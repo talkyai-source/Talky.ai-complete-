@@ -1,0 +1,31 @@
+# Development Configuration
+app:
+  name: "AI Voice Dialer"
+  version: "1.0.0"
+  debug: true
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  reload: true
+
+cors:
+  origins:
+    - "http://localhost:3000"
+    - "http://localhost:5173"
+  allow_credentials: true
+  allow_methods: ["*"]
+  allow_headers: ["*"]
+
+redis:
+  url: "redis://localhost:6379"
+  max_connections: 50
+
+database:
+  url: ${DATABASE_URL}
+  pool_size: 10
+  max_overflow: 20
+
+logging:
+  level: "DEBUG"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

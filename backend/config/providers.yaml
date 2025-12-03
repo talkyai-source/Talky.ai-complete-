@@ -1,0 +1,55 @@
+# Provider Configuration
+providers:
+  stt:
+    active: "flux"  # Ultra-low latency STT (~260ms turn detection)
+    
+    flux:
+      api_key: ${DEEPGRAM_API_KEY}
+      model: "flux-general-en"  # Flux model with turn detection
+      encoding: "linear16"  # Required for Flux
+      sample_rate: 16000  # Optimized for telephony
+      eot_threshold: 0.7  # End-of-turn confidence (0.5-0.9)
+      eager_eot_threshold: 0.5  # Enable early LLM responses (optional)
+      eot_timeout_ms: 5000  # Max silence before forcing turn end
+  
+  tts:
+    active: "cartesia"  # Ultra-low latency TTS (90ms TTFA)
+    
+    cartesia:
+      api_key: ${CARTESIA_API_KEY}
+      model_id: "sonic-3"  # Latest Sonic 3 model
+      voice_id: "6ccbfb76-1fc6-48f7-b71d-91ac6298247b"  # Default professional voice
+      sample_rate: 16000  # Optimized for telephony
+      language: "en"
+  
+  llm:
+    active: "groq"  # Ultra-fast inference (185 tokens/sec)
+    
+    groq:
+      api_key: ${GROQ_API_KEY}
+      model: "llama-3.1-8b-instant"  # Fastest model for voice agents
+      temperature: 0.7
+      max_tokens: 150  # Keep responses concise for voice
+  
+  telephony:
+    active: "vonage"  # Change this to switch telephony provider
+    
+    vonage:
+      api_key: ${VONAGE_API_KEY}
+      api_secret: ${VONAGE_API_SECRET}
+      application_id: ${VONAGE_APP_ID}
+      private_key_path: "./config/private.key"
+  
+  storage:
+    active: "supabase"
+    
+    supabase:
+      url: ${SUPABASE_URL}
+      key: ${SUPABASE_KEY}
+
+# Performance Settings
+performance:
+  latency_target_ms: 300
+  max_concurrent_calls: 100
+  audio_chunk_size_ms: 50
+  buffer_size_ms: 200
