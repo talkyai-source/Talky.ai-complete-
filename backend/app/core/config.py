@@ -104,3 +104,21 @@ class ConfigManager:
         
         config = self.get(f"providers.{provider_type}.{active}", {})
         return config
+    
+    def get_websocket_config(self) -> Dict:
+        """Get WebSocket configuration with defaults"""
+        return self.get("websocket", {
+            "max_connections": 1000,
+            "connection_timeout_seconds": 300,
+            "heartbeat_interval_seconds": 30,
+            "heartbeat_timeout_seconds": 5,
+            "max_message_size_bytes": 65536,
+            "audio_chunk_size_ms": 80,
+            "audio_buffer_size": 100,
+            "transcript_buffer_size": 50,
+            "enable_latency_tracking": True,
+            "latency_warning_threshold_ms": 500,
+            "latency_error_threshold_ms": 1000,
+            "use_binary_audio": True,
+            "use_json_audio": False,
+        })

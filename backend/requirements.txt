@@ -1,0 +1,36 @@
+# Talky.ai Backend Requirements
+# Python 3.10+
+
+# Web Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+websockets>=13.0
+
+# AI/ML Providers
+deepgram-sdk==5.3.0
+groq==0.4.1
+cartesia==1.0.4
+
+# Database & Caching
+redis==5.0.1
+supabase>=2.10.0
+
+# Configuration
+python-dotenv==1.0.0
+pydantic>=2.6.0
+pydantic-settings>=2.2.0
+pyyaml==6.0.1
+
+# HTTP Client
+httpx
+aiohttp
+
+# Utilities
+python-dateutil==2.8.2
+pytz==2023.3
+
+# Testing (optional, for development)
+pytest==7.4.4
+pytest-asyncio==0.23.3
+pytest-cov==4.1.0

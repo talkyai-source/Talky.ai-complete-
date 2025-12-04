@@ -89,6 +89,16 @@ uvicorn app.main:app --reload
 
 That's it! No code changes required.
 
+## Documentation
+
+### Protocol Specifications
+- **[WebSocket Protocol](docs/websocket_protocol.md)** - Complete WebSocket streaming protocol specification
+- **[Message Flow Diagrams](docs/diagrams/message_flow.md)** - Sequence diagrams for all call flows
+- **[Data Structures](docs/diagrams/data_structures.md)** - Binary formats and message schemas
+
+### Provider Guides
+- **Provider Implementation Guide** - `docs/provider-guide.md` (coming soon)
+
 ## Adding New Providers
 
 See `docs/provider-guide.md` for detailed instructions on implementing new providers.

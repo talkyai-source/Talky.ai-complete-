@@ -47,9 +47,42 @@ providers:
       url: ${SUPABASE_URL}
       key: ${SUPABASE_KEY}
 
+# WebSocket Configuration
+websocket:
+  # Connection settings
+  max_connections: 1000
+  connection_timeout_seconds: 300  # 5 minutes
+  heartbeat_interval_seconds: 30
+  heartbeat_timeout_seconds: 5
+  
+  # Message settings
+  max_message_size_bytes: 65536  # 64 KB
+  audio_chunk_size_ms: 80  # 80ms chunks (optimal for Flux STT)
+  
+  # Buffer settings
+  audio_buffer_size: 100  # Number of chunks to buffer
+  transcript_buffer_size: 50
+  
+  # Latency settings
+  enable_latency_tracking: true
+  latency_warning_threshold_ms: 500
+  latency_error_threshold_ms: 1000
+  
+  # Binary protocol settings
+  use_binary_audio: true  # Use binary frames for audio (production)
+  use_json_audio: false   # Use JSON for audio (development/debugging)
+
+# Session Management
+session:
+  redis_url: ${REDIS_URL}
+  sync_interval_seconds: 5
+  session_ttl_seconds: 3600  # 1 hour
+  stale_timeout_seconds: 300  # 5 minutes
+  max_sessions_per_worker: 100
+
 # Performance Settings
 performance:
   latency_target_ms: 300
   max_concurrent_calls: 100
-  audio_chunk_size_ms: 50
+  audio_chunk_size_ms: 80  # Updated to match WebSocket config
   buffer_size_ms: 200
