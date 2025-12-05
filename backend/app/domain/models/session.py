@@ -2,7 +2,7 @@
 Session Models
 Defines CallSession, CallState, and LatencyMetric for runtime state management
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List, Any
 from datetime import datetime
 from fastapi import WebSocket
@@ -10,6 +10,8 @@ from enum import Enum
 import asyncio
 
 from app.domain.models.conversation import Message
+from app.domain.models.conversation_state import ConversationState, ConversationContext
+from app.domain.models.agent_config import AgentConfig
 
 
 class CallState(str, Enum):
@@ -80,6 +82,20 @@ class CallSession(BaseModel):
     voice_id: str = Field(..., description="TTS voice identifier")
     language: str = Field(default="en", description="Language code")
     
+    # ========== Conversation State (Day 5) ==========
+    conversation_state: ConversationState = Field(
+        default=ConversationState.GREETING,
+        description="Current conversation state"
+    )
+    conversation_context: ConversationContext = Field(
+        default_factory=ConversationContext,
+        description="Conversation context tracking"
+    )
+    agent_config: Optional[AgentConfig] = Field(
+        None,
+        description="Agent configuration for this call"
+    )
+    
     # ========== Runtime-Only Fields (Not Serialized) ==========
     # These are set after deserialization from Redis
     websocket: Optional[Any] = Field(None, exclude=True, description="Active WebSocket connection")
@@ -87,10 +103,11 @@ class CallSession(BaseModel):
     audio_output_buffer: Optional[Any] = Field(None, exclude=True, description="Audio output queue")
     transcript_buffer: Optional[Any] = Field(None, exclude=True, description="Transcript queue")
     
-    class Config:
-        # Pydantic v2 config
-        arbitrary_types_allowed = True  # Allow WebSocket, asyncio.Queue
-        use_enum_values = True  # Serialize enums as values
+    # Pydantic v2 config
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,  # Allow WebSocket, asyncio.Queue
+        use_enum_values=True  # Serialize enums as values
+    )
     
     def model_dump_redis(self) -> dict:
         """

@@ -6,11 +6,16 @@ import yaml
 import os
 from pathlib import Path
 from typing import Any, Dict
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment"""
+    
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8"
+    )
     
     environment: str = "development"
     debug: bool = True
@@ -21,10 +26,6 @@ class Settings(BaseSettings):
     
     # Redis/Queue
     redis_url: str = "redis://localhost:6379"
-    
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
 
 
 class ConfigManager:

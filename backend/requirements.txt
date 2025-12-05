@@ -9,7 +9,7 @@ websockets>=13.0
 
 # AI/ML Providers
 deepgram-sdk==5.3.0
-groq==0.4.1
+groq>=0.37.0
 cartesia==1.0.4
 
 # Database & Caching

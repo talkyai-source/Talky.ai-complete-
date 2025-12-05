@@ -4,7 +4,7 @@ Defines all message types for voice streaming protocol
 
 Based on latest Pydantic v2 and FastAPI WebSocket documentation (2024)
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
 from typing import Literal, Optional, Dict, Any, Union
 from datetime import datetime
 from enum import Enum
@@ -62,10 +62,10 @@ class AudioChunkMessage(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="Message timestamp")
     sequence: int = Field(..., ge=0, description="Sequence number for ordering")
     
-    class Config:
-        json_encoders = {
-            bytes: lambda v: v.hex()  # For JSON serialization in logs
-        }
+    @field_serializer('data')
+    def serialize_bytes(self, v: bytes) -> str:
+        """Serialize bytes to hex for JSON serialization in logs"""
+        return v.hex()
 
 
 # ============================================================================

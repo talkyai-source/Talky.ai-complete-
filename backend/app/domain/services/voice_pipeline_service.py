@@ -1,6 +1,7 @@
 """
 Voice Pipeline Service
 Orchestrates the full voice AI pipeline: STT → LLM → TTS
+Integrates conversation state machine and prompt management (Day 5)
 """
 import asyncio
 import logging
@@ -11,10 +12,13 @@ from fastapi import WebSocket
 
 from app.domain.models.session import CallSession, CallState
 from app.domain.models.conversation import AudioChunk, TranscriptChunk, Message, MessageRole
+from app.domain.models.conversation_state import ConversationState
 from app.infrastructure.stt.deepgram_flux import DeepgramFluxSTTProvider
 from app.infrastructure.llm.groq import GroqLLMProvider
 from app.infrastructure.tts.cartesia import CartesiaTTSProvider
 from app.domain.interfaces.media_gateway import MediaGateway
+from app.domain.services.conversation_engine import ConversationEngine
+from app.domain.services.prompt_manager import PromptManager
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +54,10 @@ class VoicePipelineService:
         self.llm_provider = llm_provider
         self.tts_provider = tts_provider
         self.media_gateway = media_gateway
+        
+        # Day 5: Conversation management components
+        self.prompt_manager = PromptManager()
+        # Note: ConversationEngine is initialized per-session with agent_config
         
         self._active_pipelines: dict[str, bool] = {}
     
@@ -335,7 +343,13 @@ class VoicePipelineService:
         user_input: str
     ) -> str:
         """
-        Get LLM response for user input.
+        Get LLM response for user input using conversation state machine.
+        
+        Implements Groq best practices:
+        - State-aware system prompts
+        - Assistant prefilling for direct responses
+        - Optimized parameters (temp=0.3 for voice calls)
+        - Context window management
         
         Args:
             session: Active call session
@@ -344,12 +358,158 @@ class VoicePipelineService:
         Returns:
             LLM response text
         """
-        # Stream LLM response
+        call_id = session.call_id
+        
+        # Initialize conversation engine if needed (using agent_config from session)
+        if session.agent_config:
+            conversation_engine = ConversationEngine(session.agent_config)
+        else:
+            # Fallback: use basic response without state machine
+            logger.warning(
+                f"No agent_config in session {call_id}, using basic LLM response",
+                extra={"call_id": call_id}
+            )
+            return await self._get_basic_llm_response(session)
+        
+        # 1. Process user input through conversation engine
+        new_state, llm_instruction, detected_intent = await conversation_engine.handle_user_input(
+            current_state=session.conversation_state,
+            user_text=user_input,
+            conversation_history=session.conversation_history,
+            context=session.conversation_context
+        )
+        
+        # Update session state
+        session.conversation_state = new_state
+        
+        logger.info(
+            "conversation_state_transition",
+            extra={
+                "call_id": call_id,
+                "turn_id": session.turn_id,
+                "intent": detected_intent.value,
+                "new_state": new_state.value,
+                "objection_count": session.conversation_context.objection_count
+            }
+        )
+        
+        # 2. Generate state-aware system prompt
+        system_prompt = self.prompt_manager.render_system_prompt(
+            agent_config=session.agent_config,
+            state=new_state,
+            # Pass state-specific context
+            greeting_context=f"I'm calling to {session.agent_config.get_goal_description()}",
+            qualification_instruction=llm_instruction,
+            user_concern=user_input if detected_intent.value in ["uncertain", "objection"] else None,
+            objection_count=session.conversation_context.objection_count,
+            max_objections=session.agent_config.flow.max_objection_attempts,
+            confirmation_details=getattr(session, 'confirmation_details', None)
+        )
+        
+        # 3. Prepare conversation history with context window management
+        # Keep only last N messages to stay within token limits (Groq recommendation: <2000 tokens for system)
+        max_history_messages = 10
+        recent_history = session.conversation_history[-max_history_messages:] if len(session.conversation_history) > max_history_messages else session.conversation_history
+        
+        # 4. Implement assistant prefilling for direct responses (Groq best practice)
+        # This skips unnecessary preambles like "Sure!" or "Of course!"
+        messages_with_prefill = recent_history.copy()
+        
+        # Add assistant prefill based on state to enforce direct responses
+        prefill_content = self._get_prefill_for_state(new_state)
+        if prefill_content:
+            messages_with_prefill.append(Message(
+                role=MessageRole.ASSISTANT,
+                content=prefill_content
+            ))
+        
+        # 5. Stream LLM response with optimized parameters
+        response_text = prefill_content if prefill_content else ""
+        
+        try:
+            async for token in self.llm_provider.stream_chat(
+                messages=messages_with_prefill,
+                system_prompt=system_prompt,
+                temperature=0.3,  # Groq recommendation for factual voice calls (0.2-0.4)
+                max_tokens=150,   # Enforce brevity for voice
+                top_p=1.0,        # Groq recommendation
+                stop=["###", "\n\n\n"]  # Stop sequences for concise responses
+            ):
+                response_text += token
+                session.current_ai_response += token
+            
+            # 6. Check if conversation should end
+            should_end, end_reason = conversation_engine.should_end_conversation(
+                state=new_state,
+                turn_count=session.turn_id,
+                context=session.conversation_context
+            )
+            
+            if should_end:
+                logger.info(
+                    "conversation_ending",
+                    extra={
+                        "call_id": call_id,
+                        "reason": end_reason,
+                        "final_state": new_state.value
+                    }
+                )
+                # Mark session for termination
+                session.state = CallState.ENDING
+        
+        except Exception as e:
+            logger.error(
+                f"Error in conversation-aware LLM response: {e}",
+                extra={"call_id": call_id, "error": str(e)},
+                exc_info=True
+            )
+            # Fallback to basic response
+            return await self._get_basic_llm_response(session)
+        
+        return response_text.strip()
+    
+    def _get_prefill_for_state(self, state: ConversationState) -> str:
+        """
+        Get assistant prefill content for state to enforce direct responses.
+        Implements Groq's assistant prefilling best practice.
+        
+        Args:
+            state: Current conversation state
+            
+        Returns:
+            Prefill content or empty string
+        """
+        # Prefilling helps skip unnecessary preambles
+        # For voice calls, we want immediate, direct responses
+        prefills = {
+            ConversationState.GREETING: "",  # No prefill for greeting, let it be natural
+            ConversationState.QUALIFICATION: "",  # Direct question works best
+            ConversationState.OBJECTION_HANDLING: "",  # Empathy needs natural start
+            ConversationState.CLOSING: "",  # Confirmation should be natural
+            ConversationState.TRANSFER: "",  # Transfer message should be complete
+            ConversationState.GOODBYE: ""  # Goodbye should be natural
+        }
+        
+        return prefills.get(state, "")
+    
+    async def _get_basic_llm_response(self, session: CallSession) -> str:
+        """
+        Fallback: Get basic LLM response without conversation state machine.
+        Used when agent_config is not available.
+        
+        Args:
+            session: Active call session
+            
+        Returns:
+            LLM response text
+        """
         response_text = ""
         
         async for token in self.llm_provider.stream_chat(
-            session.conversation_history,
-            session.system_prompt
+            messages=session.conversation_history,
+            system_prompt=session.system_prompt,
+            temperature=0.7,
+            max_tokens=150
         ):
             response_text += token
             session.current_ai_response += token
