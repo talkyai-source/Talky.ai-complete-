@@ -21,3 +21,5 @@ class Lead(BaseModel):
     last_called_at: Optional[datetime] = None
     call_attempts: int = 0
     status: str = "pending"  # pending, called, completed, dnc
+    # Day 9: Track most recent call result for quick status lookup
+    last_call_result: Optional[str] = "pending"  # pending, answered, no_answer, busy, failed, voicemail, goal_achieved

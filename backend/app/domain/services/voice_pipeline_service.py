@@ -19,6 +19,7 @@ from app.infrastructure.tts.cartesia import CartesiaTTSProvider
 from app.domain.interfaces.media_gateway import MediaGateway
 from app.domain.services.conversation_engine import ConversationEngine
 from app.domain.services.prompt_manager import PromptManager
+from app.domain.services.transcript_service import TranscriptService
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,9 @@ class VoicePipelineService:
         # Day 5: Conversation management components
         self.prompt_manager = PromptManager()
         # Note: ConversationEngine is initialized per-session with agent_config
+        
+        # Day 10: Transcript accumulation service
+        self.transcript_service = TranscriptService()
         
         self._active_pipelines: dict[str, bool] = {}
     
@@ -266,6 +270,13 @@ class VoicePipelineService:
         )
         session.conversation_history.append(user_message)
         
+        # Day 10: Accumulate user turn for transcript
+        self.transcript_service.accumulate_turn(
+            call_id=call_id,
+            role="user",
+            content=full_transcript
+        )
+        
         try:
             # Get LLM response
             llm_start = datetime.utcnow()
@@ -294,6 +305,13 @@ class VoicePipelineService:
                 content=response_text
             )
             session.conversation_history.append(assistant_message)
+            
+            # Day 10: Accumulate assistant turn for transcript
+            self.transcript_service.accumulate_turn(
+                call_id=call_id,
+                role="assistant",
+                content=response_text
+            )
             
             # Synthesize TTS audio
             session.tts_active = True

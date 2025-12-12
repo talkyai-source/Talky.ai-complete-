@@ -11,8 +11,8 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- ============================================
 CREATE TABLE IF NOT EXISTS campaigns (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    -- MULTI-TENANT: Uncomment when enabling multi-tenancy
-    -- tenant_id VARCHAR(255) NOT NULL,
+    -- MULTI-TENANT: Enabled
+    tenant_id VARCHAR(255) NOT NULL,
     name VARCHAR(255) NOT NULL,
     description TEXT,
     status VARCHAR(50) NOT NULL DEFAULT 'draft',
@@ -33,16 +33,16 @@ CREATE TABLE IF NOT EXISTS campaigns (
 -- Index for faster queries
 CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status);
 CREATE INDEX IF NOT EXISTS idx_campaigns_created_at ON campaigns(created_at);
--- MULTI-TENANT: Uncomment when enabling multi-tenancy
--- CREATE INDEX IF NOT EXISTS idx_campaigns_tenant_id ON campaigns(tenant_id);
+-- MULTI-TENANT: Enabled
+CREATE INDEX IF NOT EXISTS idx_campaigns_tenant_id ON campaigns(tenant_id);
 
 -- ============================================
 -- 2. LEADS TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS leads (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    -- MULTI-TENANT: Uncomment when enabling multi-tenancy
-    -- tenant_id VARCHAR(255) NOT NULL,
+    -- MULTI-TENANT: Enabled
+    tenant_id VARCHAR(255) NOT NULL,
     campaign_id UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
     phone_number VARCHAR(20) NOT NULL,
     first_name VARCHAR(100),
@@ -60,16 +60,16 @@ CREATE TABLE IF NOT EXISTS leads (
 CREATE INDEX IF NOT EXISTS idx_leads_campaign_id ON leads(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
 CREATE INDEX IF NOT EXISTS idx_leads_phone_number ON leads(phone_number);
--- MULTI-TENANT: Uncomment when enabling multi-tenancy
--- CREATE INDEX IF NOT EXISTS idx_leads_tenant_id ON leads(tenant_id);
+-- MULTI-TENANT: Enabled
+CREATE INDEX IF NOT EXISTS idx_leads_tenant_id ON leads(tenant_id);
 
 -- ============================================
 -- 3. CALLS TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS calls (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    -- MULTI-TENANT: Uncomment when enabling multi-tenancy
-    -- tenant_id VARCHAR(255) NOT NULL,
+    -- MULTI-TENANT: Enabled
+    tenant_id VARCHAR(255) NOT NULL,
     campaign_id UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
     lead_id UUID NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
     phone_number VARCHAR(20) NOT NULL,
@@ -91,16 +91,16 @@ CREATE INDEX IF NOT EXISTS idx_calls_campaign_id ON calls(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_calls_lead_id ON calls(lead_id);
 CREATE INDEX IF NOT EXISTS idx_calls_status ON calls(status);
 CREATE INDEX IF NOT EXISTS idx_calls_created_at ON calls(created_at);
--- MULTI-TENANT: Uncomment when enabling multi-tenancy
--- CREATE INDEX IF NOT EXISTS idx_calls_tenant_id ON calls(tenant_id);
+-- MULTI-TENANT: Enabled
+CREATE INDEX IF NOT EXISTS idx_calls_tenant_id ON calls(tenant_id);
 
 -- ============================================
 -- 4. CONVERSATIONS TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS conversations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    -- MULTI-TENANT: Uncomment when enabling multi-tenancy
-    -- tenant_id VARCHAR(255) NOT NULL,
+    -- MULTI-TENANT: Enabled
+    tenant_id VARCHAR(255) NOT NULL,
     call_id UUID NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
     messages JSONB DEFAULT '[]',
     started_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -113,8 +113,8 @@ CREATE TABLE IF NOT EXISTS conversations (
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_conversations_call_id ON conversations(call_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_status ON conversations(status);
--- MULTI-TENANT: Uncomment when enabling multi-tenancy
--- CREATE INDEX IF NOT EXISTS idx_conversations_tenant_id ON conversations(tenant_id);
+-- MULTI-TENANT: Enabled
+CREATE INDEX IF NOT EXISTS idx_conversations_tenant_id ON conversations(tenant_id);
 
 -- ============================================
 -- 5. AUTO-UPDATE TIMESTAMPS

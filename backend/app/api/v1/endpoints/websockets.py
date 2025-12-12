@@ -14,6 +14,8 @@ from app.infrastructure.telephony.vonage_media_gateway import VonageMediaGateway
 from app.infrastructure.stt.deepgram_flux import DeepgramFluxSTTProvider
 from app.infrastructure.llm.groq import GroqLLMProvider
 from app.infrastructure.tts.cartesia import CartesiaTTSProvider
+from app.domain.services.recording_service import RecordingService
+from app.api.v1.dependencies import get_supabase
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["websockets"])
@@ -174,6 +176,16 @@ async def voice_stream(websocket: WebSocket, call_id: str):
             f"Call {call_id} cleanup complete",
             extra={"call_id": call_id}
         )
+        
+        # Day 10: Save recording and transcript (async background task)
+        asyncio.create_task(
+            _save_call_data(
+                call_id=call_id,
+                gateway=media_gateway,
+                pipeline=pipeline_service,
+                session=session
+            )
+        )
 
 
 async def send_output_audio(
@@ -218,3 +230,75 @@ async def send_output_audio(
             f"Error sending output audio: {e}",
             extra={"call_id": call_id, "error": str(e)}
         )
+
+
+async def _save_call_data(
+    call_id: str,
+    gateway: VonageMediaGateway,
+    pipeline: VoicePipelineService,
+    session: CallSession
+) -> None:
+    """
+    Save recording and transcript after call ends.
+    
+    This is a background task that runs after the WebSocket closes.
+    Uses the gateway interface so it works for both Vonage and RTP.
+    
+    Args:
+        call_id: Unique call identifier
+        gateway: Media gateway instance (Vonage or RTP)
+        pipeline: Voice pipeline service
+        session: Call session with metadata
+    """
+    try:
+        # Get Supabase client
+        supabase = next(get_supabase())
+        
+        # Get tenant and campaign info from session
+        tenant_id = getattr(session, 'tenant_id', 'default')
+        campaign_id = str(session.campaign_id) if session.campaign_id else 'unknown'
+        
+        # 1. Save recording
+        buffer = gateway.get_recording_buffer(call_id)
+        if buffer and buffer.total_bytes > 0:
+            logger.info(
+                f"Saving recording for call {call_id}: {buffer.total_bytes} bytes"
+            )
+            
+            recording_service = RecordingService(supabase)
+            recording_id = await recording_service.save_and_link(
+                call_id=call_id,
+                buffer=buffer,
+                tenant_id=tenant_id,
+                campaign_id=campaign_id
+            )
+            
+            if recording_id:
+                logger.info(f"Recording saved: {recording_id}")
+            
+            # Clear buffer to free memory
+            gateway.clear_recording_buffer(call_id)
+        else:
+            logger.debug(f"No recording buffer for call {call_id}")
+        
+        # 2. Save transcript
+        transcript_id = await pipeline.transcript_service.save_transcript(
+            call_id=call_id,
+            supabase_client=supabase,
+            tenant_id=tenant_id
+        )
+        
+        if transcript_id:
+            logger.info(f"Transcript saved: {transcript_id}")
+        
+        # Clear transcript buffer
+        pipeline.transcript_service.clear_buffer(call_id)
+        
+        logger.info(f"Call data saved successfully for {call_id}")
+        
+    except Exception as e:
+        logger.error(
+            f"Failed to save call data for {call_id}: {e}",
+            exc_info=True
+        )
+

@@ -115,6 +115,38 @@ class MediaGateway(ABC):
         """
         pass
     
+    # =========================================================================
+    # Recording Buffer Methods (Day 10)
+    # =========================================================================
+    
+    @abstractmethod
+    def get_recording_buffer(self, call_id: str):
+        """
+        Get the recording buffer for a call.
+        
+        Returns the buffer where audio chunks are accumulated
+        for saving as a recording after the call ends.
+        
+        Args:
+            call_id: Unique call identifier
+            
+        Returns:
+            RecordingBuffer or None if call not found
+        """
+        pass
+    
+    @abstractmethod
+    def clear_recording_buffer(self, call_id: str) -> None:
+        """
+        Clear the recording buffer for a call.
+        
+        Called after the recording has been saved to free memory.
+        
+        Args:
+            call_id: Unique call identifier
+        """
+        pass
+    
     @abstractmethod
     async def cleanup(self) -> None:
         """

@@ -36,3 +36,7 @@ class Campaign(BaseModel):
     total_leads: int = 0
     calls_completed: int = 0
     calls_failed: int = 0
+    # Day 9: New fields for campaign management
+    goal: Optional[str] = None  # Campaign objective (e.g., "Book appointment", "Generate lead")
+    script_config: Optional[dict] = None  # AI agent configuration (AgentConfig structure as JSONB)
+    calling_config: Optional[dict] = None  # Calling rules including time_window (CallingRules structure)

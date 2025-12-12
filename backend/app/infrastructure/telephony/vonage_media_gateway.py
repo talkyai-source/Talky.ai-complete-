@@ -9,6 +9,7 @@ from datetime import datetime
 
 from app.domain.interfaces.media_gateway import MediaGateway
 from app.utils.audio_utils import validate_pcm_format, calculate_audio_duration_ms
+from app.domain.services.recording_service import RecordingBuffer
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,9 @@ class VonageMediaGateway(MediaGateway):
         self._output_queues: Dict[str, asyncio.Queue] = {}
         self._session_metadata: Dict[str, Dict[str, Any]] = {}
         self._audio_metrics: Dict[str, Dict[str, Any]] = {}
+        
+        # Recording buffers for Day 10 (provider-agnostic recording)
+        self._recording_buffers: Dict[str, RecordingBuffer] = {}
         
         # Configuration
         self._sample_rate: int = 16000
@@ -106,6 +110,14 @@ class VonageMediaGateway(MediaGateway):
                 "call_id": call_id,
                 "max_queue_size": self._max_queue_size
             }
+        )
+        
+        # Initialize recording buffer (Day 10)
+        self._recording_buffers[call_id] = RecordingBuffer(
+            call_id=call_id,
+            sample_rate=self._sample_rate,
+            channels=self._channels,
+            bit_depth=self._bit_depth
         )
     
     async def on_audio_received(
@@ -201,6 +213,10 @@ class VonageMediaGateway(MediaGateway):
                     f"Failed to handle buffer overflow",
                     extra={"call_id": call_id}
                 )
+        
+        # Add to recording buffer (Day 10)
+        if call_id in self._recording_buffers:
+            self._recording_buffers[call_id].add_chunk(audio_chunk)
     
     async def on_call_ended(
         self,
@@ -321,6 +337,34 @@ class VonageMediaGateway(MediaGateway):
             Metrics dictionary or None if call not found
         """
         return self._audio_metrics.get(call_id)
+    
+    # =========================================================================
+    # Recording Buffer Methods (Day 10)
+    # =========================================================================
+    
+    def get_recording_buffer(self, call_id: str):
+        """
+        Get the recording buffer for a call.
+        
+        Args:
+            call_id: Unique call identifier
+            
+        Returns:
+            RecordingBuffer or None if call not found
+        """
+        return self._recording_buffers.get(call_id)
+    
+    def clear_recording_buffer(self, call_id: str) -> None:
+        """
+        Clear the recording buffer for a call.
+        
+        Args:
+            call_id: Unique call identifier
+        """
+        if call_id in self._recording_buffers:
+            self._recording_buffers[call_id].clear()
+            del self._recording_buffers[call_id]
+            logger.debug(f"Recording buffer cleared for call {call_id}")
     
     async def cleanup(self) -> None:
         """

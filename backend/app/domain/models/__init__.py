@@ -27,6 +27,17 @@ from .session import (
     CallSession,
 )
 
+# Dialer models
+from .dialer_job import (
+    JobStatus,
+    CallOutcome,
+    DialerJob,
+)
+
+from .calling_rules import (
+    CallingRules,
+)
+
 __all__ = [
     # WebSocket messages
     "MessageType",
@@ -49,4 +60,10 @@ __all__ = [
     "CallState",
     "LatencyMetric",
     "CallSession",
+    # Dialer models
+    "JobStatus",
+    "CallOutcome",
+    "DialerJob",
+    "CallingRules",
 ]
+

@@ -3,6 +3,7 @@ Telephony Provider Factory
 """
 from typing import Dict, Type
 from app.domain.interfaces.telephony_provider import TelephonyProvider
+from app.domain.interfaces.media_gateway import MediaGateway
 
 
 class TelephonyFactory:
@@ -29,3 +30,46 @@ class TelephonyFactory:
     def list_providers(cls) -> list[str]:
         """List available providers"""
         return list(cls._providers.keys())
+
+
+class MediaGatewayFactory:
+    """
+    Factory for creating Media Gateway instances.
+    
+    Supports switching between Vonage WebSocket and RTP-based gateways
+    via configuration without code changes.
+    """
+    
+    @classmethod
+    def create(cls, gateway_type: str, config: dict = None) -> MediaGateway:
+        """
+        Create media gateway instance.
+        
+        Args:
+            gateway_type: Gateway type ("vonage" or "rtp")
+            config: Optional configuration dictionary
+            
+        Returns:
+            Configured MediaGateway instance
+        """
+        config = config or {}
+        
+        if gateway_type == "vonage":
+            from app.infrastructure.telephony.vonage_media_gateway import VonageMediaGateway
+            gateway = VonageMediaGateway()
+        elif gateway_type == "rtp":
+            from app.infrastructure.telephony.rtp_media_gateway import RTPMediaGateway
+            gateway = RTPMediaGateway()
+        else:
+            raise ValueError(
+                f"Unknown media gateway type: {gateway_type}. "
+                f"Available: vonage, rtp"
+            )
+        
+        return gateway
+    
+    @classmethod
+    def list_gateways(cls) -> list[str]:
+        """List available media gateway types"""
+        return ["vonage", "rtp"]
+

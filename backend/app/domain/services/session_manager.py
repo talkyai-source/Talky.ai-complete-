@@ -56,6 +56,14 @@ class SessionManager:
             logger.warning("Redis not available - running in memory-only mode")
             return
         
+        # Check if in-memory fallback is allowed (default: True for development)
+        allow_fallback = self._config.get("allow_in_memory_sessions", True)
+        environment = self._config.get("environment", "development")
+        
+        # In production, default to NOT allowing in-memory fallback
+        if environment == "production" and not self._config.get("allow_in_memory_sessions"):
+            allow_fallback = False
+        
         try:
             # Get Redis URL from config
             redis_url = self._config.get("redis_url", "redis://localhost:6379")
@@ -76,7 +84,14 @@ class SessionManager:
             logger.info(f"SessionManager initialized with Redis: {redis_url}")
         except Exception as e:
             logger.error(f"Failed to connect to Redis: {e}")
-            logger.warning("Running in memory-only mode")
+            
+            if not allow_fallback:
+                raise RuntimeError(
+                    f"Redis is required in production but connection failed: {e}. "
+                    f"Set 'allow_in_memory_sessions: true' in config to allow fallback."
+                )
+            
+            logger.warning("Running in memory-only mode (not recommended for production)")
             self._redis_client = None
             self._redis_enabled = False
     

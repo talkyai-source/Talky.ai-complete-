@@ -202,30 +202,354 @@ def resample_audio(
     audio_data: bytes,
     from_rate: int,
     to_rate: int,
-    channels: int = 1
+    channels: int = 1,
+    bit_depth: int = 16
 ) -> bytes:
     """
-    Resample PCM audio from one sample rate to another.
+    Resample PCM audio from one sample rate to another using librosa+soxr.
     
-    NOTE: This is a placeholder for future implementation.
-    Currently not needed as Vonage sends 16kHz audio.
+    Uses high-quality band-limited sinc interpolation (soxr_hq).
     
     Args:
-        audio_data: Raw PCM audio bytes (16-bit)
+        audio_data: Raw PCM audio bytes (16-bit or 32-bit float)
         from_rate: Source sample rate in Hz
         to_rate: Target sample rate in Hz
         channels: Number of audio channels
+        bit_depth: Bit depth (16 for int16, 32 for float32)
         
     Returns:
-        Resampled PCM audio bytes
-        
-    Raises:
-        NotImplementedError: Resampling not yet implemented
+        Resampled PCM audio bytes (same format as input)
     """
     if from_rate == to_rate:
         return audio_data
     
-    raise NotImplementedError(
-        "Audio resampling not yet implemented. "
-        "Add scipy or librosa dependency when needed."
+    import numpy as np
+    
+    try:
+        import librosa
+    except ImportError:
+        raise ImportError("librosa is required for resampling. Install with: pip install librosa soxr")
+    
+    # Convert bytes to numpy array
+    if bit_depth == 16:
+        audio_array = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
+    elif bit_depth == 32:
+        audio_array = np.frombuffer(audio_data, dtype=np.float32)
+    else:
+        raise ValueError(f"Unsupported bit depth: {bit_depth}")
+    
+    # Resample using librosa with soxr backend (high quality)
+    resampled = librosa.resample(
+        audio_array,
+        orig_sr=from_rate,
+        target_sr=to_rate,
+        res_type='soxr_hq'
     )
+    
+    # Convert back to original format
+    if bit_depth == 16:
+        resampled_int = np.clip(resampled * 32768.0, -32768, 32767).astype(np.int16)
+        return resampled_int.tobytes()
+    else:
+        return resampled.astype(np.float32).tobytes()
+
+
+def pcm_float32_to_int16(pcm_f32: bytes) -> bytes:
+    """
+    Convert 32-bit float PCM to 16-bit integer PCM.
+    
+    Cartesia outputs pcm_f32le, VoIP typically needs 16-bit PCM.
+    
+    Args:
+        pcm_f32: Raw PCM audio bytes in 32-bit float format
+        
+    Returns:
+        Raw PCM audio bytes in 16-bit signed integer format
+    """
+    import numpy as np
+    
+    # Convert bytes to float32 array
+    audio_f32 = np.frombuffer(pcm_f32, dtype=np.float32)
+    
+    # Scale and convert to int16
+    # Clip to prevent overflow
+    audio_int16 = np.clip(audio_f32 * 32768.0, -32768, 32767).astype(np.int16)
+    
+    return audio_int16.tobytes()
+
+
+def pcm_int16_to_float32(pcm_int16: bytes) -> bytes:
+    """
+    Convert 16-bit integer PCM to 32-bit float PCM.
+    
+    Args:
+        pcm_int16: Raw PCM audio bytes in 16-bit signed integer format
+        
+    Returns:
+        Raw PCM audio bytes in 32-bit float format
+    """
+    import numpy as np
+    
+    audio_int16 = np.frombuffer(pcm_int16, dtype=np.int16)
+    audio_f32 = audio_int16.astype(np.float32) / 32768.0
+    
+    return audio_f32.tobytes()
+
+
+# G.711 mu-law encoding table constants
+ULAW_BIAS = 0x84
+ULAW_CLIP = 32635
+
+def pcm_to_ulaw(pcm_data: bytes) -> bytes:
+    """
+    Convert 16-bit linear PCM to G.711 mu-law encoding.
+    
+    ITU-T G.711 mu-law is used in North America and Japan.
+    Compresses 16-bit PCM to 8-bit mu-law (2:1 compression).
+    
+    Args:
+        pcm_data: Raw PCM audio bytes (16-bit signed, little-endian)
+        
+    Returns:
+        G.711 mu-law encoded audio bytes (8-bit)
+    """
+    import numpy as np
+    
+    # Convert to numpy array of int16
+    samples = np.frombuffer(pcm_data, dtype=np.int16)
+    
+    # Encode each sample
+    encoded = np.zeros(len(samples), dtype=np.uint8)
+    
+    for i, sample in enumerate(samples):
+        encoded[i] = _linear_to_ulaw(sample)
+    
+    return encoded.tobytes()
+
+
+def _linear_to_ulaw(sample: int) -> int:
+    """Convert a single 16-bit linear sample to 8-bit mu-law."""
+    # Get sign bit
+    sign = (sample >> 8) & 0x80
+    if sign:
+        sample = -sample
+    
+    # Clip to valid range
+    if sample > ULAW_CLIP:
+        sample = ULAW_CLIP
+    
+    # Add bias for mu-law
+    sample = sample + ULAW_BIAS
+    
+    # Find exponent and mantissa
+    exponent = 7
+    exp_mask = 0x4000
+    
+    for _ in range(7):
+        if sample & exp_mask:
+            break
+        exponent -= 1
+        exp_mask >>= 1
+    
+    # Extract mantissa
+    mantissa = (sample >> (exponent + 3)) & 0x0F
+    
+    # Combine sign, exponent, and mantissa, then invert
+    ulaw_byte = ~(sign | (exponent << 4) | mantissa) & 0xFF
+    
+    return ulaw_byte
+
+
+def ulaw_to_pcm(ulaw_data: bytes) -> bytes:
+    """
+    Convert G.711 mu-law to 16-bit linear PCM.
+    
+    Args:
+        ulaw_data: G.711 mu-law encoded audio bytes (8-bit)
+        
+    Returns:
+        Raw PCM audio bytes (16-bit signed, little-endian)
+    """
+    import numpy as np
+    
+    ulaw_samples = np.frombuffer(ulaw_data, dtype=np.uint8)
+    pcm_samples = np.zeros(len(ulaw_samples), dtype=np.int16)
+    
+    for i, ulaw_byte in enumerate(ulaw_samples):
+        pcm_samples[i] = _ulaw_to_linear(ulaw_byte)
+    
+    return pcm_samples.tobytes()
+
+
+def _ulaw_to_linear(ulaw_byte: int) -> int:
+    """Convert a single 8-bit mu-law sample to 16-bit linear."""
+    # Invert bits
+    ulaw_byte = ~ulaw_byte & 0xFF
+    
+    # Extract components
+    sign = ulaw_byte & 0x80
+    exponent = (ulaw_byte >> 4) & 0x07
+    mantissa = ulaw_byte & 0x0F
+    
+    # Compute linear value
+    sample = ((mantissa << 3) + ULAW_BIAS) << exponent
+    sample -= ULAW_BIAS
+    
+    if sign:
+        sample = -sample
+    
+    return sample
+
+
+# G.711 A-law encoding constants
+ALAW_CLIP = 32635
+
+def pcm_to_alaw(pcm_data: bytes) -> bytes:
+    """
+    Convert 16-bit linear PCM to G.711 A-law encoding.
+    
+    ITU-T G.711 A-law is used in Europe and most of the world.
+    Compresses 16-bit PCM to 8-bit A-law (2:1 compression).
+    
+    Args:
+        pcm_data: Raw PCM audio bytes (16-bit signed, little-endian)
+        
+    Returns:
+        G.711 A-law encoded audio bytes (8-bit)
+    """
+    import numpy as np
+    
+    samples = np.frombuffer(pcm_data, dtype=np.int16)
+    encoded = np.zeros(len(samples), dtype=np.uint8)
+    
+    for i, sample in enumerate(samples):
+        encoded[i] = _linear_to_alaw(sample)
+    
+    return encoded.tobytes()
+
+
+def _linear_to_alaw(sample: int) -> int:
+    """Convert a single 16-bit linear sample to 8-bit A-law."""
+    # Get sign bit
+    sign = 0
+    if sample < 0:
+        sign = 0x80
+        sample = -sample
+    
+    # Clip to valid range
+    if sample > ALAW_CLIP:
+        sample = ALAW_CLIP
+    
+    # Find segment and compute mantissa
+    if sample >= 256:
+        exponent = 7
+        exp_mask = 0x4000
+        
+        for _ in range(7):
+            if sample & exp_mask:
+                break
+            exponent -= 1
+            exp_mask >>= 1
+        
+        mantissa = (sample >> (exponent + 3)) & 0x0F
+    else:
+        exponent = 0
+        mantissa = sample >> 4
+    
+    # Combine and XOR with 0x55 for better idle channel noise
+    alaw_byte = (sign | (exponent << 4) | mantissa) ^ 0x55
+    
+    return alaw_byte
+
+
+def alaw_to_pcm(alaw_data: bytes) -> bytes:
+    """
+    Convert G.711 A-law to 16-bit linear PCM.
+    
+    Args:
+        alaw_data: G.711 A-law encoded audio bytes (8-bit)
+        
+    Returns:
+        Raw PCM audio bytes (16-bit signed, little-endian)
+    """
+    import numpy as np
+    
+    alaw_samples = np.frombuffer(alaw_data, dtype=np.uint8)
+    pcm_samples = np.zeros(len(alaw_samples), dtype=np.int16)
+    
+    for i, alaw_byte in enumerate(alaw_samples):
+        pcm_samples[i] = _alaw_to_linear(alaw_byte)
+    
+    return pcm_samples.tobytes()
+
+
+def _alaw_to_linear(alaw_byte: int) -> int:
+    """Convert a single 8-bit A-law sample to 16-bit linear."""
+    # XOR to undo encoding
+    alaw_byte ^= 0x55
+    
+    # Extract components
+    sign = alaw_byte & 0x80
+    exponent = (alaw_byte >> 4) & 0x07
+    mantissa = alaw_byte & 0x0F
+    
+    # Compute linear value
+    if exponent == 0:
+        sample = (mantissa << 4) + 8
+    else:
+        sample = ((mantissa << 4) + 0x108) << (exponent - 1)
+    
+    if sign:
+        sample = -sample
+    
+    return sample
+
+
+def convert_for_rtp(
+    audio_data: bytes,
+    source_rate: int,
+    source_format: str = "pcm_f32le",
+    codec: str = "ulaw"
+) -> bytes:
+    """
+    Convert audio to RTP-ready format (G.711 at 8000Hz).
+    
+    Full pipeline: Format conversion → Resample → Encode
+    
+    Args:
+        audio_data: Input audio bytes
+        source_rate: Source sample rate in Hz
+        source_format: Source format ("pcm_f32le", "pcm_s16le")
+        codec: Target codec ("ulaw" or "alaw")
+        
+    Returns:
+        G.711 encoded audio at 8000Hz
+    """
+    # Step 1: Convert to 16-bit PCM if needed
+    if source_format == "pcm_f32le":
+        pcm_16 = pcm_float32_to_int16(audio_data)
+        bit_depth = 32  # for resampling input
+    else:
+        pcm_16 = audio_data
+        bit_depth = 16
+    
+    # Step 2: Resample to 8000Hz (G.711 standard)
+    if source_rate != 8000:
+        # Convert to float for resampling
+        pcm_resampled = resample_audio(
+            pcm_16,
+            from_rate=source_rate,
+            to_rate=8000,
+            bit_depth=16
+        )
+    else:
+        pcm_resampled = pcm_16
+    
+    # Step 3: Encode to G.711
+    if codec == "ulaw":
+        return pcm_to_ulaw(pcm_resampled)
+    elif codec == "alaw":
+        return pcm_to_alaw(pcm_resampled)
+    else:
+        raise ValueError(f"Unknown codec: {codec}. Use 'ulaw' or 'alaw'")
+

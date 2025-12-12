@@ -30,6 +30,11 @@ aiohttp
 python-dateutil==2.8.2
 pytz==2023.3
 
+# Audio Processing
+librosa>=0.11.0
+soxr>=0.3.0
+numpy>=1.24.0
+
 # Testing (optional, for development)
 pytest==7.4.4
 pytest-asyncio==0.23.3

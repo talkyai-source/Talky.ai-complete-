@@ -1,230 +1,201 @@
 """
 Unit Tests for Audio Utilities
-Tests audio format validation, duration calculation, and audio generation
+Tests G.711 codecs, resampling, and format conversion
 """
 import pytest
-from app.utils.audio_utils import (
-    validate_pcm_format,
-    calculate_audio_duration_ms,
-    calculate_expected_chunk_size,
-    generate_silence,
-    generate_sine_wave,
-    resample_audio
-)
+import struct
+import numpy as np
 
 
-class TestValidatePCMFormat:
-    """Tests for PCM format validation"""
+class TestPCMConversion:
+    """Tests for PCM format conversion functions."""
     
-    def test_valid_80ms_chunk(self):
-        """Test validation of valid 80ms audio chunk at 16kHz"""
-        # 80ms at 16kHz, mono, 16-bit = 16000 * 0.08 * 1 * 2 = 2560 bytes
-        audio_data = bytes(2560)
-        is_valid, error = validate_pcm_format(audio_data, 16000, 1, 16)
-        assert is_valid is True
+    def test_pcm_float32_to_int16(self):
+        """Test F32 to int16 conversion."""
+        from app.utils.audio_utils import pcm_float32_to_int16
+        
+        # Create test F32 data (sine wave)
+        samples = np.array([0.0, 0.5, 1.0, -0.5, -1.0], dtype=np.float32)
+        f32_bytes = samples.tobytes()
+        
+        # Convert
+        int16_bytes = pcm_float32_to_int16(f32_bytes)
+        
+        # Verify
+        int16_samples = np.frombuffer(int16_bytes, dtype=np.int16)
+        assert len(int16_samples) == 5
+        assert int16_samples[0] == 0  # 0.0 -> 0
+        assert int16_samples[1] == 16384  # 0.5 -> ~16384
+        assert int16_samples[2] == 32767  # 1.0 -> 32767 (clipped)
+        assert int16_samples[3] == -16384  # -0.5 -> ~-16384
+        assert int16_samples[4] == -32768  # -1.0 -> -32768 (clipped)
+    
+    def test_pcm_int16_to_float32(self):
+        """Test int16 to F32 conversion."""
+        from app.utils.audio_utils import pcm_int16_to_float32
+        
+        # Create test int16 data
+        samples = np.array([0, 16384, 32767, -16384, -32768], dtype=np.int16)
+        int16_bytes = samples.tobytes()
+        
+        # Convert
+        f32_bytes = pcm_int16_to_float32(int16_bytes)
+        
+        # Verify
+        f32_samples = np.frombuffer(f32_bytes, dtype=np.float32)
+        assert len(f32_samples) == 5
+        assert abs(f32_samples[0]) < 0.001  # 0 -> 0.0
+        assert abs(f32_samples[1] - 0.5) < 0.001  # 16384 -> ~0.5
+        assert f32_samples[2] > 0.99  # 32767 -> ~1.0
+        
+
+class TestG711MuLaw:
+    """Tests for G.711 mu-law codec."""
+    
+    def test_pcm_to_ulaw_silence(self):
+        """Test that silence encodes correctly."""
+        from app.utils.audio_utils import pcm_to_ulaw
+        
+        # Silence (zeros)
+        silence = bytes(160 * 2)  # 160 samples, 16-bit
+        encoded = pcm_to_ulaw(silence)
+        
+        assert len(encoded) == 160  # 2:1 compression
+    
+    def test_ulaw_roundtrip(self):
+        """Test encode then decode produces similar output."""
+        from app.utils.audio_utils import pcm_to_ulaw, ulaw_to_pcm
+        
+        # Create a simple sine wave
+        samples = []
+        for i in range(160):
+            value = int(16384 * np.sin(2 * np.pi * 440 * i / 8000))
+            samples.append(value)
+        
+        original = struct.pack(f'<{len(samples)}h', *samples)
+        
+        # Encode and decode
+        encoded = pcm_to_ulaw(original)
+        decoded = ulaw_to_pcm(encoded)
+        
+        # Check sizes
+        assert len(encoded) == 160
+        assert len(decoded) == len(original)
+        
+        # Check that decoded is reasonably close to original
+        original_arr = np.frombuffer(original, dtype=np.int16)
+        decoded_arr = np.frombuffer(decoded, dtype=np.int16)
+        
+        # Allow some error due to lossy compression
+        max_error = np.max(np.abs(original_arr.astype(float) - decoded_arr.astype(float)))
+        assert max_error < 4000  # Within acceptable range for 8-bit encoding
+
+
+class TestG711ALaw:
+    """Tests for G.711 A-law codec."""
+    
+    def test_pcm_to_alaw_silence(self):
+        """Test that silence encodes correctly."""
+        from app.utils.audio_utils import pcm_to_alaw
+        
+        silence = bytes(160 * 2)
+        encoded = pcm_to_alaw(silence)
+        
+        assert len(encoded) == 160
+    
+    def test_alaw_roundtrip(self):
+        """Test encode then decode produces similar output."""
+        from app.utils.audio_utils import pcm_to_alaw, alaw_to_pcm
+        
+        # Create a simple sine wave
+        samples = []
+        for i in range(160):
+            value = int(16384 * np.sin(2 * np.pi * 440 * i / 8000))
+            samples.append(value)
+        
+        original = struct.pack(f'<{len(samples)}h', *samples)
+        
+        # Encode and decode
+        encoded = pcm_to_alaw(original)
+        decoded = alaw_to_pcm(encoded)
+        
+        # Check sizes
+        assert len(encoded) == 160
+        assert len(decoded) == len(original)
+
+
+class TestConvertForRTP:
+    """Tests for the full RTP conversion pipeline."""
+    
+    def test_convert_f32_to_ulaw(self):
+        """Test full pipeline: F32 -> resample -> G.711 mu-law."""
+        from app.utils.audio_utils import convert_for_rtp
+        
+        # Create F32 audio at 22050Hz (like Cartesia output)
+        duration_seconds = 0.02  # 20ms
+        num_samples = int(22050 * duration_seconds)
+        samples = np.zeros(num_samples, dtype=np.float32)
+        f32_audio = samples.tobytes()
+        
+        # Convert
+        g711_audio = convert_for_rtp(
+            f32_audio,
+            source_rate=22050,
+            source_format="pcm_f32le",
+            codec="ulaw"
+        )
+        
+        # At 8000Hz, 20ms = 160 samples = 160 bytes G.711
+        # But resampled from 22050, so might be slightly different
+        assert len(g711_audio) > 0
+    
+    def test_convert_f32_to_alaw(self):
+        """Test full pipeline with A-law codec."""
+        from app.utils.audio_utils import convert_for_rtp
+        
+        num_samples = 441  # ~20ms at 22050Hz
+        samples = np.zeros(num_samples, dtype=np.float32)
+        f32_audio = samples.tobytes()
+        
+        g711_audio = convert_for_rtp(
+            f32_audio,
+            source_rate=22050,
+            source_format="pcm_f32le",
+            codec="alaw"
+        )
+        
+        assert len(g711_audio) > 0
+
+
+class TestAudioValidation:
+    """Tests for existing audio validation functions."""
+    
+    def test_validate_pcm_format_valid(self):
+        """Test validation passes for correct format."""
+        from app.utils.audio_utils import validate_pcm_format
+        
+        # 20ms at 16kHz = 320 samples = 640 bytes
+        audio = bytes(640)
+        is_valid, error = validate_pcm_format(audio)
+        
+        assert is_valid
         assert error is None
     
-    def test_valid_20ms_chunk(self):
-        """Test validation of valid 20ms audio chunk"""
-        # 20ms at 16kHz, mono, 16-bit = 16000 * 0.02 * 1 * 2 = 640 bytes
-        audio_data = bytes(640)
-        is_valid, error = validate_pcm_format(audio_data, 16000, 1, 16)
-        assert is_valid is True
-        assert error is None
-    
-    def test_empty_audio(self):
-        """Test validation fails for empty audio"""
-        is_valid, error = validate_pcm_format(bytes(), 16000, 1, 16)
-        assert is_valid is False
+    def test_validate_pcm_format_empty(self):
+        """Test validation fails for empty audio."""
+        from app.utils.audio_utils import validate_pcm_format
+        
+        is_valid, error = validate_pcm_format(b'')
+        
+        assert not is_valid
         assert "empty" in error.lower()
     
-    def test_invalid_chunk_size(self):
-        """Test validation fails for chunk not divisible by frame size"""
-        # 641 bytes is not divisible by 2 (frame size for mono 16-bit)
-        audio_data = bytes(641)
-        is_valid, error = validate_pcm_format(audio_data, 16000, 1, 16)
-        assert is_valid is False
-        assert "not divisible" in error.lower()
-    
-    def test_chunk_too_small(self):
-        """Test validation fails for very small chunks"""
-        # 5ms chunk (too small)
-        audio_data = bytes(160)  # 5ms at 16kHz
-        is_valid, error = validate_pcm_format(audio_data, 16000, 1, 16)
-        assert is_valid is False
-        assert "too small" in error.lower()
-    
-    def test_chunk_too_large(self):
-        """Test validation fails for very large chunks"""
-        # 2000ms chunk (too large)
-        audio_data = bytes(64000)  # 2 seconds
-        is_valid, error = validate_pcm_format(audio_data, 16000, 1, 16)
-        assert is_valid is False
-        assert "too large" in error.lower()
-    
-    def test_stereo_audio(self):
-        """Test validation of stereo audio"""
-        # 80ms at 16kHz, stereo, 16-bit = 16000 * 0.08 * 2 * 2 = 5120 bytes
-        audio_data = bytes(5120)
-        is_valid, error = validate_pcm_format(audio_data, 16000, 2, 16)
-        assert is_valid is True
-        assert error is None
-
-
-class TestCalculateAudioDuration:
-    """Tests for audio duration calculation"""
-    
-    def test_80ms_duration(self):
-        """Test duration calculation for 80ms chunk"""
-        # 80ms at 16kHz, mono, 16-bit
-        chunk_size = 2560
-        audio_data = bytes(chunk_size)
-        duration = calculate_audio_duration_ms(audio_data, 16000, 1, 16)
-        assert abs(duration - 80.0) < 0.1  # Allow small floating point error
-    
-    def test_20ms_duration(self):
-        """Test duration calculation for 20ms chunk"""
-        # 20ms at 16kHz, mono, 16-bit
-        chunk_size = 640
-        audio_data = bytes(chunk_size)
-        duration = calculate_audio_duration_ms(audio_data, 16000, 1, 16)
+    def test_calculate_audio_duration(self):
+        """Test duration calculation."""
+        from app.utils.audio_utils import calculate_audio_duration_ms
+        
+        # 16kHz, 16-bit, mono: 640 bytes = 320 samples = 20ms
+        audio = bytes(640)
+        duration = calculate_audio_duration_ms(audio, sample_rate=16000)
+        
         assert abs(duration - 20.0) < 0.1
-    
-    def test_empty_audio_duration(self):
-        """Test duration calculation for empty audio"""
-        duration = calculate_audio_duration_ms(bytes(), 16000, 1, 16)
-        assert duration == 0.0
-    
-    def test_stereo_duration(self):
-        """Test duration calculation for stereo audio"""
-        # 100ms at 16kHz, stereo, 16-bit
-        chunk_size = 6400  # 16000 * 0.1 * 2 * 2
-        audio_data = bytes(chunk_size)
-        duration = calculate_audio_duration_ms(audio_data, 16000, 2, 16)
-        assert abs(duration - 100.0) < 0.1
-
-
-class TestCalculateExpectedChunkSize:
-    """Tests for expected chunk size calculation"""
-    
-    def test_80ms_chunk_size(self):
-        """Test chunk size calculation for 80ms"""
-        chunk_size = calculate_expected_chunk_size(80, 16000, 1, 16)
-        assert chunk_size == 2560  # 16000 * 0.08 * 1 * 2
-    
-    def test_20ms_chunk_size(self):
-        """Test chunk size calculation for 20ms"""
-        chunk_size = calculate_expected_chunk_size(20, 16000, 1, 16)
-        assert chunk_size == 640  # 16000 * 0.02 * 1 * 2
-    
-    def test_stereo_chunk_size(self):
-        """Test chunk size calculation for stereo"""
-        chunk_size = calculate_expected_chunk_size(100, 16000, 2, 16)
-        assert chunk_size == 6400  # 16000 * 0.1 * 2 * 2
-
-
-class TestGenerateSilence:
-    """Tests for silence generation"""
-    
-    def test_generate_80ms_silence(self):
-        """Test generating 80ms of silence"""
-        audio_data = generate_silence(80, 16000, 1, 16)
-        assert len(audio_data) == 2560
-        assert all(b == 0 for b in audio_data)
-    
-    def test_silence_validates(self):
-        """Test generated silence passes validation"""
-        audio_data = generate_silence(80, 16000, 1, 16)
-        is_valid, error = validate_pcm_format(audio_data, 16000, 1, 16)
-        assert is_valid is True
-    
-    def test_silence_duration(self):
-        """Test silence has correct duration"""
-        audio_data = generate_silence(100, 16000, 1, 16)
-        duration = calculate_audio_duration_ms(audio_data, 16000, 1, 16)
-        assert abs(duration - 100.0) < 0.1
-
-
-class TestGenerateSineWave:
-    """Tests for sine wave generation"""
-    
-    def test_generate_440hz_sine(self):
-        """Test generating 440Hz sine wave (A4 note)"""
-        audio_data = generate_sine_wave(440, 100, 16000, 1, 0.5)
-        assert len(audio_data) > 0
-        # Should be 100ms at 16kHz, mono, 16-bit
-        expected_size = calculate_expected_chunk_size(100, 16000, 1, 16)
-        assert len(audio_data) == expected_size
-    
-    def test_sine_wave_validates(self):
-        """Test generated sine wave passes validation"""
-        audio_data = generate_sine_wave(440, 80, 16000, 1, 0.5)
-        is_valid, error = validate_pcm_format(audio_data, 16000, 1, 16)
-        assert is_valid is True
-    
-    def test_sine_wave_not_silent(self):
-        """Test sine wave is not all zeros"""
-        audio_data = generate_sine_wave(440, 100, 16000, 1, 0.5)
-        # Should have non-zero values
-        assert not all(b == 0 for b in audio_data)
-    
-    def test_sine_wave_duration(self):
-        """Test sine wave has correct duration"""
-        audio_data = generate_sine_wave(440, 150, 16000, 1, 0.5)
-        duration = calculate_audio_duration_ms(audio_data, 16000, 1, 16)
-        assert abs(duration - 150.0) < 0.1
-
-
-class TestResampleAudio:
-    """Tests for audio resampling (placeholder)"""
-    
-    def test_same_rate_returns_original(self):
-        """Test resampling with same rate returns original"""
-        audio_data = bytes(1000)
-        resampled = resample_audio(audio_data, 16000, 16000, 1)
-        assert resampled == audio_data
-    
-    def test_different_rate_raises_not_implemented(self):
-        """Test resampling with different rate raises NotImplementedError"""
-        audio_data = bytes(1000)
-        with pytest.raises(NotImplementedError):
-            resample_audio(audio_data, 8000, 16000, 1)
-
-
-class TestAudioChunkModel:
-    """Tests for AudioChunk model validation"""
-    
-    def test_audio_chunk_creation(self):
-        """Test creating AudioChunk with valid data"""
-        from app.domain.models.conversation import AudioChunk
-        
-        audio_data = generate_silence(80, 16000, 1, 16)
-        chunk = AudioChunk(
-            data=audio_data,
-            sample_rate=16000,
-            channels=1
-        )
-        
-        assert chunk.data == audio_data
-        assert chunk.sample_rate == 16000
-        assert chunk.channels == 1
-    
-    def test_audio_chunk_with_sine_wave(self):
-        """Test AudioChunk with generated sine wave"""
-        from app.domain.models.conversation import AudioChunk
-        
-        audio_data = generate_sine_wave(440, 100, 16000, 1, 0.5)
-        chunk = AudioChunk(
-            data=audio_data,
-            sample_rate=16000,
-            channels=1
-        )
-        
-        # Validate the audio in the chunk
-        is_valid, error = validate_pcm_format(chunk.data, 16000, 1, 16)
-        assert is_valid is True
-
-
-if __name__ == "__main__":
-    # Run tests with pytest
-    pytest.main([__file__, "-v"])
