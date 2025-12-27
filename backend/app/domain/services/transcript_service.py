@@ -148,6 +148,44 @@ class TranscriptService:
             "assistant_word_count": assistant_words
         }
     
+    async def flush_to_database(
+        self,
+        call_id: str,
+        supabase_client,
+        tenant_id: Optional[str] = None
+    ) -> None:
+        """
+        Incrementally update calls.transcript with current buffer.
+        
+        Day 17: Called after each completed turn to persist progress.
+        Does NOT clear the buffer (unlike save_transcript).
+        
+        Args:
+            call_id: Call identifier
+            supabase_client: Supabase client
+            tenant_id: Optional tenant identifier
+        """
+        turns = self.get_turns(call_id)
+        if not turns:
+            return
+        
+        try:
+            transcript_text = self.get_transcript_text(call_id)
+            transcript_json = self.get_transcript_json(call_id)
+            
+            supabase_client.table("calls").update({
+                "transcript": transcript_text,
+                "transcript_json": transcript_json,
+                "updated_at": datetime.utcnow().isoformat()
+            }).eq("id", call_id).execute()
+            
+            logger.debug(
+                f"Flushed transcript for call {call_id}: {len(turns)} turns"
+            )
+            
+        except Exception as e:
+            logger.warning(f"Failed to flush transcript for {call_id}: {e}")
+    
     async def save_transcript(
         self, 
         call_id: str, 

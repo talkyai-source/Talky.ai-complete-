@@ -1,49 +1,62 @@
 """
 Deepgram Flux STT Provider Implementation
-Uses Deepgram SDK v5.3.0 with correct API pattern
-Based on working example with threading + sync context manager
+Uses direct WebSocket connection based on official Flux v2 API.
+
+Flux State Machine Events:
+- Update: Transcript update (~every 0.25s)
+- StartOfTurn: User started speaking  
+- EagerEndOfTurn: Early end-of-turn signal
+- TurnResumed: User continued speaking
+- EndOfTurn: User definitely finished speaking
+
+Day 17: Added PCM validation before sending audio to Deepgram.
+
+Based on: https://developers.deepgram.com/docs/flux/agent
 """
 import os
+import json
+import base64
 import asyncio
-import threading
-import queue
+import websockets
+import logging
 from typing import AsyncIterator, Optional
 
-from deepgram import DeepgramClient
-from deepgram.core.events import EventType
-from deepgram.extensions.types.sockets import ListenV2SocketClientResponse
-
 from app.domain.interfaces.stt_provider import STTProvider
-from app.domain.models.conversation import TranscriptChunk, AudioChunk
+from app.domain.models.conversation import TranscriptChunk, AudioChunk, BargeInSignal
+from app.utils.audio_utils import validate_pcm_format
+
+logger = logging.getLogger(__name__)
 
 
 class DeepgramFluxSTTProvider(STTProvider):
     """
-    Deepgram Flux STT provider with ultra-low latency (~260ms) and 
-    intelligent turn detection for voice agents
+    Deepgram Flux STT provider with ultra-low latency and 
+    intelligent turn detection for voice agents.
     
-    Uses SDK v5.3.0 API with threading pattern
+    Uses direct WebSocket connection to Deepgram v2 API.
     """
     
     def __init__(self):
-        self._client: Optional[DeepgramClient] = None
+        self._api_key: Optional[str] = None
         self._config: dict = {}
         self._model: str = "flux-general-en"
         self._sample_rate: int = 16000
         self._encoding: str = "linear16"
         
     async def initialize(self, config: dict) -> None:
-        """Initialize Deepgram Flux client with configuration"""
+        """Initialize Deepgram Flux with configuration"""
         self._config = config
         
-        # SDK v5 auto-loads API key from DEEPGRAM_API_KEY environment variable
-        # No need to pass api_key explicitly
-        self._client = DeepgramClient()
+        # Get API key
+        self._api_key = config.get("api_key") or os.getenv("DEEPGRAM_API_KEY")
+        if not self._api_key:
+            raise ValueError("DEEPGRAM_API_KEY not set")
         
-        # Configuration
         self._model = config.get("model", "flux-general-en")
         self._sample_rate = config.get("sample_rate", 16000)
         self._encoding = config.get("encoding", "linear16")
+        
+        logger.info(f"DeepgramFlux initialized: model={self._model}, sample_rate={self._sample_rate}")
     
     async def stream_transcribe(
         self,
@@ -52,168 +65,200 @@ class DeepgramFluxSTTProvider(STTProvider):
         context: Optional[str] = None
     ) -> AsyncIterator[TranscriptChunk]:
         """
-        Stream audio to Deepgram Flux and receive real-time transcriptions
+        Stream audio to Deepgram Flux and receive real-time transcriptions.
+        
+        Uses EndOfTurn pattern from official Flux documentation.
         
         Args:
-            audio_stream: Async iterator of audio chunks
-            language: Language code (embedded in model name for Flux)
-            context: Optional context for better accuracy
+            audio_stream: Async iterator of audio chunks (PCM 16-bit)
+            language: Language code
+            context: Optional context
             
         Yields:
-            TranscriptChunk: Partial or final transcripts with turn detection
+            TranscriptChunk: Partial or final transcripts
         """
-        if not self._client:
-            raise RuntimeError("Deepgram client not initialized. Call initialize() first.")
+        if not self._api_key:
+            raise RuntimeError("Deepgram API key not set. Call initialize() first.")
         
-        # Queue to bridge sync Deepgram → async generator
-        transcript_queue = queue.Queue()
-        stop_event = threading.Event()
-        error_container = []
+        # Build WebSocket URL with Flux parameters
+        url = (
+            f"wss://api.deepgram.com/v2/listen"
+            f"?model={self._model}"
+            f"&encoding={self._encoding}"
+            f"&sample_rate={self._sample_rate}"
+            f"&eot_threshold=0.7"  # Default end-of-turn threshold
+        )
         
-        def sync_transcribe():
-            """Run Deepgram in sync mode with threading (SDK v5 pattern)"""
+        headers = {"Authorization": f"Token {self._api_key}"}
+        
+        # Async queues
+        transcript_queue = asyncio.Queue()
+        stop_event = asyncio.Event()
+        
+        async def send_audio(ws):
+            """Send validated audio chunks to WebSocket"""
+            chunks_sent = 0
+            chunks_invalid = 0
             try:
-                # Connect using SDK v5 pattern (sync context manager)
-                with self._client.listen.v2.connect(
-                    model=self._model,
-                    encoding=self._encoding,
-                    sample_rate=self._sample_rate
-                ) as connection:
+                async for audio_chunk in audio_stream:
+                    if stop_event.is_set():
+                        break
                     
-                    # Event handler for messages
-                    def on_message(message: ListenV2SocketClientResponse) -> None:
-                        try:
-                            if hasattr(message, 'type'):
-                                # Handle turn detection events
-                                if message.type == 'TurnInfo':
-                                    event = getattr(message, 'event', None)
-                                    
-                                    if event == 'EndOfTurn':
-                                        # Signal end of turn with empty final chunk
-                                        chunk = TranscriptChunk(
-                                            text="",
-                                            is_final=True,
-                                            confidence=1.0
-                                        )
-                                        transcript_queue.put(chunk)
-                                    
-                                    elif event == 'StartOfTurn':
-                                        # User started speaking
-                                        pass
-                                
-                                # Handle transcript results
-                                elif message.type == 'Results':
-                                    if hasattr(message, 'channel') and message.channel.alternatives:
-                                        alt = message.channel.alternatives[0]
-                                        if alt.transcript:
-                                            # Calculate confidence
-                                            confidence = None
-                                            if hasattr(alt, 'confidence'):
-                                                confidence = alt.confidence
-                                            
-                                            chunk = TranscriptChunk(
-                                                text=alt.transcript,
-                                                is_final=True,  # Flux provides final results
-                                                confidence=confidence
-                                            )
-                                            transcript_queue.put(chunk)
-                        
-                        except Exception as e:
-                            error_container.append(e)
-                    
-                    # Register event handler
-                    connection.on(EventType.MESSAGE, on_message)
-                    
-                    # Start listening in background thread (SDK v5 pattern)
-                    listen_thread = threading.Thread(
-                        target=connection.start_listening,
-                        daemon=True
+                    # Validate PCM format (16kHz, mono, 16-bit)
+                    is_valid, error = validate_pcm_format(
+                        audio_chunk.data,
+                        expected_rate=self._sample_rate,
+                        expected_channels=1,
+                        expected_bit_depth=16
                     )
-                    listen_thread.start()
                     
-                    # Send audio chunks
-                    # Note: We need to consume the async iterator in a sync way
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
+                    if not is_valid:
+                        chunks_invalid += 1
+                        if chunks_invalid <= 5:  # Log first 5 warnings only
+                            logger.warning(
+                                f"Invalid PCM chunk #{chunks_invalid}: {error}",
+                                extra={"chunk_size": len(audio_chunk.data)}
+                            )
+                        continue  # Skip invalid chunks
                     
-                    async def send_audio():
-                        try:
-                            async for audio_chunk in audio_stream:
-                                if stop_event.is_set():
-                                    break
-                                # Use send_media() method (SDK v5)
-                                connection.send_media(audio_chunk.data)
-                        except Exception as e:
-                            error_container.append(e)
+                    # Send validated PCM audio bytes
+                    await ws.send(audio_chunk.data)
+                    chunks_sent += 1
                     
-                    loop.run_until_complete(send_audio())
-                    loop.close()
-                    
-                    # Wait a bit for final messages
-                    threading.Event().wait(0.5)
-            
             except Exception as e:
-                error_container.append(e)
+                logger.error(f"Flux send_audio error: {e}")
             finally:
-                # Signal completion
-                transcript_queue.put(None)
+                if chunks_invalid > 0:
+                    logger.info(f"Flux audio stats: {chunks_sent} sent, {chunks_invalid} invalid")
+                stop_event.set()
         
-        # Run sync Deepgram code in background thread
-        transcribe_thread = threading.Thread(target=sync_transcribe, daemon=True)
-        transcribe_thread.start()
+        async def receive_transcripts(ws):
+            """Receive and process Flux TurnInfo events"""
+            try:
+                async for message in ws:
+                    if stop_event.is_set():
+                        break
+                    
+                    data = json.loads(message)
+                    msg_type = data.get("type", "")
+                    
+                    # Handle TurnInfo messages (Flux-specific)
+                    if msg_type == "TurnInfo":
+                        event = data.get("event", "")
+                        transcript_text = data.get("transcript", "")
+                        
+                        if event == "EndOfTurn":
+                            # User finished speaking
+                            if transcript_text and transcript_text.strip():
+                                chunk = TranscriptChunk(
+                                    text=transcript_text.strip(),
+                                    is_final=True,
+                                    confidence=data.get("end_of_turn_confidence", 1.0)
+                                )
+                                await transcript_queue.put(chunk)
+                            
+                            # Send end-of-turn signal
+                            end_chunk = TranscriptChunk(
+                                text="",
+                                is_final=True,
+                                confidence=1.0
+                            )
+                            await transcript_queue.put(end_chunk)
+                            logger.debug(f"Flux EndOfTurn: '{transcript_text}'")
+                        
+                        elif event == "Update":
+                            # Partial transcript update
+                            if transcript_text and transcript_text.strip():
+                                chunk = TranscriptChunk(
+                                    text=transcript_text.strip(),
+                                    is_final=False,
+                                    confidence=data.get("end_of_turn_confidence")
+                                )
+                                await transcript_queue.put(chunk)
+                        
+                        elif event == "StartOfTurn":
+                            # User started speaking - emit barge-in signal
+                            # This allows interrupting TTS playback when user speaks
+                            logger.info("Flux StartOfTurn - Barge-in detected, user interrupting")
+                            barge_in = BargeInSignal()
+                            await transcript_queue.put(barge_in)
+                        
+                        elif event == "EagerEndOfTurn":
+                            logger.debug(f"Flux EagerEndOfTurn: '{transcript_text}'")
+                        
+                        elif event == "TurnResumed":
+                            logger.debug("Flux TurnResumed")
+                    
+                    # Handle Results (fallback for non-Flux responses)
+                    elif msg_type == "Results":
+                        channel = data.get("channel", {})
+                        alternatives = channel.get("alternatives", [])
+                        if alternatives:
+                            transcript = alternatives[0].get("transcript", "")
+                            if transcript:
+                                chunk = TranscriptChunk(
+                                    text=transcript,
+                                    is_final=False,
+                                    confidence=alternatives[0].get("confidence")
+                                )
+                                await transcript_queue.put(chunk)
+                    
+                    elif msg_type == "Metadata":
+                        logger.debug(f"Flux Metadata: {data}")
+                        
+            except websockets.exceptions.ConnectionClosed:
+                logger.info("Flux WebSocket closed")
+            except Exception as e:
+                logger.error(f"Flux receive error: {e}")
+            finally:
+                stop_event.set()
+                await transcript_queue.put(None)
         
-        # Yield transcripts from queue (async generator)
         try:
-            while True:
-                # Check for errors
-                if error_container:
-                    raise RuntimeError(f"Deepgram transcription failed: {error_container[0]}")
+            async with websockets.connect(url, additional_headers=headers) as ws:
+                logger.info("Connected to Deepgram Flux WebSocket")
                 
-                # Get transcript from queue (with timeout)
-                try:
-                    chunk = await asyncio.get_event_loop().run_in_executor(
-                        None,
-                        transcript_queue.get,
-                        True,  # block
-                        0.1    # timeout
-                    )
-                    
-                    if chunk is None:
-                        # End of stream
-                        break
-                    
-                    yield chunk
+                # Start send/receive tasks
+                send_task = asyncio.create_task(send_audio(ws))
+                receive_task = asyncio.create_task(receive_transcripts(ws))
                 
-                except queue.Empty:
-                    # Check if thread is still alive
-                    if not transcribe_thread.is_alive():
-                        break
-                    continue
-        
-        finally:
-            stop_event.set()
+                # Yield transcripts
+                while True:
+                    try:
+                        chunk = await asyncio.wait_for(
+                            transcript_queue.get(),
+                            timeout=0.02  # Reduced from 0.1s for lower latency
+                        )
+                        
+                        if chunk is None:
+                            break
+                        
+                        yield chunk
+                        
+                    except asyncio.TimeoutError:
+                        if stop_event.is_set() and transcript_queue.empty():
+                            break
+                        continue
+                
+                # Cleanup
+                send_task.cancel()
+                receive_task.cancel()
+                
+        except Exception as e:
+            logger.error(f"Flux connection error: {e}")
+            raise
     
     def detect_turn_end(self, transcript_chunk: TranscriptChunk) -> bool:
-        """
-        Detect if the user has finished speaking based on transcript chunk
-        
-        Args:
-            transcript_chunk: Latest transcript chunk
-            
-        Returns:
-            bool: True if turn has ended, False otherwise
-        """
-        # Check if this is an end-of-turn signal (empty final chunk)
+        """Detect if user finished speaking (empty final chunk = EndOfTurn)"""
         return transcript_chunk.is_final and not transcript_chunk.text
     
     async def cleanup(self) -> None:
         """Release resources"""
-        # SDK v5 handles cleanup automatically via context manager
-        self._client = None
+        self._api_key = None
+        logger.info("DeepgramFlux cleaned up")
     
     @property
     def name(self) -> str:
-        """Provider name"""
         return "deepgram-flux"
     
     def __repr__(self) -> str:

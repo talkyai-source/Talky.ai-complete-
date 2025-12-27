@@ -1,0 +1,45 @@
+# SIP Bridge Configuration
+# For connecting MicroSIP or other SIP softphones to Talky.ai
+
+sip:
+  # SIP Server settings
+  server:
+    host: "0.0.0.0"
+    port: 5060
+    transport: "UDP"  # UDP, TCP, or TLS
+  
+  # Authentication (basic for local testing)
+  auth:
+    enabled: false  # Set to true for production
+    realm: "talkyai"
+    users:
+      agent001: "password123"
+      test: "test"
+  
+  # Codec preferences (order matters)
+  codecs:
+    - name: "PCMU"
+      payload_type: 0
+      clock_rate: 8000
+    - name: "PCMA"
+      payload_type: 8
+      clock_rate: 8000
+  
+  # RTP settings
+  rtp:
+    port_range_start: 10000
+    port_range_end: 20000
+    dtmf_payload_type: 101
+  
+  # Audio conversion
+  audio:
+    input_sample_rate: 8000    # G.711 is 8kHz
+    output_sample_rate: 16000  # STT needs 16kHz
+    channels: 1
+    bit_depth: 16
+  
+  # Timeouts (seconds)
+  timeouts:
+    registration: 3600
+    session: 1800
+    rtp_inactivity: 30

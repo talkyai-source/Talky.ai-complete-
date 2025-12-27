@@ -12,6 +12,7 @@ import {
     BarChart2,
     Volume2,
     Layers,
+    Cpu,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
@@ -23,6 +24,7 @@ const navigation = [
     { name: "Contacts", href: "/contacts", icon: Users },
     { name: "Analytics", href: "/analytics", icon: BarChart2 },
     { name: "Recordings", href: "/recordings", icon: Volume2 },
+    { name: "AI Options", href: "/ai-options", icon: Cpu },
 ];
 
 const bottomNavigation = [

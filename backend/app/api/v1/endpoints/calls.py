@@ -8,6 +8,7 @@ from typing import List, Optional
 from supabase import Client
 
 from app.api.v1.dependencies import get_supabase, get_current_user, CurrentUser
+from app.utils.tenant_filter import apply_tenant_filter, verify_tenant_access
 
 router = APIRouter(prefix="/calls", tags=["calls"])
 
@@ -68,13 +69,14 @@ async def list_calls(
         - to: End date filter
     """
     try:
-        # Build query
+        # Build query with tenant filtering
         query = supabase.table("calls").select(
             "id, created_at, phone_number, status, duration_seconds, outcome",
             count="exact"
         )
+        query = apply_tenant_filter(query, current_user.tenant_id)
         
-        # Apply filters
+        # Apply additional filters
         if status:
             query = query.eq("status", status)
         
@@ -133,8 +135,10 @@ async def get_call(
     Returns full call information including transcript and recording reference.
     """
     try:
-        # Get call details
-        call_response = supabase.table("calls").select("*").eq("id", call_id).single().execute()
+        # Get call details with tenant filtering
+        query = supabase.table("calls").select("*").eq("id", call_id)
+        query = apply_tenant_filter(query, current_user.tenant_id)
+        call_response = query.single().execute()
         
         if not call_response.data:
             raise HTTPException(
@@ -194,6 +198,10 @@ async def get_call_transcript(
         Text format: Plain text transcript
     """
     try:
+        # Verify call belongs to tenant before fetching transcript
+        if not verify_tenant_access(supabase, "calls", call_id, current_user.tenant_id):
+            raise HTTPException(status_code=404, detail="Call not found")
+        
         # First try the transcripts table (Day 10)
         transcript_response = supabase.table("transcripts").select(
             "turns, full_text, word_count, turn_count, created_at"

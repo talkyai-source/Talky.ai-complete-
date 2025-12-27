@@ -2,6 +2,9 @@
 Voice Pipeline Service
 Orchestrates the full voice AI pipeline: STT → LLM → TTS
 Integrates conversation state machine and prompt management (Day 5)
+
+Day 17: Fixed partial transcript handling, added incremental transcript persistence,
+and integrated LLM guardrails with human-like fallback responses.
 """
 import asyncio
 import logging
@@ -11,15 +14,16 @@ from datetime import datetime
 from fastapi import WebSocket
 
 from app.domain.models.session import CallSession, CallState
-from app.domain.models.conversation import AudioChunk, TranscriptChunk, Message, MessageRole
-from app.domain.models.conversation_state import ConversationState
-from app.infrastructure.stt.deepgram_flux import DeepgramFluxSTTProvider
-from app.infrastructure.llm.groq import GroqLLMProvider
+from app.domain.models.conversation import AudioChunk, TranscriptChunk, Message, MessageRole, BargeInSignal
+from app.domain.models.conversation_state import ConversationState, CallOutcomeType
+from app.domain.interfaces.stt_provider import STTProvider
+from app.infrastructure.llm.groq import GroqLLMProvider, LLMTimeoutError
 from app.infrastructure.tts.cartesia import CartesiaTTSProvider
 from app.domain.interfaces.media_gateway import MediaGateway
 from app.domain.services.conversation_engine import ConversationEngine
 from app.domain.services.prompt_manager import PromptManager
 from app.domain.services.transcript_service import TranscriptService
+from app.domain.services.llm_guardrails import LLMGuardrails, LLMGuardrailsConfig, get_guardrails
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +34,7 @@ class VoicePipelineService:
     
     Pipeline Flow:
     1. Audio Queue (from media gateway)
-    2. Deepgram Flux STT (streaming transcription)
+    2. STT Provider (streaming transcription - ElevenLabs/Deepgram)
     3. Turn Detection (EndOfTurn event)
     4. Groq LLM (streaming response generation)
     5. Cartesia TTS (streaming audio synthesis)
@@ -46,7 +50,7 @@ class VoicePipelineService:
     
     def __init__(
         self,
-        stt_provider: DeepgramFluxSTTProvider,
+        stt_provider: STTProvider,
         llm_provider: GroqLLMProvider,
         tts_provider: CartesiaTTSProvider,
         media_gateway: MediaGateway
@@ -63,7 +67,14 @@ class VoicePipelineService:
         # Day 10: Transcript accumulation service
         self.transcript_service = TranscriptService()
         
+        # Day 17: LLM guardrails for timeout and fallback handling
+        self.guardrails = get_guardrails()
+        
         self._active_pipelines: dict[str, bool] = {}
+        
+        # Barge-in: Track interruption events per call
+        # When set, TTS should stop immediately
+        self._barge_in_events: dict[str, asyncio.Event] = {}
     
     async def start_pipeline(
         self,
@@ -149,7 +160,7 @@ class VoicePipelineService:
                     # Get audio chunk with timeout
                     audio_data = await asyncio.wait_for(
                         audio_queue.get(),
-                        timeout=0.1
+                        timeout=0.02  # Reduced from 0.1s for lower latency
                     )
                     
                     yield AudioChunk(
@@ -187,18 +198,23 @@ class VoicePipelineService:
     async def handle_transcript(
         self,
         session: CallSession,
-        transcript: TranscriptChunk,
+        transcript,  # Can be TranscriptChunk or BargeInSignal
         websocket: Optional[WebSocket] = None
     ) -> None:
         """
-        Handle transcript chunk from STT.
+        Handle transcript chunk from STT or barge-in signal.
         
         Args:
             session: Active call session
-            transcript: Transcript chunk from STT
+            transcript: Transcript chunk from STT or BargeInSignal
             websocket: Optional WebSocket for updates
         """
         call_id = session.call_id
+        
+        # Check if this is a barge-in signal (user started speaking during TTS)
+        if isinstance(transcript, BargeInSignal):
+            await self.handle_barge_in(session, websocket)
+            return
         
         # Log transcript with structured data
         logger.info(
@@ -213,17 +229,85 @@ class VoicePipelineService:
             }
         )
         
+        # Send transcript to WebSocket for browser display
+        if websocket and transcript.text:
+            try:
+                await websocket.send_json({
+                    "type": "transcript",
+                    "text": transcript.text,
+                    "is_final": transcript.is_final,
+                    "confidence": transcript.confidence
+                })
+            except Exception as e:
+                logger.warning(f"Failed to send transcript to websocket: {e}")
+        
         # Check for turn end
         if self.stt_provider.detect_turn_end(transcript):
             # User finished speaking
             await self.handle_turn_end(session, websocket)
         
         elif transcript.text:
-            # Accumulate partial transcript
-            session.current_user_input += transcript.text + " "
+            # Day 17: Fixed partial transcript handling
+            # Deepgram Flux sends "Update" events that REPLACE previous partials
+            # So we store the latest partial, not concatenate
+            if transcript.is_final:
+                # Final transcript from EndOfTurn - use as-is
+                session.current_user_input = transcript.text
+            else:
+                # Partial transcript - replace (Flux updates are cumulative)
+                session.current_user_input = transcript.text
             
             # Update session activity
             session.update_activity()
+    
+    async def handle_barge_in(
+        self,
+        session: CallSession,
+        websocket: Optional[WebSocket] = None
+    ) -> None:
+        """
+        Handle barge-in: user started speaking during agent speech.
+        
+        This interrupts TTS playback and prepares to listen to user input.
+        
+        Args:
+            session: Active call session
+            websocket: Optional WebSocket for updates
+        """
+        call_id = session.call_id
+        
+        logger.info(
+            "barge_in_detected",
+            extra={
+                "call_id": call_id,
+                "turn_id": session.turn_id,
+                "timestamp": datetime.utcnow().isoformat(),
+                "tts_active": session.tts_active
+            }
+        )
+        
+        # Signal TTS to stop if it's currently playing
+        if call_id in self._barge_in_events:
+            self._barge_in_events[call_id].set()
+            logger.info(f"Barge-in event set for call {call_id}")
+        
+        # Cancel current AI response (it was interrupted)
+        session.current_ai_response = ""
+        session.tts_active = False
+        
+        # Update session state to listening
+        session.state = CallState.LISTENING
+        
+        # Notify frontend to stop audio playback immediately
+        if websocket:
+            try:
+                await websocket.send_json({
+                    "type": "barge_in",
+                    "message": "User started speaking, stopping TTS",
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+            except Exception as e:
+                logger.warning(f"Failed to send barge_in to websocket: {e}")
     
     async def handle_turn_end(
         self,
@@ -306,6 +390,17 @@ class VoicePipelineService:
             )
             session.conversation_history.append(assistant_message)
             
+            # Send LLM response to WebSocket for browser display
+            if websocket:
+                try:
+                    await websocket.send_json({
+                        "type": "llm_response",
+                        "text": response_text,
+                        "latency_ms": llm_latency
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to send llm_response to websocket: {e}")
+            
             # Day 10: Accumulate assistant turn for transcript
             self.transcript_service.accumulate_turn(
                 call_id=call_id,
@@ -340,6 +435,30 @@ class VoicePipelineService:
                     "total_latency_ms": total_latency
                 }
             )
+            
+            # Send turn_complete to WebSocket for browser display
+            if websocket:
+                try:
+                    await websocket.send_json({
+                        "type": "turn_complete",
+                        "llm_latency_ms": llm_latency,
+                        "tts_latency_ms": tts_latency,
+                        "total_latency_ms": total_latency
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to send turn_complete to websocket: {e}")
+            
+            # Day 17: Flush transcript to database incrementally
+            try:
+                from app.api.v1.dependencies import get_supabase
+                supabase = next(get_supabase())
+                await self.transcript_service.flush_to_database(
+                    call_id=call_id,
+                    supabase_client=supabase,
+                    tenant_id=getattr(session, 'tenant_id', None)
+                )
+            except Exception as e:
+                logger.warning(f"Failed to flush transcript for {call_id}: {e}")
         
         except Exception as e:
             logger.error(
@@ -441,48 +560,110 @@ class VoicePipelineService:
                 content=prefill_content
             ))
         
-        # 5. Stream LLM response with optimized parameters
+        # 5. Stream LLM response with timeout and guardrails
         response_text = prefill_content if prefill_content else ""
+        use_fallback = False
         
         try:
-            async for token in self.llm_provider.stream_chat(
+            # Use timeout-enabled streaming for graceful degradation
+            async for token in self.llm_provider.stream_chat_with_timeout(
                 messages=messages_with_prefill,
+                timeout_seconds=self.guardrails.config.max_response_time_seconds,
                 system_prompt=system_prompt,
                 temperature=0.3,  # Groq recommendation for factual voice calls (0.2-0.4)
-                max_tokens=150,   # Enforce brevity for voice
+                max_tokens=80,    # Reduced from 150 for faster response (~300ms target)
                 top_p=1.0,        # Groq recommendation
                 stop=["###", "\n\n\n"]  # Stop sequences for concise responses
             ):
                 response_text += token
                 session.current_ai_response += token
             
-            # 6. Check if conversation should end
-            should_end, end_reason = conversation_engine.should_end_conversation(
-                state=new_state,
-                turn_count=session.turn_id,
-                context=session.conversation_context
+            # Clean and validate response
+            response_text = self.guardrails.clean_response(response_text)
+            response_text = self.guardrails.truncate_response(
+                response_text, 
+                max_sentences=session.agent_config.response_max_sentences
             )
             
-            if should_end:
-                logger.info(
-                    "conversation_ending",
-                    extra={
-                        "call_id": call_id,
-                        "reason": end_reason,
-                        "final_state": new_state.value
-                    }
-                )
-                # Mark session for termination
-                session.state = CallState.ENDING
+            # Validate against rules
+            is_valid, reason = self.guardrails.validate_response(
+                response_text, 
+                session.agent_config.rules
+            )
+            if not is_valid:
+                logger.warning(f"Response validation failed: {reason}, using fallback")
+                session.conversation_context.increment_llm_error()
+                use_fallback = True
+        
+        except LLMTimeoutError:
+            # LLM timeout - use human-like fallback (no AI hints)
+            logger.warning(
+                "llm_timeout_fallback",
+                extra={
+                    "call_id": call_id,
+                    "turn_id": session.turn_id,
+                    "state": new_state.value
+                }
+            )
+            session.conversation_context.increment_llm_error()
+            use_fallback = True
         
         except Exception as e:
             logger.error(
-                f"Error in conversation-aware LLM response: {e}",
-                extra={"call_id": call_id, "error": str(e)},
-                exc_info=True
+                f"LLM error, using fallback: {e}",
+                extra={"call_id": call_id, "error": str(e)}
             )
-            # Fallback to basic response
-            return await self._get_basic_llm_response(session)
+            session.conversation_context.increment_llm_error()
+            use_fallback = True
+        
+        # Apply fallback if needed
+        if use_fallback:
+            fallback_response, should_end = self.guardrails.get_fallback_response(
+                state=new_state,
+                call_id=call_id,
+                error_count=session.conversation_context.llm_error_count
+            )
+            response_text = fallback_response
+            session.current_ai_response = fallback_response
+            
+            if should_end:
+                # Too many errors - end gracefully
+                logger.warning(
+                    "max_llm_errors_graceful_goodbye",
+                    extra={"call_id": call_id, "error_count": session.conversation_context.llm_error_count}
+                )
+                session.state = CallState.ENDING
+                session.conversation_context.set_outcome(
+                    CallOutcomeType.ERROR, 
+                    "max_llm_errors"
+                )
+        
+        # 6. Check if conversation should end
+        should_end, end_reason = conversation_engine.should_end_conversation(
+            state=new_state,
+            turn_count=session.turn_id,
+            context=session.conversation_context
+        )
+        
+        if should_end:
+            # Determine outcome for QA tracking
+            outcome = conversation_engine.determine_outcome(
+                final_state=new_state,
+                context=session.conversation_context,
+                turn_count=session.turn_id
+            )
+            
+            logger.info(
+                "conversation_ending",
+                extra={
+                    "call_id": call_id,
+                    "reason": end_reason,
+                    "final_state": new_state.value,
+                    "outcome": outcome.value
+                }
+            )
+            # Mark session for termination
+            session.state = CallState.ENDING
         
         return response_text.strip()
     
@@ -542,6 +723,9 @@ class VoicePipelineService:
         """
         Synthesize text to speech and send to output queue.
         
+        Supports barge-in: if user starts speaking during TTS,
+        the synthesis is interrupted immediately.
+        
         Args:
             session: Active call session
             text: Text to synthesize
@@ -557,25 +741,59 @@ class VoicePipelineService:
             }
         )
         
-        # Stream TTS synthesis
-        async for audio_chunk in self.tts_provider.stream_synthesize(
-            text=text,
-            voice_id=session.voice_id,
-            sample_rate=16000  # Match Vonage format
-        ):
-            # Send audio to media gateway
-            await self.media_gateway.send_audio(
-                call_id,
-                audio_chunk.data
-            )
+        # Create barge-in event for this call to track interruptions
+        barge_in_event = asyncio.Event()
+        self._barge_in_events[call_id] = barge_in_event
         
-        logger.info(
-            "tts_complete",
-            extra={
-                "call_id": call_id,
-                "turn_id": session.turn_id
-            }
-        )
+        was_interrupted = False
+        
+        try:
+            # Stream TTS synthesis with barge-in awareness
+            async for audio_chunk in self.tts_provider.stream_synthesize(
+                text=text,
+                voice_id=session.voice_id,
+                sample_rate=16000  # Match Vonage format
+            ):
+                # Check for barge-in before sending each chunk
+                if barge_in_event.is_set():
+                    logger.info(
+                        "tts_interrupted_by_barge_in",
+                        extra={
+                            "call_id": call_id,
+                            "turn_id": session.turn_id
+                        }
+                    )
+                    was_interrupted = True
+                    break
+                
+                # Send audio to media gateway
+                await self.media_gateway.send_audio(
+                    call_id,
+                    audio_chunk.data
+                )
+        
+        finally:
+            # Clean up barge-in event
+            if call_id in self._barge_in_events:
+                del self._barge_in_events[call_id]
+        
+        if was_interrupted:
+            logger.info(
+                "tts_stopped_early",
+                extra={
+                    "call_id": call_id,
+                    "turn_id": session.turn_id,
+                    "reason": "barge_in"
+                }
+            )
+        else:
+            logger.info(
+                "tts_complete",
+                extra={
+                    "call_id": call_id,
+                    "turn_id": session.turn_id
+                }
+            )
     
     async def stop_pipeline(self, call_id: str) -> None:
         """

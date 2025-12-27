@@ -1,6 +1,8 @@
 """
 Conversation Engine
-Manages conversation state machine and transitions
+Manages conversation state machine and transitions.
+
+Day 17: Added explicit outcome determination for QA tracking.
 """
 import re
 from typing import Tuple, List, Dict, Optional
@@ -10,7 +12,8 @@ from app.domain.models.conversation_state import (
     ConversationState,
     UserIntent,
     StateTransition,
-    ConversationContext
+    ConversationContext,
+    CallOutcomeType
 )
 from app.domain.models.agent_config import AgentConfig
 from app.domain.models.conversation import Message
@@ -194,6 +197,12 @@ class ConversationEngine:
                 r'\b(speak to|talk to|transfer|human|person|representative|agent|manager)\b',
                 r'\b(real person|actual person)\b',
             ],
+            UserIntent.CALLBACK: [
+                r'\b(call (me )?(back|later|another time))\b',
+                r'\b(call again|try again later)\b',
+                r'\b(not a good time|bad time)\b',
+                r'\b(busy right now|in a meeting)\b',
+            ],
             UserIntent.GREETING: [
                 r'\b(hello|hi|hey|good (morning|afternoon|evening))\b',
             ],
@@ -219,6 +228,7 @@ class ConversationEngine:
         intent_priority = [
             UserIntent.REQUEST_HUMAN,  # Highest priority - user wants human
             UserIntent.GOODBYE,        # User wants to end
+            UserIntent.CALLBACK,       # User wants callback (Day 17)
             UserIntent.NO,             # Explicit rejection
             UserIntent.UNCERTAIN,      # Hesitation/uncertainty
             UserIntent.OBJECTION,      # Objections/concerns
@@ -433,3 +443,67 @@ class ConversationEngine:
             return True, "user_confirmed"
         
         return False, ""
+    
+    def determine_outcome(
+        self,
+        final_state: ConversationState,
+        context: ConversationContext,
+        turn_count: int = 0
+    ) -> CallOutcomeType:
+        """
+        Determine explicit call outcome for QA tracking.
+        
+        This method provides deterministic outcome calculation based on
+        final conversation state and context, enabling consistent QA.
+        
+        Args:
+            final_state: Final conversation state when call ended
+            context: Conversation context with tracking data
+            turn_count: Number of conversation turns
+            
+        Returns:
+            CallOutcomeType - explicit outcome for analytics
+        """
+        # Check for error condition (LLM failures)
+        if context.llm_error_count >= 2:
+            context.set_outcome(CallOutcomeType.ERROR, "max_llm_errors")
+            return CallOutcomeType.ERROR
+        
+        # Check for callback request
+        if context.callback_requested:
+            context.set_outcome(CallOutcomeType.CALLBACK_REQUESTED, "user_requested_callback")
+            return CallOutcomeType.CALLBACK_REQUESTED
+        
+        # Check for transfer to human
+        if final_state == ConversationState.TRANSFER or context.transfer_requested:
+            context.set_outcome(CallOutcomeType.TRANSFER_TO_HUMAN, "user_requested_human")
+            return CallOutcomeType.TRANSFER_TO_HUMAN
+        
+        # Check for success (goal achieved)
+        if context.user_confirmed or context.goal_achieved:
+            context.set_outcome(CallOutcomeType.SUCCESS, "goal_achieved")
+            return CallOutcomeType.SUCCESS
+        
+        # Check for max turns reached
+        if turn_count >= self.agent_config.max_conversation_turns:
+            context.set_outcome(CallOutcomeType.MAX_TURNS_REACHED, f"turn_limit_{turn_count}")
+            return CallOutcomeType.MAX_TURNS_REACHED
+        
+        # Determine based on final state
+        if final_state == ConversationState.GOODBYE:
+            # Check objection history to determine if declined or not interested
+            if context.objection_count >= self.agent_config.flow.max_objection_attempts:
+                context.set_outcome(CallOutcomeType.NOT_INTERESTED, "max_objections")
+                return CallOutcomeType.NOT_INTERESTED
+            else:
+                context.set_outcome(CallOutcomeType.DECLINED, "user_declined")
+                return CallOutcomeType.DECLINED
+        
+        if final_state == ConversationState.CLOSING:
+            # Reached closing but didn't confirm
+            context.set_outcome(CallOutcomeType.UNKNOWN, "closing_not_confirmed")
+            return CallOutcomeType.UNKNOWN
+        
+        # Fallback
+        context.set_outcome(CallOutcomeType.UNKNOWN, f"state_{final_state.value}")
+        return CallOutcomeType.UNKNOWN

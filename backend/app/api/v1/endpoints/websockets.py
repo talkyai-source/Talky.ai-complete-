@@ -1,8 +1,12 @@
 """
 WebSocket Endpoints
 Handles real-time voice streaming with full AI pipeline integration
+
+Day 16: Added query parameter handling, call record creation, and session close updates.
+Works with all providers: Vonage, RTP (MicroSIP/Asterisk), and Browser.
 """
 import os
+import uuid
 import asyncio
 import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -81,33 +85,155 @@ async def get_providers():
     return _media_gateway, _pipeline_service
 
 
-@router.websocket("/ws/voice/{call_id}")
-async def voice_stream(websocket: WebSocket, call_id: str):
+async def create_or_link_call_record(
+    call_id: str,
+    tenant_id: str,
+    campaign_id: str,
+    lead_id: str,
+    phone_number: str,
+    external_call_uuid: str = None
+) -> bool:
+    """
+    Create or link a call record at session start.
+    
+    Works with all providers (Vonage, RTP/MicroSIP, Browser).
+    
+    Args:
+        call_id: Our internal call UUID (database primary key)
+        tenant_id: Tenant UUID
+        campaign_id: Campaign UUID
+        lead_id: Lead UUID
+        phone_number: Phone number (required by schema)
+        external_call_uuid: Provider-specific ID (Vonage UUID, SIP Call-ID, etc.)
+    
+    Returns:
+        True if call record created/linked successfully
+    """
+    try:
+        supabase = next(get_supabase())
+        
+        # Check if call already exists (for linking existing calls)
+        existing = supabase.table("calls").select("id").eq("id", call_id).execute()
+        
+        if existing.data:
+            # Update existing call to active status
+            supabase.table("calls").update({
+                "status": "active",
+                "started_at": datetime.utcnow().isoformat()
+            }).eq("id", call_id).execute()
+            logger.info(f"Linked to existing call: {call_id}")
+        else:
+            # Create new call record
+            call_data = {
+                "id": call_id,
+                "tenant_id": tenant_id,
+                "campaign_id": campaign_id,
+                "lead_id": lead_id,
+                "phone_number": phone_number,
+                "external_call_uuid": external_call_uuid,
+                "status": "active",
+                "started_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.utcnow().isoformat()
+            }
+            supabase.table("calls").insert(call_data).execute()
+            logger.info(
+                f"Created call record: {call_id} "
+                f"(tenant: {tenant_id}, campaign: {campaign_id}, lead: {lead_id})"
+            )
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to create/link call record: {e}", exc_info=True)
+        return False
+
+
+@router.websocket("/ws/voice/{external_uuid}")
+async def voice_stream(websocket: WebSocket, external_uuid: str):
     """
     WebSocket endpoint for bidirectional voice streaming.
     
+    Works with all providers: Vonage, RTP (MicroSIP/Asterisk), and Browser.
+    
+    Path Parameters:
+        external_uuid: Provider-specific call ID (Vonage UUID, SIP Call-ID, etc.)
+    
+    Query Parameters (required):
+        tenant_id: Tenant UUID
+        campaign_id: Campaign UUID
+        lead_id: Lead UUID
+    
+    Query Parameters (optional):
+        call_id: Our internal call UUID (if linking to existing call)
+        phone_number: Phone number (defaults to "unknown")
+    
     Handles:
-    - Audio input from Vonage (PCM 16kHz mono)
-    - Session management
-    - Voice pipeline orchestration (STT → LLM → TTS)
-    - Audio output back to Vonage
+        - Audio input (PCM 16kHz mono)
+        - Session management with call record creation
+        - Voice pipeline orchestration (STT → LLM → TTS)
+        - Audio output back to provider
+        - Call record update on close (status, duration, transcript)
     """
     await websocket.accept()
     
+    # Parse query parameters
+    query_params = dict(websocket.query_params)
+    tenant_id = query_params.get("tenant_id")
+    campaign_id = query_params.get("campaign_id")
+    lead_id = query_params.get("lead_id")
+    call_id_param = query_params.get("call_id")
+    phone_number = query_params.get("phone_number", "unknown")
+    
+    # Validate required parameters
+    if not all([tenant_id, campaign_id, lead_id]):
+        logger.warning(
+            f"Missing required query params for WebSocket: {external_uuid}",
+            extra={"query_params": query_params}
+        )
+        await websocket.send_json({
+            "type": "error",
+            "message": "Missing required query parameters: tenant_id, campaign_id, lead_id"
+        })
+        await websocket.close(code=4000)
+        return
+    
+    # Generate internal call_id or use provided one
+    call_id = call_id_param or str(uuid.uuid4())
+    
     logger.info(
-        f"WebSocket connection accepted for call {call_id}",
-        extra={"call_id": call_id}
+        f"WebSocket connection accepted: call_id={call_id}, external_uuid={external_uuid}",
+        extra={
+            "call_id": call_id,
+            "external_uuid": external_uuid,
+            "tenant_id": tenant_id,
+            "campaign_id": campaign_id,
+            "lead_id": lead_id
+        }
     )
+    
+    # Create call record in database
+    call_created = await create_or_link_call_record(
+        call_id=call_id,
+        tenant_id=tenant_id,
+        campaign_id=campaign_id,
+        lead_id=lead_id,
+        phone_number=phone_number,
+        external_call_uuid=external_uuid
+    )
+    
+    if not call_created:
+        logger.warning(f"Call record creation failed for {call_id} - continuing anyway")
     
     # Get providers
     media_gateway, pipeline_service = await get_providers()
     
-    # Create call session
+    # Create call session with real values (no placeholders)
     session = CallSession(
         call_id=call_id,
-        campaign_id="default-campaign",  # TODO: Get from query params
-        lead_id="default-lead",  # TODO: Get from query params
-        vonage_call_uuid=call_id,
+        campaign_id=campaign_id,
+        lead_id=lead_id,
+        tenant_id=tenant_id,
+        vonage_call_uuid=external_uuid,
         system_prompt="You are a helpful voice assistant. Keep responses brief and conversational, under 2 sentences.",
         voice_id="6ccbfb76-1fc6-48f7-b71d-91ac6298247b",
         language="en"
@@ -115,8 +241,11 @@ async def voice_stream(websocket: WebSocket, call_id: str):
     
     # Initialize session in media gateway
     await media_gateway.on_call_started(call_id, {
-        "campaign_id": session.campaign_id,
-        "lead_id": session.lead_id,
+        "tenant_id": tenant_id,
+        "campaign_id": campaign_id,
+        "lead_id": lead_id,
+        "phone_number": phone_number,
+        "external_uuid": external_uuid,
         "started_at": datetime.utcnow().isoformat()
     })
     
@@ -239,14 +368,16 @@ async def _save_call_data(
     session: CallSession
 ) -> None:
     """
-    Save recording and transcript after call ends.
+    Save recording, transcript, and update call record after call ends.
     
     This is a background task that runs after the WebSocket closes.
-    Uses the gateway interface so it works for both Vonage and RTP.
+    Works with all providers: Vonage, RTP, and Browser.
+    
+    Day 16: Added call record update with ended_at, duration, status, transcript, cost.
     
     Args:
         call_id: Unique call identifier
-        gateway: Media gateway instance (Vonage or RTP)
+        gateway: Media gateway instance (Vonage, RTP, or Browser)
         pipeline: Voice pipeline service
         session: Call session with metadata
     """
@@ -255,12 +386,23 @@ async def _save_call_data(
         supabase = next(get_supabase())
         
         # Get tenant and campaign info from session
-        tenant_id = getattr(session, 'tenant_id', 'default')
+        tenant_id = getattr(session, 'tenant_id', None) or 'default'
         campaign_id = str(session.campaign_id) if session.campaign_id else 'unknown'
+        
+        # Calculate duration and cost
+        duration_seconds = int(session.get_duration_seconds())
+        cost = round(duration_seconds * 0.001, 4)  # ~$0.001/second
+        
+        # Get transcript text for call record
+        full_transcript = None
+        try:
+            full_transcript = pipeline.transcript_service.get_transcript_text(call_id)
+        except Exception:
+            pass
         
         # 1. Save recording
         buffer = gateway.get_recording_buffer(call_id)
-        if buffer and buffer.total_bytes > 0:
+        if buffer and hasattr(buffer, 'total_bytes') and buffer.total_bytes > 0:
             logger.info(
                 f"Saving recording for call {call_id}: {buffer.total_bytes} bytes"
             )
@@ -281,7 +423,7 @@ async def _save_call_data(
         else:
             logger.debug(f"No recording buffer for call {call_id}")
         
-        # 2. Save transcript
+        # 2. Save transcript to transcripts table
         transcript_id = await pipeline.transcript_service.save_transcript(
             call_id=call_id,
             supabase_client=supabase,
@@ -293,6 +435,28 @@ async def _save_call_data(
         
         # Clear transcript buffer
         pipeline.transcript_service.clear_buffer(call_id)
+        
+        # 3. Update call record with final status (Day 16)
+        try:
+            update_data = {
+                "status": "completed",
+                "ended_at": datetime.utcnow().isoformat(),
+                "duration_seconds": duration_seconds,
+                "cost": cost,
+                "updated_at": datetime.utcnow().isoformat()
+            }
+            
+            # Add transcript if available
+            if full_transcript:
+                update_data["transcript"] = full_transcript
+            
+            supabase.table("calls").update(update_data).eq("id", call_id).execute()
+            logger.info(
+                f"Call record updated: {call_id} "
+                f"(duration: {duration_seconds}s, cost: ${cost})"
+            )
+        except Exception as e:
+            logger.warning(f"Could not update call record for {call_id}: {e}")
         
         logger.info(f"Call data saved successfully for {call_id}")
         

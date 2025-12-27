@@ -46,7 +46,7 @@ class MediaGatewayFactory:
         Create media gateway instance.
         
         Args:
-            gateway_type: Gateway type ("vonage" or "rtp")
+            gateway_type: Gateway type ("vonage", "rtp", "sip", or "browser")
             config: Optional configuration dictionary
             
         Returns:
@@ -60,10 +60,16 @@ class MediaGatewayFactory:
         elif gateway_type == "rtp":
             from app.infrastructure.telephony.rtp_media_gateway import RTPMediaGateway
             gateway = RTPMediaGateway()
+        elif gateway_type == "sip":
+            from app.infrastructure.telephony.sip_media_gateway import SIPMediaGateway
+            gateway = SIPMediaGateway()
+        elif gateway_type == "browser":
+            from app.infrastructure.telephony.browser_media_gateway import BrowserMediaGateway
+            gateway = BrowserMediaGateway()
         else:
             raise ValueError(
                 f"Unknown media gateway type: {gateway_type}. "
-                f"Available: vonage, rtp"
+                f"Available: vonage, rtp, sip, browser"
             )
         
         return gateway
@@ -71,5 +77,5 @@ class MediaGatewayFactory:
     @classmethod
     def list_gateways(cls) -> list[str]:
         """List available media gateway types"""
-        return ["vonage", "rtp"]
+        return ["vonage", "rtp", "sip", "browser"]
 

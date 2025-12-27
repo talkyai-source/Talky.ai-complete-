@@ -37,6 +37,32 @@ class TranscriptChunk(BaseModel):
     timestamp: Optional[datetime] = None
 
 
+class BargeInSignal(BaseModel):
+    """
+    Signal indicating user started speaking during agent speech (barge-in).
+    
+    When Deepgram Flux detects a StartOfTurn event while the agent is speaking,
+    this signal is emitted to interrupt TTS playback and listen to the user.
+    
+    Used for natural conversational interruptions where the user wants to
+    interject before the agent finishes speaking.
+    """
+    timestamp: datetime = None
+    
+    class Config:
+        arbitrary_types_allowed = True
+    
+    def __init__(self, **data):
+        if data.get('timestamp') is None:
+            data['timestamp'] = datetime.now()
+        super().__init__(**data)
+    
+    @property
+    def is_barge_in(self) -> bool:
+        """Always returns True to identify this as a barge-in signal"""
+        return True
+
+
 class Conversation(BaseModel):
     """Complete conversation session"""
     id: str

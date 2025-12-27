@@ -73,30 +73,31 @@ class CartesiaTTSProvider(TTSProvider):
         
         try:
             # Use SSE streaming for lower latency
-            # Note: WebSocket would be even faster but requires persistent connection
-            bytes_iter = self._client.tts.bytes(
+            # SDK v1.0.4: tts.sse() returns a coroutine, must await it first
+            sse_stream = await self._client.tts.sse(
                 model_id=self._model_id,
                 transcript=text,
-                voice={
-                    "mode": "id",
-                    "id": selected_voice_id
-                },
+                voice_id=selected_voice_id,
                 language=language,
                 output_format={
-                    "container": container,
+                    "container": "raw",
                     "sample_rate": sample_rate,
-                    "encoding": encoding
-                }
+                    "encoding": "pcm_f32le"
+                },
+                stream=True
             )
             
-            # Stream audio chunks
-            async for chunk in bytes_iter:
+            # Now iterate over the async stream
+            async for chunk in sse_stream:
                 if chunk:
-                    yield AudioChunk(
-                        data=chunk,
-                        sample_rate=sample_rate,
-                        channels=1
-                    )
+                    # SDK returns dict with 'audio' key containing bytes
+                    audio_data = chunk.get('audio') if isinstance(chunk, dict) else chunk
+                    if audio_data:
+                        yield AudioChunk(
+                            data=audio_data,
+                            sample_rate=sample_rate,
+                            channels=1
+                        )
         
         except Exception as e:
             raise RuntimeError(f"Cartesia TTS synthesis failed: {str(e)}")

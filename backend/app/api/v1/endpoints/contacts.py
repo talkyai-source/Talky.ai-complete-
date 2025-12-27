@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from supabase import Client
 
 from app.api.v1.dependencies import get_supabase, get_current_user, CurrentUser
+from app.utils.tenant_filter import apply_tenant_filter, verify_tenant_access
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +102,7 @@ async def upload_campaign_contacts(
     campaign_id: str,
     file: UploadFile = File(..., description="CSV file with contacts"),
     skip_duplicates: bool = Query(True, description="Skip duplicate phone numbers within campaign"),
+    current_user: CurrentUser = Depends(get_current_user),
     supabase: Client = Depends(get_supabase)
 ):
     """
@@ -131,12 +133,16 @@ async def upload_campaign_contacts(
         )
     
     try:
-        # 1. Validate campaign exists
-        campaign_response = supabase.table("campaigns").select("id, name").eq("id", campaign_id).execute()
+        # 1. Validate campaign exists AND belongs to user's tenant
+        campaign_query = supabase.table("campaigns").select("id, name, tenant_id").eq("id", campaign_id)
+        campaign_query = apply_tenant_filter(campaign_query, current_user.tenant_id)
+        campaign_response = campaign_query.execute()
+        
         if not campaign_response.data:
             raise HTTPException(status_code=404, detail="Campaign not found")
         
         campaign_name = campaign_response.data[0].get("name", "Unknown")
+        campaign_tenant_id = campaign_response.data[0].get("tenant_id")
         
         # 2. Read and decode file
         content = await file.read()
@@ -239,9 +245,10 @@ async def upload_campaign_contacts(
                         if value_clean:
                             custom_fields[key] = value_clean
                 
-                # Prepare lead record
+                # Prepare lead record with tenant_id
                 lead_data = {
                     "id": str(uuid.uuid4()),
+                    "tenant_id": campaign_tenant_id or current_user.tenant_id,
                     "campaign_id": campaign_id,
                     "phone_number": normalized_phone,
                     "first_name": first_name,
@@ -385,9 +392,10 @@ async def bulk_import_contacts(
                 company = row.get('company', '').strip() or None
                 
                 if campaign_id:
-                    # Add as lead to campaign
+                    # Add as lead to campaign (with tenant_id)
                     supabase.table("leads").insert({
                         "id": str(uuid.uuid4()),
+                        "tenant_id": current_user.tenant_id,
                         "campaign_id": campaign_id,
                         "phone_number": phone,
                         "first_name": first_name,

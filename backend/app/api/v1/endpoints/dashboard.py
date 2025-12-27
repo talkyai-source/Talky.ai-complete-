@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from supabase import Client
 
 from app.api.v1.dependencies import get_supabase, get_current_user, CurrentUser
+from app.utils.tenant_filter import apply_tenant_filter
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -38,15 +39,10 @@ async def get_dashboard_summary(
         - Active campaigns count
     """
     try:
-        # Build base query - filter by tenant if user has one
-        tenant_filter = {}
-        if current_user.tenant_id:
-            # Note: For now, we query all data. In multi-tenant mode,
-            # we'd filter by tenant_id on the calls table
-            pass
-        
-        # Get call statistics
-        calls_response = supabase.table("calls").select("status, duration_seconds").execute()
+        # Build query with tenant filtering
+        calls_query = supabase.table("calls").select("status, duration_seconds")
+        calls_query = apply_tenant_filter(calls_query, current_user.tenant_id)
+        calls_response = calls_query.execute()
         
         total_calls = 0
         answered_calls = 0
@@ -67,8 +63,10 @@ async def get_dashboard_summary(
         # Convert seconds to minutes
         minutes_used = total_duration_seconds // 60
         
-        # Get active campaigns count
-        campaigns_response = supabase.table("campaigns").select("id").eq("status", "running").execute()
+        # Get active campaigns count with tenant filtering
+        campaigns_query = supabase.table("campaigns").select("id").eq("status", "running")
+        campaigns_query = apply_tenant_filter(campaigns_query, current_user.tenant_id)
+        campaigns_response = campaigns_query.execute()
         active_campaigns = len(campaigns_response.data) if campaigns_response.data else 0
         
         return DashboardSummary(

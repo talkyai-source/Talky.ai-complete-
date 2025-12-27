@@ -38,3 +38,10 @@ try:
 except ImportError:
     pass  # Cartesia not available
 
+# Auto-register Google TTS
+try:
+    from app.infrastructure.tts.google_tts import GoogleTTSProvider
+    TTSFactory.register("google", GoogleTTSProvider)
+except ImportError:
+    pass  # Google TTS not available
+

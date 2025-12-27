@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from supabase import Client
 
 from app.api.v1.dependencies import get_supabase, get_current_user, CurrentUser
+from app.utils.tenant_filter import apply_tenant_filter
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -56,14 +57,16 @@ async def get_call_analytics(
         else:
             start_dt = end_dt - timedelta(days=30)
         
-        # Query calls within date range
-        response = supabase.table("calls").select(
+        # Query calls within date range with tenant filtering
+        query = supabase.table("calls").select(
             "created_at, status"
         ).gte(
             "created_at", start_dt.isoformat()
         ).lte(
             "created_at", end_dt.isoformat()
-        ).order("created_at").execute()
+        )
+        query = apply_tenant_filter(query, current_user.tenant_id)
+        response = query.order("created_at").execute()
         
         if not response.data:
             return CallAnalyticsResponse(series=[])
