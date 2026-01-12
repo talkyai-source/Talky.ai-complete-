@@ -86,6 +86,10 @@ class SIPBridgeServer:
         # Callback for audio processing
         self._on_audio_callback = on_audio_callback
         
+        # Call lifecycle callbacks (set by sip_bridge.py for voice pipeline)
+        self.on_call_started: Optional[Callable] = None
+        self.on_call_ended: Optional[Callable] = None
+        
         # Audio conversion state
         self._resample_states: Dict[str, any] = {}
     
@@ -231,6 +235,10 @@ class SIPBridgeServer:
         
         # Start RTP listener for this call
         asyncio.create_task(self._rtp_listener(call_id, local_rtp_port))
+        
+        # Notify voice pipeline that call has started
+        if self.on_call_started:
+            asyncio.create_task(self.on_call_started(call_id))
         
         logger.info(f"Call {call_id} answered, RTP on port {local_rtp_port}")
     
@@ -393,6 +401,10 @@ class SIPBridgeServer:
             if port in self._rtp_sockets:
                 self._rtp_sockets[port].close()
                 del self._rtp_sockets[port]
+        
+        # Notify voice pipeline that call has ended
+        if self.on_call_ended:
+            asyncio.create_task(self.on_call_ended(call_id))
         
         logger.info(
             f"Call ended: {call_id}",

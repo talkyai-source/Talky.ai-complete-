@@ -32,9 +32,12 @@ from app.domain.models.ai_config import (
     GROQ_MODELS,
     DEEPGRAM_MODELS,
     CARTESIA_MODELS,
+    GOOGLE_TTS_MODELS,
 )
 from app.infrastructure.llm.groq import GroqLLMProvider
-from app.infrastructure.tts.cartesia import CartesiaTTSProvider
+# Cartesia disabled - using Google TTS only
+# from app.infrastructure.tts.cartesia import CartesiaTTSProvider
+from app.infrastructure.tts.google_tts_streaming import GoogleTTSStreamingProvider
 from app.domain.models.conversation import Message, MessageRole
 from app.api.v1.endpoints.auth import get_current_user
 
@@ -64,8 +67,8 @@ async def list_providers():
             "models": [model.model_dump() for model in DEEPGRAM_MODELS]
         },
         tts={
-            "providers": ["cartesia"],
-            "models": [model.model_dump() for model in CARTESIA_MODELS]
+            "providers": ["google"],  # Cartesia disabled
+            "models": [model.model_dump() for model in GOOGLE_TTS_MODELS]
         }
     )
 
@@ -73,43 +76,129 @@ async def list_providers():
 @router.get("/voices", response_model=List[VoiceInfo])
 async def list_voices():
     """
-    Get all available TTS voices from Cartesia.
+    Get all available TTS voices (curated list for voice agents).
     
-    Fetches voices dynamically from Cartesia API.
+    Returns curated voices optimized for voice AI agents.
+    These voices are pre-selected for clarity, naturalness, and
+    suitability for business calls.
+    
+    Includes:
+    - Cartesia Sonic 3 voices (ultra-low latency ~90ms)
+    - Google Chirp 3 HD voices (high quality ~200ms, gRPC streaming)
     
     Returns:
-        List of VoiceInfo with voice details
+        List of VoiceInfo with voice details and preview info
     """
-    api_key = os.getenv("CARTESIA_API_KEY")
-    if not api_key:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Cartesia API key not configured"
-        )
+    from app.domain.models.ai_config import GOOGLE_CHIRP3_VOICES
+    # Cartesia disabled - only return Google voices
+    return GOOGLE_CHIRP3_VOICES
+
+
+class VoicePreviewRequest(BaseModel):
+    """Request for voice preview"""
+    voice_id: str
+    text: str = "Hello, I am your AI voice assistant. How can I help you today?"
+
+
+class VoicePreviewResponse(BaseModel):
+    """Response with voice preview audio"""
+    voice_id: str
+    voice_name: str
+    audio_base64: str
+    duration_seconds: float
+    latency_ms: float
+
+
+@router.post("/voices/preview", response_model=VoicePreviewResponse)
+async def preview_voice(request: VoicePreviewRequest):
+    """
+    Generate a voice preview audio sample.
+    
+    Synthesizes the given text with the specified voice
+    and returns the audio as base64.
+    
+    Supports both Cartesia and Google Chirp 3 HD voices.
+    
+    Args:
+        request: VoicePreviewRequest with voice_id and optional text
+    
+    Returns:
+        VoicePreviewResponse with base64 audio data
+    """
+    from app.domain.models.ai_config import GOOGLE_CHIRP3_VOICES
+    import os
+    
+    # Find voice name from Google voices (Cartesia disabled)
+    voice_name = "Unknown Voice"
+    
+    for voice in GOOGLE_CHIRP3_VOICES:
+        if voice.id == request.voice_id:
+            voice_name = voice.name
+            break
+    
+    # Ensure voice_id is in Google format
+    voice_id = request.voice_id
+    if not voice_id.startswith("en-US-Chirp3-HD"):
+        # Fallback to default Google voice
+        voice_id = "en-US-Chirp3-HD-Leda"
+        voice_name = "Leda"
     
     try:
-        tts = CartesiaTTSProvider()
-        await tts.initialize({"api_key": api_key})
+        # Always use Google TTS Streaming (Cartesia disabled)
+        # Set credentials path - go up from app/api/v1/endpoints/ to backend/
+        # __file__ is in: backend/app/api/v1/endpoints/ai_options.py
+        # We need: backend/config/google-service-account.json
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
+        creds_path = os.path.join(backend_dir, "config", "google-service-account.json")
         
-        voices_raw = await tts.get_available_voices()
+        # Verify file exists
+        if not os.path.exists(creds_path):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Google service account file not found at: {creds_path}"
+            )
         
-        voices = []
-        for v in voices_raw:
-            voices.append(VoiceInfo(
-                id=v.get("id", ""),
-                name=v.get("name", "Unknown"),
-                language=v.get("language", "en"),
-                description=v.get("description", "")
-            ))
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
         
+        tts = GoogleTTSStreamingProvider()
+        await tts.initialize({
+            "voice_id": voice_id,
+            "sample_rate": 24000  # Chirp 3 HD optimal
+        })
+        
+        start_time = time.time()
+        audio_chunks = []
+        
+        async for chunk in tts.stream_synthesize(
+            text=request.text,
+            voice_id=voice_id,
+            sample_rate=24000
+        ):
+            audio_chunks.append(chunk.data)
+        
+        end_time = time.time()
         await tts.cleanup()
         
-        return voices
+        # Combine audio chunks
+        combined_audio = b''.join(audio_chunks)
+        audio_base64 = base64.b64encode(combined_audio).decode('utf-8')
+        
+        # Calculate duration (pcm_f32le at 24kHz, 4 bytes per sample)
+        duration_seconds = len(combined_audio) / (24000 * 4)
+        latency_ms = (end_time - start_time) * 1000
+        
+        return VoicePreviewResponse(
+            voice_id=request.voice_id,
+            voice_name=voice_name,
+            audio_base64=audio_base64,
+            duration_seconds=duration_seconds,
+            latency_ms=latency_ms
+        )
     
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch voices: {str(e)}"
+            detail=f"Voice preview failed: {str(e)}"
         )
 
 
@@ -203,19 +292,31 @@ async def test_tts(request: TTSTestRequest):
     Returns:
         TTSTestResponse with base64 audio and latency metrics
     """
-    api_key = os.getenv("CARTESIA_API_KEY")
-    if not api_key:
+    # Now using Google TTS (Cartesia disabled)
+    import os as _os
+    
+    # Set credentials path
+    backend_dir = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(__file__)))))
+    creds_path = _os.path.join(backend_dir, "config", "google-service-account.json")
+    
+    if not _os.path.exists(creds_path):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Cartesia API key not configured"
+            detail="Google service account file not found"
         )
     
+    _os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
+    
+    # Ensure voice_id is in Google format
+    voice_id = request.voice_id
+    if not voice_id.startswith("en-US-Chirp3-HD"):
+        voice_id = "en-US-Chirp3-HD-Leda"
+    
     try:
-        tts = CartesiaTTSProvider()
+        tts = GoogleTTSStreamingProvider()
         await tts.initialize({
-            "api_key": api_key,
-            "model_id": request.model,
-            "sample_rate": request.sample_rate
+            "voice_id": voice_id,
+            "sample_rate": 24000  # Chirp3-HD
         })
         
         start_time = time.time()
@@ -224,8 +325,8 @@ async def test_tts(request: TTSTestRequest):
         
         async for chunk in tts.stream_synthesize(
             text=request.text,
-            voice_id=request.voice_id,
-            sample_rate=request.sample_rate
+            voice_id=voice_id,
+            sample_rate=24000
         ):
             if first_audio_time is None:
                 first_audio_time = time.time()
@@ -239,10 +340,9 @@ async def test_tts(request: TTSTestRequest):
         combined_audio = b''.join(audio_chunks)
         audio_base64 = base64.b64encode(combined_audio).decode('utf-8')
         
-        # Calculate duration (assuming pcm_f32le at given sample rate)
-        # Each sample is 4 bytes (float32)
+        # Calculate duration (pcm_f32le at 24kHz, 4 bytes per sample)
         bytes_per_sample = 4
-        duration_seconds = len(combined_audio) / (request.sample_rate * bytes_per_sample)
+        duration_seconds = len(combined_audio) / (24000 * bytes_per_sample)
         
         first_audio_ms = ((first_audio_time or end_time) - start_time) * 1000
         total_latency_ms = (end_time - start_time) * 1000
@@ -252,8 +352,8 @@ async def test_tts(request: TTSTestRequest):
             latency_ms=total_latency_ms,
             first_audio_ms=first_audio_ms,
             duration_seconds=duration_seconds,
-            model=request.model,
-            voice_id=request.voice_id
+            model="chirp3-hd",
+            voice_id=voice_id
         )
     
     except Exception as e:
@@ -271,12 +371,24 @@ async def get_config(current_user = Depends(get_current_user)):
     Returns:
         AIProviderConfig with current settings
     """
+    from app.domain.models.ai_config import GoogleTTSModel
+    
     tenant_id = current_user.tenant_id or "default"
     
     if tenant_id in _config_cache:
-        return _config_cache[tenant_id]
+        cached_config = _config_cache[tenant_id]
+        
+        # Migration: Fix old Cartesia configs to use Google TTS
+        if cached_config.tts_provider == "cartesia" or cached_config.tts_model in ["sonic-3", "sonic-2"]:
+            cached_config.tts_provider = "google"
+            cached_config.tts_model = GoogleTTSModel.CHIRP3_HD.value
+            cached_config.tts_voice_id = "en-US-Chirp3-HD-Leda"
+            cached_config.tts_sample_rate = 24000
+            _config_cache[tenant_id] = cached_config
+        
+        return cached_config
     
-    # Return default config if none saved
+    # Return default config if none saved (now defaults to Google TTS)
     return AIProviderConfig()
 
 
@@ -286,9 +398,13 @@ async def save_config(
     current_user = Depends(get_current_user)
 ):
     """
-    Save AI provider configuration for the user's tenant.
+    Save AI provider configuration GLOBALLY.
     
-    This configuration will be used for actual phone calls.
+    This configuration is used for ALL voice interactions:
+    - Dummy calls
+    - Real phone calls
+    - SIP calls
+    - Voice pipeline throughout the application
     
     Args:
         config: AIProviderConfig with desired settings
@@ -296,7 +412,17 @@ async def save_config(
     Returns:
         Saved AIProviderConfig
     """
+    from app.domain.services.global_ai_config import set_global_config
+    from app.domain.models.ai_config import GoogleTTSModel
+    
     tenant_id = current_user.tenant_id or "default"
+    
+    # Auto-migrate Cartesia configs to Google TTS (Cartesia disabled)
+    if config.tts_provider == "cartesia" or config.tts_model in ["sonic-3", "sonic-2"]:
+        config.tts_provider = "google"
+        config.tts_model = GoogleTTSModel.CHIRP3_HD.value
+        config.tts_voice_id = "en-US-Chirp3-HD-Leda"
+        config.tts_sample_rate = 24000
     
     # Validate LLM model
     valid_llm_models = [m.id for m in GROQ_MODELS]
@@ -306,23 +432,18 @@ async def save_config(
             detail=f"Invalid LLM model. Must be one of: {valid_llm_models}"
         )
     
-    # Validate STT model
-    valid_stt_models = [m.id for m in DEEPGRAM_MODELS]
-    if config.stt_model not in valid_stt_models:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid STT model. Must be one of: {valid_stt_models}"
-        )
-    
-    # Validate TTS model
-    valid_tts_models = [m.id for m in CARTESIA_MODELS]
+    # Validate TTS model - Now using Google TTS only (Cartesia disabled)
+    valid_tts_models = [m.id for m in GOOGLE_TTS_MODELS]
     if config.tts_model not in valid_tts_models:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid TTS model. Must be one of: {valid_tts_models}"
         )
     
-    # Save to cache (in production, save to database)
+    # Save to global config (applies immediately to all voice interactions)
+    set_global_config(config)
+    
+    # Also save to tenant cache for persistence
     _config_cache[tenant_id] = config
     
     return config
@@ -350,14 +471,32 @@ async def run_benchmark(config: AIProviderConfig):
     Returns:
         LatencyBenchmarkResponse with detailed latency metrics
     """
-    groq_key = os.getenv("GROQ_API_KEY")
-    cartesia_key = os.getenv("CARTESIA_API_KEY")
+    import os as _os
     
-    if not groq_key or not cartesia_key:
+    groq_key = os.getenv("GROQ_API_KEY")
+    
+    if not groq_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="API keys not configured"
+            detail="Groq API key not configured"
         )
+    
+    # Set Google credentials path
+    backend_dir = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(__file__)))))
+    creds_path = _os.path.join(backend_dir, "config", "google-service-account.json")
+    
+    if not _os.path.exists(creds_path):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google service account file not found"
+        )
+    
+    _os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
+    
+    # Ensure voice_id is in Google format
+    voice_id = config.tts_voice_id
+    if not voice_id.startswith("en-US-Chirp3-HD"):
+        voice_id = "en-US-Chirp3-HD-Leda"
     
     try:
         # Initialize providers
@@ -369,11 +508,11 @@ async def run_benchmark(config: AIProviderConfig):
             "max_tokens": config.llm_max_tokens
         })
         
-        tts = CartesiaTTSProvider()
+        # Using Google TTS (Cartesia disabled)
+        tts = GoogleTTSStreamingProvider()
         await tts.initialize({
-            "api_key": cartesia_key,
-            "model_id": config.tts_model,
-            "sample_rate": config.tts_sample_rate
+            "voice_id": voice_id,
+            "sample_rate": 24000
         })
         
         # Benchmark LLM
@@ -403,8 +542,8 @@ async def run_benchmark(config: AIProviderConfig):
         
         async for chunk in tts.stream_synthesize(
             text=llm_response,
-            voice_id=config.tts_voice_id,
-            sample_rate=config.tts_sample_rate
+            voice_id=voice_id,
+            sample_rate=24000
         ):
             if tts_first_audio_time is None:
                 tts_first_audio_time = time.time()

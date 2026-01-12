@@ -18,7 +18,12 @@ from app.api.v1.endpoints import (
     admin,
     ai_options,
     ai_options_ws,
+    ask_ai_ws,
     sip_bridge,
+    billing,  # NEW: Stripe billing endpoints
+    assistant_ws,  # NEW: Assistant Agent chat endpoint
+    connectors,  # NEW: Connector OAuth and management (Day 24)
+    meetings,  # NEW: Meeting booking (Day 25)
 )
 
 api_router = APIRouter()
@@ -44,5 +49,20 @@ api_router.include_router(admin.router)
 api_router.include_router(ai_options.router)
 api_router.include_router(ai_options_ws.router)
 
+# Ask AI (one-click voice assistant)
+api_router.include_router(ask_ai_ws.router)
+
 # SIP Bridge (MicroSIP integration - Day 18)
 api_router.include_router(sip_bridge.router)
+
+# Billing (Stripe subscription management - Day 22)
+api_router.include_router(billing.router)
+
+# Assistant Agent (Conversational AI with tools)
+api_router.include_router(assistant_ws.router)
+
+# Connectors (OAuth integrations - Day 24)
+api_router.include_router(connectors.router)
+
+# Meetings (Calendar booking - Day 25)
+api_router.include_router(meetings.router)

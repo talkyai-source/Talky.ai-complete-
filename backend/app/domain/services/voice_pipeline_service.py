@@ -18,7 +18,9 @@ from app.domain.models.conversation import AudioChunk, TranscriptChunk, Message,
 from app.domain.models.conversation_state import ConversationState, CallOutcomeType
 from app.domain.interfaces.stt_provider import STTProvider
 from app.infrastructure.llm.groq import GroqLLMProvider, LLMTimeoutError
-from app.infrastructure.tts.cartesia import CartesiaTTSProvider
+# Cartesia disabled - using Google TTS only
+# from app.infrastructure.tts.cartesia import CartesiaTTSProvider
+from app.domain.interfaces.tts_provider import TTSProvider  # Use base type for TTS agnosticism
 from app.domain.interfaces.media_gateway import MediaGateway
 from app.domain.services.conversation_engine import ConversationEngine
 from app.domain.services.prompt_manager import PromptManager
@@ -37,7 +39,7 @@ class VoicePipelineService:
     2. STT Provider (streaming transcription - ElevenLabs/Deepgram)
     3. Turn Detection (EndOfTurn event)
     4. Groq LLM (streaming response generation)
-    5. Cartesia TTS (streaming audio synthesis)
+    5. Google TTS (streaming audio synthesis) - Cartesia disabled
     6. Output Queue (back to media gateway)
     
     Handles:
@@ -52,7 +54,7 @@ class VoicePipelineService:
         self,
         stt_provider: STTProvider,
         llm_provider: GroqLLMProvider,
-        tts_provider: CartesiaTTSProvider,
+        tts_provider: TTSProvider,  # Generic TTS provider (Google, etc.)
         media_gateway: MediaGateway
     ):
         self.stt_provider = stt_provider
@@ -165,7 +167,7 @@ class VoicePipelineService:
                     
                     yield AudioChunk(
                         data=audio_data,
-                        sample_rate=16000,
+                        sample_rate=16000,  # STT input is 16kHz (Deepgram Flux)
                         channels=1
                     )
                 
@@ -451,7 +453,7 @@ class VoicePipelineService:
             # Day 17: Flush transcript to database incrementally
             try:
                 from app.api.v1.dependencies import get_supabase
-                supabase = next(get_supabase())
+                supabase = get_supabase()  # Not a generator, call directly
                 await self.transcript_service.flush_to_database(
                     call_id=call_id,
                     supabase_client=supabase,
@@ -564,36 +566,67 @@ class VoicePipelineService:
         response_text = prefill_content if prefill_content else ""
         use_fallback = False
         
+        # Use global config for LLM parameters
+        from app.domain.services.global_ai_config import get_global_config
+        global_config = get_global_config()
+        
+        # Enhanced debug logging for empty response diagnosis
+        logger.info(f"[LLM DEBUG] Preparing LLM call for {call_id}")
+        logger.info(f"[LLM DEBUG] System prompt length: {len(system_prompt)} chars")
+        logger.info(f"[LLM DEBUG] Messages with prefill count: {len(messages_with_prefill)}")
+        logger.info(f"[LLM DEBUG] Global config - model: {global_config.llm_model}, temp: {global_config.llm_temperature}, max_tokens: {global_config.llm_max_tokens}")
+        
+        # Log the last message (user input) for context
+        if messages_with_prefill:
+            last_msg = messages_with_prefill[-1]
+            logger.info(f"[LLM DEBUG] Last message role: {last_msg.role.value}, content: '{last_msg.content[:100] if last_msg.content else 'EMPTY'}...'")
+        
         try:
             # Use timeout-enabled streaming for graceful degradation
             async for token in self.llm_provider.stream_chat_with_timeout(
                 messages=messages_with_prefill,
                 timeout_seconds=self.guardrails.config.max_response_time_seconds,
                 system_prompt=system_prompt,
-                temperature=0.3,  # Groq recommendation for factual voice calls (0.2-0.4)
-                max_tokens=80,    # Reduced from 150 for faster response (~300ms target)
+                temperature=global_config.llm_temperature,  # From AI Options
+                max_tokens=global_config.llm_max_tokens,    # From AI Options
                 top_p=1.0,        # Groq recommendation
                 stop=["###", "\n\n\n"]  # Stop sequences for concise responses
             ):
                 response_text += token
                 session.current_ai_response += token
             
-            # Clean and validate response
-            response_text = self.guardrails.clean_response(response_text)
-            response_text = self.guardrails.truncate_response(
-                response_text, 
-                max_sentences=session.agent_config.response_max_sentences
-            )
+            # Debug logging to track response through processing
+            logger.info(f"LLM raw response ({len(response_text)} chars): '{response_text[:100]}...'")
             
-            # Validate against rules
-            is_valid, reason = self.guardrails.validate_response(
-                response_text, 
-                session.agent_config.rules
-            )
-            if not is_valid:
-                logger.warning(f"Response validation failed: {reason}, using fallback")
-                session.conversation_context.increment_llm_error()
+            # CRITICAL: Check for zero-token response and use fallback early
+            if not response_text.strip():
+                logger.warning(f"[LLM DEBUG] Zero tokens received from LLM for call {call_id} - this should not happen!")
+                logger.warning(f"[LLM DEBUG] System prompt preview: '{system_prompt[:200] if system_prompt else 'NONE'}...'")
+                logger.warning(f"[LLM DEBUG] Messages: {[str(m)[:50] for m in messages_with_prefill]}")
+                # Don't count this as validation error, go straight to fallback
                 use_fallback = True
+                response_text = ""
+            else:
+                # Only clean/validate if we got actual tokens
+                # Clean and validate response
+                response_text = self.guardrails.clean_response(response_text)
+                logger.info(f"After clean_response ({len(response_text)} chars): '{response_text[:100] if response_text else 'EMPTY'}...'")
+                
+                response_text = self.guardrails.truncate_response(
+                    response_text, 
+                    max_sentences=session.agent_config.response_max_sentences
+                )
+                logger.info(f"After truncate_response ({len(response_text)} chars): '{response_text[:100] if response_text else 'EMPTY'}...'")
+                
+                # Validate against rules
+                is_valid, reason = self.guardrails.validate_response(
+                    response_text, 
+                    session.agent_config.rules
+                )
+                if not is_valid:
+                    logger.warning(f"Response validation failed: {reason}, using fallback")
+                    session.conversation_context.increment_llm_error()
+                    use_fallback = True
         
         except LLMTimeoutError:
             # LLM timeout - use human-like fallback (no AI hints)
@@ -747,12 +780,22 @@ class VoicePipelineService:
         
         was_interrupted = False
         
+        # Use session voice_id if available, otherwise fall back to global config
+        from app.domain.services.global_ai_config import get_global_config
+        global_config = get_global_config()
+        
+        # Priority: session.voice_id > global_config.tts_voice_id
+        voice_id = getattr(session, 'voice_id', None) or global_config.tts_voice_id
+        sample_rate = global_config.tts_sample_rate
+        
+        logger.debug(f"TTS using voice_id={voice_id}, sample_rate={sample_rate}")
+        
         try:
             # Stream TTS synthesis with barge-in awareness
             async for audio_chunk in self.tts_provider.stream_synthesize(
                 text=text,
-                voice_id=session.voice_id,
-                sample_rate=16000  # Match Vonage format
+                voice_id=voice_id,
+                sample_rate=sample_rate
             ):
                 # Check for barge-in before sending each chunk
                 if barge_in_event.is_set():
@@ -773,6 +816,10 @@ class VoicePipelineService:
                 )
         
         finally:
+            # Flush any remaining buffered audio
+            if hasattr(self.media_gateway, 'flush_audio_buffer'):
+                await self.media_gateway.flush_audio_buffer(call_id)
+            
             # Clean up barge-in event
             if call_id in self._barge_in_events:
                 del self._barge_in_events[call_id]

@@ -38,6 +38,16 @@ from .calling_rules import (
     CallingRules,
 )
 
+# Day 28: Action Plan models
+from .action_plan import (
+    ActionPlan,
+    ActionStep,
+    ActionStepResult,
+    ActionPlanStatus,
+    AllowedActionType,
+    ActionStepCondition,
+)
+
 __all__ = [
     # WebSocket messages
     "MessageType",
@@ -65,5 +75,13 @@ __all__ = [
     "CallOutcome",
     "DialerJob",
     "CallingRules",
+    # Day 28: Action Plan models
+    "ActionPlan",
+    "ActionStep",
+    "ActionStepResult",
+    "ActionPlanStatus",
+    "AllowedActionType",
+    "ActionStepCondition",
 ]
+
 

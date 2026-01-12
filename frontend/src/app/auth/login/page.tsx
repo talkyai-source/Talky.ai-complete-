@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +14,7 @@ type Step = "email" | "otp";
 
 export default function LoginPage() {
     const router = useRouter();
+    const { login, verifyOtp } = useAuth();
     const [step, setStep] = useState<Step>("email");
     const [email, setEmail] = useState("");
     const [otpCode, setOtpCode] = useState("");
@@ -29,10 +30,7 @@ export default function LoginPage() {
         setMessage("");
 
         try {
-            const response = await api.login(email);
-            const msg = typeof response === "string"
-                ? response
-                : response?.message || "Verification code sent! Check your email.";
+            const msg = await login(email);
             setMessage(msg);
             setStep("otp"); // Move to OTP input step
         } catch (err) {
@@ -55,13 +53,11 @@ export default function LoginPage() {
         setError("");
 
         try {
-            const response = await api.verifyOtp(email, otpCode);
+            // Use auth context's verifyOtp to ensure user state is updated
+            await verifyOtp(email, otpCode);
 
-            // Store the tokens
-            api.setToken(response.access_token);
-            if (typeof window !== "undefined") {
-                localStorage.setItem("refresh_token", response.refresh_token);
-            }
+            // Small delay to ensure state propagation
+            await new Promise(resolve => setTimeout(resolve, 100));
 
             // Redirect to dashboard
             router.push("/dashboard");
@@ -93,11 +89,8 @@ export default function LoginPage() {
         setMessage("");
 
         try {
-            const response = await api.login(email);
-            const msg = typeof response === "string"
-                ? response
-                : response?.message || "New verification code sent!";
-            setMessage(msg);
+            const msg = await login(email);
+            setMessage(msg || "New verification code sent!");
         } catch (err) {
             if (err instanceof Error) {
                 setError(err.message);

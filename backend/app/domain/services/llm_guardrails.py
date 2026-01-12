@@ -26,7 +26,7 @@ class LLMGuardrailsConfig(BaseModel):
     """Configuration for LLM guardrails"""
     max_response_tokens: int = Field(default=150, ge=50, le=500, description="Max tokens per response")
     max_response_time_seconds: float = Field(default=10.0, ge=1.0, le=30.0, description="Max LLM response time")
-    max_llm_errors_before_goodbye: int = Field(default=2, ge=1, le=5, description="Max LLM errors before ending call")
+    max_llm_errors_before_goodbye: int = Field(default=3, ge=1, le=5, description="Max LLM errors before ending call")
     max_sentences: int = Field(default=3, ge=1, le=5, description="Max sentences per response")
 
 

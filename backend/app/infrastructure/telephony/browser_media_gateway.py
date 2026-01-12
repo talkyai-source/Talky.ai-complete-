@@ -26,6 +26,7 @@ class BrowserSession:
     input_queue: asyncio.Queue = field(default_factory=lambda: asyncio.Queue(maxsize=100))
     output_queue: asyncio.Queue = field(default_factory=lambda: asyncio.Queue(maxsize=100))
     recording_buffer: list = field(default_factory=list)
+    output_buffer: bytearray = field(default_factory=bytearray)  # Buffer for smooth TTS playback
     is_active: bool = True
     
     # Audio metrics
@@ -142,6 +143,7 @@ class BrowserMediaGateway(MediaGateway):
     ) -> None:
         """
         Send TTS audio to browser for playback.
+        Buffers small chunks to ~100ms to prevent micro-jitter.
         
         Args:
             call_id: Session identifier
@@ -155,19 +157,38 @@ class BrowserMediaGateway(MediaGateway):
         if not session.is_active:
             return
         
-        # Update metrics
-        session.chunks_sent += 1
-        session.total_bytes_sent += len(audio_chunk)
-        
         # Add to recording buffer
         session.recording_buffer.append(audio_chunk)
         
-        # Send to browser via WebSocket
-        try:
-            await session.websocket.send_bytes(audio_chunk)
-        except Exception as e:
-            logger.error(f"Failed to send audio to browser: {e}")
-            session.is_active = False
+        # Buffer small chunks to prevent jitter
+        # 6400 bytes = ~100ms of Float32 audio at 16kHz (16000 * 4 bytes * 0.1s)
+        # This is enough to smooth playback without adding noticeable delay
+        BUFFER_THRESHOLD = 6400
+        
+        session.output_buffer.extend(audio_chunk)
+        
+        if len(session.output_buffer) >= BUFFER_THRESHOLD:
+            # Send buffered audio
+            try:
+                await session.websocket.send_bytes(bytes(session.output_buffer))
+                session.chunks_sent += 1
+                session.total_bytes_sent += len(session.output_buffer)
+                session.output_buffer = bytearray()
+            except Exception as e:
+                logger.error(f"Failed to send audio to browser: {e}")
+                session.is_active = False
+    
+    async def flush_audio_buffer(self, call_id: str) -> None:
+        """Flush remaining audio buffer at end of TTS."""
+        session = self._sessions.get(call_id)
+        if session and session.output_buffer and session.is_active:
+            try:
+                await session.websocket.send_bytes(bytes(session.output_buffer))
+                session.chunks_sent += 1
+                session.total_bytes_sent += len(session.output_buffer)
+                session.output_buffer = bytearray()
+            except Exception as e:
+                logger.error(f"Failed to flush audio buffer: {e}")
     
     def get_audio_queue(self, call_id: str) -> Optional[asyncio.Queue]:
         """

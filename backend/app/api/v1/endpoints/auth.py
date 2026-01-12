@@ -2,10 +2,11 @@
 Authentication Endpoints
 Implements Supabase OTP (One-Time Password) email authentication
 """
+import os
 from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel, EmailStr
 from typing import Optional
-from supabase import Client
+from supabase import Client, create_client
 
 from app.api.v1.dependencies import get_supabase, get_current_user, CurrentUser
 
@@ -62,6 +63,22 @@ class MeResponse(BaseModel):
     business_name: Optional[str] = None
     role: str
     minutes_remaining: int
+
+
+# ============================================
+# Helper Functions
+# ============================================
+
+def get_service_role_client() -> Client:
+    """
+    Get a fresh Supabase client with service_role key.
+    
+    Use this for database operations that need to bypass RLS,
+    especially after auth operations that change the client's session context.
+    """
+    url = os.getenv("SUPABASE_URL")
+    key = os.getenv("SUPABASE_SERVICE_KEY")
+    return create_client(url, key)
 
 
 # ============================================
@@ -234,18 +251,44 @@ async def verify_otp(
         session = auth_response.session
         user = auth_response.user
         
+        # IMPORTANT: After verify_otp(), the supabase client's auth context changes
+        # to the user's session. We need a fresh service_role client for DB operations
+        # that require bypassing RLS.
+        db_client = get_service_role_client()
+        
         # Check if user profile exists, create if not
-        profile = supabase.table("user_profiles").select("id").eq("id", str(user.id)).execute()
+        profile = db_client.table("user_profiles").select("id").eq("id", str(user.id)).execute()
         
         if not profile.data or len(profile.data) == 0:
             # First time login - create profile from user metadata
             metadata = user.user_metadata or {}
+            tenant_id = metadata.get("tenant_id")
             
-            supabase.table("user_profiles").insert({
+            # Validate tenant_id exists in tenants table (prevents FK constraint violation)
+            if tenant_id:
+                tenant_check = db_client.table("tenants").select("id").eq("id", tenant_id).execute()
+                if not tenant_check.data or len(tenant_check.data) == 0:
+                    # Tenant doesn't exist - create a new one for this user
+                    # This can happen if the database was recreated or tenant was deleted
+                    business_name = metadata.get("business_name") or f"{user.email}'s Business"
+                    new_tenant = db_client.table("tenants").insert({
+                        "business_name": business_name,
+                        "plan_id": "basic",
+                        "minutes_allocated": 300,  # Basic plan default
+                        "minutes_used": 0
+                    }).execute()
+                    
+                    if new_tenant.data and len(new_tenant.data) > 0:
+                        tenant_id = new_tenant.data[0]["id"]
+                    else:
+                        # If tenant creation fails, set to None to allow profile creation
+                        tenant_id = None
+            
+            db_client.table("user_profiles").insert({
                 "id": str(user.id),
                 "email": user.email,
                 "name": metadata.get("name"),
-                "tenant_id": metadata.get("tenant_id"),
+                "tenant_id": tenant_id,
                 "role": metadata.get("role", "user")
             }).execute()
         
@@ -338,8 +381,11 @@ async def create_profile(
     but doesn't have a profile yet.
     """
     try:
+        # Use service_role client for DB operations to bypass RLS
+        db_client = get_service_role_client()
+        
         # Check if profile exists
-        existing = supabase.table("user_profiles").select("id").eq("id", current_user.id).execute()
+        existing = db_client.table("user_profiles").select("id").eq("id", current_user.id).execute()
         
         if existing.data and len(existing.data) > 0:
             return {"detail": "Profile already exists"}
@@ -348,13 +394,32 @@ async def create_profile(
         # This data was passed during sign_in_with_otp
         auth_user = supabase.auth.get_user()
         metadata = auth_user.user.user_metadata if auth_user.user else {}
+        tenant_id = metadata.get("tenant_id")
+        
+        # Validate tenant_id exists in tenants table (prevents FK constraint violation)
+        if tenant_id:
+            tenant_check = db_client.table("tenants").select("id").eq("id", tenant_id).execute()
+            if not tenant_check.data or len(tenant_check.data) == 0:
+                # Tenant doesn't exist - create a new one for this user
+                business_name = metadata.get("business_name") or f"{current_user.email}'s Business"
+                new_tenant = db_client.table("tenants").insert({
+                    "business_name": business_name,
+                    "plan_id": "basic",
+                    "minutes_allocated": 300,  # Basic plan default
+                    "minutes_used": 0
+                }).execute()
+                
+                if new_tenant.data and len(new_tenant.data) > 0:
+                    tenant_id = new_tenant.data[0]["id"]
+                else:
+                    tenant_id = None
         
         # Create profile
-        supabase.table("user_profiles").insert({
+        db_client.table("user_profiles").insert({
             "id": current_user.id,
             "email": current_user.email,
             "name": metadata.get("name"),
-            "tenant_id": metadata.get("tenant_id"),
+            "tenant_id": tenant_id,
             "role": metadata.get("role", "user")
         }).execute()
         

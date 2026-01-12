@@ -59,6 +59,14 @@ class TenantMiddleware(BaseHTTPMiddleware):
         if request.url.path.startswith("/api/v1/plans"):
             return await call_next(request)
         
+        # Skip for OAuth callback (it's a redirect from external providers, no auth header)
+        if request.url.path == "/api/v1/connectors/callback":
+            return await call_next(request)
+        
+        # Skip for public connectors endpoints
+        if request.url.path == "/api/v1/connectors/providers":
+            return await call_next(request)
+        
         # Extract JWT token from Authorization header
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):

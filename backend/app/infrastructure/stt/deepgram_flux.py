@@ -68,6 +68,7 @@ class DeepgramFluxSTTProvider(STTProvider):
         Stream audio to Deepgram Flux and receive real-time transcriptions.
         
         Uses EndOfTurn pattern from official Flux documentation.
+        Implements KeepAlive mechanism per Deepgram best practices.
         
         Args:
             audio_stream: Async iterator of audio chunks (PCM 16-bit)
@@ -80,24 +81,54 @@ class DeepgramFluxSTTProvider(STTProvider):
         if not self._api_key:
             raise RuntimeError("Deepgram API key not set. Call initialize() first.")
         
-        # Build WebSocket URL with Flux parameters
+        # Build WebSocket URL with Flux parameters (matching official Deepgram demo)
         url = (
             f"wss://api.deepgram.com/v2/listen"
             f"?model={self._model}"
             f"&encoding={self._encoding}"
             f"&sample_rate={self._sample_rate}"
-            f"&eot_threshold=0.7"  # Default end-of-turn threshold
         )
         
-        headers = {"Authorization": f"Token {self._api_key}"}
+        # Headers matching official Deepgram demo
+        headers = {
+            "Authorization": f"Token {self._api_key}",
+            "User-Agent": "TalkyAI-VoiceAgent/1.0"
+        }
         
         # Async queues
         transcript_queue = asyncio.Queue()
         stop_event = asyncio.Event()
+        last_audio_time = asyncio.get_event_loop().time()
+        
+        async def send_keepalive(ws):
+            """Send KeepAlive messages every 5 seconds per Deepgram docs"""
+            nonlocal last_audio_time
+            try:
+                while not stop_event.is_set():
+                    await asyncio.sleep(5)
+                    if stop_event.is_set():
+                        break
+                    
+                    # Check if we need to send keepalive (no audio for 5+ seconds)
+                    current_time = asyncio.get_event_loop().time()
+                    if current_time - last_audio_time >= 5:
+                        try:
+                            # Send KeepAlive as JSON text frame per Deepgram docs
+                            await ws.send(json.dumps({"type": "KeepAlive"}))
+                            logger.debug("Sent KeepAlive to Deepgram")
+                        except Exception as e:
+                            logger.warning(f"KeepAlive send failed: {e}")
+                            break
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.error(f"KeepAlive error: {e}")
         
         async def send_audio(ws):
             """Send validated audio chunks to WebSocket"""
+            nonlocal last_audio_time
             chunks_sent = 0
+
             chunks_invalid = 0
             try:
                 async for audio_chunk in audio_stream:
@@ -124,6 +155,7 @@ class DeepgramFluxSTTProvider(STTProvider):
                     # Send validated PCM audio bytes
                     await ws.send(audio_chunk.data)
                     chunks_sent += 1
+                    last_audio_time = asyncio.get_event_loop().time()  # Update for keepalive tracking
                     
             except Exception as e:
                 logger.error(f"Flux send_audio error: {e}")
@@ -214,20 +246,28 @@ class DeepgramFluxSTTProvider(STTProvider):
                 stop_event.set()
                 await transcript_queue.put(None)
         
+        # Simple connection without custom timeouts (matching official demo)
         try:
             async with websockets.connect(url, additional_headers=headers) as ws:
                 logger.info("Connected to Deepgram Flux WebSocket")
                 
-                # Start send/receive tasks
+                # Per Deepgram docs: Send audio within 10 seconds of connection
+                # Send a silent audio frame immediately to keep connection alive
+                silent_frame = bytes(3200)  # 100ms of silence at 16kHz, 16-bit mono
+                await ws.send(silent_frame)
+                logger.debug("Sent initial silent audio frame to Deepgram")
+                
+                # Start send/receive/keepalive tasks
                 send_task = asyncio.create_task(send_audio(ws))
                 receive_task = asyncio.create_task(receive_transcripts(ws))
+                keepalive_task = asyncio.create_task(send_keepalive(ws))
                 
                 # Yield transcripts
                 while True:
                     try:
                         chunk = await asyncio.wait_for(
                             transcript_queue.get(),
-                            timeout=0.02  # Reduced from 0.1s for lower latency
+                            timeout=0.01  # 10ms polling (matching official demo)
                         )
                         
                         if chunk is None:
@@ -240,13 +280,22 @@ class DeepgramFluxSTTProvider(STTProvider):
                             break
                         continue
                 
-                # Cleanup
-                send_task.cancel()
-                receive_task.cancel()
+                # Cleanup - proper cancellation like official demo
+                if not send_task.done():
+                    send_task.cancel()
+                if not receive_task.done():
+                    receive_task.cancel()
+                if not keepalive_task.done():
+                    keepalive_task.cancel()
+                
+                # Wait for cancellation to complete gracefully
+                await asyncio.gather(send_task, receive_task, keepalive_task, return_exceptions=True)
                 
         except Exception as e:
             logger.error(f"Flux connection error: {e}")
             raise
+
+
     
     def detect_turn_end(self, transcript_chunk: TranscriptChunk) -> bool:
         """Detect if user finished speaking (empty final chunk = EndOfTurn)"""

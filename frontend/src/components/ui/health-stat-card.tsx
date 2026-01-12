@@ -64,7 +64,7 @@ export const HealthStatCard = React.forwardRef<HTMLDivElement, HealthStatCardPro
             hidden: { scaleY: 0 },
             visible: {
                 scaleY: 1,
-                transition: { type: "spring", stiffness: 100, damping: 15 },
+                transition: { type: "spring" as const, stiffness: 100, damping: 15 },
             },
         }
 

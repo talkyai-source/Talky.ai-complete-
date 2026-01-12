@@ -13,6 +13,8 @@ import {
     Volume2,
     Layers,
     Cpu,
+    CreditCard,
+    Plug2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
@@ -28,6 +30,8 @@ const navigation = [
 ];
 
 const bottomNavigation = [
+    { name: "Integrations", href: "/integrations", icon: Plug2 },
+    { name: "Billing", href: "/billing", icon: CreditCard },
     { name: "Settings", href: "/settings", icon: Settings },
 ];
 

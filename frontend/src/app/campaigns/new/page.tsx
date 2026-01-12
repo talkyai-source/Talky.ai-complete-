@@ -1,35 +1,51 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { dashboardApi } from "@/lib/dashboard-api";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { aiOptionsApi, VoiceInfo } from "@/lib/ai-options-api";
+import { ArrowLeft, Loader2, Play, RefreshCw, Volume2, Check } from "lucide-react";
 import { motion } from "framer-motion";
-
-const voiceOptions = [
-    { id: "alloy", name: "Alloy", description: "Neutral and balanced" },
-    { id: "echo", name: "Echo", description: "Warm and conversational" },
-    { id: "fable", name: "Fable", description: "Expressive and dynamic" },
-    { id: "onyx", name: "Onyx", description: "Deep and authoritative" },
-    { id: "nova", name: "Nova", description: "Friendly and upbeat" },
-    { id: "shimmer", name: "Shimmer", description: "Clear and professional" },
-];
 
 export default function NewCampaignPage() {
     const router = useRouter();
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
+    const [voices, setVoices] = useState<VoiceInfo[]>([]);
+    const [loadingVoices, setLoadingVoices] = useState(true);
+    const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null);
+
     const [formData, setFormData] = useState({
         name: "",
         description: "",
         system_prompt: "",
-        voice_id: "alloy",
+        voice_id: "",
         goal: "",
     });
+
+    // Fetch curated voices from AI Options
+    useEffect(() => {
+        async function fetchVoices() {
+            try {
+                setLoadingVoices(true);
+                const voiceList = await aiOptionsApi.getVoices();
+                setVoices(voiceList);
+                // Set default to first voice if available
+                if (voiceList.length > 0 && !formData.voice_id) {
+                    setFormData(prev => ({ ...prev, voice_id: voiceList[0].id }));
+                }
+            } catch (err) {
+                console.error("Failed to fetch voices:", err);
+            } finally {
+                setLoadingVoices(false);
+            }
+        }
+        fetchVoices();
+    }, []);
 
     function handleChange(
         e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
@@ -38,6 +54,46 @@ export default function NewCampaignPage() {
             ...prev,
             [e.target.name]: e.target.value,
         }));
+    }
+
+    // Preview a voice
+    async function handlePreviewVoice(voiceId: string) {
+        try {
+            setPreviewingVoiceId(voiceId);
+
+            const response = await aiOptionsApi.previewVoice({
+                voice_id: voiceId,
+                text: "Hello, I am your AI voice assistant. How can I help you today?",
+            });
+
+            // Play audio
+            const audioData = atob(response.audio_base64);
+            const audioArray = new Float32Array(audioData.length / 4);
+            const dataView = new DataView(new ArrayBuffer(audioData.length));
+            for (let i = 0; i < audioData.length; i++) {
+                dataView.setUint8(i, audioData.charCodeAt(i));
+            }
+            for (let i = 0; i < audioArray.length; i++) {
+                audioArray[i] = dataView.getFloat32(i * 4, true);
+            }
+
+            const audioContext = new AudioContext({ sampleRate: 16000 });
+            const audioBuffer = audioContext.createBuffer(1, audioArray.length, 16000);
+            audioBuffer.getChannelData(0).set(audioArray);
+
+            const source = audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(audioContext.destination);
+            source.start();
+
+            source.onended = () => {
+                audioContext.close();
+                setPreviewingVoiceId(null);
+            };
+        } catch (err) {
+            console.error("Voice preview failed:", err);
+            setPreviewingVoiceId(null);
+        }
     }
 
     async function handleSubmit(e: React.FormEvent) {
@@ -133,29 +189,81 @@ export default function NewCampaignPage() {
                             </p>
                         </div>
 
-                        {/* Voice Selection */}
+                        {/* Voice Selection - Updated to use AI Options voices */}
                         <div className="space-y-2">
-                            <Label className="text-gray-400">AI Voice</Label>
-                            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                                {voiceOptions.map((voice) => (
-                                    <button
-                                        key={voice.id}
-                                        type="button"
-                                        onClick={() => setFormData((prev) => ({ ...prev, voice_id: voice.id }))}
-                                        disabled={loading}
-                                        className={`p-3 rounded-lg border text-left transition-all ${formData.voice_id === voice.id
-                                            ? "border-white bg-white text-gray-900"
-                                            : "border-white/20 bg-white/5 hover:bg-white/10 text-white"
-                                            }`}
-                                    >
-                                        <p className="font-medium text-sm">{voice.name}</p>
-                                        <p className={`text-xs ${formData.voice_id === voice.id ? "text-gray-600" : "text-gray-400"
-                                            }`}>
-                                            {voice.description}
-                                        </p>
-                                    </button>
-                                ))}
-                            </div>
+                            <Label className="text-gray-400">AI Voice ({voices.length} available)</Label>
+                            {loadingVoices ? (
+                                <div className="flex items-center justify-center py-8">
+                                    <RefreshCw className="w-5 h-5 animate-spin text-gray-400" />
+                                    <span className="ml-2 text-gray-400">Loading voices...</span>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                    {voices.map((voice) => (
+                                        <div
+                                            key={voice.id}
+                                            onClick={() => setFormData((prev) => ({ ...prev, voice_id: voice.id }))}
+                                            className={`relative p-3 rounded-lg border cursor-pointer transition-all ${formData.voice_id === voice.id
+                                                    ? "border-emerald-500 bg-emerald-500/20"
+                                                    : "border-white/20 bg-white/5 hover:bg-white/10"
+                                                }`}
+                                        >
+                                            {/* Play Preview Button */}
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handlePreviewVoice(voice.id);
+                                                }}
+                                                disabled={previewingVoiceId === voice.id}
+                                                className="absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center transition-all hover:scale-110"
+                                                style={{ backgroundColor: (voice.accent_color || "#10B981") + "30" }}
+                                            >
+                                                {previewingVoiceId === voice.id ? (
+                                                    <RefreshCw className="w-4 h-4 animate-spin" style={{ color: voice.accent_color || "#10B981" }} />
+                                                ) : (
+                                                    <Play className="w-4 h-4" style={{ color: voice.accent_color || "#10B981" }} />
+                                                )}
+                                            </button>
+
+                                            {/* Voice Info */}
+                                            <div className="pr-10">
+                                                <div className="flex items-center gap-2">
+                                                    <div
+                                                        className="w-6 h-6 rounded-full flex items-center justify-center"
+                                                        style={{ backgroundColor: (voice.accent_color || "#10B981") + "30" }}
+                                                    >
+                                                        <Volume2 className="w-3 h-3" style={{ color: voice.accent_color || "#10B981" }} />
+                                                    </div>
+                                                    <p className="font-medium text-sm text-white">{voice.name}</p>
+                                                </div>
+                                                <p className="text-xs text-gray-400 mt-1 line-clamp-2">
+                                                    {voice.description}
+                                                </p>
+
+                                                {/* Gender Tag */}
+                                                <div className="mt-2 flex gap-1">
+                                                    {voice.gender && (
+                                                        <span className={`text-xs px-1.5 py-0.5 rounded ${voice.gender === "female"
+                                                                ? "bg-pink-500/20 text-pink-400"
+                                                                : "bg-blue-500/20 text-blue-400"
+                                                            }`}>
+                                                            {voice.gender}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            {/* Selected Indicator */}
+                                            {formData.voice_id === voice.id && (
+                                                <div className="absolute bottom-2 right-2">
+                                                    <Check className="w-4 h-4 text-emerald-400" />
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
 
                         {/* System Prompt */}

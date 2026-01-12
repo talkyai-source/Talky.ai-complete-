@@ -81,6 +81,10 @@ export default function AIOptionsPage() {
     // Voice preview state
     const [previewText, setPreviewText] = useState("Hello, I am your AI voice assistant. How can I help you today?");
     const [previewing, setPreviewing] = useState(false);
+    const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null);
+
+    // TTS Provider filter state - Google only (Cartesia disabled)
+    const [ttsProvider, setTtsProvider] = useState<"google">("google");
 
     // Dummy Call state
     const [dummyCall, setDummyCall] = useState<DummyCallState>({
@@ -217,6 +221,50 @@ export default function AIOptionsPage() {
         }
     }
 
+    // Preview a specific voice by ID (for individual voice cards)
+    async function handlePreviewVoiceById(voiceId: string) {
+        try {
+            setPreviewingVoiceId(voiceId);
+            setError("");
+
+            const response = await aiOptionsApi.previewVoice({
+                voice_id: voiceId,
+                text: "Hello, I am your AI voice assistant. How can I help you today?",
+            });
+
+            // Play audio
+            const audioData = atob(response.audio_base64);
+            const audioArray = new Float32Array(audioData.length / 4);
+            const dataView = new DataView(new ArrayBuffer(audioData.length));
+            for (let i = 0; i < audioData.length; i++) {
+                dataView.setUint8(i, audioData.charCodeAt(i));
+            }
+            for (let i = 0; i < audioArray.length; i++) {
+                audioArray[i] = dataView.getFloat32(i * 4, true);
+            }
+
+            // Determine sample rate based on voice ID (Google Chirp 3 HD uses 24kHz, Cartesia uses 16kHz)
+            const isGoogleVoice = voiceId.includes("Chirp3-HD");
+            const sampleRate = isGoogleVoice ? 24000 : 16000;
+
+            const audioContext = new AudioContext({ sampleRate });
+            const audioBuffer = audioContext.createBuffer(1, audioArray.length, sampleRate);
+            audioBuffer.getChannelData(0).set(audioArray);
+
+            const source = audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(audioContext.destination);
+            source.start();
+
+            source.onended = () => {
+                audioContext.close();
+                setPreviewingVoiceId(null);
+            };
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Voice preview failed");
+            setPreviewingVoiceId(null);
+        }
+    }
     async function handleRunBenchmark() {
         try {
             setBenchmarking(true);
@@ -377,8 +425,10 @@ export default function AIOptionsPage() {
         isPlayingRef.current = true;
 
         try {
+            const sampleRate = config.tts_sample_rate || 24000;  // Official Cartesia: 24kHz
+
             if (!audioContextRef.current) {
-                audioContextRef.current = new AudioContext({ sampleRate: 16000 });
+                audioContextRef.current = new AudioContext({ sampleRate });
             }
 
             const ctx = audioContextRef.current;
@@ -392,7 +442,7 @@ export default function AIOptionsPage() {
                     float32Data[i] = view.getFloat32(i * 4, true);
                 }
 
-                const audioBuffer = ctx.createBuffer(1, float32Data.length, 16000);
+                const audioBuffer = ctx.createBuffer(1, float32Data.length, sampleRate);
                 audioBuffer.getChannelData(0).set(float32Data);
 
                 const source = ctx.createBufferSource();
@@ -623,6 +673,35 @@ export default function AIOptionsPage() {
 
                         {dummyCall.isActive && (
                             <div className="space-y-4">
+                                {/* Network Latency Bar - Always visible above the call */}
+                                <div className="flex items-center justify-center gap-6 p-3 bg-gradient-to-r from-purple-500/10 via-emerald-500/10 to-blue-500/10 rounded-lg border border-white/10">
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-2 h-2 bg-purple-500 rounded-full" />
+                                        <span className="text-xs text-gray-400">LLM:</span>
+                                        <span className="text-sm font-mono font-bold text-purple-400">
+                                            {dummyCall.latency.llm_ms ? `${dummyCall.latency.llm_ms.toFixed(0)}ms` : '--'}
+                                        </span>
+                                    </div>
+                                    <div className="h-4 w-px bg-white/20" />
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-2 h-2 bg-emerald-500 rounded-full" />
+                                        <span className="text-xs text-gray-400">TTS:</span>
+                                        <span className="text-sm font-mono font-bold text-emerald-400">
+                                            {dummyCall.latency.tts_ms ? `${dummyCall.latency.tts_ms.toFixed(0)}ms` : '--'}
+                                        </span>
+                                    </div>
+                                    <div className="h-4 w-px bg-white/20" />
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-2 h-2 bg-yellow-500 rounded-full" />
+                                        <span className="text-xs text-gray-400">Total:</span>
+                                        <span className="text-sm font-mono font-bold text-yellow-400">
+                                            {(dummyCall.latency.llm_ms && dummyCall.latency.tts_ms)
+                                                ? `${(dummyCall.latency.llm_ms + dummyCall.latency.tts_ms).toFixed(0)}ms`
+                                                : '--'}
+                                        </span>
+                                    </div>
+                                </div>
+
                                 {/* Call Info Bar */}
                                 <div className="flex items-center justify-between p-3 bg-orange-500/10 rounded-lg border border-orange-500/20">
                                     <div className="flex items-center gap-4">
@@ -638,15 +717,16 @@ export default function AIOptionsPage() {
                                             {dummyCall.conversationState}
                                         </span>
                                     </div>
-                                    <div className="flex items-center gap-4 text-xs text-gray-400">
-                                        {dummyCall.latency.llm_ms && (
-                                            <span>LLM: <span className="text-purple-400">{dummyCall.latency.llm_ms.toFixed(0)}ms</span></span>
-                                        )}
-                                        {dummyCall.latency.tts_ms && (
-                                            <span>TTS: <span className="text-emerald-400">{dummyCall.latency.tts_ms.toFixed(0)}ms</span></span>
-                                        )}
+                                    <div className="flex items-center gap-2 text-xs">
+                                        <span className="px-2 py-1 bg-blue-500/20 rounded text-blue-400">
+                                            Provider: {config.tts_provider || 'cartesia'}
+                                        </span>
+                                        <span className="px-2 py-1 bg-purple-500/20 rounded text-purple-400">
+                                            {config.tts_sample_rate / 1000}kHz
+                                        </span>
                                     </div>
                                 </div>
+
 
                                 {/* Microphone Status Indicator */}
                                 <div className="flex items-center justify-center gap-3 p-4 bg-green-500/10 rounded-lg border border-green-500/20">
@@ -783,141 +863,142 @@ export default function AIOptionsPage() {
                             </div>
                         </motion.div>
 
-                        {/* STT Provider */}
+                        {/* TTS Provider - Voice Selection Cards */}
                         <motion.div
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: 0.2 }}
-                            className="content-card"
+                            className="content-card md:col-span-2"
                         >
-                            <div className="flex items-center gap-3 mb-6">
-                                <div className="p-2 bg-blue-500/20 rounded-lg">
-                                    <Mic className="w-5 h-5 text-blue-400" />
-                                </div>
-                                <div>
-                                    <h3 className="text-lg font-semibold text-white">STT Model</h3>
-                                    <p className="text-sm text-gray-400">Deepgram</p>
-                                </div>
-                            </div>
-
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-400 mb-2">Model</label>
-                                    <select
-                                        value={config.stt_model}
-                                        onChange={(e) => setConfig({ ...config, stt_model: e.target.value })}
-                                        className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500/50"
-                                    >
-                                        {providers?.stt.models.map((model) => (
-                                            <option key={model.id} value={model.id} className="bg-gray-900">
-                                                {model.name}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-400 mb-2">Language</label>
-                                    <select
-                                        value={config.stt_language}
-                                        onChange={(e) => setConfig({ ...config, stt_language: e.target.value })}
-                                        className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500/50"
-                                    >
-                                        <option value="en" className="bg-gray-900">English</option>
-                                        <option value="es" className="bg-gray-900">Spanish</option>
-                                        <option value="fr" className="bg-gray-900">French</option>
-                                        <option value="de" className="bg-gray-900">German</option>
-                                    </select>
-                                </div>
-
-                                {/* Model Info */}
-                                {providers?.stt.models.find(m => m.id === config.stt_model) && (
-                                    <div className="p-3 bg-blue-500/10 rounded-lg border border-blue-500/20">
-                                        <p className="text-sm text-blue-300">
-                                            {providers.stt.models.find(m => m.id === config.stt_model)?.description}
-                                        </p>
+                            <div className="flex items-center justify-between mb-6">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-emerald-500/20 rounded-lg">
+                                        <Volume2 className="w-5 h-5 text-emerald-400" />
                                     </div>
-                                )}
-
-                                <div className="p-3 bg-blue-500/10 rounded-lg border border-blue-500/20">
-                                    <p className="text-xs text-blue-400">
-                                        ✓ Turn detection enabled (EndOfTurn events)
-                                    </p>
+                                    <div>
+                                        <h3 className="text-lg font-semibold text-white">TTS Voice ({voices.filter(v => v.provider === ttsProvider).length} available)</h3>
+                                        <p className="text-sm text-gray-400">Select a voice for your AI agent</p>
+                                    </div>
                                 </div>
-                            </div>
-                        </motion.div>
 
-                        {/* TTS Provider */}
-                        <motion.div
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: 0.3 }}
-                            className="content-card"
-                        >
-                            <div className="flex items-center gap-3 mb-6">
-                                <div className="p-2 bg-emerald-500/20 rounded-lg">
-                                    <Volume2 className="w-5 h-5 text-emerald-400" />
-                                </div>
-                                <div>
-                                    <h3 className="text-lg font-semibold text-white">TTS Voice</h3>
-                                    <p className="text-sm text-gray-400">Cartesia</p>
+                                {/* Provider Info - Google Only (Cartesia disabled) */}
+                                <div className="flex gap-2 p-1 bg-white/5 rounded-lg border border-white/10">
+                                    <div className="px-4 py-2 rounded-md text-sm font-medium bg-blue-500 text-white shadow-lg shadow-blue-500/25">
+                                        Google Chirp3-HD ({voices.filter(v => v.provider === "google").length} voices)
+                                    </div>
+                                    <div className="px-4 py-2 rounded-md text-xs text-gray-500 flex items-center">
+                                        Cartesia disabled
+                                    </div>
                                 </div>
                             </div>
 
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-400 mb-2">Model</label>
-                                    <select
-                                        value={config.tts_model}
-                                        onChange={(e) => setConfig({ ...config, tts_model: e.target.value })}
-                                        className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
-                                    >
-                                        {providers?.tts.models.map((model) => (
-                                            <option key={model.id} value={model.id} className="bg-gray-900">
-                                                {model.name}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
+                            {/* Voice Cards Grid - Google voices only */}
+                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
+                                {voices
+                                    .filter(voice => voice.provider === "google")
+                                    .map((voice) => (
+                                        <div
+                                            key={voice.id}
+                                            onClick={() => setConfig({
+                                                ...config,
+                                                tts_voice_id: voice.id,
+                                                tts_provider: 'google',
+                                                tts_sample_rate: 24000  // Google Chirp3-HD sample rate
+                                            })}
+                                            className={`relative p-3 rounded-lg border cursor-pointer transition-all hover:scale-[1.02] ${config.tts_voice_id === voice.id
+                                                ? "border-emerald-500 bg-emerald-500/20"
+                                                : "border-white/20 bg-white/5 hover:bg-white/10"
+                                                }`}
+                                        >
+                                            {/* Play Preview Button */}
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handlePreviewVoiceById(voice.id);
+                                                }}
+                                                disabled={previewingVoiceId === voice.id}
+                                                className="absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center transition-all hover:scale-110"
+                                                style={{ backgroundColor: (voice.accent_color || "#10B981") + "30" }}
+                                            >
+                                                {previewingVoiceId === voice.id ? (
+                                                    <RefreshCw className="w-4 h-4 animate-spin" style={{ color: voice.accent_color || "#10B981" }} />
+                                                ) : (
+                                                    <Play className="w-4 h-4" style={{ color: voice.accent_color || "#10B981" }} />
+                                                )}
+                                            </button>
 
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-400 mb-2">
-                                        Voice ({voices.length} available)
-                                    </label>
-                                    <select
-                                        value={config.tts_voice_id}
-                                        onChange={(e) => setConfig({ ...config, tts_voice_id: e.target.value })}
-                                        className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-emerald-500/50"
-                                    >
-                                        {voices.map((voice) => (
-                                            <option key={voice.id} value={voice.id} className="bg-gray-900">
-                                                {voice.name} ({voice.language})
-                                            </option>
-                                        ))}
-                                        {voices.length === 0 && (
-                                            <option value={config.tts_voice_id} className="bg-gray-900">
-                                                Default Voice
-                                            </option>
-                                        )}
-                                    </select>
-                                </div>
+                                            {/* Voice Info */}
+                                            <div className="pr-10">
+                                                <div className="flex items-center gap-2">
+                                                    <div
+                                                        className="w-6 h-6 rounded-full flex items-center justify-center"
+                                                        style={{ backgroundColor: (voice.accent_color || "#10B981") + "30" }}
+                                                    >
+                                                        <Volume2 className="w-3 h-3" style={{ color: voice.accent_color || "#10B981" }} />
+                                                    </div>
+                                                    <p className="font-medium text-sm text-white">{voice.name}</p>
+                                                </div>
+                                                <p className="text-xs text-gray-400 mt-1 line-clamp-2">
+                                                    {voice.description}
+                                                </p>
 
-                                {/* Voice Preview */}
-                                <div className="pt-2">
-                                    <button
-                                        onClick={handlePreviewVoice}
-                                        disabled={previewing}
-                                        className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-emerald-400 transition-colors disabled:opacity-50"
-                                    >
-                                        {previewing ? (
-                                            <RefreshCw className="w-4 h-4 animate-spin" />
-                                        ) : (
-                                            <Play className="w-4 h-4" />
-                                        )}
-                                        <span>Preview Voice</span>
-                                    </button>
-                                </div>
+                                                {/* Gender Tag */}
+                                                <div className="mt-2 flex gap-1">
+                                                    {voice.gender && (
+                                                        <span className={`text-xs px-1.5 py-0.5 rounded ${voice.gender === "female"
+                                                            ? "bg-pink-500/20 text-pink-400"
+                                                            : "bg-blue-500/20 text-blue-400"
+                                                            }`}>
+                                                            {voice.gender}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            {/* Selected Indicator */}
+                                            {config.tts_voice_id === voice.id && (
+                                                <div className="absolute bottom-2 right-2">
+                                                    <Check className="w-4 h-4 text-emerald-400" />
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
                             </div>
+
+                            {/* Selected Voice Preview */}
+                            {(() => {
+                                const selectedVoice = voices.find(v => v.id === config.tts_voice_id);
+                                if (!selectedVoice) return null;
+                                return (
+                                    <div className="p-4 bg-emerald-500/10 rounded-lg border border-emerald-500/30">
+                                        <div className="flex items-center gap-3">
+                                            <div
+                                                className="w-10 h-10 rounded-full flex items-center justify-center"
+                                                style={{ backgroundColor: (selectedVoice.accent_color || "#10B981") + "40" }}
+                                            >
+                                                <Volume2 className="w-5 h-5" style={{ color: selectedVoice.accent_color || "#10B981" }} />
+                                            </div>
+                                            <div className="flex-1">
+                                                <p className="text-sm font-medium text-white">{selectedVoice.name}</p>
+                                                <p className="text-xs text-gray-400">{selectedVoice.description}</p>
+                                            </div>
+                                            <button
+                                                onClick={() => handlePreviewVoiceById(selectedVoice.id)}
+                                                disabled={previewingVoiceId === selectedVoice.id}
+                                                className="px-4 py-2 bg-emerald-500/30 hover:bg-emerald-500/40 rounded-lg text-emerald-400 text-sm flex items-center gap-2 transition-colors"
+                                            >
+                                                {previewingVoiceId === selectedVoice.id ? (
+                                                    <RefreshCw className="w-4 h-4 animate-spin" />
+                                                ) : (
+                                                    <Play className="w-4 h-4" />
+                                                )}
+                                                <span>Preview Selected</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
                         </motion.div>
                     </div>
 

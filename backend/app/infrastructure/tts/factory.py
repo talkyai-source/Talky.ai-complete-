@@ -45,3 +45,10 @@ try:
 except ImportError:
     pass  # Google TTS not available
 
+# Auto-register Google TTS Streaming (low-latency gRPC)
+try:
+    from app.infrastructure.tts.google_tts_streaming import GoogleTTSStreamingProvider
+    TTSFactory.register("google-streaming", GoogleTTSStreamingProvider)
+except ImportError:
+    pass  # Google TTS Streaming not available (requires google-cloud-texttospeech)
+

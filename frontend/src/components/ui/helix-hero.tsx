@@ -9,20 +9,7 @@ import * as THREE from "three";
 import BlurEffect from "react-progressive-blur";
 import { MagneticText } from "./morphing-cursor";
 
-type AIState = "idle" | "connecting" | "browsing" | "listening" | "processing" | "speaking";
-
-interface VoiceAgent {
-    id: string;
-    name: string;
-    gender: string;
-    description: string;
-}
-
-const VOICE_AGENTS: VoiceAgent[] = [
-    { id: "sophia", name: "Sophia", gender: "female", description: "Warm & Professional" },
-    { id: "emma", name: "Emma", gender: "female", description: "Energetic & Friendly" },
-    { id: "alex", name: "Alex", gender: "male", description: "Confident & Clear" },
-];
+type AIState = "idle" | "connecting" | "listening" | "processing" | "speaking";
 
 interface HelixRingsProps {
     levelsUp?: number;
@@ -51,64 +38,42 @@ const HelixRings: React.FC<HelixRingsProps> = ({
     useFrame((_, delta) => {
         if (groupRef.current) {
             timeRef.current += delta;
-
-            // Smooth transition (0 = helix, 1 = sound wave) - FAST
             const targetTransition = isActive ? 1 : 0;
-            transitionRef.current += (targetTransition - transitionRef.current) * 0.15; // Faster!
+            transitionRef.current += (targetTransition - transitionRef.current) * 0.15;
             const t = transitionRef.current;
 
-            // ROTATE ONLY WHEN IDLE (helix mode) - stop when active (wave mode)
             if (!isActive) {
                 groupRef.current.rotation.y += 0.005;
             }
 
-            // STAY IN RIGHT SECTION - don't move!
             groupRef.current.position.x = 5;
             groupRef.current.position.y = 0;
             groupRef.current.position.z = 0;
 
-            // Animate rings from helix to SOUND WAVE pattern
             const totalRings = levelsUp + levelsDown + 1;
 
             meshRefs.current.forEach((mesh, index) => {
                 if (mesh) {
-                    // Original helix position
                     const helixY = (index - levelsDown) * stepY;
                     const helixRotY = (index - levelsDown) * rotationStep;
-
-                    // SOUND WAVE pattern: bars spread horizontally, height varies with audio
                     const waveSpacing = 0.5;
                     const centerIndex = totalRings / 2;
                     const distanceFromCenter = Math.abs(index - centerIndex);
-
-                    // X position: spread rings horizontally across the wave
                     const waveX = (index - centerIndex) * waveSpacing;
-
-                    // Height of each bar based on REAL audio level only
-                    // Bars in center are taller, edges are shorter (like real waveform)
-                    const baseHeight = 0.15; // Static minimum height when silent
+                    const baseHeight = 0.15;
                     const maxHeight = 2.5;
                     const falloff = 1 - (distanceFromCenter / (totalRings / 2)) * 0.85;
-
-                    // ONLY react to real audio - no random motion!
                     const audioReaction = audioLevel > 0.01 ? audioLevel * maxHeight * falloff : 0;
                     const finalHeight = baseHeight + audioReaction;
 
-                    // Lerp positions - all bars at Y=0 in wave mode
                     mesh.position.x = 0 * (1 - t) + waveX * t;
                     mesh.position.y = helixY * (1 - t) + 0 * t;
                     mesh.position.z = 0;
-
-                    // Scale: make bars stretch along their tube length (Z axis when facing camera)
-                    // Tube is originally along Z axis, so scale.z = height
-                    mesh.scale.x = 1 * (1 - t) + 0.15 * t; // Thin bars
-                    mesh.scale.y = 1 * (1 - t) + 0.15 * t; // Thin bars
-                    mesh.scale.z = 1 * (1 - t) + finalHeight * t; // Height = length of tube
-
-                    // Rotation: in wave mode, tubes face camera (point along Z axis toward viewer)
-                    // rotation.y = 0 makes tube point toward camera, then we tilt it up
-                    mesh.rotation.y = (Math.PI / 2 + helixRotY) * (1 - t) + 0 * t; // Face camera
-                    mesh.rotation.x = 0 * (1 - t) + (Math.PI / 2) * t; // Tilt up so tube points UP (Y axis)
+                    mesh.scale.x = 1 * (1 - t) + 0.15 * t;
+                    mesh.scale.y = 1 * (1 - t) + 0.15 * t;
+                    mesh.scale.z = 1 * (1 - t) + finalHeight * t;
+                    mesh.rotation.y = (Math.PI / 2 + helixRotY) * (1 - t) + 0 * t;
+                    mesh.rotation.x = 0 * (1 - t) + (Math.PI / 2) * t;
                     mesh.rotation.z = 0;
                 }
             });
@@ -133,7 +98,6 @@ const HelixRings: React.FC<HelixRingsProps> = ({
         return geometry;
     }, []);
 
-    // Original colors (no color shift)
     const getRingColor = (index: number, total: number) => {
         const t = (index + levelsDown) / total;
         const r = Math.floor(26 + t * 20);
@@ -197,25 +161,6 @@ const Scene: React.FC<{ aiState: AIState; audioLevel: number }> = ({ aiState, au
     </Canvas>
 );
 
-const AudioVisualizer: React.FC<{ isActive: boolean; audioLevel: number }> = ({ isActive, audioLevel }) => {
-    if (!isActive) return null;
-    return (
-        <div className="flex items-end justify-center gap-1 h-5 mt-1">
-            {[...Array(5)].map((_, i) => (
-                <div
-                    key={i}
-                    className="w-1 rounded-full transition-all duration-75"
-                    style={{
-                        height: `${Math.max(3, 4 + Math.random() * audioLevel * 12 + Math.sin(Date.now() / 100 + i) * 2)}px`,
-                        background: `linear-gradient(to top, #6366f1, #818cf8, #a5b4fc)`,
-                        opacity: 0.8 + audioLevel * 0.2,
-                    }}
-                />
-            ))}
-        </div>
-    );
-};
-
 interface HeroProps {
     title: string;
     description: string;
@@ -226,78 +171,94 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats }) => {
     const [aiState, setAiState] = useState<AIState>("idle");
     const [audioLevel, setAudioLevel] = useState(0);
     const [error, setError] = useState<string | null>(null);
-    const [selectedVoiceIndex, setSelectedVoiceIndex] = useState(0);
-    const [currentVoiceName, setCurrentVoiceName] = useState("");
-    const [voiceSelected, setVoiceSelected] = useState(false);
-    const [hasSwiped, setHasSwiped] = useState(false);
 
     const wsRef = useRef<WebSocket | null>(null);
     const audioContextRef = useRef<AudioContext | null>(null);
-    const audioQueueRef = useRef<ArrayBuffer[]>([]);
-    const isPlayingRef = useRef(false);
     const micStreamRef = useRef<MediaStream | null>(null);
     const micAudioContextRef = useRef<AudioContext | null>(null);
     const processorRef = useRef<ScriptProcessorNode | null>(null);
     const animationFrameRef = useRef<number | null>(null);
     const analyserRef = useRef<AnalyserNode | null>(null);
 
-    const selectedVoice = VOICE_AGENTS[selectedVoiceIndex];
+    // Scheduled playback for jitter-free audio (official Web Audio approach)
+    const nextStartTimeRef = useRef(0);
+    const isPlayingRef = useRef(false);
+
     const isActive = aiState !== "idle";
 
-    const playNextAudioChunk = useCallback(async () => {
-        // Start IMMEDIATELY with first chunk - no pre-buffering delay
-        // Backend sends small first chunk (~100ms) for instant audio start
-        if (isPlayingRef.current || audioQueueRef.current.length === 0) return;
-        isPlayingRef.current = true;
+    // Official Cartesia recommended sample rate
+    const SAMPLE_RATE = 24000;
 
+    // Official jitter-free approach: Schedule audio buffers sequentially
+    // Each buffer starts exactly when the previous one ends
+    const scheduleAudioPlayback = useCallback((audioData: ArrayBuffer) => {
         try {
             if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
-                audioContextRef.current = new AudioContext({ sampleRate: 16000 });
+                audioContextRef.current = new AudioContext({ sampleRate: SAMPLE_RATE });
+                nextStartTimeRef.current = audioContextRef.current.currentTime;
             }
+
             const ctx = audioContextRef.current;
-            const buffer = audioQueueRef.current.shift();
 
-            if (buffer) {
-                const float32Data = new Float32Array(buffer.byteLength / 4);
-                const view = new DataView(buffer);
-                for (let i = 0; i < float32Data.length; i++) {
-                    float32Data[i] = view.getFloat32(i * 4, true);
-                }
-                const audioBuffer = ctx.createBuffer(1, float32Data.length, 16000);
-                audioBuffer.getChannelData(0).set(float32Data);
-
-                // Create analyser for output audio visualization
-                const analyser = ctx.createAnalyser();
-                analyser.fftSize = 256;
-
-                const source = ctx.createBufferSource();
-                source.buffer = audioBuffer;
-                source.connect(analyser);
-                analyser.connect(ctx.destination);
-                source.start();
-
-                // Track output audio level while playing
-                const dataArray = new Uint8Array(analyser.frequencyBinCount);
-                const trackOutputLevel = () => {
-                    if (isPlayingRef.current) {
-                        analyser.getByteFrequencyData(dataArray);
-                        const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
-                        setAudioLevel(Math.min(1, average / 100));
-                        requestAnimationFrame(trackOutputLevel);
-                    }
-                };
-                trackOutputLevel();
-
-                source.onended = () => {
-                    isPlayingRef.current = false;
-                    setAudioLevel(0); // Reset level when chunk ends
-                    playNextAudioChunk();
-                };
-            } else {
-                isPlayingRef.current = false;
+            // Resume context if suspended (browser autoplay policy)
+            if (ctx.state === 'suspended') {
+                ctx.resume();
             }
-        } catch {
-            isPlayingRef.current = false;
+
+            // Convert pcm_f32le (32-bit float little-endian) to Float32Array
+            // 4 bytes per sample
+            const float32Data = new Float32Array(audioData.byteLength / 4);
+            const view = new DataView(audioData);
+            for (let i = 0; i < float32Data.length; i++) {
+                float32Data[i] = view.getFloat32(i * 4, true); // true = little-endian
+            }
+
+            // Create audio buffer
+            const audioBuffer = ctx.createBuffer(1, float32Data.length, SAMPLE_RATE);
+            audioBuffer.getChannelData(0).set(float32Data);
+
+            // Create source and analyser for visualization
+            const source = ctx.createBufferSource();
+            source.buffer = audioBuffer;
+
+            const analyser = ctx.createAnalyser();
+            analyser.fftSize = 256;
+            source.connect(analyser);
+            analyser.connect(ctx.destination);
+
+            // Schedule playback: start at next available time slot
+            const startTime = Math.max(ctx.currentTime, nextStartTimeRef.current);
+            source.start(startTime);
+
+            // Update next start time for seamless playback
+            nextStartTimeRef.current = startTime + audioBuffer.duration;
+            isPlayingRef.current = true;
+
+            // Track audio level for visualization
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            const trackLevel = () => {
+                if (ctx.currentTime < nextStartTimeRef.current) {
+                    analyser.getByteFrequencyData(dataArray);
+                    const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+                    setAudioLevel(Math.min(1, average / 100));
+                    requestAnimationFrame(trackLevel);
+                } else {
+                    setAudioLevel(0);
+                }
+            };
+            trackLevel();
+
+            source.onended = () => {
+                // Check if this was the last scheduled buffer
+                if (ctx.currentTime >= nextStartTimeRef.current - 0.05) {
+                    isPlayingRef.current = false;
+                    setAudioLevel(0);
+                    setAiState("listening");
+                }
+            };
+
+        } catch (err) {
+            console.error("Audio playback error:", err);
         }
     }, []);
 
@@ -319,12 +280,12 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats }) => {
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
             const updateLevel = () => {
-                if (analyserRef.current) {
+                if (analyserRef.current && !isPlayingRef.current) {
                     analyserRef.current.getByteFrequencyData(dataArray);
                     const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
                     setAudioLevel(Math.min(1, average / 128));
-                    animationFrameRef.current = requestAnimationFrame(updateLevel);
                 }
+                animationFrameRef.current = requestAnimationFrame(updateLevel);
             };
             updateLevel();
 
@@ -361,18 +322,15 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats }) => {
     const handleMessage = useCallback(async (event: MessageEvent) => {
         if (event.data instanceof Blob) {
             const arrayBuffer = await event.data.arrayBuffer();
-            audioQueueRef.current.push(arrayBuffer);
             setAiState("speaking");
-            playNextAudioChunk();
+            // Use scheduled playback for jitter-free audio
+            scheduleAudioPlayback(arrayBuffer);
         } else {
             const data = JSON.parse(event.data);
             switch (data.type) {
                 case "ready":
-                    setAiState("browsing");
-                    setCurrentVoiceName(data.agent_name);
-                    break;
-                case "voice_switched":
-                    setCurrentVoiceName(data.agent_name);
+                    setAiState("listening");
+                    startMicrophone();
                     break;
                 case "transcript":
                     if (data.is_final && data.text) setAiState("processing");
@@ -381,25 +339,25 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats }) => {
                     setAiState("speaking");
                     break;
                 case "turn_complete":
-                    if (voiceSelected) {
-                        setAiState("listening");
-                    } else {
-                        setAiState("browsing");
-                    }
+                    // Audio completion is handled by scheduled playback
                     break;
                 case "barge_in":
                 case "tts_interrupted":
-                    audioQueueRef.current = [];
+                    // Stop all scheduled audio
+                    if (audioContextRef.current) {
+                        audioContextRef.current.close();
+                        audioContextRef.current = null;
+                    }
+                    nextStartTimeRef.current = 0;
                     isPlayingRef.current = false;
-                    if (audioContextRef.current) { audioContextRef.current.close(); audioContextRef.current = null; }
-                    if (voiceSelected) setAiState("listening");
+                    setAiState("listening");
                     break;
                 case "error":
                     setError(data.message);
                     break;
             }
         }
-    }, [playNextAudioChunk, voiceSelected]);
+    }, [scheduleAudioPlayback, startMicrophone]);
 
     const endSession = useCallback(() => {
         stopMicrophone();
@@ -409,66 +367,32 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats }) => {
             wsRef.current = null;
         }
         if (audioContextRef.current) { audioContextRef.current.close(); audioContextRef.current = null; }
-        audioQueueRef.current = [];
+        nextStartTimeRef.current = 0;
         isPlayingRef.current = false;
         setAiState("idle");
         setAudioLevel(0);
-        setCurrentVoiceName("");
-        setHasSwiped(false);
-        setVoiceSelected(false);
     }, [stopMicrophone]);
 
     const startSession = useCallback(() => {
         setAiState("connecting");
         setError(null);
-        setHasSwiped(false);
-        setVoiceSelected(false);
         const sessionId = `ask-ai-${Date.now()}`;
-        const ws = new WebSocket(`ws://localhost:8000/api/v1/ws/ai-test/${sessionId}`);
+        const ws = new WebSocket(`ws://localhost:8000/api/v1/ws/ask-ai/${sessionId}`);
         wsRef.current = ws;
 
-        ws.onopen = () => {
-            ws.send(JSON.stringify({ type: "config", voice_id: selectedVoice.id }));
-        };
+        ws.onopen = () => console.log("Ask AI connected");
         ws.onmessage = handleMessage;
         ws.onerror = () => { setError("Connection error"); endSession(); };
         ws.onclose = () => { if (aiState !== "idle") endSession(); };
-    }, [handleMessage, selectedVoice.id, aiState, endSession]);
+    }, [handleMessage, aiState, endSession]);
 
-    const selectVoice = useCallback(() => {
-        setVoiceSelected(true);
-        setAiState("listening");
-        startMicrophone();
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({ type: "voice_selected", voice_id: selectedVoice.id }));
-        }
-    }, [selectedVoice.id, startMicrophone]);
-
-    const switchVoice = useCallback((direction: 'prev' | 'next') => {
-        if (!hasSwiped) setHasSwiped(true);
-
-        const newIndex = direction === 'next'
-            ? (selectedVoiceIndex + 1) % VOICE_AGENTS.length
-            : (selectedVoiceIndex - 1 + VOICE_AGENTS.length) % VOICE_AGENTS.length;
-        setSelectedVoiceIndex(newIndex);
-
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            audioQueueRef.current = [];
-            isPlayingRef.current = false;
-            if (audioContextRef.current) { audioContextRef.current.close(); audioContextRef.current = null; }
-            wsRef.current.send(JSON.stringify({ type: "switch_voice", voice_id: VOICE_AGENTS[newIndex].id }));
-        }
-    }, [selectedVoiceIndex, hasSwiped]);
-
-    const handleMainButtonClick = useCallback(() => {
+    const handleClick = useCallback(() => {
         if (aiState === "idle") {
             startSession();
-        } else if (aiState === "browsing" || aiState === "speaking") {
-            selectVoice();
         } else {
             endSession();
         }
-    }, [aiState, startSession, selectVoice, endSession]);
+    }, [aiState, startSession, endSession]);
 
     useEffect(() => {
         return () => {
@@ -481,15 +405,12 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats }) => {
     const getStatusText = () => {
         switch (aiState) {
             case "connecting": return "Connecting...";
-            case "browsing": return "Tap to select";
             case "listening": return "Listening...";
             case "processing": return "Thinking...";
-            case "speaking": return voiceSelected ? "Speaking..." : "Tap to select";
+            case "speaking": return "Speaking...";
             default: return "Click to talk";
         }
     };
-
-    const showSwipeArrows = isActive && !voiceSelected;
 
     return (
         <section className="relative h-screen w-screen font-sans tracking-tight text-gray-900 bg-neutral-50 overflow-hidden">
@@ -497,31 +418,20 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats }) => {
                 <Scene aiState={aiState} audioLevel={audioLevel} />
             </div>
 
-            {/* Ask AI Button - Always at center of waveform/helix (right side) */}
+            {/* Ask AI Button - Simple, clean design */}
             <div
-                className="absolute z-20 flex items-center gap-3"
+                className="absolute z-20 flex items-center justify-center"
                 style={{
                     left: '50%',
                     top: '50%',
                     transform: 'translate(calc(-50% + 22.5vw), -50%)'
                 }}
             >
-                {/* Left Arrow */}
-                {showSwipeArrows && hasSwiped && (
-                    <button
-                        onClick={() => switchVoice('prev')}
-                        className="w-10 h-10 rounded-full bg-white/90 hover:bg-white border border-indigo-200 flex items-center justify-center text-indigo-600 hover:text-indigo-700 transition-all shadow-lg hover:shadow-xl hover:scale-110"
-                    >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-                    </button>
-                )}
-
-                {/* Main Circle Button */}
                 <button
-                    onClick={handleMainButtonClick}
+                    onClick={handleClick}
                     className={`relative rounded-full flex flex-col items-center justify-center transition-all duration-500 ease-out cursor-pointer group backdrop-blur-md ${!isActive
                         ? "w-32 h-32 bg-white/60 hover:bg-white/80 border border-gray-200/50 hover:border-gray-300 shadow-2xl hover:shadow-3xl hover:scale-105"
-                        : "w-40 h-40 bg-white/80 border-2 border-indigo-300/60"
+                        : "w-36 h-36 bg-white/80 border-2 border-indigo-300/60"
                         }`}
                     style={{
                         boxShadow: isActive
@@ -534,35 +444,30 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats }) => {
                     )}
 
                     <div className="text-center z-10">
-                        {!isActive && (
-                            <>
-                                <h3 className="text-xl font-semibold text-gray-800 group-hover:text-gray-900 mb-1">Ask AI</h3>
-                                <p className="text-xs text-gray-500 group-hover:text-gray-600">{getStatusText()}</p>
-                            </>
-                        )}
+                        <h3 className={`font-semibold mb-1 ${isActive ? "text-lg text-indigo-700" : "text-xl text-gray-800 group-hover:text-gray-900"}`}>
+                            Ask AI
+                        </h3>
+                        <p className={`text-xs ${isActive ? "text-indigo-500" : "text-gray-500 group-hover:text-gray-600"}`}>
+                            {getStatusText()}
+                        </p>
 
+                        {/* Simple audio visualization */}
                         {isActive && (
-                            <>
-                                <div className="text-2xl font-bold text-indigo-700 mb-0.5">
-                                    {currentVoiceName || selectedVoice.name}
-                                </div>
-                                <div className="text-xs text-indigo-500 mb-1">{selectedVoice.description}</div>
-                                <AudioVisualizer isActive={voiceSelected && (aiState === "listening" || aiState === "speaking")} audioLevel={audioLevel} />
-                                <p className="text-[10px] text-indigo-400 mt-1">{getStatusText()}</p>
-                            </>
+                            <div className="flex items-end justify-center gap-1 h-4 mt-2">
+                                {[...Array(5)].map((_, i) => (
+                                    <div
+                                        key={i}
+                                        className="w-1 rounded-full bg-indigo-500 transition-all duration-75"
+                                        style={{
+                                            height: `${Math.max(3, 4 + audioLevel * 12 + Math.sin(Date.now() / 100 + i) * 2)}px`,
+                                            opacity: 0.7 + audioLevel * 0.3,
+                                        }}
+                                    />
+                                ))}
+                            </div>
                         )}
                     </div>
                 </button>
-
-                {/* Right Arrow */}
-                {showSwipeArrows && (
-                    <button
-                        onClick={() => switchVoice('next')}
-                        className="w-10 h-10 rounded-full bg-white/90 hover:bg-white border border-indigo-200 flex items-center justify-center text-indigo-600 hover:text-indigo-700 transition-all shadow-lg hover:shadow-xl hover:scale-110"
-                    >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                    </button>
-                )}
 
                 {error && <p className="absolute -bottom-10 left-1/2 -translate-x-1/2 text-xs text-red-500 whitespace-nowrap">{error}</p>}
             </div>

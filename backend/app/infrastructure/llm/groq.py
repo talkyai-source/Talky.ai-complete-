@@ -197,6 +197,10 @@ class GroqLLMProvider(LLMProvider):
         stop_sequences = kwargs.get("stop", self.DEFAULT_STOP_SEQUENCES)
         
         try:
+            # Log what we're sending to Groq
+            logger.info(f"[GROQ DEBUG] Sending to Groq: model={model}, temp={temperature}, max_tokens={max_tokens}")
+            logger.info(f"[GROQ DEBUG] Messages count: {len(groq_messages)}")
+            
             # Stream completion using Groq's ultra-fast LPU
             stream = await self._client.chat.completions.create(
                 model=model,
@@ -213,11 +217,18 @@ class GroqLLMProvider(LLMProvider):
             )
             
             # Yield tokens as they arrive
+            token_count = 0
             async for chunk in stream:
                 if chunk.choices:
                     delta = chunk.choices[0].delta
                     if delta.content:
+                        token_count += 1
                         yield delta.content
+            
+            logger.info(f"[GROQ DEBUG] Stream completed, yielded {token_count} tokens")
+            
+            if token_count == 0:
+                logger.warning("[GROQ DEBUG] WARNING: Zero tokens received from Groq!")
         
         except Exception as e:
             logger.error(f"Groq LLM streaming failed: {str(e)}")

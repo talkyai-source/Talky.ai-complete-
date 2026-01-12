@@ -11,10 +11,14 @@ websockets>=13.0
 deepgram-sdk==5.3.0
 groq>=0.37.0
 cartesia==1.0.4
+google-cloud-texttospeech>=2.16.0
 
 # Database & Caching
 redis==5.0.1
 supabase>=2.10.0
+
+# Payments
+stripe>=8.0.0
 
 # Configuration
 python-dotenv==1.0.0

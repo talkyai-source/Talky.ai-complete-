@@ -3,7 +3,7 @@ Plans & Pricing Endpoints
 Provides pricing plan information for the frontend
 """
 from fastapi import APIRouter, HTTPException, Depends
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel
 from supabase import Client
 
@@ -24,6 +24,10 @@ class PlanResponse(BaseModel):
     features: List[str]
     not_included: List[str]
     popular: bool
+    # Stripe billing fields
+    stripe_price_id: Optional[str] = None
+    stripe_product_id: Optional[str] = None
+    billing_period: str = "monthly"
 
 
 @router.get("/", response_model=List[PlanResponse])
@@ -55,7 +59,10 @@ async def list_plans(
                 concurrent_calls=plan["concurrent_calls"],
                 features=plan.get("features", []),
                 not_included=plan.get("not_included", []),
-                popular=plan.get("popular", False)
+                popular=plan.get("popular", False),
+                stripe_price_id=plan.get("stripe_price_id"),
+                stripe_product_id=plan.get("stripe_product_id"),
+                billing_period=plan.get("billing_period", "monthly")
             ))
         
         return plans

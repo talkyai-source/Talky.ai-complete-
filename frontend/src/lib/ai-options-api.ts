@@ -13,6 +13,9 @@ export interface ModelInfo {
     name: string;
     description: string;
     speed?: string;
+    price?: string;
+    context_window?: number;
+    is_preview?: boolean;
 }
 
 export interface VoiceInfo {
@@ -22,6 +25,10 @@ export interface VoiceInfo {
     description: string;
     gender?: string;
     accent?: string;
+    accent_color: string;
+    preview_text: string;
+    provider: string;
+    tags: string[];
 }
 
 export interface ProviderListResponse {
@@ -84,6 +91,19 @@ export interface TTSTestResponse {
     voice_id: string;
 }
 
+export interface VoicePreviewRequest {
+    voice_id: string;
+    text?: string;
+}
+
+export interface VoicePreviewResponse {
+    voice_id: string;
+    voice_name: string;
+    audio_base64: string;
+    duration_seconds: number;
+    latency_ms: number;
+}
+
 export interface LatencyBenchmarkResponse {
     llm_first_token_ms: number;
     llm_total_ms: number;
@@ -92,7 +112,7 @@ export interface LatencyBenchmarkResponse {
     total_pipeline_ms: number;
 }
 
-// Default configuration
+// Default configuration - Using Google TTS (Cartesia disabled)
 export const DEFAULT_CONFIG: AIProviderConfig = {
     llm_provider: "groq",
     llm_model: "llama-3.3-70b-versatile",
@@ -101,10 +121,10 @@ export const DEFAULT_CONFIG: AIProviderConfig = {
     stt_provider: "deepgram",
     stt_model: "nova-3",
     stt_language: "en",
-    tts_provider: "cartesia",
-    tts_model: "sonic-3",
-    tts_voice_id: "6ccbfb76-1fc6-48f7-b71d-91ac6298247b",
-    tts_sample_rate: 16000,
+    tts_provider: "google",  // Changed from cartesia
+    tts_model: "Chirp3-HD",
+    tts_voice_id: "en-US-Chirp3-HD-Leda",  // Google Chirp3-HD Leda
+    tts_sample_rate: 24000,  // Google Chirp3-HD sample rate
 };
 
 class AIOptionsApi {
@@ -140,9 +160,17 @@ class AIOptionsApi {
         return this.request<ProviderListResponse>("/ai-options/providers");
     }
 
-    // Get available TTS voices
+    // Get available TTS voices (curated list)
     async getVoices(): Promise<VoiceInfo[]> {
         return this.request<VoiceInfo[]>("/ai-options/voices");
+    }
+
+    // Preview a voice with sample audio
+    async previewVoice(request: VoicePreviewRequest): Promise<VoicePreviewResponse> {
+        return this.request<VoicePreviewResponse>("/ai-options/voices/preview", {
+            method: "POST",
+            body: JSON.stringify(request),
+        });
     }
 
     // Get current configuration

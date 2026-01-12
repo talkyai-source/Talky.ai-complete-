@@ -409,9 +409,20 @@ CREATE POLICY "Users can view their own tenant" ON tenants
         id = (SELECT tenant_id FROM user_profiles WHERE id = auth.uid())
     );
 
+-- Service role bypass (explicit TO clause for proper RLS bypass)
 DROP POLICY IF EXISTS "Service role can manage tenants" ON tenants;
 CREATE POLICY "Service role can manage tenants" ON tenants
-    FOR ALL USING (auth.role() = 'service_role');
+    FOR ALL 
+    TO service_role
+    USING (true)
+    WITH CHECK (true);
+
+-- Allow tenant creation during registration (before user is authenticated)
+DROP POLICY IF EXISTS "Anon can create tenants for registration" ON tenants;
+CREATE POLICY "Anon can create tenants for registration" ON tenants
+    FOR INSERT 
+    TO anon
+    WITH CHECK (true);
 
 -- -----------------------------------------------------------------------------
 -- 4.3 USER_PROFILES POLICIES
@@ -428,9 +439,20 @@ DROP POLICY IF EXISTS "Users can update own profile" ON user_profiles;
 CREATE POLICY "Users can update own profile" ON user_profiles
     FOR UPDATE USING (id = auth.uid());
 
+-- Service role bypass (explicit TO clause for proper RLS bypass)
 DROP POLICY IF EXISTS "Service role can manage profiles" ON user_profiles;
 CREATE POLICY "Service role can manage profiles" ON user_profiles
-    FOR ALL USING (auth.role() = 'service_role');
+    FOR ALL 
+    TO service_role
+    USING (true)
+    WITH CHECK (true);
+
+-- Allow profile creation during registration (backend creates profile after OTP verification)
+DROP POLICY IF EXISTS "Anon can create profiles for registration" ON user_profiles;
+CREATE POLICY "Anon can create profiles for registration" ON user_profiles
+    FOR INSERT 
+    TO anon
+    WITH CHECK (true);
 
 
 -- -----------------------------------------------------------------------------

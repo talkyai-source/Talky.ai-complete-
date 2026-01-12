@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +14,7 @@ type Step = "form" | "otp";
 
 export default function RegisterPage() {
     const router = useRouter();
+    const { register, verifyOtp, login } = useAuth();
     const [step, setStep] = useState<Step>("form");
     const [formData, setFormData] = useState({
         email: "",
@@ -40,15 +41,11 @@ export default function RegisterPage() {
         setMessage("");
 
         try {
-            const response = await api.register(
+            const msg = await register(
                 formData.email,
                 formData.businessName,
-                "basic",
                 formData.name || undefined
             );
-            const msg = typeof response === "string"
-                ? response
-                : response?.message || "Verification code sent! Check your email.";
             setMessage(msg);
             setStep("otp"); // Move to OTP input step
         } catch (err) {
@@ -71,13 +68,11 @@ export default function RegisterPage() {
         setError("");
 
         try {
-            const response = await api.verifyOtp(formData.email, otpCode);
+            // Use auth context's verifyOtp to ensure user state is updated
+            await verifyOtp(formData.email, otpCode);
 
-            // Store the tokens
-            api.setToken(response.access_token);
-            if (typeof window !== "undefined") {
-                localStorage.setItem("refresh_token", response.refresh_token);
-            }
+            // Small delay to ensure state propagation
+            await new Promise(resolve => setTimeout(resolve, 100));
 
             // Redirect to dashboard
             router.push("/dashboard");
@@ -110,11 +105,8 @@ export default function RegisterPage() {
 
         try {
             // Use login to resend (since user is already registered at this point)
-            const response = await api.login(formData.email);
-            const msg = typeof response === "string"
-                ? response
-                : response?.message || "New verification code sent!";
-            setMessage(msg);
+            const msg = await login(formData.email);
+            setMessage(msg || "New verification code sent!");
         } catch (err) {
             if (err instanceof Error) {
                 setError(err.message);
