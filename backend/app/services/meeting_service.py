@@ -7,7 +7,7 @@ Day 25: Meeting Booking Feature
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
-from supabase import Client
+from app.core.postgres_adapter import Client
 
 from app.infrastructure.connectors.base import ConnectorFactory
 from app.infrastructure.connectors.encryption import get_encryption_service
@@ -39,8 +39,8 @@ class MeetingService:
     - Triggerable from: Voice agent outcome, Assistant agent, Dashboard API
     """
     
-    def __init__(self, supabase: Client):
-        self.supabase = supabase
+    def __init__(self, db_client: Client):
+        self.db_client = db_client
         self._encryption = get_encryption_service()
     
     async def _get_active_calendar_connector(
@@ -57,7 +57,7 @@ class MeetingService:
             CalendarNotConnectedError: If no active calendar connector
         """
         # Find active calendar connector for tenant
-        response = self.supabase.table("connectors").select(
+        response = self.db_client.table("connectors").select(
             "id, provider, status"
         ).eq("tenant_id", tenant_id).eq(
             "type", "calendar"
@@ -74,7 +74,7 @@ class MeetingService:
         provider = connector_data["provider"]
         
         # Get decrypted access token
-        account_response = self.supabase.table("connector_accounts").select(
+        account_response = self.db_client.table("connector_accounts").select(
             "access_token_encrypted, token_expires_at"
         ).eq("connector_id", connector_id).eq("status", "active").single().execute()
         
@@ -228,7 +228,7 @@ class MeetingService:
             }
         }
         
-        meeting_response = self.supabase.table("meetings").insert(meeting_data).execute()
+        meeting_response = self.db_client.table("meetings").insert(meeting_data).execute()
         meeting_record = meeting_response.data[0] if meeting_response.data else {}
         meeting_id = meeting_record.get("id")
         
@@ -255,12 +255,12 @@ class MeetingService:
             "completed_at": datetime.utcnow().isoformat()
         }
         
-        action_response = self.supabase.table("assistant_actions").insert(action_data).execute()
+        action_response = self.db_client.table("assistant_actions").insert(action_data).execute()
         action_id = action_response.data[0]["id"] if action_response.data else None
         
         # Update meeting with action_id
         if meeting_id and action_id:
-            self.supabase.table("meetings").update(
+            self.db_client.table("meetings").update(
                 {"action_id": action_id}
             ).eq("id", meeting_id).execute()
         
@@ -306,7 +306,7 @@ class MeetingService:
         Updates both the calendar event and database record.
         """
         # Get meeting from database
-        meeting_response = self.supabase.table("meetings").select(
+        meeting_response = self.db_client.table("meetings").select(
             "*, connectors(provider)"
         ).eq("id", meeting_id).eq("tenant_id", tenant_id).single().execute()
         
@@ -355,7 +355,7 @@ class MeetingService:
             update_data["attendees"] = [{"email": email, "status": "pending"} for email in new_attendees]
         
         if update_data:
-            self.supabase.table("meetings").update(update_data).eq("id", meeting_id).execute()
+            self.db_client.table("meetings").update(update_data).eq("id", meeting_id).execute()
         
         logger.info(f"Meeting updated: {meeting_id}")
         
@@ -377,7 +377,7 @@ class MeetingService:
         Deletes the calendar event and updates database status.
         """
         # Get meeting from database
-        meeting_response = self.supabase.table("meetings").select(
+        meeting_response = self.db_client.table("meetings").select(
             "*"
         ).eq("id", meeting_id).eq("tenant_id", tenant_id).single().execute()
         
@@ -399,7 +399,7 @@ class MeetingService:
                 logger.error(f"Error deleting calendar event: {e}")
         
         # Update database status
-        self.supabase.table("meetings").update({
+        self.db_client.table("meetings").update({
             "status": "cancelled",
             "metadata": {
                 **meeting.get("metadata", {}),
@@ -422,7 +422,7 @@ class MeetingService:
         meeting_id: str
     ) -> Optional[Dict[str, Any]]:
         """Get meeting by ID."""
-        response = self.supabase.table("meetings").select(
+        response = self.db_client.table("meetings").select(
             "*"
         ).eq("id", meeting_id).eq("tenant_id", tenant_id).single().execute()
         
@@ -437,7 +437,7 @@ class MeetingService:
         limit: int = 50
     ) -> List[Dict[str, Any]]:
         """List meetings for tenant with optional filters."""
-        query = self.supabase.table("meetings").select(
+        query = self.db_client.table("meetings").select(
             "*"
         ).eq("tenant_id", tenant_id)
         
@@ -514,7 +514,7 @@ class MeetingService:
             }
             
             try:
-                response = self.supabase.table("reminders").insert(reminder_data).execute()
+                response = self.db_client.table("reminders").insert(reminder_data).execute()
                 
                 if response.data:
                     reminder_id = response.data[0]["id"]
@@ -531,9 +531,9 @@ class MeetingService:
 # Singleton instance helper
 _meeting_service: Optional[MeetingService] = None
 
-def get_meeting_service(supabase: Client) -> MeetingService:
+def get_meeting_service(db_client: Client) -> MeetingService:
     """Get or create MeetingService instance."""
     global _meeting_service
     if _meeting_service is None:
-        _meeting_service = MeetingService(supabase)
+        _meeting_service = MeetingService(db_client)
     return _meeting_service

@@ -2,117 +2,88 @@
 Ask AI WebSocket - Simplified Voice Assistant Demo
 
 One-click voice interaction without voice selection.
-Uses Google Chirp3-HD with natural voices (Cartesia disabled).
+Uses Deepgram Aura-2 TTS (Google Chirp3-HD commented out for future switching).
 
-Voice: Leda (en-US-Chirp3-HD-Leda) - Professional female voice
-Sample Rate: 24000 Hz (Chirp3-HD optimal)
+Voice: Andromeda (aura-2-andromeda-en) - Customer service optimized
+Sample Rate: 24000 Hz (Deepgram recommended for streaming TTS)
+
+Day 41: Refactored to use VoiceOrchestrator for lifecycle management.
 """
-import os
-import uuid
 import json
 import asyncio
 import logging
-import time
-from datetime import datetime
-from dotenv import load_dotenv
+from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.domain.models.session import CallSession, CallState
-from app.domain.models.conversation_state import ConversationState, ConversationContext
 from app.domain.models.agent_config import AgentConfig, AgentGoal, ConversationFlow, ConversationRule
-from app.domain.models.conversation import Message, MessageRole
-from app.domain.services.voice_pipeline_service import VoicePipelineService
-from app.infrastructure.stt.deepgram_flux import DeepgramFluxSTTProvider
-from app.infrastructure.llm.groq import GroqLLMProvider
-# Cartesia disabled - using Google TTS
-# from app.infrastructure.tts.cartesia import CartesiaTTSProvider
-from app.infrastructure.tts.google_tts_streaming import GoogleTTSStreamingProvider
-from app.infrastructure.telephony.browser_media_gateway import BrowserMediaGateway
-
-load_dotenv()
+from app.domain.services.voice_orchestrator import VoiceSessionConfig
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Ask AI"])
 
-# Fixed configuration for Ask AI - using Google TTS (Cartesia disabled)
+# Fixed configuration for Ask AI - using Deepgram TTS (Google commented out for switching)
+# Deepgram best practices:
+# - Voice: Andromeda (aura-2-andromeda-en) - Casual, Expressive, Comfortable for customer service
+# - Sample rate: 24000 Hz (Deepgram streaming default for best quality)
+# - Text chunking: Enabled at sentence boundaries for natural speech
 ASK_AI_CONFIG = {
-    # Google Chirp3-HD Leda voice - professional female
-    "voice_id": "en-US-Chirp3-HD-Leda",
-    "sample_rate": 24000,  # Chirp3-HD optimal sample rate
-    "model_id": "Chirp3-HD",
-    # LLM settings
-    "llm_model": "llama-3.3-70b-versatile",
+    # Deepgram Aura-2 Andromeda voice - optimized for customer service/IVR
+    # Voice characteristics: Casual, Expressive, Comfortable
+    "voice_id": "aura-2-andromeda-en",
+    "sample_rate": 24000,  # Deepgram recommended for streaming TTS (best quality)
+    "model_id": "aura-2",
+    # LLM settings — use gpt-oss-120b for accurate responses
+    "llm_model": "openai/gpt-oss-120b",
     "llm_temperature": 0.6,
     "llm_max_tokens": 150
 }
+
+# GOOGLE TTS CONFIGURATION (commented out - for switching back if needed)
+# ASK_AI_CONFIG_GOOGLE = {
+#     # Google Chirp3-HD Leda voice - professional female
+#     "voice_id": "en-US-Chirp3-HD-Leda",
+#     "sample_rate": 16000,  # Standard 16kHz for voice (lower latency, compatible with WebRTC)
+#     "model_id": "Chirp3-HD",
+#     # LLM settings — use gpt-oss-120b for accurate responses
+#     "llm_model": "openai/gpt-oss-120b",
+#     "llm_temperature": 0.6,
+#     "llm_max_tokens": 150
+# }
 
 # Talky.ai Product Information for the assistant
 TALKY_PRODUCT_INFO = """
 ## About Talky.ai
 
-Talky.ai provides intelligent voice agents that make phone calls on behalf of businesses. Our agents sound natural and can handle real conversations.
+Talky.ai is a voice AI platform that lets businesses automate phone calls with natural-sounding agents. Think of it as hiring a tireless team member who can call hundreds of customers while sounding genuinely human.
 
-### What We Do
-- Make outbound calls to customers automatically
-- Confirm appointments and send reminders
-- Follow up with leads and customers
-- Conduct surveys and gather feedback
-- Handle payment reminders professionally
+### Core Features
+- Automated outbound calling — follow-ups, reminders, surveys
+- Natural voice conversations — not robotic IVR menus
+- Smart lead qualification and appointment booking
+- Real-time analytics dashboard
+- Works with your existing CRM and tools
 
-### Pricing Plans
+### Packages
 
-**Starter - $99/month**
-- 500 call minutes
-- 1 voice agent
-- Basic reporting
+**Basic — $29/month**
+- 300 call minutes, 1 AI agent, basic analytics
 
-**Growth - $299/month**  
-- 2,000 call minutes
-- 3 voice agents
-- Priority support
-- Advanced analytics
+**Professional — $79/month** (most popular)
+- 1,500 call minutes, 3 AI agents, advanced analytics, custom voices
 
-**Enterprise - Custom**
-- Unlimited minutes available
-- Unlimited agents
-- Dedicated support
-- Custom integrations
+**Enterprise — $199/month**
+- 5,000 call minutes, 10 AI agents, full suite, API access
 
-### Why Choose Talky
+### Why Businesses Love Talky
 - Sounds natural, not robotic
-- Available 24/7
+- Available around the clock
+- Setup takes minutes, not weeks
 - Scales with your business
-- Easy to set up
-- Works with your existing tools
 """
 
-
-def create_ask_ai_agent_config() -> AgentConfig:
-    """Create agent config optimized for Ask AI."""
-    return AgentConfig(
-        agent_name="Assistant",
-        company_name="Talky.ai",
-        business_type="Voice AI Platform",
-        goal=AgentGoal.INFORMATION_GATHERING,  # Using valid enum value
-        tone="friendly, warm, and helpful",
-        flow=ConversationFlow(max_objection_attempts=3),
-        rules=ConversationRule(
-            do_not_say_rules=[
-                "Keep responses brief - 1 to 2 sentences",
-                "Be helpful and natural",
-                "Never mention technical terms or that you are an AI"
-            ]
-        ),
-        max_conversation_turns=20,  # Max allowed by model
-        response_max_sentences=2
-    )
-
-
-def create_ask_ai_session(call_id: str, agent_config: AgentConfig) -> CallSession:
-    """Create session optimized for Ask AI voice interaction."""
-    system_prompt = """You are a friendly voice assistant for Talky.ai.
+ASK_AI_SYSTEM_PROMPT = f"""You are a friendly voice assistant for Talky.ai.
 
 Your personality: friendly, warm, and helpful. You're genuinely curious and positive.
 
@@ -127,246 +98,207 @@ Your personality: friendly, warm, and helpful. You're genuinely curious and posi
 - If you don't know something, offer to have someone follow up
 - Be genuinely helpful and curious about what the user needs"""
 
-    return CallSession(
-        call_id=call_id,
-        campaign_id="ask-ai",
-        lead_id="demo-user",
-        vonage_call_uuid="ask-ai-session",
-        state=CallState.ACTIVE,
-        conversation_state=ConversationState.GREETING,
-        conversation_context=ConversationContext(),
-        agent_config=agent_config,
-        system_prompt=system_prompt,
-        voice_id=ASK_AI_CONFIG["voice_id"],
-        started_at=datetime.utcnow(),
-        last_activity_at=datetime.utcnow()
+
+def _create_ask_ai_agent_config() -> AgentConfig:
+    """Create agent config optimized for Ask AI."""
+    return AgentConfig(
+        agent_name="Assistant",
+        company_name="Talky.ai",
+        business_type="Voice AI Platform",
+        goal=AgentGoal.INFORMATION_GATHERING,
+        tone="friendly, warm, and helpful",
+        flow=ConversationFlow(max_objection_attempts=3),
+        rules=ConversationRule(
+            do_not_say_rules=[
+                "Keep responses brief - 1 to 2 sentences",
+                "Be helpful and natural",
+                "Never mention technical terms or that you are an AI"
+            ]
+        ),
+        max_conversation_turns=20,
+        response_max_sentences=2
     )
 
 
-async def create_ask_ai_pipeline():
-    """Initialize providers with fixed Ask AI configuration."""
-    
-    # STT Provider - Deepgram Flux
-    stt_provider = DeepgramFluxSTTProvider()
-    await stt_provider.initialize({
-        "api_key": os.getenv("DEEPGRAM_API_KEY"),
-        "model": "flux-general-en",
-        "sample_rate": 16000,
-        "encoding": "linear16"
-    })
-    
-    # LLM Provider - Groq
-    llm_provider = GroqLLMProvider()
-    await llm_provider.initialize({
-        "api_key": os.getenv("GROQ_API_KEY"),
-        "model": ASK_AI_CONFIG["llm_model"],
-        "temperature": ASK_AI_CONFIG["llm_temperature"],
-        "max_tokens": ASK_AI_CONFIG["llm_max_tokens"]
-    })
-    
-    # TTS Provider - Google Chirp3-HD Streaming (Cartesia disabled)
-    tts_provider = GoogleTTSStreamingProvider()
-    await tts_provider.initialize({
-        "voice_id": ASK_AI_CONFIG["voice_id"],
-        "sample_rate": ASK_AI_CONFIG["sample_rate"]
-    })
-    
-    # Browser Media Gateway - match TTS sample rate
-    browser_gateway = BrowserMediaGateway()
-    await browser_gateway.initialize({
-        "sample_rate": ASK_AI_CONFIG["sample_rate"],  # 24kHz to match TTS
-        "channels": 1,
-        "bit_depth": 16  # pcm_s16le is 16-bit
-    })
-    
-    return stt_provider, llm_provider, tts_provider, browser_gateway
+def _build_session_config() -> VoiceSessionConfig:
+    """Build a VoiceSessionConfig for the Ask AI endpoint."""
+    return VoiceSessionConfig(
+        stt_provider_type="deepgram_flux",
+        llm_provider_type="groq",
+        # TTS Provider: "deepgram" or "google" (switch here)
+        tts_provider_type="deepgram",
+        stt_model="flux-general-en",
+        stt_sample_rate=16000,
+        stt_encoding="linear16",
+        stt_eot_threshold=0.7,
+        stt_eager_eot_threshold=None,  # EndOfTurn-only mode for reliability
+        stt_eot_timeout_ms=5000,
+        llm_model=ASK_AI_CONFIG["llm_model"],
+        llm_temperature=ASK_AI_CONFIG["llm_temperature"],
+        llm_max_tokens=ASK_AI_CONFIG["llm_max_tokens"],
+        voice_id=ASK_AI_CONFIG["voice_id"],
+        tts_sample_rate=ASK_AI_CONFIG["sample_rate"],
+        gateway_sample_rate=ASK_AI_CONFIG["sample_rate"],
+        gateway_channels=1,
+        gateway_bit_depth=16,
+        session_type="ask_ai",
+        agent_config=_create_ask_ai_agent_config(),
+        system_prompt=ASK_AI_SYSTEM_PROMPT,
+        campaign_id="ask-ai",
+        lead_id="demo-user",
+    )
+
+# GOOGLE TTS SESSION CONFIG (commented out - for switching back if needed)
+# def _build_session_config_google() -> VoiceSessionConfig:
+#     """Build a VoiceSessionConfig using Google TTS."""
+#     return VoiceSessionConfig(
+#         stt_provider_type="deepgram_flux",
+#         llm_provider_type="groq",
+#         tts_provider_type="google",
+#         stt_model="flux-general-en",
+#         stt_sample_rate=16000,
+#         stt_encoding="linear16",
+#         llm_model=ASK_AI_CONFIG_GOOGLE["llm_model"],
+#         llm_temperature=ASK_AI_CONFIG_GOOGLE["llm_temperature"],
+#         llm_max_tokens=ASK_AI_CONFIG_GOOGLE["llm_max_tokens"],
+#         voice_id=ASK_AI_CONFIG_GOOGLE["voice_id"],
+#         tts_sample_rate=ASK_AI_CONFIG_GOOGLE["sample_rate"],
+#         gateway_sample_rate=ASK_AI_CONFIG_GOOGLE["sample_rate"],
+#         gateway_channels=1,
+#         gateway_bit_depth=16,
+#         session_type="ask_ai",
+#         agent_config=_create_ask_ai_agent_config(),
+#         system_prompt=ASK_AI_SYSTEM_PROMPT,
+#         campaign_id="ask-ai",
+#         lead_id="demo-user",
+#     )
 
 
 @router.websocket("/ws/ask-ai/{session_id}")
 async def ask_ai_websocket(websocket: WebSocket, session_id: str):
     """
-    Ask AI WebSocket - One-click voice assistant.
-    
-    Simpler flow than dummy call:
-    1. Connect
-    2. Send greeting immediately
-    3. Start listening for user input
-    4. Process and respond
-    
-    No voice selection needed - uses fixed, natural voice.
+    Ask AI WebSocket — one-click voice assistant.
+
+    Lifecycle is managed by VoiceOrchestrator; this endpoint only handles
+    the WebSocket message loop (transport concern).
     """
     await websocket.accept()
     logger.info(f"Ask AI session started: {session_id}")
-    
-    stt_provider = None
-    llm_provider = None
-    tts_provider = None
-    browser_gateway = None
-    pipeline = None
-    call_session = None
+
+    # Get orchestrator from DI container
+    from app.core.container import get_container
+    container = get_container()
+
+    voice_session = None
     barge_in_event = asyncio.Event()
+    receiver_task: Optional[asyncio.Task] = None
 
     try:
-        # Initialize pipeline with fixed config
-        stt_provider, llm_provider, tts_provider, browser_gateway = await create_ask_ai_pipeline()
-        
-        pipeline = VoicePipelineService(
-            stt_provider=stt_provider,
-            llm_provider=llm_provider,
-            tts_provider=tts_provider,
-            media_gateway=browser_gateway
-        )
-        
-        call_id = str(uuid.uuid4())
-        agent_config = create_ask_ai_agent_config()
-        call_session = create_ask_ai_session(call_id, agent_config)
-        
-        await browser_gateway.on_call_started(call_id, {"websocket": websocket})
-        
-        # Send ready message - no config needed from client
+        orchestrator = container.voice_orchestrator
+
+        # 1. Create session via orchestrator
+        config = _build_session_config()
+        voice_session = await orchestrator.create_voice_session(config)
+
+        # 2. Send ready message
         await websocket.send_json({
             "type": "ready",
             "session_id": session_id,
-            "call_id": call_id,
-            "sample_rate": ASK_AI_CONFIG["sample_rate"]
+            "call_id": voice_session.call_id,
+            "sample_rate": ASK_AI_CONFIG["sample_rate"],
         })
-        
-        # Send greeting with emotion
-        await send_ask_ai_greeting(tts_provider, websocket, barge_in_event)
-        
-        # Start voice pipeline
-        logger.info(f"Starting Ask AI pipeline for {call_id}...")
-        pipeline_task = asyncio.create_task(
-            pipeline.start_pipeline(call_session, websocket)
-        )
-        
-        # Main message loop
-        while browser_gateway.is_session_active(call_id):
-            try:
-                message = await asyncio.wait_for(
-                    websocket.receive(),
-                    timeout=30.0
-                )
-                
-                if "bytes" in message:
-                    audio_data = message["bytes"]
-                    await browser_gateway.on_audio_received(call_id, audio_data)
-                    
-                    # Barge-in detection
-                    if len(audio_data) >= 256:
-                        samples = [int.from_bytes(audio_data[i:i+2], 'little', signed=True) 
-                                   for i in range(0, min(len(audio_data), 256), 2)]
-                        energy = sum(abs(s) for s in samples) / len(samples)
-                        if energy > 300:
-                            barge_in_event.set()
-                            await websocket.send_json({"type": "barge_in"})
-                
-                elif "text" in message:
-                    data = json.loads(message["text"])
-                    msg_type = data.get("type")
-                    
-                    if msg_type == "end_call":
-                        await browser_gateway.on_call_ended(call_id, "user_ended")
+
+        call_id = voice_session.call_id
+        gateway = voice_session.media_gateway
+
+        async def _receive_messages() -> None:
+            """
+            Continuously consume websocket frames.
+
+            Running this concurrently with greeting prevents stale mic audio
+            buildup and keeps audio flow real-time.
+            """
+            while gateway.is_session_active(call_id):
+                try:
+                    message = await asyncio.wait_for(websocket.receive(), timeout=30.0)
+                    message_type = message.get("type")
+
+                    # Starlette emits explicit disconnect frames; stop reading immediately.
+                    if message_type == "websocket.disconnect":
+                        logger.info(f"Ask AI websocket disconnected: {session_id}")
                         break
-            
-            except asyncio.TimeoutError:
-                await websocket.send_json({"type": "heartbeat"})
-                continue
-            
-            except WebSocketDisconnect:
-                break
-        
-        pipeline_task.cancel()
-        try:
-            await pipeline_task
-        except asyncio.CancelledError:
-            pass
-    
+
+                    if message_type != "websocket.receive":
+                        continue
+
+                    audio_data = message.get("bytes")
+                    if isinstance(audio_data, (bytes, bytearray)):
+                        if not audio_data:
+                            continue
+
+                        await gateway.on_audio_received(call_id, bytes(audio_data))
+                        continue
+
+                    text_data = message.get("text")
+                    if not text_data:
+                        continue
+                    try:
+                        data = json.loads(text_data)
+                    except json.JSONDecodeError:
+                        logger.debug(
+                            f"Ignoring non-JSON websocket text frame: {text_data[:120]}"
+                        )
+                        continue
+                    if data.get("type") == "end_call":
+                        await gateway.on_call_ended(call_id, "user_ended")
+                        break
+
+                except asyncio.TimeoutError:
+                    try:
+                        await websocket.send_json({"type": "heartbeat"})
+                    except (WebSocketDisconnect, RuntimeError):
+                        break
+                    continue
+                except WebSocketDisconnect:
+                    break
+                except RuntimeError as e:
+                    if "disconnect message has been received" in str(e):
+                        logger.info(f"Ask AI websocket closed after disconnect: {session_id}")
+                        break
+                    raise
+
+        # 3. Start pipeline before greeting so STT queue is active immediately.
+        await orchestrator.start_pipeline(voice_session, websocket)
+
+        # 4. Start frame receiver before greeting to avoid buffered stale audio.
+        receiver_task = asyncio.create_task(_receive_messages())
+
+        # 5. Greeting (always play full intro before listening)
+        await orchestrator.send_greeting(
+            voice_session,
+            "Hi there! How can I help you today?",
+            websocket,
+            barge_in_event,
+        )
+
+        # 6. Keep endpoint alive until receiver exits (disconnect/end_call).
+        await receiver_task
+
     except WebSocketDisconnect:
         logger.info(f"Ask AI disconnected: {session_id}")
-    
     except Exception as e:
         logger.error(f"Ask AI error: {e}", exc_info=True)
         try:
             await websocket.send_json({"type": "error", "message": str(e)})
-        except:
+        except Exception:
             pass
-    
     finally:
-        if browser_gateway and call_session:
-            await browser_gateway.on_call_ended(call_session.call_id, "session_ended")
-        if stt_provider:
-            await stt_provider.cleanup()
-        if llm_provider:
-            await llm_provider.cleanup()
-        if tts_provider:
-            await tts_provider.cleanup()
-        if browser_gateway:
-            await browser_gateway.cleanup()
+        if receiver_task and not receiver_task.done():
+            receiver_task.cancel()
+            try:
+                await receiver_task
+            except asyncio.CancelledError:
+                pass
+        if voice_session:
+            await container.voice_orchestrator.end_session(voice_session)
         logger.info(f"Ask AI session ended: {session_id}")
-
-
-async def send_ask_ai_greeting(
-    tts_provider: GoogleTTSStreamingProvider,
-    websocket: WebSocket,
-    barge_in_event: asyncio.Event
-):
-    """Send the Ask AI greeting with proper audio buffering to eliminate jitter."""
-    
-    greeting_text = "Hi there! How can I help you today?"
-    
-    # Send greeting text to frontend
-    await websocket.send_json({
-        "type": "llm_response",
-        "text": greeting_text,
-        "latency_ms": 0
-    })
-    
-    tts_start = time.time()
-    was_interrupted = False
-    
-    # Chunk sizes for 24kHz pcm_f32le (4 bytes per sample)
-    # Using larger chunks reduces jitter from WebSocket overhead
-    FIRST_CHUNK_BYTES = 48000   # ~500ms for first audio (24kHz * 4 bytes * 0.5s)
-    REGULAR_CHUNK_BYTES = 96000  # ~1s for smooth streaming
-    audio_buffer = bytearray()
-    chunks_sent = 0
-    
-    try:
-        # Synthesize with Google TTS Streaming
-        async for audio_chunk in tts_provider.stream_synthesize(
-            text=greeting_text,
-            voice_id=ASK_AI_CONFIG["voice_id"],
-            sample_rate=ASK_AI_CONFIG["sample_rate"]
-        ):
-            if barge_in_event.is_set():
-                was_interrupted = True
-                barge_in_event.clear()
-                await websocket.send_json({"type": "tts_interrupted", "reason": "barge_in"})
-                break
-            
-            audio_buffer.extend(audio_chunk.data)
-            
-            target_size = FIRST_CHUNK_BYTES if chunks_sent == 0 else REGULAR_CHUNK_BYTES
-            
-            if len(audio_buffer) >= target_size:
-                await websocket.send_bytes(bytes(audio_buffer))
-                audio_buffer = bytearray()
-                chunks_sent += 1
-        
-        # Send remaining audio
-        if audio_buffer and not was_interrupted:
-            await websocket.send_bytes(bytes(audio_buffer))
-            
-    except Exception as e:
-        logger.error(f"Ask AI greeting TTS error: {e}")
-    
-    tts_latency = (time.time() - tts_start) * 1000
-    
-    await websocket.send_json({
-        "type": "turn_complete",
-        "llm_latency_ms": 0,
-        "tts_latency_ms": tts_latency,
-        "total_latency_ms": tts_latency,
-        "was_interrupted": was_interrupted
-    })

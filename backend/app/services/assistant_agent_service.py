@@ -17,7 +17,7 @@ Key Features:
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
-from supabase import Client
+from app.core.postgres_adapter import Client
 
 from app.domain.models.action_plan import (
     ActionPlan,
@@ -53,7 +53,7 @@ class AssistantAgentService:
     - Logs all plans to action_plans table for audit
     
     Example Usage:
-        service = get_assistant_agent_service(supabase)
+        service = get_assistant_agent_service(db_client)
         
         plan = await service.create_plan(
             tenant_id="...",
@@ -71,8 +71,8 @@ class AssistantAgentService:
     
     ALLOWED_ACTIONS = {e.value for e in AllowedActionType}
     
-    def __init__(self, supabase: Client):
-        self.supabase = supabase
+    def __init__(self, db_client: Client):
+        self.db_client = db_client
     
     async def create_plan(
         self,
@@ -155,7 +155,7 @@ class AssistantAgentService:
         }
         
         try:
-            response = self.supabase.table("action_plans").insert(plan_data).execute()
+            response = self.db_client.table("action_plans").insert(plan_data).execute()
             if response.data:
                 plan.id = response.data[0]["id"]
                 logger.info(f"Created action plan {plan.id} with {len(validated_actions)} steps")
@@ -335,7 +335,7 @@ class AssistantAgentService:
             if action_type == AllowedActionType.BOOK_MEETING.value:
                 return await book_meeting(
                     tenant_id=tenant_id,
-                    supabase=self.supabase,
+                    db_client=self.db_client,
                     title=merged_params.get("title", "Meeting"),
                     start_time=merged_params.get("time") or merged_params.get("start_time", ""),
                     duration_minutes=merged_params.get("duration_minutes", 30),
@@ -361,7 +361,7 @@ class AssistantAgentService:
                 
                 return await send_email(
                     tenant_id=tenant_id,
-                    supabase=self.supabase,
+                    db_client=self.db_client,
                     to=merged_params.get("to", []),
                     subject=merged_params.get("subject", ""),
                     body=merged_params.get("body", ""),
@@ -373,7 +373,7 @@ class AssistantAgentService:
             elif action_type == AllowedActionType.SEND_SMS.value:
                 return await send_sms(
                     tenant_id=tenant_id,
-                    supabase=self.supabase,
+                    db_client=self.db_client,
                     to=merged_params.get("to", []),
                     message=merged_params.get("message", ""),
                     conversation_id=conversation_id
@@ -390,7 +390,7 @@ class AssistantAgentService:
             elif action_type == AllowedActionType.INITIATE_CALL.value:
                 return await initiate_call(
                     tenant_id=tenant_id,
-                    supabase=self.supabase,
+                    db_client=self.db_client,
                     phone_number=merged_params.get("phone_number", ""),
                     campaign_id=merged_params.get("campaign_id"),
                     conversation_id=conversation_id
@@ -399,7 +399,7 @@ class AssistantAgentService:
             elif action_type == AllowedActionType.START_CAMPAIGN.value:
                 return await start_campaign(
                     tenant_id=tenant_id,
-                    supabase=self.supabase,
+                    db_client=self.db_client,
                     campaign_id=merged_params.get("campaign_id", ""),
                     conversation_id=conversation_id
                 )
@@ -407,7 +407,7 @@ class AssistantAgentService:
             elif action_type == AllowedActionType.CHECK_AVAILABILITY.value:
                 return await check_availability(
                     tenant_id=tenant_id,
-                    supabase=self.supabase,
+                    db_client=self.db_client,
                     date_str=merged_params.get("date", ""),
                     duration_minutes=merged_params.get("duration_minutes", 30)
                 )
@@ -415,7 +415,7 @@ class AssistantAgentService:
             elif action_type == AllowedActionType.UPDATE_MEETING.value:
                 return await update_meeting_tool(
                     tenant_id=tenant_id,
-                    supabase=self.supabase,
+                    db_client=self.db_client,
                     meeting_id=merged_params.get("meeting_id", ""),
                     new_time=merged_params.get("new_time"),
                     new_title=merged_params.get("new_title"),
@@ -425,7 +425,7 @@ class AssistantAgentService:
             elif action_type == AllowedActionType.CANCEL_MEETING.value:
                 return await cancel_meeting_tool(
                     tenant_id=tenant_id,
-                    supabase=self.supabase,
+                    db_client=self.db_client,
                     meeting_id=merged_params.get("meeting_id", ""),
                     reason=merged_params.get("reason"),
                     conversation_id=conversation_id
@@ -500,7 +500,7 @@ class AssistantAgentService:
         }
         
         try:
-            response = self.supabase.table("reminders").insert(reminder_data).execute()
+            response = self.db_client.table("reminders").insert(reminder_data).execute()
             
             if response.data:
                 return {
@@ -565,7 +565,7 @@ class AssistantAgentService:
             if plan.completed_at:
                 update_data["completed_at"] = plan.completed_at.isoformat()
             
-            self.supabase.table("action_plans").update(
+            self.db_client.table("action_plans").update(
                 update_data
             ).eq("id", plan.id).execute()
             
@@ -575,7 +575,7 @@ class AssistantAgentService:
     async def get_plan(self, plan_id: str, tenant_id: str) -> Optional[ActionPlan]:
         """Get an action plan by ID."""
         try:
-            response = self.supabase.table("action_plans").select(
+            response = self.db_client.table("action_plans").select(
                 "*"
             ).eq("id", plan_id).eq("tenant_id", tenant_id).single().execute()
             
@@ -611,7 +611,7 @@ class AssistantAgentService:
     ) -> List[Dict[str, Any]]:
         """List action plans for a tenant."""
         try:
-            query = self.supabase.table("action_plans").select(
+            query = self.db_client.table("action_plans").select(
                 "id, intent, status, current_step, created_at, completed_at"
             ).eq("tenant_id", tenant_id)
             
@@ -630,9 +630,9 @@ class AssistantAgentService:
 _assistant_agent_service: Optional[AssistantAgentService] = None
 
 
-def get_assistant_agent_service(supabase: Client) -> AssistantAgentService:
+def get_assistant_agent_service(db_client: Client) -> AssistantAgentService:
     """Get or create AssistantAgentService instance."""
     global _assistant_agent_service
     if _assistant_agent_service is None:
-        _assistant_agent_service = AssistantAgentService(supabase)
+        _assistant_agent_service = AssistantAgentService(db_client)
     return _assistant_agent_service

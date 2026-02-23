@@ -14,9 +14,12 @@ Authentication:
     Set GOOGLE_APPLICATION_CREDENTIALS environment variable to path of service account JSON file
 """
 import os
+import re
 import asyncio
 import logging
 from typing import AsyncIterator, List, Dict, Optional
+
+import numpy as np
 
 from app.domain.interfaces.tts_provider import TTSProvider
 from app.domain.models.conversation import AudioChunk
@@ -219,8 +222,6 @@ class GoogleTTSStreamingProvider(TTSProvider):
                     chunk_count += 1
                     
                     # Convert to Float32 for browser playback
-                    import numpy as np
-                    
                     # The streaming API returns PCM audio (Int16)
                     int16_array = np.frombuffer(response.audio_content, dtype=np.int16)
                     float32_array = (int16_array.astype(np.float32) / 32768.0)
@@ -263,8 +264,6 @@ class GoogleTTSStreamingProvider(TTSProvider):
         Streaming TTS works best when text is sent in complete sentences,
         as this allows the model to apply proper prosody and intonation.
         """
-        import re
-        
         # Split on sentence-ending punctuation
         sentences = re.split(r'(?<=[.!?])\s+', text)
         

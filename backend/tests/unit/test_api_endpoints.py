@@ -13,7 +13,8 @@ import sys
 
 # Set test environment variables before importing app
 os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
-os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
+# Supabase validates key is JWT-shaped (header.payload.signature)
+os.environ.setdefault("SUPABASE_SERVICE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJ0ZXN0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9.test_sig")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379")
 
 
@@ -40,9 +41,10 @@ class TestPlansEndpoint:
     """Tests for /api/v1/plans endpoint"""
     
     @pytest.mark.skipif(not IMPORT_SUCCESS, reason="App not available")
-    @patch("app.api.v1.endpoints.plans.get_supabase")
-    def test_list_plans_returns_list(self, mock_supabase):
+    def test_list_plans_returns_list(self):
         """Test that plans endpoint returns a list"""
+        from app.api.v1.dependencies import get_db_client
+
         # Mock Supabase response
         mock_client = MagicMock()
         mock_client.table.return_value.select.return_value.order.return_value.execute.return_value.data = [
@@ -59,16 +61,19 @@ class TestPlansEndpoint:
                 "popular": False
             }
         ]
-        mock_supabase.return_value = mock_client
-        
-        response = client.get("/api/v1/plans/")
-        assert response.status_code == 200
-        data = response.json()
-        assert isinstance(data, list)
-        assert len(data) == 1
-        assert data[0]["id"] == "basic"
-        assert data[0]["name"] == "Basic"
-        assert data[0]["price"] == 29
+        # Use FastAPI's dependency_overrides (not @patch) for Depends() injected deps
+        app.dependency_overrides[get_db_client] = lambda: mock_client
+        try:
+            response = client.get("/api/v1/plans/")
+            assert response.status_code == 200
+            data = response.json()
+            assert isinstance(data, list)
+            assert len(data) == 1
+            assert data[0]["id"] == "basic"
+            assert data[0]["name"] == "Basic"
+            assert data[0]["price"] == 29
+        finally:
+            app.dependency_overrides.pop(get_db_client, None)
 
 
 class TestAuthEndpoints:

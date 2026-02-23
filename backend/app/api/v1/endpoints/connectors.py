@@ -12,9 +12,9 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
-from supabase import Client
+from app.core.postgres_adapter import Client
 
-from app.api.v1.dependencies import get_supabase, get_current_user, CurrentUser
+from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
 from app.infrastructure.connectors.base import ConnectorFactory
 from app.infrastructure.connectors.oauth import get_oauth_state_manager, OAuthStateError
 from app.infrastructure.connectors.encryption import get_encryption_service
@@ -136,7 +136,7 @@ async def list_providers():
 @router.get("", response_model=List[ConnectorResponse])
 async def list_connectors(
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase),
+    db_client: Client = Depends(get_db_client),
     type: Optional[str] = Query(None, description="Filter by type")
 ):
     """
@@ -145,7 +145,7 @@ async def list_connectors(
     Returns all connectors with their status.
     Token data is NOT included.
     """
-    query = supabase.table("connectors").select(
+    query = db_client.table("connectors").select(
         "id, type, provider, name, status, created_at"
     ).eq("tenant_id", current_user.tenant_id)
     
@@ -159,7 +159,7 @@ async def list_connectors(
     for conn in response.data:
         account_email = None
         if conn["status"] == "active":
-            acc_response = supabase.table("connector_accounts").select(
+            acc_response = db_client.table("connector_accounts").select(
                 "account_email"
             ).eq("connector_id", conn["id"]).eq("status", "active").limit(1).execute()
             
@@ -183,10 +183,10 @@ async def list_connectors(
 async def get_connector(
     connector_id: str,
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """Get a specific connector's details."""
-    response = supabase.table("connectors").select(
+    response = db_client.table("connectors").select(
         "id, type, provider, name, status, created_at"
     ).eq("id", connector_id).eq("tenant_id", current_user.tenant_id).single().execute()
     
@@ -198,7 +198,7 @@ async def get_connector(
     # Get account email
     account_email = None
     if conn["status"] == "active":
-        acc_response = supabase.table("connector_accounts").select(
+        acc_response = db_client.table("connector_accounts").select(
             "account_email"
         ).eq("connector_id", conn["id"]).eq("status", "active").limit(1).execute()
         
@@ -221,7 +221,7 @@ async def authorize_connector(
     request: CreateConnectorRequest,
     http_request: Request,
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     Start OAuth authorization flow for a connector.
@@ -248,7 +248,7 @@ async def authorize_connector(
         "status": "pending"
     }
     
-    conn_response = supabase.table("connectors").insert(connector_data).execute()
+    conn_response = db_client.table("connectors").insert(connector_data).execute()
     
     if not conn_response.data:
         raise HTTPException(status_code=500, detail="Failed to create connector")
@@ -294,7 +294,7 @@ async def oauth_callback(
     state: str = Query(...),
     code: Optional[str] = Query(None),
     error: Optional[str] = Query(None),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     OAuth callback handler.
@@ -379,10 +379,10 @@ async def oauth_callback(
             "last_refreshed_at": datetime.utcnow().isoformat()
         }
         
-        supabase.table("connector_accounts").insert(account_data).execute()
+        db_client.table("connector_accounts").insert(account_data).execute()
         
         # Update connector status to active
-        supabase.table("connectors").update({
+        db_client.table("connectors").update({
             "status": "active"
         }).eq("id", connector_id).execute()
         
@@ -408,7 +408,7 @@ async def oauth_callback(
 async def delete_connector(
     connector_id: str,
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     Disconnect/delete a connector.
@@ -416,7 +416,7 @@ async def delete_connector(
     Revokes tokens and removes connector record.
     """
     # Verify ownership
-    conn_response = supabase.table("connectors").select(
+    conn_response = db_client.table("connectors").select(
         "id, provider"
     ).eq("id", connector_id).eq("tenant_id", current_user.tenant_id).single().execute()
     
@@ -424,12 +424,12 @@ async def delete_connector(
         raise HTTPException(status_code=404, detail="Connector not found")
     
     # Delete connector accounts (tokens)
-    supabase.table("connector_accounts").delete().eq(
+    db_client.table("connector_accounts").delete().eq(
         "connector_id", connector_id
     ).execute()
     
     # Delete connector
-    supabase.table("connectors").delete().eq(
+    db_client.table("connectors").delete().eq(
         "id", connector_id
     ).execute()
     
@@ -440,7 +440,7 @@ async def delete_connector(
 async def refresh_connector_tokens(
     connector_id: str,
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     Force refresh connector tokens.
@@ -448,7 +448,7 @@ async def refresh_connector_tokens(
     Useful when tokens are about to expire.
     """
     # Get connector
-    conn_response = supabase.table("connectors").select(
+    conn_response = db_client.table("connectors").select(
         "id, provider, tenant_id"
     ).eq("id", connector_id).eq("tenant_id", current_user.tenant_id).single().execute()
     
@@ -458,7 +458,7 @@ async def refresh_connector_tokens(
     provider = conn_response.data["provider"]
     
     # Get account with tokens
-    acc_response = supabase.table("connector_accounts").select(
+    acc_response = db_client.table("connector_accounts").select(
         "id, refresh_token_encrypted"
     ).eq("connector_id", connector_id).eq("status", "active").single().execute()
     
@@ -488,7 +488,7 @@ async def refresh_connector_tokens(
     new_access_encrypted = encryption.encrypt(new_tokens.access_token)
     new_refresh_encrypted = encryption.encrypt(new_tokens.refresh_token or refresh_token)
     
-    supabase.table("connector_accounts").update({
+    db_client.table("connector_accounts").update({
         "access_token_encrypted": new_access_encrypted,
         "refresh_token_encrypted": new_refresh_encrypted,
         "token_expires_at": new_tokens.expires_at.isoformat() if new_tokens.expires_at else None,

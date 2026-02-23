@@ -1,0 +1,158 @@
+name: Deploy — Build, Push & Deploy
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: staging
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE: ghcr.io/${{ github.repository }}/backend
+  PYTHON_VERSION: "3.10"
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────
+  # Build & Push Docker Images
+  # ──────────────────────────────────────────────────────────────────
+  build-and-push:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.BACKEND_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ──────────────────────────────────────────────────────────────────
+  # Deploy to Server
+  # ──────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    environment:
+      name: ${{ github.event.inputs.environment || 'staging' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -e
+            cd ${{ secrets.DEPLOY_PATH || '/opt/talky' }}
+
+            # Pull latest code
+            git pull origin main
+
+            # Pull latest images
+            docker compose pull backend
+
+            # Apply database migrations (if any)
+            docker compose exec -T db psql -U talky -d talky \
+              -f /docker-entrypoint-initdb.d/init.sql 2>/dev/null || true
+
+            # Restart services with zero-downtime
+            docker compose up -d --build backend
+            docker compose restart redis
+
+            # Wait for health check
+            echo "Waiting for backend health check..."
+            for i in $(seq 1 30); do
+              if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+                echo "✅ Backend is healthy!"
+                exit 0
+              fi
+              echo "  Attempt $i/30..."
+              sleep 5
+            done
+            echo "❌ Backend failed health check"
+            docker compose logs --tail=50 backend
+            exit 1
+
+      - name: Verify deployment
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            echo "=== Service Status ==="
+            cd ${{ secrets.DEPLOY_PATH || '/opt/talky' }}
+            docker compose ps
+            echo ""
+            echo "=== Health Check ==="
+            curl -sf http://localhost:8000/health | python3 -m json.tool || echo "Health check failed"
+            echo ""
+            echo "=== Recent Logs ==="
+            docker compose logs --tail=10 backend
+
+  # ──────────────────────────────────────────────────────────────────
+  # Post-Deploy Notification
+  # ──────────────────────────────────────────────────────────────────
+  notify:
+    name: Notify
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    if: always()
+
+    steps:
+      - name: Deployment status
+        run: |
+          if [ "${{ needs.deploy.result }}" == "success" ]; then
+            echo "✅ Deployment successful!"
+            echo "Image: ${{ env.BACKEND_IMAGE }}:${{ needs.build-and-push.outputs.image_tag }}"
+            echo "Environment: ${{ github.event.inputs.environment || 'staging' }}"
+          else
+            echo "❌ Deployment failed!"
+            echo "Check the workflow logs for details."
+          fi

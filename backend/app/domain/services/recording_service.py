@@ -92,20 +92,20 @@ class RecordingService:
     Handles recording storage operations.
     
     Provider-agnostic service that works with any MediaGateway.
-    Uploads recordings to Supabase Storage and links them to call records.
+    Uploads recordings to PostgreSQL Storage and links them to call records.
     """
     
-    # Storage bucket name in Supabase
+    # Storage bucket name in PostgreSQL
     BUCKET_NAME = "recordings"
     
-    def __init__(self, supabase_client):
+    def __init__(self, db_client):
         """
         Initialize the recording service.
         
         Args:
-            supabase_client: Initialized Supabase client
+            db_client: Initialized PostgreSQL client
         """
-        self._supabase = supabase_client
+        self._db_client = db_client
     
     def _generate_storage_path(
         self, 
@@ -141,7 +141,7 @@ class RecordingService:
         campaign_id: str
     ) -> Optional[str]:
         """
-        Save recording to Supabase Storage.
+        Save recording to PostgreSQL Storage.
         
         Args:
             call_id: Call identifier
@@ -166,8 +166,8 @@ class RecordingService:
                 f"{len(wav_data)} bytes to {storage_path}"
             )
             
-            # Upload to Supabase Storage
-            self._supabase.storage.from_(self.BUCKET_NAME).upload(
+            # Upload to PostgreSQL Storage
+            self._db_client.storage.from_(self.BUCKET_NAME).upload(
                 path=storage_path,
                 file=wav_data,
                 file_options={"content-type": "audio/wav"}
@@ -202,7 +202,7 @@ class RecordingService:
             Recording ID if successful, None otherwise
         """
         try:
-            result = self._supabase.table("recordings").insert({
+            result = self._db_client.table("recordings").insert({
                 "call_id": call_id,
                 "storage_path": storage_path,
                 "duration_seconds": int(duration_seconds),
@@ -242,7 +242,7 @@ class RecordingService:
             # Generate public URL for the recording
             recording_url = f"/api/v1/recordings/stream/{storage_path}"
             
-            self._supabase.table("calls").update({
+            self._db_client.table("calls").update({
                 "recording_url": recording_url,
                 "updated_at": datetime.utcnow().isoformat()
             }).eq("id", call_id).execute()
@@ -265,7 +265,7 @@ class RecordingService:
         Save recording and link to call record.
         
         Complete workflow:
-        1. Upload to Supabase Storage
+        1. Upload to PostgreSQL Storage
         2. Insert into recordings table
         3. Update calls.recording_url
         
@@ -312,7 +312,7 @@ class RecordingService:
         """
         try:
             # Get signed URL (valid for 1 hour)
-            result = self._supabase.storage.from_(self.BUCKET_NAME).create_signed_url(
+            result = self._db_client.storage.from_(self.BUCKET_NAME).create_signed_url(
                 path=storage_path,
                 expires_in=3600
             )

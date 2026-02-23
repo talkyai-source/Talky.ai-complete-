@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  freeswitch:
+    # drachtio-freeswitch-mrf v1.10.1-full includes mod_sofia and mod_event_socket
+    image: drachtio/drachtio-freeswitch-mrf:v1.10.1-full
+    container_name: talky-freeswitch
+    # Host network mode for direct PBX access (required for cross-subnet routing)
+    network_mode: host
+    environment:
+      # Enable mod_audio_fork for WebSocket audio streaming
+      - MOD_AUDIO_FORK=1
+      # SIP port for FreeSWITCH
+      - SIP_PORT=5080
+      # RTP port range
+      - RTP_PORT_START=16384
+      - RTP_PORT_END=32768
+    volumes:
+      # Mount custom dialplan
+      - ./freeswitch_config/dialplan:/tmp/dialplan
+      # Audio files for playback
+      - ./audio_files:/var/lib/freeswitch/sounds/custom
+      # Recording storage
+      - freeswitch-recordings:/var/lib/freeswitch/recordings
+    restart: unless-stopped
+    # Run FreeSWITCH in foreground
+    command: [ "freeswitch", "-nonat", "-c" ]
+    healthcheck:
+      test: [ "CMD-SHELL", "fs_cli -x 'sofia status' | grep -q 'profile'" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  freeswitch-recordings:
+    driver: local

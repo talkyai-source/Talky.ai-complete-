@@ -1,68 +1,57 @@
 """
-API Router
-Combines all endpoint routers
+API v1 Route Aggregator
+
+Collects all endpoint routers and exposes a single `api_router`.
 """
 from fastapi import APIRouter
-from app.api.v1.endpoints import (
-    campaigns,
-    webhooks,
-    websockets,
-    auth,
-    plans,
-    dashboard,
-    analytics,
-    calls,
-    recordings,
-    contacts,
-    clients,
-    admin,
-    ai_options,
-    ai_options_ws,
-    ask_ai_ws,
-    sip_bridge,
-    billing,  # NEW: Stripe billing endpoints
-    assistant_ws,  # NEW: Assistant Agent chat endpoint
-    connectors,  # NEW: Connector OAuth and management (Day 24)
-    meetings,  # NEW: Meeting booking (Day 25)
-)
 
 api_router = APIRouter()
 
+# --- Core endpoints ---
+from app.api.v1.endpoints.auth import router as auth_router
+from app.api.v1.endpoints.campaigns import router as campaigns_router
+from app.api.v1.endpoints.contacts import router as contacts_router
+from app.api.v1.endpoints.calls import router as calls_router
+from app.api.v1.endpoints.recordings import router as recordings_router
+from app.api.v1.endpoints.health import router as health_router
+from app.api.v1.endpoints.dashboard import router as dashboard_router
+from app.api.v1.endpoints.analytics import router as analytics_router
+from app.api.v1.endpoints.billing import router as billing_router
+from app.api.v1.endpoints.plans import router as plans_router
+from app.api.v1.endpoints.clients import router as clients_router
+from app.api.v1.endpoints.connectors import router as connectors_router
+from app.api.v1.endpoints.meetings import router as meetings_router
+from app.api.v1.endpoints.webhooks import router as webhooks_router
+
+# --- WebSocket / AI endpoints ---
+from app.api.v1.endpoints.assistant_ws import router as assistant_ws_router
+from app.api.v1.endpoints.ask_ai_ws import router as ask_ai_ws_router
+from app.api.v1.endpoints.ai_options import router as ai_options_router
+from app.api.v1.endpoints.ai_options_ws import router as ai_options_ws_router
+from app.api.v1.endpoints.freeswitch_bridge import router as freeswitch_router
+
+# --- Admin endpoints ---
+from app.api.v1.endpoints.admin import router as admin_router
+
 # Include all routers
-# Existing routers
-api_router.include_router(campaigns.router)
-api_router.include_router(webhooks.router)
-api_router.include_router(websockets.router)
+api_router.include_router(auth_router)
+api_router.include_router(campaigns_router)
+api_router.include_router(contacts_router)
+api_router.include_router(calls_router)
+api_router.include_router(recordings_router)
+api_router.include_router(health_router)
+api_router.include_router(dashboard_router)
+api_router.include_router(analytics_router)
+api_router.include_router(billing_router)
+api_router.include_router(plans_router)
+api_router.include_router(clients_router)
+api_router.include_router(connectors_router)
+api_router.include_router(meetings_router)
+api_router.include_router(webhooks_router)
+api_router.include_router(assistant_ws_router)
+api_router.include_router(ask_ai_ws_router)
+api_router.include_router(ai_options_router)
+api_router.include_router(ai_options_ws_router)
+api_router.include_router(freeswitch_router)
+api_router.include_router(admin_router)
 
-# New routers (frontend alignment)
-api_router.include_router(auth.router)
-api_router.include_router(plans.router)
-api_router.include_router(dashboard.router)
-api_router.include_router(analytics.router)
-api_router.include_router(calls.router)
-api_router.include_router(recordings.router)
-api_router.include_router(contacts.router)
-api_router.include_router(clients.router)
-api_router.include_router(admin.router)
-
-# AI Options (provider selection & testing)
-api_router.include_router(ai_options.router)
-api_router.include_router(ai_options_ws.router)
-
-# Ask AI (one-click voice assistant)
-api_router.include_router(ask_ai_ws.router)
-
-# SIP Bridge (MicroSIP integration - Day 18)
-api_router.include_router(sip_bridge.router)
-
-# Billing (Stripe subscription management - Day 22)
-api_router.include_router(billing.router)
-
-# Assistant Agent (Conversational AI with tools)
-api_router.include_router(assistant_ws.router)
-
-# Connectors (OAuth integrations - Day 24)
-api_router.include_router(connectors.router)
-
-# Meetings (Calendar booking - Day 25)
-api_router.include_router(meetings.router)

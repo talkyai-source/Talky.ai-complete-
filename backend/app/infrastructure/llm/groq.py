@@ -8,6 +8,9 @@ Following Groq's official prompting guidelines:
 - Parameter tuning for voice AI use case
 - Stop sequences for cleaner outputs
 
+Available models are defined in app/domain/models/ai_config.py (GROQ_MODELS)
+and exposed via the AI Options UI at /api/v1/ai-options/providers
+
 Day 17: Added timeout handling and deterministic mode for QA.
 """
 import os
@@ -33,10 +36,20 @@ class GroqLLMProvider(LLMProvider):
     """
     Groq LLM provider with ultra-fast inference
     
-    Recommended models for voice AI (Dec 2025):
+    Production Models (available in AI Options):
+    - llama-3.3-70b-versatile: 280 t/s - Best quality/speed balance (default)
     - llama-3.1-8b-instant: 560 t/s - Fastest, ideal for real-time
-    - llama-3.3-70b-versatile: 280 t/s - Best quality/speed balance
-    - llama-4-scout-17b-16e-instruct: 750 t/s - Preview, very fast
+    - openai/gpt-oss-120b: 500 t/s - OpenAI flagship with reasoning
+    - openai/gpt-oss-20b: 1000 t/s - Fast and efficient
+    
+    Preview Models (evaluation only):
+    - meta-llama/llama-4-maverick-17b-128e-instruct: 600 t/s - Complex reasoning
+    - meta-llama/llama-4-scout-17b-16e-instruct: 750 t/s - Fast variant
+    - qwen/qwen3-32b: 400 t/s - Multilingual
+    - moonshotai/kimi-k2-instruct-0905: 200 t/s - Large context (262K)
+    
+    Model selection is configured via AI Options UI (/ai-options page).
+    See app/domain/models/ai_config.py for full model specifications.
     """
     
     # Default stop sequences to prevent rambling
@@ -181,6 +194,11 @@ class GroqLLMProvider(LLMProvider):
         
         # User/Assistant channels: Conversation history
         for msg in messages:
+            # Skip empty messages - they can cause issues with the LLM
+            if not msg.content or not msg.content.strip():
+                logger.warning(f"[GROQ DEBUG] Skipping empty {msg.role.value} message in conversation history")
+                continue
+                
             groq_messages.append({
                 "role": msg.role.value,
                 "content": msg.content
@@ -198,8 +216,14 @@ class GroqLLMProvider(LLMProvider):
         
         try:
             # Log what we're sending to Groq
-            logger.info(f"[GROQ DEBUG] Sending to Groq: model={model}, temp={temperature}, max_tokens={max_tokens}")
-            logger.info(f"[GROQ DEBUG] Messages count: {len(groq_messages)}")
+            logger.debug(f"Sending to Groq: model={model}, temp={temperature}, max_tokens={max_tokens}")
+            logger.debug(f"Messages count: {len(groq_messages)}")
+            logger.debug(f"Stop sequences: {stop_sequences}")
+            
+            # Log each message for debugging (truncated)
+            for i, msg in enumerate(groq_messages):
+                content_preview = msg['content'][:100] if msg['content'] else '<EMPTY>'
+                logger.debug(f"Message {i}: role={msg['role']}, content='{content_preview}...'")
             
             # Stream completion using Groq's ultra-fast LPU
             stream = await self._client.chat.completions.create(
@@ -225,10 +249,10 @@ class GroqLLMProvider(LLMProvider):
                         token_count += 1
                         yield delta.content
             
-            logger.info(f"[GROQ DEBUG] Stream completed, yielded {token_count} tokens")
+            logger.debug(f"Stream completed, yielded {token_count} tokens")
             
             if token_count == 0:
-                logger.warning("[GROQ DEBUG] WARNING: Zero tokens received from Groq!")
+                logger.warning("Zero tokens received from Groq")
         
         except Exception as e:
             logger.error(f"Groq LLM streaming failed: {str(e)}")

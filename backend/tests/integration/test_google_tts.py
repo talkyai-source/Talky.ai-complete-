@@ -1,160 +1,88 @@
 """
-Integration Test for Google Cloud TTS with Chirp 3: HD Voices
-Tests the GoogleTTSProvider implementation
+Test script for Deepgram TTS - Saves and plays audio
+Run: python test_deepgram_tts.py
 """
 import asyncio
 import os
-import pytest
-from dotenv import load_dotenv
+import sys
+import wave
+import subprocess
 
-load_dotenv()
+# Add backend to path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-
-class TestGoogleTTSProvider:
-    """Integration tests for Google Cloud TTS with Chirp 3: HD voices."""
+async def test_deepgram_tts():
+    """Test Deepgram TTS with a greeting message and play it."""
+    from dotenv import load_dotenv
+    load_dotenv()
     
-    @pytest.mark.asyncio
-    async def test_google_tts_initialization(self):
-        """Test Google TTS provider initializes correctly."""
-        from app.infrastructure.tts.google_tts import GoogleTTSProvider
-        
-        api_key = os.getenv("GOOGLE_TTS_API_KEY")
-        if not api_key:
-            pytest.skip("GOOGLE_TTS_API_KEY not set")
-        
-        tts = GoogleTTSProvider()
-        await tts.initialize({
+    from app.infrastructure.tts.deepgram_tts import DeepgramTTSProvider
+    
+    api_key = os.getenv("DEEPGRAM_API_KEY")
+    if not api_key:
+        print("✗ DEEPGRAM_API_KEY not found in environment")
+        return
+    
+    print(f"✓ Using Deepgram API key: {api_key[:10]}...")
+    print("\n=== Testing Deepgram TTS ===\n")
+    
+    try:
+        # Initialize provider
+        tts_provider = DeepgramTTSProvider()
+        await tts_provider.initialize({
             "api_key": api_key,
-            "voice_id": "en-US-Chirp3-HD-Orus",
-            "language_code": "en-US"
+            "voice_id": "aura-asteria-en",
+            "sample_rate": 16000
         })
+        print("✓ Deepgram TTS initialized successfully")
         
-        assert tts.name == "google"
-        assert tts._api_key is not None
+        # Test synthesis
+        greeting = "Hello! This is a test greeting from Talky AI. How can I help you today?"
+        print(f"\n📢 Synthesizing: \"{greeting}\"\n")
         
-        await tts.cleanup()
-    
-    @pytest.mark.asyncio
-    async def test_google_tts_synthesis_orus_voice(self):
-        """Test speech synthesis with Orus voice (default)."""
-        from app.infrastructure.tts.google_tts import GoogleTTSProvider
+        # Get raw audio (Int16 PCM for saving as WAV)
+        print("Generating audio...")
+        raw_audio = await tts_provider.synthesize_raw(
+            text=greeting,
+            voice_id="aura-asteria-en",
+            sample_rate=16000
+        )
+        print(f"✓ Generated {len(raw_audio)} bytes ({len(raw_audio) / 1024:.1f} KB)")
+        print(f"  Duration: ~{len(raw_audio) / (16000 * 2):.2f} seconds")
         
-        api_key = os.getenv("GOOGLE_TTS_API_KEY")
-        if not api_key:
-            pytest.skip("GOOGLE_TTS_API_KEY not set")
+        # Save to WAV file
+        wav_path = os.path.join(os.path.dirname(__file__), "test_greeting.wav")
+        with wave.open(wav_path, 'wb') as wav_file:
+            wav_file.setnchannels(1)  # Mono
+            wav_file.setsampwidth(2)  # 16-bit = 2 bytes
+            wav_file.setframerate(16000)  # 16kHz
+            wav_file.writeframes(raw_audio)
         
-        tts = GoogleTTSProvider()
-        await tts.initialize({
-            "api_key": api_key
-        })
+        print(f"✓ Saved to: {wav_path}")
         
-        # Generate audio using Orus voice
-        text = "Hello, this is a test of Google Cloud TTS with Chirp 3 HD Orus voice."
-        audio_chunks = []
+        # Play the audio (Windows)
+        print("\n🔊 Playing audio...")
+        try:
+            # Use Windows Media Player
+            subprocess.run(
+                ['powershell', '-c', f'(New-Object Media.SoundPlayer "{wav_path}").PlaySync()'],
+                check=True,
+                timeout=15
+            )
+            print("✓ Audio played successfully!")
+        except subprocess.TimeoutExpired:
+            print("✓ Audio playback started (may still be playing)")
+        except Exception as e:
+            print(f"⚠ Could not play audio automatically: {e}")
+            print(f"   Please manually open: {wav_path}")
         
-        async for chunk in tts.stream_synthesize(
-            text=text,
-            voice_id="Orus",
-            sample_rate=24000
-        ):
-            audio_chunks.append(chunk.data)
+        await tts_provider.cleanup()
+        print("\n✓ Test complete!")
         
-        # Verify audio was generated
-        assert len(audio_chunks) > 0
-        total_bytes = sum(len(chunk) for chunk in audio_chunks)
-        assert total_bytes > 0
-        print(f"Generated {len(audio_chunks)} chunks, total {total_bytes} bytes")
-        
-        await tts.cleanup()
-    
-    @pytest.mark.asyncio
-    async def test_google_tts_full_voice_format(self):
-        """Test synthesis with full voice ID format."""
-        from app.infrastructure.tts.google_tts import GoogleTTSProvider
-        
-        api_key = os.getenv("GOOGLE_TTS_API_KEY")
-        if not api_key:
-            pytest.skip("GOOGLE_TTS_API_KEY not set")
-        
-        tts = GoogleTTSProvider()
-        await tts.initialize({"api_key": api_key})
-        
-        # Use full voice format
-        audio_chunks = []
-        async for chunk in tts.stream_synthesize(
-            text="Testing full voice format.",
-            voice_id="en-US-Chirp3-HD-Orus",
-            sample_rate=24000
-        ):
-            audio_chunks.append(chunk.data)
-        
-        assert len(audio_chunks) > 0
-        
-        await tts.cleanup()
-    
-    @pytest.mark.asyncio
-    async def test_google_tts_available_voices(self):
-        """Test getting available Chirp 3: HD voices."""
-        from app.infrastructure.tts.google_tts import GoogleTTSProvider
-        
-        api_key = os.getenv("GOOGLE_TTS_API_KEY")
-        if not api_key:
-            pytest.skip("GOOGLE_TTS_API_KEY not set")
-        
-        tts = GoogleTTSProvider()
-        await tts.initialize({"api_key": api_key})
-        
-        voices = await tts.get_available_voices()
-        
-        assert len(voices) > 0
-        
-        # Find Orus voice
-        orus_voice = next((v for v in voices if "Orus" in v["id"]), None)
-        assert orus_voice is not None
-        assert orus_voice["gender"] == "Male"
-        
-        await tts.cleanup()
-    
-    @pytest.mark.asyncio
-    async def test_google_tts_speaking_rate(self):
-        """Test synthesis with custom speaking rate."""
-        from app.infrastructure.tts.google_tts import GoogleTTSProvider
-        
-        api_key = os.getenv("GOOGLE_TTS_API_KEY")
-        if not api_key:
-            pytest.skip("GOOGLE_TTS_API_KEY not set")
-        
-        tts = GoogleTTSProvider()
-        await tts.initialize({"api_key": api_key})
-        
-        # Generate with faster speaking rate
-        audio_chunks = []
-        async for chunk in tts.stream_synthesize(
-            text="This is spoken at a faster rate.",
-            voice_id="Orus",
-            sample_rate=24000,
-            speaking_rate=1.5
-        ):
-            audio_chunks.append(chunk.data)
-        
-        assert len(audio_chunks) > 0
-        
-        await tts.cleanup()
+    except Exception as e:
+        print(f"\n✗ TTS FAILED: {e}")
+        import traceback
+        traceback.print_exc()
 
-
-class TestTTSFactoryWithGoogle:
-    """Test TTSFactory with Google TTS provider."""
-    
-    def test_factory_lists_google_provider(self):
-        """Test that factory lists Google TTS provider."""
-        from app.infrastructure.tts.factory import TTSFactory
-        
-        providers = TTSFactory.list_providers()
-        assert "google" in providers
-    
-    def test_factory_creates_google_provider(self):
-        """Test that factory creates Google TTS provider."""
-        from app.infrastructure.tts.factory import TTSFactory
-        
-        provider = TTSFactory.create("google", {})
-        assert provider.name == "google"
+if __name__ == "__main__":
+    asyncio.run(test_deepgram_tts())

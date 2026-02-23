@@ -6,26 +6,93 @@ import yaml
 import os
 from pathlib import Path
 from typing import Any, Dict
+from functools import lru_cache
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_BACKEND_ROOT = Path(__file__).resolve().parents[2]
+_ENV_FILE = _BACKEND_ROOT / ".env"
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment"""
     
     model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8"
+        env_file=str(_ENV_FILE),
+        env_file_encoding="utf-8",
+        env_ignore_empty=True,
+        extra="allow"
     )
     
     environment: str = "development"
     debug: bool = True
-    
+
     # API Settings
     api_prefix: str = "/api/v1"
+
+    # CORS — populated from CORS_ORIGINS env var (comma-separated)
+    # Falls back to FRONTEND_URL if CORS_ORIGINS is not set
     cors_origins: list[str] = ["http://localhost:3000"]
-    
+    frontend_url: str = "http://localhost:3000"
+    api_base_url: str = "http://localhost:8000"
+
     # Redis/Queue
     redis_url: str = "redis://localhost:6379"
+
+    # Authentication
+    jwt_secret: str | None = None
+    secret_key: str | None = None
+    jwt_algorithm: str = "HS256"
+    jwt_expiry_hours: int = 24
+
+    @field_validator("jwt_secret", "secret_key", mode="before")
+    @classmethod
+    def _normalize_secret_fields(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            return value
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        if cleaned.lower() in {"null", "none", "undefined"}:
+            return None
+        return cleaned
+
+    @property
+    def allowed_origins(self) -> list[str]:
+        """
+        Compute the final list of allowed CORS origins.
+
+        Priority:
+        1. CORS_ORIGINS env var (comma-separated) if explicitly set
+        2. FRONTEND_URL as a single-origin fallback
+        """
+        # If cors_origins was explicitly set via env and isn't the default
+        if self.cors_origins and self.cors_origins != ["http://localhost:3000"]:
+            return self.cors_origins
+        # Always include the frontend URL
+        origins = [self.frontend_url]
+        if self.api_base_url and self.api_base_url not in origins:
+            origins.append(self.api_base_url)
+        return origins
+
+    @property
+    def effective_jwt_secret(self) -> str | None:
+        """
+        Primary JWT signing secret.
+
+        Resolution order:
+        1. JWT_SECRET
+        2. SECRET_KEY (legacy fallback)
+        """
+        return self.jwt_secret or self.secret_key
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Shared cached settings instance."""
+    return Settings()
 
 
 class ConfigManager:

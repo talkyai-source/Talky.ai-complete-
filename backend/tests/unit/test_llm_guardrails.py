@@ -95,6 +95,19 @@ class TestFallbackResponses:
         assert response is not None
         assert "thank" in response.lower() or "care" in response.lower() or "day" in response.lower()
 
+    def test_get_fallback_accepts_string_state(self):
+        """Runtime sessions may store enum values as strings; fallback must still work."""
+        guardrails = LLMGuardrails()
+        response, should_end = guardrails.get_fallback_response(
+            state="greeting",
+            call_id="test-call-string-state",
+            error_count=0
+        )
+
+        assert response is not None
+        assert len(response) > 0
+        assert should_end is False
+
 
 class TestResponseTruncation:
     """Test response truncation for voice brevity"""
@@ -183,6 +196,37 @@ class TestResponseValidation:
         
         assert is_valid is True
 
+    def test_do_not_say_rule_allows_feature_mention_without_scheduling_intent(self):
+        """Product feature mention should not be flagged as scheduling behavior."""
+        guardrails = LLMGuardrails()
+        rules = ConversationRule(
+            do_not_say_rules=["Do not try to book appointments or schedule calls"]
+        )
+
+        is_valid, reason = guardrails.validate_response(
+            "Talky includes smart lead qualification and appointment booking features.",
+            rules
+        )
+
+        assert is_valid is True
+        assert reason is None
+
+    def test_do_not_say_rule_blocks_explicit_scheduling_attempt(self):
+        """Explicit booking language should still be blocked."""
+        guardrails = LLMGuardrails()
+        rules = ConversationRule(
+            do_not_say_rules=["Do not try to book appointments or schedule calls"]
+        )
+
+        is_valid, reason = guardrails.validate_response(
+            "I can schedule a call now. What time works best for you?",
+            rules
+        )
+
+        assert is_valid is False
+        assert reason is not None
+        assert "may_violate_rule" in reason
+
 
 class TestResponseCleaning:
     """Test response cleaning of LLM artifacts"""
@@ -221,7 +265,7 @@ class TestGuardrailsConfig:
         
         assert config.max_response_tokens == 150
         assert config.max_response_time_seconds == 10.0
-        assert config.max_llm_errors_before_goodbye == 2
+        assert config.max_llm_errors_before_goodbye == 3
         assert config.max_sentences == 3
     
     def test_custom_config(self):

@@ -27,8 +27,8 @@ from app.domain.services.session_manager import SessionManager
 from app.domain.services.voice_pipeline_service import VoicePipelineService
 from app.infrastructure.stt.deepgram_flux import DeepgramFluxSTTProvider
 from app.infrastructure.llm.groq import GroqLLMProvider
-from app.infrastructure.tts.cartesia import CartesiaTTSProvider
-from app.infrastructure.telephony.vonage_media_gateway import VonageMediaGateway
+from app.infrastructure.tts.factory import TTSFactory
+from app.infrastructure.telephony.factory import MediaGatewayFactory
 
 
 logger = logging.getLogger(__name__)
@@ -58,18 +58,19 @@ class VoicePipelineWorker:
     # Redis pub/sub channel for call events
     CALL_CHANNEL = "voice:calls:active"
     
-    # Max concurrent pipelines
-    MAX_CONCURRENT_PIPELINES = 50
-    
     def __init__(self):
         self._redis: Optional[redis.Redis] = None
         self._session_manager: Optional[SessionManager] = None
         
+        # Load centralized config (cached singleton — zero runtime overhead)
+        from app.core.voice_config import get_voice_config
+        self._voice_config = get_voice_config()
+        
         # Provider instances (lazy initialized)
         self._stt_provider: Optional[DeepgramFluxSTTProvider] = None
         self._llm_provider: Optional[GroqLLMProvider] = None
-        self._tts_provider: Optional[CartesiaTTSProvider] = None
-        self._media_gateway: Optional[VonageMediaGateway] = None
+        self._tts_provider = None  # Created via TTSFactory
+        self._media_gateway = None  # Created via MediaGatewayFactory
         
         # Active pipelines
         self._active_pipelines: dict[str, asyncio.Task] = {}
@@ -113,15 +114,22 @@ class VoicePipelineWorker:
                 "model": "llama-3.1-8b-instant"
             })
             
-            # TTS Provider (Cartesia)
-            self._tts_provider = CartesiaTTSProvider()
+            # TTS Provider (via factory — config-driven)
+            self._tts_provider = TTSFactory.create(self._voice_config.tts_provider, {})
             await self._tts_provider.initialize({
-                "api_key": os.getenv("CARTESIA_API_KEY")
+                "api_key": os.getenv("CARTESIA_API_KEY") or os.getenv("GOOGLE_TTS_API_KEY", ""),
             })
             
-            # Media Gateway
-            self._media_gateway = VonageMediaGateway()
-            await self._media_gateway.initialize({})
+            # Media Gateway (via factory — config-driven with RTP params)
+            self._media_gateway = MediaGatewayFactory.create(self._voice_config.media_gateway_type)
+            await self._media_gateway.initialize({
+                "remote_ip": self._voice_config.rtp_remote_ip,
+                "remote_port": self._voice_config.rtp_remote_port,
+                "local_port": self._voice_config.rtp_local_port,
+                "codec": self._voice_config.rtp_codec,
+                "source_sample_rate": self._voice_config.tts_source_sample_rate,
+                "source_format": self._voice_config.tts_source_format,
+            })
             
             logger.info("AI providers initialized")
             
@@ -312,9 +320,26 @@ class VoicePipelineWorker:
             "active_call_ids": list(self._active_pipelines.keys())
         }
 
+    async def _heartbeat(self) -> None:
+        """Log heartbeat periodically for systemd liveness monitoring."""
+        interval = self._voice_config.worker_heartbeat_interval
+        while self.running:
+            logger.info(
+                f"heartbeat: active_pipelines={len(self._active_pipelines)}, "
+                f"calls_handled={self._calls_handled}, "
+                f"calls_failed={self._calls_failed}"
+            )
+            await asyncio.sleep(interval)
+
 
 async def main():
     """Entry point for running voice worker as separate process."""
+    from app.core.voice_config import get_voice_config
+    _vc = get_voice_config()
+
+    # Configure logging from config
+    logging.getLogger().setLevel(getattr(logging, _vc.worker_log_level, logging.INFO))
+
     worker = VoicePipelineWorker()
     
     # Handle shutdown signals
@@ -325,11 +350,7 @@ async def main():
         worker.running = False
     
     for sig in (signal.SIGTERM, signal.SIGINT):
-        try:
-            loop.add_signal_handler(sig, signal_handler)
-        except NotImplementedError:
-            # Windows doesn't support add_signal_handler
-            pass
+        loop.add_signal_handler(sig, signal_handler)
     
     try:
         await worker.run()

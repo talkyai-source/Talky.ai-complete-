@@ -3,29 +3,23 @@ Multi-Tenant Middleware
 Enabled: Extracts tenant_id from JWT tokens
 
 Security:
-- In PRODUCTION: Verifies JWT signature using SUPABASE_JWT_SECRET
-- In DEVELOPMENT: Skips signature verification for local testing (logs warning)
+- In PRODUCTION: Verifies JWT signature using JWT_SECRET
+- In DEVELOPMENT: Still verifies JWT signature when a bearer token is present
 """
-import os
 import logging
-from fastapi import Request, HTTPException, status
+from fastapi import Request, status
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 from typing import Optional
 import jwt
 
+from app.core.config import get_settings
+
 logger = logging.getLogger(__name__)
 
-# Cache environment settings at module load
-_ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
-_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
-
-# Log warning if production mode without JWT secret
-if _ENVIRONMENT == "production" and not _JWT_SECRET:
-    logger.warning(
-        "PRODUCTION MODE: SUPABASE_JWT_SECRET not set! "
-        "JWT signature verification will be DISABLED. "
-        "This is a SECURITY RISK - set SUPABASE_JWT_SECRET in your .env file."
-    )
+def _current_jwt_config() -> tuple[str, Optional[str], str]:
+    settings = get_settings()
+    return settings.environment, settings.effective_jwt_secret, settings.jwt_algorithm
 
 
 class TenantMiddleware(BaseHTTPMiddleware):
@@ -37,13 +31,23 @@ class TenantMiddleware(BaseHTTPMiddleware):
     2. Access tenant via request.state.tenant_id in endpoints
     
     Security:
-    - Production: Verifies JWT signature (requires SUPABASE_JWT_SECRET)
-    - Development: Skips verification for local testing
+    - Production: Verifies JWT signature (requires JWT_SECRET)
+    - Development: Verifies signature using the same JWT_SECRET when configured
     """
     
     async def dispatch(self, request: Request, call_next):
+        environment, jwt_secret, jwt_algorithm = _current_jwt_config()
+
         # Skip tenant check for public endpoints
-        public_paths = ["/", "/health", "/docs", "/openapi.json", "/redoc"]
+        public_paths = [
+            "/",
+            "/health",
+            "/api/v1/health",
+            "/api/v1/health/detailed",
+            "/docs",
+            "/openapi.json",
+            "/redoc",
+        ]
         if request.url.path in public_paths:
             return await call_next(request)
         
@@ -70,52 +74,63 @@ class TenantMiddleware(BaseHTTPMiddleware):
         # Extract JWT token from Authorization header
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
-            # Allow unauthenticated requests to pass through
-            # Individual endpoints can enforce auth via dependencies
+            # No token — allow request to pass through.
+            # Individual endpoints enforce auth via Depends(get_current_user).
             request.state.tenant_id = None
             return await call_next(request)
-        
+
         token = auth_header.split(" ")[1]
-        
+
         try:
-            # Decode JWT with environment-aware signature verification
-            if _ENVIRONMENT == "production" and _JWT_SECRET:
-                # PRODUCTION: Verify JWT signature
-                payload = jwt.decode(
-                    token,
-                    _JWT_SECRET,
-                    algorithms=["HS256"],
-                    options={"verify_aud": False}  # Supabase doesn't always set audience
+            if environment == "production" and not jwt_secret:
+                logger.error("JWT secret is missing in production mode")
+                return JSONResponse(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    content={"detail": "Server authentication is not configured"},
                 )
-            else:
-                # DEVELOPMENT: Skip signature verification (for local testing only)
-                if _ENVIRONMENT == "production":
-                    logger.warning(
-                        "JWT verification DISABLED in production! "
-                        "Set SUPABASE_JWT_SECRET to enable."
-                    )
-                payload = jwt.decode(
-                    token,
-                    options={"verify_signature": False}
+
+            if not jwt_secret:
+                logger.error("JWT_SECRET is not configured")
+                return JSONResponse(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    content={"detail": "Server authentication is not configured"},
                 )
-            
+
+            # Verify JWT signature in all environments.
+            payload = jwt.decode(
+                token,
+                jwt_secret,
+                algorithms=[jwt_algorithm],
+                options={"verify_aud": False}
+            )
+
             tenant_id = payload.get("tenant_id") or payload.get("user_metadata", {}).get("tenant_id")
-            
+
             # Attach tenant_id to request state
             request.state.tenant_id = tenant_id
-            
+
         except jwt.ExpiredSignatureError:
-            # Token expired - let individual endpoints handle auth
             logger.debug("JWT token expired")
-            request.state.tenant_id = None
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"detail": "Token has expired"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         except jwt.InvalidTokenError as e:
-            # Invalid token - let individual endpoints handle auth
-            logger.debug(f"Invalid JWT token: {e}")
-            request.state.tenant_id = None
+            logger.warning(f"Invalid JWT token: {e}")
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"detail": "Invalid authentication token"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         except Exception as e:
-            logger.warning(f"JWT decode error: {e}")
-            request.state.tenant_id = None
-        
+            logger.error(f"JWT decode error: {e}")
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"detail": "Authentication failed"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
         return await call_next(request)
 
 

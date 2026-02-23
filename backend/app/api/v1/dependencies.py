@@ -1,210 +1,186 @@
 """
-API Dependencies
-Shared dependencies for authentication, Supabase access, and authorization
+Shared API Dependencies
+
+Provides dependency injection for:
+- Database connection (get_db) — via asyncpg pool from ServiceContainer
+- Current authenticated user (get_current_user) — via JWT
+- Admin authorization (require_admin)
+- Optional user (get_optional_user)
+
+Uses local JWT verification.
 """
-import os
+import logging
 from typing import Optional
-from fastapi import Depends, HTTPException, status, Header
-from supabase import create_client, Client
-from pydantic import BaseModel
-from dotenv import load_dotenv
+from dataclasses import dataclass
 
-load_dotenv()
+import jwt
+from fastapi import Depends, HTTPException, Header, status
+import asyncpg
+
+from app.core.container import get_db_pool_from_container
+from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
-class CurrentUser(BaseModel):
-    """Current authenticated user model"""
+def _require_jwt_secret() -> str:
+    """Return configured JWT secret or fail closed."""
+    secret = get_settings().effective_jwt_secret
+    if secret:
+        return secret
+    logger.error("JWT_SECRET is not configured")
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Server authentication is not configured",
+    )
+
+
+@dataclass
+class CurrentUser:
+    """User context extracted from JWT token"""
     id: str
     email: str
-    name: Optional[str] = None
-    business_name: Optional[str] = None
     tenant_id: Optional[str] = None
     role: str = "user"
+    name: Optional[str] = None
+    business_name: Optional[str] = None
     minutes_remaining: int = 0
 
 
-def get_supabase() -> Client:
+def get_db_pool() -> asyncpg.Pool:
     """
-    Get Supabase client with validation.
-    
-    Raises:
-        RuntimeError: If Supabase URL or SERVICE_KEY is not configured
+    FastAPI dependency — returns the asyncpg pool from the ServiceContainer.
     """
-    url = os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_SERVICE_KEY")
-    
-    if not url:
-        raise RuntimeError(
-            "SUPABASE_URL is not configured. "
-            "Set SUPABASE_URL environment variable."
-        )
-    if not key:
-        raise RuntimeError(
-            "SUPABASE_SERVICE_KEY is not configured. "
-            "Set SUPABASE_SERVICE_KEY environment variable."
-        )
-    
-    return create_client(url, key)
+    return get_db_pool_from_container()
+
+
+from app.core.postgres_adapter import Client
+
+# Backward-compat alias
+def get_db_client(pool: asyncpg.Pool = Depends(get_db_pool)) -> Client:
+    """
+    Backward-compat alias -> returns Postgres adapter client wrapping asyncpg pool.
+    Shim allows legacy code using .table() to work.
+    """
+    # When called outside FastAPI dependency injection, `pool` can be a
+    # Depends marker instead of an asyncpg pool. Resolve from container.
+    if not hasattr(pool, "acquire"):
+        pool = get_db_pool()
+    return Client(pool)
 
 
 async def get_current_user(
     authorization: Optional[str] = Header(None, alias="Authorization"),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client),
 ) -> CurrentUser:
     """
-    Dependency to get the current authenticated user from JWT token.
-    
-    Args:
-        authorization: Bearer token from Authorization header
-        supabase: Supabase client
-    
-    Returns:
-        CurrentUser object with user details
-    
-    Raises:
-        HTTPException: If token is invalid or user not found
+    Extract and validate JWT token from Authorization header.
+
+    Returns CurrentUser with user info and tenant context.
+    JWT is signed with JWT_SECRET (HS256).
     """
     if not authorization:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authorization header missing",
-            headers={"WWW-Authenticate": "Bearer"},
         )
-    
-    # Extract token from "Bearer <token>"
+
     parts = authorization.split()
     if len(parts) != 2 or parts[0].lower() != "bearer":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authorization header format. Use: Bearer <token>",
-            headers={"WWW-Authenticate": "Bearer"},
+            detail="Invalid authorization format. Expected: Bearer <token>",
         )
-    
+
     token = parts[1]
-    
+
     try:
-        # Verify token with Supabase
-        user_response = supabase.auth.get_user(token)
-        
-        if not user_response or not user_response.user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired token",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        
-        auth_user = user_response.user
-        
-        # Get user profile from our user_profiles table
-        profile_response = supabase.table("user_profiles").select(
-            "*, tenants(business_name, minutes_allocated, minutes_used)"
-        ).eq("id", auth_user.id).single().execute()
-        
-        if profile_response.data:
-            profile = profile_response.data
-            tenant = profile.get("tenants", {}) or {}
-            minutes_remaining = tenant.get("minutes_allocated", 0) - tenant.get("minutes_used", 0)
-            
-            return CurrentUser(
-                id=str(auth_user.id),
-                email=auth_user.email,
-                name=profile.get("name"),
-                business_name=tenant.get("business_name"),
-                tenant_id=profile.get("tenant_id"),
-                role=profile.get("role", "user"),
-                minutes_remaining=max(0, minutes_remaining)
-            )
-        else:
-            # User exists in auth but no profile yet
-            return CurrentUser(
-                id=str(auth_user.id),
-                email=auth_user.email,
-                role="user",
-                minutes_remaining=0
-            )
-    
-    except HTTPException:
-        raise
-    except Exception as e:
+        payload = jwt.decode(
+            token,
+            _require_jwt_secret(),
+            algorithms=[get_settings().jwt_algorithm],
+        )
+    except jwt.ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Token validation failed: {str(e)}",
-            headers={"WWW-Authenticate": "Bearer"},
+            detail="Token has expired",
         )
+    except jwt.InvalidTokenError as e:
+        logger.warning(f"Token verification failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token: missing subject",
+        )
+
+    # Fetch user profile with tenant info from PostgreSQL
+    try:
+        async with db_client.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT up.id, up.email, up.name, up.role, up.tenant_id,
+                       t.business_name, t.minutes_allocated, t.minutes_used
+                FROM user_profiles up
+                LEFT JOIN tenants t ON t.id = up.tenant_id
+                WHERE up.id = $1
+                """,
+                user_id,
+            )
+    except Exception as e:
+        logger.warning(f"Failed to fetch user profile: {e}")
+        row = None
+
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User profile not found",
+        )
+
+    minutes_remaining = max(
+        0,
+        (row["minutes_allocated"] or 0) - (row["minutes_used"] or 0)
+    )
+
+    return CurrentUser(
+        id=str(row["id"]),
+        email=row["email"] or "",
+        tenant_id=str(row["tenant_id"]) if row["tenant_id"] else None,
+        role=row["role"] or "user",
+        name=row["name"],
+        business_name=row["business_name"],
+        minutes_remaining=minutes_remaining,
+    )
 
 
 async def require_admin(
-    current_user: CurrentUser = Depends(get_current_user)
+    current_user: CurrentUser = Depends(get_current_user),
 ) -> CurrentUser:
-    """
-    Dependency to require admin role.
-    
-    Args:
-        current_user: Current authenticated user
-    
-    Returns:
-        CurrentUser if they are an admin
-    
-    Raises:
-        HTTPException: If user is not an admin
-    """
+    """Require admin role for endpoint access."""
     if current_user.role != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required"
+            detail="Admin access required",
         )
     return current_user
 
 
-def get_optional_user(
+async def get_optional_user(
     authorization: Optional[str] = Header(None, alias="Authorization"),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client),
 ) -> Optional[CurrentUser]:
     """
-    Dependency to optionally get current user (for endpoints that work with or without auth).
-    
-    Returns None if no valid token provided.
+    Get current user if authenticated, otherwise return None.
+    Useful for endpoints that work both with and without auth.
     """
     if not authorization:
         return None
-    
     try:
-        parts = authorization.split()
-        if len(parts) != 2 or parts[0].lower() != "bearer":
-            return None
-        
-        token = parts[1]
-        user_response = supabase.auth.get_user(token)
-        
-        if not user_response or not user_response.user:
-            return None
-        
-        auth_user = user_response.user
-        
-        profile_response = supabase.table("user_profiles").select(
-            "*, tenants(business_name, minutes_allocated, minutes_used)"
-        ).eq("id", auth_user.id).single().execute()
-        
-        if profile_response.data:
-            profile = profile_response.data
-            tenant = profile.get("tenants", {}) or {}
-            minutes_remaining = tenant.get("minutes_allocated", 0) - tenant.get("minutes_used", 0)
-            
-            return CurrentUser(
-                id=str(auth_user.id),
-                email=auth_user.email,
-                name=profile.get("name"),
-                business_name=tenant.get("business_name"),
-                tenant_id=profile.get("tenant_id"),
-                role=profile.get("role", "user"),
-                minutes_remaining=max(0, minutes_remaining)
-            )
-        
-        return CurrentUser(
-            id=str(auth_user.id),
-            email=auth_user.email,
-            role="user",
-            minutes_remaining=0
-        )
-    except Exception:
+        return await get_current_user(authorization=authorization, db_client=db_client)
+    except HTTPException:
         return None

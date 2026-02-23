@@ -19,9 +19,9 @@ from typing import List, Optional, Set
 
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Query
 from pydantic import BaseModel
-from supabase import Client
+from app.core.postgres_adapter import Client
 
-from app.api.v1.dependencies import get_supabase, get_current_user, CurrentUser
+from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
 from app.utils.tenant_filter import apply_tenant_filter, verify_tenant_access
 
 logger = logging.getLogger(__name__)
@@ -103,7 +103,7 @@ async def upload_campaign_contacts(
     file: UploadFile = File(..., description="CSV file with contacts"),
     skip_duplicates: bool = Query(True, description="Skip duplicate phone numbers within campaign"),
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     Bulk import contacts from CSV to a specific campaign.
@@ -134,7 +134,7 @@ async def upload_campaign_contacts(
     
     try:
         # 1. Validate campaign exists AND belongs to user's tenant
-        campaign_query = supabase.table("campaigns").select("id, name, tenant_id").eq("id", campaign_id)
+        campaign_query = db_client.table("campaigns").select("id, name, tenant_id").eq("id", campaign_id)
         campaign_query = apply_tenant_filter(campaign_query, current_user.tenant_id)
         campaign_response = campaign_query.execute()
         
@@ -177,7 +177,7 @@ async def upload_campaign_contacts(
         # 4. Get existing phone numbers in campaign for duplicate detection
         existing_phones: Set[str] = set()
         if skip_duplicates:
-            existing_response = supabase.table("leads").select("phone_number").eq(
+            existing_response = db_client.table("leads").select("phone_number").eq(
                 "campaign_id", campaign_id
             ).neq("status", "deleted").execute()
             
@@ -269,13 +269,13 @@ async def upload_campaign_contacts(
         
         # 6. Batch insert leads
         if leads_to_insert:
-            # Supabase supports batch insert - insert all at once for performance
+            # PostgreSQL supports batch insert - insert all at once for performance
             # Split into chunks of 500 to avoid request size limits
             chunk_size = 500
             for i in range(0, len(leads_to_insert), chunk_size):
                 chunk = leads_to_insert[i:i + chunk_size]
                 try:
-                    supabase.table("leads").insert(chunk).execute()
+                    db_client.table("leads").insert(chunk).execute()
                     imported += len(chunk)
                 except Exception as e:
                     logger.error(f"Batch insert failed for chunk {i}-{i+len(chunk)}: {e}")
@@ -319,7 +319,7 @@ async def bulk_import_contacts(
     file: UploadFile = File(..., description="CSV file with contacts"),
     campaign_id: Optional[str] = None,
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     Bulk import contacts from CSV file.
@@ -393,7 +393,7 @@ async def bulk_import_contacts(
                 
                 if campaign_id:
                     # Add as lead to campaign (with tenant_id)
-                    supabase.table("leads").insert({
+                    db_client.table("leads").insert({
                         "id": str(uuid.uuid4()),
                         "tenant_id": current_user.tenant_id,
                         "campaign_id": campaign_id,
@@ -407,7 +407,7 @@ async def bulk_import_contacts(
                 else:
                     # Add as client
                     name = f"{first_name or ''} {last_name or ''}".strip() or "Unknown"
-                    supabase.table("clients").insert({
+                    db_client.table("clients").insert({
                         "tenant_id": current_user.tenant_id,
                         "name": name,
                         "company": company,

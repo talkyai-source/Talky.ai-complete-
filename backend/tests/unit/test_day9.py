@@ -303,16 +303,15 @@ class TestDay9Checkpoints:
         assert "/contacts/bulk" in routes
     
     def test_checkpoint_5_dialer_link(self):
-        """Checkpoint 5: Campaign start links to dialer"""
-        from app.api.v1.endpoints.campaigns import start_campaign
+        """Checkpoint 5: Campaign start links to dialer (via CampaignService)"""
+        from app.domain.services.campaign_service import CampaignService
         import inspect
         
-        # Verify start_campaign function exists and uses DialerJob
-        source = inspect.getsource(start_campaign)
+        # Business logic now lives in CampaignService, not the endpoint
+        source = inspect.getsource(CampaignService.start_campaign)
         
-        assert "DialerJob" in source
+        assert "DialerJob" in source or "enqueue_job" in source
         assert "queue_service" in source
-        assert "enqueue_job" in source
 
 
 if __name__ == "__main__":

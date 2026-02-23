@@ -1,0 +1,133 @@
+"""
+WS-D tests for BrowserMediaGateway media contract and backpressure behavior.
+"""
+import asyncio
+import pytest
+
+from app.infrastructure.telephony.browser_media_gateway import BrowserMediaGateway
+from app.utils.audio_utils import generate_silence
+
+
+class _FakeWebSocket:
+    def __init__(self, *, send_delay: float = 0.0):
+        self.send_delay = send_delay
+        self.sent_payloads = []
+
+    async def send_bytes(self, payload: bytes) -> None:
+        if self.send_delay > 0:
+            await asyncio.sleep(self.send_delay)
+        self.sent_payloads.append(payload)
+
+
+@pytest.mark.asyncio
+class TestBrowserMediaGatewayWSD:
+    async def test_initialization_validates_contract(self) -> None:
+        gateway = BrowserMediaGateway()
+        await gateway.initialize(
+            {
+                "sample_rate": 8000,
+                "channels": 1,
+                "bit_depth": 16,
+                "max_queue_size": 16,
+                "target_buffer_ms": 80,
+                "max_buffer_ms": 320,
+                "ws_send_timeout_ms": 50,
+            }
+        )
+        assert gateway._sample_rate == 8000
+        assert gateway._frame_bytes == 2
+        assert gateway._max_queue_size == 16
+
+    async def test_invalid_audio_is_rejected(self) -> None:
+        gateway = BrowserMediaGateway()
+        await gateway.initialize({"sample_rate": 16000})
+
+        ws = _FakeWebSocket()
+        call_id = "wsd-call-1"
+        await gateway.on_call_started(call_id, {"websocket": ws})
+
+        await gateway.on_audio_received(call_id, b"\x00")  # invalid frame alignment
+
+        q = gateway.get_audio_queue(call_id)
+        assert q is not None
+        assert q.qsize() == 0
+        metrics = gateway.get_session_metrics(call_id)
+        assert metrics["input_validation_errors"] == 1
+
+    async def test_input_queue_backpressure_drops_oldest(self) -> None:
+        gateway = BrowserMediaGateway()
+        await gateway.initialize({"sample_rate": 16000, "max_queue_size": 2})
+
+        ws = _FakeWebSocket()
+        call_id = "wsd-call-2"
+        await gateway.on_call_started(call_id, {"websocket": ws})
+
+        for _ in range(5):
+            await gateway.on_audio_received(call_id, generate_silence(80, 16000, 1, 16))
+
+        q = gateway.get_audio_queue(call_id)
+        assert q is not None
+        assert q.qsize() == 2
+        metrics = gateway.get_session_metrics(call_id)
+        assert metrics["dropped_input_chunks"] >= 3
+        assert metrics["max_input_queue_depth"] <= 2
+
+    async def test_send_timeout_increments_metrics(self) -> None:
+        gateway = BrowserMediaGateway()
+        await gateway.initialize(
+            {
+                "sample_rate": 16000,
+                "target_buffer_ms": 10,
+                "max_buffer_ms": 20,
+                "ws_send_timeout_ms": 1,
+            }
+        )
+
+        ws = _FakeWebSocket(send_delay=0.05)
+        call_id = "wsd-call-3"
+        await gateway.on_call_started(call_id, {"websocket": ws})
+
+        # Trigger buffered send path
+        await gateway.send_audio(call_id, generate_silence(40, 16000, 1, 16))
+        await gateway.flush_audio_buffer(call_id)
+
+        metrics = gateway.get_session_metrics(call_id)
+        assert metrics["ws_send_timeouts"] >= 1
+        assert metrics["dropped_output_bytes"] > 0
+
+    async def test_session_metrics_include_contract(self) -> None:
+        gateway = BrowserMediaGateway()
+        await gateway.initialize({"sample_rate": 8000, "target_buffer_ms": 80, "max_buffer_ms": 320})
+
+        ws = _FakeWebSocket()
+        call_id = "wsd-call-4"
+        await gateway.on_call_started(call_id, {"websocket": ws})
+
+        metrics = gateway.get_session_metrics(call_id)
+        assert "contract" in metrics
+        assert metrics["contract"]["sample_rate"] == 8000
+        assert metrics["contract"]["target_buffer_ms"] == 80
+        assert metrics["contract"]["max_buffer_ms"] == 320
+
+    async def test_output_buffer_trim_enforces_max_buffer(self) -> None:
+        gateway = BrowserMediaGateway()
+        await gateway.initialize(
+            {
+                "sample_rate": 16000,
+                "target_buffer_ms": 100,
+                "max_buffer_ms": 100,
+                "ws_send_timeout_ms": 100,
+            }
+        )
+
+        ws = _FakeWebSocket()
+        call_id = "wsd-call-5"
+        await gateway.on_call_started(call_id, {"websocket": ws})
+
+        # Two chunks push buffer over cap before send threshold path.
+        await gateway.send_audio(call_id, generate_silence(80, 16000, 1, 16))
+        await gateway.send_audio(call_id, generate_silence(80, 16000, 1, 16))
+
+        metrics = gateway.get_session_metrics(call_id)
+        assert metrics["dropped_output_bytes"] > 0
+        assert metrics["bytes_sent"] > 0

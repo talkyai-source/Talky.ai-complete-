@@ -12,8 +12,12 @@ The selected configuration is used for actual phone calls.
 import os
 import time
 import base64
+import struct
 import asyncio
-from typing import Optional, List
+import logging
+from typing import Optional, List, Set
+
+import aiohttp
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -31,22 +35,245 @@ from app.domain.models.ai_config import (
     VoiceInfo,
     GROQ_MODELS,
     DEEPGRAM_MODELS,
-    CARTESIA_MODELS,
     GOOGLE_TTS_MODELS,
+    DEEPGRAM_TTS_MODELS,
+    GOOGLE_CHIRP3_VOICES,
+    DEEPGRAM_AURA2_VOICES,
 )
 from app.infrastructure.llm.groq import GroqLLMProvider
-# Cartesia disabled - using Google TTS only
-# from app.infrastructure.tts.cartesia import CartesiaTTSProvider
 from app.infrastructure.tts.google_tts_streaming import GoogleTTSStreamingProvider
+from app.infrastructure.tts.deepgram_tts import DeepgramTTSProvider
 from app.domain.models.conversation import Message, MessageRole
-from app.api.v1.endpoints.auth import get_current_user
+from app.api.v1.dependencies import get_current_user, get_db_client
+from app.core.postgres_adapter import Client
 
 
 router = APIRouter(prefix="/ai-options", tags=["AI Options"])
+logger = logging.getLogger(__name__)
+
+_DEEPGRAM_MODELS_URL = "https://api.deepgram.com/v1/models"
+_DEEPGRAM_MODELS_CACHE_TTL_SECONDS = 300.0
+_deepgram_voice_cache_ids: Optional[Set[str]] = None
+_deepgram_voice_cache_expires_at: float = 0.0
+_deepgram_voice_cache_lock = asyncio.Lock()
 
 
-# In-memory config storage (per-tenant in production, use database)
-_config_cache: dict[str, AIProviderConfig] = {}
+async def _fetch_tenant_config(conn, tenant_id: str) -> Optional[AIProviderConfig]:
+    row = await conn.fetchrow(
+        """
+        SELECT
+            llm_provider,
+            llm_model,
+            llm_temperature,
+            llm_max_tokens,
+            stt_provider,
+            stt_model,
+            stt_language,
+            tts_provider,
+            tts_model,
+            tts_voice_id,
+            tts_sample_rate
+        FROM tenant_ai_configs
+        WHERE tenant_id = $1
+        """,
+        tenant_id,
+    )
+    if not row:
+        return None
+
+    return AIProviderConfig(
+        llm_provider=row["llm_provider"],
+        llm_model=row["llm_model"],
+        llm_temperature=row["llm_temperature"],
+        llm_max_tokens=row["llm_max_tokens"],
+        stt_provider=row["stt_provider"],
+        stt_model=row["stt_model"],
+        stt_language=row["stt_language"],
+        tts_provider=row["tts_provider"],
+        tts_model=row["tts_model"],
+        tts_voice_id=row["tts_voice_id"],
+        tts_sample_rate=row["tts_sample_rate"],
+    )
+
+
+async def _upsert_tenant_config(conn, tenant_id: str, config: AIProviderConfig) -> None:
+    await conn.execute(
+        """
+        INSERT INTO tenant_ai_configs (
+            tenant_id,
+            llm_provider,
+            llm_model,
+            llm_temperature,
+            llm_max_tokens,
+            stt_provider,
+            stt_model,
+            stt_language,
+            tts_provider,
+            tts_model,
+            tts_voice_id,
+            tts_sample_rate
+        )
+        VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+        )
+        ON CONFLICT (tenant_id) DO UPDATE SET
+            llm_provider = EXCLUDED.llm_provider,
+            llm_model = EXCLUDED.llm_model,
+            llm_temperature = EXCLUDED.llm_temperature,
+            llm_max_tokens = EXCLUDED.llm_max_tokens,
+            stt_provider = EXCLUDED.stt_provider,
+            stt_model = EXCLUDED.stt_model,
+            stt_language = EXCLUDED.stt_language,
+            tts_provider = EXCLUDED.tts_provider,
+            tts_model = EXCLUDED.tts_model,
+            tts_voice_id = EXCLUDED.tts_voice_id,
+            tts_sample_rate = EXCLUDED.tts_sample_rate,
+            updated_at = NOW()
+        """,
+        tenant_id,
+        config.llm_provider,
+        config.llm_model,
+        config.llm_temperature,
+        config.llm_max_tokens,
+        config.stt_provider,
+        config.stt_model,
+        config.stt_language,
+        config.tts_provider,
+        config.tts_model,
+        config.tts_voice_id,
+        config.tts_sample_rate,
+    )
+
+
+def _find_google_voice(voice_id: str) -> Optional[VoiceInfo]:
+    for voice in GOOGLE_CHIRP3_VOICES:
+        if voice.id == voice_id:
+            return voice
+    return None
+
+
+def _is_google_voice(voice_id: str) -> bool:
+    return _find_google_voice(voice_id) is not None
+
+
+def _is_english_language(language: Optional[str]) -> bool:
+    if not language:
+        return False
+    normalized = language.strip().lower()
+    return normalized == "en" or normalized.startswith("en-") or normalized == "english"
+
+
+def _english_google_voices() -> List[VoiceInfo]:
+    return [voice for voice in GOOGLE_CHIRP3_VOICES if _is_english_language(voice.language)]
+
+
+def _english_deepgram_static_voices() -> List[VoiceInfo]:
+    return [voice for voice in DEEPGRAM_AURA2_VOICES if _is_english_language(voice.language)]
+
+
+async def _get_live_deepgram_aura2_voice_ids() -> Optional[Set[str]]:
+    """
+    Query Deepgram's official models endpoint and return currently available
+    Aura-2 model IDs for the configured API key.
+
+    Reference:
+    https://developers.deepgram.com/reference/speech-to-text/list-models
+    """
+    global _deepgram_voice_cache_ids, _deepgram_voice_cache_expires_at
+
+    api_key = os.getenv("DEEPGRAM_API_KEY")
+    if not api_key:
+        return None
+
+    now = time.time()
+    if _deepgram_voice_cache_ids is not None and now < _deepgram_voice_cache_expires_at:
+        return set(_deepgram_voice_cache_ids)
+
+    async with _deepgram_voice_cache_lock:
+        now = time.time()
+        if _deepgram_voice_cache_ids is not None and now < _deepgram_voice_cache_expires_at:
+            return set(_deepgram_voice_cache_ids)
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=8)
+            headers = {"Authorization": f"Token {api_key}"}
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(_DEEPGRAM_MODELS_URL, headers=headers) as response:
+                    if response.status != 200:
+                        logger.warning(
+                            "Deepgram models lookup failed with status %s; using docs list fallback.",
+                            response.status,
+                        )
+                        return None
+                    payload = await response.json()
+        except Exception as exc:
+            logger.warning(
+                "Deepgram models lookup failed (%s); using docs list fallback.",
+                exc,
+            )
+            return None
+
+        ids: Set[str] = set()
+        for model in payload.get("tts", []):
+            canonical_name = model.get("canonical_name") or model.get("name")
+            architecture = (model.get("architecture") or "").strip().lower()
+            if not isinstance(canonical_name, str):
+                continue
+            if not canonical_name.startswith("aura-2-"):
+                continue
+            if architecture and architecture != "aura-2":
+                continue
+            ids.add(canonical_name)
+
+        if not ids:
+            logger.warning(
+                "Deepgram models endpoint returned no Aura-2 voices; using docs list fallback."
+            )
+            return None
+
+        _deepgram_voice_cache_ids = ids
+        _deepgram_voice_cache_expires_at = time.time() + _DEEPGRAM_MODELS_CACHE_TTL_SECONDS
+        return set(ids)
+
+
+async def _get_deepgram_voices_for_current_key() -> List[VoiceInfo]:
+    """
+    Return Deepgram voices filtered to the current key's available Aura-2 models.
+    Falls back to the docs-verified static list if lookup fails.
+    """
+    fallback_english = _english_deepgram_static_voices()
+    live_ids = await _get_live_deepgram_aura2_voice_ids()
+    if not live_ids:
+        return fallback_english
+
+    filtered = [
+        voice
+        for voice in DEEPGRAM_AURA2_VOICES
+        if voice.id in live_ids and _is_english_language(voice.language)
+    ]
+    if not filtered:
+        logger.warning(
+            "No overlap between docs-verified Aura-2 voices and live account models; using English docs list fallback."
+        )
+        return fallback_english
+    return filtered
+
+
+def _linear16_to_float32le_bytes(pcm16_data: bytes) -> bytes:
+    """
+    Convert little-endian linear16 PCM bytes to float32 little-endian bytes.
+    Frontend preview playback expects float32 PCM payload.
+    """
+    if not pcm16_data:
+        return b""
+    sample_count = len(pcm16_data) // 2
+    if sample_count == 0:
+        return b""
+    samples = struct.unpack(f"<{sample_count}h", pcm16_data[: sample_count * 2])
+    return b"".join(
+        struct.pack("<f", max(-1.0, min(1.0, sample / 32768.0)))
+        for sample in samples
+    )
 
 
 @router.get("/providers", response_model=ProviderListResponse)
@@ -67,8 +294,11 @@ async def list_providers():
             "models": [model.model_dump() for model in DEEPGRAM_MODELS]
         },
         tts={
-            "providers": ["google"],  # Cartesia disabled
-            "models": [model.model_dump() for model in GOOGLE_TTS_MODELS]
+            "providers": ["google", "deepgram"],
+            "models": [
+                *(model.model_dump() for model in GOOGLE_TTS_MODELS),
+                *(model.model_dump() for model in DEEPGRAM_TTS_MODELS),
+            ],
         }
     )
 
@@ -83,15 +313,14 @@ async def list_voices():
     suitability for business calls.
     
     Includes:
-    - Cartesia Sonic 3 voices (ultra-low latency ~90ms)
-    - Google Chirp 3 HD voices (high quality ~200ms, gRPC streaming)
+    - Google Chirp 3 HD voices
+    - Deepgram Aura-2 voices
     
     Returns:
         List of VoiceInfo with voice details and preview info
     """
-    from app.domain.models.ai_config import GOOGLE_CHIRP3_VOICES
-    # Cartesia disabled - only return Google voices
-    return GOOGLE_CHIRP3_VOICES
+    deepgram_voices = await _get_deepgram_voices_for_current_key()
+    return [*_english_google_voices(), *deepgram_voices]
 
 
 class VoicePreviewRequest(BaseModel):
@@ -117,7 +346,9 @@ async def preview_voice(request: VoicePreviewRequest):
     Synthesizes the given text with the specified voice
     and returns the audio as base64.
     
-    Supports both Cartesia and Google Chirp 3 HD voices.
+    Supports:
+    - Google Chirp3-HD voices
+    - Deepgram Aura-2 voices
     
     Args:
         request: VoicePreviewRequest with voice_id and optional text
@@ -125,76 +356,85 @@ async def preview_voice(request: VoicePreviewRequest):
     Returns:
         VoicePreviewResponse with base64 audio data
     """
-    from app.domain.models.ai_config import GOOGLE_CHIRP3_VOICES
-    import os
-    
-    # Find voice name from Google voices (Cartesia disabled)
-    voice_name = "Unknown Voice"
-    
-    for voice in GOOGLE_CHIRP3_VOICES:
-        if voice.id == request.voice_id:
-            voice_name = voice.name
-            break
-    
-    # Ensure voice_id is in Google format
-    voice_id = request.voice_id
-    if not voice_id.startswith("en-US-Chirp3-HD"):
-        # Fallback to default Google voice
-        voice_id = "en-US-Chirp3-HD-Leda"
-        voice_name = "Leda"
-    
     try:
-        # Always use Google TTS Streaming (Cartesia disabled)
-        # Set credentials path - go up from app/api/v1/endpoints/ to backend/
-        # __file__ is in: backend/app/api/v1/endpoints/ai_options.py
-        # We need: backend/config/google-service-account.json
-        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
-        creds_path = os.path.join(backend_dir, "config", "google-service-account.json")
-        
-        # Verify file exists
-        if not os.path.exists(creds_path):
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Google service account file not found at: {creds_path}"
+        tts = None
+        deepgram_voices = await _get_deepgram_voices_for_current_key()
+        deepgram_voice_map = {voice.id: voice for voice in deepgram_voices}
+        deepgram_static_voice_map = {
+            voice.id: voice
+            for voice in _english_deepgram_static_voices()
+        }
+
+        voice_info = (
+            _find_google_voice(request.voice_id)
+            or deepgram_voice_map.get(request.voice_id)
+            or deepgram_static_voice_map.get(request.voice_id)
+        )
+        voice_name = voice_info.name if voice_info else "Unknown Voice"
+        voice_id = request.voice_id
+        sample_rate = 24000
+
+        if _is_google_voice(voice_id):
+            backend_dir = os.path.dirname(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
             )
-        
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
-        
-        tts = GoogleTTSStreamingProvider()
-        await tts.initialize({
-            "voice_id": voice_id,
-            "sample_rate": 24000  # Chirp 3 HD optimal
-        })
-        
+            creds_path = os.path.join(backend_dir, "config", "google-service-account.json")
+            if not os.path.exists(creds_path):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Google service account file not found at: {creds_path}",
+                )
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
+            tts = GoogleTTSStreamingProvider()
+            await tts.initialize({"voice_id": voice_id, "sample_rate": sample_rate})
+            output_is_linear16 = False
+        elif voice_id in deepgram_voice_map or voice_id in deepgram_static_voice_map:
+            if not os.getenv("DEEPGRAM_API_KEY"):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Deepgram API key not configured",
+                )
+            tts = DeepgramTTSProvider()
+            await tts.initialize({"voice_id": voice_id, "sample_rate": sample_rate})
+            output_is_linear16 = True
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unknown voice_id",
+            )
+
         start_time = time.time()
-        audio_chunks = []
-        
+        audio_chunks: List[bytes] = []
+
         async for chunk in tts.stream_synthesize(
             text=request.text,
             voice_id=voice_id,
-            sample_rate=24000
+            sample_rate=sample_rate,
         ):
             audio_chunks.append(chunk.data)
-        
         end_time = time.time()
+
         await tts.cleanup()
-        
-        # Combine audio chunks
-        combined_audio = b''.join(audio_chunks)
-        audio_base64 = base64.b64encode(combined_audio).decode('utf-8')
-        
-        # Calculate duration (pcm_f32le at 24kHz, 4 bytes per sample)
-        duration_seconds = len(combined_audio) / (24000 * 4)
+
+        combined_audio = b"".join(audio_chunks)
+        if output_is_linear16:
+            # Deepgram returns linear16 PCM; convert to float32 for frontend preview playback.
+            combined_audio = _linear16_to_float32le_bytes(combined_audio)
+        audio_base64 = base64.b64encode(combined_audio).decode("utf-8")
+
+        duration_seconds = len(combined_audio) / (sample_rate * 4)
         latency_ms = (end_time - start_time) * 1000
-        
+
         return VoicePreviewResponse(
             voice_id=request.voice_id,
             voice_name=voice_name,
             audio_base64=audio_base64,
             duration_seconds=duration_seconds,
-            latency_ms=latency_ms
+            latency_ms=latency_ms,
         )
-    
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -292,70 +532,85 @@ async def test_tts(request: TTSTestRequest):
     Returns:
         TTSTestResponse with base64 audio and latency metrics
     """
-    # Now using Google TTS (Cartesia disabled)
-    import os as _os
-    
-    # Set credentials path
-    backend_dir = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(__file__)))))
-    creds_path = _os.path.join(backend_dir, "config", "google-service-account.json")
-    
-    if not _os.path.exists(creds_path):
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Google service account file not found"
-        )
-    
-    _os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
-    
-    # Ensure voice_id is in Google format
-    voice_id = request.voice_id
-    if not voice_id.startswith("en-US-Chirp3-HD"):
-        voice_id = "en-US-Chirp3-HD-Leda"
-    
     try:
-        tts = GoogleTTSStreamingProvider()
-        await tts.initialize({
-            "voice_id": voice_id,
-            "sample_rate": 24000  # Chirp3-HD
-        })
-        
+        tts = None
+        voice_id = request.voice_id
+        sample_rate = request.sample_rate or 24000
+        deepgram_voices = await _get_deepgram_voices_for_current_key()
+        deepgram_voice_ids = {voice.id for voice in deepgram_voices}
+        deepgram_static_voice_ids = {voice.id for voice in _english_deepgram_static_voices()}
+
+        if _is_google_voice(voice_id):
+            import os as _os
+
+            backend_dir = _os.path.dirname(
+                _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(__file__))))
+            )
+            creds_path = _os.path.join(backend_dir, "config", "google-service-account.json")
+            if not _os.path.exists(creds_path):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Google service account file not found",
+                )
+            _os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
+            tts = GoogleTTSStreamingProvider()
+            await tts.initialize({"voice_id": voice_id, "sample_rate": sample_rate})
+            output_is_linear16 = False
+            model_name = "Chirp3-HD"
+        elif voice_id in deepgram_voice_ids or voice_id in deepgram_static_voice_ids:
+            if not os.getenv("DEEPGRAM_API_KEY"):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Deepgram API key not configured",
+                )
+            tts = DeepgramTTSProvider()
+            await tts.initialize({"voice_id": voice_id, "sample_rate": sample_rate})
+            output_is_linear16 = True
+            model_name = "aura-2"
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unknown voice_id",
+            )
+
         start_time = time.time()
         first_audio_time: Optional[float] = None
-        audio_chunks = []
-        
+        audio_chunks: List[bytes] = []
+
         async for chunk in tts.stream_synthesize(
             text=request.text,
             voice_id=voice_id,
-            sample_rate=24000
+            sample_rate=sample_rate
         ):
             if first_audio_time is None:
                 first_audio_time = time.time()
             audio_chunks.append(chunk.data)
-        
+
         end_time = time.time()
-        
+
         await tts.cleanup()
-        
-        # Combine audio chunks
-        combined_audio = b''.join(audio_chunks)
-        audio_base64 = base64.b64encode(combined_audio).decode('utf-8')
-        
-        # Calculate duration (pcm_f32le at 24kHz, 4 bytes per sample)
-        bytes_per_sample = 4
-        duration_seconds = len(combined_audio) / (24000 * bytes_per_sample)
-        
+
+        combined_audio = b"".join(audio_chunks)
+        if output_is_linear16:
+            combined_audio = _linear16_to_float32le_bytes(combined_audio)
+        audio_base64 = base64.b64encode(combined_audio).decode("utf-8")
+
+        duration_seconds = len(combined_audio) / (sample_rate * 4)
+
         first_audio_ms = ((first_audio_time or end_time) - start_time) * 1000
         total_latency_ms = (end_time - start_time) * 1000
-        
+
         return TTSTestResponse(
             audio_base64=audio_base64,
             latency_ms=total_latency_ms,
             first_audio_ms=first_audio_ms,
             duration_seconds=duration_seconds,
-            model="chirp3-hd",
+            model=model_name,
             voice_id=voice_id
         )
-    
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -364,38 +619,57 @@ async def test_tts(request: TTSTestRequest):
 
 
 @router.get("/config", response_model=AIProviderConfig)
-async def get_config(current_user = Depends(get_current_user)):
+async def get_config(
+    current_user=Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
     """
     Get current AI provider configuration for the user's tenant.
     
     Returns:
         AIProviderConfig with current settings
     """
-    from app.domain.models.ai_config import GoogleTTSModel
-    
-    tenant_id = current_user.tenant_id or "default"
-    
-    if tenant_id in _config_cache:
-        cached_config = _config_cache[tenant_id]
-        
-        # Migration: Fix old Cartesia configs to use Google TTS
-        if cached_config.tts_provider == "cartesia" or cached_config.tts_model in ["sonic-3", "sonic-2"]:
-            cached_config.tts_provider = "google"
-            cached_config.tts_model = GoogleTTSModel.CHIRP3_HD.value
-            cached_config.tts_voice_id = "en-US-Chirp3-HD-Leda"
-            cached_config.tts_sample_rate = 24000
-            _config_cache[tenant_id] = cached_config
-        
-        return cached_config
-    
-    # Return default config if none saved (now defaults to Google TTS)
-    return AIProviderConfig()
+    from app.domain.services.global_ai_config import set_global_config
+
+    tenant_id = current_user.tenant_id
+    if not tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User is not associated with a tenant",
+        )
+
+    async with db_client.pool.acquire() as conn:
+        config = await _fetch_tenant_config(conn, tenant_id)
+        if config is None:
+            config = AIProviderConfig()
+            await _upsert_tenant_config(conn, tenant_id, config)
+        elif config.tts_provider == "deepgram":
+            deepgram_voices = await _get_deepgram_voices_for_current_key()
+            valid_voice_ids = {voice.id for voice in deepgram_voices}
+            if valid_voice_ids and config.tts_voice_id not in valid_voice_ids:
+                old_voice_id = config.tts_voice_id
+                config.tts_voice_id = deepgram_voices[0].id
+                config.tts_model = "aura-2"
+                if config.tts_sample_rate not in {8000, 16000, 24000, 32000, 48000}:
+                    config.tts_sample_rate = 24000
+                await _upsert_tenant_config(conn, tenant_id, config)
+                logger.info(
+                    "Auto-corrected invalid Deepgram voice id '%s' to '%s' for tenant %s",
+                    old_voice_id,
+                    config.tts_voice_id,
+                    tenant_id,
+                )
+
+    # Keep voice pipeline in sync with tenant-selected config.
+    set_global_config(config)
+    return config
 
 
 @router.post("/config", response_model=AIProviderConfig)
 async def save_config(
     config: AIProviderConfig,
-    current_user = Depends(get_current_user)
+    current_user=Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
 ):
     """
     Save AI provider configuration GLOBALLY.
@@ -412,17 +686,21 @@ async def save_config(
     Returns:
         Saved AIProviderConfig
     """
+    from app.domain.models.ai_config import GoogleTTSModel, DeepgramTTSModel
     from app.domain.services.global_ai_config import set_global_config
-    from app.domain.models.ai_config import GoogleTTSModel
-    
-    tenant_id = current_user.tenant_id or "default"
-    
-    # Auto-migrate Cartesia configs to Google TTS (Cartesia disabled)
-    if config.tts_provider == "cartesia" or config.tts_model in ["sonic-3", "sonic-2"]:
-        config.tts_provider = "google"
-        config.tts_model = GoogleTTSModel.CHIRP3_HD.value
-        config.tts_voice_id = "en-US-Chirp3-HD-Leda"
-        config.tts_sample_rate = 24000
+
+    tenant_id = current_user.tenant_id
+    if not tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User is not associated with a tenant",
+        )
+
+    if config.tts_provider not in {"google", "deepgram"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid TTS provider. Supported providers: google, deepgram.",
+        )
     
     # Validate LLM model
     valid_llm_models = [m.id for m in GROQ_MODELS]
@@ -432,20 +710,50 @@ async def save_config(
             detail=f"Invalid LLM model. Must be one of: {valid_llm_models}"
         )
     
-    # Validate TTS model - Now using Google TTS only (Cartesia disabled)
-    valid_tts_models = [m.id for m in GOOGLE_TTS_MODELS]
+    if config.tts_provider == "google":
+        valid_tts_models = [m.id for m in GOOGLE_TTS_MODELS]
+        valid_voice_ids = {voice.id for voice in _english_google_voices()}
+    else:
+        valid_tts_models = [m.id for m in DEEPGRAM_TTS_MODELS]
+        deepgram_voices = await _get_deepgram_voices_for_current_key()
+        valid_voice_ids = {voice.id for voice in deepgram_voices}
+
     if config.tts_model not in valid_tts_models:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid TTS model. Must be one of: {valid_tts_models}"
         )
-    
-    # Save to global config (applies immediately to all voice interactions)
+    if config.tts_voice_id not in valid_voice_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid TTS voice for current provider or not available for this Deepgram key",
+        )
+
+    if (
+        config.tts_provider == "google"
+        and config.tts_model == GoogleTTSModel.CHIRP3_HD.value
+        and config.tts_sample_rate != 24000
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Chirp3-HD requires sample rate 24000",
+        )
+
+    if (
+        config.tts_provider == "deepgram"
+        and config.tts_model == DeepgramTTSModel.AURA_2.value
+        and config.tts_sample_rate not in {8000, 16000, 24000, 32000, 48000}
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Aura-2 sample_rate must be one of 8000, 16000, 24000, 32000, 48000",
+        )
+
+    async with db_client.pool.acquire() as conn:
+        await _upsert_tenant_config(conn, tenant_id, config)
+
+    # Applies immediately to active voice pipeline selection.
     set_global_config(config)
-    
-    # Also save to tenant cache for persistence
-    _config_cache[tenant_id] = config
-    
     return config
 
 
@@ -481,23 +789,9 @@ async def run_benchmark(config: AIProviderConfig):
             detail="Groq API key not configured"
         )
     
-    # Set Google credentials path
-    backend_dir = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(__file__)))))
-    creds_path = _os.path.join(backend_dir, "config", "google-service-account.json")
-    
-    if not _os.path.exists(creds_path):
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Google service account file not found"
-        )
-    
-    _os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
-    
-    # Ensure voice_id is in Google format
     voice_id = config.tts_voice_id
-    if not voice_id.startswith("en-US-Chirp3-HD"):
-        voice_id = "en-US-Chirp3-HD-Leda"
-    
+    sample_rate = config.tts_sample_rate
+
     try:
         # Initialize providers
         llm = GroqLLMProvider()
@@ -508,12 +802,32 @@ async def run_benchmark(config: AIProviderConfig):
             "max_tokens": config.llm_max_tokens
         })
         
-        # Using Google TTS (Cartesia disabled)
-        tts = GoogleTTSStreamingProvider()
-        await tts.initialize({
-            "voice_id": voice_id,
-            "sample_rate": 24000
-        })
+        if config.tts_provider == "google":
+            backend_dir = _os.path.dirname(
+                _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(__file__))))
+            )
+            creds_path = _os.path.join(backend_dir, "config", "google-service-account.json")
+            if not _os.path.exists(creds_path):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Google service account file not found",
+                )
+            _os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
+            tts = GoogleTTSStreamingProvider()
+            await tts.initialize({"voice_id": voice_id, "sample_rate": sample_rate})
+        elif config.tts_provider == "deepgram":
+            if not os.getenv("DEEPGRAM_API_KEY"):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Deepgram API key not configured",
+                )
+            tts = DeepgramTTSProvider()
+            await tts.initialize({"voice_id": voice_id, "sample_rate": sample_rate})
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported TTS provider '{config.tts_provider}' for benchmark",
+            )
         
         # Benchmark LLM
         messages = [Message(role=MessageRole.USER, content="Hello, how are you?")]
@@ -543,7 +857,7 @@ async def run_benchmark(config: AIProviderConfig):
         async for chunk in tts.stream_synthesize(
             text=llm_response,
             voice_id=voice_id,
-            sample_rate=24000
+            sample_rate=sample_rate
         ):
             if tts_first_audio_time is None:
                 tts_first_audio_time = time.time()

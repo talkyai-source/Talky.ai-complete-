@@ -146,7 +146,7 @@ class TestCampaignsAPI:
     async def test_campaigns_supabase_validation(self):
         """Test that campaigns endpoint validates Supabase config."""
         import os
-        from app.api.v1.endpoints.campaigns import get_supabase
+        from app.api.v1.endpoints.campaigns import get_db_client
         
         # Save original values
         original_url = os.environ.get("SUPABASE_URL")
@@ -161,7 +161,7 @@ class TestCampaignsAPI:
             
             # Should raise RuntimeError
             with pytest.raises(RuntimeError) as exc_info:
-                get_supabase()
+                get_db_client()
             
             assert "SUPABASE_URL" in str(exc_info.value)
             

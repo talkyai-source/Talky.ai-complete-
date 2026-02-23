@@ -37,8 +37,8 @@ class ProviderValidator:
             ("VONAGE_API_SECRET", "Vonage telephony"),
         ],
         "database": [
-            ("SUPABASE_URL", "Supabase database"),
-            ("SUPABASE_SERVICE_KEY", "Supabase database"),
+            ("DATABASE_URL", "PostgreSQL database"),
+            ("JWT_SECRET", "JWT Secret for auth"),
         ],
         "cache": [("REDIS_URL", "Redis cache (optional)")],
     }
@@ -70,7 +70,14 @@ class ProviderValidator:
         # Check required vars
         for provider, vars_list in self.REQUIRED_ENV_VARS.items():
             for env_var, description in vars_list:
-                value = os.getenv(env_var)
+                if env_var == "JWT_SECRET":
+                    # Accept JWT_SECRET or SECRET_KEY fallback.
+                    value = (
+                        os.getenv("JWT_SECRET")
+                        or os.getenv("SECRET_KEY")
+                    )
+                else:
+                    value = os.getenv(env_var)
                 
                 # Special case: Redis is optional in development
                 if env_var == "REDIS_URL":

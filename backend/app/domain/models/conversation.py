@@ -2,7 +2,7 @@
 Conversation Domain Models
 """
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
 
@@ -35,6 +35,7 @@ class TranscriptChunk(BaseModel):
     is_final: bool = False
     confidence: Optional[float] = None
     timestamp: Optional[datetime] = None
+    metadata: Optional[Dict[str, Any]] = None  # For Flux events: eager, resumed, etc.
 
 
 class BargeInSignal(BaseModel):

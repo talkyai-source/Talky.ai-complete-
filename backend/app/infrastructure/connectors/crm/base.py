@@ -1,72 +1,52 @@
 """
 CRM Provider Base Class
 Abstract interface for CRM integrations.
+
+Day 24: Unified Connector System
+Day 30: Added log_call() and create_note() abstract methods
 """
 from abc import abstractmethod
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from pydantic import BaseModel
 
 from app.infrastructure.connectors.base import BaseConnector, ConnectorCapability
-
-
-class CRMContact(BaseModel):
-    """Represents a CRM contact."""
-    id: Optional[str] = None
-    email: Optional[str] = None
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    phone: Optional[str] = None
-    company: Optional[str] = None
-    job_title: Optional[str] = None
-    properties: Dict[str, Any] = {}
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    
-    class Config:
-        extra = "allow"
-    
-    @property
-    def full_name(self) -> str:
-        parts = [self.first_name, self.last_name]
-        return " ".join(p for p in parts if p)
-
-
-class CRMDeal(BaseModel):
-    """Represents a CRM deal/opportunity."""
-    id: Optional[str] = None
-    name: str = ""
-    stage: Optional[str] = None
-    amount: Optional[float] = None
-    close_date: Optional[datetime] = None
-    contact_ids: List[str] = []
-    properties: Dict[str, Any] = {}
-    
-    class Config:
-        extra = "allow"
 
 
 class CRMProvider(BaseConnector):
     """
     Abstract base class for CRM providers.
-    
-    Extends BaseConnector with CRM-specific methods.
+
+    Extends BaseConnector with CRM-specific methods for:
+    - Contact search
+    - Call logging
+    - Note creation
     """
-    
+
     @property
     def connector_type(self) -> str:
         return "crm"
-    
+
     @property
     def capabilities(self) -> List[ConnectorCapability]:
         return [
-            ConnectorCapability.CREATE_CONTACT,
-            ConnectorCapability.UPDATE_CONTACT,
-            ConnectorCapability.LIST_CONTACTS,
-            ConnectorCapability.GET_CONTACT,
-            ConnectorCapability.CREATE_DEAL
+            ConnectorCapability.LOG_CALL,
+            ConnectorCapability.CREATE_NOTE,
         ]
-    
+
+    @abstractmethod
+    async def search_contact(
+        self,
+        email: Optional[str] = None,
+        phone: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Search for a contact by email or phone.
+
+        Returns:
+            Contact dict with at least 'id' key, or None if not found.
+        """
+        ...
+
     @abstractmethod
     async def create_contact(
         self,
@@ -74,54 +54,46 @@ class CRMProvider(BaseConnector):
         first_name: Optional[str] = None,
         last_name: Optional[str] = None,
         phone: Optional[str] = None,
-        company: Optional[str] = None,
-        properties: Optional[Dict[str, Any]] = None
-    ) -> CRMContact:
-        """Create a new CRM contact."""
-        pass
-    
+        properties: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a new contact.
+
+        Returns:
+            Created contact dict with 'id' key.
+        """
+        ...
+
     @abstractmethod
-    async def update_contact(
+    async def log_call(
         self,
         contact_id: str,
-        email: Optional[str] = None,
-        first_name: Optional[str] = None,
-        last_name: Optional[str] = None,
-        phone: Optional[str] = None,
-        company: Optional[str] = None,
-        properties: Optional[Dict[str, Any]] = None
-    ) -> CRMContact:
-        """Update an existing CRM contact."""
-        pass
-    
+        call_body: str,
+        duration_seconds: int,
+        outcome: str = "COMPLETED",
+        call_direction: str = "OUTBOUND",
+        timestamp: Optional[datetime] = None,
+    ) -> str:
+        """
+        Log a call activity associated with a contact.
+
+        Returns:
+            Provider's call activity ID.
+        """
+        ...
+
     @abstractmethod
-    async def get_contact(self, contact_id: str) -> CRMContact:
-        """Get a contact by ID."""
-        pass
-    
-    @abstractmethod
-    async def list_contacts(
+    async def create_note(
         self,
-        limit: int = 100,
-        search: Optional[str] = None
-    ) -> List[CRMContact]:
-        """List contacts with optional search."""
-        pass
-    
-    @abstractmethod
-    async def find_contact_by_email(self, email: str) -> Optional[CRMContact]:
-        """Find a contact by email address."""
-        pass
-    
-    @abstractmethod
-    async def create_deal(
-        self,
-        name: str,
-        stage: str,
-        amount: Optional[float] = None,
-        close_date: Optional[datetime] = None,
-        contact_ids: Optional[List[str]] = None,
-        properties: Optional[Dict[str, Any]] = None
-    ) -> CRMDeal:
-        """Create a new deal/opportunity."""
-        pass
+        contact_id: str,
+        note_body: str,
+        timestamp: Optional[datetime] = None,
+    ) -> str:
+        """
+        Create a note attached to a contact.
+
+        Returns:
+            Provider's note ID.
+        """
+        ...
+

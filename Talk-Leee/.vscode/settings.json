@@ -1,0 +1,11 @@
+{
+    {
+  "window.zoomLevel": 0,
+  "editor.fontSize": 12,
+  "terminal.integrated.fontSize": 12,
+  "debug.console.fontSize": 12,
+  "scm.inputFontSize": 12,
+  "notebook.output.fontSize": 12
+}
+
+}

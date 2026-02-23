@@ -1,0 +1,7 @@
+[Unit]
+Description=Talky.ai Full Stack (API + Workers)
+Requires=talky-api.service talky-voice-worker.service talky-dialer-worker.service talky-reminder-worker.service
+After=talky-api.service
+
+[Install]
+WantedBy=multi-user.target

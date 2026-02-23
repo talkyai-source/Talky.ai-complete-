@@ -5,10 +5,10 @@ Provides call analytics with date range and grouping
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime, timedelta
-from supabase import Client
+from datetime import date, datetime, time, timedelta, timezone
+from app.core.postgres_adapter import Client
 
-from app.api.v1.dependencies import get_supabase, get_current_user, CurrentUser
+from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
 from app.utils.tenant_filter import apply_tenant_filter
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -33,7 +33,7 @@ async def get_call_analytics(
     to_date: Optional[str] = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
     group_by: str = Query("day", description="Grouping: day, week, month"),
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     Get call analytics with date range and grouping.
@@ -46,27 +46,52 @@ async def get_call_analytics(
         - group_by: day, week, or month
     """
     try:
-        # Parse dates with defaults
+        if group_by not in {"day", "week", "month"}:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid group_by. Must be one of: day, week, month",
+            )
+
+        # Parse dates with defaults (inclusive range on provided dates).
         if to_date:
-            end_dt = datetime.strptime(to_date, "%Y-%m-%d")
+            end_date = date.fromisoformat(to_date)
         else:
-            end_dt = datetime.utcnow()
-        
+            end_date = datetime.now(timezone.utc).date()
+
         if from_date:
-            start_dt = datetime.strptime(from_date, "%Y-%m-%d")
+            start_date = date.fromisoformat(from_date)
         else:
-            start_dt = end_dt - timedelta(days=30)
-        
-        # Query calls within date range with tenant filtering
-        query = supabase.table("calls").select(
+            start_date = end_date - timedelta(days=30)
+
+        if start_date > end_date:
+            raise HTTPException(
+                status_code=400,
+                detail="'from' date cannot be later than 'to' date",
+            )
+
+        start_dt = datetime.combine(start_date, time.min, tzinfo=timezone.utc)
+        end_dt_exclusive = datetime.combine(
+            end_date + timedelta(days=1),
+            time.min,
+            tzinfo=timezone.utc,
+        )
+
+        # Query calls within date range with tenant filtering.
+        query = db_client.table("calls").select(
             "created_at, status"
         ).gte(
-            "created_at", start_dt.isoformat()
-        ).lte(
-            "created_at", end_dt.isoformat()
+            "created_at", start_dt
+        ).lt(
+            "created_at", end_dt_exclusive
         )
         query = apply_tenant_filter(query, current_user.tenant_id)
         response = query.order("created_at").execute()
+
+        if response.error:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to fetch analytics: {response.error}",
+            )
         
         if not response.data:
             return CallAnalyticsResponse(series=[])
@@ -75,13 +100,21 @@ async def get_call_analytics(
         date_groups = {}
         
         for call in response.data:
-            created_at = call.get("created_at", "")
+            created_at = call.get("created_at")
             if not created_at:
                 continue
             
             # Parse timestamp and get date key based on grouping
             try:
-                dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                if isinstance(created_at, datetime):
+                    dt = created_at
+                elif isinstance(created_at, str):
+                    dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                else:
+                    continue
+
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
                 
                 if group_by == "week":
                     # Week starts on Monday
@@ -118,6 +151,8 @@ async def get_call_analytics(
         
         return CallAnalyticsResponse(series=series)
     
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(
             status_code=400,

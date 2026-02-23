@@ -2,13 +2,16 @@
 Call History Endpoints
 Provides paginated call list and individual call details
 """
+import logging
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from typing import List, Optional
-from supabase import Client
+from app.core.postgres_adapter import Client
 
-from app.api.v1.dependencies import get_supabase, get_current_user, CurrentUser
+from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
 from app.utils.tenant_filter import apply_tenant_filter, verify_tenant_access
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/calls", tags=["calls"])
 
@@ -16,6 +19,7 @@ router = APIRouter(prefix="/calls", tags=["calls"])
 class CallListItem(BaseModel):
     """Call list item (summary)"""
     id: str
+    talklee_call_id: Optional[str] = None
     timestamp: str
     to_number: str
     status: str
@@ -26,6 +30,7 @@ class CallListItem(BaseModel):
 class CallDetail(BaseModel):
     """Full call details"""
     id: str
+    talklee_call_id: Optional[str] = None
     timestamp: str
     to_number: str
     status: str
@@ -54,7 +59,7 @@ async def list_calls(
     from_date: Optional[str] = Query(None, alias="from", description="Start date (YYYY-MM-DD)"),
     to_date: Optional[str] = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     Get paginated list of calls.
@@ -70,7 +75,7 @@ async def list_calls(
     """
     try:
         # Build query with tenant filtering
-        query = supabase.table("calls").select(
+        query = db_client.table("calls").select(
             "id, created_at, phone_number, status, duration_seconds, outcome",
             count="exact"
         )
@@ -100,6 +105,7 @@ async def list_calls(
         for call in response.data or []:
             items.append(CallListItem(
                 id=call["id"],
+                talklee_call_id=call.get("talklee_call_id"),
                 timestamp=call.get("created_at", ""),
                 to_number=call.get("phone_number", ""),
                 status=call.get("status", "unknown"),
@@ -115,9 +121,10 @@ async def list_calls(
         )
     
     except Exception as e:
+        logger.error(f"Failed to fetch calls: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to fetch calls: {str(e)}"
+            detail="Failed to fetch calls"
         )
 
 
@@ -125,7 +132,7 @@ async def list_calls(
 async def get_call(
     call_id: str,
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     Get individual call details.
@@ -136,7 +143,7 @@ async def get_call(
     """
     try:
         # Get call details with tenant filtering
-        query = supabase.table("calls").select("*").eq("id", call_id)
+        query = db_client.table("calls").select("*").eq("id", call_id)
         query = apply_tenant_filter(query, current_user.tenant_id)
         call_response = query.single().execute()
         
@@ -150,13 +157,14 @@ async def get_call(
         
         # Get recording if exists
         recording_id = None
-        recording_response = supabase.table("recordings").select("id").eq("call_id", call_id).execute()
+        recording_response = db_client.table("recordings").select("id").eq("call_id", call_id).execute()
         
         if recording_response.data and len(recording_response.data) > 0:
             recording_id = recording_response.data[0]["id"]
         
         return CallDetail(
             id=call["id"],
+            talklee_call_id=call.get("talklee_call_id"),
             timestamp=call.get("created_at", ""),
             to_number=call.get("phone_number", ""),
             status=call.get("status", "unknown"),
@@ -172,9 +180,10 @@ async def get_call(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to fetch call {call_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to fetch call: {str(e)}"
+            detail="Failed to fetch call"
         )
 
 
@@ -183,7 +192,7 @@ async def get_call_transcript(
     call_id: str,
     format: str = Query("json", description="Format: 'json' or 'text'"),
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     Get call transcript in requested format (Day 10).
@@ -199,11 +208,11 @@ async def get_call_transcript(
     """
     try:
         # Verify call belongs to tenant before fetching transcript
-        if not verify_tenant_access(supabase, "calls", call_id, current_user.tenant_id):
+        if not verify_tenant_access(db_client, "calls", call_id, current_user.tenant_id):
             raise HTTPException(status_code=404, detail="Call not found")
         
         # First try the transcripts table (Day 10)
-        transcript_response = supabase.table("transcripts").select(
+        transcript_response = db_client.table("transcripts").select(
             "turns, full_text, word_count, turn_count, created_at"
         ).eq("call_id", call_id).execute()
         
@@ -229,7 +238,7 @@ async def get_call_transcript(
                 }
         
         # Fallback to calls table transcript fields
-        call_response = supabase.table("calls").select(
+        call_response = db_client.table("calls").select(
             "transcript, transcript_json"
         ).eq("id", call_id).single().execute()
         
@@ -258,8 +267,89 @@ async def get_call_transcript(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to fetch transcript for call {call_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to fetch transcript: {str(e)}"
+            detail="Failed to fetch transcript"
         )
+
+
+# =============================================================================
+# Day 1: Call Events & Legs Endpoints
+# =============================================================================
+
+@router.get("/{call_id}/events")
+async def get_call_events(
+    call_id: str,
+    limit: int = Query(100, ge=1, le=500),
+    event_type: Optional[str] = Query(None, description="Filter by event type"),
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client)
+):
+    """
+    Get call events (timeline) for a specific call.
+    
+    Returns chronological list of events: state changes, leg starts,
+    transcripts, LLM calls, TTS, webhooks, etc.
+    
+    Query params:
+        - limit: Max events to return (default 100, max 500)
+        - event_type: Filter by type (state_change, transcript, etc.)
+    """
+    try:
+        # Verify call belongs to tenant
+        if not verify_tenant_access(db_client, "calls", call_id, current_user.tenant_id):
+            raise HTTPException(status_code=404, detail="Call not found")
+        
+        # Build query
+        query = db_client.table("call_events").select("*").eq("call_id", call_id)
+        
+        if event_type:
+            query = query.eq("event_type", event_type)
+        
+        response = query.order("created_at", desc=False).limit(limit).execute()
+        
+        return {
+            "call_id": call_id,
+            "events": response.data or [],
+            "count": len(response.data) if response.data else 0
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to fetch events for call {call_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to fetch call events")
+
+
+@router.get("/{call_id}/legs")
+async def get_call_legs(
+    call_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client)
+):
+    """
+    Get call legs for a specific call.
+    
+    Returns all legs (PSTN, WebSocket, SIP, etc.) with their status
+    and timing information.
+    """
+    try:
+        # Verify call belongs to tenant
+        if not verify_tenant_access(db_client, "calls", call_id, current_user.tenant_id):
+            raise HTTPException(status_code=404, detail="Call not found")
+        
+        response = db_client.table("call_legs").select("*").eq("call_id", call_id).order("created_at", desc=False).execute()
+        
+        return {
+            "call_id": call_id,
+            "legs": response.data or [],
+            "count": len(response.data) if response.data else 0
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to fetch legs for call {call_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to fetch call legs")
 

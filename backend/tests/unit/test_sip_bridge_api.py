@@ -25,26 +25,30 @@ class TestSIPBridgeEndpoints:
         return mock
     
     def test_status_when_stopped(self):
-        """Test status endpoint when server is stopped"""
-        with patch('app.api.v1.endpoints.sip_bridge._sip_server', None):
-            from app.api.v1.endpoints.sip_bridge import get_sip_status
+        """Test status endpoint when ESL client is not started"""
+        with patch('app.api.v1.endpoints.freeswitch_bridge._esl_client', None):
+            from app.api.v1.endpoints.freeswitch_bridge import get_freeswitch_status
             import asyncio
             
-            result = asyncio.get_event_loop().run_until_complete(get_sip_status())
+            result = asyncio.get_event_loop().run_until_complete(get_freeswitch_status())
             
             assert result.status_code == 200
             body = result.body.decode()
-            assert "stopped" in body
+            assert "not_started" in body
     
     def test_status_when_running(self, mock_sip_server):
-        """Test status endpoint when server is running"""
+        """Test status endpoint when ESL client is running"""
         mock_sip_server._running = True
+        mock_sip_server.connected = True
+        mock_sip_server.calls = {}
+        mock_sip_server.get_sofia_status = AsyncMock(return_value="")
+        mock_sip_server.get_gateway_status = AsyncMock(return_value="REGED")
         
-        with patch('app.api.v1.endpoints.sip_bridge._sip_server', mock_sip_server):
-            from app.api.v1.endpoints.sip_bridge import get_sip_status
+        with patch('app.api.v1.endpoints.freeswitch_bridge._esl_client', mock_sip_server):
+            from app.api.v1.endpoints.freeswitch_bridge import get_freeswitch_status
             import asyncio
             
-            result = asyncio.get_event_loop().run_until_complete(get_sip_status())
+            result = asyncio.get_event_loop().run_until_complete(get_freeswitch_status())
             
             assert result.status_code == 200
             body = result.body.decode()

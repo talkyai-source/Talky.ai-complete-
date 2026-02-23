@@ -10,9 +10,9 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from supabase import Client
+from app.core.postgres_adapter import Client
 
-from app.api.v1.dependencies import get_supabase, get_current_user, CurrentUser
+from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
 from app.services.meeting_service import (
     get_meeting_service,
     CalendarNotConnectedError
@@ -100,7 +100,7 @@ async def get_availability(
     date: str = Query(..., description="Date in YYYY-MM-DD format"),
     duration_minutes: int = Query(30, ge=15, le=240, description="Slot duration"),
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ) -> List[AvailabilitySlot]:
     """
     Get available meeting slots for a specific date.
@@ -114,7 +114,7 @@ async def get_availability(
         start_time = datetime.combine(target_date, datetime.min.time().replace(hour=9))
         end_time = datetime.combine(target_date, datetime.min.time().replace(hour=18))
         
-        service = get_meeting_service(supabase)
+        service = get_meeting_service(db_client)
         
         slots = await service.get_availability(
             tenant_id=current_user.tenant_id,
@@ -149,7 +149,7 @@ async def get_availability(
 async def create_meeting(
     request: CreateMeetingRequest,
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ) -> CreateMeetingResponse:
     """
     Book a new meeting.
@@ -163,7 +163,7 @@ async def create_meeting(
         # Parse start time
         start_time = datetime.fromisoformat(request.start_time.replace("Z", "+00:00"))
         
-        service = get_meeting_service(supabase)
+        service = get_meeting_service(db_client)
         
         result = await service.create_meeting(
             tenant_id=current_user.tenant_id,
@@ -197,14 +197,14 @@ async def list_meetings(
     to_date: Optional[str] = Query(None, description="To date (YYYY-MM-DD)"),
     limit: int = Query(50, ge=1, le=100, description="Maximum results"),
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ) -> List[MeetingResponse]:
     """
     List meetings for the tenant.
     
     Supports filtering by status and date range.
     """
-    service = get_meeting_service(supabase)
+    service = get_meeting_service(db_client)
     
     # Parse dates if provided
     from_dt = datetime.strptime(from_date, "%Y-%m-%d") if from_date else None
@@ -240,12 +240,12 @@ async def list_meetings(
 async def get_meeting(
     meeting_id: str,
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ) -> MeetingResponse:
     """
     Get meeting details by ID.
     """
-    service = get_meeting_service(supabase)
+    service = get_meeting_service(db_client)
     
     meeting = await service.get_meeting(
         tenant_id=current_user.tenant_id,
@@ -275,7 +275,7 @@ async def update_meeting(
     meeting_id: str,
     request: UpdateMeetingRequest,
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     Update/reschedule a meeting.
@@ -283,7 +283,7 @@ async def update_meeting(
     Updates both the calendar event and database record.
     """
     try:
-        service = get_meeting_service(supabase)
+        service = get_meeting_service(db_client)
         
         new_start_time = None
         if request.start_time:
@@ -316,14 +316,14 @@ async def cancel_meeting(
     meeting_id: str,
     request: Optional[CancelMeetingRequest] = None,
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     Cancel a meeting.
     
     Deletes the calendar event and updates the database status to 'cancelled'.
     """
-    service = get_meeting_service(supabase)
+    service = get_meeting_service(db_client)
     
     reason = request.reason if request else None
     

@@ -17,6 +17,7 @@ from app.domain.models.conversation_state import (
 )
 from app.domain.models.agent_config import AgentConfig
 from app.domain.models.conversation import Message
+from app.domain.services.intent_detector import IntentDetector
 
 logger = logging.getLogger(__name__)
 
@@ -27,16 +28,19 @@ class ConversationEngine:
     Sits on top of LLM to control conversation flow
     """
     
-    def __init__(self, agent_config: AgentConfig):
+    def __init__(self, agent_config: AgentConfig, intent_detector: Optional[IntentDetector] = None):
         """
         Initialize conversation engine
         
         Args:
             agent_config: Agent configuration
+            intent_detector: Optional IntentDetector for LLM-based intent detection.
+                             Falls back to built-in regex patterns if not provided.
         """
         self.agent_config = agent_config
         self.state_transitions = self._build_transition_map()
         self.intent_patterns = self._build_intent_patterns()
+        self._intent_detector = intent_detector
     
     def _build_transition_map(self) -> List[StateTransition]:
         """
@@ -213,7 +217,10 @@ class ConversationEngine:
     
     def _detect_intent(self, user_text: str) -> UserIntent:
         """
-        Detect user intent from text using pattern matching
+        Detect user intent from text.
+        
+        Delegates to IntentDetector if available (supports LLM classification),
+        otherwise falls back to built-in regex patterns.
         
         Args:
             user_text: User's input text
@@ -221,19 +228,26 @@ class ConversationEngine:
         Returns:
             Detected intent
         """
+        # Delegate to IntentDetector if available (sync wrapper for regex fallback)
+        if self._intent_detector:
+            # IntentDetector.detect_intent is async, but regex path is sync.
+            # Use the sync regex method directly here since ConversationEngine
+            # process_user_input is sync. The async LLM path should be called
+            # from an async context before reaching this method.
+            return self._intent_detector._detect_via_regex(user_text)
+        
+        # Built-in regex fallback (original logic)
         user_text_lower = user_text.lower().strip()
         
-        # Check intents in priority order: more specific/negative intents first
-        # to avoid false positives from broader patterns like YES
         intent_priority = [
-            UserIntent.REQUEST_HUMAN,  # Highest priority - user wants human
-            UserIntent.GOODBYE,        # User wants to end
-            UserIntent.CALLBACK,       # User wants callback (Day 17)
-            UserIntent.NO,             # Explicit rejection
-            UserIntent.UNCERTAIN,      # Hesitation/uncertainty
-            UserIntent.OBJECTION,      # Objections/concerns
-            UserIntent.GREETING,       # Greetings
-            UserIntent.YES,            # Affirmative (checked last to avoid false positives)
+            UserIntent.REQUEST_HUMAN,
+            UserIntent.GOODBYE,
+            UserIntent.CALLBACK,
+            UserIntent.NO,
+            UserIntent.UNCERTAIN,
+            UserIntent.OBJECTION,
+            UserIntent.GREETING,
+            UserIntent.YES,
         ]
         
         for intent in intent_priority:
@@ -243,7 +257,6 @@ class ConversationEngine:
                     logger.info(f"Detected intent: {intent.value} from text: '{user_text}'")
                     return intent
         
-        # Default to UNKNOWN
         logger.info(f"No clear intent detected from text: '{user_text}'")
         return UserIntent.UNKNOWN
     

@@ -5,9 +5,9 @@ Provides pricing plan information for the frontend
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
 from pydantic import BaseModel
-from supabase import Client
+from app.core.postgres_adapter import Client
 
-from app.api.v1.dependencies import get_supabase
+from app.api.v1.dependencies import get_db_client
 
 router = APIRouter(prefix="/plans", tags=["plans"])
 
@@ -32,7 +32,7 @@ class PlanResponse(BaseModel):
 
 @router.get("/", response_model=List[PlanResponse])
 async def list_plans(
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     Get all available pricing plans.
@@ -42,7 +42,7 @@ async def list_plans(
     This endpoint is public (no auth required).
     """
     try:
-        response = supabase.table("plans").select("*").order("price").execute()
+        response = db_client.table("plans").select("*").order("price").execute()
         
         if not response.data:
             return []

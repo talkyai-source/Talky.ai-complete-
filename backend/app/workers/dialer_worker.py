@@ -9,9 +9,9 @@ import asyncio
 import logging
 import os
 import signal
-from datetime import datetime
-from typing import Optional, List
 import json
+from datetime import datetime
+from typing import Optional, List, Dict, Any
 
 from dotenv import load_dotenv
 
@@ -20,15 +20,16 @@ load_dotenv()
 
 try:
     import redis.asyncio as redis
-    from supabase import create_client, Client
+    import asyncpg
 except ImportError as e:
     raise ImportError(f"Required dependency not installed: {e}")
 
 from app.domain.models.dialer_job import DialerJob, JobStatus, CallOutcome
 from app.domain.models.calling_rules import CallingRules
+from app.domain.models.voice_contract import generate_talklee_call_id
 from app.domain.services.queue_service import DialerQueueService
 from app.domain.services.scheduling_rules import SchedulingRuleEngine
-
+from app.core.db import init_db_pool, close_db_pool, Database
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ class DialerWorker:
     
     Architecture:
     - Runs as separate process from FastAPI
-    - Connects to same Redis and Supabase instances
+    - Connects to same Redis and PostgreSQL instances
     - Publishes call events for Voice Worker to handle
     """
     
@@ -68,7 +69,7 @@ class DialerWorker:
         self.rules_engine = SchedulingRuleEngine()
         
         self.running = False
-        self._supabase: Optional[Client] = None
+        self._db_pool: Optional[asyncpg.Pool] = None
         self._redis: Optional[redis.Redis] = None
         
         # Stats
@@ -77,20 +78,14 @@ class DialerWorker:
         self._last_scheduled_check = datetime.utcnow()
     
     async def initialize(self) -> None:
-        """Initialize connections to Redis and Supabase."""
+        """Initialize connections to Redis and PostgreSQL."""
         logger.info("Initializing Dialer Worker...")
         
         # Initialize queue service (Redis)
         await self.queue_service.initialize()
         
-        # Initialize Supabase client
-        supabase_url = os.getenv("SUPABASE_URL")
-        supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
-        
-        if not supabase_url or not supabase_key:
-            raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_KEY must be set")
-        
-        self._supabase = create_client(supabase_url, supabase_key)
+        # Initialize PostgreSQL pool
+        self._db_pool = await init_db_pool()
         
         # Initialize separate Redis connection for pub/sub
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
@@ -202,8 +197,8 @@ class DialerWorker:
                 call_id = await self._make_call(job, rules)
                 
                 if call_id:
-                    # 6. Create call record in database
-                    await self._create_call_record(job, call_id)
+                    # 6. Create call record in database (with talklee_call_id and PSTN leg)
+                    talklee_call_id, leg_id = await self._create_call_record(job, call_id)
                     
                     # 7. Update lead status to 'calling'
                     await self._update_lead_status(job.lead_id, "calling")
@@ -214,8 +209,8 @@ class DialerWorker:
                     job.processed_at = datetime.utcnow()
                     await self._update_job_status(job.job_id, JobStatus.PROCESSING, call_id=call_id)
                     
-                    # 9. Notify voice worker about new call
-                    await self._publish_call_event(call_id, job)
+                    # 9. Notify voice worker about new call (include talklee_call_id)
+                    await self._publish_call_event(call_id, job, talklee_call_id)
                     
                     self._jobs_processed += 1
                     logger.info(f"Call initiated: {call_id} for job {job.job_id}")
@@ -251,23 +246,13 @@ class DialerWorker:
         Returns:
             call_id (UUID) if successful, None otherwise
         """
-        # TODO: Integrate with actual Vonage/telephony provider
+        # TODO: Integrate with actual telephony provider (e.g. FreeSWITCH ESL)
         # For now, log the call attempt
         
         logger.info(
             f"CALL INITIATION: {job.phone_number} "
             f"(campaign={job.campaign_id}, lead={job.lead_id})"
         )
-        
-        # In production, this would call the telephony provider:
-        # from app.infrastructure.telephony.vonage_caller import VonageCaller
-        # caller = VonageCaller()
-        # call_id = await caller.make_call(
-        #     to_number=job.phone_number,
-        #     from_number=rules.caller_id or os.getenv("DEFAULT_CALLER_ID"),
-        #     webhook_url=f"{self.API_BASE_URL}/api/v1/webhooks/vonage/answer",
-        #     metadata={"job_id": job.job_id}
-        # )
         
         # For now, generate a mock call_id
         import uuid
@@ -278,16 +263,12 @@ class DialerWorker:
     async def _get_active_tenant_ids(self) -> List[str]:
         """Get list of tenants with active/running campaigns."""
         try:
-            response = self._supabase.table("campaigns").select(
-                "id"
-            ).in_("status", ["running", "active"]).execute()
-            
-            if response.data:
-                # Get unique tenant IDs from campaigns (if tenant_id exists)
-                # For now, return empty list to check all queues
-                pass
-            
-            # Return None to scan all tenant queues
+            async with self._db_pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT DISTINCT tenant_id FROM campaigns WHERE status IN ('running', 'active')"
+                )
+                if rows:
+                    return [str(r["tenant_id"]) for r in rows]
             return None
             
         except Exception as e:
@@ -297,12 +278,18 @@ class DialerWorker:
     async def _get_tenant_rules(self, tenant_id: str) -> CallingRules:
         """Get calling rules for a tenant."""
         try:
-            response = self._supabase.table("tenants").select(
-                "calling_rules"
-            ).eq("id", tenant_id).single().execute()
-            
-            if response.data and response.data.get("calling_rules"):
-                return CallingRules.from_dict(response.data["calling_rules"])
+            async with self._db_pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT calling_rules FROM tenants WHERE id = $1",
+                    tenant_id
+                )
+                if row and row["calling_rules"]:
+                    # asyncpg returns JSON/JSONB as string or dict depending on driver config
+                    # assuming standard driver config (string/dict)
+                    rules_data = row["calling_rules"]
+                    if isinstance(rules_data, str):
+                        rules_data = json.loads(rules_data)
+                    return CallingRules.from_dict(rules_data)
             
         except Exception as e:
             logger.warning(f"Failed to get tenant rules, using defaults: {e}")
@@ -312,45 +299,91 @@ class DialerWorker:
     async def _get_lead_last_called(self, lead_id: str) -> Optional[datetime]:
         """Get the last time a lead was called."""
         try:
-            response = self._supabase.table("leads").select(
-                "last_called_at"
-            ).eq("id", lead_id).single().execute()
-            
-            if response.data and response.data.get("last_called_at"):
-                return datetime.fromisoformat(response.data["last_called_at"].replace("Z", "+00:00"))
+            async with self._db_pool.acquire() as conn:
+                val = await conn.fetchval(
+                    "SELECT last_called_at FROM leads WHERE id = $1",
+                    lead_id
+                )
+                return val  # asyncpg returns appropriate datetime object
             
         except Exception as e:
             logger.warning(f"Failed to get lead last_called_at: {e}")
         
         return None
     
-    async def _create_call_record(self, job: DialerJob, call_id: str) -> None:
-        """Create a call record in the database."""
+    async def _create_call_record(self, job: DialerJob, call_id: str) -> tuple[str, str]:
+        """
+        Create a call record in the database with talklee_call_id and PSTN leg.
+        
+        Returns:
+            tuple: (talklee_call_id, leg_id)
+        """
+        talklee_call_id = generate_talklee_call_id()
+        
         try:
-            call_data = {
-                "id": call_id,
-                "campaign_id": job.campaign_id,
-                "lead_id": job.lead_id,
-                "phone_number": job.phone_number,
-                "status": "initiated",
-                "created_at": datetime.utcnow().isoformat(),
-                "dialer_job_id": job.job_id
-            }
-            
-            self._supabase.table("calls").insert(call_data).execute()
-            logger.debug(f"Created call record: {call_id}")
+            async with self._db_pool.acquire() as conn:
+                # Create call record
+                await conn.execute(
+                    """
+                    INSERT INTO calls (
+                        id, talklee_call_id, campaign_id, lead_id, phone_number,
+                        status, created_at, dialer_job_id, tenant_id
+                    ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, $8)
+                    """,
+                    call_id, talklee_call_id, job.campaign_id, job.lead_id,
+                    job.phone_number, "initiated", job.job_id, job.tenant_id
+                )
+                logger.debug(f"Created call record: {call_id} with {talklee_call_id}")
+                
+                # Create PSTN leg
+                # Using direct execution instead of CallEventRepository for simplicity now
+                # or replicate behavior
+                import uuid
+                leg_id = str(uuid.uuid4())
+                await conn.execute(
+                    """
+                    INSERT INTO call_legs (
+                        id, call_id, talklee_call_id, leg_type, direction,
+                        provider, to_number, status, metadata, created_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+                    """,
+                    leg_id, call_id, talklee_call_id, "pstn_outbound", "outbound",
+                    "vonage", job.phone_number, "initiated",
+                    json.dumps({"job_id": job.job_id, "campaign_id": job.campaign_id})
+                )
+                
+                logger.debug(f"Created PSTN leg: {leg_id}")
+                
+                # Log call initiated event
+                await conn.execute(
+                    """
+                    INSERT INTO call_events (
+                        call_id, talklee_call_id, leg_id, event_type, source,
+                        event_data, new_state, created_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+                    """,
+                    call_id, talklee_call_id, leg_id, "leg_started", "dialer_worker",
+                    json.dumps({"leg_type": "pstn_outbound", "provider": "vonage"}),
+                    "initiated"
+                )
+                
+                return talklee_call_id, leg_id
             
         except Exception as e:
             logger.error(f"Failed to create call record: {e}")
+            return talklee_call_id, ""
     
     async def _update_lead_status(self, lead_id: str, status: str) -> None:
         """Update lead status in database."""
         try:
-            self._supabase.table("leads").update({
-                "status": status,
-                "last_called_at": datetime.utcnow().isoformat()
-            }).eq("id", lead_id).execute()
-            
+            async with self._db_pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE leads SET status = $1, last_called_at = NOW()
+                    WHERE id = $2
+                    """,
+                    status, lead_id
+                )
         except Exception as e:
             logger.error(f"Failed to update lead status: {e}")
     
@@ -364,32 +397,36 @@ class DialerWorker:
     ) -> None:
         """Update job status in database."""
         try:
-            update_data = {
-                "status": status.value if hasattr(status, 'value') else status,
-                "updated_at": datetime.utcnow().isoformat()
-            }
+            # Build update query dynamically or use simple execution
+            status_val = status.value if hasattr(status, 'value') else status
             
-            if call_id:
-                update_data["call_id"] = call_id
-                update_data["processed_at"] = datetime.utcnow().isoformat()
-            
-            if error:
-                update_data["last_error"] = error
-            
-            if status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.GOAL_ACHIEVED]:
-                update_data["completed_at"] = datetime.utcnow().isoformat()
-            
-            self._supabase.table("dialer_jobs").update(update_data).eq("id", job_id).execute()
-            
+            async with self._db_pool.acquire() as conn:
+                db = Database(conn)
+                data = {
+                    "status": status_val,
+                    "updated_at": datetime.utcnow()
+                }
+                if call_id:
+                    data["call_id"] = call_id
+                    data["processed_at"] = datetime.utcnow()
+                if error:
+                    data["last_error"] = error
+                
+                if status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.GOAL_ACHIEVED]:
+                    data["completed_at"] = datetime.utcnow()
+                    
+                await db.update("dialer_jobs", data, "id = $1", [job_id])
+                
         except Exception as e:
             logger.error(f"Failed to update job status: {e}")
     
-    async def _publish_call_event(self, call_id: str, job: DialerJob) -> None:
+    async def _publish_call_event(self, call_id: str, job: DialerJob, talklee_call_id: str) -> None:
         """Publish call event for voice worker to pick up."""
         try:
             event = {
                 "event": "call_initiated",
                 "call_id": call_id,
+                "talklee_call_id": talklee_call_id,
                 "job_id": job.job_id,
                 "campaign_id": job.campaign_id,
                 "lead_id": job.lead_id,
@@ -398,7 +435,7 @@ class DialerWorker:
             }
             
             await self._redis.publish("voice:calls:active", json.dumps(event))
-            logger.debug(f"Published call event for {call_id}")
+            logger.debug(f"Published call event for {call_id} ({talklee_call_id})")
             
         except Exception as e:
             logger.error(f"Failed to publish call event: {e}")
@@ -412,6 +449,9 @@ class DialerWorker:
         await self.queue_service.close()
         if self._redis:
             await self._redis.close()
+        
+        if self._db_pool:
+            await close_db_pool()
         
         # Log final stats
         logger.info(
@@ -431,9 +471,25 @@ class DialerWorker:
             }
         }
 
+    async def _heartbeat(self) -> None:
+        """Log heartbeat periodically for systemd liveness monitoring."""
+        # Using simple config access to avoid dependency issues during migration
+        # from app.core.voice_config import get_voice_config
+        # interval = get_voice_config().worker_heartbeat_interval
+        interval = 60
+        while self.running:
+            logger.info(
+                f"heartbeat: jobs_processed={self._jobs_processed}, "
+                f"jobs_failed={self._jobs_failed}"
+            )
+            await asyncio.sleep(interval)
+
 
 async def main():
     """Entry point for running dialer worker as separate process."""
+    # Setup simple logging first
+    logging.basicConfig(level=logging.INFO)
+    
     worker = DialerWorker()
     
     # Handle shutdown signals
@@ -444,11 +500,7 @@ async def main():
         worker.running = False
     
     for sig in (signal.SIGTERM, signal.SIGINT):
-        try:
-            loop.add_signal_handler(sig, signal_handler)
-        except NotImplementedError:
-            # Windows doesn't support add_signal_handler
-            pass
+        loop.add_signal_handler(sig, signal_handler)
     
     try:
         await worker.run()

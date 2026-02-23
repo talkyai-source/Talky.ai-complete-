@@ -55,6 +55,7 @@ class CallSession(BaseModel):
     # ========== Connection State ==========
     # Note: websocket is NOT serialized to Redis (runtime only)
     vonage_call_uuid: str = Field(..., description="Vonage's call UUID")
+    talklee_call_id: Optional[str] = Field(None, description="Human-friendly call ID (tlk_<hex>)")
     state: CallState = Field(default=CallState.CONNECTING, description="Current session state")
     
     # ========== Conversation State ==========
@@ -79,6 +80,9 @@ class CallSession(BaseModel):
     
     # ========== Configuration ==========
     system_prompt: str = Field(..., description="AI system prompt from campaign")
+    llm_model: Optional[str] = Field(None, description="LLM model override for this session")
+    llm_temperature: Optional[float] = Field(None, description="LLM temperature override for this session")
+    llm_max_tokens: Optional[int] = Field(None, ge=1, description="LLM max tokens override for this session")
     voice_id: str = Field(..., description="TTS voice identifier")
     language: str = Field(default="en", description="Language code")
     

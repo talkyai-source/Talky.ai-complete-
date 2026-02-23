@@ -6,7 +6,7 @@ import os
 import logging
 from typing import Optional, Dict, Any
 from datetime import datetime
-from supabase import Client
+from app.core.postgres_adapter import Client
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +29,8 @@ class BillingService:
     - STRIPE_MOCK_MODE environment variable is set to 'true'
     """
     
-    def __init__(self, supabase: Client):
-        self.supabase = supabase
+    def __init__(self, db_client: Client):
+        self.db_client = db_client
         self.mock_mode = self._should_use_mock_mode()
         
         if not self.mock_mode and STRIPE_AVAILABLE:
@@ -66,7 +66,7 @@ class BillingService:
             Dict with customer_id and whether it was newly created
         """
         # Check if tenant already has a Stripe customer
-        tenant = self.supabase.table("tenants").select(
+        tenant = self.db_client.table("tenants").select(
             "stripe_customer_id"
         ).eq("id", tenant_id).single().execute()
         
@@ -92,7 +92,7 @@ class BillingService:
             customer_id = customer.id
         
         # Update tenant with customer ID
-        self.supabase.table("tenants").update({
+        self.db_client.table("tenants").update({
             "stripe_customer_id": customer_id
         }).eq("id", tenant_id).execute()
         
@@ -129,7 +129,7 @@ class BillingService:
         customer_id = customer_result["customer_id"]
         
         # Get plan's stripe_price_id
-        plan = self.supabase.table("plans").select(
+        plan = self.db_client.table("plans").select(
             "stripe_price_id, name"
         ).eq("id", plan_id).single().execute()
         
@@ -194,7 +194,7 @@ class BillingService:
         Create a Stripe Customer Portal session for managing subscription.
         """
         # Get customer ID
-        tenant = self.supabase.table("tenants").select(
+        tenant = self.db_client.table("tenants").select(
             "stripe_customer_id"
         ).eq("id", tenant_id).single().execute()
         
@@ -228,7 +228,7 @@ class BillingService:
         """
         Get current subscription for a tenant.
         """
-        subscription = self.supabase.table("subscriptions").select(
+        subscription = self.db_client.table("subscriptions").select(
             "*, plans(name, price, minutes, agents)"
         ).eq("tenant_id", tenant_id).order(
             "created_at", desc=True
@@ -236,7 +236,7 @@ class BillingService:
         
         if not subscription.data:
             # Check tenants table for basic subscription info
-            tenant = self.supabase.table("tenants").select(
+            tenant = self.db_client.table("tenants").select(
                 "subscription_status, stripe_subscription_id, plan_id, plans(name, price, minutes)"
             ).eq("id", tenant_id).single().execute()
             
@@ -258,7 +258,7 @@ class BillingService:
         """
         Cancel a subscription (at period end by default).
         """
-        tenant = self.supabase.table("tenants").select(
+        tenant = self.db_client.table("tenants").select(
             "stripe_subscription_id"
         ).eq("id", tenant_id).single().execute()
         
@@ -269,7 +269,7 @@ class BillingService:
         
         if self.mock_mode:
             # Update local state in mock mode
-            self.supabase.table("tenants").update({
+            self.db_client.table("tenants").update({
                 "subscription_status": "canceled"
             }).eq("id", tenant_id).execute()
             
@@ -285,11 +285,11 @@ class BillingService:
         )
         
         # Update local state
-        self.supabase.table("tenants").update({
+        self.db_client.table("tenants").update({
             "subscription_status": subscription.status
         }).eq("id", tenant_id).execute()
         
-        self.supabase.table("subscriptions").update({
+        self.db_client.table("subscriptions").update({
             "status": subscription.status,
             "cancel_at": datetime.fromtimestamp(subscription.cancel_at) if subscription.cancel_at else None,
             "canceled_at": datetime.now()
@@ -353,7 +353,7 @@ class BillingService:
             return
         
         # Update tenant
-        self.supabase.table("tenants").update({
+        self.db_client.table("tenants").update({
             "stripe_customer_id": customer_id,
             "stripe_subscription_id": subscription_id,
             "subscription_status": "active",
@@ -362,9 +362,9 @@ class BillingService:
         
         # Get plan details to update minutes
         if plan_id:
-            plan = self.supabase.table("plans").select("minutes").eq("id", plan_id).single().execute()
+            plan = self.db_client.table("plans").select("minutes").eq("id", plan_id).single().execute()
             if plan.data:
-                self.supabase.table("tenants").update({
+                self.db_client.table("tenants").update({
                     "minutes_allocated": plan.data.get("minutes", 0),
                     "minutes_used": 0
                 }).eq("id", tenant_id).execute()
@@ -384,13 +384,13 @@ class BillingService:
         tenant_id = subscription.get("metadata", {}).get("tenant_id")
         
         if tenant_id:
-            self.supabase.table("tenants").update({
+            self.db_client.table("tenants").update({
                 "subscription_status": "canceled",
                 "stripe_subscription_id": None
             }).eq("id", tenant_id).execute()
         
         # Update subscription record
-        self.supabase.table("subscriptions").update({
+        self.db_client.table("subscriptions").update({
             "status": "canceled",
             "canceled_at": datetime.now()
         }).eq("stripe_subscription_id", subscription["id"]).execute()
@@ -398,7 +398,7 @@ class BillingService:
     async def _handle_invoice_paid(self, invoice: Dict):
         """Handle invoice.paid event"""
         # Store invoice record
-        self.supabase.table("invoices").upsert({
+        self.db_client.table("invoices").upsert({
             "stripe_invoice_id": invoice["id"],
             "stripe_subscription_id": invoice.get("subscription"),
             "tenant_id": invoice.get("metadata", {}).get("tenant_id"),
@@ -416,12 +416,12 @@ class BillingService:
         subscription_id = invoice.get("subscription")
         
         if subscription_id:
-            self.supabase.table("subscriptions").update({
+            self.db_client.table("subscriptions").update({
                 "status": "past_due"
             }).eq("stripe_subscription_id", subscription_id).execute()
             
             # Update tenant status
-            self.supabase.table("tenants").update({
+            self.db_client.table("tenants").update({
                 "subscription_status": "past_due"
             }).eq("stripe_subscription_id", subscription_id).execute()
     
@@ -444,14 +444,14 @@ class BillingService:
             subscription_data["plan_id"] = plan_id
         
         # Upsert subscription record
-        self.supabase.table("subscriptions").upsert(
+        self.db_client.table("subscriptions").upsert(
             subscription_data,
             on_conflict="stripe_subscription_id"
         ).execute()
         
         # Update tenant
         if tenant_id:
-            self.supabase.table("tenants").update({
+            self.db_client.table("tenants").update({
                 "subscription_status": subscription["status"],
                 "stripe_subscription_id": subscription["id"]
             }).eq("id", tenant_id).execute()
@@ -472,7 +472,7 @@ class BillingService:
         This stores usage locally and optionally reports to Stripe.
         """
         # Store usage record
-        result = self.supabase.table("usage_records").insert({
+        result = self.db_client.table("usage_records").insert({
             "tenant_id": tenant_id,
             "quantity": quantity,
             "usage_type": usage_type,
@@ -494,14 +494,14 @@ class BillingService:
         subscription = await self.get_subscription(tenant_id)
         
         # Get total usage
-        usage = self.supabase.table("usage_records").select(
+        usage = self.db_client.table("usage_records").select(
             "quantity"
         ).eq("tenant_id", tenant_id).eq("usage_type", usage_type).execute()
         
         total_usage = sum(record["quantity"] for record in usage.data) if usage.data else 0
         
         # Get tenant allocation
-        tenant = self.supabase.table("tenants").select(
+        tenant = self.db_client.table("tenants").select(
             "minutes_allocated, minutes_used"
         ).eq("id", tenant_id).single().execute()
         

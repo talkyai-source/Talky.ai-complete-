@@ -16,7 +16,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 
 from groq import AsyncGroq
 
-from supabase import Client
+import asyncpg  # migrated from db_client
 
 from app.infrastructure.assistant.tools import (
     get_dashboard_stats,
@@ -45,7 +45,7 @@ class AgentState(TypedDict):
     tenant_id: str
     user_id: Optional[str]
     conversation_id: Optional[str]
-    supabase: Any  # Supabase client
+    db_client: Any  # PostgreSQL client
     tool_results: List[Dict[str, Any]]
 
 
@@ -412,7 +412,7 @@ async def tool_executor(state: AgentState) -> Dict[str, Any]:
     results = []
     
     tenant_id = state["tenant_id"]
-    supabase = state["supabase"]
+    db_client = state["db_client"]
     conversation_id = state.get("conversation_id")
     
     for tc in tool_calls:
@@ -435,25 +435,25 @@ async def tool_executor(state: AgentState) -> Dict[str, Any]:
         try:
             # Route to appropriate tool
             if func_name == "get_dashboard_stats":
-                result = await get_dashboard_stats(tenant_id, supabase, **args)
+                result = await get_dashboard_stats(tenant_id, db_client, **args)
             elif func_name == "get_usage_info":
-                result = await get_usage_info(tenant_id, supabase)
+                result = await get_usage_info(tenant_id, db_client)
             elif func_name == "get_leads":
-                result = await get_leads(tenant_id, supabase, **args)
+                result = await get_leads(tenant_id, db_client, **args)
             elif func_name == "get_campaigns":
-                result = await get_campaigns(tenant_id, supabase, **args)
+                result = await get_campaigns(tenant_id, db_client, **args)
             elif func_name == "get_recent_calls":
-                result = await get_recent_calls(tenant_id, supabase, **args)
+                result = await get_recent_calls(tenant_id, db_client, **args)
             elif func_name == "get_actions_today":
-                result = await get_actions_today(tenant_id, supabase)
+                result = await get_actions_today(tenant_id, db_client)
             elif func_name == "send_email":
-                result = await send_email(tenant_id, supabase, conversation_id=conversation_id, **args)
+                result = await send_email(tenant_id, db_client, conversation_id=conversation_id, **args)
             elif func_name == "send_sms":
-                result = await send_sms(tenant_id, supabase, conversation_id=conversation_id, **args)
+                result = await send_sms(tenant_id, db_client, conversation_id=conversation_id, **args)
             elif func_name == "initiate_call":
-                result = await initiate_call(tenant_id, supabase, conversation_id=conversation_id, **args)
+                result = await initiate_call(tenant_id, db_client, conversation_id=conversation_id, **args)
             elif func_name == "start_campaign":
-                result = await start_campaign(tenant_id, supabase, conversation_id=conversation_id, **args)
+                result = await start_campaign(tenant_id, db_client, conversation_id=conversation_id, **args)
             else:
                 result = {"error": f"Unknown tool: {func_name}"}
             

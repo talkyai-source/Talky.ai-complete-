@@ -327,8 +327,9 @@ def pcm_to_ulaw(pcm_data: bytes) -> bytes:
     return encoded.tobytes()
 
 
-def _linear_to_ulaw(sample: int) -> int:
+def _linear_to_ulaw(sample) -> int:
     """Convert a single 16-bit linear sample to 8-bit mu-law."""
+    sample = int(sample)  # Ensure Python int to avoid numpy overflow
     # Get sign bit
     sign = (sample >> 8) & 0x80
     if sign:
@@ -381,8 +382,9 @@ def ulaw_to_pcm(ulaw_data: bytes) -> bytes:
     return pcm_samples.tobytes()
 
 
-def _ulaw_to_linear(ulaw_byte: int) -> int:
+def _ulaw_to_linear(ulaw_byte) -> int:
     """Convert a single 8-bit mu-law sample to 16-bit linear."""
+    ulaw_byte = int(ulaw_byte)  # Ensure Python int to avoid numpy overflow
     # Invert bits
     ulaw_byte = ~ulaw_byte & 0xFF
     
@@ -428,8 +430,9 @@ def pcm_to_alaw(pcm_data: bytes) -> bytes:
     return encoded.tobytes()
 
 
-def _linear_to_alaw(sample: int) -> int:
+def _linear_to_alaw(sample) -> int:
     """Convert a single 16-bit linear sample to 8-bit A-law."""
+    sample = int(sample)  # Ensure Python int to avoid numpy overflow
     # Get sign bit
     sign = 0
     if sample < 0:
@@ -483,8 +486,9 @@ def alaw_to_pcm(alaw_data: bytes) -> bytes:
     return pcm_samples.tobytes()
 
 
-def _alaw_to_linear(alaw_byte: int) -> int:
+def _alaw_to_linear(alaw_byte) -> int:
     """Convert a single 8-bit A-law sample to 16-bit linear."""
+    alaw_byte = int(alaw_byte)  # Ensure Python int to avoid numpy overflow
     # XOR to undo encoding
     alaw_byte ^= 0x55
     
@@ -528,10 +532,8 @@ def convert_for_rtp(
     # Step 1: Convert to 16-bit PCM if needed
     if source_format == "pcm_f32le":
         pcm_16 = pcm_float32_to_int16(audio_data)
-        bit_depth = 32  # for resampling input
     else:
         pcm_16 = audio_data
-        bit_depth = 16
     
     # Step 2: Resample to 8000Hz (G.711 standard)
     if source_rate != 8000:

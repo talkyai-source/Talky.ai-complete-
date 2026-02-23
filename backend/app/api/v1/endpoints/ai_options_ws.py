@@ -1,138 +1,139 @@
 """
 Voice Demo WebSocket - Talky.ai Voice Agents Demo
 
-Uses voice pipeline WITHOUT database operations.
-Supports multiple voice personas that introduce themselves.
+Uses the same voice pipeline as live calls and applies the
+currently selected AI Options config (LLM + TTS voice/model).
+
+Day 41: Refactored to use VoiceOrchestrator for lifecycle management.
 """
-import os
-import uuid
 import json
 import asyncio
 import logging
-import time
-from typing import Optional, Dict
-from datetime import datetime
-from dotenv import load_dotenv
+from typing import Dict
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from pydantic import ValidationError
 
-from app.domain.models.session import CallSession, CallState
-from app.domain.models.conversation_state import ConversationState, ConversationContext
 from app.domain.models.agent_config import AgentConfig, AgentGoal, ConversationFlow, ConversationRule
-from app.domain.models.ai_config import AIProviderConfig
-from app.domain.models.conversation import Message, MessageRole
-from app.domain.services.voice_pipeline_service import VoicePipelineService
-from app.infrastructure.stt.deepgram_flux import DeepgramFluxSTTProvider
-from app.infrastructure.llm.groq import GroqLLMProvider
-# Google TTS imports - commented out due to GCP permission issues
-# TODO: Re-enable when gcloud permissions are fixed
-# from app.infrastructure.tts.google_tts import GoogleTTSProvider
-# try:
-#     from app.infrastructure.tts.google_tts_streaming import GoogleTTSStreamingProvider
-#     STREAMING_TTS_AVAILABLE = True
-# except ImportError:
-#     STREAMING_TTS_AVAILABLE = False
-
-# Cartesia TTS disabled - using Google TTS only
-# from app.infrastructure.tts.cartesia import CartesiaTTSProvider
-from app.infrastructure.telephony.browser_media_gateway import BrowserMediaGateway
-
-load_dotenv()
+from app.domain.models.ai_config import AIProviderConfig, GOOGLE_CHIRP3_VOICES, DEEPGRAM_AURA2_VOICES
+from app.domain.services.global_ai_config import set_global_config
+from app.domain.services.voice_orchestrator import VoiceSessionConfig
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Voice Demo"])
 
-# Voice Agent Personas - Using Google Chirp3-HD voices (Cartesia disabled)
-VOICE_AGENTS = {
-    "sophia": {
-        "id": "sophia",
-        "name": "Sophia",
-        "gender": "female",
-        # Katie - stable, realistic female voice (recommended for voice agents)
-        "voice_id": "f786b574-daa5-4673-aa0c-cbe3e8534c02",
-        "personality": "warm, professional, and reassuring",
-        "intro": "Hi there! I'm Sophia. I help businesses connect with their customers through natural phone conversations. What would you like to know about how I can help your business?",
-        "description": "Warm & Professional"
-    },
-    "emma": {
-        "id": "emma", 
-        "name": "Emma",
-        "gender": "female",
-        # Tessa - expressive, emotive female voice (good for friendly personas)
-        "voice_id": "6ccbfb76-1fc6-48f7-b71d-91ac6298247b",
-        "personality": "energetic, friendly, and enthusiastic",
-        "intro": "Hey! I'm Emma, nice to meet you! I love helping businesses reach out to customers and make every conversation count. How can I help you today?",
-        "description": "Energetic & Friendly"
-    },
-    "alex": {
-        "id": "alex",
-        "name": "Alex",
-        "gender": "male",
-        # Kiefer - stable, realistic male voice (recommended for voice agents)
-        "voice_id": "228fca29-3a0a-435c-8728-5cb483251068",
-        "personality": "confident, clear, and trustworthy",
-        "intro": "Hello! I'm Alex. I specialize in professional outreach calls - from appointment confirmations to customer follow-ups. What can I tell you about Talky?",
-        "description": "Confident & Clear"
-    }
-}
+# Default demo persona for missing voice metadata.
+DEFAULT_AGENT_NAME = "Assistant"
+DEFAULT_AGENT_PERSONALITY = "warm, professional, and reassuring"
+DEFAULT_COMPANY_NAME = "Talky.ai"
 
-# Talky.ai Product Information (no technical jargon)
+# Talky.ai Product Information — surface-level, concise
 TALKY_PRODUCT_INFO = """
 ## About Talky.ai
 
-Talky.ai provides intelligent voice agents that make phone calls on behalf of businesses. Our agents sound natural and can handle real conversations.
+Talky.ai is a voice AI platform that lets businesses automate phone calls with natural-sounding agents. Think of it as hiring a tireless team member who can call hundreds of customers while sounding genuinely human.
 
-### What We Do
-- Make outbound calls to customers automatically
-- Confirm appointments and send reminders
-- Follow up with leads and customers
-- Conduct surveys and gather feedback
-- Handle payment reminders professionally
+### Core Features
+- Automated outbound calling — follow-ups, reminders, surveys
+- Natural voice conversations — not robotic IVR menus
+- Smart lead qualification and appointment booking
+- Real-time analytics dashboard
+- Works with your existing CRM and tools
 
-### Pricing Plans
+### Packages
 
-**Starter - $99/month**
-- 500 call minutes
-- 1 voice agent
-- Basic reporting
+**Basic — $29/month**
+- 300 call minutes
+- 1 AI agent
+- Basic analytics
+- Email support
 
-**Growth - $299/month**  
-- 2,000 call minutes
-- 3 voice agents
-- Priority support
+**Professional — $79/month** (most popular)
+- 1,500 call minutes
+- 3 AI agents
 - Advanced analytics
+- Priority support & custom voices
 
-**Enterprise - Custom**
-- Unlimited minutes available
-- Unlimited agents
-- Dedicated support
-- Custom integrations
+**Enterprise — $199/month**
+- 5,000 call minutes
+- 10 AI agents
+- Full analytics suite
+- 24/7 support, API access, white-label option
 
-### Why Choose Talky
+### Why Businesses Love Talky
 - Sounds natural, not robotic
-- Available 24/7
+- Available around the clock
+- Setup takes minutes, not weeks
 - Scales with your business
-- Easy to set up
-- Works with your existing tools
 """
 
+def _build_system_prompt(agent_name: str, personality: str) -> str:
+    return f"""You are {agent_name}, a friendly product specialist at Talky.ai.
 
-def create_agent_config(voice_id: str = None) -> AgentConfig:
-    """Create agent config using the dynamically selected voice."""
-    agent = get_dynamic_agent_info()
-    
+Your personality: {personality}
+
+{TALKY_PRODUCT_INFO}
+
+## Your Role
+You are a live product demo on the Talky.ai website. Visitors click the "Ask AI" button to learn about Talky. Your job is to describe what Talky does, explain our packages, and answer product questions — all in a relaxed, informative way.
+
+You are NOT booking appointments. You are NOT making sales calls. You are simply answering questions about the product.
+
+## Rules
+- Keep responses SHORT (1-2 sentences max) — this is a voice conversation
+- Be mild, informative, and helpful — no hard selling or pressure
+- Describe the product and packages when asked
+- If someone asks pricing, briefly mention the three tiers
+- Be conversational and natural, like chatting with a knowledgeable friend
+- Only discuss Talky.ai — product, features, pricing, and use cases
+- If asked something unrelated, gently steer back
+- Never say you are an AI, a bot, or automated
+- Never use technical jargon
+- If you don't know something, offer to have a team member follow up
+- Present Talky confidently but not aggressively"""
+
+
+def _resolve_voice_profile(ai_config: AIProviderConfig) -> Dict[str, str]:
+    for voice in [*GOOGLE_CHIRP3_VOICES, *DEEPGRAM_AURA2_VOICES]:
+        if voice.id == ai_config.tts_voice_id:
+            personality = "warm and professional" if (voice.gender or "").lower() == "female" else "professional and confident"
+            return {
+                "agent_name": voice.name,
+                "description": voice.description or "Voice assistant",
+                "personality": personality,
+                "intro": f"Hi there! I'm {voice.name} from {DEFAULT_COMPANY_NAME}. What would you like to know about our voice agents?",
+            }
+
+    return {
+        "agent_name": DEFAULT_AGENT_NAME,
+        "description": "Voice assistant",
+        "personality": DEFAULT_AGENT_PERSONALITY,
+        "intro": f"Hi there! I'm {DEFAULT_AGENT_NAME} from {DEFAULT_COMPANY_NAME}. What would you like to know about our voice agents?",
+    }
+
+
+def _is_english_language(language: str | None) -> bool:
+    if not language:
+        return False
+    normalized = language.strip().lower()
+    return normalized == "en" or normalized.startswith("en-") or normalized == "english"
+
+
+def _create_agent_config(agent_name: str, personality: str) -> AgentConfig:
+    """Create agent config for product info mode (not appointment booking)."""
     return AgentConfig(
-        agent_name=agent["name"],
-        company_name="Talky.ai",
-        business_type="Business Communication Platform",
-        goal=AgentGoal.APPOINTMENT_CONFIRMATION,
-        tone=agent["personality"],
+        agent_name=agent_name,
+        company_name=DEFAULT_COMPANY_NAME,
+        business_type="Voice AI Platform",
+        goal=AgentGoal.INFORMATION_GATHERING,
+        tone=personality,
         flow=ConversationFlow(max_objection_attempts=3),
         rules=ConversationRule(
             do_not_say_rules=[
                 "Keep responses brief - 1 to 2 sentences",
-                "Be helpful and natural",
+                "Describe the product and packages only",
+                "Do not try to book appointments or schedule calls",
                 "Never mention technical terms or that you are automated"
             ]
         ),
@@ -141,209 +142,69 @@ def create_agent_config(voice_id: str = None) -> AgentConfig:
     )
 
 
-# Google TTS imports
-from app.infrastructure.tts.google_tts_streaming import GoogleTTSStreamingProvider
-
-# Using Cartesia TTS for ultra-low latency (~90ms first audio)
-# Ref: https://docs.cartesia.ai/build-with-cartesia/tts-models#voice-selection
-from app.infrastructure.tts.cartesia import CartesiaTTSProvider
-from app.infrastructure.telephony.browser_media_gateway import BrowserMediaGateway
-
-load_dotenv()
-
-logger = logging.getLogger(__name__)
-
-router = APIRouter(tags=["Voice Demo"])
-
-# Voice Agent Personas - Dynamic based on selected voice
-# These are now dynamically generated based on the globally selected voice
-def get_dynamic_agent_info():
-    """Get agent info dynamically based on selected voice from global config."""
-    from app.domain.services.global_ai_config import get_global_config, get_selected_voice_info
-    
-    config = get_global_config()
-    voice_info = get_selected_voice_info()
-    
-    # Get voice name and gender from the selected voice
-    voice_name = voice_info.get("name", "Alex")
-    gender = voice_info.get("gender", "male")
-    
-    # Generate personality based on gender
-    if gender == "female":
-        personality = "warm, professional, and reassuring"
-        intro = f"Hi there! I'm {voice_name}. How can I help you today?"
-    else:
-        personality = "confident, clear, and trustworthy"
-        intro = f"Hello! I'm {voice_name}. What can I help you with?"
-    
-    return {
-        "id": "dynamic",
-        "name": voice_name,
-        "gender": gender,
-        "voice_id": config.tts_voice_id,
-        "personality": personality,
-        "intro": intro,
-        "description": f"{voice_name} - AI Voice Assistant"
-    }
-
-
-async def create_voice_pipeline(voice_id: str) -> tuple:
-    """Initialize providers using GLOBAL config for LLM and TTS voice.
-    
-    The LLM model and TTS voice are taken from the global AI config,
-    which is set via the AI Options page. This ensures consistency
-    across dummy calls, real calls, and all other voice interactions.
-    """
-    from app.domain.services.global_ai_config import get_global_config
-    
-    # Get global config (what's selected in AI Options page)
-    global_config = get_global_config()
-    
-    # Update agent config effectively
-    # agent = VOICE_AGENTS.get(voice_id, VOICE_AGENTS["sophia"]) 
-    # Logic note: voice_id arg might be stale if global config changed, but let's stick to global config for pipeline
-    
-    stt_provider = DeepgramFluxSTTProvider()
-    await stt_provider.initialize({
-        "api_key": os.getenv("DEEPGRAM_API_KEY"),
-        "model": "flux-general-en",
-        "sample_rate": 16000,
-        "encoding": "linear16"
-    })
-    
-    # Use LLM model from global config
-    llm_provider = GroqLLMProvider()
-    await llm_provider.initialize({
-        "api_key": os.getenv("GROQ_API_KEY"),
-        "model": global_config.llm_model,  # From AI Options
-        "temperature": global_config.llm_temperature,
-        "max_tokens": global_config.llm_max_tokens
-    })
-    logger.info(f"Using LLM model from global config: {global_config.llm_model}")
-    
-    # Use TTS voice from global config
-    tts_voice_id = global_config.tts_voice_id
-    logger.info(f"Using TTS voice from global config: {tts_voice_id}")
-    
-    # Always use Google TTS Streaming (Cartesia disabled)
-    logger.info(f"Initializing Google TTS Streaming for voice: {tts_voice_id}")
-    
-    # Determine credentials path - ensure it points to backend/config
-    # We need: backend/config/google-service-account.json
-    # Current file is in: backend/app/api/v1/endpoints/
-    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
-    creds_path = os.path.join(backend_dir, "config", "google-service-account.json")
-    
-    if os.path.exists(creds_path):
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
-    else:
-        logger.warning(f"Google creds not found at {creds_path}, hoping ADC works or env var is set")
-    
-    # Ensure voice_id is in Google format
-    if not tts_voice_id.startswith("en-US-Chirp3-HD"):
-        # Convert short name to full format
-        tts_voice_id = f"en-US-Chirp3-HD-{tts_voice_id}" if not "Chirp3" in tts_voice_id else tts_voice_id
-        # Fallback to default Google voice if not valid
-        if not tts_voice_id.startswith("en-US"):
-            tts_voice_id = "en-US-Chirp3-HD-Leda"
-    
-    tts_provider = GoogleTTSStreamingProvider()
-    await tts_provider.initialize({
-        "voice_id": tts_voice_id,
-        "sample_rate": 24000  # Chirp 3 HD uses 24kHz
-    })
-    
-    # Cartesia disabled
-    # else:
-    #     logger.info(f"Initializing Cartesia TTS for voice: {tts_voice_id}")
-    #     tts_provider = CartesiaTTSProvider()
-    #     await tts_provider.initialize({
-    #         "api_key": os.getenv("CARTESIA_API_KEY"),
-    #         "voice_id": tts_voice_id,
-    #         "model_id": global_config.tts_model,
-    #         "sample_rate": global_config.tts_sample_rate or 24000
-    #     })
-    
-    browser_gateway = BrowserMediaGateway()
-    await browser_gateway.initialize({
-        "sample_rate": global_config.tts_sample_rate or 24000,  # Match TTS output
-        "channels": 1,
-        "bit_depth": 16
-    })
-    
-    return stt_provider, llm_provider, tts_provider, browser_gateway
-
-
-def create_demo_session(call_id: str, agent_config: AgentConfig, voice_id: str = None) -> CallSession:
-    """Create demo session with dynamically selected voice persona."""
-    agent = get_dynamic_agent_info()
-    
-    system_prompt = f"""You are {agent['name']}, a voice agent for Talky.ai.
-
-Your personality: {agent['personality']}
-
-{TALKY_PRODUCT_INFO}
-
-## Important Guidelines
-- Keep responses SHORT (1-2 sentences max) - this is a phone conversation
-- Sound natural and conversational
-- Never say you are an "AI" or mention technology
-- If interrupted, stop and listen immediately
-- Answer questions about Talky naturally
-- If you don't know something, offer to have someone follow up
-- Be {agent['personality']}"""
-    
-    return CallSession(
-        call_id=call_id,
+def _build_session_config(ai_config: AIProviderConfig, agent_name: str, personality: str) -> VoiceSessionConfig:
+    """Build a VoiceSessionConfig for the Voice Demo endpoint."""
+    tts_provider_type = "deepgram" if ai_config.tts_provider == "deepgram" else "google"
+    return VoiceSessionConfig(
+        stt_provider_type="deepgram_flux",
+        llm_provider_type="groq",
+        tts_provider_type=tts_provider_type,
+        stt_model="flux-general-en",
+        stt_sample_rate=16000,
+        stt_encoding="linear16",
+        llm_model=ai_config.llm_model,
+        llm_temperature=ai_config.llm_temperature,
+        llm_max_tokens=ai_config.llm_max_tokens,
+        voice_id=ai_config.tts_voice_id,
+        tts_sample_rate=ai_config.tts_sample_rate,
+        gateway_sample_rate=ai_config.tts_sample_rate,
+        gateway_channels=1,
+        gateway_bit_depth=16,
+        session_type="voice_demo",
+        agent_config=_create_agent_config(agent_name, personality),
+        system_prompt=_build_system_prompt(agent_name, personality),
         campaign_id="demo",
         lead_id="demo-user",
-        vonage_call_uuid="demo-session",
-        state=CallState.ACTIVE,
-        conversation_state=ConversationState.GREETING,
-        conversation_context=ConversationContext(),
-        agent_config=agent_config,
-        system_prompt=system_prompt,
-        voice_id=agent["voice_id"],
-        started_at=datetime.utcnow(),
-        last_activity_at=datetime.utcnow()
     )
 
 
 @router.get("/voices")
 async def get_available_voices():
-    """Return current voice agent info."""
-    agent = get_dynamic_agent_info()
+    """Return available voice agent info."""
+    available_voices = [
+        voice for voice in [*GOOGLE_CHIRP3_VOICES, *DEEPGRAM_AURA2_VOICES]
+        if _is_english_language(voice.language)
+    ]
     return {
         "voices": [
-            {
-                "id": agent["id"],
-                "name": agent["name"],
-                "gender": agent["gender"],
-                "description": agent["description"]
-            }
+            {"id": voice.id, "name": voice.name, "gender": voice.gender, "description": voice.description}
+            for voice in available_voices
         ]
     }
 
 
 @router.websocket("/ws/ai-test/{session_id}")
 async def voice_demo_websocket(websocket: WebSocket, session_id: str):
-    """Voice demo WebSocket with dynamic voice support."""
+    """
+    Voice demo WebSocket using the currently selected AI options config.
+
+    Lifecycle is managed by VoiceOrchestrator; this endpoint only handles
+    the WebSocket message loop (transport concern).
+    """
     await websocket.accept()
     logger.info(f"Voice demo started: {session_id}")
-    
-    stt_provider = None
-    llm_provider = None
-    tts_provider = None
-    browser_gateway = None
-    pipeline = None
-    call_session = None
+
+    # Get orchestrator from DI container
+    from app.core.container import get_container
+    container = get_container()
+
+    voice_session = None
     barge_in_event = asyncio.Event()
 
-    
     try:
         # Wait for config message
         config_msg = await websocket.receive_json()
-        
+
         if config_msg.get("type") != "config":
             await websocket.send_json({
                 "type": "error",
@@ -351,214 +212,119 @@ async def voice_demo_websocket(websocket: WebSocket, session_id: str):
             })
             await websocket.close()
             return
-        
-        # CRITICAL: Read the full config object and set it globally
-        # Frontend sends: {type: "config", config: {llm_model, tts_voice_id, ...}}
-        from app.domain.services.global_ai_config import set_global_config, get_global_config
-        from app.domain.models.ai_config import AIProviderConfig
-        
-        config_data = config_msg.get("config", {})
-        if config_data:
-            # Create AIProviderConfig from frontend data
-            ai_config = AIProviderConfig(
-                llm_model=config_data.get("llm_model", "llama-3.3-70b-versatile"),
-                llm_temperature=config_data.get("llm_temperature", 0.6),
-                llm_max_tokens=config_data.get("llm_max_tokens", 150),
-                tts_model=config_data.get("tts_model", "sonic-3"),
-                tts_voice_id=config_data.get("tts_voice_id", "f786b574-daa5-4673-aa0c-cbe3e8534c02"),
-                tts_sample_rate=config_data.get("tts_sample_rate", 24000),  # Official Cartesia: 24kHz
-                tts_provider=config_data.get("tts_provider", "cartesia")
-            )
-            # Set as global config so pipeline uses it
-            set_global_config(ai_config)
-            logger.info(f"Global config set: LLM={ai_config.llm_model}, Voice={ai_config.tts_voice_id}")
-        
-        # Now get the global config (which we just set)
-        global_config = get_global_config()
-        
-        # Get dynamic agent info based on selected voice
-        agent = get_dynamic_agent_info()
-        agent_config = create_agent_config()
-        
-        # Initialize voice pipeline - this now uses global config
-        stt_provider, llm_provider, tts_provider, browser_gateway = await create_voice_pipeline(None)
-        
-        pipeline = VoicePipelineService(
-            stt_provider=stt_provider,
-            llm_provider=llm_provider,
-            tts_provider=tts_provider,
-            media_gateway=browser_gateway
+
+        raw_ai_config = config_msg.get("config")
+        if not isinstance(raw_ai_config, dict):
+            await websocket.send_json({
+                "type": "error",
+                "message": "Missing or invalid AI config payload"
+            })
+            await websocket.close()
+            return
+
+        try:
+            ai_config = AIProviderConfig(**raw_ai_config)
+        except ValidationError as exc:
+            await websocket.send_json({
+                "type": "error",
+                "message": f"Invalid AI config: {exc.errors()}"
+            })
+            await websocket.close()
+            return
+
+        # Apply selected config to the active voice pipeline session.
+        set_global_config(ai_config)
+        voice_profile = _resolve_voice_profile(ai_config)
+        logger.info("Starting voice demo with selected AI options config")
+
+        orchestrator = container.voice_orchestrator
+
+        # 1. Create session via orchestrator
+        config = _build_session_config(
+            ai_config=ai_config,
+            agent_name=voice_profile["agent_name"],
+            personality=voice_profile["personality"],
         )
-        
-        call_id = str(uuid.uuid4())
-        call_session = create_demo_session(call_id, agent_config)
-        
-        await browser_gateway.on_call_started(call_id, {"websocket": websocket})
-        
-        # Send ready with voice info
+        voice_session = await orchestrator.create_voice_session(config)
+
+        # 2. Send ready with voice info
         await websocket.send_json({
             "type": "ready",
             "session_id": session_id,
-            "call_id": call_id,
-            "voice_id": agent["voice_id"],
-            "agent_name": agent["name"],
-            "agent_description": agent["description"]
+            "call_id": voice_session.call_id,
+            "state": "ready",
+            "voice_id": ai_config.tts_voice_id,
+            "agent_name": voice_profile["agent_name"],
+            "company_name": DEFAULT_COMPANY_NAME,
+            "agent_description": voice_profile["description"],
+            "sample_rate": ai_config.tts_sample_rate,
+            "audio_format": "s16le",
         })
-        
-        # Send voice introduction (pre-written, not generated)
-        await send_voice_introduction(tts_provider, agent, websocket, barge_in_event)
 
-        
-        # Start pipeline
-        logger.info(f"Starting voice pipeline for {call_id}...")
-        pipeline_task = asyncio.create_task(
-            pipeline.start_pipeline(call_session, websocket)
+        # 3. Start pipeline (so STT can detect barge-in during intro)
+        await orchestrator.start_pipeline(voice_session, websocket)
+
+        # 4. Greeting
+        # For linear16 mono audio: bytes/sec = sample_rate * 2.
+        # Keep greeting chunks moderate to reduce jitter and avoid large burst playback.
+        pcm_bytes_per_second = max(8000, int(ai_config.tts_sample_rate) * 2)
+        greeting_first_chunk_bytes = max(1600, pcm_bytes_per_second // 10)   # ~100ms
+        greeting_regular_chunk_bytes = max(3200, pcm_bytes_per_second // 5)  # ~200ms
+        await orchestrator.send_greeting(
+            voice_session,
+            voice_profile["intro"],
+            websocket,
+            barge_in_event,
+            first_chunk_bytes=greeting_first_chunk_bytes,
+            regular_chunk_bytes=greeting_regular_chunk_bytes,
         )
-        logger.info(f"Voice pipeline task created for {call_id}")
-        
-        # Main message loop
-        while browser_gateway.is_session_active(call_id):
+
+        # 5. Message loop — stays in endpoint (WebSocket I/O is transport concern)
+        call_id = voice_session.call_id
+        gateway = voice_session.media_gateway
+
+        while gateway.is_session_active(call_id):
             try:
                 message = await asyncio.wait_for(
-                    websocket.receive(),
-                    timeout=30.0
+                    websocket.receive(), timeout=30.0
                 )
-                
+
                 if "bytes" in message:
                     audio_data = message["bytes"]
-                    await browser_gateway.on_audio_received(call_id, audio_data)
-                    
-                    # Log audio receipt periodically
-                    audio_count = getattr(browser_gateway.get_session(call_id), 'chunks_received', 0)
-                    if audio_count % 50 == 0 and audio_count > 0:
-                        logger.info(f"Audio chunks received: {audio_count}")
-                    
-                    # Barge-in detection - LOW threshold for instant response
-                    if len(audio_data) >= 256:  # Reduced from 512 for faster detection
-                        samples = [int.from_bytes(audio_data[i:i+2], 'little', signed=True) 
-                                   for i in range(0, min(len(audio_data), 256), 2)]
+                    await gateway.on_audio_received(call_id, audio_data)
+
+                    # Barge-in detection
+                    if len(audio_data) >= 256:
+                        samples = [
+                            int.from_bytes(audio_data[i:i+2], "little", signed=True)
+                            for i in range(0, min(len(audio_data), 256), 2)
+                        ]
                         energy = sum(abs(s) for s in samples) / len(samples)
-                        if energy > 300:  # Lowered from 500 for faster barge-in
+                        if energy > 300:
                             barge_in_event.set()
                             await websocket.send_json({"type": "barge_in"})
-                
+
                 elif "text" in message:
                     data = json.loads(message["text"])
-                    msg_type = data.get("type")
-                    
-                    if msg_type == "end_call":
-                        await browser_gateway.on_call_ended(call_id, "user_ended")
+                    if data.get("type") == "end_call":
+                        await gateway.on_call_ended(call_id, "user_ended")
                         break
 
-            
             except asyncio.TimeoutError:
                 await websocket.send_json({"type": "heartbeat"})
                 continue
-            
             except WebSocketDisconnect:
                 break
-        
-        pipeline_task.cancel()
-        try:
-            await pipeline_task
-        except asyncio.CancelledError:
-            pass
-    
+
     except WebSocketDisconnect:
         logger.info(f"Voice demo disconnected: {session_id}")
-    
     except Exception as e:
         logger.error(f"Voice demo error: {e}", exc_info=True)
         try:
             await websocket.send_json({"type": "error", "message": str(e)})
-        except:
+        except Exception:
             pass
-    
     finally:
-        if browser_gateway and call_session:
-            await browser_gateway.on_call_ended(call_session.call_id, "session_ended")
-        if stt_provider:
-            await stt_provider.cleanup()
-        if llm_provider:
-            await llm_provider.cleanup()
-        if tts_provider:
-            await tts_provider.cleanup()
-        if browser_gateway:
-            await browser_gateway.cleanup()
+        if voice_session:
+            await container.voice_orchestrator.end_session(voice_session)
         logger.info(f"Voice demo ended: {session_id}")
-
-
-async def send_voice_introduction(
-    tts_provider,  # TTSProvider (CartesiaTTSProvider or GoogleTTSProvider)
-    agent: Dict,
-    websocket: WebSocket,
-    barge_in_event: asyncio.Event
-):
-    """Send the voice agent's introduction using global config voice."""
-    from app.domain.services.global_ai_config import get_global_config, get_selected_voice_info
-    
-    config = get_global_config()
-    voice_info = get_selected_voice_info()
-    
-    # Use the selected voice name in the intro
-    voice_name = voice_info.get("name", agent["name"])
-    intro_text = f"Hi there! I'm {voice_name}. How can I help you today?"
-    
-    # Send intro text to frontend
-    await websocket.send_json({
-        "type": "llm_response",
-        "text": intro_text,
-        "latency_ms": 0
-    })
-    
-    tts_start = time.time()
-    was_interrupted = False
-    
-    # Optimized chunk sizes for smooth, instant playback:
-    # First chunk: 12800 bytes (~200ms of Float32 audio) - fast first audio without jitter
-    # Regular chunks: 32000 bytes (~500ms) - smooth continuous playback
-    FIRST_CHUNK_BYTES = 12800   # ~200ms for fast first audio (prevents jitter)
-    REGULAR_CHUNK_BYTES = 32000  # ~500ms for smooth streaming
-    audio_buffer = bytearray()
-    chunks_sent = 0
-    
-    try:
-        # Use voice_id from global config
-        async for audio_chunk in tts_provider.stream_synthesize(
-            text=intro_text,
-            voice_id=config.tts_voice_id,
-            sample_rate=config.tts_sample_rate
-        ):
-            if barge_in_event.is_set():
-                was_interrupted = True
-                barge_in_event.clear()
-                await websocket.send_json({"type": "tts_interrupted", "reason": "barge_in"})
-                break
-            
-            audio_buffer.extend(audio_chunk.data)
-            
-            # Use smaller threshold for first chunk (instant start)
-            # Then larger threshold for remaining chunks (smooth playback)
-            target_size = FIRST_CHUNK_BYTES if chunks_sent == 0 else REGULAR_CHUNK_BYTES
-            
-            if len(audio_buffer) >= target_size:
-                await websocket.send_bytes(bytes(audio_buffer))
-                audio_buffer = bytearray()
-                chunks_sent += 1
-        
-        # Send remaining audio
-        if audio_buffer and not was_interrupted:
-            await websocket.send_bytes(bytes(audio_buffer))
-            
-    except Exception as e:
-        logger.error(f"Intro TTS error: {e}")
-    
-    tts_latency = (time.time() - tts_start) * 1000
-    
-    await websocket.send_json({
-        "type": "turn_complete",
-        "llm_latency_ms": 0,
-        "tts_latency_ms": tts_latency,
-        "total_latency_ms": tts_latency,
-        "was_interrupted": was_interrupted
-    })

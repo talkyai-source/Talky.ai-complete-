@@ -1,6 +1,6 @@
 """
 Database Connection and Session Management
-Connects to Supabase PostgreSQL
+Connects to PostgreSQL PostgreSQL
 """
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Get database URL directly from environment
-# For Supabase, get this from: Settings > Database > Connection String > URI
+# For PostgreSQL, get this from: Settings > Database > Connection String > URI
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not DATABASE_URL:

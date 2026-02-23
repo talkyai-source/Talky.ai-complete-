@@ -1,0 +1,28 @@
+# Production Configuration
+app:
+  name: "AI Voice Dialer"
+  version: "1.0.0"
+  debug: false
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  reload: false
+
+cors:
+  origins:
+    - "${FRONTEND_URL}"
+  allow_credentials: true
+
+redis:
+  url: "${REDIS_URL}"
+  max_connections: 100
+
+database:
+  url: ${DATABASE_URL}
+  pool_size: 20
+  max_overflow: 40
+
+logging:
+  level: "WARNING"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

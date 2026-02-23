@@ -5,9 +5,10 @@ Day 24: Unified Connector System
 import pytest
 import os
 from unittest.mock import patch
+from cryptography.fernet import Fernet
 
-# Set test environment before imports
-os.environ["CONNECTOR_ENCRYPTION_KEY"] = "test_key_for_testing_only_32bytes!"
+# Set test environment before imports - use a valid Fernet key
+os.environ["CONNECTOR_ENCRYPTION_KEY"] = Fernet.generate_key().decode()
 
 
 class TestTokenEncryption:

@@ -23,6 +23,7 @@ class TTSProvider(str, Enum):
     """Available TTS providers"""
     CARTESIA = "cartesia"
     GOOGLE = "google"
+    DEEPGRAM = "deepgram"
 
 
 class GroqModel(str, Enum):
@@ -54,6 +55,11 @@ class CartesiaModel(str, Enum):
 class GoogleTTSModel(str, Enum):
     """Available Google TTS models"""
     CHIRP3_HD = "Chirp3-HD"
+
+
+class DeepgramTTSModel(str, Enum):
+    """Available Deepgram TTS models"""
+    AURA_2 = "aura-2"
 
 
 class ModelInfo(BaseModel):
@@ -282,6 +288,15 @@ GOOGLE_TTS_MODELS = [
     ),
 ]
 
+DEEPGRAM_TTS_MODELS = [
+    ModelInfo(
+        id=DeepgramTTSModel.AURA_2.value,
+        name="Aura-2",
+        description="Deepgram's latest low-latency neural text-to-speech model family.",
+        speed="Streaming optimized",
+    ),
+]
+
 
 # =============================================================================
 # CARTESIA VOICES - Curated for Voice Agents
@@ -497,3 +512,142 @@ GOOGLE_CHIRP3_VOICES = [
     ),
 ]
 
+# =============================================================================
+# DEEPGRAM AURA-2 VOICES - Official Voice IDs
+# =============================================================================
+# Source: https://developers.deepgram.com/docs/tts-models
+# Includes all currently documented Aura-2 voices across supported languages.
+_DEEPGRAM_AURA2_VOICE_SPECS = [
+    # English (all available)
+    ("aura-2-amalthea-en", "Amalthea", "en", "female"),
+    ("aura-2-andromeda-en", "Andromeda", "en", "female"),
+    ("aura-2-apollo-en", "Apollo", "en", "male"),
+    ("aura-2-arcas-en", "Arcas", "en", "male"),
+    ("aura-2-aries-en", "Aries", "en", "male"),
+    ("aura-2-asteria-en", "Asteria", "en", "female"),
+    ("aura-2-athena-en", "Athena", "en", "female"),
+    ("aura-2-atlas-en", "Atlas", "en", "male"),
+    ("aura-2-aurora-en", "Aurora", "en", "female"),
+    ("aura-2-callista-en", "Callista", "en", "female"),
+    ("aura-2-cora-en", "Cora", "en", "female"),
+    ("aura-2-cordelia-en", "Cordelia", "en", "female"),
+    ("aura-2-delia-en", "Delia", "en", "female"),
+    ("aura-2-draco-en", "Draco", "en", "male"),
+    ("aura-2-electra-en", "Electra", "en", "female"),
+    ("aura-2-harmonia-en", "Harmonia", "en", "female"),
+    ("aura-2-helena-en", "Helena", "en", "female"),
+    ("aura-2-hera-en", "Hera", "en", "female"),
+    ("aura-2-hermes-en", "Hermes", "en", "male"),
+    ("aura-2-hyperion-en", "Hyperion", "en", "male"),
+    ("aura-2-iris-en", "Iris", "en", "female"),
+    ("aura-2-janus-en", "Janus", "en", "female"),
+    ("aura-2-juno-en", "Juno", "en", "female"),
+    ("aura-2-jupiter-en", "Jupiter", "en", "male"),
+    ("aura-2-luna-en", "Luna", "en", "female"),
+    ("aura-2-mars-en", "Mars", "en", "male"),
+    ("aura-2-minerva-en", "Minerva", "en", "female"),
+    ("aura-2-neptune-en", "Neptune", "en", "male"),
+    ("aura-2-odysseus-en", "Odysseus", "en", "male"),
+    ("aura-2-ophelia-en", "Ophelia", "en", "female"),
+    ("aura-2-orion-en", "Orion", "en", "male"),
+    ("aura-2-orpheus-en", "Orpheus", "en", "male"),
+    ("aura-2-pandora-en", "Pandora", "en", "female"),
+    ("aura-2-phoebe-en", "Phoebe", "en", "female"),
+    ("aura-2-pluto-en", "Pluto", "en", "male"),
+    ("aura-2-saturn-en", "Saturn", "en", "male"),
+    ("aura-2-selene-en", "Selene", "en", "female"),
+    ("aura-2-thalia-en", "Thalia", "en", "female"),
+    ("aura-2-theia-en", "Theia", "en", "female"),
+    ("aura-2-vesta-en", "Vesta", "en", "female"),
+    ("aura-2-zeus-en", "Zeus", "en", "male"),
+    # Spanish (all available)
+    ("aura-2-sirio-es", "Sirio", "es", "male"),
+    ("aura-2-nestor-es", "Nestor", "es", "male"),
+    ("aura-2-carina-es", "Carina", "es", "female"),
+    ("aura-2-celeste-es", "Celeste", "es", "female"),
+    ("aura-2-alvaro-es", "Alvaro", "es", "male"),
+    ("aura-2-diana-es", "Diana", "es", "female"),
+    ("aura-2-aquila-es", "Aquila", "es", "male"),
+    ("aura-2-selena-es", "Selena", "es", "female"),
+    ("aura-2-estrella-es", "Estrella", "es", "female"),
+    ("aura-2-javier-es", "Javier", "es", "male"),
+    ("aura-2-agustina-es", "Agustina", "es", "female"),
+    ("aura-2-antonia-es", "Antonia", "es", "female"),
+    ("aura-2-gloria-es", "Gloria", "es", "female"),
+    ("aura-2-luciano-es", "Luciano", "es", "male"),
+    ("aura-2-olivia-es", "Olivia", "es", "female"),
+    ("aura-2-silvia-es", "Silvia", "es", "female"),
+    ("aura-2-valerio-es", "Valerio", "es", "male"),
+    # Dutch (all available)
+    ("aura-2-beatrix-nl", "Beatrix", "nl", "female"),
+    ("aura-2-daphne-nl", "Daphne", "nl", "female"),
+    ("aura-2-cornelia-nl", "Cornelia", "nl", "female"),
+    ("aura-2-sander-nl", "Sander", "nl", "male"),
+    ("aura-2-hestia-nl", "Hestia", "nl", "female"),
+    ("aura-2-lars-nl", "Lars", "nl", "male"),
+    ("aura-2-roman-nl", "Roman", "nl", "male"),
+    ("aura-2-rhea-nl", "Rhea", "nl", "female"),
+    ("aura-2-leda-nl", "Leda", "nl", "female"),
+    # French (all available)
+    ("aura-2-agathe-fr", "Agathe", "fr", "female"),
+    ("aura-2-hector-fr", "Hector", "fr", "male"),
+    # German (all available)
+    ("aura-2-elara-de", "Elara", "de", "female"),
+    ("aura-2-aurelia-de", "Aurelia", "de", "female"),
+    ("aura-2-lara-de", "Lara", "de", "female"),
+    ("aura-2-julius-de", "Julius", "de", "male"),
+    ("aura-2-fabian-de", "Fabian", "de", "male"),
+    ("aura-2-kara-de", "Kara", "de", "female"),
+    ("aura-2-viktoria-de", "Viktoria", "de", "female"),
+    # Italian (all available)
+    ("aura-2-melia-it", "Melia", "it", "female"),
+    ("aura-2-elio-it", "Elio", "it", "male"),
+    ("aura-2-flavio-it", "Flavio", "it", "male"),
+    ("aura-2-maia-it", "Maia", "it", "female"),
+    ("aura-2-cinzia-it", "Cinzia", "it", "female"),
+    ("aura-2-cesare-it", "Cesare", "it", "male"),
+    ("aura-2-livia-it", "Livia", "it", "female"),
+    ("aura-2-perseo-it", "Perseo", "it", "male"),
+    ("aura-2-dionisio-it", "Dionisio", "it", "male"),
+    ("aura-2-demetra-it", "Demetra", "it", "female"),
+    # Japanese (all available)
+    ("aura-2-uzume-ja", "Uzume", "ja", "female"),
+    ("aura-2-ebisu-ja", "Ebisu", "ja", "male"),
+    ("aura-2-fujin-ja", "Fujin", "ja", "male"),
+    ("aura-2-izanami-ja", "Izanami", "ja", "female"),
+    ("aura-2-ama-ja", "Ama", "ja", "female"),
+]
+
+_DEEPGRAM_LANGUAGE_LABELS = {
+    "en": "English",
+    "es": "Spanish",
+    "nl": "Dutch",
+    "fr": "French",
+    "de": "German",
+    "it": "Italian",
+    "ja": "Japanese",
+}
+
+
+def _deepgram_accent_color(gender: Optional[str]) -> str:
+    if gender == "female":
+        return "#db2777"
+    if gender == "male":
+        return "#1d4ed8"
+    return "#64748b"
+
+
+DEEPGRAM_AURA2_VOICES = [
+    VoiceInfo(
+        id=voice_id,
+        name=name,
+        language=language_code,
+        description=f"Deepgram Aura-2 {(_DEEPGRAM_LANGUAGE_LABELS.get(language_code, language_code)).title()} voice.",
+        gender=gender,
+        accent="Global",
+        accent_color=_deepgram_accent_color(gender),
+        tags=["aura-2", language_code],
+        provider="deepgram",
+    )
+    for voice_id, name, language_code, gender in _DEEPGRAM_AURA2_VOICE_SPECS
+]

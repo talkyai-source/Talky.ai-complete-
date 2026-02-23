@@ -1,19 +1,19 @@
 """
 Tenant Filter Utility
-Shared helper for applying consistent tenant filtering across Supabase queries
+Shared helper for applying consistent tenant filtering across PostgreSQL queries
 """
 from typing import Optional, Any
 
 
 def apply_tenant_filter(query: Any, tenant_id: Optional[str], column: str = "tenant_id") -> Any:
     """
-    Apply tenant filtering to a Supabase query.
+    Apply tenant filtering to a PostgreSQL query.
     
     Centralizes tenant filtering logic to prevent copy-paste errors and ensure
     consistent handling of edge cases across all endpoints.
     
     Args:
-        query: Supabase query builder object (from supabase.table(...).select(...))
+        query: PostgreSQL query builder object (from db_client.table(...).select(...))
         tenant_id: Current user's tenant_id (may be None for admin users)
         column: Name of the tenant_id column (default: "tenant_id")
     
@@ -21,7 +21,7 @@ def apply_tenant_filter(query: Any, tenant_id: Optional[str], column: str = "ten
         Modified query with tenant filter applied, or original query if tenant_id is None
     
     Usage:
-        query = supabase.table("calls").select("*")
+        query = db_client.table("calls").select("*")
         query = apply_tenant_filter(query, current_user.tenant_id)
         response = query.execute()
     
@@ -36,7 +36,7 @@ def apply_tenant_filter(query: Any, tenant_id: Optional[str], column: str = "ten
 
 
 def verify_tenant_access(
-    supabase: Any,
+    db_client: Any,
     table: str,
     record_id: str,
     tenant_id: Optional[str],
@@ -49,7 +49,7 @@ def verify_tenant_access(
     the user has access to that specific record.
     
     Args:
-        supabase: Supabase client instance
+        db_client: PostgreSQL client instance
         table: Table name to check
         record_id: UUID of the record to verify
         tenant_id: Current user's tenant_id
@@ -59,7 +59,7 @@ def verify_tenant_access(
         True if record exists and belongs to tenant, False otherwise
     
     Usage:
-        if not verify_tenant_access(supabase, "calls", call_id, current_user.tenant_id):
+        if not verify_tenant_access(db_client, "calls", call_id, current_user.tenant_id):
             raise HTTPException(status_code=404, detail="Call not found")
     """
     if not tenant_id:
@@ -67,7 +67,7 @@ def verify_tenant_access(
         return True
     
     try:
-        response = supabase.table(table).select("id").eq("id", record_id).eq(tenant_column, tenant_id).execute()
+        response = db_client.table(table).select("id").eq("id", record_id).eq(tenant_column, tenant_id).execute()
         return bool(response.data)
     except Exception:
         return False

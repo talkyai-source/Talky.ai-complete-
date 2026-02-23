@@ -1,6 +1,6 @@
 """
 SQLAlchemy Database Models
-Maps to Supabase PostgreSQL tables
+Maps to PostgreSQL PostgreSQL tables
 """
 from sqlalchemy import Column, String, Integer, Boolean, DateTime, Text, DECIMAL, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID, JSONB

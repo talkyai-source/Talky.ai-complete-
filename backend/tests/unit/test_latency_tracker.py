@@ -97,6 +97,28 @@ class TestLatencyMetrics:
         assert d["total_latency_ms"] == pytest.approx(500, abs=1)
         assert "timestamps" in d
 
+    def test_ws_d_stage_latencies(self):
+        """Test WS-D stage latency calculations."""
+        now = datetime.utcnow()
+
+        metrics = LatencyMetrics(
+            call_id="test-call",
+            turn_id=1,
+            listening_start_time=now,
+            stt_first_transcript_time=now + timedelta(milliseconds=120),
+            speech_end_time=now + timedelta(milliseconds=700),
+            llm_start_time=now + timedelta(milliseconds=710),
+            llm_first_token_time=now + timedelta(milliseconds=860),
+            tts_start_time=now + timedelta(milliseconds=980),
+            tts_first_chunk_time=now + timedelta(milliseconds=1110),
+            response_start_time=now + timedelta(milliseconds=1110),
+        )
+
+        assert metrics.stt_first_transcript_ms == pytest.approx(120, abs=1)
+        assert metrics.llm_first_token_ms == pytest.approx(150, abs=1)
+        assert metrics.tts_first_chunk_ms == pytest.approx(130, abs=1)
+        assert metrics.response_start_latency_ms == pytest.approx(410, abs=1)
+
 
 class TestLatencyTracker:
     """Tests for LatencyTracker class."""
@@ -190,6 +212,35 @@ class TestLatencyTracker:
         assert "call-1" in active
         assert "call-2" in active
         assert "call-3" in active
+
+    def test_percentiles_and_baseline_snapshot(self):
+        """Test WS-D percentile helpers for baseline reporting."""
+        tracker = LatencyTracker()
+        now = datetime.utcnow()
+
+        values = [300, 500, 900]
+        for idx, response_latency in enumerate(values, start=1):
+            tracker.start_turn("call-wsd", turn_id=idx)
+            metrics = tracker.get_metrics("call-wsd")
+            assert metrics is not None
+            metrics.listening_start_time = now
+            metrics.stt_first_transcript_time = now + timedelta(milliseconds=100)
+            metrics.speech_end_time = now
+            metrics.llm_start_time = now + timedelta(milliseconds=10)
+            metrics.llm_first_token_time = now + timedelta(milliseconds=160)
+            metrics.tts_start_time = now + timedelta(milliseconds=170)
+            metrics.tts_first_chunk_time = now + timedelta(milliseconds=290)
+            metrics.response_start_time = now + timedelta(milliseconds=response_latency)
+            metrics.audio_start_time = metrics.response_start_time
+            tracker.log_metrics("call-wsd")
+
+        percentiles = tracker.get_percentiles("call-wsd", "response_start_latency_ms")
+        assert percentiles[50] == pytest.approx(500, abs=1)
+        assert percentiles[95] == pytest.approx(860, abs=1)
+
+        snapshot = tracker.build_baseline_snapshot("call-wsd")
+        assert "response_start_latency_ms" in snapshot
+        assert snapshot["response_start_latency_ms"][50] == pytest.approx(500, abs=1)
 
 
 class TestGlobalTracker:

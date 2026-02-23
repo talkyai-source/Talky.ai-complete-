@@ -1,17 +1,24 @@
 """
-Deepgram Flux STT Provider Implementation
-Uses direct WebSocket connection based on official Flux v2 API.
+Deepgram Flux STT Provider Implementation - aligned with official best practices.
+
+Uses direct WebSocket connection with optimal configuration for voice agents.
 
 Flux State Machine Events:
 - Update: Transcript update (~every 0.25s)
-- StartOfTurn: User started speaking  
-- EagerEndOfTurn: Early end-of-turn signal
-- TurnResumed: User continued speaking
-- EndOfTurn: User definitely finished speaking
+- StartOfTurn: User started speaking (trigger barge-in immediately)
+- EagerEndOfTurn: Early end-of-turn signal (moderate confidence - start LLM early)
+- TurnResumed: User continued speaking (cancel speculative LLM call)
+- EndOfTurn: User definitely finished speaking (proceed with response)
 
-Day 17: Added PCM validation before sending audio to Deepgram.
+Default Configuration (Simple EndOfTurn-only Mode):
+- eot_threshold=0.7: Confirm end of turn
+- eot_timeout_ms=5000: Natural pause timeout
+- eager_eot_threshold disabled unless explicitly configured
 
-Based on: https://developers.deepgram.com/docs/flux/agent
+Audio Streaming:
+- ~80ms chunks (2560 bytes at 16kHz linear16) for optimal Flux performance
+
+Reference: https://developers.deepgram.com/docs/flux/configuration
 """
 import os
 import json
@@ -19,7 +26,8 @@ import base64
 import asyncio
 import websockets
 import logging
-from typing import AsyncIterator, Optional
+from typing import AsyncIterator, Optional, Callable
+from dataclasses import dataclass
 
 from app.domain.interfaces.stt_provider import STTProvider
 from app.domain.models.conversation import TranscriptChunk, AudioChunk, BargeInSignal
@@ -27,11 +35,40 @@ from app.utils.audio_utils import validate_pcm_format
 
 logger = logging.getLogger(__name__)
 
+# Deepgram recommended audio chunk size for optimal Flux performance
+# 80ms @ 16kHz, 16-bit mono = 2560 bytes
+FLUX_OPTIMAL_CHUNK_BYTES = 2560
+FLUX_OPTIMAL_CHUNK_MS = 80
+FLUX_HEARTBEAT_INTERVAL_SEC = 4.0
+FLUX_HEARTBEAT_SILENCE_MS = 100
+
+
+@dataclass
+class FluxEagerTurnState:
+    """Tracks speculative LLM call state for EagerEndOfTurn pattern."""
+    is_speculating: bool = False
+    transcript: str = ""
+    cancel_event: Optional[asyncio.Event] = None
+    
+    def reset(self):
+        """Reset state when turn is finalized or resumed."""
+        self.is_speculating = False
+        self.transcript = ""
+        if self.cancel_event:
+            self.cancel_event.set()
+        self.cancel_event = None
+
 
 class DeepgramFluxSTTProvider(STTProvider):
     """
-    Deepgram Flux STT provider with ultra-low latency and 
-    intelligent turn detection for voice agents.
+    Deepgram Flux STT provider with optimized turn detection for voice agents.
+    
+    Implements Deepgram best practices:
+    - EndOfTurn-only mode by default for simpler, more reliable agents
+    - Optional eager mode when eager_eot_threshold is configured
+    - ~80ms audio chunks for optimal streaming
+    - EagerEndOfTurn + TurnResumed handling when eager mode is enabled
+    - StartOfTurn immediate barge-in (with echo suppression)
     
     Uses direct WebSocket connection to Deepgram v2 API.
     """
@@ -42,6 +79,60 @@ class DeepgramFluxSTTProvider(STTProvider):
         self._model: str = "flux-general-en"
         self._sample_rate: int = 16000
         self._encoding: str = "linear16"
+        
+        # EOT configuration (Simple mode defaults per Deepgram docs)
+        self._eot_threshold: float = 0.7
+        self._eager_eot_threshold: Optional[float] = None
+        self._eot_timeout_ms: int = 5000
+        
+        # Echo suppression: mute microphone during TTS playback
+        # This prevents the agent's voice from triggering StartOfTurn
+        self._muted_calls: set[str] = set()
+        self._mute_lock = asyncio.Lock()
+        
+        # Eager turn state tracking
+        self._eager_states: dict[str, FluxEagerTurnState] = {}
+
+    def _validate_turn_config(self) -> None:
+        """Validate Flux turn-detection parameter ranges."""
+        if not (0.5 <= self._eot_threshold <= 0.9):
+            raise ValueError(
+                f"eot_threshold must be between 0.5 and 0.9, got {self._eot_threshold}"
+            )
+
+        if not (500 <= self._eot_timeout_ms <= 10000):
+            raise ValueError(
+                f"eot_timeout_ms must be between 500 and 10000, got {self._eot_timeout_ms}"
+            )
+
+        if self._eager_eot_threshold is not None:
+            if not (0.3 <= self._eager_eot_threshold <= 0.9):
+                raise ValueError(
+                    "eager_eot_threshold must be between 0.3 and 0.9, "
+                    f"got {self._eager_eot_threshold}"
+                )
+            if self._eager_eot_threshold > self._eot_threshold:
+                raise ValueError(
+                    "eager_eot_threshold must be less than or equal to "
+                    f"eot_threshold (got eager={self._eager_eot_threshold}, "
+                    f"eot={self._eot_threshold})"
+                )
+    
+    async def mute(self, call_id: str) -> None:
+        """Mute microphone for a call (during TTS playback to prevent echo)."""
+        async with self._mute_lock:
+            self._muted_calls.add(call_id)
+            logger.debug(f"Muted microphone for call {call_id}")
+    
+    async def unmute(self, call_id: str) -> None:
+        """Unmute microphone for a call (after TTS playback)."""
+        async with self._mute_lock:
+            self._muted_calls.discard(call_id)
+            logger.debug(f"Unmuted microphone for call {call_id}")
+    
+    def is_muted(self, call_id: str) -> bool:
+        """Check if microphone is muted for a call."""
+        return call_id in self._muted_calls
         
     async def initialize(self, config: dict) -> None:
         """Initialize Deepgram Flux with configuration"""
@@ -56,40 +147,66 @@ class DeepgramFluxSTTProvider(STTProvider):
         self._sample_rate = config.get("sample_rate", 16000)
         self._encoding = config.get("encoding", "linear16")
         
-        logger.info(f"DeepgramFlux initialized: model={self._model}, sample_rate={self._sample_rate}")
+        # EOT configuration from config (can override defaults)
+        self._eot_threshold = float(config.get("eot_threshold", 0.7))
+        eager = config.get("eager_eot_threshold")
+        self._eager_eot_threshold = float(eager) if eager is not None else None
+        self._eot_timeout_ms = int(config.get("eot_timeout_ms", 5000))
+        self._validate_turn_config()
+        
+        logger.info(
+            f"DeepgramFlux initialized: model={self._model}, sample_rate={self._sample_rate}, "
+            f"eot_threshold={self._eot_threshold}, eager_eot_threshold={self._eager_eot_threshold}, "
+            f"eot_timeout_ms={self._eot_timeout_ms}"
+        )
     
     async def stream_transcribe(
         self,
         audio_stream: AsyncIterator[AudioChunk],
         language: str = "en",
-        context: Optional[str] = None
+        context: Optional[str] = None,
+        call_id: Optional[str] = None,
+        on_eager_end_of_turn: Optional[Callable[[str], None]] = None
     ) -> AsyncIterator[TranscriptChunk]:
         """
-        Stream audio to Deepgram Flux and receive real-time transcriptions.
+        Stream audio to Deepgram Flux with optimized configuration.
         
-        Uses EndOfTurn pattern from official Flux documentation.
-        Implements KeepAlive mechanism per Deepgram best practices.
+        Uses Flux turn detection with EndOfTurn-only by default.
+        Optional eager mode is enabled when eager_eot_threshold is configured.
         
         Args:
             audio_stream: Async iterator of audio chunks (PCM 16-bit)
             language: Language code
             context: Optional context
+            call_id: Call ID for eager turn state tracking
+            on_eager_end_of_turn: Callback for EagerEndOfTurn (start LLM early)
             
         Yields:
             TranscriptChunk: Partial or final transcripts
+            BargeInSignal: When user starts speaking (StartOfTurn)
         """
         if not self._api_key:
             raise RuntimeError("Deepgram API key not set. Call initialize() first.")
         
-        # Build WebSocket URL with Flux parameters (matching official Deepgram demo)
-        url = (
-            f"wss://api.deepgram.com/v2/listen"
-            f"?model={self._model}"
-            f"&encoding={self._encoding}"
-            f"&sample_rate={self._sample_rate}"
-        )
+        # Initialize eager turn state for this call
+        if call_id:
+            self._eager_states[call_id] = FluxEagerTurnState()
+        eager_state = self._eager_states.get(call_id) if call_id else None
         
-        # Headers matching official Deepgram demo
+        # Build WebSocket URL with Flux turn-detection parameters.
+        # eager_eot_threshold is optional and only added when explicitly configured.
+        params = [
+            ("model", self._model),
+            ("encoding", self._encoding),
+            ("sample_rate", str(self._sample_rate)),
+            ("eot_threshold", str(self._eot_threshold)),
+            ("eot_timeout_ms", str(self._eot_timeout_ms)),
+        ]
+        if self._eager_eot_threshold is not None:
+            params.append(("eager_eot_threshold", str(self._eager_eot_threshold)))
+        query = "&".join(f"{k}={v}" for k, v in params)
+        url = f"wss://api.deepgram.com/v2/listen?{query}"
+        
         headers = {
             "Authorization": f"Token {self._api_key}",
             "User-Agent": "TalkyAI-VoiceAgent/1.0"
@@ -100,42 +217,64 @@ class DeepgramFluxSTTProvider(STTProvider):
         stop_event = asyncio.Event()
         last_audio_time = asyncio.get_event_loop().time()
         
-        async def send_keepalive(ws):
-            """Send KeepAlive messages every 5 seconds per Deepgram docs"""
+        async def send_silence_heartbeat(ws):
+            """
+            Keep Flux stream active with short silent audio frames.
+
+            Flux v2 control messages accept `CloseStream`/`Configure`; sending
+            JSON `KeepAlive` causes UNPARSABLE_CLIENT_MESSAGE errors.
+            """
             nonlocal last_audio_time
+            silence_bytes = int(
+                self._sample_rate * (FLUX_HEARTBEAT_SILENCE_MS / 1000.0) * 2
+            )
+            silent_frame = bytes(max(2, silence_bytes))
             try:
                 while not stop_event.is_set():
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(FLUX_HEARTBEAT_INTERVAL_SEC)
                     if stop_event.is_set():
                         break
-                    
-                    # Check if we need to send keepalive (no audio for 5+ seconds)
+
                     current_time = asyncio.get_event_loop().time()
-                    if current_time - last_audio_time >= 5:
+                    if current_time - last_audio_time >= FLUX_HEARTBEAT_INTERVAL_SEC:
                         try:
-                            # Send KeepAlive as JSON text frame per Deepgram docs
-                            await ws.send(json.dumps({"type": "KeepAlive"}))
-                            logger.debug("Sent KeepAlive to Deepgram")
+                            await ws.send(silent_frame)
+                            last_audio_time = current_time
+                            logger.debug("Sent Flux silence heartbeat frame")
+                        except websockets.exceptions.ConnectionClosed:
+                            break
                         except Exception as e:
-                            logger.warning(f"KeepAlive send failed: {e}")
+                            logger.warning(f"Flux silence heartbeat failed: {e}")
                             break
             except asyncio.CancelledError:
                 pass
             except Exception as e:
-                logger.error(f"KeepAlive error: {e}")
+                logger.error(f"Flux silence heartbeat error: {e}")
         
         async def send_audio(ws):
-            """Send validated audio chunks to WebSocket"""
+            """Send validated audio chunks to WebSocket with optimal chunking"""
             nonlocal last_audio_time
             chunks_sent = 0
-
+            chunks_skipped = 0
             chunks_invalid = 0
+            
+            # Buffer for accumulating optimal chunk sizes
+            audio_buffer = bytearray()
+            
+            logger.debug("send_audio started")
             try:
                 async for audio_chunk in audio_stream:
                     if stop_event.is_set():
                         break
                     
-                    # Validate PCM format (16kHz, mono, 16-bit)
+                    # Skip audio when muted (during TTS to prevent echo)
+                    if call_id and self.is_muted(call_id):
+                        chunks_skipped += 1
+                        if chunks_skipped <= 3:
+                            logger.debug(f"Skipping audio chunk - microphone muted for call {call_id}")
+                        continue
+                    
+                    # Validate PCM format
                     is_valid, error = validate_pcm_format(
                         audio_chunk.data,
                         expected_rate=self._sample_rate,
@@ -145,43 +284,123 @@ class DeepgramFluxSTTProvider(STTProvider):
                     
                     if not is_valid:
                         chunks_invalid += 1
-                        if chunks_invalid <= 5:  # Log first 5 warnings only
-                            logger.warning(
-                                f"Invalid PCM chunk #{chunks_invalid}: {error}",
-                                extra={"chunk_size": len(audio_chunk.data)}
-                            )
-                        continue  # Skip invalid chunks
+                        if chunks_invalid <= 5:
+                            logger.debug(f"Invalid PCM chunk: {error}")
+                        continue
                     
-                    # Send validated PCM audio bytes
-                    await ws.send(audio_chunk.data)
+                    # Accumulate in buffer for optimal chunk size
+                    audio_buffer.extend(audio_chunk.data)
+                    
+                    # Send when we have optimal chunk size (~80ms)
+                    while len(audio_buffer) >= FLUX_OPTIMAL_CHUNK_BYTES:
+                        chunk_to_send = bytes(audio_buffer[:FLUX_OPTIMAL_CHUNK_BYTES])
+                        await ws.send(chunk_to_send)
+                        audio_buffer = audio_buffer[FLUX_OPTIMAL_CHUNK_BYTES:]
+                        chunks_sent += 1
+                        last_audio_time = asyncio.get_event_loop().time()
+                    
+                # Flush remaining audio
+                if audio_buffer and not (call_id and self.is_muted(call_id)):
+                    await ws.send(bytes(audio_buffer))
                     chunks_sent += 1
-                    last_audio_time = asyncio.get_event_loop().time()  # Update for keepalive tracking
                     
+            except websockets.exceptions.ConnectionClosed:
+                # Normal during shutdown/disconnect.
+                logger.debug("Flux send_audio stopped: websocket closed")
             except Exception as e:
                 logger.error(f"Flux send_audio error: {e}")
             finally:
-                if chunks_invalid > 0:
-                    logger.info(f"Flux audio stats: {chunks_sent} sent, {chunks_invalid} invalid")
+                logger.debug(f"send_audio ending. Sent {chunks_sent} chunks, {chunks_skipped} skipped, {chunks_invalid} invalid")
+                if chunks_invalid > 0 or chunks_skipped > 0:
+                    logger.info(f"Flux audio stats: {chunks_sent} sent, {chunks_skipped} skipped, {chunks_invalid} invalid")
                 stop_event.set()
         
         async def receive_transcripts(ws):
             """Receive and process Flux TurnInfo events"""
+            logger.debug("receive_transcripts started")
+            msg_count = 0
+            turn_info_count = 0
+            
             try:
                 async for message in ws:
-                    if stop_event.is_set():
-                        break
-                    
+                    msg_count += 1
                     data = json.loads(message)
                     msg_type = data.get("type", "")
                     
-                    # Handle TurnInfo messages (Flux-specific)
+                    if msg_count <= 10:
+                        logger.debug(f"Msg #{msg_count}: type={msg_type}")
+                    
                     if msg_type == "TurnInfo":
+                        turn_info_count += 1
                         event = data.get("event", "")
                         transcript_text = data.get("transcript", "")
                         
-                        if event == "EndOfTurn":
-                            # User finished speaking
+                        if turn_info_count <= 10:
+                            logger.debug(f"TurnInfo: event={event}, transcript={transcript_text[:30]!r}")
+                        
+                        if stop_event.is_set():
+                            break
+                        
+                        # Handle StartOfTurn - immediate barge-in
+                        if event == "StartOfTurn":
+                            # Ignore StartOfTurn when muted (prevents echo from agent's voice)
+                            if call_id and self.is_muted(call_id):
+                                logger.debug(f"Ignoring StartOfTurn - microphone muted for call {call_id} (echo suppression)")
+                                continue
+                            
+                            logger.info("Flux StartOfTurn - User started speaking, barge-in detected")
+                            # Cancel any speculative processing
+                            if eager_state:
+                                eager_state.reset()
+                            # Signal barge-in to stop TTS immediately
+                            barge_in = BargeInSignal()
+                            await transcript_queue.put(barge_in)
+                        
+                        # Handle EagerEndOfTurn - start LLM early (speculative)
+                        elif event == "EagerEndOfTurn":
+                            logger.debug(f"Flux EagerEndOfTurn: '{transcript_text}'")
                             if transcript_text and transcript_text.strip():
+                                # Track speculative state
+                                if eager_state:
+                                    eager_state.is_speculating = True
+                                    eager_state.transcript = transcript_text.strip()
+                                    eager_state.cancel_event = asyncio.Event()
+                                
+                                # Yield partial transcript for display
+                                chunk = TranscriptChunk(
+                                    text=transcript_text.strip(),
+                                    is_final=False,  # Not final yet
+                                    confidence=data.get("end_of_turn_confidence", 0.5),
+                                    metadata={"eager": True}
+                                )
+                                await transcript_queue.put(chunk)
+                                
+                                # Trigger early LLM processing via callback
+                                if on_eager_end_of_turn:
+                                    try:
+                                        on_eager_end_of_turn(transcript_text.strip())
+                                    except Exception as e:
+                                        logger.warning(f"EagerEndOfTurn callback error: {e}")
+                        
+                        # Handle TurnResumed - cancel speculative LLM call
+                        elif event == "TurnResumed":
+                            logger.info("Flux TurnResumed - User continued speaking, cancelling speculative LLM")
+                            if eager_state:
+                                eager_state.reset()  # This signals cancellation
+                            # Yield empty chunk to signal resumption
+                            resume_chunk = TranscriptChunk(
+                                text="",
+                                is_final=False,
+                                metadata={"resumed": True}
+                            )
+                            await transcript_queue.put(resume_chunk)
+                        
+                        # Handle EndOfTurn - finalize turn
+                        elif event == "EndOfTurn":
+                            logger.info(f"Flux EndOfTurn: '{transcript_text}'")
+                            
+                            if transcript_text and transcript_text.strip():
+                                # Use the final transcript
                                 chunk = TranscriptChunk(
                                     text=transcript_text.strip(),
                                     is_final=True,
@@ -189,17 +408,20 @@ class DeepgramFluxSTTProvider(STTProvider):
                                 )
                                 await transcript_queue.put(chunk)
                             
-                            # Send end-of-turn signal
+                            # Reset eager state
+                            if eager_state:
+                                eager_state.reset()
+                            
+                            # Signal end of turn
                             end_chunk = TranscriptChunk(
                                 text="",
                                 is_final=True,
                                 confidence=1.0
                             )
                             await transcript_queue.put(end_chunk)
-                            logger.debug(f"Flux EndOfTurn: '{transcript_text}'")
                         
+                        # Handle Update - partial transcript
                         elif event == "Update":
-                            # Partial transcript update
                             if transcript_text and transcript_text.strip():
                                 chunk = TranscriptChunk(
                                     text=transcript_text.strip(),
@@ -207,19 +429,6 @@ class DeepgramFluxSTTProvider(STTProvider):
                                     confidence=data.get("end_of_turn_confidence")
                                 )
                                 await transcript_queue.put(chunk)
-                        
-                        elif event == "StartOfTurn":
-                            # User started speaking - emit barge-in signal
-                            # This allows interrupting TTS playback when user speaks
-                            logger.info("Flux StartOfTurn - Barge-in detected, user interrupting")
-                            barge_in = BargeInSignal()
-                            await transcript_queue.put(barge_in)
-                        
-                        elif event == "EagerEndOfTurn":
-                            logger.debug(f"Flux EagerEndOfTurn: '{transcript_text}'")
-                        
-                        elif event == "TurnResumed":
-                            logger.debug("Flux TurnResumed")
                     
                     # Handle Results (fallback for non-Flux responses)
                     elif msg_type == "Results":
@@ -237,37 +446,43 @@ class DeepgramFluxSTTProvider(STTProvider):
                     
                     elif msg_type == "Metadata":
                         logger.debug(f"Flux Metadata: {data}")
+                    
+                    elif msg_type == "Error":
+                        logger.warning(f"Flux Error from Deepgram: {data}")
                         
             except websockets.exceptions.ConnectionClosed:
                 logger.info("Flux WebSocket closed")
             except Exception as e:
                 logger.error(f"Flux receive error: {e}")
             finally:
+                logger.debug(f"receive_transcripts ending. Total: {msg_count} msgs, {turn_info_count} TurnInfo")
                 stop_event.set()
                 await transcript_queue.put(None)
         
-        # Simple connection without custom timeouts (matching official demo)
+        # Main connection
         try:
-            async with websockets.connect(url, additional_headers=headers) as ws:
-                logger.info("Connected to Deepgram Flux WebSocket")
+            async with websockets.connect(url, extra_headers=headers) as ws:
+                logger.info(
+                    "Connected to Deepgram Flux "
+                    f"(eager={self._eager_eot_threshold}, eot={self._eot_threshold}, "
+                    f"timeout_ms={self._eot_timeout_ms})"
+                )
                 
-                # Per Deepgram docs: Send audio within 10 seconds of connection
-                # Send a silent audio frame immediately to keep connection alive
-                silent_frame = bytes(3200)  # 100ms of silence at 16kHz, 16-bit mono
+                # Send initial silent frame to keep connection alive (per Deepgram docs)
+                silent_frame = bytes(3200)  # 100ms of silence
                 await ws.send(silent_frame)
-                logger.debug("Sent initial silent audio frame to Deepgram")
                 
-                # Start send/receive/keepalive tasks
+                # Start tasks
                 send_task = asyncio.create_task(send_audio(ws))
                 receive_task = asyncio.create_task(receive_transcripts(ws))
-                keepalive_task = asyncio.create_task(send_keepalive(ws))
+                heartbeat_task = asyncio.create_task(send_silence_heartbeat(ws))
                 
                 # Yield transcripts
                 while True:
                     try:
                         chunk = await asyncio.wait_for(
                             transcript_queue.get(),
-                            timeout=0.01  # 10ms polling (matching official demo)
+                            timeout=0.01
                         )
                         
                         if chunk is None:
@@ -280,30 +495,44 @@ class DeepgramFluxSTTProvider(STTProvider):
                             break
                         continue
                 
-                # Cleanup - proper cancellation like official demo
-                if not send_task.done():
-                    send_task.cancel()
-                if not receive_task.done():
-                    receive_task.cancel()
-                if not keepalive_task.done():
-                    keepalive_task.cancel()
+                # Cleanup
+                try:
+                    await ws.send(json.dumps({"type": "CloseStream"}))
+                except Exception:
+                    pass
                 
-                # Wait for cancellation to complete gracefully
-                await asyncio.gather(send_task, receive_task, keepalive_task, return_exceptions=True)
+                # Cancel tasks
+                for task in [send_task, receive_task, heartbeat_task]:
+                    if not task.done():
+                        task.cancel()
+
+                await asyncio.gather(
+                    send_task, receive_task, heartbeat_task, return_exceptions=True
+                )
                 
         except Exception as e:
             logger.error(f"Flux connection error: {e}")
             raise
-
-
+        finally:
+            # Clean up eager state
+            if call_id and call_id in self._eager_states:
+                del self._eager_states[call_id]
     
     def detect_turn_end(self, transcript_chunk: TranscriptChunk) -> bool:
         """Detect if user finished speaking (empty final chunk = EndOfTurn)"""
         return transcript_chunk.is_final and not transcript_chunk.text
     
+    def should_cancel_speculative(self, call_id: str) -> bool:
+        """Check if speculative LLM call should be cancelled (TurnResumed)."""
+        if call_id not in self._eager_states:
+            return False
+        state = self._eager_states[call_id]
+        return state.cancel_event is not None and state.cancel_event.is_set()
+    
     async def cleanup(self) -> None:
         """Release resources"""
         self._api_key = None
+        self._eager_states.clear()
         logger.info("DeepgramFlux cleaned up")
     
     @property

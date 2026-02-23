@@ -66,7 +66,7 @@ class TestConnectorsList:
     
     @pytest.mark.skipif(not IMPORT_SUCCESS, reason="App not available")
     @patch("app.api.v1.endpoints.connectors.get_current_user")
-    @patch("app.api.v1.endpoints.connectors.get_supabase")
+    @patch("app.api.v1.endpoints.connectors.get_db_client")
     def test_list_connectors_returns_tenant_scoped(self, mock_supabase, mock_user):
         """Only tenant's connectors returned"""
         # Mock user

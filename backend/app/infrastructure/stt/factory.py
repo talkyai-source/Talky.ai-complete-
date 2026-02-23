@@ -52,7 +52,8 @@ class STTFactory:
 try:
     from app.infrastructure.stt.deepgram_flux import DeepgramFluxSTTProvider
     STTFactory.register("deepgram-flux", DeepgramFluxSTTProvider)
-    STTFactory.register("flux", DeepgramFluxSTTProvider)  # Alias
+    STTFactory.register("deepgram_flux", DeepgramFluxSTTProvider)  # Underscore alias (orchestrator convention)
+    STTFactory.register("flux", DeepgramFluxSTTProvider)  # Short alias
 except ImportError:
     pass  # Deepgram Flux not available
 

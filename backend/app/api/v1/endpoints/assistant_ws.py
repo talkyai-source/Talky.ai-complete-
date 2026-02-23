@@ -11,8 +11,9 @@ from typing import Optional
 from datetime import datetime
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
-from supabase import Client, create_client
+from app.core.postgres_adapter import Client
 
+from app.api.v1.dependencies import get_db_client
 from app.infrastructure.assistant.agent import assistant_graph, AgentState
 
 logger = logging.getLogger(__name__)
@@ -112,13 +113,11 @@ async def assistant_chat(
     
     try:
         # STEP 2: Authenticate after connection is accepted
-        supabase_url = os.getenv("SUPABASE_URL")
-        supabase_key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_ANON_KEY")
-        supabase = create_client(supabase_url, supabase_key)
+        db_client = get_db_client()
         
         # Validate token
         try:
-            user_response = supabase.auth.get_user(token)
+            user_response = db_client.auth.get_user(token)
             user = user_response.user
             if not user:
                 await manager.send_json(connection_id, {
@@ -130,7 +129,7 @@ async def assistant_chat(
             user_id = user.id
             
             # Get tenant_id
-            profile = supabase.table("user_profiles").select(
+            profile = db_client.table("user_profiles").select(
                 "tenant_id"
             ).eq("id", user_id).single().execute()
             
@@ -163,7 +162,7 @@ async def assistant_chat(
         
         if conversation_id:
             try:
-                conv_response = supabase.table("assistant_conversations").select(
+                conv_response = db_client.table("assistant_conversations").select(
                     "messages"
                 ).eq("id", conversation_id).eq("tenant_id", tenant_id).single().execute()
                 
@@ -207,7 +206,7 @@ async def assistant_chat(
                         "tenant_id": tenant_id,
                         "user_id": user_id,
                         "conversation_id": current_conversation_id,
-                        "supabase": supabase,
+                        "db_client": db_client,
                         "tool_results": []
                     }
                     
@@ -267,13 +266,13 @@ async def assistant_chat(
                     
                     # Save conversation
                     if current_conversation_id:
-                        supabase.table("assistant_conversations").update({
+                        db_client.table("assistant_conversations").update({
                             "messages": messages_history,
                             "message_count": len(messages_history),
                             "last_message_at": datetime.utcnow().isoformat()
                         }).eq("id", current_conversation_id).execute()
                     else:
-                        new_conv = supabase.table("assistant_conversations").insert({
+                        new_conv = db_client.table("assistant_conversations").insert({
                             "tenant_id": tenant_id,
                             "user_id": user_id,
                             "messages": messages_history,
@@ -330,17 +329,14 @@ async def assistant_chat(
 
 @router.get("/conversations")
 async def list_conversations(
-    supabase: Client = Depends(lambda: create_client(
-        os.getenv("SUPABASE_URL"),
-        os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_ANON_KEY")
-    )),
+    db_client: Client = Depends(get_db_client),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100)
 ):
     """List user's assistant conversations."""
     offset = (page - 1) * page_size
     
-    response = supabase.table("assistant_conversations").select(
+    response = db_client.table("assistant_conversations").select(
         "id, title, message_count, last_message_at, created_at",
         count="exact"
     ).order("last_message_at", desc=True).range(offset, offset + page_size - 1).execute()
@@ -356,13 +352,10 @@ async def list_conversations(
 @router.get("/conversations/{conversation_id}")
 async def get_conversation(
     conversation_id: str,
-    supabase: Client = Depends(lambda: create_client(
-        os.getenv("SUPABASE_URL"),
-        os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_ANON_KEY")
-    ))
+    db_client: Client = Depends(get_db_client)
 ):
     """Get a specific conversation with messages."""
-    response = supabase.table("assistant_conversations").select(
+    response = db_client.table("assistant_conversations").select(
         "id, title, messages, context, message_count, started_at, last_message_at"
     ).eq("id", conversation_id).single().execute()
     
@@ -376,13 +369,10 @@ async def get_conversation(
 @router.delete("/conversations/{conversation_id}")
 async def delete_conversation(
     conversation_id: str,
-    supabase: Client = Depends(lambda: create_client(
-        os.getenv("SUPABASE_URL"),
-        os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_ANON_KEY")
-    ))
+    db_client: Client = Depends(get_db_client)
 ):
     """Delete a conversation."""
-    supabase.table("assistant_conversations").delete().eq(
+    db_client.table("assistant_conversations").delete().eq(
         "id", conversation_id
     ).execute()
     
@@ -391,10 +381,7 @@ async def delete_conversation(
 
 @router.get("/actions")
 async def list_actions(
-    supabase: Client = Depends(lambda: create_client(
-        os.getenv("SUPABASE_URL"),
-        os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_ANON_KEY")
-    )),
+    db_client: Client = Depends(get_db_client),
     type: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100)
@@ -402,7 +389,7 @@ async def list_actions(
     """List assistant actions (audit log)."""
     offset = (page - 1) * page_size
     
-    query = supabase.table("assistant_actions").select(
+    query = db_client.table("assistant_actions").select(
         "id, type, status, triggered_by, input_data, output_data, created_at, completed_at",
         count="exact"
     )

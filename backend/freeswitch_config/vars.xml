@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FreeSWITCH Global Variables
+  Talky.ai AI Dialer Configuration
+-->
+<include>
+  <!-- PBX Connection Settings (from MicroSIP config) -->
+  <X-PRE-PROCESS cmd="set" data="pbx_host=192.168.1.6"/>
+  <X-PRE-PROCESS cmd="set" data="pbx_port=5060"/>
+  <X-PRE-PROCESS cmd="set" data="pbx_domain=192.168.1.6"/>
+  
+  <!-- AI Agent Extension (register as this on PBX) -->
+  <X-PRE-PROCESS cmd="set" data="ai_extension=1001"/>
+  <X-PRE-PROCESS cmd="set" data="ai_password=1001"/>
+  <X-PRE-PROCESS cmd="set" data="ai_display_name=Talky AI Agent"/>
+  
+  <!-- Local Network Settings -->
+  <X-PRE-PROCESS cmd="set" data="local_ip_v4=192.168.1.34"/>
+  <X-PRE-PROCESS cmd="set" data="external_rtp_ip=192.168.1.34"/>
+  <X-PRE-PROCESS cmd="set" data="external_sip_ip=192.168.1.34"/>
+  
+  <!-- SIP/RTP Ports -->
+  <X-PRE-PROCESS cmd="set" data="internal_sip_port=5060"/>
+  <X-PRE-PROCESS cmd="set" data="external_sip_port=5080"/>
+  <X-PRE-PROCESS cmd="set" data="rtp_start_port=16384"/>
+  <X-PRE-PROCESS cmd="set" data="rtp_end_port=32768"/>
+  
+  <!-- Audio Settings -->
+  <X-PRE-PROCESS cmd="set" data="default_codec=PCMU"/>
+  <X-PRE-PROCESS cmd="set" data="sound_prefix=/var/lib/freeswitch/sounds"/>
+  
+  <!-- ESL (Event Socket) Settings -->
+  <X-PRE-PROCESS cmd="set" data="esl_listen_ip=0.0.0.0"/>
+  <X-PRE-PROCESS cmd="set" data="esl_port=8021"/>
+  <X-PRE-PROCESS cmd="set" data="esl_password=ClueCon"/>
+  
+  <!-- WebSocket Audio Bridge (127.0.0.1 works with network_mode: host on Linux) -->
+  <X-PRE-PROCESS cmd="set" data="audio_fork_ws_uri=ws://127.0.0.1:8000/ws/freeswitch-audio"/>
+</include>

@@ -1,39 +1,56 @@
 """
-Health Check Endpoint
-Provides health status for Docker health checks and monitoring
+Health Check Endpoint — API v1 Scoped
+
+Provides detailed health status for application-level monitoring.
+The root-level /health (used by Docker) is defined in main.py.
+This endpoint adds API-version-scoped health info at /api/v1/health.
 """
 from fastapi import APIRouter, status
 from datetime import datetime
-from typing import Dict
+from typing import Dict, Any
 
 router = APIRouter(tags=["health"])
 
 
 @router.get("/health", status_code=status.HTTP_200_OK)
-async def health_check() -> Dict[str, str]:
+async def health_check() -> Dict[str, Any]:
     """
-    Health check endpoint for Docker and monitoring systems.
-    
-    Returns:
-        Dict with status and timestamp
+    Basic API-scoped health check.
+
+    Frontend and monitoring probes expect this route at /api/v1/health.
     """
     return {
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat() + "Z",
-        "service": "talky-backend"
+        "service": "talky-backend",
     }
 
 
-@router.get("/", status_code=status.HTTP_200_OK)
-async def root() -> Dict[str, str]:
+@router.get("/health/detailed", status_code=status.HTTP_200_OK)
+async def detailed_health_check() -> Dict[str, Any]:
     """
-    Root endpoint.
-    
-    Returns:
-        Welcome message
+    Detailed health check for application monitoring.
+
+    Includes container, Redis, and session status.
+    Docker uses the simpler GET /health in main.py.
     """
-    return {
-        "message": "Talky.ai Voice AI Backend",
-        "version": "1.0.0",
-        "docs": "/docs"
+    from app.core.container import get_container
+
+    health: Dict[str, Any] = {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "service": "talky-backend",
     }
+
+    container = get_container()
+    if container.is_initialized:
+        health["container"] = "initialized"
+        health["redis_enabled"] = container.redis_enabled
+        if container._session_manager:
+            health["active_sessions"] = (
+                container.session_manager.get_active_session_count()
+            )
+    else:
+        health["container"] = "not_initialized"
+
+    return health

@@ -1,0 +1,7 @@
+# Kamailio dispatcher set file
+# Format: <setid> <destination>
+# Set 1: Stable lane.
+# Set 2: Canary lane (default mirrors stable until explicitly changed).
+
+1 sip:127.0.0.1:5080
+2 sip:127.0.0.1:5080

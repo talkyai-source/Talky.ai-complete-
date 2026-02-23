@@ -41,11 +41,11 @@ providers:
       private_key_path: "./config/private.key"
   
   storage:
-    active: "supabase"
-    
-    supabase:
-      url: ${SUPABASE_URL}
-      key: ${SUPABASE_KEY}
+    active: "postgres"
+
+    postgres:
+      database_url: ${DATABASE_URL}
+      recordings_dir: ${RECORDINGS_STORAGE_DIR}
 
 # WebSocket Configuration
 websocket:

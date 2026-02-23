@@ -5,9 +5,10 @@ Orchestrates email connectors with template rendering and audit logging.
 Day 26: AI Email System
 """
 import logging
+import json
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from supabase import Client
+import asyncpg  # migrated from db_client
 
 from app.infrastructure.connectors.base import ConnectorFactory
 from app.infrastructure.connectors.encryption import get_encryption_service
@@ -41,15 +42,15 @@ class EmailService:
     Follows the pattern from MeetingService.
     """
     
-    def __init__(self, supabase: Client, template_manager: Optional[EmailTemplateManager] = None):
+    def __init__(self, db_pool: asyncpg.Pool, template_manager: Optional[EmailTemplateManager] = None):
         """
         Initialize EmailService.
         
         Args:
-            supabase: Supabase client for database operations
+            db_pool: PostgreSQL connection pool
             template_manager: Optional template manager (uses singleton if not provided)
         """
-        self.supabase = supabase
+        self.db_pool = db_pool
         self.encryption = get_encryption_service()
         self.template_manager = template_manager or get_email_template_manager()
     
@@ -66,67 +67,82 @@ class EmailService:
         Raises:
             EmailNotConnectedError: If no active email connector found
         """
-        # Query for active email connectors
-        response = self.supabase.table("connectors").select(
-            "id, provider, status"
-        ).eq("tenant_id", tenant_id).eq("type", "email").eq("status", "active").execute()
-        
-        if not response.data:
-            logger.warning(f"No active email connector for tenant {tenant_id[:8]}...")
-            raise EmailNotConnectedError()
-        
-        connector_data = response.data[0]
-        connector_id = connector_data["id"]
-        provider = connector_data["provider"]
-        
-        # Get account credentials
-        account_response = self.supabase.table("connector_accounts").select(
-            "access_token_encrypted, refresh_token_encrypted, token_expires_at, account_email"
-        ).eq("connector_id", connector_id).eq("status", "active").single().execute()
-        
-        if not account_response.data:
-            raise EmailNotConnectedError("Email connection expired. Please reconnect from Settings > Integrations.")
-        
-        account = account_response.data
-        
-        # Decrypt access token
-        try:
-            access_token = self.encryption.decrypt(account["access_token_encrypted"])
-        except Exception as e:
-            logger.error(f"Failed to decrypt email token: {e}")
-            raise EmailNotConnectedError("Email connection error. Please reconnect.")
-        
-        # Check token expiry and refresh if needed
-        if account.get("token_expires_at"):
-            expires_at = datetime.fromisoformat(account["token_expires_at"].replace("Z", "+00:00"))
-            if datetime.utcnow() >= expires_at:
-                # Token expired, attempt refresh
-                if account.get("refresh_token_encrypted"):
-                    try:
-                        access_token = await self._refresh_token(
-                            connector_id=connector_id,
-                            provider=provider,
-                            refresh_token_encrypted=account["refresh_token_encrypted"]
-                        )
-                    except Exception as e:
-                        logger.error(f"Token refresh failed: {e}")
+        async with self.db_pool.acquire() as conn:
+            # Query for active email connectors
+            rows = await conn.fetch(
+                """
+                SELECT id, provider, status 
+                FROM connectors 
+                WHERE tenant_id = $1 AND type = 'email' AND status = 'active'
+                """,
+                tenant_id
+            )
+            
+            if not rows:
+                logger.warning(f"No active email connector for tenant {tenant_id[:8]}...")
+                raise EmailNotConnectedError()
+            
+            connector_data = rows[0]
+            connector_id = str(connector_data["id"])
+            provider = connector_data["provider"]
+            
+            # Get account credentials
+            account_row = await conn.fetchrow(
+                """
+                SELECT access_token_encrypted, refresh_token_encrypted, token_expires_at, account_email
+                FROM connector_accounts
+                WHERE connector_id = $1 AND status = 'active'
+                """,
+                connector_id
+            )
+            
+            if not account_row:
+                raise EmailNotConnectedError("Email connection expired. Please reconnect from Settings > Integrations.")
+            
+            account = dict(account_row)
+            
+            # Decrypt access token
+            try:
+                access_token = self.encryption.decrypt(account["access_token_encrypted"])
+            except Exception as e:
+                logger.error(f"Failed to decrypt email token: {e}")
+                raise EmailNotConnectedError("Email connection error. Please reconnect.")
+            
+            # Check token expiry and refresh if needed
+            if account.get("token_expires_at"):
+                # Handle datetime or string from asyncpg
+                expires_at = account["token_expires_at"]
+                if isinstance(expires_at, str):
+                    expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+                
+                if datetime.utcnow() >= expires_at:
+                    # Token expired, attempt refresh
+                    if account.get("refresh_token_encrypted"):
+                        try:
+                            access_token = await self._refresh_token(
+                                connector_id=connector_id,
+                                provider=provider,
+                                refresh_token_encrypted=account["refresh_token_encrypted"]
+                            )
+                        except Exception as e:
+                            logger.error(f"Token refresh failed: {e}")
+                            raise EmailNotConnectedError("Email connection expired. Please reconnect.")
+                    else:
                         raise EmailNotConnectedError("Email connection expired. Please reconnect.")
-                else:
-                    raise EmailNotConnectedError("Email connection expired. Please reconnect.")
-        
-        # Create connector instance
-        connector = ConnectorFactory.create(
-            provider=provider,
-            tenant_id=tenant_id,
-            connector_id=connector_id
-        )
-        
-        # Set the access token
-        await connector.set_access_token(access_token)
-        
-        logger.info(f"Retrieved email connector for tenant {tenant_id[:8]}: {provider}")
-        
-        return connector, connector_id, provider
+            
+            # Create connector instance
+            connector = ConnectorFactory.create(
+                provider=provider,
+                tenant_id=tenant_id,
+                connector_id=connector_id
+            )
+            
+            # Set the access token
+            await connector.set_access_token(access_token)
+            
+            logger.info(f"Retrieved email connector for tenant {tenant_id[:8]}: {provider}")
+            
+            return connector, connector_id, provider
     
     async def _refresh_token(
         self,
@@ -152,12 +168,21 @@ class EmailService:
             new_tokens.refresh_token or refresh_token
         )
         
-        self.supabase.table("connector_accounts").update({
-            "access_token_encrypted": new_access_encrypted,
-            "refresh_token_encrypted": new_refresh_encrypted,
-            "token_expires_at": new_tokens.expires_at.isoformat() if new_tokens.expires_at else None,
-            "last_refreshed_at": datetime.utcnow().isoformat()
-        }).eq("connector_id", connector_id).execute()
+        async with self.db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE connector_accounts SET
+                    access_token_encrypted = $1,
+                    refresh_token_encrypted = $2,
+                    token_expires_at = $3,
+                    last_refreshed_at = NOW()
+                WHERE connector_id = $4
+                """,
+                new_access_encrypted,
+                new_refresh_encrypted,
+                new_tokens.expires_at,
+                connector_id
+            )
         
         return new_tokens.access_token
     
@@ -180,29 +205,6 @@ class EmailService:
     ) -> Dict[str, Any]:
         """
         Send an email via connected email provider.
-        
-        Args:
-            tenant_id: Tenant ID
-            to: List of recipient email addresses
-            subject: Email subject (ignored if using template)
-            body: Email body (ignored if using template)
-            body_html: Optional HTML body
-            cc: Carbon copy recipients
-            bcc: Blind carbon copy recipients
-            reply_to: Reply-to address
-            template_name: Optional template to use
-            template_context: Variables for template rendering
-            lead_ids: Optional lead IDs for linking
-            call_id: Optional call ID if email is call-related
-            conversation_id: Optional assistant conversation ID
-            triggered_by: Trigger source (assistant, call_outcome, api, etc.)
-            
-        Returns:
-            Dict with success status, message_id, and details
-            
-        Raises:
-            EmailNotConnectedError: If no email provider connected
-            EmailContentValidationError: If content validation fails
         """
         # Render template if specified
         if template_name and template_context:
@@ -304,16 +306,6 @@ class EmailService:
     ) -> Dict[str, Any]:
         """
         Convenience method for sending templated emails.
-        
-        Args:
-            tenant_id: Tenant ID
-            template_name: Name of template to use
-            recipients: List of recipient emails
-            context: Template variables
-            **kwargs: Additional parameters passed to send_email
-            
-        Returns:
-            Result from send_email
         """
         return await self.send_email(
             tenant_id=tenant_id,
@@ -335,27 +327,32 @@ class EmailService:
         input_data: Dict[str, Any]
     ) -> str:
         """Create an action record for audit purposes."""
-        action_data = {
-            "tenant_id": tenant_id,
-            "type": "send_email",
-            "status": "pending",
-            "triggered_by": triggered_by,
-            "conversation_id": conversation_id,
-            "call_id": call_id,
-            "input_data": input_data,
-            "started_at": datetime.utcnow().isoformat()
-        }
+        import uuid
+        action_id = str(uuid.uuid4())
         
-        # Link to first lead if provided
-        if lead_ids and len(lead_ids) > 0:
-            action_data["lead_id"] = lead_ids[0]
+        lead_id = lead_ids[0] if lead_ids and len(lead_ids) > 0 else None
         
-        response = self.supabase.table("assistant_actions").insert(action_data).execute()
-        
-        action_id = response.data[0]["id"] if response.data else None
-        logger.debug(f"Created email action record: {action_id}")
-        
-        return action_id
+        try:
+            async with self.db_pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO assistant_actions (
+                        id, tenant_id, type, status, triggered_by, 
+                        conversation_id, call_id, lead_id,
+                        input_data, started_at, created_at
+                    ) VALUES ($1, $2, 'send_email', 'pending', $3, $4, $5, $6, $7, NOW(), NOW())
+                    """,
+                    action_id, tenant_id, triggered_by, 
+                    conversation_id, call_id, lead_id,
+                    json.dumps(input_data)
+                )
+                
+                logger.debug(f"Created email action record: {action_id}")
+                return action_id
+                
+        except Exception as e:
+            logger.error(f"Failed to create email action record: {e}")
+            return str(uuid.uuid4())
     
     async def _update_action_status(
         self,
@@ -368,17 +365,29 @@ class EmailService:
         if not action_id:
             return
         
-        update_data = {
-            "status": status,
-            "completed_at": datetime.utcnow().isoformat()
-        }
-        
-        if output_data:
-            update_data["output_data"] = output_data
-        if error:
-            update_data["error"] = error
-        
-        self.supabase.table("assistant_actions").update(update_data).eq("id", action_id).execute()
+        try:
+            async with self.db_pool.acquire() as conn:
+                query = "UPDATE assistant_actions SET status = $1, completed_at = NOW()"
+                params = [status]
+                param_idx = 2
+                
+                if output_data:
+                    query += f", output_data = ${param_idx}"
+                    params.append(json.dumps(output_data))
+                    param_idx += 1
+                
+                if error:
+                    query += f", error = ${param_idx}"
+                    params.append(error)
+                    param_idx += 1
+                
+                query += f" WHERE id = ${param_idx}"
+                params.append(action_id)
+                
+                await conn.execute(query, *params)
+                
+        except Exception as e:
+            logger.error(f"Failed to update action status: {e}")
     
     def list_templates(self) -> List[Dict[str, Any]]:
         """List available email templates."""
@@ -392,9 +401,9 @@ class EmailService:
 _email_service: Optional[EmailService] = None
 
 
-def get_email_service(supabase: Client) -> EmailService:
+def get_email_service(db_pool: asyncpg.Pool) -> EmailService:
     """Get or create EmailService instance."""
     global _email_service
     if _email_service is None:
-        _email_service = EmailService(supabase)
+        _email_service = EmailService(db_pool)
     return _email_service

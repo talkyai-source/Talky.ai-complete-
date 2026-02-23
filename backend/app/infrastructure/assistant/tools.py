@@ -8,7 +8,7 @@ import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime, date, timedelta
 from pydantic import BaseModel, Field
-from supabase import Client
+from app.core.postgres_adapter import Client
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ class GetDashboardStatsInput(BaseModel):
 
 async def get_dashboard_stats(
     tenant_id: str,
-    supabase: Client,
+    db_client: Client,
     date_str: Optional[str] = None
 ) -> Dict[str, Any]:
     """
@@ -42,7 +42,7 @@ async def get_dashboard_stats(
         target_date = date_str or date.today().isoformat()
         
         # Get calls for the day
-        calls_response = supabase.table("calls").select(
+        calls_response = db_client.table("calls").select(
             "id, status, outcome, goal_achieved",
             count="exact"
         ).eq("tenant_id", tenant_id).gte(
@@ -57,7 +57,7 @@ async def get_dashboard_stats(
         goal_achieved = len([c for c in calls_response.data if c.get("goal_achieved")])
         
         # Get active campaigns
-        campaigns_response = supabase.table("campaigns").select(
+        campaigns_response = db_client.table("campaigns").select(
             "id",
             count="exact"
         ).eq("tenant_id", tenant_id).eq("status", "running").execute()
@@ -82,7 +82,7 @@ async def get_dashboard_stats(
 
 async def get_usage_info(
     tenant_id: str,
-    supabase: Client
+    db_client: Client
 ) -> Dict[str, Any]:
     """
     Get plan usage information.
@@ -96,7 +96,7 @@ async def get_usage_info(
     """
     try:
         # Get tenant with plan info
-        tenant_response = supabase.table("tenants").select(
+        tenant_response = db_client.table("tenants").select(
             "id, plan_id, minutes_allocated, minutes_used, subscription_status"
         ).eq("id", tenant_id).single().execute()
         
@@ -105,7 +105,7 @@ async def get_usage_info(
             return {"error": "Tenant not found"}
         
         # Get plan details
-        plan_response = supabase.table("plans").select(
+        plan_response = db_client.table("plans").select(
             "name, price, minutes"
         ).eq("id", tenant.get("plan_id")).single().execute()
         
@@ -137,7 +137,7 @@ class GetLeadsInput(BaseModel):
 
 async def get_leads(
     tenant_id: str,
-    supabase: Client,
+    db_client: Client,
     campaign_id: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 10
@@ -146,7 +146,7 @@ async def get_leads(
     Get leads for the tenant with optional filters.
     """
     try:
-        query = supabase.table("leads").select(
+        query = db_client.table("leads").select(
             "id, phone_number, first_name, last_name, email, status, priority, call_attempts, last_call_result",
             count="exact"
         ).eq("tenant_id", tenant_id)
@@ -170,14 +170,14 @@ async def get_leads(
 
 async def get_campaigns(
     tenant_id: str,
-    supabase: Client,
+    db_client: Client,
     status: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Get campaigns for the tenant.
     """
     try:
-        query = supabase.table("campaigns").select(
+        query = db_client.table("campaigns").select(
             "id, name, status, goal, total_leads, calls_completed, calls_failed, created_at",
             count="exact"
         ).eq("tenant_id", tenant_id)
@@ -198,7 +198,7 @@ async def get_campaigns(
 
 async def get_recent_calls(
     tenant_id: str,
-    supabase: Client,
+    db_client: Client,
     today_only: bool = True,
     outcome: Optional[str] = None,
     limit: int = 10
@@ -207,7 +207,7 @@ async def get_recent_calls(
     Get recent calls for the tenant.
     """
     try:
-        query = supabase.table("calls").select(
+        query = db_client.table("calls").select(
             "id, phone_number, status, outcome, goal_achieved, duration_seconds, created_at",
             count="exact"
         ).eq("tenant_id", tenant_id)
@@ -232,7 +232,7 @@ async def get_recent_calls(
 
 async def get_actions_today(
     tenant_id: str,
-    supabase: Client
+    db_client: Client
 ) -> Dict[str, Any]:
     """
     Get assistant actions performed today.
@@ -240,7 +240,7 @@ async def get_actions_today(
     try:
         today = date.today().isoformat()
         
-        response = supabase.table("assistant_actions").select(
+        response = db_client.table("assistant_actions").select(
             "id, type, status, triggered_by, created_at",
             count="exact"
         ).eq("tenant_id", tenant_id).gte(
@@ -280,7 +280,7 @@ class SendEmailInput(BaseModel):
 
 async def send_email(
     tenant_id: str,
-    supabase: Client,
+    db_client: Client,
     to: List[str],
     subject: str,
     body: str,
@@ -304,7 +304,7 @@ async def send_email(
         from app.services.email_service import get_email_service, EmailNotConnectedError
         from app.infrastructure.connectors.email.smtp import SMTPConnector
         
-        service = get_email_service(supabase)
+        service = get_email_service(db_client)
         
         try:
             # Try sending via connected email provider (Gmail)
@@ -371,7 +371,7 @@ class SendSMSInput(BaseModel):
 
 async def send_sms(
     tenant_id: str,
-    supabase: Client,
+    db_client: Client,
     to: List[str],
     message: str,
     lead_ids: Optional[List[str]] = None,
@@ -396,13 +396,13 @@ async def send_sms(
             }
         }
         
-        action_response = supabase.table("assistant_actions").insert(action_data).execute()
+        action_response = db_client.table("assistant_actions").insert(action_data).execute()
         action_id = action_response.data[0]["id"] if action_response.data else None
         
         # TODO: Actually send SMS via connector
         
         if action_id:
-            supabase.table("assistant_actions").update({
+            db_client.table("assistant_actions").update({
                 "status": "completed",
                 "completed_at": datetime.utcnow().isoformat(),
                 "output_data": {"message": "SMS queued for delivery"}
@@ -427,7 +427,7 @@ class InitiateCallInput(BaseModel):
 
 async def initiate_call(
     tenant_id: str,
-    supabase: Client,
+    db_client: Client,
     phone_number: str,
     campaign_id: Optional[str] = None,
     lead_id: Optional[str] = None,
@@ -452,7 +452,7 @@ async def initiate_call(
             }
         }
         
-        action_response = supabase.table("assistant_actions").insert(action_data).execute()
+        action_response = db_client.table("assistant_actions").insert(action_data).execute()
         action_id = action_response.data[0]["id"] if action_response.data else None
         
         # TODO: Queue call via dialer worker
@@ -475,7 +475,7 @@ class StartCampaignInput(BaseModel):
 
 async def start_campaign(
     tenant_id: str,
-    supabase: Client,
+    db_client: Client,
     campaign_id: str,
     conversation_id: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -484,7 +484,7 @@ async def start_campaign(
     """
     try:
         # Verify campaign belongs to tenant
-        campaign = supabase.table("campaigns").select(
+        campaign = db_client.table("campaigns").select(
             "id, name, status"
         ).eq("id", campaign_id).eq("tenant_id", tenant_id).single().execute()
         
@@ -496,13 +496,13 @@ async def start_campaign(
             return {"success": False, "error": "Campaign is already running"}
         
         # Update campaign status
-        supabase.table("campaigns").update({
+        db_client.table("campaigns").update({
             "status": "running",
             "started_at": datetime.utcnow().isoformat() if current_status == "draft" else None
         }).eq("id", campaign_id).execute()
         
         # Log action
-        supabase.table("assistant_actions").insert({
+        db_client.table("assistant_actions").insert({
             "tenant_id": tenant_id,
             "type": "start_campaign",
             "status": "completed",
@@ -536,7 +536,7 @@ class CheckAvailabilityInput(BaseModel):
 
 async def check_availability(
     tenant_id: str,
-    supabase: Client,
+    db_client: Client,
     date_str: str,
     duration_minutes: int = 30
 ) -> Dict[str, Any]:
@@ -552,7 +552,7 @@ async def check_availability(
         start_time = datetime.combine(target_date, datetime.min.time().replace(hour=9))  # 9 AM
         end_time = datetime.combine(target_date, datetime.min.time().replace(hour=18))   # 6 PM
         
-        service = get_meeting_service(supabase)
+        service = get_meeting_service(db_client)
         
         slots = await service.get_availability(
             tenant_id=tenant_id,
@@ -588,7 +588,7 @@ class BookMeetingInput(BaseModel):
 
 async def book_meeting(
     tenant_id: str,
-    supabase: Client,
+    db_client: Client,
     title: str,
     start_time: str,
     duration_minutes: int = 30,
@@ -610,7 +610,7 @@ async def book_meeting(
         # Parse start time
         start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
         
-        service = get_meeting_service(supabase)
+        service = get_meeting_service(db_client)
         
         result = await service.create_meeting(
             tenant_id=tenant_id,
@@ -642,7 +642,7 @@ class UpdateMeetingInput(BaseModel):
 
 async def update_meeting_tool(
     tenant_id: str,
-    supabase: Client,
+    db_client: Client,
     meeting_id: str,
     new_time: Optional[str] = None,
     new_title: Optional[str] = None,
@@ -654,7 +654,7 @@ async def update_meeting_tool(
     try:
         from app.services.meeting_service import get_meeting_service, CalendarNotConnectedError
         
-        service = get_meeting_service(supabase)
+        service = get_meeting_service(db_client)
         
         new_start_time = None
         if new_time:
@@ -684,7 +684,7 @@ class CancelMeetingInput(BaseModel):
 
 async def cancel_meeting_tool(
     tenant_id: str,
-    supabase: Client,
+    db_client: Client,
     meeting_id: str,
     reason: Optional[str] = None,
     conversation_id: Optional[str] = None
@@ -695,7 +695,7 @@ async def cancel_meeting_tool(
     try:
         from app.services.meeting_service import get_meeting_service
         
-        service = get_meeting_service(supabase)
+        service = get_meeting_service(db_client)
         
         result = await service.cancel_meeting(
             tenant_id=tenant_id,
@@ -726,7 +726,7 @@ class ScheduleReminderInput(BaseModel):
 
 async def schedule_reminder(
     tenant_id: str,
-    supabase: Client,
+    db_client: Client,
     meeting_id: Optional[str] = None,
     lead_id: Optional[str] = None,
     offset: Optional[str] = None,
@@ -743,12 +743,12 @@ async def schedule_reminder(
     try:
         from app.services.assistant_agent_service import get_assistant_agent_service
         
-        service = get_assistant_agent_service(supabase)
+        service = get_assistant_agent_service(db_client)
         
         # If meeting_id provided, get meeting details for chaining
         chained_result = {}
         if meeting_id:
-            meeting_response = supabase.table("meetings").select(
+            meeting_response = db_client.table("meetings").select(
                 "id, title, start_time, join_link"
             ).eq("id", meeting_id).eq("tenant_id", tenant_id).single().execute()
             
@@ -796,7 +796,7 @@ class ExecuteActionPlanInput(BaseModel):
 
 async def execute_action_plan(
     tenant_id: str,
-    supabase: Client,
+    db_client: Client,
     intent: str,
     actions: List[Dict[str, Any]],
     context: Optional[Dict[str, Any]] = None,
@@ -810,7 +810,7 @@ async def execute_action_plan(
     try:
         from app.services.assistant_agent_service import get_assistant_agent_service
         
-        service = get_assistant_agent_service(supabase)
+        service = get_assistant_agent_service(db_client)
         
         plan = await service.create_plan(
             tenant_id=tenant_id,

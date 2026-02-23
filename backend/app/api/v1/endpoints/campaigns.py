@@ -5,6 +5,8 @@ Handles campaign CRUD, contact management, and job enqueueing for the dialer
 Day 9 Additions:
 - POST /campaigns/{id}/contacts - Add single contact to campaign
 - GET /campaigns/{id}/contacts - List contacts for a campaign with pagination
+
+Refactored: Business logic delegates to CampaignService.
 """
 import logging
 import os
@@ -16,15 +18,26 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Request, Depends, Query
 from pydantic import BaseModel, Field, field_validator
 from dotenv import load_dotenv
-from supabase import create_client, Client
+from app.core.postgres_adapter import Client
 
 from app.domain.models.dialer_job import DialerJob, JobStatus
 from app.domain.services.queue_service import DialerQueueService
-from app.api.v1.dependencies import get_supabase, get_current_user, CurrentUser
+from app.domain.services.campaign_service import (
+    CampaignService, CampaignError, CampaignNotFoundError, CampaignStateError
+)
+from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+
+def _get_campaign_service(db_client: Client) -> CampaignService:
+    """Build CampaignService using the DI container's queue service."""
+    from app.core.container import get_container
+    container = get_container()
+    queue_service = container.queue_service if container.is_initialized else None
+    return CampaignService(db_client, queue_service=queue_service)
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
@@ -70,46 +83,48 @@ class ContactListResponse(BaseModel):
 @router.get("/")
 async def list_campaigns(
     request: Request,
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """List all campaigns"""
     try:
-        response = supabase.table("campaigns").select("*").order("created_at", desc=True).execute()
+        response = db_client.table("campaigns").select("*").order("created_at", desc=True).execute()
         return {"campaigns": response.data}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error listing campaigns: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list campaigns")
 
 
 @router.post("/")
 async def create_campaign(
     campaign_data: dict,
     request: Request,
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """Create a new campaign"""
     try:
-        response = supabase.table("campaigns").insert(campaign_data).execute()
+        response = db_client.table("campaigns").insert(campaign_data).execute()
         return {"campaign": response.data[0] if response.data else None}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error creating campaign: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create campaign")
 
 
 @router.get("/{campaign_id}")
 async def get_campaign(
     campaign_id: str,
     request: Request,
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
-    """Get campaign details"""
+    """Get campaign details — delegates to CampaignService."""
     try:
-        response = supabase.table("campaigns").select("*").eq("id", campaign_id).execute()
-        if not response.data:
-            raise HTTPException(status_code=404, detail="Campaign not found")
-        return {"campaign": response.data[0]}
-    except HTTPException:
-        raise
+        service = _get_campaign_service(db_client)
+        campaign = await service.get_campaign(campaign_id)
+        return {"campaign": campaign}
+    except CampaignNotFoundError:
+        raise HTTPException(status_code=404, detail="Campaign not found")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error fetching campaign {campaign_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get campaign")
 
 
 @router.post("/{campaign_id}/start")
@@ -117,226 +132,86 @@ async def start_campaign(
     campaign_id: str,
     request: Request,
     start_request: Optional[CampaignStartRequest] = None,
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
-    Start a campaign - enqueue all pending leads as dialer jobs.
+    Start a campaign — delegates to CampaignService.
     
-    This endpoint:
-    1. Validates the campaign exists and is in a valid state
-    2. Fetches all leads with status='pending' for this campaign
-    3. Creates DialerJob for each lead with priority handling
-    4. Enqueues all jobs to Redis queue
-    5. Stores job metadata in database
-    6. Updates campaign status to 'running'
-    
-    Priority Logic:
-    - Base priority from lead.priority (default 5)
-    - High-value leads (is_high_value=true): +2 priority
-    - Tags 'urgent' or 'appointment': +1 priority
-    - Priority >= 8 goes to priority queue (processed first)
+    Validates, enqueues jobs, and updates status atomically.
     """
     try:
-        # 1. Get campaign
-        campaign_response = supabase.table("campaigns").select("*").eq("id", campaign_id).execute()
-        if not campaign_response.data:
-            raise HTTPException(status_code=404, detail="Campaign not found")
+        service = _get_campaign_service(db_client)
         
-        campaign = campaign_response.data[0]
+        tenant_id = (start_request.tenant_id if start_request else None)
+        priority_override = (start_request.priority_override if start_request else None)
         
-        # Check if campaign can be started
-        if campaign.get("status") == "running":
-            raise HTTPException(status_code=400, detail="Campaign is already running")
-        
-        # 2. Get tenant_id (from request or campaign)
-        tenant_id = None
-        if start_request and start_request.tenant_id:
-            tenant_id = start_request.tenant_id
-        # For now, use a default tenant if not provided
-        if not tenant_id:
-            tenant_id = "default-tenant"
-        
-        # 3. Get all pending leads for this campaign
-        leads_response = supabase.table("leads").select("*")\
-            .eq("campaign_id", campaign_id)\
-            .eq("status", "pending")\
-            .order("priority", desc=True)\
-            .order("created_at")\
-            .execute()
-        
-        leads = leads_response.data or []
-        
-        if not leads:
-            # No leads to process, but still update status
-            supabase.table("campaigns").update({
-                "status": "running",
-                "started_at": datetime.utcnow().isoformat()
-            }).eq("id", campaign_id).execute()
-            
-            return {
-                "message": f"Campaign {campaign_id} started (no pending leads)",
-                "jobs_enqueued": 0,
-                "campaign": {"id": campaign_id, "status": "running"}
-            }
-        
-        # 4. Initialize queue service
-        queue_service = DialerQueueService()
-        await queue_service.initialize()
-        
-        # 5. Create and enqueue jobs for each lead
-        priority_override = start_request.priority_override if start_request else None
-        jobs_created = 0
-        jobs_data = []
-        
-        for lead in leads:
-            # Calculate priority
-            base_priority = priority_override if priority_override else lead.get("priority", 5)
-            
-            # High-value customers get priority boost
-            if lead.get("is_high_value"):
-                base_priority = min(base_priority + 2, 10)
-            
-            # Urgent tags get priority boost
-            lead_tags = lead.get("tags", []) or []
-            if "urgent" in lead_tags or "appointment" in lead_tags or "reminder" in lead_tags:
-                base_priority = min(base_priority + 1, 10)
-            
-            # Create job
-            job_id = str(uuid.uuid4())
-            job = DialerJob(
-                job_id=job_id,
-                campaign_id=campaign_id,
-                lead_id=lead["id"],
-                tenant_id=tenant_id,
-                phone_number=lead["phone_number"],
-                priority=base_priority,
-                status=JobStatus.PENDING,
-                attempt_number=1,
-                scheduled_at=datetime.utcnow(),
-                created_at=datetime.utcnow()
-            )
-            
-            # Enqueue to Redis
-            await queue_service.enqueue_job(job)
-            
-            # Prepare database record
-            jobs_data.append({
-                "id": job_id,
-                "campaign_id": campaign_id,
-                "lead_id": lead["id"],
-                "tenant_id": tenant_id,
-                "phone_number": lead["phone_number"],
-                "priority": base_priority,
-                "status": "pending",
-                "attempt_number": 1,
-                "scheduled_at": datetime.utcnow().isoformat(),
-                "created_at": datetime.utcnow().isoformat()
-            })
-            
-            jobs_created += 1
-        
-        # 6. Store jobs in database (batch insert)
-        if jobs_data:
-            try:
-                supabase.table("dialer_jobs").insert(jobs_data).execute()
-            except Exception as e:
-                # Log but don't fail - jobs are already in Redis
-                print(f"Warning: Failed to store jobs in database: {e}")
-        
-        # 7. Update campaign status
-        supabase.table("campaigns").update({
-            "status": "running",
-            "started_at": datetime.utcnow().isoformat(),
-            "total_leads": len(leads)
-        }).eq("id", campaign_id).execute()
-        
-        # 8. Close queue service
-        await queue_service.close()
-        
-        # Get queue stats
-        await queue_service.initialize()
-        stats = await queue_service.get_queue_stats()
-        await queue_service.close()
+        result = await service.start_campaign(
+            campaign_id=campaign_id,
+            tenant_id=tenant_id,
+            priority_override=priority_override
+        )
         
         return {
-            "message": f"Campaign {campaign_id} started",
-            "jobs_enqueued": jobs_created,
-            "queue_stats": stats,
-            "campaign": {"id": campaign_id, "status": "running"}
+            "message": result.message,
+            "jobs_enqueued": result.jobs_enqueued,
+            "queue_stats": result.queue_stats,
+            "campaign": {"id": result.campaign_id, "status": "running"}
         }
-        
-    except HTTPException:
-        raise
+    except CampaignNotFoundError:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    except CampaignStateError as e:
+        raise HTTPException(status_code=400, detail=e.message)
+    except CampaignError as e:
+        logger.error(f"Campaign service error for {campaign_id}: {e}")
+        raise HTTPException(status_code=e.status_code, detail="Failed to start campaign")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Unexpected error starting campaign {campaign_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/{campaign_id}/pause")
 async def pause_campaign(
     campaign_id: str,
     request: Request,
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
-    """Pause a campaign"""
+    """Pause a campaign — delegates to CampaignService."""
     try:
-        response = supabase.table("campaigns").update({
-            "status": "paused"
-        }).eq("id", campaign_id).execute()
-        
-        if not response.data:
-            raise HTTPException(status_code=404, detail="Campaign not found")
-        return {"message": f"Campaign {campaign_id} paused", "campaign": response.data[0]}
-    except HTTPException:
-        raise
+        service = _get_campaign_service(db_client)
+        campaign = await service.pause_campaign(campaign_id)
+        return {"message": f"Campaign {campaign_id} paused", "campaign": campaign}
+    except CampaignNotFoundError:
+        raise HTTPException(status_code=404, detail="Campaign not found")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error pausing campaign {campaign_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to pause campaign")
 
 
 @router.post("/{campaign_id}/stop")
 async def stop_campaign(
     campaign_id: str,
     clear_queue: bool = Query(False, description="Clear pending jobs from queue"),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
-    Stop a campaign completely.
+    Stop a campaign — delegates to CampaignService.
     
     Args:
         campaign_id: Campaign UUID
-        clear_queue: If True, remove pending jobs from Redis queue
+        clear_queue: If True, mark pending jobs as skipped
     """
     try:
-        # Update campaign status
-        response = supabase.table("campaigns").update({
-            "status": "stopped",
-            "completed_at": datetime.utcnow().isoformat()
-        }).eq("id", campaign_id).execute()
-        
-        if not response.data:
-            raise HTTPException(status_code=404, detail="Campaign not found")
-        
-        jobs_cleared = 0
-        
-        if clear_queue:
-            # Clear pending jobs for this campaign from database
-            supabase.table("dialer_jobs").update({
-                "status": "skipped",
-                "last_error": "Campaign stopped"
-            }).eq("campaign_id", campaign_id).eq("status", "pending").execute()
-            
-            # Note: Redis queue uses tenant-based keys, so we can't easily
-            # clear specific campaign jobs without scanning. In production,
-            # the worker will skip jobs for stopped campaigns.
-        
+        service = _get_campaign_service(db_client)
+        campaign = await service.stop_campaign(campaign_id, clear_queue=clear_queue)
         return {
             "message": f"Campaign {campaign_id} stopped",
-            "jobs_cleared": jobs_cleared,
-            "campaign": response.data[0]
+            "campaign": campaign
         }
-    except HTTPException:
-        raise
+    except CampaignNotFoundError:
+        raise HTTPException(status_code=404, detail="Campaign not found")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error stopping campaign {campaign_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to stop campaign")
 
 
 @router.get("/{campaign_id}/jobs")
@@ -345,11 +220,11 @@ async def get_campaign_jobs(
     status: Optional[str] = Query(None, description="Filter by job status"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """Get dialer jobs for a campaign"""
     try:
-        query = supabase.table("dialer_jobs").select(
+        query = db_client.table("dialer_jobs").select(
             "*", count="exact"
         ).eq("campaign_id", campaign_id)
         
@@ -366,25 +241,26 @@ async def get_campaign_jobs(
             "page_size": page_size
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error fetching jobs for campaign {campaign_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch campaign jobs")
 
 
 @router.get("/{campaign_id}/stats")
 async def get_campaign_stats(
     campaign_id: str,
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """Get statistics for a campaign"""
     try:
         # Get campaign
-        campaign_response = supabase.table("campaigns").select("*").eq("id", campaign_id).execute()
+        campaign_response = db_client.table("campaigns").select("*").eq("id", campaign_id).execute()
         if not campaign_response.data:
             raise HTTPException(status_code=404, detail="Campaign not found")
         
         campaign = campaign_response.data[0]
         
         # Get job counts by status
-        jobs_response = supabase.table("dialer_jobs").select("status").eq("campaign_id", campaign_id).execute()
+        jobs_response = db_client.table("dialer_jobs").select("status").eq("campaign_id", campaign_id).execute()
         
         status_counts = {}
         for job in jobs_response.data or []:
@@ -392,7 +268,7 @@ async def get_campaign_stats(
             status_counts[status] = status_counts.get(status, 0) + 1
         
         # Get call outcomes
-        calls_response = supabase.table("calls").select("outcome, goal_achieved").eq("campaign_id", campaign_id).execute()
+        calls_response = db_client.table("calls").select("outcome, goal_achieved").eq("campaign_id", campaign_id).execute()
         
         outcome_counts = {}
         goals_achieved = 0
@@ -413,7 +289,8 @@ async def get_campaign_stats(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error fetching stats for campaign {campaign_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch campaign stats")
 
 
 # =============================================================================
@@ -464,7 +341,7 @@ def normalize_phone_number(phone: str) -> str:
 async def add_contact_to_campaign(
     campaign_id: str,
     contact: ContactCreate,
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     Add a single contact (lead) to a campaign.
@@ -482,7 +359,7 @@ async def add_contact_to_campaign(
     """
     try:
         # 1. Validate campaign exists
-        campaign_response = supabase.table("campaigns").select("id, name, status").eq("id", campaign_id).execute()
+        campaign_response = db_client.table("campaigns").select("id, name, status").eq("id", campaign_id).execute()
         if not campaign_response.data:
             raise HTTPException(status_code=404, detail="Campaign not found")
         
@@ -493,7 +370,7 @@ async def add_contact_to_campaign(
             raise HTTPException(status_code=400, detail=f"Invalid phone number: {str(e)}")
         
         # 3. Check for duplicate within campaign
-        existing = supabase.table("leads").select("id").eq(
+        existing = db_client.table("leads").select("id").eq(
             "campaign_id", campaign_id
         ).eq(
             "phone_number", normalized_phone
@@ -523,7 +400,7 @@ async def add_contact_to_campaign(
             "created_at": datetime.utcnow().isoformat()
         }
         
-        response = supabase.table("leads").insert(lead_data).execute()
+        response = db_client.table("leads").insert(lead_data).execute()
         
         if not response.data:
             raise HTTPException(status_code=500, detail="Failed to create contact")
@@ -539,7 +416,7 @@ async def add_contact_to_campaign(
         raise
     except Exception as e:
         logger.error(f"Error adding contact to campaign {campaign_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to add contact")
 
 
 @router.get("/{campaign_id}/contacts")
@@ -549,7 +426,7 @@ async def list_campaign_contacts(
     page_size: int = Query(50, ge=1, le=100, description="Items per page"),
     status: Optional[str] = Query(None, description="Filter by status (pending, called, completed, dnc)"),
     last_call_result: Optional[str] = Query(None, description="Filter by last call result"),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     List all contacts (leads) for a campaign with pagination.
@@ -567,12 +444,12 @@ async def list_campaign_contacts(
     """
     try:
         # 1. Validate campaign exists
-        campaign_response = supabase.table("campaigns").select("id").eq("id", campaign_id).execute()
+        campaign_response = db_client.table("campaigns").select("id").eq("id", campaign_id).execute()
         if not campaign_response.data:
             raise HTTPException(status_code=404, detail="Campaign not found")
         
         # 2. Build query
-        query = supabase.table("leads").select(
+        query = db_client.table("leads").select(
             "*", count="exact"
         ).eq("campaign_id", campaign_id).neq("status", "deleted")
         
@@ -608,7 +485,7 @@ async def list_campaign_contacts(
 async def remove_contact_from_campaign(
     campaign_id: str,
     contact_id: str,
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     Remove a contact from a campaign (soft delete).
@@ -618,7 +495,7 @@ async def remove_contact_from_campaign(
     """
     try:
         # Verify contact belongs to campaign
-        existing = supabase.table("leads").select("id").eq(
+        existing = db_client.table("leads").select("id").eq(
             "id", contact_id
         ).eq(
             "campaign_id", campaign_id
@@ -628,7 +505,7 @@ async def remove_contact_from_campaign(
             raise HTTPException(status_code=404, detail="Contact not found in this campaign")
         
         # Soft delete
-        response = supabase.table("leads").update({
+        response = db_client.table("leads").update({
             "status": "deleted"
         }).eq("id", contact_id).execute()
         
@@ -640,4 +517,4 @@ async def remove_contact_from_campaign(
         raise
     except Exception as e:
         logger.error(f"Error removing contact {contact_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to remove contact")

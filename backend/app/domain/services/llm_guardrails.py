@@ -8,7 +8,7 @@ human-like conversation flow (no hints that it's an AI).
 import re
 import asyncio
 import logging
-from typing import Tuple, Optional, List
+from typing import Tuple, Optional, List, Union
 from pydantic import BaseModel, Field
 
 from app.domain.models.conversation_state import ConversationState, CallOutcomeType
@@ -86,10 +86,27 @@ class LLMGuardrails:
     def __init__(self, config: LLMGuardrailsConfig = None):
         self.config = config or LLMGuardrailsConfig()
         self._fallback_index = {}  # Tracks which fallback to use per call
+
+    @staticmethod
+    def _normalize_state(state: Union[ConversationState, str, None]) -> ConversationState:
+        """
+        Normalize state input to ConversationState.
+
+        Some runtime session models serialize enums as raw strings; this guardrail
+        accepts both forms to prevent fallback-path crashes.
+        """
+        if isinstance(state, ConversationState):
+            return state
+        if isinstance(state, str):
+            try:
+                return ConversationState(state)
+            except ValueError:
+                logger.warning("Unknown conversation state '%s', defaulting to greeting", state)
+        return ConversationState.GREETING
     
     def get_fallback_response(
         self,
-        state: ConversationState,
+        state: Union[ConversationState, str, None],
         call_id: str = None,
         error_count: int = 0
     ) -> Tuple[str, bool]:
@@ -111,19 +128,22 @@ class LLMGuardrails:
             logger.warning(f"Max LLM errors reached ({error_count}), using graceful goodbye")
             return response, True
         
+        normalized_state = self._normalize_state(state)
+        state_key = normalized_state.value
+
         # Get state-specific fallbacks
         fallbacks = self.FALLBACK_RESPONSES.get(
-            state, 
+            normalized_state,
             self.FALLBACK_RESPONSES[ConversationState.GREETING]
         )
         
         # Cycle through fallbacks for variety
-        key = f"{call_id}_{state.value}" if call_id else state.value
+        key = f"{call_id}_{state_key}" if call_id else state_key
         idx = self._fallback_index.get(key, 0)
         response = fallbacks[idx % len(fallbacks)]
         self._fallback_index[key] = idx + 1
         
-        logger.info(f"Using fallback response for state={state.value}: '{response[:50]}...'")
+        logger.info(f"Using fallback response for state={state_key}: '{response[:50]}...'")
         return response, False
     
     def truncate_response(self, response: str, max_sentences: int = None) -> str:
@@ -189,6 +209,16 @@ class LLMGuardrails:
         
         # Check do_not_say rules (more flexible matching)
         for rule in rules.do_not_say_rules:
+            rule_lower = rule.lower()
+
+            # Special handling for scheduling restrictions:
+            # mention of a feature is allowed; explicit scheduling intent is not.
+            if "book appointments" in rule_lower or "schedule calls" in rule_lower:
+                if self._looks_like_scheduling_attempt(response_lower):
+                    logger.warning(f"Response may violate rule: '{rule}'")
+                    return False, f"may_violate_rule:{rule}"
+                continue
+
             # Extract key terms from rule
             terms = [t.strip().lower() for t in rule.split() if len(t) > 3]
             matches = sum(1 for t in terms if t in response_lower)
@@ -229,6 +259,22 @@ class LLMGuardrails:
         cleaned = re.sub(r'\s+', ' ', cleaned).strip()
         
         return cleaned
+
+    @staticmethod
+    def _looks_like_scheduling_attempt(response_lower: str) -> bool:
+        """
+        Detect explicit assistant-led scheduling attempts.
+
+        This avoids false positives where the assistant merely describes product
+        features like "appointment booking" without trying to schedule now.
+        """
+        patterns = [
+            r"\b(let me|i can|i will|we can|would you like to)\b.{0,40}\b(schedule|book|set up|arrange)\b.{0,40}\b(call|appointment|meeting)\b",
+            r"\b(what|which)\s+(time|day)\s+(works|is best)\b",
+            r"\bshall i\s+(book|schedule|set up)\b",
+            r"\bcan i\s+(book|schedule|set up)\b",
+        ]
+        return any(re.search(pattern, response_lower) for pattern in patterns)
     
     def reset_call_tracking(self, call_id: str):
         """Reset fallback tracking for a call (call cleanup)"""

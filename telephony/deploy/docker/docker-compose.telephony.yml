@@ -1,0 +1,65 @@
+name: talky-telephony
+
+# WS-A bootstrap compose for staging.
+# Best practice: override image tags with immutable digests in .env.telephony.
+
+services:
+  freeswitch:
+    image: "${FREESWITCH_IMAGE:-safarov/freeswitch:latest}"
+    container_name: talky-freeswitch
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ../../freeswitch/conf/autoload_configs/event_socket.conf.xml:/etc/freeswitch/autoload_configs/event_socket.conf.xml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "fs_cli -x status >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+  rtpengine:
+    image: "${RTPENGINE_IMAGE:-talky/rtpengine:ubuntu24.04}"
+    build:
+      context: ../../rtpengine
+      dockerfile: Dockerfile
+    container_name: talky-rtpengine
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ../../rtpengine/conf/rtpengine.conf:/etc/rtpengine/rtpengine.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "ss -lun | grep -q ':2223' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+  kamailio:
+    image: "${KAMAILIO_IMAGE:-ghcr.io/kamailio/kamailio:6.0.4-bookworm}"
+    container_name: talky-kamailio
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      KAMAILIO_SIP_IP: "${KAMAILIO_SIP_IP:-0.0.0.0}"
+      KAMAILIO_SIP_PORT: "${KAMAILIO_SIP_PORT:-15060}"
+      KAMAILIO_TLS_PORT: "${KAMAILIO_TLS_PORT:-15061}"
+      KAMAILIO_TLS_ONLY: "${KAMAILIO_TLS_ONLY:-0}"
+    depends_on:
+      freeswitch:
+        condition: service_healthy
+      rtpengine:
+        condition: service_started
+    command: ["kamailio", "-DD", "-E", "-f", "/etc/kamailio/kamailio.cfg"]
+    volumes:
+      - ../../kamailio/conf/kamailio.cfg:/etc/kamailio/kamailio.cfg:ro
+      - ../../kamailio/conf/dispatcher.list:/etc/kamailio/dispatcher.list:ro
+      - ../../kamailio/conf/address.list:/etc/kamailio/address.list:ro
+      - ../../kamailio/conf/tls.cfg:/etc/kamailio/tls.cfg:ro
+      - ../../kamailio/certs:/etc/kamailio/certs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "kamailio -c -f /etc/kamailio/kamailio.cfg >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s

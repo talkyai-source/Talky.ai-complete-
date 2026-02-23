@@ -26,6 +26,10 @@ from app.domain.services.conversation_engine import ConversationEngine
 from app.domain.services.prompt_manager import PromptManager
 from app.domain.services.transcript_service import TranscriptService
 from app.domain.services.llm_guardrails import LLMGuardrails, LLMGuardrailsConfig, get_guardrails
+from app.domain.services.latency_tracker import get_latency_tracker
+from app.domain.services.global_ai_config import get_global_config
+from app.core.container import get_container
+from app.core.postgres_adapter import Client as PostgresAdapterClient
 
 logger = logging.getLogger(__name__)
 
@@ -55,12 +59,17 @@ class VoicePipelineService:
         stt_provider: STTProvider,
         llm_provider: GroqLLMProvider,
         tts_provider: TTSProvider,  # Generic TTS provider (Google, etc.)
-        media_gateway: MediaGateway
+        media_gateway: MediaGateway,
+        *,
+        stt_sample_rate: int = 16000,
+        tts_sample_rate: int = 24000,
     ):
         self.stt_provider = stt_provider
         self.llm_provider = llm_provider
         self.tts_provider = tts_provider
         self.media_gateway = media_gateway
+        self.stt_sample_rate = stt_sample_rate
+        self.tts_sample_rate = tts_sample_rate
         
         # Day 5: Conversation management components
         self.prompt_manager = PromptManager()
@@ -71,12 +80,16 @@ class VoicePipelineService:
         
         # Day 17: LLM guardrails for timeout and fallback handling
         self.guardrails = get_guardrails()
+        self.latency_tracker = get_latency_tracker()
         
         self._active_pipelines: dict[str, bool] = {}
         
         # Barge-in: Track interruption events per call
         # When set, TTS should stop immediately
         self._barge_in_events: dict[str, asyncio.Event] = {}
+        
+        # EagerEndOfTurn: Track speculative LLM tasks for cancellation on TurnResumed
+        self._pending_llm_tasks: dict[str, asyncio.Task] = {}
     
     async def start_pipeline(
         self,
@@ -126,8 +139,11 @@ class VoicePipelineService:
             session.state = CallState.ERROR
         
         finally:
-            self._active_pipelines[call_id] = False
+            self._active_pipelines.pop(call_id, None)
+            self._barge_in_events.pop(call_id, None)
+            self._pending_llm_tasks.pop(call_id, None)
             session.stt_active = False
+            self.latency_tracker.cleanup_call(call_id)
             
             logger.info(
                 f"Voice pipeline ended for call {call_id}",
@@ -150,10 +166,14 @@ class VoicePipelineService:
         """
         call_id = session.call_id
         
-        logger.info(
-            f"Processing audio stream for call {call_id}",
-            extra={"call_id": call_id}
-        )
+        print(f"🔊 [PIPELINE] Processing audio stream for call {call_id}", flush=True)
+        
+        # Debug: check queue
+        try:
+            queue_size = audio_queue.qsize() if hasattr(audio_queue, 'qsize') else 'unknown'
+            print(f"🔊 [PIPELINE] Initial audio queue size: {queue_size}", flush=True)
+        except Exception as e:
+            print(f"🔊 [PIPELINE] Queue check error: {e}", flush=True)
         
         # Create async generator from queue
         async def audio_stream() -> AsyncIterator[AudioChunk]:
@@ -167,7 +187,7 @@ class VoicePipelineService:
                     
                     yield AudioChunk(
                         data=audio_data,
-                        sample_rate=16000,  # STT input is 16kHz (Deepgram Flux)
+                        sample_rate=self.stt_sample_rate,
                         channels=1
                     )
                 
@@ -183,12 +203,24 @@ class VoicePipelineService:
                     break
         
         # Stream audio to STT
+        print(f"🔊 [PIPELINE] Starting STT stream_transcribe...", flush=True)
         try:
+            self.latency_tracker.start_turn(call_id, session.turn_id)
+            self.latency_tracker.mark_listening_start(call_id)
+            transcript_count = 0
             async for transcript in self.stt_provider.stream_transcribe(
                 audio_stream(),
-                language="en"
+                language="en",
+                call_id=call_id
             ):
+                transcript_count += 1
+                if transcript_count <= 5:
+                    if isinstance(transcript, BargeInSignal):
+                        print(f"🔊 [PIPELINE] Got barge-in signal #{transcript_count}", flush=True)
+                    else:
+                        print(f"🔊 [PIPELINE] Got transcript #{transcript_count}: {transcript.text!r}", flush=True)
                 await self.handle_transcript(session, transcript, websocket)
+            print(f"🔊 [PIPELINE] STT stream ended. Total transcripts: {transcript_count}", flush=True)
         
         except Exception as e:
             logger.error(
@@ -206,6 +238,11 @@ class VoicePipelineService:
         """
         Handle transcript chunk from STT or barge-in signal.
         
+        Implements Flux EagerEndOfTurn pattern for lower latency:
+        - EagerEndOfTurn: Start LLM preparation early (speculative)
+        - TurnResumed: Cancel speculative LLM call
+        - EndOfTurn: Finalize and send response
+        
         Args:
             session: Active call session
             transcript: Transcript chunk from STT or BargeInSignal
@@ -218,7 +255,28 @@ class VoicePipelineService:
             await self.handle_barge_in(session, websocket)
             return
         
+        # Handle TurnResumed - cancel any speculative processing
+        if transcript.metadata and transcript.metadata.get("resumed"):
+            logger.info(f"TurnResumed for call {call_id} - cancelling speculative processing")
+            session.llm_active = False
+            # Cancel any pending LLM tasks
+            if call_id in self._pending_llm_tasks:
+                task = self._pending_llm_tasks[call_id]
+                if not task.done():
+                    task.cancel()
+                    logger.info(f"Cancelled speculative LLM task for {call_id}")
+                del self._pending_llm_tasks[call_id]
+            return
+        
         # Log transcript with structured data
+        metadata = transcript.metadata or {}
+
+        # Ensure latency tracker is aligned with current turn ID.
+        current_metrics = self.latency_tracker.get_metrics(call_id)
+        if not current_metrics or current_metrics.turn_id != session.turn_id:
+            self.latency_tracker.start_turn(call_id, session.turn_id)
+            self.latency_tracker.mark_listening_start(call_id)
+
         logger.info(
             "transcript_received",
             extra={
@@ -227,15 +285,21 @@ class VoicePipelineService:
                 "timestamp": datetime.utcnow().isoformat(),
                 "text": transcript.text,
                 "is_final": transcript.is_final,
-                "confidence": transcript.confidence
+                "confidence": transcript.confidence,
+                "eager": metadata.get("eager", False)
             }
         )
         
         # Send transcript to WebSocket for browser display
         if websocket and transcript.text:
             try:
+                msg_type = "transcript"
+                # Eager transcripts are shown as partial
+                if metadata.get("eager"):
+                    msg_type = "transcript_eager"
+                
                 await websocket.send_json({
-                    "type": "transcript",
+                    "type": msg_type,
                     "text": transcript.text,
                     "is_final": transcript.is_final,
                     "confidence": transcript.confidence
@@ -243,12 +307,26 @@ class VoicePipelineService:
             except Exception as e:
                 logger.warning(f"Failed to send transcript to websocket: {e}")
         
-        # Check for turn end
+        # Check for turn end (EndOfTurn with empty text signals turn end)
         if self.stt_provider.detect_turn_end(transcript):
             # User finished speaking
             await self.handle_turn_end(session, websocket)
+            return
         
-        elif transcript.text:
+        # Handle EagerEndOfTurn - start LLM early for lower latency
+        if metadata.get("eager") and transcript.text:
+            # Only start eager processing if not already processing
+            if not session.llm_active and call_id not in self._pending_llm_tasks:
+                logger.info(f"EagerEndOfTurn for call {call_id} - starting speculative LLM")
+                # Store the eager transcript but don't process yet
+                # We'll process when EndOfTurn confirms
+                session.current_user_input = transcript.text
+            return
+        
+        # Regular transcript handling
+        if transcript.text:
+            self.latency_tracker.mark_stt_first_transcript(call_id)
+
             # Day 17: Fixed partial transcript handling
             # Deepgram Flux sends "Update" events that REPLACE previous partials
             # So we store the latest partial, not concatenate
@@ -348,6 +426,8 @@ class VoicePipelineService:
         # Update session state
         session.state = CallState.PROCESSING
         session.llm_active = True
+        self.latency_tracker.mark_speech_end(call_id)
+        self.latency_tracker.mark_llm_start(call_id)
         
         # Add user message to conversation
         user_message = Message(
@@ -371,6 +451,7 @@ class VoicePipelineService:
                 session,
                 full_transcript
             )
+            self.latency_tracker.mark_llm_end(call_id)
             
             llm_latency = (datetime.utcnow() - llm_start).total_seconds() * 1000
             session.add_latency_measurement("llm", llm_latency)
@@ -385,12 +466,19 @@ class VoicePipelineService:
                 }
             )
             
-            # Add assistant message to conversation
-            assistant_message = Message(
-                role=MessageRole.ASSISTANT,
-                content=response_text
-            )
-            session.conversation_history.append(assistant_message)
+            # Add assistant message to conversation (only if non-empty)
+            # Empty responses can confuse the LLM on subsequent turns
+            if response_text and response_text.strip():
+                assistant_message = Message(
+                    role=MessageRole.ASSISTANT,
+                    content=response_text
+                )
+                session.conversation_history.append(assistant_message)
+            else:
+                logger.warning(
+                    f"Skipping empty assistant message for call {call_id} - "
+                    "this prevents conversation history corruption"
+                )
             
             # Send LLM response to WebSocket for browser display
             if websocket:
@@ -412,6 +500,7 @@ class VoicePipelineService:
             
             # Synthesize TTS audio
             session.tts_active = True
+            self.latency_tracker.mark_tts_start(call_id)
             
             tts_start = datetime.utcnow()
             
@@ -426,6 +515,26 @@ class VoicePipelineService:
             # Calculate total turn latency
             total_latency = llm_latency + tts_latency
             session.add_latency_measurement("total_turn", total_latency)
+
+            tracked = self.latency_tracker.get_metrics(call_id)
+            if tracked:
+                if tracked.stt_first_transcript_ms is not None:
+                    session.add_latency_measurement(
+                        "stt_first_transcript", tracked.stt_first_transcript_ms
+                    )
+                if tracked.llm_first_token_ms is not None:
+                    session.add_latency_measurement(
+                        "llm_first_token", tracked.llm_first_token_ms
+                    )
+                if tracked.tts_first_chunk_ms is not None:
+                    session.add_latency_measurement(
+                        "tts_first_chunk", tracked.tts_first_chunk_ms
+                    )
+                if tracked.response_start_latency_ms is not None:
+                    session.add_latency_measurement(
+                        "response_start", tracked.response_start_latency_ms
+                    )
+                self.latency_tracker.log_metrics(call_id)
             
             logger.info(
                 "turn_complete",
@@ -452,13 +561,16 @@ class VoicePipelineService:
             
             # Day 17: Flush transcript to database incrementally
             try:
-                from app.api.v1.dependencies import get_supabase
-                supabase = get_supabase()  # Not a generator, call directly
-                await self.transcript_service.flush_to_database(
-                    call_id=call_id,
-                    supabase_client=supabase,
-                    tenant_id=getattr(session, 'tenant_id', None)
-                )
+                container = get_container()
+                if container.is_initialized:
+                    postgres_client = PostgresAdapterClient(container.db_pool)
+                    await self.transcript_service.flush_to_database(
+                        call_id=call_id,
+                        db_client=postgres_client,
+                        tenant_id=getattr(session, 'tenant_id', None)
+                    )
+                else:
+                    logger.debug("Skipping transcript flush: container not initialized")
             except Exception as e:
                 logger.warning(f"Failed to flush transcript for {call_id}: {e}")
         
@@ -472,6 +584,8 @@ class VoicePipelineService:
         finally:
             # Reset for next turn
             session.increment_turn()
+            self.latency_tracker.start_turn(call_id, session.turn_id)
+            self.latency_tracker.mark_listening_start(call_id)
             session.state = CallState.LISTENING
             session.llm_active = False
             session.tts_active = False
@@ -499,63 +613,83 @@ class VoicePipelineService:
         """
         call_id = session.call_id
         
-        # Initialize conversation engine if needed (using agent_config from session)
-        if session.agent_config:
-            conversation_engine = ConversationEngine(session.agent_config)
-        else:
-            # Fallback: use basic response without state machine
-            logger.warning(
-                f"No agent_config in session {call_id}, using basic LLM response",
-                extra={"call_id": call_id}
+        # ---------------------------------------------------------------
+        # Determine prompt mode:
+        # If the endpoint set a custom system_prompt on the session (e.g.
+        # ai_options_ws / ask_ai_ws), use it directly.  This avoids the
+        # PromptManager templates which contain appointment-themed
+        # examples that conflict with the product-info role.
+        # ---------------------------------------------------------------
+        has_custom_prompt = bool(getattr(session, 'system_prompt', None) and session.system_prompt.strip())
+        
+        if has_custom_prompt:
+            # ---- CUSTOM PROMPT PATH (voice_demo / ask_ai) ----
+            # Skip ConversationEngine state machine — we don't need
+            # GREETING→QUALIFICATION→CLOSING for product Q&A sessions.
+            system_prompt = session.system_prompt
+            
+            logger.info(
+                "using_custom_system_prompt",
+                extra={
+                    "call_id": call_id,
+                    "turn_id": session.turn_id,
+                    "prompt_length": len(system_prompt),
+                }
             )
-            return await self._get_basic_llm_response(session)
-        
-        # 1. Process user input through conversation engine
-        new_state, llm_instruction, detected_intent = await conversation_engine.handle_user_input(
-            current_state=session.conversation_state,
-            user_text=user_input,
-            conversation_history=session.conversation_history,
-            context=session.conversation_context
-        )
-        
-        # Update session state
-        session.conversation_state = new_state
-        
-        logger.info(
-            "conversation_state_transition",
-            extra={
-                "call_id": call_id,
-                "turn_id": session.turn_id,
-                "intent": detected_intent.value,
-                "new_state": new_state.value,
-                "objection_count": session.conversation_context.objection_count
-            }
-        )
-        
-        # 2. Generate state-aware system prompt
-        system_prompt = self.prompt_manager.render_system_prompt(
-            agent_config=session.agent_config,
-            state=new_state,
-            # Pass state-specific context
-            greeting_context=f"I'm calling to {session.agent_config.get_goal_description()}",
-            qualification_instruction=llm_instruction,
-            user_concern=user_input if detected_intent.value in ["uncertain", "objection"] else None,
-            objection_count=session.conversation_context.objection_count,
-            max_objections=session.agent_config.flow.max_objection_attempts,
-            confirmation_details=getattr(session, 'confirmation_details', None)
-        )
+        else:
+            # ---- STATE MACHINE PATH (campaign calls, outbound dialer) ----
+            if session.agent_config:
+                conversation_engine = ConversationEngine(session.agent_config)
+            else:
+                logger.warning(
+                    f"No agent_config in session {call_id}, using basic LLM response",
+                    extra={"call_id": call_id}
+                )
+                return await self._get_basic_llm_response(session)
+            
+            # Process user input through conversation engine
+            new_state, llm_instruction, detected_intent = await conversation_engine.handle_user_input(
+                current_state=session.conversation_state,
+                user_text=user_input,
+                conversation_history=session.conversation_history,
+                context=session.conversation_context
+            )
+            
+            session.conversation_state = new_state
+            
+            logger.info(
+                "conversation_state_transition",
+                extra={
+                    "call_id": call_id,
+                    "turn_id": session.turn_id,
+                    "intent": detected_intent.value,
+                    "new_state": new_state.value,
+                    "objection_count": session.conversation_context.objection_count
+                }
+            )
+            
+            # Generate state-aware system prompt from templates
+            system_prompt = self.prompt_manager.render_system_prompt(
+                agent_config=session.agent_config,
+                state=new_state,
+                greeting_context=f"I'm calling to {session.agent_config.get_goal_description()}",
+                qualification_instruction=llm_instruction,
+                user_concern=user_input if detected_intent.value in ["uncertain", "objection"] else None,
+                objection_count=session.conversation_context.objection_count,
+                max_objections=session.agent_config.flow.max_objection_attempts,
+                confirmation_details=getattr(session, 'confirmation_details', None)
+            )
         
         # 3. Prepare conversation history with context window management
-        # Keep only last N messages to stay within token limits (Groq recommendation: <2000 tokens for system)
         max_history_messages = 10
         recent_history = session.conversation_history[-max_history_messages:] if len(session.conversation_history) > max_history_messages else session.conversation_history
         
         # 4. Implement assistant prefilling for direct responses (Groq best practice)
-        # This skips unnecessary preambles like "Sure!" or "Of course!"
         messages_with_prefill = recent_history.copy()
         
-        # Add assistant prefill based on state to enforce direct responses
-        prefill_content = self._get_prefill_for_state(new_state)
+        prefill_content = self._get_prefill_for_state(
+            session.conversation_state if not has_custom_prompt else ConversationState.GREETING
+        )
         if prefill_content:
             messages_with_prefill.append(Message(
                 role=MessageRole.ASSISTANT,
@@ -567,31 +701,50 @@ class VoicePipelineService:
         use_fallback = False
         
         # Use global config for LLM parameters
-        from app.domain.services.global_ai_config import get_global_config
         global_config = get_global_config()
+
+        # Session-specific config takes priority (Ask-AI / per-endpoint overrides)
+        effective_model = getattr(session, "llm_model", None) or global_config.llm_model
+        effective_temperature = (
+            session.llm_temperature
+            if getattr(session, "llm_temperature", None) is not None
+            else global_config.llm_temperature
+        )
+        effective_max_tokens = (
+            session.llm_max_tokens
+            if getattr(session, "llm_max_tokens", None) is not None
+            else global_config.llm_max_tokens
+        )
         
-        # Enhanced debug logging for empty response diagnosis
+        # Enhanced debug logging
         logger.info(f"[LLM DEBUG] Preparing LLM call for {call_id}")
-        logger.info(f"[LLM DEBUG] System prompt length: {len(system_prompt)} chars")
+        logger.info(f"[LLM DEBUG] System prompt length: {len(system_prompt)} chars, custom={has_custom_prompt}")
         logger.info(f"[LLM DEBUG] Messages with prefill count: {len(messages_with_prefill)}")
-        logger.info(f"[LLM DEBUG] Global config - model: {global_config.llm_model}, temp: {global_config.llm_temperature}, max_tokens: {global_config.llm_max_tokens}")
+        logger.info(
+            "[LLM DEBUG] Effective config - "
+            f"model: {effective_model}, temp: {effective_temperature}, max_tokens: {effective_max_tokens}"
+        )
         
-        # Log the last message (user input) for context
         if messages_with_prefill:
             last_msg = messages_with_prefill[-1]
             logger.info(f"[LLM DEBUG] Last message role: {last_msg.role.value}, content: '{last_msg.content[:100] if last_msg.content else 'EMPTY'}...'")
         
         try:
             # Use timeout-enabled streaming for graceful degradation
+            first_token_seen = False
             async for token in self.llm_provider.stream_chat_with_timeout(
                 messages=messages_with_prefill,
                 timeout_seconds=self.guardrails.config.max_response_time_seconds,
                 system_prompt=system_prompt,
-                temperature=global_config.llm_temperature,  # From AI Options
-                max_tokens=global_config.llm_max_tokens,    # From AI Options
+                model=effective_model,
+                temperature=effective_temperature,
+                max_tokens=effective_max_tokens,
                 top_p=1.0,        # Groq recommendation
                 stop=["###", "\n\n\n"]  # Stop sequences for concise responses
             ):
+                if token and not first_token_seen:
+                    first_token_seen = True
+                    self.latency_tracker.mark_llm_first_token(call_id)
                 response_text += token
                 session.current_ai_response += token
             
@@ -652,7 +805,7 @@ class VoicePipelineService:
         # Apply fallback if needed
         if use_fallback:
             fallback_response, should_end = self.guardrails.get_fallback_response(
-                state=new_state,
+                state=session.conversation_state,
                 call_id=call_id,
                 error_count=session.conversation_context.llm_error_count
             )
@@ -660,7 +813,6 @@ class VoicePipelineService:
             session.current_ai_response = fallback_response
             
             if should_end:
-                # Too many errors - end gracefully
                 logger.warning(
                     "max_llm_errors_graceful_goodbye",
                     extra={"call_id": call_id, "error_count": session.conversation_context.llm_error_count}
@@ -671,32 +823,32 @@ class VoicePipelineService:
                     "max_llm_errors"
                 )
         
-        # 6. Check if conversation should end
-        should_end, end_reason = conversation_engine.should_end_conversation(
-            state=new_state,
-            turn_count=session.turn_id,
-            context=session.conversation_context
-        )
-        
-        if should_end:
-            # Determine outcome for QA tracking
-            outcome = conversation_engine.determine_outcome(
-                final_state=new_state,
-                context=session.conversation_context,
-                turn_count=session.turn_id
+        # 6. Check if conversation should end (only for state-machine path)
+        if not has_custom_prompt and session.agent_config:
+            conversation_engine = ConversationEngine(session.agent_config)
+            should_end, end_reason = conversation_engine.should_end_conversation(
+                state=session.conversation_state,
+                turn_count=session.turn_id,
+                context=session.conversation_context
             )
             
-            logger.info(
-                "conversation_ending",
-                extra={
-                    "call_id": call_id,
-                    "reason": end_reason,
-                    "final_state": new_state.value,
-                    "outcome": outcome.value
-                }
-            )
-            # Mark session for termination
-            session.state = CallState.ENDING
+            if should_end:
+                outcome = conversation_engine.determine_outcome(
+                    final_state=session.conversation_state,
+                    context=session.conversation_context,
+                    turn_count=session.turn_id
+                )
+                
+                logger.info(
+                    "conversation_ending",
+                    extra={
+                        "call_id": call_id,
+                        "reason": end_reason,
+                        "final_state": session.conversation_state.value if hasattr(session.conversation_state, 'value') else str(session.conversation_state),
+                        "outcome": outcome.value
+                    }
+                )
+                session.state = CallState.ENDING
         
         return response_text.strip()
     
@@ -748,6 +900,104 @@ class VoicePipelineService:
         
         return response_text
     
+    def _clean_text_for_tts(self, text: str) -> str:
+        """
+        Clean text for TTS by removing markdown, special characters, and emojis.
+        
+        This ensures the voice output sounds natural and conversational,
+        without speaking out asterisks, hashes, and other formatting marks.
+        
+        Args:
+            text: Raw text from LLM
+            
+        Returns:
+            Cleaned text suitable for voice synthesis
+        """
+        import re
+        
+        if not text:
+            return text
+        
+        # IMPORTANT: Order matters - process complex patterns before simple ones
+        # 1. First handle markdown links (before URL removal)
+        cleaned = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+        
+        # 2. Remove code blocks and inline code
+        cleaned = re.sub(r'```[\s\S]*?```', ' code block ', cleaned)
+        cleaned = re.sub(r'`([^`]+)`', r'\1', cleaned)
+        
+        # 3. Remove standalone URLs (after markdown links)
+        cleaned = re.sub(r'https?://\S+', ' link ', cleaned)
+        cleaned = re.sub(r'www\.\S+', ' website ', cleaned)
+        
+        # 4. Remove markdown formatting (bold, italic, strikethrough)
+        cleaned = re.sub(r'\*\*\*?|\*\*?|__?|~~', '', cleaned)
+        
+        # 5. Remove headers
+        cleaned = re.sub(r'^#{1,6}\s*', '', cleaned, flags=re.MULTILINE)
+        
+        # 6. Remove blockquotes
+        cleaned = re.sub(r'^>\s*', '', cleaned, flags=re.MULTILINE)
+        
+        # 7. Remove emojis (comprehensive range)
+        emoji_pattern = re.compile(
+            "["
+            "\U0001F600-\U0001F64F"  # emoticons
+            "\U0001F300-\U0001F5FF"  # symbols & pictographs
+            "\U0001F680-\U0001F6FF"  # transport & map symbols
+            "\U0001F1E0-\U0001F1FF"  # flags
+            "\U00002702-\U000027B0"  # dingbats
+            "\U000024C2-\U0001F251"  # enclosed characters
+            "\U0001F900-\U0001F9FF"  # supplemental symbols
+            "\U00002600-\U000026FF"  # miscellaneous symbols
+            "]+",
+            flags=re.UNICODE
+        )
+        cleaned = emoji_pattern.sub('', cleaned)
+        
+        # 8. Replace common symbols with spoken equivalents
+        replacements = {
+            '&': ' and ',
+            '@': ' at ',
+            '#': ' number ',
+            '$': ' dollars ',
+            '%': ' percent ',
+            '+': ' plus ',
+            '=': ' equals ',
+            '→': ' to ',
+            '←': ' from ',
+            '•': ', ',
+            '·': ', ',
+            '…': '...',
+            '|': ', ',
+            '™': ' trademark ',
+            '®': ' registered ',
+            '©': ' copyright ',
+            '°': ' degrees ',
+            '×': ' times ',
+            '÷': ' divided by ',
+            '–': '-',  # en-dash to hyphen
+            '—': '-',  # em-dash to hyphen
+        }
+        for symbol, spoken in replacements.items():
+            cleaned = cleaned.replace(symbol, spoken)
+        
+        # 9. Remove bullet points and list markers at start of lines
+        cleaned = re.sub(r'^[\s]*[-*+•]\s+', '', cleaned, flags=re.MULTILINE)
+        
+        # 10. Normalize whitespace (multiple spaces -> single space)
+        cleaned = re.sub(r'\s+', ' ', cleaned)
+        
+        # 11. Remove excessive punctuation
+        cleaned = re.sub(r'!{2,}', '!', cleaned)  # !!! -> !
+        cleaned = re.sub(r'\?{2,}', '?', cleaned)  # ??? -> ?
+        cleaned = re.sub(r'\.{3,}', '...', cleaned)  # .... -> ...
+        
+        # 12. Trim whitespace
+        cleaned = cleaned.strip()
+        
+        return cleaned
+
     async def synthesize_and_send_audio(
         self,
         session: CallSession,
@@ -765,12 +1015,16 @@ class VoicePipelineService:
         """
         call_id = session.call_id
         
+        # Clean text for TTS (remove markdown, emojis, etc.)
+        cleaned_text = self._clean_text_for_tts(text)
+        
         logger.info(
             "tts_start",
             extra={
                 "call_id": call_id,
                 "turn_id": session.turn_id,
-                "text": text
+                "original_text": text,
+                "cleaned_text": cleaned_text
             }
         )
         
@@ -781,19 +1035,31 @@ class VoicePipelineService:
         was_interrupted = False
         
         # Use session voice_id if available, otherwise fall back to global config
-        from app.domain.services.global_ai_config import get_global_config
         global_config = get_global_config()
-        
+
         # Priority: session.voice_id > global_config.tts_voice_id
         voice_id = getattr(session, 'voice_id', None) or global_config.tts_voice_id
-        sample_rate = global_config.tts_sample_rate
-        
-        logger.debug(f"TTS using voice_id={voice_id}, sample_rate={sample_rate}")
+        # Use pipeline-level sample rate (set from VoiceSessionConfig) instead
+        # of the global default, so FreeSWITCH gets 8 kHz while browser gets 24 kHz.
+        sample_rate = self.tts_sample_rate
+
+        logger.info(
+            f"TTS synthesizing voice_id={voice_id} sample_rate={sample_rate} "
+            f"for call {call_id}"
+        )
         
         try:
+            # Mute STT microphone during TTS to prevent echo detection
+            # This prevents the agent's voice from triggering StartOfTurn
+            if hasattr(self.stt_provider, 'mute'):
+                await self.stt_provider.mute(call_id)
+                logger.debug(f"Muted STT for call {call_id} during TTS")
+            
             # Stream TTS synthesis with barge-in awareness
+            # Use cleaned text (no markdown, emojis, etc.)
+            first_audio_chunk_sent = False
             async for audio_chunk in self.tts_provider.stream_synthesize(
-                text=text,
+                text=cleaned_text,
                 voice_id=voice_id,
                 sample_rate=sample_rate
             ):
@@ -814,11 +1080,22 @@ class VoicePipelineService:
                     call_id,
                     audio_chunk.data
                 )
+                if not first_audio_chunk_sent:
+                    first_audio_chunk_sent = True
+                    self.latency_tracker.mark_tts_first_chunk(call_id)
+                    self.latency_tracker.mark_response_start(call_id)
         
         finally:
+            self.latency_tracker.mark_tts_end(call_id)
             # Flush any remaining buffered audio
             if hasattr(self.media_gateway, 'flush_audio_buffer'):
                 await self.media_gateway.flush_audio_buffer(call_id)
+            
+            # Unmute STT microphone after TTS (with small delay to prevent echo)
+            if hasattr(self.stt_provider, 'unmute'):
+                await asyncio.sleep(0.3)  # 300ms delay to let audio finish playing
+                await self.stt_provider.unmute(call_id)
+                logger.debug(f"Unmuted STT for call {call_id} after TTS")
             
             # Clean up barge-in event
             if call_id in self._barge_in_events:
@@ -854,7 +1131,8 @@ class VoicePipelineService:
             extra={"call_id": call_id}
         )
         
-        self._active_pipelines[call_id] = False
+        self._active_pipelines.pop(call_id, None)
+        self._barge_in_events.pop(call_id, None)
     
     def is_pipeline_active(self, call_id: str) -> bool:
         """

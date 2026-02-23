@@ -1,0 +1,1385 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Talk-Lee API",
+    "version": "0.1.0",
+    "description": "Generated from frontend client contracts (schemas + endpoint registry)."
+  },
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "tags": [
+    {
+      "name": "System"
+    },
+    {
+      "name": "Connectors"
+    },
+    {
+      "name": "Meetings"
+    },
+    {
+      "name": "Reminders"
+    },
+    {
+      "name": "Assistant"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "Connector": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "config": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "config",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "ConnectorAccount": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "connector_id": {
+            "type": "string"
+          },
+          "credentials": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "id",
+          "connector_id",
+          "credentials",
+          "metadata"
+        ],
+        "additionalProperties": false
+      },
+      "Meeting": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "participants": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "startTime": {
+            "type": "string"
+          },
+          "endTime": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "participants",
+          "startTime",
+          "endTime",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "Reminder": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "scheduled",
+                  "sent",
+                  "failed",
+                  "canceled"
+                ]
+              },
+              "channel": {
+                "type": "string",
+                "enum": [
+                  "email",
+                  "sms"
+                ]
+              },
+              "scheduledAt": {
+                "type": "string"
+              },
+              "meetingId": {
+                "type": "string"
+              },
+              "meetingTitle": {
+                "type": "string"
+              },
+              "contactId": {
+                "type": "string"
+              },
+              "contactName": {
+                "type": "string"
+              },
+              "toEmail": {
+                "type": "string"
+              },
+              "toPhone": {
+                "type": "string"
+              },
+              "sentAt": {
+                "type": "string"
+              },
+              "failedAt": {
+                "type": "string"
+              },
+              "canceledAt": {
+                "type": "string"
+              },
+              "retryCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxRetries": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "nextRetryAt": {
+                "type": "string"
+              },
+              "failureReason": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "updatedAt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "content",
+              "status",
+              "channel",
+              "scheduledAt"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "scheduled",
+                  "sent",
+                  "failed",
+                  "canceled"
+                ]
+              },
+              "channel": {
+                "type": "string",
+                "enum": [
+                  "email",
+                  "sms"
+                ]
+              },
+              "scheduled_at": {
+                "type": "string"
+              },
+              "meeting_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "meeting_title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "contact_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "contact_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "to_email": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "to_phone": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sent_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "failed_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "canceled_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "retry_count": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "max_retries": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "next_retry_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "failure_reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "created_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "updated_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "content"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              },
+              "due_date": {
+                "type": "string"
+              },
+              "is_completed": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "content",
+              "due_date",
+              "is_completed"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "AssistantAction": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "parameters": {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "parameters"
+        ],
+        "additionalProperties": false
+      },
+      "ConnectorListResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "config": {
+                  "type": "object",
+                  "additionalProperties": {}
+                },
+                "createdAt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "type",
+                "config",
+                "createdAt"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "ConnectorAccountListResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "connector_id": {
+                  "type": "string"
+                },
+                "credentials": {
+                  "type": "object",
+                  "additionalProperties": {}
+                },
+                "metadata": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "id",
+                "connector_id",
+                "credentials",
+                "metadata"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "MeetingListResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "participants": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "startTime": {
+                  "type": "string"
+                },
+                "endTime": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "title",
+                "participants",
+                "startTime",
+                "endTime",
+                "status"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "ReminderListResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "content": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "scheduled",
+                        "sent",
+                        "failed",
+                        "canceled"
+                      ]
+                    },
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "email",
+                        "sms"
+                      ]
+                    },
+                    "scheduledAt": {
+                      "type": "string"
+                    },
+                    "meetingId": {
+                      "type": "string"
+                    },
+                    "meetingTitle": {
+                      "type": "string"
+                    },
+                    "contactId": {
+                      "type": "string"
+                    },
+                    "contactName": {
+                      "type": "string"
+                    },
+                    "toEmail": {
+                      "type": "string"
+                    },
+                    "toPhone": {
+                      "type": "string"
+                    },
+                    "sentAt": {
+                      "type": "string"
+                    },
+                    "failedAt": {
+                      "type": "string"
+                    },
+                    "canceledAt": {
+                      "type": "string"
+                    },
+                    "retryCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "maxRetries": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    },
+                    "nextRetryAt": {
+                      "type": "string"
+                    },
+                    "failureReason": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "content",
+                    "status",
+                    "channel",
+                    "scheduledAt"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "content": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "scheduled",
+                        "sent",
+                        "failed",
+                        "canceled"
+                      ]
+                    },
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "email",
+                        "sms"
+                      ]
+                    },
+                    "scheduled_at": {
+                      "type": "string"
+                    },
+                    "meeting_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "meeting_title": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "contact_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "contact_name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "to_email": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "to_phone": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "sent_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "failed_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "canceled_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "retry_count": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "max_retries": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "next_retry_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "failure_reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "created_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "updated_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "content"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "content": {
+                      "type": "string"
+                    },
+                    "due_date": {
+                      "type": "string"
+                    },
+                    "is_completed": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "content",
+                    "due_date",
+                    "is_completed"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "AssistantActionListResponse": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "parameters": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "description",
+                "parameters"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "HealthResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string",
+            "examples": [
+              "ok"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "detail": {
+            "type": "string",
+            "examples": [
+              "Unauthorized"
+            ]
+          }
+        },
+        "required": [
+          "detail"
+        ]
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Health check",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                },
+                "examples": {
+                  "ok": {
+                    "value": {
+                      "status": "ok"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/connectors": {
+      "get": {
+        "tags": [
+          "Connectors"
+        ],
+        "summary": "List connectors",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectorListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Connectors"
+        ],
+        "summary": "Create connector",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "examples": [
+                      "Google Calendar"
+                    ]
+                  },
+                  "type": {
+                    "type": "string",
+                    "examples": [
+                      "calendar"
+                    ]
+                  },
+                  "config": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "examples": [
+                      {
+                        "clientId": "..."
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "type",
+                  "config"
+                ]
+              },
+              "examples": {
+                "create": {
+                  "value": {
+                    "name": "Google Calendar",
+                    "type": "calendar",
+                    "config": {
+                      "clientId": "..."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Connector"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/connector-accounts": {
+      "get": {
+        "tags": [
+          "Connectors"
+        ],
+        "summary": "List connector accounts",
+        "parameters": [
+          {
+            "name": "connector_id",
+            "in": "query",
+            "required": false,
+            "description": "Filter accounts by connector id.",
+            "schema": {
+              "type": "string",
+              "examples": [
+                "con-123"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectorAccountListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/meetings": {
+      "get": {
+        "tags": [
+          "Meetings"
+        ],
+        "summary": "List meetings",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reminders": {
+      "get": {
+        "tags": [
+          "Reminders"
+        ],
+        "summary": "List reminders",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReminderListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Reminders"
+        ],
+        "summary": "Create reminder",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "content": {
+                    "type": "string"
+                  },
+                  "channel": {
+                    "type": "string",
+                    "examples": [
+                      "email"
+                    ]
+                  },
+                  "scheduled_at": {
+                    "type": "string",
+                    "description": "ISO datetime",
+                    "examples": [
+                      "2026-01-14T10:00:00Z"
+                    ]
+                  },
+                  "meeting_id": {
+                    "type": "string"
+                  },
+                  "meeting_title": {
+                    "type": "string"
+                  },
+                  "contact_id": {
+                    "type": "string"
+                  },
+                  "contact_name": {
+                    "type": "string"
+                  },
+                  "to_email": {
+                    "type": "string"
+                  },
+                  "to_phone": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "content",
+                  "channel",
+                  "scheduled_at"
+                ]
+              },
+              "examples": {
+                "email": {
+                  "value": {
+                    "content": "Reminder: meeting soon",
+                    "channel": "email",
+                    "scheduled_at": "2026-01-14T10:00:00Z",
+                    "to_email": "name@example.com"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reminder"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reminders/{id}": {
+      "patch": {
+        "tags": [
+          "Reminders"
+        ],
+        "summary": "Update reminder",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Reminder id.",
+            "schema": {
+              "type": "string",
+              "examples": [
+                "rem-123"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "content": {
+                    "type": "string"
+                  },
+                  "due_date": {
+                    "type": "string",
+                    "description": "ISO datetime",
+                    "examples": [
+                      "2026-01-14T10:00:00Z"
+                    ]
+                  },
+                  "is_completed": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "examples": {
+                "toggle": {
+                  "value": {
+                    "is_completed": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reminder"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reminders/{id}/cancel": {
+      "post": {
+        "tags": [
+          "Reminders"
+        ],
+        "summary": "Cancel reminder",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Reminder id.",
+            "schema": {
+              "type": "string",
+              "examples": [
+                "rem-123"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reminder"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/assistant/actions": {
+      "get": {
+        "tags": [
+          "Assistant"
+        ],
+        "summary": "List assistant actions",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistantActionListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

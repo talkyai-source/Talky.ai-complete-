@@ -2,12 +2,15 @@
 Dashboard Endpoints
 Provides aggregated metrics for the dashboard overview
 """
+import logging
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from supabase import Client
+from app.core.postgres_adapter import Client
 
-from app.api.v1.dependencies import get_supabase, get_current_user, CurrentUser
+from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
 from app.utils.tenant_filter import apply_tenant_filter
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -25,7 +28,7 @@ class DashboardSummary(BaseModel):
 @router.get("/summary", response_model=DashboardSummary)
 async def get_dashboard_summary(
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     Get aggregated dashboard metrics.
@@ -39,35 +42,37 @@ async def get_dashboard_summary(
         - Active campaigns count
     """
     try:
-        # Build query with tenant filtering
-        calls_query = supabase.table("calls").select("status, duration_seconds")
-        calls_query = apply_tenant_filter(calls_query, current_user.tenant_id)
-        calls_response = calls_query.execute()
-        
-        total_calls = 0
-        answered_calls = 0
-        failed_calls = 0
-        total_duration_seconds = 0
-        
-        if calls_response.data:
-            for call in calls_response.data:
-                total_calls += 1
-                status = call.get("status", "").lower()
-                
-                if status in ["answered", "completed", "in_progress"]:
-                    answered_calls += 1
-                    total_duration_seconds += call.get("duration_seconds", 0) or 0
-                elif status in ["failed", "no_answer", "busy"]:
-                    failed_calls += 1
+        # 1. Total calls count (uses PostgreSQL count, no rows transferred)
+        total_q = db_client.table("calls").select("id", count="exact")
+        total_q = apply_tenant_filter(total_q, current_user.tenant_id)
+        total_resp = total_q.execute()
+        total_calls = total_resp.count or 0
+
+        # 2. Answered calls + duration (only matching rows, minimal columns)
+        answered_q = db_client.table("calls").select("duration_seconds")
+        answered_q = apply_tenant_filter(answered_q, current_user.tenant_id)
+        answered_q = answered_q.in_("status", ["answered", "completed", "in_progress"])
+        answered_resp = answered_q.execute()
+        answered_calls = len(answered_resp.data) if answered_resp.data else 0
+        total_duration_seconds = sum(
+            c.get("duration_seconds", 0) or 0 for c in (answered_resp.data or [])
+        )
+
+        # 3. Failed calls count (uses PostgreSQL count, no rows transferred)
+        failed_q = db_client.table("calls").select("id", count="exact")
+        failed_q = apply_tenant_filter(failed_q, current_user.tenant_id)
+        failed_q = failed_q.in_("status", ["failed", "no_answer", "busy"])
+        failed_resp = failed_q.execute()
+        failed_calls = failed_resp.count or 0
         
         # Convert seconds to minutes
         minutes_used = total_duration_seconds // 60
         
         # Get active campaigns count with tenant filtering
-        campaigns_query = supabase.table("campaigns").select("id").eq("status", "running")
+        campaigns_query = db_client.table("campaigns").select("id", count="exact").eq("status", "running")
         campaigns_query = apply_tenant_filter(campaigns_query, current_user.tenant_id)
         campaigns_response = campaigns_query.execute()
-        active_campaigns = len(campaigns_response.data) if campaigns_response.data else 0
+        active_campaigns = campaigns_response.count or 0
         
         return DashboardSummary(
             total_calls=total_calls,
@@ -79,7 +84,9 @@ async def get_dashboard_summary(
         )
     
     except Exception as e:
+        logger.error(f"Failed to fetch dashboard summary: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to fetch dashboard summary: {str(e)}"
+            detail="Failed to fetch dashboard summary"
         )
+

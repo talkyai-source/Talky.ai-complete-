@@ -32,8 +32,8 @@ class TestAIConfig:
         assert config.llm_model == "llama-3.3-70b-versatile"
         assert config.stt_provider == "deepgram"
         assert config.stt_model == "nova-3"
-        assert config.tts_provider == "cartesia"
-        assert config.tts_model == "sonic-3"
+        assert config.tts_provider == "google"
+        assert config.tts_model == "Chirp3-HD"
         assert config.llm_temperature == 0.6
         assert config.llm_max_tokens == 150
     
@@ -93,8 +93,8 @@ class TestModelInfo:
         
         assert GroqModel.LLAMA_3_3_70B.value in model_ids
         assert GroqModel.LLAMA_3_1_8B.value in model_ids
-        assert GroqModel.MIXTRAL_8X7B.value in model_ids
-        assert GroqModel.GEMMA2_9B.value in model_ids
+        assert GroqModel.GPT_OSS_120B.value in model_ids
+        assert GroqModel.KIMI_K2.value in model_ids
         
         # Verify each model has required fields
         for model in GROQ_MODELS:
@@ -164,7 +164,7 @@ class TestRequestModels:
         assert request.model == "sonic-3"
         assert request.voice_id == "test-voice"
         assert request.text == "Hello world"
-        assert request.sample_rate == 16000  # Default
+        assert request.sample_rate == 24000  # Default (Cartesia recommended)
 
 
 class TestConfigSerialization:
@@ -183,7 +183,7 @@ class TestConfigSerialization:
         # Values should be strings (enum values)
         assert config_dict["llm_provider"] == "groq"
         assert config_dict["stt_provider"] == "deepgram"
-        assert config_dict["tts_provider"] == "cartesia"
+        assert config_dict["tts_provider"] == "google"
     
     def test_config_from_dict(self):
         """Test configuration can be loaded from dict"""

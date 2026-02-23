@@ -1,0 +1,15 @@
+# ========================================
+# Talky.ai Backend - Dev & Testing Dependencies
+# Install: pip install -r requirements-dev.txt
+# ========================================
+
+# Include production deps first
+-r requirements.txt
+
+# --- Testing ---
+pytest==7.4.4
+pytest-asyncio==0.23.3
+
+# --- Dev Server Extras ---
+httptools==0.7.1
+watchfiles==1.1.1

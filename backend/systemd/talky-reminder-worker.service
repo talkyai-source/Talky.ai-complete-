@@ -1,0 +1,18 @@
+[Unit]
+Description=Talky.ai Reminder Worker
+After=network.target redis.service talky-api.service
+Requires=redis.service
+
+[Service]
+Type=exec
+WorkingDirectory=/home/ai-lab/Desktop/Talky.ai-complete-/backend
+EnvironmentFile=/home/ai-lab/Desktop/Talky.ai-complete-/backend/.env
+ExecStart=/home/ai-lab/Desktop/Talky.ai-complete-/backend/venv/bin/python -m app.workers.reminder_worker
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=talky-reminder
+
+[Install]
+WantedBy=multi-user.target

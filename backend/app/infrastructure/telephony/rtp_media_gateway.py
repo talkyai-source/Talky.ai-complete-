@@ -5,8 +5,8 @@ Handles RTP-based audio streaming for Asterisk/FreeSWITCH integration
 import asyncio
 import socket as socket_module
 import logging
-from typing import Dict, Any, Optional, Tuple
-from datetime import datetime
+from typing import Callable, Dict, Any, Optional, Tuple
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 
 from app.domain.interfaces.media_gateway import MediaGateway
@@ -26,6 +26,37 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class RTPFlowMonitor:
+    """Tracks RTP media flow state for a single call."""
+    first_packet_at: Optional[datetime] = None
+    last_packet_at: Optional[datetime] = None
+    silence_threshold_ms: float = 5000.0  # 5 s with no packets = silent
+    media_started_fired: bool = False
+
+    @property
+    def is_media_flowing(self) -> bool:
+        """True if packets were received recently (within threshold)."""
+        if self.last_packet_at is None:
+            return False
+        elapsed_ms = (datetime.now(timezone.utc) - self.last_packet_at).total_seconds() * 1000
+        return elapsed_ms < self.silence_threshold_ms
+
+    @property
+    def is_silent_call(self) -> bool:
+        """True if the call has never received any media."""
+        return self.first_packet_at is None
+
+    def record_packet(self) -> bool:
+        """Record an incoming packet. Returns True on the FIRST packet only."""
+        now = datetime.now(timezone.utc)
+        self.last_packet_at = now
+        if self.first_packet_at is None:
+            self.first_packet_at = now
+            return True
+        return False
+
+
+@dataclass
 class RTPSession:
     """RTP session state for a single call."""
     call_id: str
@@ -37,6 +68,7 @@ class RTPSession:
     udp_socket: Optional[socket_module.socket] = None
     input_queue: asyncio.Queue = field(default_factory=lambda: asyncio.Queue(maxsize=100))
     output_queue: asyncio.Queue = field(default_factory=lambda: asyncio.Queue(maxsize=100))
+    flow_monitor: RTPFlowMonitor = field(default_factory=RTPFlowMonitor)
     started_at: Optional[datetime] = None
     packets_sent: int = 0
     packets_received: int = 0
@@ -66,19 +98,25 @@ class RTPMediaGateway(MediaGateway):
     def __init__(self):
         self._config: Dict[str, Any] = {}
         self._sessions: Dict[str, RTPSession] = {}
-        
-        # Default configuration
-        self._default_remote_ip: str = "127.0.0.1"
-        self._default_remote_port: int = 5004
-        self._default_local_port: int = 5005
-        self._default_codec: str = "ulaw"
-        
-        # Source audio format (from Cartesia TTS)
-        self._source_sample_rate: int = 22050
-        self._source_format: str = "pcm_f32le"
-        
+
+        # Load defaults from centralized config (read once, cached)
+        from app.core.voice_config import get_voice_config
+        _vc = get_voice_config()
+
+        self._default_remote_ip: str = _vc.rtp_remote_ip
+        self._default_remote_port: int = _vc.rtp_remote_port
+        self._default_local_port: int = _vc.rtp_local_port
+        self._default_codec: str = _vc.rtp_codec
+
+        # Source audio format (from TTS providers)
+        self._source_sample_rate: int = _vc.tts_source_sample_rate
+        self._source_format: str = _vc.tts_source_format
+
         # Recording buffers for Day 10 (provider-agnostic recording)
         self._recording_buffers: Dict[str, RecordingBuffer] = {}
+
+        # Callback fired on first inbound RTP packet per call (Day 42)
+        self._on_media_started: Optional[Callable] = None
         
     async def initialize(self, config: Dict[str, Any]) -> None:
         """
@@ -158,7 +196,7 @@ class RTPMediaGateway(MediaGateway):
             codec=codec,
             rtp_builder=rtp_builder,
             udp_socket=sock,
-            started_at=datetime.utcnow()
+            started_at=datetime.now(timezone.utc)
         )
         
         self._sessions[call_id] = session
@@ -231,10 +269,21 @@ class RTPMediaGateway(MediaGateway):
                     session.input_queue.put_nowait(pcm_data)
                 except:
                     pass
-                    
+
+            # --- RTP flow monitoring (Day 42) ---
+            is_first_packet = session.flow_monitor.record_packet()
+            if is_first_packet and self._on_media_started:
+                try:
+                    await self._on_media_started(call_id)
+                except Exception as cb_err:
+                    logger.warning(
+                        f"media_started callback error: {cb_err}",
+                        extra={"call_id": call_id},
+                    )
+
         except Exception as e:
             logger.error(f"Error processing RTP audio: {e}", extra={"call_id": call_id})
-        
+
         # Add decoded PCM to recording buffer (Day 10)
         if call_id in self._recording_buffers and pcm_data:
             self._recording_buffers[call_id].add_chunk(pcm_data)
@@ -286,7 +335,10 @@ class RTPMediaGateway(MediaGateway):
             # Send packets via UDP
             loop = asyncio.get_event_loop()
             
-            for packet in rtp_packets:
+            for i, packet in enumerate(rtp_packets):
+                # RFC 3550: pace packets at 20ms intervals to match ptime
+                if i > 0:
+                    await asyncio.sleep(0.02)
                 await loop.run_in_executor(
                     None,
                     lambda p=packet: session.udp_socket.sendto(
@@ -341,7 +393,7 @@ class RTPMediaGateway(MediaGateway):
         # Log session metrics
         duration = 0
         if session.started_at:
-            duration = (datetime.utcnow() - session.started_at).total_seconds()
+            duration = (datetime.now(timezone.utc) - session.started_at).total_seconds()
         
         logger.info(
             f"RTP session metrics for {call_id}",
@@ -359,7 +411,7 @@ class RTPMediaGateway(MediaGateway):
         if session.udp_socket:
             try:
                 session.udp_socket.close()
-            except:
+            except OSError:
                 pass
         
         # Remove session
@@ -403,6 +455,38 @@ class RTPMediaGateway(MediaGateway):
         """
         return self._sessions.get(call_id)
     
+    # =========================================================================
+    # RTP Flow Monitoring (Day 42)
+    # =========================================================================
+
+    def set_media_started_callback(self, callback: Callable) -> None:
+        """Register an async callback fired on the first inbound RTP packet."""
+        self._on_media_started = callback
+
+    def check_media_flow(self, call_id: str) -> dict:
+        """
+        Return media flow status for a call.
+
+        Returns:
+            Dict with is_media_flowing, is_silent_call, timestamps, packet
+            count — or ``{"error": "unknown_call"}`` if *call_id* not found.
+        """
+        session = self._sessions.get(call_id)
+        if not session:
+            return {"error": "unknown_call"}
+        fm = session.flow_monitor
+        return {
+            "is_media_flowing": fm.is_media_flowing,
+            "is_silent_call": fm.is_silent_call,
+            "first_packet_at": (
+                fm.first_packet_at.isoformat() if fm.first_packet_at else None
+            ),
+            "last_packet_at": (
+                fm.last_packet_at.isoformat() if fm.last_packet_at else None
+            ),
+            "packets_received": session.packets_received,
+        }
+
     # =========================================================================
     # Recording Buffer Methods (Day 10)
     # =========================================================================

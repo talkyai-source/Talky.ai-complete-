@@ -7,9 +7,9 @@ import logging
 from fastapi import APIRouter, HTTPException, Depends, Request, status
 from pydantic import BaseModel
 from typing import Optional
-from supabase import Client
+from app.core.postgres_adapter import Client
 
-from app.api.v1.dependencies import get_supabase, get_current_user, CurrentUser
+from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
 from app.domain.services.billing_service import BillingService
 
 logger = logging.getLogger(__name__)
@@ -82,9 +82,9 @@ class UsageSummaryResponse(BaseModel):
 # Helper Functions
 # ============================================
 
-def get_billing_service(supabase: Client = Depends(get_supabase)) -> BillingService:
+def get_billing_service(db_client: Client = Depends(get_db_client)) -> BillingService:
     """Dependency to get billing service instance"""
-    return BillingService(supabase)
+    return BillingService(db_client)
 
 
 def get_default_urls(request: Request):
@@ -149,7 +149,7 @@ async def create_checkout_session(
 @router.post("/webhooks")
 async def stripe_webhook(
     request: Request,
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     Handle Stripe webhook events.
@@ -165,7 +165,7 @@ async def stripe_webhook(
     - invoice.paid
     - invoice.payment_failed
     """
-    billing = BillingService(supabase)
+    billing = BillingService(db_client)
     
     # Get raw body and signature
     payload = await request.body()
@@ -348,13 +348,13 @@ async def get_usage_summary(
 async def list_invoices(
     limit: int = 10,
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     List invoices for the current tenant.
     """
     try:
-        result = supabase.table("invoices").select(
+        result = db_client.table("invoices").select(
             "*"
         ).eq("tenant_id", current_user.tenant_id).order(
             "created_at", desc=True

@@ -11,9 +11,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timezone
-from supabase import Client
+from app.core.postgres_adapter import Client
 
-from app.api.v1.dependencies import get_supabase, get_current_user, CurrentUser
+from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
 from app.utils.tenant_filter import apply_tenant_filter, verify_tenant_access
 from app.domain.models.retention_config import (
     get_retention_config_for_plan,
@@ -55,7 +55,7 @@ async def list_recordings(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     Get paginated list of recordings.
@@ -72,7 +72,7 @@ async def list_recordings(
         # First, get the list of call_ids that belong to this tenant
         if current_user.tenant_id:
             # Get calls belonging to tenant
-            calls_query = supabase.table("calls").select("id")
+            calls_query = db_client.table("calls").select("id")
             calls_query = apply_tenant_filter(calls_query, current_user.tenant_id)
             calls_response = calls_query.execute()
             tenant_call_ids = [call["id"] for call in (calls_response.data or [])]
@@ -87,13 +87,13 @@ async def list_recordings(
                 )
             
             # Build query filtering by tenant's call_ids
-            query = supabase.table("recordings").select(
+            query = db_client.table("recordings").select(
                 "id, call_id, created_at, duration_seconds",
                 count="exact"
             ).in_("call_id", tenant_call_ids)
         else:
             # No tenant filter (admin or no tenant assigned)
-            query = supabase.table("recordings").select(
+            query = db_client.table("recordings").select(
                 "id, call_id, created_at, duration_seconds",
                 count="exact"
             )
@@ -139,7 +139,7 @@ async def list_recordings(
 async def stream_recording(
     recording_id: str,
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     Stream recording audio file.
@@ -150,7 +150,7 @@ async def stream_recording(
     """
     try:
         # First verify the recording's associated call belongs to the tenant
-        recording_check = supabase.table("recordings").select("call_id").eq("id", recording_id).single().execute()
+        recording_check = db_client.table("recordings").select("call_id").eq("id", recording_id).single().execute()
         
         if not recording_check.data:
             raise HTTPException(
@@ -159,14 +159,14 @@ async def stream_recording(
             )
         
         associated_call_id = recording_check.data.get("call_id")
-        if not verify_tenant_access(supabase, "calls", associated_call_id, current_user.tenant_id):
+        if not verify_tenant_access(db_client, "calls", associated_call_id, current_user.tenant_id):
             raise HTTPException(
                 status_code=404,
                 detail="Recording not found"
             )
         
         # Get recording details
-        response = supabase.table("recordings").select(
+        response = db_client.table("recordings").select(
             "storage_path, mime_type"
         ).eq("id", recording_id).single().execute()
         
@@ -186,11 +186,11 @@ async def stream_recording(
                 detail="Recording file not found"
             )
         
-        # Download from Supabase Storage
+        # Download from PostgreSQL Storage
         try:
             # Assuming recordings are stored in 'recordings' bucket
             bucket_name = "recordings"
-            file_data = supabase.storage.from_(bucket_name).download(storage_path)
+            file_data = db_client.storage.from_(bucket_name).download(storage_path)
             
             # Stream the audio
             async def audio_generator():
@@ -227,13 +227,13 @@ async def stream_recording(
 async def get_recording_url(
     recording_id: str,
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     Get a time-limited signed URL for direct audio access.
     
     RECOMMENDED: Use this endpoint instead of /stream for better performance.
-    The signed URL allows direct download from Supabase Storage without
+    The signed URL allows direct download from PostgreSQL Storage without
     routing through the backend.
     
     PLAN-BASED ACCESS CONTROL:
@@ -252,7 +252,7 @@ async def get_recording_url(
     """
     try:
         # 1. Get recording details including created_at for retention check
-        response = supabase.table("recordings").select(
+        response = db_client.table("recordings").select(
             "id, call_id, storage_path, mime_type, created_at"
         ).eq("id", recording_id).single().execute()
         
@@ -266,7 +266,7 @@ async def get_recording_url(
         associated_call_id = recording.get("call_id")
         
         # 2. Verify tenant access via calls table
-        if not verify_tenant_access(supabase, "calls", associated_call_id, current_user.tenant_id):
+        if not verify_tenant_access(db_client, "calls", associated_call_id, current_user.tenant_id):
             raise HTTPException(
                 status_code=404,
                 detail="Recording not found"
@@ -276,7 +276,7 @@ async def get_recording_url(
         # CRITICAL: Recording access is determined by purchased plan
         plan_id = "basic"  # Default to most restrictive
         if current_user.tenant_id:
-            tenant_response = supabase.table("tenants").select(
+            tenant_response = db_client.table("tenants").select(
                 "plan_id"
             ).eq("id", current_user.tenant_id).single().execute()
             
@@ -331,7 +331,7 @@ async def get_recording_url(
             expires_in = 3600  # 1 hour
             
             # Generate signed URL
-            signed_url_response = supabase.storage.from_(bucket_name).create_signed_url(
+            signed_url_response = db_client.storage.from_(bucket_name).create_signed_url(
                 path=storage_path,
                 expires_in=expires_in
             )

@@ -22,6 +22,7 @@ class CallStatus(str, Enum):
 class Call(BaseModel):
     """Call record"""
     id: str
+    talklee_call_id: Optional[str] = None  # Day 1: human-friendly call ID (tlk_<hex>)
     # MULTI-TENANT: Uncomment the line below to enable multi-tenancy
     # tenant_id: str  # Tenant identifier for multi-tenant isolation
     campaign_id: str

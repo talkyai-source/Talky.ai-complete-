@@ -4,6 +4,7 @@ Handles transcript accumulation and storage for call conversations.
 Provider-agnostic - works with any voice pipeline.
 """
 import logging
+import inspect
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
@@ -43,6 +44,18 @@ class TranscriptService:
     # Class-level storage for transcript buffers
     # This allows multiple instances to share the same data
     _buffers: Dict[str, List[TranscriptTurn]] = {}
+
+    async def _run_execute(self, query):
+        """
+        Execute a PostgreSQL query builder in sync/async compatible fashion.
+
+        Some client variants return an awaitable from `.execute()`, while
+        others return the response directly.
+        """
+        result = query.execute()
+        if inspect.isawaitable(result):
+            return await result
+        return result
     
     def accumulate_turn(
         self, 
@@ -151,7 +164,7 @@ class TranscriptService:
     async def flush_to_database(
         self,
         call_id: str,
-        supabase_client,
+        db_client,
         tenant_id: Optional[str] = None
     ) -> None:
         """
@@ -162,7 +175,7 @@ class TranscriptService:
         
         Args:
             call_id: Call identifier
-            supabase_client: Supabase client
+            db_client: PostgreSQL client
             tenant_id: Optional tenant identifier
         """
         turns = self.get_turns(call_id)
@@ -173,11 +186,11 @@ class TranscriptService:
             transcript_text = self.get_transcript_text(call_id)
             transcript_json = self.get_transcript_json(call_id)
             
-            supabase_client.table("calls").update({
+            await self._run_execute(db_client.table("calls").update({
                 "transcript": transcript_text,
                 "transcript_json": transcript_json,
                 "updated_at": datetime.utcnow().isoformat()
-            }).eq("id", call_id).execute()
+            }).eq("id", call_id))
             
             logger.debug(
                 f"Flushed transcript for call {call_id}: {len(turns)} turns"
@@ -189,7 +202,7 @@ class TranscriptService:
     async def save_transcript(
         self, 
         call_id: str, 
-        supabase_client,
+        db_client,
         tenant_id: Optional[str] = None
     ) -> Optional[str]:
         """
@@ -202,7 +215,7 @@ class TranscriptService:
         
         Args:
             call_id: Call identifier
-            supabase_client: Supabase client
+            db_client: PostgreSQL client
             tenant_id: Optional tenant identifier
             
         Returns:
@@ -221,7 +234,7 @@ class TranscriptService:
             metrics = self.get_metrics(call_id)
             
             # Step 1: Insert into transcripts table
-            transcript_result = supabase_client.table("transcripts").insert({
+            transcript_result = await self._run_execute(db_client.table("transcripts").insert({
                 "call_id": call_id,
                 "tenant_id": tenant_id,
                 "turns": transcript_json,
@@ -230,18 +243,18 @@ class TranscriptService:
                 "turn_count": metrics["turn_count"],
                 "user_word_count": metrics["user_word_count"],
                 "assistant_word_count": metrics["assistant_word_count"]
-            }).execute()
+            }))
             
             transcript_id = None
             if transcript_result.data and len(transcript_result.data) > 0:
                 transcript_id = transcript_result.data[0].get("id")
             
             # Step 2 & 3: Update calls table with transcript
-            supabase_client.table("calls").update({
+            await self._run_execute(db_client.table("calls").update({
                 "transcript": transcript_text,
                 "transcript_json": transcript_json,
                 "updated_at": datetime.utcnow().isoformat()
-            }).eq("id", call_id).execute()
+            }).eq("id", call_id))
             
             logger.info(
                 f"Transcript saved for call {call_id}: "

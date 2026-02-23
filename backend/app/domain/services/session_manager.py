@@ -320,7 +320,7 @@ class SessionManager:
     
     async def _persist_session_to_db(self, session: CallSession, reason: str):
         """
-        Persist session to Supabase database
+        Persist session to PostgreSQL database
         TODO: Implement database persistence
         """
         # This will be implemented in a later task

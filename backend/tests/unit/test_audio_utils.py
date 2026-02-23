@@ -129,6 +129,7 @@ class TestConvertForRTP:
     
     def test_convert_f32_to_ulaw(self):
         """Test full pipeline: F32 -> resample -> G.711 mu-law."""
+        pytest.importorskip('librosa', reason='librosa required for resampling')
         from app.utils.audio_utils import convert_for_rtp
         
         # Create F32 audio at 22050Hz (like Cartesia output)
@@ -151,6 +152,7 @@ class TestConvertForRTP:
     
     def test_convert_f32_to_alaw(self):
         """Test full pipeline with A-law codec."""
+        pytest.importorskip('librosa', reason='librosa required for resampling')
         from app.utils.audio_utils import convert_for_rtp
         
         num_samples = 441  # ~20ms at 22050Hz

@@ -5,9 +5,9 @@ CRUD operations for client/contact management
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional
-from supabase import Client
+from app.core.postgres_adapter import Client
 
-from app.api.v1.dependencies import get_supabase, get_current_user, CurrentUser
+from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
 
 router = APIRouter(prefix="/clients", tags=["clients"])
 
@@ -35,7 +35,7 @@ class ClientResponse(BaseModel):
 @router.get("/", response_model=List[ClientResponse])
 async def list_clients(
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     Get all clients for the current tenant.
@@ -44,7 +44,7 @@ async def list_clients(
     """
     try:
         # Build query
-        query = supabase.table("clients").select("id, name, company, phone, email, tags")
+        query = db_client.table("clients").select("id, name, company, phone, email, tags")
         
         # Filter by tenant if user has one
         if current_user.tenant_id:
@@ -76,7 +76,7 @@ async def list_clients(
 async def create_client(
     client: ClientCreate,
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     Create a new client.
@@ -96,7 +96,7 @@ async def create_client(
         }
         
         # Insert client
-        response = supabase.table("clients").insert(client_data).execute()
+        response = db_client.table("clients").insert(client_data).execute()
         
         if not response.data:
             raise HTTPException(
@@ -128,13 +128,13 @@ async def create_client(
 async def get_client(
     client_id: str,
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     Get a single client by ID.
     """
     try:
-        query = supabase.table("clients").select("*").eq("id", client_id)
+        query = db_client.table("clients").select("*").eq("id", client_id)
         
         # Filter by tenant if user has one
         if current_user.tenant_id:
@@ -172,13 +172,13 @@ async def get_client(
 async def delete_client(
     client_id: str,
     current_user: CurrentUser = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    db_client: Client = Depends(get_db_client)
 ):
     """
     Delete a client by ID.
     """
     try:
-        query = supabase.table("clients").delete().eq("id", client_id)
+        query = db_client.table("clients").delete().eq("id", client_id)
         
         # Filter by tenant if user has one
         if current_user.tenant_id:

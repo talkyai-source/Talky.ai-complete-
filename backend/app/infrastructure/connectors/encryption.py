@@ -58,15 +58,20 @@ class TokenEncryptionService:
         old_keys: Optional[List[str]] = None
     ) -> None:
         """Load encryption keys from parameters or environment."""
-        # Current key (required)
+        # Current key (required in production)
         current_key = key or os.getenv("CONNECTOR_ENCRYPTION_KEY")
+        environment = os.getenv("ENVIRONMENT", "development")
         
         if not current_key:
-            # Generate a temporary key for development/testing
-            # In production, this should be a proper error
+            if environment == "production":
+                raise RuntimeError(
+                    "CONNECTOR_ENCRYPTION_KEY is required in production. "
+                    "Generate one with: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+                )
+            # Development only: generate temporary key
             logger.warning(
-                "CONNECTOR_ENCRYPTION_KEY not set! "
-                "Using temporary key - DO NOT USE IN PRODUCTION"
+                "CONNECTOR_ENCRYPTION_KEY not set — using temporary key. "
+                "This is acceptable for local development only."
             )
             current_key = Fernet.generate_key().decode()
         
@@ -165,7 +170,7 @@ class TokenEncryptionService:
             return False
         
         # Fernet tokens are base64-encoded and start with 'gAAAA'
-        return value.startswith("gAAAA") and len(value) > 100
+        return value.startswith("gAAAA") and len(value) > 50
     
     @staticmethod
     def generate_key() -> str:
