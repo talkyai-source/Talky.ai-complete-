@@ -103,7 +103,8 @@ CREATE TABLE IF NOT EXISTS assistant_conversations (
     message_count INTEGER DEFAULT 0,
     started_at TIMESTAMPTZ DEFAULT NOW(),
     last_message_at TIMESTAMPTZ DEFAULT NOW(),
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Indexes for assistant_conversations

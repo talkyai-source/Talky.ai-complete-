@@ -1,0 +1,7 @@
+date_utc=2026-03-03T10:57:18Z
+pid=206119
+    PID    PPID COMMAND           RSS    VSZ %CPU %MEM     ELAPSED
+ 206119  206083 voice_gateway    4172 235968  0.9  0.0       00:04
+
+gateway_stats:
+{"sessions_started_total":5,"sessions_stopped_total":5,"active_sessions":0,"stopped_sessions":0,"packets_in":0,"packets_out":0,"bytes_in":0,"bytes_out":0,"invalid_packets":0,"dropped_packets":0,"jitter_buffer_overflow_drops":0,"jitter_buffer_late_drops":0,"duplicate_packets":0,"out_of_order_packets":0,"timeout_events_total":0}

@@ -555,3 +555,127 @@ def convert_for_rtp(
     else:
         raise ValueError(f"Unknown codec: {codec}. Use 'ulaw' or 'alaw'")
 
+
+# =============================================================================
+# Text-to-speech text normalisation
+# =============================================================================
+
+def clean_text_for_tts(text: str) -> str:
+    """
+    Sanitise LLM output for voice synthesis.
+
+    Removes markdown, special characters, emojis, and code blocks so the TTS
+    engine receives clean natural-language prose.  Order of steps is important:
+    complex patterns are processed before simpler character replacements.
+
+    Args:
+        text: Raw text from LLM or greeting script.
+
+    Returns:
+        Cleaned text suitable for TTS (e.g. Deepgram Aura, Google Chirp).
+    """
+    import re
+
+    if not text:
+        return text
+
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+
+    # 1. Remove hidden reasoning / XML-style wrappers before any other cleanup.
+    cleaned = re.sub(r'<think\b[^>]*>[\s\S]*?</think>', ' ', text, flags=re.IGNORECASE)
+    cleaned = re.sub(r'<reasoning\b[^>]*>[\s\S]*?</reasoning>', ' ', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'<analysis\b[^>]*>[\s\S]*?</analysis>', ' ', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'<[^>]+>', ' ', cleaned)
+
+    # 2. Resolve markdown links [label](url) → label  (before generic URL removal)
+    cleaned = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', cleaned)
+
+    # 3. Remove fenced code blocks; replace inline code with bare text
+    cleaned = re.sub(r'```[\s\S]*?```', ' code block ', cleaned)
+    cleaned = re.sub(r'`([^`]+)`', r'\1', cleaned)
+
+    # 4. Normalize brand/domain phrasing and common conversational patterns.
+    cleaned = re.sub(
+        r"(?i)\btalky\.ai('s)?\b",
+        lambda match: f"Talky AI{match.group(1) or ''}",
+        cleaned,
+    )
+    cleaned = re.sub(r'(?i)\b24/7\b', ' twenty four seven ', cleaned)
+    cleaned = re.sub(r'(?<!\w)\$([\d,]+(?:\.\d+)?)', r'\1 dollars', cleaned)
+
+    # 5. Normalize subscription-style slashes into spoken phrasing.
+    cleaned = re.sub(r'(?i)\b/month\b', ' per month', cleaned)
+    cleaned = re.sub(r'(?i)\b/mo\b', ' per month', cleaned)
+    cleaned = re.sub(r'(?i)\b/year\b', ' per year', cleaned)
+    cleaned = re.sub(r'(?i)\b/yr\b', ' per year', cleaned)
+    cleaned = re.sub(r'(?i)\b/week\b', ' per week', cleaned)
+    cleaned = re.sub(r'(?i)\b/day\b', ' per day', cleaned)
+
+    # 6. Remove bare URLs (after markdown links so we don't clobber them)
+    cleaned = re.sub(r'https?://\S+', ' link ', cleaned)
+    cleaned = re.sub(r'www\.\S+', ' website ', cleaned)
+
+    # 7. Strip markdown emphasis / strikethrough
+    cleaned = re.sub(r'\*\*\*?|\*\*?|__?|~~', '', cleaned)
+
+    # 8. Strip ATX headers
+    cleaned = re.sub(r'^#{1,6}\s*', '', cleaned, flags=re.MULTILINE)
+
+    # 9. Strip blockquotes
+    cleaned = re.sub(r'^>\s*', '', cleaned, flags=re.MULTILINE)
+
+    # 10. Remove emoji codepoints
+    _emoji_re = re.compile(
+        "["
+        "\U0001F600-\U0001F64F"  # emoticons
+        "\U0001F300-\U0001F5FF"  # symbols & pictographs
+        "\U0001F680-\U0001F6FF"  # transport & map symbols
+        "\U0001F1E0-\U0001F1FF"  # flags
+        "\U00002702-\U000027B0"  # dingbats
+        "\U000024C2-\U0001F251"  # enclosed characters
+        "\U0001F900-\U0001F9FF"  # supplemental symbols
+        "\U00002600-\U000026FF"  # miscellaneous symbols
+        "]+",
+        flags=re.UNICODE,
+    )
+    cleaned = _emoji_re.sub('', cleaned)
+
+    # 11. Expand common symbols to their spoken form
+    _symbol_map = {
+        '&': ' and ', '@': ' at ', '#': ' number ',
+        '$': ' dollars ', '%': ' percent ', '+': ' plus ',
+        '=': ' equals ', '→': ' to ', '←': ' from ',
+        '•': ', ', '·': ', ', '…': '...', '|': ', ',
+        '™': ' trademark ', '®': ' registered ', '©': ' copyright ',
+        '°': ' degrees ', '×': ' times ', '÷': ' divided by ',
+        '–': '-', '—': '-',
+    }
+    for symbol, spoken in _symbol_map.items():
+        cleaned = cleaned.replace(symbol, spoken)
+
+    # 12. Turn standalone dash separators into spoken pauses.
+    cleaned = re.sub(r'(?<=\S)\s+-\s+(?=\S)', ', ', cleaned)
+
+    # 13. Strip leading bullet / list markers from lines
+    cleaned = re.sub(r'^[\s]*[-*+•]\s+', '', cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r'^[\s]*\d+[.)]\s+', '', cleaned, flags=re.MULTILINE)
+
+    # 14. Preserve line-separated markdown items as sentence boundaries.
+    cleaned = re.sub(r'[ \t]*\n+[ \t]*', '. ', cleaned)
+
+    # Numbered lists often arrive flattened onto one line in streamed output.
+    # Convert those inline markers into sentence boundaries so providers get
+    # complete spoken clauses instead of one run-on package list.
+    cleaned = re.sub(r'^\d+[.)]\s+(?=[A-Za-z])', '', cleaned)
+    cleaned = re.sub(r'(?<=\S)\s+\d+[.)]\s+(?=[A-Za-z])', '. ', cleaned)
+
+    # 15. Collapse whitespace
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+
+    # 16. Normalise repeated punctuation
+    cleaned = re.sub(r'!{2,}', '!', cleaned)
+    cleaned = re.sub(r'\?{2,}', '?', cleaned)
+    cleaned = re.sub(r'\.{3,}', '...', cleaned)
+    cleaned = re.sub(r'(?:\.\s*){2,}', '. ', cleaned)
+
+    return cleaned.strip()

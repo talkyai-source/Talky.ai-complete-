@@ -62,6 +62,7 @@ class ServiceContainer:
         self._call_service = None
         self._session_manager = None
         self._voice_orchestrator = None
+        self._adapter_registry_started: bool = False
         self._initialized = False
 
     async def startup(self) -> None:
@@ -102,6 +103,16 @@ class ServiceContainer:
         # 6. Initialize VoiceOrchestrator
         self._initialize_voice_orchestrator()
 
+        # 7. Start adapter health monitor (non-blocking background task)
+        try:
+            from app.infrastructure.telephony.adapter_factory import AdapterRegistry
+            interval = float(os.getenv("ADAPTER_HEALTH_INTERVAL", "30"))
+            AdapterRegistry.start_monitor(interval=interval)
+            self._adapter_registry_started = True
+            logger.info("Adapter health monitor started (interval=%.0fs)", interval)
+        except Exception as e:
+            logger.warning("Adapter health monitor could not start: %s", e)
+
         self._initialized = True
         logger.info("Service container startup complete")
 
@@ -112,6 +123,16 @@ class ServiceContainer:
         Called during FastAPI lifespan shutdown.
         """
         logger.info("Shutting down service container...")
+
+        # Stop adapter health monitor and disconnect cached adapters first
+        if self._adapter_registry_started:
+            try:
+                from app.infrastructure.telephony.adapter_factory import AdapterRegistry
+                await AdapterRegistry.stop()
+                logger.info("Adapter registry stopped")
+            except Exception as e:
+                logger.error("Adapter registry stop error: %s", e)
+            self._adapter_registry_started = False
 
         if self._voice_orchestrator:
             try:

@@ -1,11 +1,10 @@
 export const backendEndpoints = {
     health: { method: "GET", path: "/health", tags: ["System"], summary: "Health check" },
 
+    connectorsProviders: { method: "GET", path: "/connectors/providers", tags: ["Connectors"], summary: "List connector providers" },
     connectorsList: { method: "GET", path: "/connectors", tags: ["Connectors"], summary: "List connectors" },
-    connectorsCreate: { method: "POST", path: "/connectors", tags: ["Connectors"], summary: "Create connector" },
-    connectorsStatus: { method: "GET", path: "/connectors/status", tags: ["Connectors"], summary: "List connector statuses" },
-    connectorsAuthorize: { method: "GET", path: "/connectors/{type}/authorize", tags: ["Connectors"], summary: "Start OAuth authorization" },
-    connectorsDisconnect: { method: "POST", path: "/connectors/{type}/disconnect", tags: ["Connectors"], summary: "Disconnect connector" },
+    connectorsAuthorize: { method: "POST", path: "/connectors/authorize", tags: ["Connectors"], summary: "Start OAuth authorization" },
+    connectorsDisconnect: { method: "DELETE", path: "/connectors/{connector_id}", tags: ["Connectors"], summary: "Disconnect connector" },
 
     connectorAccountsList: {
         method: "GET",

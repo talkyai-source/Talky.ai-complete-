@@ -44,7 +44,7 @@ class TestVoiceWorkerReadiness:
         from app.workers.voice_worker import VoicePipelineWorker
         worker = VoicePipelineWorker()
         assert hasattr(worker, "_voice_config")
-        assert worker._voice_config.rtp_remote_port == 5004
+        assert worker._voice_config.media_gateway_type == "browser"
 
 
 class TestDialerWorkerReadiness:

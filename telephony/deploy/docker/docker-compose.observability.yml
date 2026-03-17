@@ -1,0 +1,44 @@
+name: talky-telemetry
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: talky-prometheus
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    volumes:
+      - ../../observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../../observability/prometheus/rules:/etc/prometheus/rules:ro
+      - talky_prometheus_data:/prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:9090/-/healthy >/dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: talky-alertmanager
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ../../observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - talky_alertmanager_data:/alertmanager
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:9093/-/healthy >/dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+volumes:
+  talky_prometheus_data:
+  talky_alertmanager_data:

@@ -1,0 +1,25 @@
+Start testing: Mar 04 16:23 PKT
+----------------------------------------------------------
+1/1 Testing: voice_gateway_tests
+1/1 Test: voice_gateway_tests
+Command: "/home/ai-lab/Desktop/Talky.ai-complete-/services/voice-gateway-cpp/build/voice_gateway_tests"
+Directory: /home/ai-lab/Desktop/Talky.ai-complete-/services/voice-gateway-cpp/build
+"voice_gateway_tests" start time: Mar 04 16:23 PKT
+Output:
+----------------------------------------------------------
+[PASS] rtp_roundtrip
+[PASS] rtp_invalid_packets
+[PASS] rtp_sequencer_increments
+[PASS] rtp_sequencer_rollover
+[PASS] session_registry_start_stop_idempotency
+[PASS] session_registry_config_validation
+passed=6 failed=0
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Passed.
+"voice_gateway_tests" end time: Mar 04 16:23 PKT
+"voice_gateway_tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Mar 04 16:23 PKT

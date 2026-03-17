@@ -90,7 +90,9 @@ Your personality: friendly, warm, and helpful. You're genuinely curious and posi
 {TALKY_PRODUCT_INFO}
 
 ## Important Guidelines
-- Keep responses SHORT (1-2 sentences max) - this is a voice conversation
+- Keep responses short and spoken naturally
+- Use plain spoken sentences only - no markdown, no bullets, no headings, no XML or HTML tags
+- Usually answer in 1 to 2 sentences, but if asked about pricing, plans, or packages you may use up to 4 short sentences so all tiers are covered
 - Sound natural and conversational, like talking to a friend
 - Never say you are an "AI" or mention technology
 - If interrupted, stop and listen immediately
@@ -112,7 +114,8 @@ def _create_ask_ai_agent_config() -> AgentConfig:
             do_not_say_rules=[
                 "Keep responses brief - 1 to 2 sentences",
                 "Be helpful and natural",
-                "Never mention technical terms or that you are an AI"
+                "Never mention technical terms or that you are an AI",
+                "Never use markdown, bullet lists, headings, or XML tags in spoken replies"
             ]
         ),
         max_conversation_turns=20,
@@ -206,6 +209,7 @@ async def ask_ai_websocket(websocket: WebSocket, session_id: str):
             "session_id": session_id,
             "call_id": voice_session.call_id,
             "sample_rate": ASK_AI_CONFIG["sample_rate"],
+            "audio_format": "s16le",
         })
 
         call_id = voice_session.call_id
@@ -252,6 +256,11 @@ async def ask_ai_websocket(websocket: WebSocket, session_id: str):
                     if data.get("type") == "end_call":
                         await gateway.on_call_ended(call_id, "user_ended")
                         break
+                    if data.get("type") == "playback_complete":
+                        mark_playback_complete = getattr(gateway, "mark_playback_complete", None)
+                        if callable(mark_playback_complete):
+                            mark_playback_complete(call_id)
+                        continue
 
                 except asyncio.TimeoutError:
                     try:
@@ -274,11 +283,16 @@ async def ask_ai_websocket(websocket: WebSocket, session_id: str):
         receiver_task = asyncio.create_task(_receive_messages())
 
         # 5. Greeting (always play full intro before listening)
+        pcm_bytes_per_second = max(8000, int(ASK_AI_CONFIG["sample_rate"]) * 2)
+        greeting_first_chunk_bytes = max(1600, pcm_bytes_per_second // 10)   # ~100ms
+        greeting_regular_chunk_bytes = max(3200, pcm_bytes_per_second // 5)  # ~200ms
         await orchestrator.send_greeting(
             voice_session,
             "Hi there! How can I help you today?",
             websocket,
             barge_in_event,
+            first_chunk_bytes=greeting_first_chunk_bytes,
+            regular_chunk_bytes=greeting_regular_chunk_bytes,
         )
 
         # 6. Keep endpoint alive until receiver exits (disconnect/end_call).

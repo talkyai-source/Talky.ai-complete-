@@ -15,7 +15,7 @@ import json
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
-from dotenv import load_dotenv
+from app.core.dotenv_compat import load_dotenv
 
 # Load environment variables
 load_dotenv()

@@ -132,10 +132,12 @@ class TestConnectorsCallback:
         mock_oauth.validate_state = AsyncMock(side_effect=OAuthStateError("Invalid state"))
         mock_manager.return_value = mock_oauth
         
-        response = client.get("/api/v1/connectors/callback?code=test&state=invalid")
+        response = client.get("/api/v1/connectors/callback?code=test&state=invalid", follow_redirects=False)
         
         # Should redirect to frontend with error
         assert response.status_code in (302, 307)  # Redirect
+        assert "/connectors/callback" in response.headers["location"]
+        assert "error=invalid_state" in response.headers["location"]
 
 
 class TestConnectorsDelete:

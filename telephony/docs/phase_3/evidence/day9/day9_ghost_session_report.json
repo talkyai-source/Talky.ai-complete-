@@ -1,0 +1,16 @@
+{
+  "gateway": {
+    "active_session_count": 0,
+    "active_session_ids": []
+  },
+  "baseline": {
+    "external_channel_ids": [],
+    "bridge_ids": []
+  },
+  "post": {
+    "external_channel_ids": [],
+    "bridge_ids": []
+  },
+  "leaked_external_channel_ids": [],
+  "leaked_bridge_ids": []
+}

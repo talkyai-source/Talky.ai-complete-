@@ -10,6 +10,7 @@ import { HealthIndicator } from "@/components/ui/health-indicator";
 import { useAuth } from "@/lib/auth-context";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { FloatingAssistant } from "@/components/assistant/floating-assistant";
 
 interface DashboardLayoutProps {
     children: React.ReactNode;
@@ -146,6 +147,9 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
                     {children}
                 </main>
             </div>
+
+            {/* Floating AI Assistant Chat Widget */}
+            <FloatingAssistant />
         </div>
     );
 }

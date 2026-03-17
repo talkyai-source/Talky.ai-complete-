@@ -1,0 +1,2 @@
+/usr/bin/ar qc libvoice_gateway_lib.a CMakeFiles/voice_gateway_lib.dir/src/rtp_packet.cpp.o CMakeFiles/voice_gateway_lib.dir/src/session.cpp.o CMakeFiles/voice_gateway_lib.dir/src/session_registry.cpp.o CMakeFiles/voice_gateway_lib.dir/src/http_server.cpp.o
+/usr/bin/ranlib libvoice_gateway_lib.a

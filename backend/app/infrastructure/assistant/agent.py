@@ -7,6 +7,7 @@ import json
 from typing import Optional, List, Dict, Any, Annotated, TypedDict, Literal
 from datetime import datetime
 
+from fastapi.encoders import jsonable_encoder
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
@@ -33,6 +34,11 @@ from app.infrastructure.assistant.tools import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _dump_json(data: Any) -> str:
+    """Encode assistant payloads using FastAPI's JSON-safe conversion rules."""
+    return json.dumps(jsonable_encoder(data))
 
 
 # =============================================================================
@@ -136,7 +142,7 @@ async def agent_node(state: AgentState) -> Dict[str, Any]:
                         "type": "function",
                         "function": {
                             "name": tc.get("name"),
-                            "arguments": json.dumps(tc.get("args")) if isinstance(tc.get("args"), dict) else tc.get("args")
+                            "arguments": _dump_json(tc.get("args")) if isinstance(tc.get("args"), dict) else tc.get("args")
                         }
                     }
                     for tc in msg.tool_calls
@@ -175,7 +181,7 @@ async def agent_node(state: AgentState) -> Dict[str, Any]:
                             "type": "function",
                             "function": {
                                 "name": tc.get("name"),
-                                "arguments": json.dumps(args) if isinstance(args, dict) else (args or "{}")
+                                "arguments": _dump_json(args) if isinstance(args, dict) else (args or "{}")
                             }
                         })
                 formatted_msg["tool_calls"] = groq_tool_calls
@@ -459,7 +465,7 @@ async def tool_executor(state: AgentState) -> Dict[str, Any]:
             
             # Return as ToolMessage for proper LangGraph handling
             tool_message = ToolMessage(
-                content=json.dumps(result),
+                content=_dump_json(result),
                 tool_call_id=tool_call_id
             )
             results.append(tool_message)
@@ -467,7 +473,7 @@ async def tool_executor(state: AgentState) -> Dict[str, Any]:
         except Exception as e:
             logger.error(f"Tool execution error for {func_name}: {e}")
             error_message = ToolMessage(
-                content=json.dumps({"error": str(e)}),
+                content=_dump_json({"error": str(e)}),
                 tool_call_id=tool_call_id
             )
             results.append(error_message)

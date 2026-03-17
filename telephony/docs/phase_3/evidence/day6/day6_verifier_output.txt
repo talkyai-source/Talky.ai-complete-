@@ -1,0 +1,204 @@
+[1/8] Building and testing voice-gateway-cpp...
+Internal ctest changing into directory: /home/ai-lab/Desktop/Talky.ai-complete-/services/voice-gateway-cpp/build
+Test project /home/ai-lab/Desktop/Talky.ai-complete-/services/voice-gateway-cpp/build
+    Start 1: voice_gateway_tests
+1/1 Test #1: voice_gateway_tests ..............   Passed    0.00 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   0.01 sec
+[2/8] Starting voice-gateway-cpp runtime...
+[3/8] Running Day 6 fault-injection probe...
+{
+  "host": "127.0.0.1",
+  "port": 18080,
+  "scenarios": [
+    {
+      "name": "startup_silence",
+      "passed": true,
+      "expected_reason": "start_timeout",
+      "observed_reason": "start_timeout",
+      "observed_state": "stopped",
+      "notes": "No RTP packets sent after start.",
+      "stats": {
+        "session_id": "day6-start-timeout",
+        "state": "stopped",
+        "stop_reason": "start_timeout",
+        "packets_in": 0,
+        "packets_out": 0,
+        "bytes_in": 0,
+        "bytes_out": 0,
+        "invalid_packets": 1,
+        "dropped_packets": 0,
+        "last_rtp_rx_ms_ago": 416,
+        "last_rtp_tx_ms_ago": 416,
+        "tx_next_sequence": 45022,
+        "tx_next_timestamp": 1960080955,
+        "tx_ssrc": 702138683,
+        "rx_interarrival_jitter_ts_units": 0,
+        "rx_interarrival_jitter_ms": 0,
+        "jitter_buffer_depth_frames": 0,
+        "jitter_buffer_overflow_drops": 0,
+        "jitter_buffer_late_drops": 0,
+        "duplicate_packets": 0,
+        "out_of_order_packets": 0,
+        "timeout_events_total": 1
+      }
+    },
+    {
+      "name": "active_no_rtp_timeout",
+      "passed": true,
+      "expected_reason": "no_rtp_timeout",
+      "observed_reason": "no_rtp_timeout",
+      "observed_state": "stopped",
+      "notes": "RTP starts then stops before active timeout window.",
+      "stats": {
+        "session_id": "day6-no-rtp-timeout",
+        "state": "stopped",
+        "stop_reason": "no_rtp_timeout",
+        "packets_in": 5,
+        "packets_out": 5,
+        "bytes_in": 800,
+        "bytes_out": 860,
+        "invalid_packets": 1,
+        "dropped_packets": 0,
+        "last_rtp_rx_ms_ago": 735,
+        "last_rtp_tx_ms_ago": 695,
+        "tx_next_sequence": 18214,
+        "tx_next_timestamp": 4004354280,
+        "tx_ssrc": 1988931707,
+        "rx_interarrival_jitter_ts_units": 0.361374,
+        "rx_interarrival_jitter_ms": 0.0451717,
+        "jitter_buffer_depth_frames": 0,
+        "jitter_buffer_overflow_drops": 0,
+        "jitter_buffer_late_drops": 0,
+        "duplicate_packets": 0,
+        "out_of_order_packets": 0,
+        "timeout_events_total": 1
+      }
+    },
+    {
+      "name": "hold_no_rtp_timeout",
+      "passed": true,
+      "expected_reason": "no_rtp_timeout_hold",
+      "observed_reason": "no_rtp_timeout_hold",
+      "observed_state": "stopped",
+      "notes": "Hold timeout configured shorter than active timeout to exercise hold reason path.",
+      "stats": {
+        "session_id": "day6-hold-timeout",
+        "state": "stopped",
+        "stop_reason": "no_rtp_timeout_hold",
+        "packets_in": 5,
+        "packets_out": 5,
+        "bytes_in": 800,
+        "bytes_out": 860,
+        "invalid_packets": 1,
+        "dropped_packets": 0,
+        "last_rtp_rx_ms_ago": 1249,
+        "last_rtp_tx_ms_ago": 1209,
+        "tx_next_sequence": 42894,
+        "tx_next_timestamp": 3454412957,
+        "tx_ssrc": 158316416,
+        "rx_interarrival_jitter_ts_units": 0.500466,
+        "rx_interarrival_jitter_ms": 0.0625582,
+        "jitter_buffer_depth_frames": 0,
+        "jitter_buffer_overflow_drops": 0,
+        "jitter_buffer_late_drops": 0,
+        "duplicate_packets": 0,
+        "out_of_order_packets": 0,
+        "timeout_events_total": 1
+      }
+    },
+    {
+      "name": "burst_reorder_loss",
+      "passed": true,
+      "expected_reason": "running_or_manual_stop",
+      "observed_reason": "running",
+      "observed_state": "active",
+      "notes": "out_of_order=4 duplicate=2",
+      "stats": {
+        "session_id": "day6-reorder-duplicate",
+        "state": "active",
+        "stop_reason": "running",
+        "packets_in": 10,
+        "packets_out": 8,
+        "bytes_in": 1600,
+        "bytes_out": 1376,
+        "invalid_packets": 0,
+        "dropped_packets": 0,
+        "last_rtp_rx_ms_ago": 405,
+        "last_rtp_tx_ms_ago": 301,
+        "tx_next_sequence": 58430,
+        "tx_next_timestamp": 251933919,
+        "tx_ssrc": 3779736039,
+        "rx_interarrival_jitter_ts_units": 52.152,
+        "rx_interarrival_jitter_ms": 6.51901,
+        "jitter_buffer_depth_frames": 0,
+        "jitter_buffer_overflow_drops": 0,
+        "jitter_buffer_late_drops": 0,
+        "duplicate_packets": 2,
+        "out_of_order_packets": 4,
+        "timeout_events_total": 0
+      }
+    },
+    {
+      "name": "queue_pressure",
+      "passed": true,
+      "expected_reason": "running_or_manual_stop",
+      "observed_reason": "running",
+      "observed_state": "active",
+      "notes": "overflow=392 dropped=392",
+      "stats": {
+        "session_id": "day6-queue-pressure",
+        "state": "active",
+        "stop_reason": "running",
+        "packets_in": 400,
+        "packets_out": 8,
+        "bytes_in": 64000,
+        "bytes_out": 1376,
+        "invalid_packets": 0,
+        "dropped_packets": 392,
+        "last_rtp_rx_ms_ago": 800,
+        "last_rtp_tx_ms_ago": 665,
+        "tx_next_sequence": 35988,
+        "tx_next_timestamp": 3519039462,
+        "tx_ssrc": 3915739647,
+        "rx_interarrival_jitter_ts_units": 159.932,
+        "rx_interarrival_jitter_ms": 19.9915,
+        "jitter_buffer_depth_frames": 0,
+        "jitter_buffer_overflow_drops": 392,
+        "jitter_buffer_late_drops": 0,
+        "duplicate_packets": 0,
+        "out_of_order_packets": 0,
+        "timeout_events_total": 0
+      }
+    }
+  ],
+  "process_stats": {
+    "sessions_started_total": 5,
+    "sessions_stopped_total": 5,
+    "active_sessions": 0,
+    "stopped_sessions": 0,
+    "packets_in": 0,
+    "packets_out": 0,
+    "bytes_in": 0,
+    "bytes_out": 0,
+    "invalid_packets": 0,
+    "dropped_packets": 0,
+    "jitter_buffer_overflow_drops": 0,
+    "jitter_buffer_late_drops": 0,
+    "duplicate_packets": 0,
+    "out_of_order_packets": 0,
+    "timeout_events_total": 0
+  },
+  "passed": 5,
+  "failed": 0
+}
+[4/8] Capturing memory profile and runtime stats...
+[5/8] Recording ARI trace note for Day 6 verifier context...
+[6/8] Validating Day 6 acceptance checks...
+acceptance validation: ok
+[7/8] Optional regression checks (Day 4 / Day 5) ...
+[8/8] Writing Day 6 evidence summary...
+DAY6 verification PASSED.
+Evidence: /home/ai-lab/Desktop/Talky.ai-complete-/telephony/docs/phase_3/evidence/day6

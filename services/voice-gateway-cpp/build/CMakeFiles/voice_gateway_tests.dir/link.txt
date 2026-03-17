@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG CMakeFiles/voice_gateway_tests.dir/tests/test_voice_gateway.cpp.o -o voice_gateway_tests  libvoice_gateway_lib.a 

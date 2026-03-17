@@ -1,0 +1,15 @@
+{
+  "enforced": false,
+  "tenants": [
+    {
+      "tenant_id": "day10-default",
+      "attempted": 58,
+      "success": 58,
+      "failed": 0,
+      "success_ratio": 1.0
+    }
+  ],
+  "threshold_success_ratio": 0.98,
+  "pass": true,
+  "note": "Single tenant run; fairness cannot be fully validated."
+}

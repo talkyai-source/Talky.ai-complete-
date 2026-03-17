@@ -4,7 +4,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { backendApi } from "@/lib/backend-api";
 import { dashboardApi, type Call } from "@/lib/dashboard-api";
 import { extendedApi } from "@/lib/extended-api";
-import type { AssistantRun, CalendarEvent, Connector, Reminder } from "@/lib/models";
+import type { AssistantRun, CalendarEvent, Reminder } from "@/lib/models";
 import { emailAuditStore } from "@/lib/email-audit";
 import { notificationsStore } from "@/lib/notifications";
 import { captureException } from "@/lib/monitoring";
@@ -16,6 +16,7 @@ function randomId() {
 
 export const queryKeys = {
     health: () => ["health"] as const,
+    connectorProviders: () => ["connectorProviders"] as const,
     connectors: () => ["connectors"] as const,
     connectorStatuses: () => ["connectorStatuses"] as const,
     connectorAccounts: (connectorId?: string) => ["connectorAccounts", connectorId ?? "all"] as const,
@@ -53,6 +54,15 @@ export function useConnectors() {
     });
 }
 
+export function useConnectorProviders(options?: { enabled?: boolean }) {
+    return useQuery({
+        queryKey: queryKeys.connectorProviders(),
+        queryFn: ({ signal }) => backendApi.connectors.providers(signal),
+        staleTime: 60_000,
+        enabled: options?.enabled ?? true,
+    });
+}
+
 export function useConnectorStatuses(options?: { enabled?: boolean }) {
     return useQuery({
         queryKey: queryKeys.connectorStatuses(),
@@ -68,70 +78,6 @@ export function useConnectorStatuses(options?: { enabled?: boolean }) {
         staleTime: 0,
         retry: 2,
         enabled: options?.enabled ?? true,
-    });
-}
-
-export function useAuthorizeConnector() {
-    return useMutation({
-        mutationFn: backendApi.connectors.authorize,
-        retry: (failureCount, err) => {
-            if (failureCount >= 2) return false;
-            if (typeof err === "object" && err !== null && "status" in (err as object)) {
-                const status = (err as { status?: number }).status;
-                if (typeof status === "number" && status >= 400 && status < 500) return false;
-            }
-            return true;
-        },
-        onError: () => {
-            notificationsStore.create({ type: "error", title: "Authorization failed", message: "Could not start the connection flow." });
-        },
-    });
-}
-
-export function useDisconnectConnector() {
-    const qc = useQueryClient();
-    return useMutation({
-        mutationFn: backendApi.connectors.disconnect,
-        onError: () => {
-            notificationsStore.create({ type: "error", title: "Disconnect failed", message: "Could not disconnect. Please try again." });
-        },
-        onSuccess: () => {
-            notificationsStore.create({ type: "success", title: "Disconnected", message: "Connector disconnected successfully." });
-        },
-        onSettled: () => {
-            void qc.invalidateQueries({ queryKey: queryKeys.connectorStatuses() });
-        },
-    });
-}
-
-export function useCreateConnector() {
-    const qc = useQueryClient();
-    return useMutation({
-        mutationFn: backendApi.connectors.create,
-        onMutate: async (input) => {
-            await qc.cancelQueries({ queryKey: queryKeys.connectors() });
-            const prev = qc.getQueryData<Awaited<ReturnType<typeof backendApi.connectors.list>>>(queryKeys.connectors());
-            const optimistic: Connector = {
-                id: randomId(),
-                name: input.name,
-                type: input.type,
-                config: input.config,
-                createdAt: new Date().toISOString(),
-            };
-            if (prev) qc.setQueryData(queryKeys.connectors(), { items: [optimistic, ...prev.items] });
-            else qc.setQueryData(queryKeys.connectors(), { items: [optimistic] });
-            return { prev };
-        },
-        onError: (_err, _input, ctx) => {
-            if (ctx?.prev) qc.setQueryData(queryKeys.connectors(), ctx.prev);
-            notificationsStore.create({ type: "error", title: "Connector failed", message: "Could not create connector." });
-        },
-        onSuccess: () => {
-            notificationsStore.create({ type: "success", title: "Connector created", message: "Connector saved successfully." });
-        },
-        onSettled: () => {
-            void qc.invalidateQueries({ queryKey: queryKeys.connectors() });
-        },
     });
 }
 

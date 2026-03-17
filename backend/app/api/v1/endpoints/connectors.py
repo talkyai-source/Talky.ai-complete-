@@ -8,6 +8,7 @@ import os
 import logging
 from typing import Optional, List
 from datetime import datetime
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from fastapi.responses import RedirectResponse
@@ -107,6 +108,18 @@ PROVIDER_METADATA = {
         "requires_oauth": True
     }
 }
+
+
+def _frontend_callback_url(frontend_url: str, *, status: str, provider: Optional[str] = None, error: Optional[str] = None) -> str:
+    params = [("status", status)]
+    provider_type = PROVIDER_METADATA.get(provider or "", {}).get("type")
+    if provider_type:
+        params.append(("type", provider_type))
+    if provider:
+        params.append(("provider", provider))
+    if error:
+        params.append(("error", error))
+    return f"{frontend_url}/connectors/callback?{urlencode(params)}"
 
 
 # =============================================================================
@@ -308,15 +321,11 @@ async def oauth_callback(
     
     if error:
         logger.warning(f"OAuth error: {error}")
-        return RedirectResponse(
-            f"{frontend_url}/integrations?error={error}"
-        )
+        return RedirectResponse(_frontend_callback_url(frontend_url, status="error", error=error))
     
     if not code:
         logger.warning("OAuth callback missing code parameter")
-        return RedirectResponse(
-            f"{frontend_url}/integrations?error=missing_code"
-        )
+        return RedirectResponse(_frontend_callback_url(frontend_url, status="error", error="missing_code"))
     
     try:
         # Validate state
@@ -388,20 +397,14 @@ async def oauth_callback(
         
         logger.info(f"OAuth completed for {provider}, connector {connector_id}")
         
-        return RedirectResponse(
-            f"{frontend_url}/integrations?success=true&provider={provider}"
-        )
+        return RedirectResponse(_frontend_callback_url(frontend_url, status="success", provider=provider))
         
     except OAuthStateError as e:
         logger.warning(f"OAuth state error: {e}")
-        return RedirectResponse(
-            f"{frontend_url}/integrations?error=invalid_state"
-        )
+        return RedirectResponse(_frontend_callback_url(frontend_url, status="error", error="invalid_state"))
     except Exception as e:
         logger.error(f"OAuth callback error: {e}")
-        return RedirectResponse(
-            f"{frontend_url}/integrations?error=callback_failed"
-        )
+        return RedirectResponse(_frontend_callback_url(frontend_url, status="error", error="callback_failed"))
 
 
 @router.delete("/{connector_id}")

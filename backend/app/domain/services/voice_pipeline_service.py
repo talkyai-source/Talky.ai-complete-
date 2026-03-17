@@ -90,6 +90,37 @@ class VoicePipelineService:
         
         # EagerEndOfTurn: Track speculative LLM tasks for cancellation on TurnResumed
         self._pending_llm_tasks: dict[str, asyncio.Task] = {}
+
+    def _response_max_sentences_for_turn(
+        self,
+        session: CallSession,
+        user_input: str,
+        *,
+        has_custom_prompt: bool,
+    ) -> int:
+        """
+        Allow slightly longer pricing/package answers for product-demo sessions.
+
+        The default voice policy is brief answers, but plan/pricing questions
+        need enough room to mention all tiers without truncating mid-answer.
+        """
+        base_limit = (
+            session.agent_config.response_max_sentences
+            if session.agent_config is not None
+            else self.guardrails.config.max_sentences
+        )
+        if not has_custom_prompt:
+            return base_limit
+
+        lowered = user_input.lower()
+        pricing_terms = (
+            "price", "pricing", "cost", "costs",
+            "plan", "plans", "package", "packages",
+            "tier", "tiers", "subscription", "monthly",
+        )
+        if any(term in lowered for term in pricing_terms):
+            return max(base_limit, 4)
+        return base_limit
     
     async def start_pipeline(
         self,
@@ -104,6 +135,7 @@ class VoicePipelineService:
             websocket: Optional WebSocket connection for sending updates
         """
         call_id = session.call_id
+        self.transcript_service.bind_call_identity(call_id, session.talklee_call_id)
         
         logger.info(
             f"Starting voice pipeline for call {call_id}",
@@ -221,6 +253,14 @@ class VoicePipelineService:
                         print(f"🔊 [PIPELINE] Got transcript #{transcript_count}: {transcript.text!r}", flush=True)
                 await self.handle_transcript(session, transcript, websocket)
             print(f"🔊 [PIPELINE] STT stream ended. Total transcripts: {transcript_count}", flush=True)
+            get_stats = getattr(self.stt_provider, "get_stream_stats", None)
+            if callable(get_stats):
+                stt_stats = get_stats(call_id)
+                if stt_stats:
+                    logger.info(
+                        "stt_stream_stats",
+                        extra={"call_id": call_id, **stt_stats},
+                    )
         
         except Exception as e:
             logger.error(
@@ -270,6 +310,7 @@ class VoicePipelineService:
         
         # Log transcript with structured data
         metadata = transcript.metadata or {}
+        self.transcript_service.bind_call_identity(call_id, session.talklee_call_id)
 
         # Ensure latency tracker is aligned with current turn ID.
         current_metrics = self.latency_tracker.get_metrics(call_id)
@@ -325,6 +366,29 @@ class VoicePipelineService:
         
         # Regular transcript handling
         if transcript.text:
+            event_type = "update"
+            include_in_plaintext = False
+            if metadata.get("eager"):
+                event_type = "eager_end_of_turn"
+            if transcript.is_final:
+                event_type = "end_of_turn"
+                include_in_plaintext = True
+
+            self.transcript_service.accumulate_turn(
+                call_id=call_id,
+                role="user",
+                content=transcript.text,
+                confidence=transcript.confidence,
+                talklee_call_id=session.talklee_call_id,
+                turn_index=session.turn_id,
+                event_type=event_type,
+                is_final=transcript.is_final,
+                audio_window_start=metadata.get("audio_window_start"),
+                audio_window_end=metadata.get("audio_window_end"),
+                include_in_plaintext=include_in_plaintext,
+                metadata=metadata,
+            )
+
             self.latency_tracker.mark_stt_first_transcript(call_id)
 
             # Day 17: Fixed partial transcript handling
@@ -436,13 +500,6 @@ class VoicePipelineService:
         )
         session.conversation_history.append(user_message)
         
-        # Day 10: Accumulate user turn for transcript
-        self.transcript_service.accumulate_turn(
-            call_id=call_id,
-            role="user",
-            content=full_transcript
-        )
-        
         try:
             # Get LLM response
             llm_start = datetime.utcnow()
@@ -495,7 +552,12 @@ class VoicePipelineService:
             self.transcript_service.accumulate_turn(
                 call_id=call_id,
                 role="assistant",
-                content=response_text
+                content=response_text,
+                talklee_call_id=session.talklee_call_id,
+                turn_index=session.turn_id,
+                event_type="assistant_response",
+                is_final=True,
+                include_in_plaintext=True,
             )
             
             # Synthesize TTS audio
@@ -506,7 +568,8 @@ class VoicePipelineService:
             
             await self.synthesize_and_send_audio(
                 session,
-                response_text
+                response_text,
+                websocket,
             )
             
             tts_latency = (datetime.utcnow() - tts_start).total_seconds() * 1000
@@ -567,7 +630,8 @@ class VoicePipelineService:
                     await self.transcript_service.flush_to_database(
                         call_id=call_id,
                         db_client=postgres_client,
-                        tenant_id=getattr(session, 'tenant_id', None)
+                        tenant_id=getattr(session, 'tenant_id', None),
+                        talklee_call_id=session.talklee_call_id,
                     )
                 else:
                     logger.debug("Skipping transcript flush: container not initialized")
@@ -739,7 +803,6 @@ class VoicePipelineService:
                 model=effective_model,
                 temperature=effective_temperature,
                 max_tokens=effective_max_tokens,
-                top_p=1.0,        # Groq recommendation
                 stop=["###", "\n\n\n"]  # Stop sequences for concise responses
             ):
                 if token and not first_token_seen:
@@ -764,31 +827,42 @@ class VoicePipelineService:
                 # Clean and validate response
                 response_text = self.guardrails.clean_response(response_text)
                 logger.info(f"After clean_response ({len(response_text)} chars): '{response_text[:100] if response_text else 'EMPTY'}...'")
-                
-                response_text = self.guardrails.truncate_response(
-                    response_text, 
-                    max_sentences=session.agent_config.response_max_sentences
-                )
-                logger.info(f"After truncate_response ({len(response_text)} chars): '{response_text[:100] if response_text else 'EMPTY'}...'")
-                
-                # Validate against rules
-                is_valid, reason = self.guardrails.validate_response(
-                    response_text, 
-                    session.agent_config.rules
-                )
-                if not is_valid:
-                    logger.warning(f"Response validation failed: {reason}, using fallback")
-                    session.conversation_context.increment_llm_error()
-                    use_fallback = True
+
+                # agent_config may be None for telephony sessions without campaign context
+                # (e.g. raw SIP calls). Skip truncation/validation in that case.
+                _agent_cfg = session.agent_config
+                if _agent_cfg is not None:
+                    max_sentences = self._response_max_sentences_for_turn(
+                        session,
+                        user_input,
+                        has_custom_prompt=has_custom_prompt,
+                    )
+                    response_text = self.guardrails.truncate_response(
+                        response_text,
+                        max_sentences=max_sentences
+                    )
+                    logger.info(f"After truncate_response ({len(response_text)} chars): '{response_text[:100] if response_text else 'EMPTY'}...'")
+
+                    # Validate against rules
+                    is_valid, reason = self.guardrails.validate_response(
+                        response_text,
+                        _agent_cfg.rules
+                    )
+                    if not is_valid:
+                        logger.warning(f"Response validation failed: {reason}, using fallback")
+                        session.conversation_context.increment_llm_error()
+                        use_fallback = True
         
         except LLMTimeoutError:
             # LLM timeout - use human-like fallback (no AI hints)
+            # Use session.conversation_state because new_state is only assigned
+            # in the state-machine branch; custom-prompt sessions never set it.
             logger.warning(
                 "llm_timeout_fallback",
                 extra={
                     "call_id": call_id,
                     "turn_id": session.turn_id,
-                    "state": new_state.value
+                    "state": session.conversation_state.value
                 }
             )
             session.conversation_context.increment_llm_error()
@@ -901,107 +975,15 @@ class VoicePipelineService:
         return response_text
     
     def _clean_text_for_tts(self, text: str) -> str:
-        """
-        Clean text for TTS by removing markdown, special characters, and emojis.
-        
-        This ensures the voice output sounds natural and conversational,
-        without speaking out asterisks, hashes, and other formatting marks.
-        
-        Args:
-            text: Raw text from LLM
-            
-        Returns:
-            Cleaned text suitable for voice synthesis
-        """
-        import re
-        
-        if not text:
-            return text
-        
-        # IMPORTANT: Order matters - process complex patterns before simple ones
-        # 1. First handle markdown links (before URL removal)
-        cleaned = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
-        
-        # 2. Remove code blocks and inline code
-        cleaned = re.sub(r'```[\s\S]*?```', ' code block ', cleaned)
-        cleaned = re.sub(r'`([^`]+)`', r'\1', cleaned)
-        
-        # 3. Remove standalone URLs (after markdown links)
-        cleaned = re.sub(r'https?://\S+', ' link ', cleaned)
-        cleaned = re.sub(r'www\.\S+', ' website ', cleaned)
-        
-        # 4. Remove markdown formatting (bold, italic, strikethrough)
-        cleaned = re.sub(r'\*\*\*?|\*\*?|__?|~~', '', cleaned)
-        
-        # 5. Remove headers
-        cleaned = re.sub(r'^#{1,6}\s*', '', cleaned, flags=re.MULTILINE)
-        
-        # 6. Remove blockquotes
-        cleaned = re.sub(r'^>\s*', '', cleaned, flags=re.MULTILINE)
-        
-        # 7. Remove emojis (comprehensive range)
-        emoji_pattern = re.compile(
-            "["
-            "\U0001F600-\U0001F64F"  # emoticons
-            "\U0001F300-\U0001F5FF"  # symbols & pictographs
-            "\U0001F680-\U0001F6FF"  # transport & map symbols
-            "\U0001F1E0-\U0001F1FF"  # flags
-            "\U00002702-\U000027B0"  # dingbats
-            "\U000024C2-\U0001F251"  # enclosed characters
-            "\U0001F900-\U0001F9FF"  # supplemental symbols
-            "\U00002600-\U000026FF"  # miscellaneous symbols
-            "]+",
-            flags=re.UNICODE
-        )
-        cleaned = emoji_pattern.sub('', cleaned)
-        
-        # 8. Replace common symbols with spoken equivalents
-        replacements = {
-            '&': ' and ',
-            '@': ' at ',
-            '#': ' number ',
-            '$': ' dollars ',
-            '%': ' percent ',
-            '+': ' plus ',
-            '=': ' equals ',
-            '→': ' to ',
-            '←': ' from ',
-            '•': ', ',
-            '·': ', ',
-            '…': '...',
-            '|': ', ',
-            '™': ' trademark ',
-            '®': ' registered ',
-            '©': ' copyright ',
-            '°': ' degrees ',
-            '×': ' times ',
-            '÷': ' divided by ',
-            '–': '-',  # en-dash to hyphen
-            '—': '-',  # em-dash to hyphen
-        }
-        for symbol, spoken in replacements.items():
-            cleaned = cleaned.replace(symbol, spoken)
-        
-        # 9. Remove bullet points and list markers at start of lines
-        cleaned = re.sub(r'^[\s]*[-*+•]\s+', '', cleaned, flags=re.MULTILINE)
-        
-        # 10. Normalize whitespace (multiple spaces -> single space)
-        cleaned = re.sub(r'\s+', ' ', cleaned)
-        
-        # 11. Remove excessive punctuation
-        cleaned = re.sub(r'!{2,}', '!', cleaned)  # !!! -> !
-        cleaned = re.sub(r'\?{2,}', '?', cleaned)  # ??? -> ?
-        cleaned = re.sub(r'\.{3,}', '...', cleaned)  # .... -> ...
-        
-        # 12. Trim whitespace
-        cleaned = cleaned.strip()
-        
-        return cleaned
+        """Delegate to the shared audio_utils helper to avoid code duplication."""
+        from app.utils.audio_utils import clean_text_for_tts
+        return clean_text_for_tts(text)
 
     async def synthesize_and_send_audio(
         self,
         session: CallSession,
-        text: str
+        text: str,
+        websocket: Optional[WebSocket] = None,
     ) -> None:
         """
         Synthesize text to speech and send to output queue.
@@ -1054,6 +1036,9 @@ class VoicePipelineService:
             if hasattr(self.stt_provider, 'mute'):
                 await self.stt_provider.mute(call_id)
                 logger.debug(f"Muted STT for call {call_id} during TTS")
+
+            if hasattr(self.media_gateway, "start_playback_tracking"):
+                self.media_gateway.start_playback_tracking(call_id)
             
             # Stream TTS synthesis with barge-in awareness
             # Use cleaned text (no markdown, emojis, etc.)
@@ -1090,10 +1075,24 @@ class VoicePipelineService:
             # Flush any remaining buffered audio
             if hasattr(self.media_gateway, 'flush_audio_buffer'):
                 await self.media_gateway.flush_audio_buffer(call_id)
+
+            waited_for_browser_playback = False
+            if (
+                not was_interrupted
+                and first_audio_chunk_sent
+                and hasattr(self.media_gateway, "wait_for_playback_complete")
+            ):
+                if websocket:
+                    try:
+                        await websocket.send_json({"type": "tts_audio_complete"})
+                    except Exception as e:
+                        logger.warning(f"Failed to send tts_audio_complete to websocket: {e}")
+                waited_for_browser_playback = True
+                await self.media_gateway.wait_for_playback_complete(call_id)
             
             # Unmute STT microphone after TTS (with small delay to prevent echo)
             if hasattr(self.stt_provider, 'unmute'):
-                await asyncio.sleep(0.3)  # 300ms delay to let audio finish playing
+                await asyncio.sleep(0.05 if waited_for_browser_playback else 0.3)
                 await self.stt_provider.unmute(call_id)
                 logger.debug(f"Unmuted STT for call {call_id} after TTS")
             

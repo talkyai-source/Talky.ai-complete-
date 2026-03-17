@@ -79,16 +79,6 @@ function dedupeVoicesById(input: VoiceInfo[]): VoiceInfo[] {
     return Array.from(map.values());
 }
 
-function float32BufferToInt16Le(input: ArrayBuffer): ArrayBuffer {
-    const floatArray = new Float32Array(input);
-    const int16Array = new Int16Array(floatArray.length);
-    for (let i = 0; i < floatArray.length; i++) {
-        const sample = Math.max(-1, Math.min(1, floatArray[i]));
-        int16Array[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
-    }
-    return int16Array.buffer;
-}
-
 export default function AIOptionsPage() {
     // State
     const [providers, setProviders] = useState<ProviderListResponse | null>(null);
@@ -127,11 +117,12 @@ export default function AIOptionsPage() {
     // WebSocket ref
     const wsRef = useRef<WebSocket | null>(null);
     const audioContextRef = useRef<AudioContext | null>(null);
-    const audioWorkletNodeRef = useRef<AudioWorkletNode | null>(null);
-    const audioWorkletLoadPromiseRef = useRef<Promise<void> | null>(null);
-    const isAudioContextInitializedRef = useRef(false);
+    const audioInitPromiseRef = useRef<Promise<void> | null>(null);
+    const playbackSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+    const nextPlaybackTimeRef = useRef(0);
     const ttsSampleRateRef = useRef<number>(24000);
     const ttsAudioFormatRef = useRef<"s16le" | "f32le">("s16le");
+    const awaitingPlaybackCompleteRef = useRef(false);
 
     // Microphone capture refs
     const micStreamRef = useRef<MediaStream | null>(null);
@@ -288,18 +279,17 @@ export default function AIOptionsPage() {
     }
 
     const initializeAudioPlayer = useCallback(async () => {
-        if (audioWorkletLoadPromiseRef.current) {
-            return audioWorkletLoadPromiseRef.current;
+        if (audioInitPromiseRef.current) {
+            return audioInitPromiseRef.current;
         }
 
-        audioWorkletLoadPromiseRef.current = (async () => {
+        audioInitPromiseRef.current = (async () => {
             try {
                 if (!audioContextRef.current || audioContextRef.current.state === "closed") {
                     audioContextRef.current = new AudioContext({
-                        sampleRate: ttsSampleRateRef.current,
                         latencyHint: "interactive",
                     });
-                    isAudioContextInitializedRef.current = false;
+                    nextPlaybackTimeRef.current = 0;
                 }
 
                 const ctx = audioContextRef.current;
@@ -307,55 +297,89 @@ export default function AIOptionsPage() {
                 if (ctx.state === "suspended") {
                     await ctx.resume();
                 }
-
-                if (!isAudioContextInitializedRef.current) {
-                    await ctx.audioWorklet.addModule("/audio-stream-processor.js");
-                    isAudioContextInitializedRef.current = true;
-                }
-
-                if (!audioWorkletNodeRef.current) {
-                    const node = new AudioWorkletNode(ctx, "audio-stream-processor", {
-                        numberOfInputs: 0,
-                        numberOfOutputs: 1,
-                        outputChannelCount: [1],
-                    });
-                    node.connect(ctx.destination);
-                    audioWorkletNodeRef.current = node;
-                }
             } finally {
                 // Allow retry if init fails.
                 setTimeout(() => {
-                    audioWorkletLoadPromiseRef.current = null;
+                    audioInitPromiseRef.current = null;
                 }, 100);
             }
         })();
 
-        return audioWorkletLoadPromiseRef.current;
+        return audioInitPromiseRef.current;
     }, []);
 
     const queueAudioChunk = useCallback((buffer: ArrayBuffer, sampleRate: number, format: "s16le" | "f32le") => {
-        if (!audioWorkletNodeRef.current) return;
-        const pcm16 = format === "f32le" ? float32BufferToInt16Le(buffer) : buffer;
-        audioWorkletNodeRef.current.port.postMessage({
-            audioData: pcm16,
-            sampleRate,
-        });
+        const ctx = audioContextRef.current;
+        if (!ctx) return;
+
+        const float32 =
+            format === "f32le"
+                ? new Float32Array(buffer)
+                : (() => {
+                    const pcm16 = new Int16Array(buffer);
+                    const out = new Float32Array(pcm16.length);
+                    for (let i = 0; i < pcm16.length; i++) {
+                        out[i] = pcm16[i] / 32768.0;
+                    }
+                    return out;
+                })();
+
+        if (float32.length === 0) return;
+
+        const audioBuffer = ctx.createBuffer(1, float32.length, sampleRate);
+        audioBuffer.getChannelData(0).set(float32);
+
+        const source = ctx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(ctx.destination);
+
+        const leadTimeSeconds = 0.08;
+        const startAt = Math.max(
+            ctx.currentTime + leadTimeSeconds,
+            nextPlaybackTimeRef.current || 0,
+        );
+
+        source.onended = () => {
+            playbackSourcesRef.current.delete(source);
+            if (
+                awaitingPlaybackCompleteRef.current &&
+                playbackSourcesRef.current.size === 0 &&
+                wsRef.current?.readyState === WebSocket.OPEN
+            ) {
+                awaitingPlaybackCompleteRef.current = false;
+                wsRef.current.send(JSON.stringify({ type: "playback_complete" }));
+            }
+        };
+
+        playbackSourcesRef.current.add(source);
+        source.start(startAt);
+        nextPlaybackTimeRef.current = startAt + audioBuffer.duration;
     }, []);
 
     const resetAudioPlayer = useCallback(() => {
-        if (!audioWorkletNodeRef.current) return;
-        audioWorkletNodeRef.current.port.postMessage({ reset: true });
-    }, []);
-
-    const cleanupAudioPlayer = useCallback(() => {
-        if (audioWorkletNodeRef.current) {
+        awaitingPlaybackCompleteRef.current = false;
+        playbackSourcesRef.current.forEach((source) => {
             try {
-                audioWorkletNodeRef.current.disconnect();
+                source.stop();
             } catch {
                 // no-op
             }
-            audioWorkletNodeRef.current = null;
-        }
+        });
+        playbackSourcesRef.current.clear();
+        nextPlaybackTimeRef.current = 0;
+    }, []);
+
+    const cleanupAudioPlayer = useCallback(() => {
+        awaitingPlaybackCompleteRef.current = false;
+        playbackSourcesRef.current.forEach((source) => {
+            try {
+                source.stop();
+            } catch {
+                // no-op
+            }
+        });
+        playbackSourcesRef.current.clear();
+        nextPlaybackTimeRef.current = 0;
 
         if (audioContextRef.current) {
             try {
@@ -366,8 +390,7 @@ export default function AIOptionsPage() {
             audioContextRef.current = null;
         }
 
-        isAudioContextInitializedRef.current = false;
-        audioWorkletLoadPromiseRef.current = null;
+        audioInitPromiseRef.current = null;
     }, []);
 
     // Live test call - WebSocket connection and handlers
@@ -407,7 +430,7 @@ export default function AIOptionsPage() {
                     const arrayBuffer = event.data instanceof Blob
                         ? await event.data.arrayBuffer()
                         : event.data;
-                    if (!audioWorkletNodeRef.current) {
+                    if (!audioContextRef.current) {
                         await initializeAudioPlayer();
                     }
                     queueAudioChunk(arrayBuffer, ttsSampleRateRef.current, ttsAudioFormatRef.current);
@@ -511,6 +534,17 @@ export default function AIOptionsPage() {
                         tts_ms: typeof payload.tts_latency_ms === "number" ? payload.tts_latency_ms : prev.latency.tts_ms
                     }
                 }));
+                break;
+
+            case "tts_audio_complete":
+                awaitingPlaybackCompleteRef.current = true;
+                if (
+                    playbackSourcesRef.current.size === 0 &&
+                    wsRef.current?.readyState === WebSocket.OPEN
+                ) {
+                    awaitingPlaybackCompleteRef.current = false;
+                    wsRef.current.send(JSON.stringify({ type: "playback_complete" }));
+                }
                 break;
 
             case "barge_in":

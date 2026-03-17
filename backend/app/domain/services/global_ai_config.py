@@ -27,7 +27,6 @@ def get_global_config() -> AIProviderConfig:
     Returns the saved config or default if none saved.
     This config is used by:
     - Dummy call WebSocket
-    - SIP bridge
     - Voice pipeline service
     - Any other voice interaction
     """

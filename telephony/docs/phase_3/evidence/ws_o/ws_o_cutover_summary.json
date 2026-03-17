@@ -1,0 +1,16 @@
+{
+  "gate_mode": "synthetic",
+  "hot_standby_log": "/home/ai-lab/Desktop/Talky.ai-complete-/telephony/docs/phase_3/evidence/ws_o/ws_o_hot_standby_check.txt",
+  "metrics_url": null,
+  "stabilization_seconds": 30,
+  "stages_completed": [
+    0,
+    5,
+    25,
+    50,
+    100
+  ],
+  "status": "passed",
+  "timeline_log": "/home/ai-lab/Desktop/Talky.ai-complete-/telephony/docs/phase_3/evidence/ws_o/ws_o_cutover_timeline.log",
+  "workstream": "WS-O"
+}

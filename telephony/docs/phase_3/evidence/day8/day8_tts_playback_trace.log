@@ -1,0 +1,9 @@
+{"ts": 1772541994.3803422, "event": "tts_play_queued", "call_index": 1, "scenario": "baseline", "session_id": "day5-1772541993.5-32000"}
+{"ts": 1772541999.5125778, "event": "tts_play_queued", "call_index": 2, "scenario": "barge_in", "session_id": "day5-1772541998.5-32001"}
+{"ts": 1772542000.357166, "event": "tts_interrupt", "call_index": 2, "scenario": "barge_in", "session_id": "day5-1772541998.5-32001", "reason": "barge_in_start_of_turn"}
+{"ts": 1772542001.5072958, "event": "tts_play_queued", "call_index": 3, "scenario": "baseline", "session_id": "day5-1772542000.5-32002"}
+{"ts": 1772542006.6372194, "event": "tts_play_queued", "call_index": 4, "scenario": "barge_in", "session_id": "day5-1772542006.5-32003"}
+{"ts": 1772542007.4850655, "event": "tts_interrupt", "call_index": 4, "scenario": "barge_in", "session_id": "day5-1772542006.5-32003", "reason": "barge_in_start_of_turn"}
+{"ts": 1772542008.6280482, "event": "tts_play_queued", "call_index": 5, "scenario": "baseline", "session_id": "day5-1772542008.5-32004"}
+{"ts": 1772542013.7579713, "event": "tts_play_queued", "call_index": 6, "scenario": "barge_in", "session_id": "day5-1772542013.5-32005"}
+{"ts": 1772542014.602505, "event": "tts_interrupt", "call_index": 6, "scenario": "barge_in", "session_id": "day5-1772542013.5-32005", "reason": "barge_in_start_of_turn"}

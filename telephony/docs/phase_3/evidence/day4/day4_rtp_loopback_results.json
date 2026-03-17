@@ -1,0 +1,32 @@
+{
+  "session_id": "day4-verify-session",
+  "listen_port": 49892,
+  "sink_port": 52539,
+  "packets_sent": 64,
+  "packets_received": 64,
+  "sequence_monotonic": true,
+  "timestamp_monotonic": true,
+  "p50_inter_packet_ms": 19.99,
+  "p95_inter_packet_ms": 20.166,
+  "max_inter_packet_ms": 21.397,
+  "health_response": {
+    "status": "ok",
+    "io_loop_healthy": true
+  },
+  "start_response": {
+    "status": "started",
+    "session_id": "day4-verify-session"
+  },
+  "stop_response": {
+    "status": "stopped",
+    "session_id": "day4-verify-session"
+  },
+  "probe_duration_ms": 1317.4,
+  "acceptance": {
+    "packets_received_min_48": true,
+    "sequence_monotonic": true,
+    "timestamp_monotonic": true,
+    "p95_between_19_21": true,
+    "max_le_25": true
+  }
+}

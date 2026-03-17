@@ -7,7 +7,8 @@ from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import NullPool
 from contextlib import contextmanager
 import os
-from dotenv import load_dotenv
+
+from app.core.dotenv_compat import load_dotenv
 
 # Load environment variables
 load_dotenv()

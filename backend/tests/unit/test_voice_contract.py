@@ -265,7 +265,7 @@ class TestEnumValues:
         assert {d.value for d in LegDirection} == {"inbound", "outbound"}
 
     def test_telephony_providers(self):
-        expected = {"vonage", "freeswitch", "sip", "browser", "simulation"}
+        expected = {"sip", "vonage", "twilio", "freeswitch", "browser", "simulation"}
         assert {p.value for p in TelephonyProvider} == expected
 
     def test_event_types(self):

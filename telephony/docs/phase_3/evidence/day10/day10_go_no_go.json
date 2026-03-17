@@ -1,0 +1,54 @@
+{
+  "generated_at_utc": "2026-03-04T11:26:36.018745+00:00",
+  "decision": "go",
+  "checks": {
+    "ramp_pass": true,
+    "soak_pass": true,
+    "transfer_pass": true,
+    "bargein_pass": true,
+    "tenant_fairness_pass": true,
+    "recovery_pass": true,
+    "leak_pass": true
+  },
+  "failed_checks": [],
+  "safe_concurrency_threshold": 3,
+  "recommended_concurrency": 2,
+  "recovery_results": [
+    {
+      "service": "opensips",
+      "status": "passed",
+      "start_epoch": 1772623517,
+      "recovered_epoch": 1772623532,
+      "recovery_seconds": 15,
+      "sla_seconds": 180,
+      "notes": "Recovery within SLA and SIP probe passed."
+    },
+    {
+      "service": "asterisk",
+      "status": "passed",
+      "start_epoch": 1772623532,
+      "recovered_epoch": 1772623547,
+      "recovery_seconds": 15,
+      "sla_seconds": 180,
+      "notes": "Recovery within SLA and SIP probe passed."
+    },
+    {
+      "service": "rtpengine",
+      "status": "passed",
+      "start_epoch": 1772623547,
+      "recovered_epoch": 1772623562,
+      "recovery_seconds": 15,
+      "sla_seconds": 180,
+      "notes": "Recovery within SLA and SIP probe passed."
+    },
+    {
+      "service": "gateway",
+      "status": "passed",
+      "start_epoch": 1772623562,
+      "recovered_epoch": 1772623562,
+      "recovery_seconds": 0,
+      "sla_seconds": 60,
+      "notes": "Gateway recovered within SLA."
+    }
+  ]
+}

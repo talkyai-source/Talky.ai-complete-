@@ -12,10 +12,8 @@ Flow:
 """
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-import jwt
 import bcrypt
 from fastapi import APIRouter, HTTPException, Depends, Request, status
 from pydantic import BaseModel, EmailStr
@@ -23,7 +21,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from app.api.v1.dependencies import get_current_user, CurrentUser, get_db_client
-from app.core.config import get_settings
+from app.core.jwt_security import encode_access_token
 from app.core.postgres_adapter import Client
 
 logger = logging.getLogger(__name__)
@@ -91,30 +89,21 @@ class ChangePasswordRequest(BaseModel):
 # Helpers
 # ============================================
 
-def _require_jwt_secret() -> str:
-    """Return configured JWT secret or fail closed."""
-    secret = get_settings().effective_jwt_secret
-    if secret:
-        return secret
-    logger.error("JWT_SECRET is not configured")
-    raise HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail="Server authentication is not configured",
-    )
-
-
-def _create_jwt(user_id: str, email: str, role: str) -> str:
+def _create_jwt(user_id: str, email: str, role: str, tenant_id: Optional[str]) -> str:
     """Create a signed JWT token."""
-    settings = get_settings()
-    now = datetime.now(timezone.utc)
-    payload = {
-        "sub": user_id,
-        "email": email,
-        "role": role,
-        "iat": now,
-        "exp": now + timedelta(hours=settings.jwt_expiry_hours),
-    }
-    return jwt.encode(payload, _require_jwt_secret(), algorithm=settings.jwt_algorithm)
+    try:
+        return encode_access_token(
+            user_id=user_id,
+            email=email,
+            role=role,
+            tenant_id=tenant_id,
+        )
+    except Exception as exc:
+        logger.error("JWT token creation failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Server authentication is not configured",
+        ) from exc
 
 
 def _hash_password(password: str) -> str:
@@ -200,7 +189,7 @@ async def register(
             hashed_pw,
         )
 
-    token = _create_jwt(user_id, body.email, "owner")
+    token = _create_jwt(user_id, body.email, "owner", str(tenant["id"]))
     return AuthTokenResponse(
         access_token=token,
         user_id=user_id,
@@ -251,7 +240,12 @@ async def login(
         (row["minutes_allocated"] or 0) - (row["minutes_used"] or 0),
     )
 
-    token = _create_jwt(str(row["id"]), row["email"], row["role"])
+    token = _create_jwt(
+        str(row["id"]),
+        row["email"],
+        row["role"],
+        str(row["tenant_id"]) if row["tenant_id"] else None,
+    )
     return AuthTokenResponse(
         access_token=token,
         user_id=str(row["id"]),

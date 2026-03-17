@@ -1,0 +1,4 @@
+sngrep=installed (/usr/bin/sngrep)
+tcpdump=installed (/usr/bin/tcpdump)
+iftop=installed (/usr/sbin/iftop)
+htop=installed (/usr/bin/htop)

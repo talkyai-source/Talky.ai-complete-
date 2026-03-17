@@ -1,0 +1,21 @@
+Start testing: Mar 03 17:44 PKT
+----------------------------------------------------------
+1/1 Testing: voice_gateway_tests
+1/1 Test: voice_gateway_tests
+Command: "/home/ai-lab/Desktop/Talky.ai-complete-/services/voice-gateway-cpp/build-asan/voice_gateway_tests"
+Directory: /home/ai-lab/Desktop/Talky.ai-complete-/services/voice-gateway-cpp/build-asan
+"voice_gateway_tests" start time: Mar 03 17:44 PKT
+Output:
+----------------------------------------------------------
+==264466==LeakSanitizer has encountered a fatal error.
+==264466==HINT: For debugging, try setting environment variable LSAN_OPTIONS=verbosity=1:log_threads=1
+==264466==HINT: LeakSanitizer does not work under ptrace (strace, gdb, etc)
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Failed.
+"voice_gateway_tests" end time: Mar 03 17:44 PKT
+"voice_gateway_tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Mar 03 17:44 PKT

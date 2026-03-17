@@ -1,0 +1,9 @@
+{
+  "service": "asterisk",
+  "status": "passed",
+  "start_epoch": 1772623532,
+  "recovered_epoch": 1772623547,
+  "recovery_seconds": 15,
+  "sla_seconds": 180,
+  "notes": "Recovery within SLA and SIP probe passed."
+}

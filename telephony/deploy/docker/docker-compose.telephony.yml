@@ -4,13 +4,43 @@ name: talky-telephony
 # Best practice: override image tags with immutable digests in .env.telephony.
 
 services:
+  asterisk:
+    image: "${ASTERISK_IMAGE:-talky/asterisk:bookworm}"
+    build:
+      context: ../../asterisk
+      dockerfile: Dockerfile
+    container_name: talky-asterisk
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      ASTERISK_SIP_PORT: "${ASTERISK_SIP_PORT:-5070}"
+      RTP_PORT_MIN: "${RTP_PORT_MIN:-40000}"
+      RTP_PORT_MAX: "${RTP_PORT_MAX:-44999}"
+    volumes:
+      - ../../asterisk/conf/modules.conf:/etc/asterisk/modules.conf:ro
+      - ../../asterisk/conf/pjsip.conf:/etc/asterisk/pjsip.conf:ro
+      - ../../asterisk/conf/extensions.conf:/etc/asterisk/extensions.conf:ro
+      - ../../asterisk/conf/http.conf:/etc/asterisk/http.conf:ro
+      - ../../asterisk/conf/ari.conf:/etc/asterisk/ari.conf:ro
+      - ../../asterisk/conf/features.conf:/etc/asterisk/features.conf:ro
+      - ../../asterisk/conf/rtp.conf:/etc/asterisk/rtp.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "asterisk -rx 'core show uptime seconds' >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
   freeswitch:
     image: "${FREESWITCH_IMAGE:-safarov/freeswitch:latest}"
     container_name: talky-freeswitch
     restart: unless-stopped
     network_mode: host
+    # FreeSWITCH is always running as the hot-standby B2BUA.
+    # OpenSIPS dispatcher routes calls here automatically when Asterisk is down.
+    # To disable FreeSWITCH in a single-PBX deployment add: profiles: ["backup"]
     volumes:
       - ../../freeswitch/conf/autoload_configs/event_socket.conf.xml:/etc/freeswitch/autoload_configs/event_socket.conf.xml:ro
+      - ../../freeswitch/conf/autoload_configs/xml_curl.conf.xml:/etc/freeswitch/autoload_configs/xml_curl.conf.xml:ro
     healthcheck:
       test: ["CMD-SHELL", "fs_cli -x status >/dev/null 2>&1 || exit 1"]
       interval: 15s
@@ -28,38 +58,65 @@ services:
     cap_add:
       - NET_ADMIN
     volumes:
-      - ../../rtpengine/conf/rtpengine.conf:/etc/rtpengine/rtpengine.conf:ro
+      - ../../rtpengine/conf/rtpengine.userspace.conf:/etc/rtpengine/rtpengine.conf:ro
     healthcheck:
       test: ["CMD-SHELL", "ss -lun | grep -q ':2223' || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 10
       start_period: 10s
-  kamailio:
-    image: "${KAMAILIO_IMAGE:-ghcr.io/kamailio/kamailio:6.0.4-bookworm}"
-    container_name: talky-kamailio
+  opensips:
+    image: "${OPENSIPS_IMAGE:-talky/opensips:3.4-tls}"
+    build:
+      context: ../../opensips
+      dockerfile: Dockerfile
+    container_name: talky-opensips
     restart: unless-stopped
     network_mode: host
     environment:
-      KAMAILIO_SIP_IP: "${KAMAILIO_SIP_IP:-0.0.0.0}"
-      KAMAILIO_SIP_PORT: "${KAMAILIO_SIP_PORT:-15060}"
-      KAMAILIO_TLS_PORT: "${KAMAILIO_TLS_PORT:-15061}"
-      KAMAILIO_TLS_ONLY: "${KAMAILIO_TLS_ONLY:-0}"
+      OPENSIPS_SIP_IP: "${OPENSIPS_SIP_IP:-0.0.0.0}"
+      OPENSIPS_SIP_PORT: "${OPENSIPS_SIP_PORT:-15060}"
+      OPENSIPS_TLS_PORT: "${OPENSIPS_TLS_PORT:-15061}"
+      OPENSIPS_TLS_ONLY: "${OPENSIPS_TLS_ONLY:-0}"
     depends_on:
-      freeswitch:
+      asterisk:
         condition: service_healthy
       rtpengine:
         condition: service_started
-    command: ["kamailio", "-DD", "-E", "-f", "/etc/kamailio/kamailio.cfg"]
+    command: ["opensips", "-F", "-f", "/etc/opensips/opensips.cfg"]
     volumes:
-      - ../../kamailio/conf/kamailio.cfg:/etc/kamailio/kamailio.cfg:ro
-      - ../../kamailio/conf/dispatcher.list:/etc/kamailio/dispatcher.list:ro
-      - ../../kamailio/conf/address.list:/etc/kamailio/address.list:ro
-      - ../../kamailio/conf/tls.cfg:/etc/kamailio/tls.cfg:ro
-      - ../../kamailio/certs:/etc/kamailio/certs:ro
+      - ../../opensips/conf/opensips.cfg:/etc/opensips/opensips.cfg:ro
+      - ../../opensips/conf/dispatcher.list:/etc/opensips/dispatcher.list:ro
+      - ../../opensips/conf/address.list:/etc/opensips/address.list:ro
+      - ../../opensips/conf/tls.cfg:/etc/opensips/tls.cfg:ro
+      - ../../opensips/certs:/etc/opensips/certs:ro
     healthcheck:
-      test: ["CMD-SHELL", "kamailio -c -f /etc/kamailio/kamailio.cfg >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "opensips -C -f /etc/opensips/opensips.cfg >/dev/null 2>&1 || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 10
       start_period: 10s
+
+  # keepalived: floats a Virtual IP (VIP) between OpenSIPS (MASTER) and
+  # Kamailio (BACKUP) on a separate host.  Run this service only on the SBC
+  # hosts, not on the B2BUA hosts.  Requires NET_ADMIN capability for VRRP.
+  #
+  # To enable: set profile to "sbc" and start with --profile sbc.
+  keepalived:
+    image: "${KEEPALIVED_IMAGE:-osixia/keepalived:2.0.20}"
+    container_name: talky-keepalived
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_BROADCAST
+    profiles: ["sbc-ha"]
+    environment:
+      KEEPALIVED_CONF: "${KEEPALIVED_CONF:-/etc/keepalived/keepalived.conf}"
+    volumes:
+      # Mount the appropriate config depending on which node this is:
+      #   OpenSIPS host → keepalived-opensips.conf
+      #   Kamailio host → keepalived-kamailio.conf
+      - ../keepalived/keepalived-opensips.conf:/etc/keepalived/keepalived.conf:ro
+      - ../keepalived/notify.sh:/etc/keepalived/notify.sh:ro
+      - ../../scripts/check_sbc_health.sh:/etc/keepalived/check_sbc_health.sh:ro

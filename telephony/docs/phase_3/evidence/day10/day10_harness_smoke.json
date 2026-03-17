@@ -1,0 +1,56 @@
+{
+  "summary": {
+    "stage_label": "smoke",
+    "concurrency": 2,
+    "duration_seconds": 10.0,
+    "calls_attempted": 7,
+    "calls_success": 7,
+    "calls_failed": 0,
+    "session_setup_success_ratio": 1.0,
+    "ineffective_session_attempt_percent": 0.0,
+    "srd_ms": {
+      "p50": 9.0,
+      "p95": 12.399999999999999,
+      "p99": 12.879999999999999
+    },
+    "sdd_ms": {
+      "p50": 6.0,
+      "p95": 11.799999999999997,
+      "p99": 12.759999999999998
+    },
+    "transfer": {
+      "attempted": 7,
+      "success": 7,
+      "success_ratio": 1.0
+    },
+    "barge_in": {
+      "attempted": 0,
+      "reaction_ms": {
+        "available": false,
+        "p95": null
+      }
+    },
+    "scenario_breakdown": {
+      "transfer": {
+        "attempted": 7,
+        "success": 7,
+        "failed": 0
+      }
+    },
+    "tenant_breakdown": {
+      "day10-default": {
+        "attempted": 7,
+        "success": 7,
+        "failed": 0
+      }
+    },
+    "reason_breakdown": {
+      "caller_bye_fallback": 7
+    }
+  },
+  "gate": {
+    "pass": true,
+    "reasons": []
+  },
+  "timeseries_samples": 4
+}

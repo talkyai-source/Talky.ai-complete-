@@ -1,0 +1,13 @@
+2026-02-26T14:36:51Z | preflight_ok | primary_services_healthy
+2026-02-26T14:36:54Z | stage_pass | target=0
+2026-02-26T14:36:54Z | stage_start | target=5
+2026-02-26T14:37:03Z | stage_pass | target=5
+2026-02-26T14:37:03Z | stage_start | target=25
+2026-02-26T14:37:11Z | stage_pass | target=25
+2026-02-26T14:37:11Z | stage_start | target=50
+2026-02-26T14:37:19Z | stage_pass | target=50
+2026-02-26T14:37:19Z | stage_start | target=100
+2026-02-26T14:37:27Z | stage_pass | target=100
+2026-02-26T14:37:27Z | stabilization_start | seconds=30 interval=10
+2026-02-26T14:38:13Z | stabilization_pass | duration=30s
+2026-02-26T14:38:29Z | hot_standby_pass | freeswitch_backup_ready

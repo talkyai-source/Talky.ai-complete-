@@ -69,17 +69,24 @@ class VoiceSessionConfig:
     tts_sample_rate: int = 24000
 
     # Gateway
-    gateway_type: str = "browser"  # "browser" | "rtp" | "vonage" | "sip"
+    gateway_type: str = "browser"  # "browser" | "telephony"
     gateway_sample_rate: int = 24000
     gateway_channels: int = 1
     gateway_bit_depth: int = 16
 
     # Session metadata
-    session_type: str = "ask_ai"  # "ask_ai" | "voice_demo" | "freeswitch"
+    # session_type "telephony" covers ANY SIP B2BUA call (Asterisk or FreeSWITCH).
+    # "freeswitch" is kept as an alias for backwards compat and maps to "telephony".
+    # "vonage" indicates a Vonage-originated call.
+    session_type: str = "ask_ai"  # "ask_ai" | "voice_demo" | "telephony" | "freeswitch" | "vonage"
+    telephony_provider: str = "sip"  # "sip" | "vonage" | "twilio" | "browser"
     agent_config: Optional[AgentConfig] = None
     system_prompt: str = ""
     campaign_id: str = "ask-ai"
     lead_id: str = "demo-user"
+    # Only enable this when the session is backed by a real row in `calls`.
+    # Browser demos generate ephemeral call_ids that do not satisfy the FK.
+    event_logging_enabled: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +186,7 @@ class VoiceOrchestrator:
             call_id=call_id,
             campaign_id=config.campaign_id,
             lead_id=config.lead_id,
-            vonage_call_uuid=f"{config.session_type}-session",
+            provider_call_id=f"{config.session_type}-session",
             state=CallState.ACTIVE,
             conversation_state=ConversationState.GREETING,
             conversation_context=ConversationContext(),
@@ -197,7 +204,7 @@ class VoiceOrchestrator:
         # --- Event logging ---
         event_repo = None
         leg_id = None
-        if self._db_client and hasattr(self._db_client, "table"):
+        if config.event_logging_enabled and self._db_client and hasattr(self._db_client, "table"):
             event_repo = CallEventRepository(self._db_client)
             try:
                 leg_id = await event_repo.create_leg(
@@ -223,9 +230,15 @@ class VoiceOrchestrator:
                 )
             except Exception as evt_err:
                 logger.debug(f"Event logging failed (non-critical): {evt_err}")
-        elif self._db_client:
+        elif config.event_logging_enabled and self._db_client:
             logger.debug(
                 "Skipping call event logging: provided client does not implement table()"
+            )
+        else:
+            logger.debug(
+                "Skipping call event logging for %s session %s: no persisted calls row",
+                config.session_type,
+                call_id[:8],
             )
 
         # --- Assemble VoiceSession ---
@@ -252,20 +265,29 @@ class VoiceOrchestrator:
     # ------------------------------------------------------------------
 
     async def start_pipeline(
-        self, session: VoiceSession, websocket: WebSocket
+        self, session: VoiceSession, websocket: Optional[WebSocket]
     ) -> asyncio.Task:
         """
         Start the voice pipeline as an asyncio task.
 
-        The caller is responsible for cancelling the returned task
-        when the WebSocket message loop ends.
+        When *websocket* is not None (browser path), this method also calls
+        ``media_gateway.on_call_started`` so the gateway creates its session.
+
+        When *websocket* is None (telephony/Asterisk path), the caller is
+        responsible for having called ``media_gateway.on_call_started`` before
+        invoking this method — ``TelephonyMediaGateway`` does not need a
+        WebSocket and is initialised directly by the telephony bridge.
         """
         if not session.pipeline:
             raise RuntimeError("Pipeline not initialised")
 
-        await session.media_gateway.on_call_started(
-            session.call_id, {"websocket": websocket}
-        )
+        if websocket is not None:
+            # Browser path: let the orchestrator own the gateway session setup.
+            await session.media_gateway.on_call_started(
+                session.call_id, {"websocket": websocket}
+            )
+        # Telephony path: on_call_started was already called by the bridge with
+        # adapter/pbx_call_id metadata; no action needed here.
 
         async def _pipeline_with_error_handling():
             try:
@@ -287,76 +309,9 @@ class VoiceOrchestrator:
     # ------------------------------------------------------------------
 
     def _clean_text_for_tts(self, text: str) -> str:
-        """
-        Clean text for TTS by removing markdown, special characters, and emojis.
-        
-        Order matters - process complex patterns before simple ones to avoid
-        interference (e.g., markdown links before URL removal).
-        """
-        import re
-        
-        if not text:
-            return text
-        
-        # 1. First handle markdown links (before URL removal)
-        cleaned = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
-        
-        # 2. Remove code blocks and inline code
-        cleaned = re.sub(r'```[\s\S]*?```', ' code block ', cleaned)
-        cleaned = re.sub(r'`([^`]+)`', r'\1', cleaned)
-        
-        # 3. Remove standalone URLs (after markdown links)
-        cleaned = re.sub(r'https?://\S+', ' link ', cleaned)
-        cleaned = re.sub(r'www\.\S+', ' website ', cleaned)
-        
-        # 4. Remove markdown formatting (bold, italic, strikethrough)
-        cleaned = re.sub(r'\*\*\*?|\*\*?|__?|~~', '', cleaned)
-        
-        # 5. Remove headers
-        cleaned = re.sub(r'^#{1,6}\s*', '', cleaned, flags=re.MULTILINE)
-        
-        # 6. Remove blockquotes
-        cleaned = re.sub(r'^>\s*', '', cleaned, flags=re.MULTILINE)
-        
-        # 7. Remove emojis (comprehensive range)
-        emoji_pattern = re.compile(
-            "["
-            "\U0001F600-\U0001F64F"  # emoticons
-            "\U0001F300-\U0001F5FF"  # symbols & pictographs
-            "\U0001F680-\U0001F6FF"  # transport & map symbols
-            "\U0001F1E0-\U0001F1FF"  # flags
-            "\U00002702-\U000027B0"  # dingbats
-            "\U000024C2-\U0001F251"  # enclosed characters
-            "\U0001F900-\U0001F9FF"  # supplemental symbols
-            "\U00002600-\U000026FF"  # miscellaneous symbols
-            "]+",
-            flags=re.UNICODE
-        )
-        cleaned = emoji_pattern.sub('', cleaned)
-        
-        # 8. Replace common symbols with spoken words
-        replacements = {
-            '&': ' and ', '@': ' at ', '#': ' number ',
-            '$': ' dollars ', '%': ' percent ', '+': ' plus ',
-            '=': ' equals ', '→': ' to ', '←': ' from ',
-            '•': ', ', '·': ', ', '…': '...', '|': ', ',
-            '™': ' trademark ', '®': ' registered ', '©': ' copyright ',
-            '°': ' degrees ', '×': ' times ', '÷': ' divided by ',
-            '–': '-', '—': '-',  # en-dash and em-dash to hyphen
-        }
-        for symbol, spoken in replacements.items():
-            cleaned = cleaned.replace(symbol, spoken)
-        
-        # 9. Remove bullet points (but preserve the text)
-        cleaned = re.sub(r'^[\s]*[-*+•]\s+', '', cleaned, flags=re.MULTILINE)
-        
-        # 10. Normalize whitespace
-        cleaned = re.sub(r'\s+', ' ', cleaned)
-        cleaned = re.sub(r'!{2,}', '!', cleaned)
-        cleaned = re.sub(r'\?{2,}', '?', cleaned)
-        cleaned = re.sub(r'\.{3,}', '...', cleaned)
-        
-        return cleaned.strip()
+        """Delegate to the shared audio_utils helper to avoid code duplication."""
+        from app.utils.audio_utils import clean_text_for_tts
+        return clean_text_for_tts(text)
 
     async def send_greeting(
         self,
@@ -384,14 +339,17 @@ class VoiceOrchestrator:
 
         tts_start = time.time()
         was_interrupted = False
-        audio_buffer = bytearray()
-        chunks_sent = 0
+        sent_audio = False
+        waited_for_browser_playback = False
 
         try:
             # Mute STT during greeting TTS to prevent echo
             if session.stt_provider and hasattr(session.stt_provider, 'mute'):
                 await session.stt_provider.mute(session.call_id)
                 logger.debug(f"Muted STT for call {session.call_id} during greeting")
+
+            if hasattr(session.media_gateway, "start_playback_tracking"):
+                session.media_gateway.start_playback_tracking(session.call_id)
             
             async for audio_chunk in session.tts_provider.stream_synthesize(
                 text=cleaned_greeting,
@@ -407,19 +365,26 @@ class VoiceOrchestrator:
                     })
                     break
 
-                audio_buffer.extend(audio_chunk.data)
-
-                target_size = (
-                    first_chunk_bytes if chunks_sent == 0 else regular_chunk_bytes
+                # Route greeting audio through the media gateway so browser
+                # sessions use the same format conversion and buffering path as
+                # normal replies.
+                await session.media_gateway.send_audio(
+                    session.call_id,
+                    audio_chunk.data,
                 )
-                if len(audio_buffer) >= target_size:
-                    await websocket.send_bytes(bytes(audio_buffer))
-                    audio_buffer = bytearray()
-                    chunks_sent += 1
+                sent_audio = True
 
-            # Flush remaining audio
-            if audio_buffer and not was_interrupted:
-                await websocket.send_bytes(bytes(audio_buffer))
+            # Flush any buffered browser audio at end of greeting.
+            if not was_interrupted and hasattr(session.media_gateway, "flush_audio_buffer"):
+                await session.media_gateway.flush_audio_buffer(session.call_id)
+            if (
+                not was_interrupted
+                and sent_audio
+                and hasattr(session.media_gateway, "wait_for_playback_complete")
+            ):
+                await websocket.send_json({"type": "tts_audio_complete"})
+                waited_for_browser_playback = True
+                await session.media_gateway.wait_for_playback_complete(session.call_id)
 
         except Exception as e:
             logger.error(f"Greeting TTS error: {e}")
@@ -427,7 +392,7 @@ class VoiceOrchestrator:
         finally:
             # Unmute STT after greeting (with delay)
             if session.stt_provider and hasattr(session.stt_provider, 'unmute'):
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.05 if waited_for_browser_playback else 0.3)
                 await session.stt_provider.unmute(session.call_id)
                 logger.debug(f"Unmuted STT for call {session.call_id} after greeting")
 
@@ -569,27 +534,20 @@ class VoiceOrchestrator:
     async def _create_media_gateway(self, config: VoiceSessionConfig):
         """Initialise and return a media gateway via the factory."""
         from app.infrastructure.telephony.factory import MediaGatewayFactory
-        from app.core.voice_config import get_voice_config
 
-        _vc = get_voice_config()
         gateway = MediaGatewayFactory.create(config.gateway_type)
 
-        # Build init config — add provider-specific fields when needed
         init_config = {
             "sample_rate": config.gateway_sample_rate,
             "channels": config.gateway_channels,
             "bit_depth": config.gateway_bit_depth,
             "tts_source_format": "s16le" if config.tts_provider_type == "deepgram" else "f32le",
         }
-        if config.gateway_type == "rtp":
-            init_config.update({
-                "source_sample_rate": config.tts_sample_rate,
-                "source_format": _vc.tts_source_format,
-                "codec": _vc.rtp_codec,
-            })
 
-        # Telephony mode: FreeSWITCH needs Float32→Int16 conversion
-        if config.session_type == "freeswitch":
+        # Telephony mode: all SIP B2BUA calls (Asterisk or FreeSWITCH) need
+        # Float32→Int16 conversion because the audio bridge delivers 8 kHz PCM.
+        # "freeswitch" is kept as a backwards-compatible alias for "telephony".
+        if config.session_type in ("telephony", "freeswitch"):
             init_config["telephony_mode"] = True
 
         await gateway.initialize(init_config)
@@ -602,13 +560,17 @@ class VoiceOrchestrator:
 
 def _session_leg_type(config: VoiceSessionConfig) -> str:
     """Map session type to the leg_type used in call event logging."""
-    return {"freeswitch": "sip", "voice_demo": "browser"}.get(
-        config.session_type, "websocket"
-    )
+    return {
+        "telephony": "sip",
+        "freeswitch": "sip",   # backwards-compat alias
+        "voice_demo": "browser",
+    }.get(config.session_type, "websocket")
 
 
 def _session_provider(config: VoiceSessionConfig) -> str:
     """Map session type to the provider name used in call event logging."""
-    return {"freeswitch": "freeswitch", "voice_demo": "browser"}.get(
-        config.session_type, "browser"
-    )
+    return {
+        "telephony": "telephony",
+        "freeswitch": "freeswitch",  # backwards-compat alias
+        "voice_demo": "browser",
+    }.get(config.session_type, "browser")

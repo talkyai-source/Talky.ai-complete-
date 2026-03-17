@@ -1,0 +1,7 @@
+Day4 RTP pacing analysis
+packets_received=64
+sequence_monotonic=True
+timestamp_monotonic=True
+p50_inter_packet_ms=19.990
+p95_inter_packet_ms=20.166
+max_inter_packet_ms=21.397

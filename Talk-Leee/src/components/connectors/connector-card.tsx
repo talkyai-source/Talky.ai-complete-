@@ -1,6 +1,5 @@
 "use client";
 
-import React from "react";
 import type { ComponentType } from "react";
 import { useCallback, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -8,7 +7,7 @@ import { ExternalLink, Loader2, RotateCcw, Unplug } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { StatusPill, type StatusPillState, type StatusPillTheme } from "@/components/ui/status-pill";
-import { useAuthorizeConnector, useDisconnectConnector, queryKeys } from "@/lib/api-hooks";
+import { queryKeys } from "@/lib/api-hooks";
 import { formatLastSync, type ConnectorProviderType } from "@/lib/connectors-utils";
 import { isApiClientError } from "@/lib/http-client";
 import type { ConnectorConnectionStatus } from "@/lib/models";
@@ -36,6 +35,14 @@ function formatError(err: unknown) {
     return err instanceof Error ? err.message : "Request failed";
 }
 
+async function unavailableAuthorizeConnector(): Promise<{ authorization_url: string }> {
+    throw new Error("Connector action is unavailable.");
+}
+
+async function unavailableDisconnectConnector(): Promise<void> {
+    throw new Error("Connector action is unavailable.");
+}
+
 export function ConnectorCard({
     type,
     name,
@@ -46,9 +53,9 @@ export function ConnectorCard({
     lastSync,
     provider,
     errorMessage,
-    oauthCallbackPath = "/connectors/callback",
     authorizeConnector,
     disconnectConnector,
+    cardKey,
     statusPillTheme,
     className,
 }: {
@@ -61,15 +68,13 @@ export function ConnectorCard({
     lastSync?: string | null;
     provider?: string | null;
     errorMessage?: string | null;
-    oauthCallbackPath?: string;
-    authorizeConnector?: (input: { type: string; redirect_uri: string }) => Promise<{ authorization_url: string }>;
-    disconnectConnector?: (input: { type: string }) => Promise<void>;
+    authorizeConnector?: () => Promise<{ authorization_url: string }>;
+    disconnectConnector?: () => Promise<void>;
+    cardKey?: string;
     statusPillTheme?: StatusPillTheme;
     className?: string;
 }) {
     const qc = useQueryClient();
-    const authorize = useAuthorizeConnector();
-    const disconnect = useDisconnectConnector();
 
     const [inlineError, setInlineError] = useState<string | undefined>(undefined);
     const [pendingAction, setPendingAction] = useState<"connect" | "reconnect" | "disconnect" | null>(null);
@@ -90,10 +95,11 @@ export function ConnectorCard({
         return "Not connected.";
     }, [errorMessage, inlineError, status]);
 
-    const authorizeFn = authorizeConnector ?? authorize.mutateAsync;
-    const disconnectFn = disconnectConnector ?? disconnect.mutateAsync;
+    const authorizeFn = authorizeConnector ?? unavailableAuthorizeConnector;
+    const disconnectFn = disconnectConnector ?? unavailableDisconnectConnector;
 
     const isBusy = pendingAction !== null;
+    const testIdKey = cardKey ?? type;
 
     const canConnect = status === "disconnected";
     const canReconnect = status === "expired" || status === "error";
@@ -103,18 +109,14 @@ export function ConnectorCard({
         setInlineError(undefined);
         setPendingAction(status === "disconnected" ? "connect" : "reconnect");
         try {
-            const redirect = new URL(`${window.location.origin}${oauthCallbackPath}`);
-            if (!oauthCallbackPath.includes("[type]") && !oauthCallbackPath.includes(`/${type}/`)) {
-                redirect.searchParams.set("type", type);
-            }
-            const res = await authorizeFn({ type, redirect_uri: redirect.toString() });
+            const res = await authorizeFn();
             openOAuthWindow(res.authorization_url);
         } catch (err) {
             setInlineError(formatError(err));
         } finally {
             setPendingAction(null);
         }
-    }, [authorizeFn, oauthCallbackPath, status, type]);
+    }, [authorizeFn, status]);
 
     const requestDisconnect = useCallback(() => {
         setInlineError(undefined);
@@ -125,7 +127,8 @@ export function ConnectorCard({
         setInlineError(undefined);
         setPendingAction("disconnect");
         try {
-            await disconnectFn({ type });
+            await disconnectFn();
+            await qc.invalidateQueries({ queryKey: queryKeys.connectors() });
             await qc.invalidateQueries({ queryKey: queryKeys.connectorStatuses() });
         } catch (err) {
             setInlineError(formatError(err));
@@ -133,7 +136,7 @@ export function ConnectorCard({
         } finally {
             setPendingAction(null);
         }
-    }, [disconnectFn, qc, type]);
+    }, [disconnectFn, qc]);
 
     const lastSyncLabel = useMemo(() => formatLastSync(lastSync), [lastSync]);
 
@@ -144,7 +147,7 @@ export function ConnectorCard({
                 accentClassName,
                 className
             )}
-            data-testid={`connector-card-${type}`}
+            data-testid={`connector-card-${testIdKey}`}
         >
             <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -176,7 +179,7 @@ export function ConnectorCard({
             </div>
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-                <div className="text-xs text-muted-foreground">{provider ? `Provider: ${provider}` : null}</div>
+                <div className="text-xs text-muted-foreground">{provider ?? null}</div>
 
                 <div className="flex flex-wrap items-center gap-2">
                     {canConnect ? (
@@ -185,7 +188,7 @@ export function ConnectorCard({
                             variant="outline"
                             disabled={isBusy}
                             onClick={() => void connectOrReconnect()}
-                            data-testid={`connector-${type}-connect`}
+                            data-testid={`connector-${testIdKey}-connect`}
                         >
                             {pendingAction === "connect" ? (
                                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -202,7 +205,7 @@ export function ConnectorCard({
                             variant="secondary"
                             disabled={isBusy}
                             onClick={() => void connectOrReconnect()}
-                            data-testid={`connector-${type}-reconnect`}
+                            data-testid={`connector-${testIdKey}-reconnect`}
                         >
                             {pendingAction === "reconnect" ? (
                                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -219,7 +222,7 @@ export function ConnectorCard({
                             variant="destructive"
                             disabled={isBusy}
                             onClick={requestDisconnect}
-                            data-testid={`connector-${type}-disconnect`}
+                            data-testid={`connector-${testIdKey}-disconnect`}
                         >
                             {pendingAction === "disconnect" ? (
                                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />

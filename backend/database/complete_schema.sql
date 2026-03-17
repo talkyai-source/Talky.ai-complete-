@@ -5,7 +5,7 @@
 -- This is the final consolidated schema for LOCAL PostgreSQL (managed via pgAdmin4).
 -- All Supabase-specific SQL has been removed:
 --   - No auth.users reference (user_profiles uses its own UUID primary key)
---   - No auth.uid() or auth.role() in RLS (RLS disabled; app enforces tenant isolation)
+--   - No auth.uid() or auth.role() in RLS (tenant policy tables use app.current_tenant_id context)
 --   - No Supabase extensions (uuid-ossp kept as it's standard PostgreSQL)
 --
 -- Auth: Local JWT (PyJWT + bcrypt) via app/api/v1/endpoints/auth.py
@@ -235,6 +235,7 @@ CREATE TABLE IF NOT EXISTS transcripts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
     call_id UUID NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
+    talklee_call_id VARCHAR(20),
     turns JSONB NOT NULL DEFAULT '[]',
     full_text TEXT,
     word_count INTEGER DEFAULT 0,
@@ -250,6 +251,7 @@ CREATE TABLE IF NOT EXISTS transcripts (
 
 CREATE INDEX IF NOT EXISTS idx_transcripts_tenant_id ON transcripts(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_transcripts_call_id ON transcripts(call_id);
+CREATE INDEX IF NOT EXISTS idx_transcripts_talklee_id ON transcripts(talklee_call_id) WHERE talklee_call_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_transcripts_full_text_search
 ON transcripts USING gin(to_tsvector('english', COALESCE(full_text, '')));
 
@@ -349,7 +351,8 @@ CREATE TABLE IF NOT EXISTS assistant_conversations (
     message_count INTEGER DEFAULT 0,
     started_at TIMESTAMPTZ DEFAULT NOW(),
     last_message_at TIMESTAMPTZ DEFAULT NOW(),
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- 4.4 ASSISTANT ACTIONS (Audit Log)
@@ -582,6 +585,703 @@ CREATE TABLE IF NOT EXISTS tenant_ai_configs (
 
 CREATE INDEX IF NOT EXISTS idx_tenant_ai_configs_tenant_id ON tenant_ai_configs(tenant_id);
 
+-- 6.6.2 TENANT SIP TRUNKS
+CREATE TABLE IF NOT EXISTS tenant_sip_trunks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    trunk_name VARCHAR(100) NOT NULL,
+    sip_domain VARCHAR(255) NOT NULL,
+    port INTEGER NOT NULL DEFAULT 5060 CHECK (port BETWEEN 1 AND 65535),
+    transport VARCHAR(8) NOT NULL DEFAULT 'udp' CHECK (transport IN ('udp', 'tcp', 'tls')),
+    direction VARCHAR(10) NOT NULL DEFAULT 'both' CHECK (direction IN ('inbound', 'outbound', 'both')),
+    auth_username VARCHAR(255),
+    auth_password_encrypted TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT FALSE,
+    metadata JSONB NOT NULL DEFAULT '{}',
+    created_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
+    updated_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_tenant_sip_trunks_auth_pair
+        CHECK (
+            (auth_username IS NULL AND auth_password_encrypted IS NULL) OR
+            (auth_username IS NOT NULL AND auth_password_encrypted IS NOT NULL)
+        )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_sip_trunks_tenant_name_unique
+    ON tenant_sip_trunks(tenant_id, lower(trunk_name));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_sip_trunks_tenant_id_id_unique
+    ON tenant_sip_trunks(tenant_id, id);
+CREATE INDEX IF NOT EXISTS idx_tenant_sip_trunks_tenant_active
+    ON tenant_sip_trunks(tenant_id, is_active);
+
+-- 6.6.3 TENANT CODEC POLICIES
+CREATE TABLE IF NOT EXISTS tenant_codec_policies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    policy_name VARCHAR(100) NOT NULL,
+    allowed_codecs TEXT[] NOT NULL DEFAULT ARRAY['PCMU', 'PCMA'],
+    preferred_codec VARCHAR(20) NOT NULL DEFAULT 'PCMU',
+    sample_rate_hz INTEGER NOT NULL DEFAULT 8000 CHECK (sample_rate_hz IN (8000, 16000, 24000, 48000)),
+    ptime_ms INTEGER NOT NULL DEFAULT 20 CHECK (ptime_ms IN (10, 20, 30, 40, 60)),
+    max_bitrate_kbps INTEGER CHECK (max_bitrate_kbps IS NULL OR max_bitrate_kbps > 0),
+    jitter_buffer_ms INTEGER NOT NULL DEFAULT 60 CHECK (jitter_buffer_ms BETWEEN 0 AND 1000),
+    is_active BOOLEAN NOT NULL DEFAULT FALSE,
+    metadata JSONB NOT NULL DEFAULT '{}',
+    created_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
+    updated_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_tenant_codec_preferred_in_allowed
+        CHECK (preferred_codec = ANY (allowed_codecs))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_codec_policies_tenant_name_unique
+    ON tenant_codec_policies(tenant_id, lower(policy_name));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_codec_policies_tenant_id_id_unique
+    ON tenant_codec_policies(tenant_id, id);
+CREATE INDEX IF NOT EXISTS idx_tenant_codec_policies_tenant_active
+    ON tenant_codec_policies(tenant_id, is_active);
+
+-- 6.6.4 TENANT ROUTE POLICIES
+CREATE TABLE IF NOT EXISTS tenant_route_policies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    policy_name VARCHAR(100) NOT NULL,
+    route_type VARCHAR(10) NOT NULL DEFAULT 'outbound' CHECK (route_type IN ('inbound', 'outbound')),
+    priority INTEGER NOT NULL DEFAULT 100 CHECK (priority BETWEEN 1 AND 10000),
+    match_pattern TEXT NOT NULL,
+    target_trunk_id UUID NOT NULL,
+    codec_policy_id UUID,
+    strip_digits INTEGER NOT NULL DEFAULT 0 CHECK (strip_digits BETWEEN 0 AND 15),
+    prepend_digits VARCHAR(20),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    metadata JSONB NOT NULL DEFAULT '{}',
+    created_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
+    updated_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT fk_tenant_route_policies_trunk
+        FOREIGN KEY (tenant_id, target_trunk_id)
+        REFERENCES tenant_sip_trunks(tenant_id, id)
+        ON DELETE RESTRICT,
+    CONSTRAINT fk_tenant_route_policies_codec
+        FOREIGN KEY (tenant_id, codec_policy_id)
+        REFERENCES tenant_codec_policies(tenant_id, id)
+        ON DELETE SET NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_route_policies_tenant_name_unique
+    ON tenant_route_policies(tenant_id, lower(policy_name));
+CREATE INDEX IF NOT EXISTS idx_tenant_route_policies_tenant_route_active_priority
+    ON tenant_route_policies(tenant_id, route_type, is_active, priority);
+
+-- 6.6.5 TENANT TELEPHONY IDEMPOTENCY
+CREATE TABLE IF NOT EXISTS tenant_telephony_idempotency (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    operation VARCHAR(120) NOT NULL,
+    idempotency_key VARCHAR(255) NOT NULL,
+    request_hash CHAR(64) NOT NULL,
+    response_body JSONB,
+    status_code INTEGER CHECK (status_code IS NULL OR status_code BETWEEN 100 AND 599),
+    resource_type VARCHAR(64),
+    resource_id UUID,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '24 hours'),
+    CONSTRAINT uq_tenant_telephony_idempotency
+        UNIQUE (tenant_id, operation, idempotency_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tenant_telephony_idempotency_tenant_created
+    ON tenant_telephony_idempotency(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tenant_telephony_idempotency_expires
+    ON tenant_telephony_idempotency(expires_at);
+
+-- 6.6.6 TENANT RUNTIME POLICY VERSIONS
+CREATE TABLE IF NOT EXISTS tenant_runtime_policy_versions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    policy_version INTEGER NOT NULL CHECK (policy_version > 0),
+    source_hash CHAR(64) NOT NULL,
+    schema_version VARCHAR(32) NOT NULL DEFAULT 'ws-g.v1',
+    input_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+    compiled_artifact JSONB NOT NULL,
+    validation_report JSONB NOT NULL DEFAULT '{}'::jsonb,
+    build_status VARCHAR(20) NOT NULL DEFAULT 'compiled'
+        CHECK (build_status IN ('compiled', 'active', 'failed', 'superseded', 'rolled_back')),
+    is_active BOOLEAN NOT NULL DEFAULT FALSE,
+    is_last_good BOOLEAN NOT NULL DEFAULT FALSE,
+    created_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
+    activated_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    activated_at TIMESTAMPTZ,
+    CONSTRAINT uq_tenant_runtime_policy_version UNIQUE (tenant_id, policy_version)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_runtime_policy_versions_tenant_active_unique
+    ON tenant_runtime_policy_versions(tenant_id)
+    WHERE is_active = TRUE;
+
+CREATE INDEX IF NOT EXISTS idx_tenant_runtime_policy_versions_tenant_version
+    ON tenant_runtime_policy_versions(tenant_id, policy_version DESC);
+
+CREATE INDEX IF NOT EXISTS idx_tenant_runtime_policy_versions_tenant_last_good
+    ON tenant_runtime_policy_versions(tenant_id, is_last_good, policy_version DESC);
+
+-- 6.6.7 TENANT RUNTIME POLICY EVENTS
+CREATE TABLE IF NOT EXISTS tenant_runtime_policy_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    policy_version_id UUID NOT NULL REFERENCES tenant_runtime_policy_versions(id) ON DELETE CASCADE,
+    action VARCHAR(20) NOT NULL CHECK (action IN ('activate', 'rollback')),
+    stage VARCHAR(20) NOT NULL CHECK (stage IN ('precheck', 'apply', 'verify', 'commit', 'rollback')),
+    status VARCHAR(20) NOT NULL CHECK (status IN ('started', 'succeeded', 'failed')),
+    details JSONB NOT NULL DEFAULT '{}'::jsonb,
+    request_id VARCHAR(128),
+    created_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_tenant_runtime_policy_events_tenant_created
+    ON tenant_runtime_policy_events(tenant_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_tenant_runtime_policy_events_policy_version
+    ON tenant_runtime_policy_events(policy_version_id, created_at DESC);
+
+-- 6.6.8 TENANT SIP TRUST POLICIES
+CREATE TABLE IF NOT EXISTS tenant_sip_trust_policies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    policy_name VARCHAR(100) NOT NULL,
+    allowed_source_cidrs CIDR[] NOT NULL DEFAULT ARRAY[]::CIDR[],
+    blocked_source_cidrs CIDR[] NOT NULL DEFAULT ARRAY[]::CIDR[],
+    kamailio_group SMALLINT NOT NULL DEFAULT 1 CHECK (kamailio_group > 0),
+    priority INTEGER NOT NULL DEFAULT 100 CHECK (priority BETWEEN 1 AND 10000),
+    is_active BOOLEAN NOT NULL DEFAULT FALSE,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
+    updated_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_tenant_sip_trust_has_source
+        CHECK (cardinality(allowed_source_cidrs) > 0)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_sip_trust_policies_tenant_name_unique
+    ON tenant_sip_trust_policies(tenant_id, lower(policy_name));
+CREATE INDEX IF NOT EXISTS idx_tenant_sip_trust_policies_tenant_active
+    ON tenant_sip_trust_policies(tenant_id, is_active, priority);
+
+-- 6.6.9 TENANT TELEPHONY THRESHOLD POLICIES (WS-I)
+CREATE TABLE IF NOT EXISTS tenant_telephony_threshold_policies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    policy_name VARCHAR(100) NOT NULL,
+    policy_scope VARCHAR(32) NOT NULL
+        CHECK (policy_scope IN ('api_mutation', 'runtime_mutation', 'sip_edge')),
+    metric_key VARCHAR(120) NOT NULL DEFAULT '*',
+    window_seconds INTEGER NOT NULL DEFAULT 60 CHECK (window_seconds BETWEEN 1 AND 3600),
+    warn_threshold INTEGER NOT NULL DEFAULT 20 CHECK (warn_threshold > 0),
+    throttle_threshold INTEGER NOT NULL DEFAULT 30 CHECK (throttle_threshold > 0),
+    block_threshold INTEGER NOT NULL DEFAULT 45 CHECK (block_threshold > 0),
+    block_duration_seconds INTEGER NOT NULL DEFAULT 300 CHECK (block_duration_seconds BETWEEN 1 AND 86400),
+    throttle_retry_seconds INTEGER NOT NULL DEFAULT 2 CHECK (throttle_retry_seconds BETWEEN 1 AND 60),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
+    updated_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_tenant_telephony_threshold_policy UNIQUE (tenant_id, policy_scope, metric_key),
+    CONSTRAINT chk_tenant_telephony_threshold_order
+        CHECK (warn_threshold <= throttle_threshold AND throttle_threshold <= block_threshold)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tenant_telephony_threshold_scope_active
+    ON tenant_telephony_threshold_policies(tenant_id, policy_scope, is_active);
+CREATE INDEX IF NOT EXISTS idx_tenant_telephony_threshold_metric
+    ON tenant_telephony_threshold_policies(tenant_id, policy_scope, metric_key);
+
+INSERT INTO tenant_telephony_threshold_policies (
+    tenant_id,
+    policy_name,
+    policy_scope,
+    metric_key,
+    window_seconds,
+    warn_threshold,
+    throttle_threshold,
+    block_threshold,
+    block_duration_seconds,
+    throttle_retry_seconds,
+    metadata
+)
+SELECT
+    t.id,
+    'api-default',
+    'api_mutation',
+    '*',
+    60,
+    20,
+    30,
+    45,
+    300,
+    2,
+    '{"seeded_by":"ws-i"}'::jsonb
+FROM tenants t
+ON CONFLICT (tenant_id, policy_scope, metric_key) DO NOTHING;
+
+INSERT INTO tenant_telephony_threshold_policies (
+    tenant_id,
+    policy_name,
+    policy_scope,
+    metric_key,
+    window_seconds,
+    warn_threshold,
+    throttle_threshold,
+    block_threshold,
+    block_duration_seconds,
+    throttle_retry_seconds,
+    metadata
+)
+SELECT
+    t.id,
+    'runtime-default',
+    'runtime_mutation',
+    '*',
+    60,
+    10,
+    15,
+    20,
+    300,
+    2,
+    '{"seeded_by":"ws-i"}'::jsonb
+FROM tenants t
+ON CONFLICT (tenant_id, policy_scope, metric_key) DO NOTHING;
+
+-- 6.6.10 TENANT TELEPHONY QUOTA EVENTS (WS-I)
+CREATE TABLE IF NOT EXISTS tenant_telephony_quota_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    policy_id UUID REFERENCES tenant_telephony_threshold_policies(id) ON DELETE SET NULL,
+    event_type VARCHAR(16) NOT NULL CHECK (event_type IN ('warn', 'throttle', 'block')),
+    policy_scope VARCHAR(32) NOT NULL,
+    metric_key VARCHAR(120) NOT NULL,
+    counter_value BIGINT NOT NULL DEFAULT 0,
+    threshold_value BIGINT,
+    window_seconds INTEGER NOT NULL CHECK (window_seconds > 0),
+    block_ttl_seconds INTEGER NOT NULL DEFAULT 0 CHECK (block_ttl_seconds >= 0),
+    request_id VARCHAR(128),
+    details JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_tenant_telephony_quota_events_tenant_created
+    ON tenant_telephony_quota_events(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tenant_telephony_quota_events_policy
+    ON tenant_telephony_quota_events(policy_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tenant_telephony_quota_events_scope_metric
+    ON tenant_telephony_quota_events(tenant_id, policy_scope, metric_key, created_at DESC);
+
+-- 6.6.11 TENANT POLICY AUDIT LOG (WS-J)
+CREATE TABLE IF NOT EXISTS tenant_policy_audit_log (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    table_name VARCHAR(80) NOT NULL,
+    record_id UUID,
+    action VARCHAR(10) NOT NULL CHECK (action IN ('INSERT', 'UPDATE', 'DELETE')),
+    actor_user_id UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
+    actor_type VARCHAR(16) NOT NULL DEFAULT 'system' CHECK (actor_type IN ('user', 'system')),
+    request_id VARCHAR(128),
+    correlation_id VARCHAR(128),
+    before_payload JSONB,
+    after_payload JSONB,
+    changed_fields TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    source VARCHAR(32) NOT NULL DEFAULT 'db_trigger',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    retention_until TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '400 days')
+);
+
+CREATE INDEX IF NOT EXISTS idx_tenant_policy_audit_log_tenant_created
+    ON tenant_policy_audit_log(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tenant_policy_audit_log_tenant_table_created
+    ON tenant_policy_audit_log(tenant_id, table_name, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tenant_policy_audit_log_request_id
+    ON tenant_policy_audit_log(request_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_policy_audit_log_retention_until
+    ON tenant_policy_audit_log(retention_until);
+
+CREATE OR REPLACE FUNCTION prevent_tenant_policy_audit_log_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'tenant_policy_audit_log is immutable';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION log_tenant_policy_mutation()
+RETURNS TRIGGER AS $$
+DECLARE
+    event_tenant_id UUID;
+    event_record_id UUID;
+    before_data JSONB := NULL;
+    after_data JSONB := NULL;
+    actor_setting TEXT;
+    actor_uuid UUID := NULL;
+    request_id_setting TEXT;
+    correlation_id_setting TEXT;
+    merged_data JSONB;
+    changed_cols TEXT[] := ARRAY[]::TEXT[];
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        event_tenant_id := NEW.tenant_id;
+        event_record_id := NEW.id;
+        after_data := to_jsonb(NEW);
+    ELSIF TG_OP = 'UPDATE' THEN
+        event_tenant_id := NEW.tenant_id;
+        event_record_id := NEW.id;
+        before_data := to_jsonb(OLD);
+        after_data := to_jsonb(NEW);
+    ELSIF TG_OP = 'DELETE' THEN
+        event_tenant_id := OLD.tenant_id;
+        event_record_id := OLD.id;
+        before_data := to_jsonb(OLD);
+    ELSE
+        RAISE EXCEPTION 'Unsupported TG_OP: %', TG_OP;
+    END IF;
+
+    actor_setting := NULLIF(current_setting('app.current_user_id', true), '');
+    IF actor_setting IS NOT NULL THEN
+        BEGIN
+            actor_uuid := actor_setting::UUID;
+        EXCEPTION WHEN others THEN
+            actor_uuid := NULL;
+        END;
+    END IF;
+
+    request_id_setting := NULLIF(current_setting('app.current_request_id', true), '');
+    correlation_id_setting := request_id_setting;
+
+    merged_data := COALESCE(before_data, '{}'::jsonb) || COALESCE(after_data, '{}'::jsonb);
+    SELECT COALESCE(array_agg(keys.key ORDER BY keys.key), ARRAY[]::TEXT[])
+    INTO changed_cols
+    FROM jsonb_object_keys(merged_data) AS keys(key)
+    WHERE COALESCE(before_data -> keys.key, 'null'::jsonb)
+        IS DISTINCT FROM COALESCE(after_data -> keys.key, 'null'::jsonb);
+
+    INSERT INTO tenant_policy_audit_log (
+        tenant_id,
+        table_name,
+        record_id,
+        action,
+        actor_user_id,
+        actor_type,
+        request_id,
+        correlation_id,
+        before_payload,
+        after_payload,
+        changed_fields,
+        source
+    )
+    VALUES (
+        event_tenant_id,
+        TG_TABLE_NAME,
+        event_record_id,
+        TG_OP,
+        actor_uuid,
+        CASE WHEN actor_uuid IS NULL THEN 'system' ELSE 'user' END,
+        request_id_setting,
+        correlation_id_setting,
+        before_data,
+        after_data,
+        changed_cols,
+        'db_trigger'
+    );
+
+    RETURN COALESCE(NEW, OLD);
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION prune_tenant_policy_audit_log(p_limit INTEGER DEFAULT 5000)
+RETURNS INTEGER AS $$
+DECLARE
+    deleted_count INTEGER;
+BEGIN
+    WITH to_delete AS (
+        SELECT id
+        FROM tenant_policy_audit_log
+        WHERE retention_until < NOW()
+        ORDER BY retention_until ASC
+        LIMIT GREATEST(COALESCE(p_limit, 0), 0)
+    ),
+    deleted AS (
+        DELETE FROM tenant_policy_audit_log a
+        USING to_delete d
+        WHERE a.id = d.id
+        RETURNING 1
+    )
+    SELECT COUNT(*) INTO deleted_count FROM deleted;
+
+    RETURN deleted_count;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 6.6.12 TENANT POLICY RLS
+ALTER TABLE tenant_sip_trunks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_codec_policies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_route_policies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_telephony_idempotency ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_runtime_policy_versions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_runtime_policy_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_sip_trust_policies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_telephony_threshold_policies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_telephony_quota_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_policy_audit_log ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE tenant_sip_trunks FORCE ROW LEVEL SECURITY;
+ALTER TABLE tenant_codec_policies FORCE ROW LEVEL SECURITY;
+ALTER TABLE tenant_route_policies FORCE ROW LEVEL SECURITY;
+ALTER TABLE tenant_telephony_idempotency FORCE ROW LEVEL SECURITY;
+ALTER TABLE tenant_runtime_policy_versions FORCE ROW LEVEL SECURITY;
+ALTER TABLE tenant_runtime_policy_events FORCE ROW LEVEL SECURITY;
+ALTER TABLE tenant_sip_trust_policies FORCE ROW LEVEL SECURITY;
+ALTER TABLE tenant_telephony_threshold_policies FORCE ROW LEVEL SECURITY;
+ALTER TABLE tenant_telephony_quota_events FORCE ROW LEVEL SECURITY;
+ALTER TABLE tenant_policy_audit_log FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS p_tenant_sip_trunks_select ON tenant_sip_trunks;
+DROP POLICY IF EXISTS p_tenant_sip_trunks_insert ON tenant_sip_trunks;
+DROP POLICY IF EXISTS p_tenant_sip_trunks_update ON tenant_sip_trunks;
+DROP POLICY IF EXISTS p_tenant_sip_trunks_delete ON tenant_sip_trunks;
+CREATE POLICY p_tenant_sip_trunks_select ON tenant_sip_trunks
+    FOR SELECT
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_sip_trunks_insert ON tenant_sip_trunks
+    FOR INSERT
+    WITH CHECK (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_sip_trunks_update ON tenant_sip_trunks
+    FOR UPDATE
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true))
+    WITH CHECK (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_sip_trunks_delete ON tenant_sip_trunks
+    FOR DELETE
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true));
+
+DROP POLICY IF EXISTS p_tenant_codec_policies_select ON tenant_codec_policies;
+DROP POLICY IF EXISTS p_tenant_codec_policies_insert ON tenant_codec_policies;
+DROP POLICY IF EXISTS p_tenant_codec_policies_update ON tenant_codec_policies;
+DROP POLICY IF EXISTS p_tenant_codec_policies_delete ON tenant_codec_policies;
+CREATE POLICY p_tenant_codec_policies_select ON tenant_codec_policies
+    FOR SELECT
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_codec_policies_insert ON tenant_codec_policies
+    FOR INSERT
+    WITH CHECK (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_codec_policies_update ON tenant_codec_policies
+    FOR UPDATE
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true))
+    WITH CHECK (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_codec_policies_delete ON tenant_codec_policies
+    FOR DELETE
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true));
+
+DROP POLICY IF EXISTS p_tenant_route_policies_select ON tenant_route_policies;
+DROP POLICY IF EXISTS p_tenant_route_policies_insert ON tenant_route_policies;
+DROP POLICY IF EXISTS p_tenant_route_policies_update ON tenant_route_policies;
+DROP POLICY IF EXISTS p_tenant_route_policies_delete ON tenant_route_policies;
+CREATE POLICY p_tenant_route_policies_select ON tenant_route_policies
+    FOR SELECT
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_route_policies_insert ON tenant_route_policies
+    FOR INSERT
+    WITH CHECK (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_route_policies_update ON tenant_route_policies
+    FOR UPDATE
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true))
+    WITH CHECK (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_route_policies_delete ON tenant_route_policies
+    FOR DELETE
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true));
+
+DROP POLICY IF EXISTS p_tenant_telephony_idempotency_select ON tenant_telephony_idempotency;
+DROP POLICY IF EXISTS p_tenant_telephony_idempotency_insert ON tenant_telephony_idempotency;
+DROP POLICY IF EXISTS p_tenant_telephony_idempotency_update ON tenant_telephony_idempotency;
+DROP POLICY IF EXISTS p_tenant_telephony_idempotency_delete ON tenant_telephony_idempotency;
+CREATE POLICY p_tenant_telephony_idempotency_select ON tenant_telephony_idempotency
+    FOR SELECT
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_telephony_idempotency_insert ON tenant_telephony_idempotency
+    FOR INSERT
+    WITH CHECK (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_telephony_idempotency_update ON tenant_telephony_idempotency
+    FOR UPDATE
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true))
+    WITH CHECK (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_telephony_idempotency_delete ON tenant_telephony_idempotency
+    FOR DELETE
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true));
+
+DROP POLICY IF EXISTS p_tenant_runtime_policy_versions_select ON tenant_runtime_policy_versions;
+DROP POLICY IF EXISTS p_tenant_runtime_policy_versions_insert ON tenant_runtime_policy_versions;
+DROP POLICY IF EXISTS p_tenant_runtime_policy_versions_update ON tenant_runtime_policy_versions;
+DROP POLICY IF EXISTS p_tenant_runtime_policy_versions_delete ON tenant_runtime_policy_versions;
+CREATE POLICY p_tenant_runtime_policy_versions_select ON tenant_runtime_policy_versions
+    FOR SELECT
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_runtime_policy_versions_insert ON tenant_runtime_policy_versions
+    FOR INSERT
+    WITH CHECK (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_runtime_policy_versions_update ON tenant_runtime_policy_versions
+    FOR UPDATE
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true))
+    WITH CHECK (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_runtime_policy_versions_delete ON tenant_runtime_policy_versions
+    FOR DELETE
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true));
+
+DROP POLICY IF EXISTS p_tenant_runtime_policy_events_select ON tenant_runtime_policy_events;
+DROP POLICY IF EXISTS p_tenant_runtime_policy_events_insert ON tenant_runtime_policy_events;
+DROP POLICY IF EXISTS p_tenant_runtime_policy_events_update ON tenant_runtime_policy_events;
+DROP POLICY IF EXISTS p_tenant_runtime_policy_events_delete ON tenant_runtime_policy_events;
+CREATE POLICY p_tenant_runtime_policy_events_select ON tenant_runtime_policy_events
+    FOR SELECT
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_runtime_policy_events_insert ON tenant_runtime_policy_events
+    FOR INSERT
+    WITH CHECK (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_runtime_policy_events_update ON tenant_runtime_policy_events
+    FOR UPDATE
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true))
+    WITH CHECK (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_runtime_policy_events_delete ON tenant_runtime_policy_events
+    FOR DELETE
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true));
+
+DROP POLICY IF EXISTS p_tenant_sip_trust_policies_select ON tenant_sip_trust_policies;
+DROP POLICY IF EXISTS p_tenant_sip_trust_policies_insert ON tenant_sip_trust_policies;
+DROP POLICY IF EXISTS p_tenant_sip_trust_policies_update ON tenant_sip_trust_policies;
+DROP POLICY IF EXISTS p_tenant_sip_trust_policies_delete ON tenant_sip_trust_policies;
+CREATE POLICY p_tenant_sip_trust_policies_select ON tenant_sip_trust_policies
+    FOR SELECT
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_sip_trust_policies_insert ON tenant_sip_trust_policies
+    FOR INSERT
+    WITH CHECK (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_sip_trust_policies_update ON tenant_sip_trust_policies
+    FOR UPDATE
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true))
+    WITH CHECK (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_sip_trust_policies_delete ON tenant_sip_trust_policies
+    FOR DELETE
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true));
+
+DROP POLICY IF EXISTS p_tenant_telephony_threshold_policies_select ON tenant_telephony_threshold_policies;
+DROP POLICY IF EXISTS p_tenant_telephony_threshold_policies_insert ON tenant_telephony_threshold_policies;
+DROP POLICY IF EXISTS p_tenant_telephony_threshold_policies_update ON tenant_telephony_threshold_policies;
+DROP POLICY IF EXISTS p_tenant_telephony_threshold_policies_delete ON tenant_telephony_threshold_policies;
+CREATE POLICY p_tenant_telephony_threshold_policies_select ON tenant_telephony_threshold_policies
+    FOR SELECT
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_telephony_threshold_policies_insert ON tenant_telephony_threshold_policies
+    FOR INSERT
+    WITH CHECK (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_telephony_threshold_policies_update ON tenant_telephony_threshold_policies
+    FOR UPDATE
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true))
+    WITH CHECK (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_telephony_threshold_policies_delete ON tenant_telephony_threshold_policies
+    FOR DELETE
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true));
+
+DROP POLICY IF EXISTS p_tenant_telephony_quota_events_select ON tenant_telephony_quota_events;
+DROP POLICY IF EXISTS p_tenant_telephony_quota_events_insert ON tenant_telephony_quota_events;
+DROP POLICY IF EXISTS p_tenant_telephony_quota_events_update ON tenant_telephony_quota_events;
+DROP POLICY IF EXISTS p_tenant_telephony_quota_events_delete ON tenant_telephony_quota_events;
+CREATE POLICY p_tenant_telephony_quota_events_select ON tenant_telephony_quota_events
+    FOR SELECT
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_telephony_quota_events_insert ON tenant_telephony_quota_events
+    FOR INSERT
+    WITH CHECK (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_telephony_quota_events_update ON tenant_telephony_quota_events
+    FOR UPDATE
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true))
+    WITH CHECK (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_telephony_quota_events_delete ON tenant_telephony_quota_events
+    FOR DELETE
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true));
+
+DROP POLICY IF EXISTS p_tenant_policy_audit_log_select ON tenant_policy_audit_log;
+DROP POLICY IF EXISTS p_tenant_policy_audit_log_insert ON tenant_policy_audit_log;
+DROP POLICY IF EXISTS p_tenant_policy_audit_log_update ON tenant_policy_audit_log;
+DROP POLICY IF EXISTS p_tenant_policy_audit_log_delete ON tenant_policy_audit_log;
+CREATE POLICY p_tenant_policy_audit_log_select ON tenant_policy_audit_log
+    FOR SELECT
+    USING (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_policy_audit_log_insert ON tenant_policy_audit_log
+    FOR INSERT
+    WITH CHECK (tenant_id::text = current_setting('app.current_tenant_id', true));
+CREATE POLICY p_tenant_policy_audit_log_update ON tenant_policy_audit_log
+    FOR UPDATE
+    USING (FALSE)
+    WITH CHECK (FALSE);
+CREATE POLICY p_tenant_policy_audit_log_delete ON tenant_policy_audit_log
+    FOR DELETE
+    USING (FALSE);
+
+DROP TRIGGER IF EXISTS trg_prevent_tenant_policy_audit_log_update
+    ON tenant_policy_audit_log;
+CREATE TRIGGER trg_prevent_tenant_policy_audit_log_update
+    BEFORE UPDATE ON tenant_policy_audit_log
+    FOR EACH ROW
+    EXECUTE FUNCTION prevent_tenant_policy_audit_log_mutation();
+
+DROP TRIGGER IF EXISTS trg_prevent_tenant_policy_audit_log_delete
+    ON tenant_policy_audit_log;
+CREATE TRIGGER trg_prevent_tenant_policy_audit_log_delete
+    BEFORE DELETE ON tenant_policy_audit_log
+    FOR EACH ROW
+    EXECUTE FUNCTION prevent_tenant_policy_audit_log_mutation();
+
+DROP TRIGGER IF EXISTS trg_audit_tenant_sip_trunks ON tenant_sip_trunks;
+CREATE TRIGGER trg_audit_tenant_sip_trunks
+    AFTER INSERT OR UPDATE OR DELETE ON tenant_sip_trunks
+    FOR EACH ROW
+    EXECUTE FUNCTION log_tenant_policy_mutation();
+
+DROP TRIGGER IF EXISTS trg_audit_tenant_codec_policies ON tenant_codec_policies;
+CREATE TRIGGER trg_audit_tenant_codec_policies
+    AFTER INSERT OR UPDATE OR DELETE ON tenant_codec_policies
+    FOR EACH ROW
+    EXECUTE FUNCTION log_tenant_policy_mutation();
+
+DROP TRIGGER IF EXISTS trg_audit_tenant_route_policies ON tenant_route_policies;
+CREATE TRIGGER trg_audit_tenant_route_policies
+    AFTER INSERT OR UPDATE OR DELETE ON tenant_route_policies
+    FOR EACH ROW
+    EXECUTE FUNCTION log_tenant_policy_mutation();
+
+DROP TRIGGER IF EXISTS trg_audit_tenant_sip_trust_policies ON tenant_sip_trust_policies;
+CREATE TRIGGER trg_audit_tenant_sip_trust_policies
+    AFTER INSERT OR UPDATE OR DELETE ON tenant_sip_trust_policies
+    FOR EACH ROW
+    EXECUTE FUNCTION log_tenant_policy_mutation();
+
+DROP TRIGGER IF EXISTS trg_audit_tenant_runtime_policy_versions ON tenant_runtime_policy_versions;
+CREATE TRIGGER trg_audit_tenant_runtime_policy_versions
+    AFTER INSERT OR UPDATE OR DELETE ON tenant_runtime_policy_versions
+    FOR EACH ROW
+    EXECUTE FUNCTION log_tenant_policy_mutation();
+
+DROP TRIGGER IF EXISTS trg_audit_tenant_telephony_threshold_policies ON tenant_telephony_threshold_policies;
+CREATE TRIGGER trg_audit_tenant_telephony_threshold_policies
+    AFTER INSERT OR UPDATE OR DELETE ON tenant_telephony_threshold_policies
+    FOR EACH ROW
+    EXECUTE FUNCTION log_tenant_policy_mutation();
+
 -- 6.7 CLIENTS
 CREATE TABLE IF NOT EXISTS clients (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -700,10 +1400,15 @@ DECLARE
     t text;
 BEGIN
     FOR t IN
-        SELECT table_name FROM information_schema.tables
-        WHERE table_schema = 'public'
-        AND table_type = 'BASE TABLE'
-        AND table_name NOT IN ('call_events', 'recordings', 'invoices', 'usage_records')
+        SELECT t.table_name
+        FROM information_schema.tables t
+        JOIN information_schema.columns c
+          ON c.table_schema = t.table_schema
+         AND c.table_name = t.table_name
+        WHERE t.table_schema = 'public'
+          AND t.table_type = 'BASE TABLE'
+          AND c.column_name = 'updated_at'
+          AND t.table_name NOT IN ('call_events', 'recordings', 'invoices', 'usage_records')
     LOOP
         EXECUTE format('DROP TRIGGER IF EXISTS update_%I_updated_at ON %I', t, t);
         EXECUTE format(

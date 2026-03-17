@@ -24,11 +24,13 @@ import {
 } from "@/components/ui/dashboard-charts";
 import { HoverTooltip, useHoverTooltip } from "@/components/ui/hover-tooltip";
 import { computeMinutesUsageFontPx, MINUTES_USAGE_LAYOUT_SPEC } from "@/lib/minutes-usage-layout.mjs";
+import { ApiClientError } from "@/lib/http-client";
+import { useAuth } from "@/lib/auth-context";
 
 function Counter({ value }: { value: number }) {
     const nodeRef = useRef<HTMLSpanElement>(null);
     const isInView = useInView(nodeRef, { once: true, margin: "-10px" });
-    
+
     useEffect(() => {
         const node = nodeRef.current;
         if (!node || !isInView) return;
@@ -40,7 +42,7 @@ function Counter({ value }: { value: number }) {
         }
 
         const current = Number((node.textContent || "0").replace(/,/g, "")) || 0;
-        
+
         const controls = animate(current, value, {
             duration: 1.5,
             ease: "easeOut",
@@ -48,7 +50,7 @@ function Counter({ value }: { value: number }) {
                 node.textContent = Math.floor(v).toLocaleString();
             }
         });
-        
+
         return () => controls.stop();
     }, [value, isInView]);
 
@@ -105,12 +107,12 @@ function KpiCard({
     const motionProps = reduceMotion
         ? {}
         : {
-              initial: { opacity: 0, y: 14 },
-              animate: { opacity: 1, y: 0 },
-              transition: { duration: 0.35 },
-              whileHover: { scale: 1.02 },
-              whileTap: { scale: 0.99 },
-          };
+            initial: { opacity: 0, y: 14 },
+            animate: { opacity: 1, y: 0 },
+            transition: { duration: 0.35 },
+            whileHover: { scale: 1.02 },
+            whileTap: { scale: 0.99 },
+        };
 
     return (
         <motion.div
@@ -508,8 +510,7 @@ function CampaignLinesChart({
                 ...c,
                 values: data.map((b) => {
                     const total = typeof b.total === "number" ? b.total : 0;
-                    const noise = (seeded01(b.startMs * 0.00001 + ci * 91.7) - 0.5) * 0.16;
-                    return Math.max(0, total * c.weight * (1 + noise));
+                    return Math.max(0, total * c.weight);
                 }),
             };
         });
@@ -654,12 +655,13 @@ function CampaignLinesChart({
 }
 
 export default function DashboardPage() {
+    const { user, loading: authLoading } = useAuth();
     const [summary, setSummary] = useState<DashboardSummary | null>(null);
     const [liveSummary, setLiveSummary] = useState<DashboardSummary | null>(null);
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
     const [series, setSeries] = useState<CallSeriesItem[]>([]);
     const [liveBars, setLiveBars] = useState<DualSeriesPoint[]>([]);
-    const [streamStatus, setStreamStatus] = useState<"connecting" | "connected" | "retrying" | "offline">("connecting");
+    const [streamStatus, setStreamStatus] = useState<"connecting" | "connected" | "retrying" | "offline">("offline");
     const [, setStreamFailures] = useState(0);
     const [, setStreamLatencyMs] = useState<number | null>(null);
     const [, setStreamError] = useState("");
@@ -771,8 +773,8 @@ export default function DashboardPage() {
         const successDelta = delta(currentSuccessRate, prevSuccessRate);
         const failedPct = currentTotal > 0 ? (currentFailed / currentTotal) * 100 : 0;
 
-        const currentActiveCalls = Math.max(0, Math.round((liveBuckets[liveBuckets.length - 1]?.total ?? 0) * 0.18 + 6));
-        const prevActiveCalls = Math.max(0, Math.round((previousBucketsBase[previousBucketsBase.length - 1]?.total ?? 0) * 0.18 + 6));
+        const currentActiveCalls = currentFailed;
+        const prevActiveCalls = sum(previousBucketsBase, "failed");
         const activeDelta = delta(currentActiveCalls, prevActiveCalls);
 
         const avgDurDelta = delta(currentAvgDurationSec, prevAvgDurationSec);
@@ -795,12 +797,12 @@ export default function DashboardPage() {
                 status: statusVariant(currentSuccessRate, { green: 92, yellow: 85 }),
             },
             {
-                title: "Active Calls",
+                title: "Failed Calls",
                 value: currentActiveCalls,
                 valueSuffix: "",
                 deltaAbs: activeDelta.abs,
                 deltaPct: activeDelta.pct,
-                status: statusVariant(currentActiveCalls, { green: 30, yellow: 18 }),
+                status: statusVariantLowerBetter(currentActiveCalls, { green: 10, yellow: 50 }),
             },
             {
                 title: "Avg Duration",
@@ -816,19 +818,11 @@ export default function DashboardPage() {
         const windowStart = activeRange.startMs;
         const rangeMs = Math.max(1, now - windowStart);
 
-        const baseMarkers: LiveChartMarker[] = [
-            { ms: now - Math.round(rangeMs * 0.82), label: "Campaign A start", kind: "campaign-start" },
-            { ms: now - Math.round(rangeMs * 0.46), label: "Campaign A end", kind: "campaign-end" },
-            { ms: now - Math.round(rangeMs * 0.68), label: "Campaign B start", kind: "campaign-start" },
-            { ms: now - Math.round(rangeMs * 0.22), label: "Campaign B end", kind: "campaign-end" },
-            { ms: now - Math.round(rangeMs * 0.12), label: "Deploy", kind: "event" },
-        ];
+        const baseMarkers: LiveChartMarker[] = [];
         const noteMarkers: LiveChartMarker[] = notes.map((n) => ({ ms: n.ms, label: n.label, kind: "note" }));
         const markers: LiveChartMarker[] = [...baseMarkers, ...noteMarkers].filter((m) => m.ms >= windowStart && m.ms <= now);
 
-        const maintenanceWindows: LiveWindow[] = [
-            { startMs: now - Math.round(rangeMs * 0.6), endMs: now - Math.round(rangeMs * 0.55), label: "Maintenance" },
-        ].filter((w) => w.endMs >= windowStart && w.startMs <= now);
+        const maintenanceWindows: LiveWindow[] = [];
 
         const peaks = liveBuckets
             .map((b) => ({ b, v: typeof b.total === "number" ? b.total : -1 }))
@@ -851,20 +845,10 @@ export default function DashboardPage() {
 
         const peakBands = peaks.map((p) => ({ startMs: p.startMs, endMs: p.endMs, label: p.label })) satisfies LiveWindow[];
 
-        const outcomes = (() => {
-            const completed = Math.max(0, Math.round(currentAnswered * 0.72));
-            const voicemail = Math.max(0, Math.round(currentAnswered * 0.11));
-            const busy = Math.max(0, Math.round(currentTotal * 0.05));
-            const noAnswer = Math.max(0, Math.round(currentTotal * 0.07));
-            const networkError = Math.max(0, currentFailed - busy - noAnswer);
-            return [
-                { label: "Completed", value: completed, color: "#10B981" },
-                { label: "Voicemail", value: voicemail, color: "#3B82F6" },
-                { label: "Busy", value: busy, color: "#F59E0B" },
-                { label: "No Answer", value: noAnswer, color: "#A855F7" },
-                { label: "Network Error", value: networkError, color: "#EF4444" },
-            ];
-        })();
+        const outcomes = [
+            { label: "Answered", value: currentAnswered, color: "#10B981" },
+            { label: "Failed", value: currentFailed, color: "#EF4444" },
+        ];
 
         const bucket = activeBucket ?? liveBuckets[liveBuckets.length - 1] ?? null;
         const bucketTotal = bucket && typeof bucket.total === "number" ? bucket.total : 0;
@@ -873,8 +857,8 @@ export default function DashboardPage() {
         const bucketInProgress = Math.max(0, bucketTotal - bucketAnswered - bucketFailed);
 
         const hoverStats = {
-            activeCalls: Math.max(0, Math.round(bucketTotal * 0.18 + 6)),
-            queueSize: Math.max(0, Math.round(bucketTotal * 0.12 + 4)),
+            totalCalls: bucketTotal,
+            answeredCalls: bucketAnswered,
             completedTotal: currentAnswered,
             failedTotal: currentFailed,
             successRate: currentTotal > 0 ? (currentAnswered / currentTotal) * 100 : 0,
@@ -886,8 +870,9 @@ export default function DashboardPage() {
     }, [activeBucket, activeRange.endMs, activeRange.startMs, liveBuckets, notes, previousBucketsBase]);
 
     useEffect(() => {
-        loadData();
-    }, []);
+        if (authLoading || !user) return;
+        void loadData();
+    }, [authLoading, user]);
 
     async function loadData() {
         try {
@@ -902,6 +887,10 @@ export default function DashboardPage() {
             setCampaigns(campaignsData.campaigns);
             setSeries(analytics.series);
         } catch (err) {
+            if (err instanceof ApiClientError && err.status === 401) {
+                setError("Your session expired. Please sign in again.");
+                return;
+            }
             setError(err instanceof Error ? err.message : "Failed to load dashboard");
         } finally {
             setLoading(false);
@@ -937,6 +926,11 @@ export default function DashboardPage() {
     }, [liveSummary]);
 
     useEffect(() => {
+        if (authLoading || !user) {
+            setStreamStatus("offline");
+            return;
+        }
+
         const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
         const isString = (v: unknown): v is string => typeof v === "string";
 
@@ -961,9 +955,8 @@ export default function DashboardPage() {
 
         const getWsUrl = () => {
             const envUrl = process.env.NEXT_PUBLIC_DASHBOARD_WS_URL;
-            if (envUrl && envUrl.trim().length > 0) return envUrl.trim();
-            const proto = window.location.protocol === "https:" ? "wss" : "ws";
-            return `${proto}://${window.location.host}/ws`;
+            if (!envUrl || envUrl.trim().length === 0) return null;
+            return envUrl.trim();
         };
 
         let ws: WebSocket | null = null;
@@ -1040,8 +1033,13 @@ export default function DashboardPage() {
 
             let url = "";
             try {
-                url = getWsUrl();
+                url = getWsUrl() ?? "";
             } catch {
+                setStreamStatus("offline");
+                return;
+            }
+
+            if (!url) {
                 setStreamStatus("offline");
                 return;
             }
@@ -1126,7 +1124,7 @@ export default function DashboardPage() {
             stopped = true;
             cleanup();
         };
-    }, []);
+    }, [authLoading, user]);
 
     const effectiveSummary = liveSummary ?? summary;
 
@@ -1208,30 +1206,29 @@ export default function DashboardPage() {
 
     const heatRows = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     const heatCols = ["0–3", "3–6", "6–9", "9–12", "12–15", "15–18", "18–21", "21–24"];
-    const seedTotals = series.length > 0 ? series.map((s) => s.total_calls) : [0, 0, 0, 0, 0, 0, 0];
-    const heatValues = heatRows.map((_, ri) =>
-        heatCols.map((__, ci) => {
-            const base = seedTotals[ri % seedTotals.length] ?? 0;
-            const wave = 0.55 + 0.45 * Math.sin((ri + 1) * 1.4 + (ci + 1) * 0.9);
-            return Math.max(0, Math.round((base / heatCols.length) * wave));
-        })
+    const heatValues = heatRows.map(() =>
+        heatCols.map(() => 0)
     );
+    // Populate heatmap from real API series data
+    for (const s of series) {
+        const d = new Date(s.date);
+        const dayIndex = (d.getDay() + 6) % 7; // Mon=0 .. Sun=6
+        // Distribute calls evenly across time slots (API doesn't provide hourly breakdowns)
+        const perSlot = Math.round(s.total_calls / heatCols.length);
+        for (let ci = 0; ci < heatCols.length; ci++) {
+            heatValues[dayIndex][ci] += perSlot;
+        }
+    }
     const heatMax = Math.max(1, ...heatValues.flat());
 
     const campaignLineSeries = useMemo(() => {
         const palette = ["#2563EB", "#10B981", "#F59E0B", "#A855F7"];
-        const base = campaigns.length > 0
-            ? campaigns.slice(0, 4).map((c, i) => ({
-                id: c.id,
-                label: c.name,
-                weight: Math.max(0.35, Math.min(1.5, (c.max_concurrent_calls ?? 10) / 12)),
-                color: palette[i % palette.length],
-            }))
-            : [
-                { id: "camp-a", label: "Campaign A", weight: 1, color: palette[0] },
-                { id: "camp-b", label: "Campaign B", weight: 0.8, color: palette[1] },
-                { id: "camp-c", label: "Campaign C", weight: 0.6, color: palette[2] },
-            ];
+        const base = campaigns.slice(0, 4).map((c, i) => ({
+            id: c.id,
+            label: c.name,
+            weight: Math.max(0.35, Math.min(1.5, (c.max_concurrent_calls ?? 10) / 12)),
+            color: palette[i % palette.length],
+        }));
         const enabled: Record<string, boolean> = {};
         for (const c of base) enabled[c.id] = true;
         return { campaigns: base, enabled };
@@ -1649,12 +1646,12 @@ export default function DashboardPage() {
 
                             <div className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
                                 <div className="rounded-xl border border-gray-200 dark:border-border bg-white dark:bg-muted/30 px-3 py-2">
-                                    <div className="text-[11px] font-bold uppercase tracking-wide text-gray-600 dark:text-muted-foreground">Active calls</div>
-                                    <div className="mt-1 text-lg font-black tabular-nums text-gray-900 dark:text-foreground">{Math.round(hoverStats.activeCalls).toLocaleString()}</div>
+                                    <div className="text-[11px] font-bold uppercase tracking-wide text-gray-600 dark:text-muted-foreground">Total calls</div>
+                                    <div className="mt-1 text-lg font-black tabular-nums text-gray-900 dark:text-foreground">{Math.round(hoverStats.totalCalls).toLocaleString()}</div>
                                 </div>
                                 <div className="rounded-xl border border-gray-200 dark:border-border bg-white dark:bg-muted/30 px-3 py-2">
-                                    <div className="text-[11px] font-bold uppercase tracking-wide text-gray-600 dark:text-muted-foreground">Queue size</div>
-                                    <div className="mt-1 text-lg font-black tabular-nums text-gray-900 dark:text-foreground">{Math.round(hoverStats.queueSize).toLocaleString()}</div>
+                                    <div className="text-[11px] font-bold uppercase tracking-wide text-gray-600 dark:text-muted-foreground">Answered</div>
+                                    <div className="mt-1 text-lg font-black tabular-nums text-gray-900 dark:text-foreground">{Math.round(hoverStats.answeredCalls).toLocaleString()}</div>
                                 </div>
                                 <div className="rounded-xl border border-gray-200 dark:border-border bg-white dark:bg-muted/30 px-3 py-2">
                                     <div className="text-[11px] font-bold uppercase tracking-wide text-gray-600 dark:text-muted-foreground">In progress</div>

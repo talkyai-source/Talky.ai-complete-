@@ -99,9 +99,10 @@ class LegDirection(str, Enum):
 
 class TelephonyProvider(str, Enum):
     """Telephony provider identifiers."""
-    VONAGE      = "vonage"
-    FREESWITCH  = "freeswitch"
-    SIP         = "sip"
+    SIP         = "sip"         # Generic SIP stack (Asterisk / FreeSWITCH)
+    VONAGE      = "vonage"      # Vonage Voice API (cloud)
+    TWILIO      = "twilio"      # Twilio Programmable Voice (cloud, future)
+    FREESWITCH  = "freeswitch"  # Backwards compat alias for SIP
     BROWSER     = "browser"
     SIMULATION  = "simulation"
 
@@ -206,7 +207,7 @@ class CallEvent(BaseModel):
     previous_state: Optional[str] = None
     new_state: Optional[str] = None
     event_data: Dict[str, Any] = Field(default_factory=dict)
-    source: str = Field(..., description="Origin: vonage_webhook, call_service, websocket, system")
+    source: str = Field(..., description="Origin: vonage_webhook, sip_bridge, call_service, websocket, dialer_worker, system")
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -259,6 +260,9 @@ def map_vonage_status(vonage_status: str) -> Optional[VoiceCallState]:
     """
     Map raw Vonage event status strings to ``VoiceCallState``.
 
+    Used by the Vonage webhook bridge to normalise provider-specific
+    statuses into the canonical state machine.
+
     Returns ``None`` for informational statuses that do not require
     processing (``started``, ``ringing``).
     """
@@ -276,3 +280,5 @@ def map_vonage_status(vonage_status: str) -> Optional[VoiceCallState]:
         "machine":     VoiceCallState.NO_ANSWER,
     }
     return _MAP.get(vonage_status)
+
+

@@ -134,7 +134,7 @@ export default function SettingsPage() {
                         </div>
                         <div className="flex flex-wrap gap-2">
                             <Link
-                                href="/settings/connectors"
+                                href="/connectors"
                                 className="inline-flex items-center justify-center rounded-xl border border-teal-600 bg-teal-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition-[transform,background-color,color,border-color,box-shadow] duration-150 ease-out hover:bg-teal-700 hover:border-teal-700 hover:shadow-md hover:scale-[1.02] active:scale-[0.99]"
                             >
                                 Connectors

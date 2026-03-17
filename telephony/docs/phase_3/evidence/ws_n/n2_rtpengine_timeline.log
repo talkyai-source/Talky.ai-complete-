@@ -1,0 +1,5 @@
+2026-02-26T14:35:56Z | drill_start | N2 RTPengine degradation drill started
+2026-02-26T14:35:57Z | inject_restart_rtpengine | Restarting talky-rtpengine
+2026-02-26T14:36:03Z | ng_port_ok | RTPengine NG port 2223 confirmed
+2026-02-26T14:36:03Z | sip_probe_ok | SIP probe succeeded after RTPengine recovery
+2026-02-26T14:36:03Z | drill_complete | N2 passed (recovery=6s)

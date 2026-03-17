@@ -17,7 +17,7 @@ Usage:
 import asyncio
 import logging
 import os
-import socket
+import random
 from typing import Optional, Callable, Dict, Any
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -25,6 +25,11 @@ from enum import Enum
 from uuid import uuid4
 
 logger = logging.getLogger(__name__)
+
+ESL_INITIAL_CONNECT_ATTEMPTS = 3
+ESL_RECONNECT_BASE_DELAY = 0.25
+ESL_RECONNECT_MAX_DELAY = 5.0
+ESL_API_COMMAND_RETRIES = 1
 
 
 @dataclass
@@ -130,6 +135,14 @@ class _ESLConnection:
         self.name = name
         self._reader: Optional[asyncio.StreamReader] = None
         self._writer: Optional[asyncio.StreamWriter] = None
+
+    @property
+    def is_connected(self) -> bool:
+        return (
+            self._reader is not None
+            and self._writer is not None
+            and not self._writer.is_closing()
+        )
     
     async def connect(self) -> bool:
         """Connect and authenticate."""
@@ -292,9 +305,11 @@ class FreeSwitchESL:
         self._api_conn: Optional[_ESLConnection] = None
         self._connected = False
         self._running = False
+        self._disconnect_requested = False
         
         # Lock for API commands (serialize command+response pairs)
         self._api_lock = asyncio.Lock()
+        self._reconnect_lock = asyncio.Lock()
         
         # Active calls tracked by UUID
         self._calls: Dict[str, CallInfo] = {}
@@ -319,33 +334,228 @@ class FreeSwitchESL:
     @property
     def calls(self) -> Dict[str, CallInfo]:
         return self._calls.copy()
+
+    def _connection_alive(self, connection: Optional[_ESLConnection]) -> bool:
+        return bool(connection and connection.is_connected)
+
+    def _refresh_connected_state(self) -> None:
+        self._connected = (
+            self._connection_alive(self._event_conn)
+            and self._connection_alive(self._api_conn)
+        )
+
+    def _is_transport_error(self, exc: Exception) -> bool:
+        if isinstance(exc, RuntimeError):
+            return "not connected" in str(exc).lower()
+        return isinstance(exc, (OSError, asyncio.IncompleteReadError))
+
+    def _next_reconnect_delay(self, attempt: int) -> float:
+        delay = min(
+            ESL_RECONNECT_BASE_DELAY * (2 ** attempt),
+            ESL_RECONNECT_MAX_DELAY,
+        )
+        return delay * (0.5 + random.random())
+
+    async def _close_connection(self, connection: Optional[_ESLConnection]) -> None:
+        if connection:
+            await connection.close()
+
+    async def _open_connection(self, name: str) -> _ESLConnection:
+        connection = _ESLConnection(self.config, name)
+        if not await connection.connect():
+            await connection.close()
+            raise ConnectionError(f"ESL[{name}] failed to connect")
+        return connection
+
+    async def _connect_dual_connections(self, max_attempts: int) -> bool:
+        async with self._reconnect_lock:
+            attempt = 0
+            while not self._disconnect_requested and attempt < max_attempts:
+                event_conn: Optional[_ESLConnection] = None
+                api_conn: Optional[_ESLConnection] = None
+                try:
+                    event_conn = await self._open_connection("events")
+                    api_conn = await self._open_connection("api")
+                    await self._subscribe_events(event_conn)
+
+                    old_event_conn = self._event_conn
+                    old_api_conn = self._api_conn
+                    self._event_conn = event_conn
+                    self._api_conn = api_conn
+                    await self._close_connection(old_event_conn)
+                    await self._close_connection(old_api_conn)
+                    self._refresh_connected_state()
+                    logger.info("✓ Connected to FreeSWITCH ESL (dual-connection)")
+                    return True
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    attempt += 1
+                    self._connected = False
+                    await self._close_connection(event_conn)
+                    await self._close_connection(api_conn)
+                    if attempt >= max_attempts:
+                        logger.error(
+                            "ESL dual connection failed after %s attempts: %s",
+                            attempt,
+                            exc,
+                        )
+                        return False
+                    delay = self._next_reconnect_delay(attempt - 1)
+                    logger.warning(
+                        "ESL dual connection attempt %s/%s failed: %s; retrying in %.2fs",
+                        attempt,
+                        max_attempts,
+                        exc,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+        return False
+
+    async def _reconnect_connection(
+        self,
+        target: str,
+        *,
+        failed_conn: Optional[_ESLConnection] = None,
+        max_attempts: Optional[int] = None,
+    ) -> bool:
+        attr_name = "_event_conn" if target == "event" else "_api_conn"
+        connection_name = "events" if target == "event" else "api"
+
+        async with self._reconnect_lock:
+            if self._disconnect_requested:
+                return False
+
+            current = getattr(self, attr_name)
+            if (
+                failed_conn is not None
+                and current is not failed_conn
+                and self._connection_alive(current)
+            ):
+                self._refresh_connected_state()
+                return True
+
+            if current and (failed_conn is None or current is failed_conn or not current.is_connected):
+                await current.close()
+
+            attempt = 0
+            while not self._disconnect_requested:
+                if max_attempts is not None and attempt >= max_attempts:
+                    self._refresh_connected_state()
+                    return False
+
+                new_conn: Optional[_ESLConnection] = None
+                try:
+                    new_conn = await self._open_connection(connection_name)
+                    if target == "event":
+                        await self._subscribe_events(new_conn)
+
+                    old_conn = getattr(self, attr_name)
+                    setattr(self, attr_name, new_conn)
+                    if old_conn is not new_conn:
+                        await self._close_connection(old_conn)
+                    self._refresh_connected_state()
+                    logger.info("ESL %s connection ready", connection_name)
+                    return True
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    attempt += 1
+                    self._connected = False
+                    await self._close_connection(new_conn)
+                    if max_attempts is not None and attempt >= max_attempts:
+                        logger.error(
+                            "ESL %s reconnect failed after %s attempts: %s",
+                            connection_name,
+                            attempt,
+                            exc,
+                        )
+                        return False
+                    delay = self._next_reconnect_delay(attempt - 1)
+                    logger.warning(
+                        "ESL %s reconnect attempt %s failed: %s; retrying in %.2fs",
+                        connection_name,
+                        attempt,
+                        exc,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+
+        self._refresh_connected_state()
+        return False
+
+    async def _execute_api_command(self, command_type: str, command: str) -> str:
+        max_attempts = ESL_API_COMMAND_RETRIES + 1
+
+        async with self._api_lock:
+            last_exc: Optional[Exception] = None
+
+            for attempt in range(max_attempts):
+                conn = self._api_conn
+                if not self._connection_alive(conn):
+                    reconnected = await self._reconnect_connection(
+                        "api",
+                        failed_conn=conn,
+                        max_attempts=ESL_INITIAL_CONNECT_ATTEMPTS,
+                    )
+                    if not reconnected or not self._api_conn:
+                        raise RuntimeError("ESL api connection unavailable")
+                    conn = self._api_conn
+
+                try:
+                    assert conn is not None
+                    await conn.send(f"{command_type} {command}")
+                    response = await conn.read_full_response()
+                    self._refresh_connected_state()
+                    return response
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    if not self._is_transport_error(exc) or attempt >= max_attempts - 1:
+                        raise
+
+                    last_exc = exc
+                    logger.warning(
+                        "ESL %s transport failure for '%s' (attempt %s/%s): %s",
+                        command_type,
+                        command,
+                        attempt + 1,
+                        max_attempts,
+                        exc,
+                    )
+                    reconnected = await self._reconnect_connection(
+                        "api",
+                        failed_conn=conn,
+                        max_attempts=ESL_INITIAL_CONNECT_ATTEMPTS,
+                    )
+                    if not reconnected:
+                        raise
+
+            raise last_exc or RuntimeError(
+                f"ESL {command_type} command failed without a captured exception"
+            )
     
     async def connect(self) -> bool:
         """Connect both ESL connections and start event listener."""
         try:
+            if self._running and self._event_task and not self._event_task.done() and self.connected:
+                return True
+
             logger.info(f"Connecting to FreeSWITCH ESL at {self.config.host}:{self.config.port}")
-            
-            # Connection 1: Events
-            self._event_conn = _ESLConnection(self.config, "events")
-            if not await self._event_conn.connect():
-                return False
-            
-            # Connection 2: API commands
-            self._api_conn = _ESLConnection(self.config, "api")
-            if not await self._api_conn.connect():
-                await self._event_conn.close()
-                return False
-            
-            self._connected = True
-            logger.info("✓ Connected to FreeSWITCH ESL (dual-connection)")
-            
-            # Subscribe to events on the event connection
-            await self._subscribe_events()
-            
-            # Start event listener
+            self._disconnect_requested = False
             self._running = True
-            self._event_task = asyncio.create_task(self._event_listener())
-            
+
+            connected = await self._connect_dual_connections(
+                max_attempts=ESL_INITIAL_CONNECT_ATTEMPTS
+            )
+            if not connected:
+                self._running = False
+                self._connected = False
+                return False
+
+            if not self._event_task or self._event_task.done():
+                self._event_task = asyncio.create_task(self._event_listener())
+
             return True
             
         except asyncio.TimeoutError:
@@ -357,6 +567,7 @@ class FreeSwitchESL:
     
     async def disconnect(self) -> None:
         """Disconnect from FreeSWITCH ESL."""
+        self._disconnect_requested = True
         self._running = False
         self._connected = False
         
@@ -366,15 +577,21 @@ class FreeSwitchESL:
                 await self._event_task
             except asyncio.CancelledError:
                 pass
+            self._event_task = None
         
         if self._event_conn:
             await self._event_conn.close()
+            self._event_conn = None
         if self._api_conn:
             await self._api_conn.close()
+            self._api_conn = None
         
         logger.info("Disconnected from FreeSWITCH ESL")
     
-    async def _subscribe_events(self) -> None:
+    async def _subscribe_events(
+        self,
+        connection: Optional[_ESLConnection] = None,
+    ) -> None:
         """Subscribe to call-related events on the event connection."""
         events = [
             "CHANNEL_CREATE",
@@ -388,25 +605,44 @@ class FreeSwitchESL:
             "CUSTOM",
             "HEARTBEAT"
         ]
-        await self._event_conn.send(f"event plain {' '.join(events)}")
-        await self._event_conn.read_full_response()
+        event_conn = connection or self._event_conn
+        if not event_conn:
+            raise RuntimeError("ESL[event] not connected")
+        await event_conn.send(f"event plain {' '.join(events)}")
+        await event_conn.read_full_response()
         logger.info(f"Subscribed to ESL events: {events}")
     
     async def _event_listener(self) -> None:
         """Background task listening for FreeSWITCH events on event connection."""
         logger.info("ESL event listener started")
         
-        while self._running and self._event_conn:
+        while self._running:
+            conn = self._event_conn
+            if not self._connection_alive(conn):
+                if not await self._reconnect_connection("event", failed_conn=conn):
+                    break
+                continue
+
             try:
-                event = await self._event_conn.read_event()
+                assert conn is not None
+                event = await conn.read_event()
                 if event:
                     await self._handle_event(event)
+                else:
+                    logger.warning("ESL event connection closed; reconnecting")
+                    if not await self._reconnect_connection("event", failed_conn=conn):
+                        break
             except asyncio.TimeoutError:
                 continue
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 if self._running:
+                    if self._is_transport_error(e):
+                        logger.warning(f"ESL event connection lost: {e}")
+                        if not await self._reconnect_connection("event", failed_conn=conn):
+                            break
+                        continue
                     logger.debug(f"ESL event read: {e}")
                 await asyncio.sleep(0.1)
         
@@ -657,15 +893,11 @@ class FreeSwitchESL:
     
     async def api(self, command: str) -> str:
         """Execute a FreeSWITCH API command and return result."""
-        async with self._api_lock:
-            await self._api_conn.send(f"api {command}")
-            return await self._api_conn.read_full_response()
+        return await self._execute_api_command("api", command)
     
     async def bgapi(self, command: str) -> str:
         """Execute a FreeSWITCH API command in background."""
-        async with self._api_lock:
-            await self._api_conn.send(f"bgapi {command}")
-            return await self._api_conn.read_full_response()
+        return await self._execute_api_command("bgapi", command)
     
     async def answer_call(self, uuid: str) -> bool:
         """Answer an incoming call."""

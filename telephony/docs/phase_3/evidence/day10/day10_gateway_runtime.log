@@ -1,0 +1,4 @@
+voice-gateway-cpp started host=127.0.0.1 port=18080 codec=pcmu ptime_ms=20
+voice-gateway-cpp stopped
+voice-gateway-cpp started host=127.0.0.1 port=18080 codec=pcmu ptime_ms=20
+voice-gateway-cpp stopped

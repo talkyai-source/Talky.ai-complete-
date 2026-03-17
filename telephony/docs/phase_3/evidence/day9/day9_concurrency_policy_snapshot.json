@@ -1,0 +1,6 @@
+{
+  "tenant_id": "day9-default",
+  "tenant_max_active_calls": 2,
+  "tenant_max_transfer_inflight": 1,
+  "transfer_endpoint": "Local/blind_target@wsm-synthetic"
+}

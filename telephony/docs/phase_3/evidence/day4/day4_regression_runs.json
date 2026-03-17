@@ -1,0 +1,52 @@
+{
+  "runs": [
+    {
+      "run": 1,
+      "packets_received": 64,
+      "packets_sent": 64,
+      "sequence_monotonic": true,
+      "timestamp_monotonic": true,
+      "p95_inter_packet_ms": 20.14,
+      "max_inter_packet_ms": 20.21,
+      "acceptance": {
+        "packets_received_min_48": true,
+        "sequence_monotonic": true,
+        "timestamp_monotonic": true,
+        "p95_between_19_21": true,
+        "max_le_25": true
+      }
+    },
+    {
+      "run": 2,
+      "packets_received": 64,
+      "packets_sent": 64,
+      "sequence_monotonic": true,
+      "timestamp_monotonic": true,
+      "p95_inter_packet_ms": 20.108,
+      "max_inter_packet_ms": 20.128,
+      "acceptance": {
+        "packets_received_min_48": true,
+        "sequence_monotonic": true,
+        "timestamp_monotonic": true,
+        "p95_between_19_21": true,
+        "max_le_25": true
+      }
+    },
+    {
+      "run": 3,
+      "packets_received": 64,
+      "packets_sent": 64,
+      "sequence_monotonic": true,
+      "timestamp_monotonic": true,
+      "p95_inter_packet_ms": 20.365,
+      "max_inter_packet_ms": 21.657,
+      "acceptance": {
+        "packets_received_min_48": true,
+        "sequence_monotonic": true,
+        "timestamp_monotonic": true,
+        "p95_between_19_21": true,
+        "max_le_25": true
+      }
+    }
+  ]
+}

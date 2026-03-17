@@ -1,20 +1,23 @@
-# Kamailio Layer
+# Kamailio Backup (Non-Active)
 
-This folder holds SBC/SIP edge routing configs.
+This directory is retained as a backup snapshot only.
 
-## Purpose
+## Status
 
-- SIP ingress/egress routing
-- Tenant-aware trunk policy
-- ACL/rate-limit/fraud controls
-- SIP normalization before B2BUA handoff
+- Runtime SIP edge is **OpenSIPS** under `telephony/opensips/`.
+- Docker compose and validation scripts target OpenSIPS.
+- Files in this folder are for fallback reference and emergency restore planning.
 
-## Structure
+## Backup Snapshot Contents
 
-- `conf/` - Kamailio configs and include files
+- `conf/kamailio.cfg`
+- `conf/dispatcher.list`
+- `conf/address.list`
+- `conf/tls.cfg`
+- `certs/` (local backup cert placeholders)
 
-## Notes
+## Guardrails
 
-- Keep tenant routes data-driven where possible.
-- Avoid hardcoding customer trunk details in static config.
-- Custom C modules/patches (if needed) live in `../modules/kamailio/`.
+1. Do not point active runtime to this folder.
+2. Do not modify backup files during normal feature work.
+3. If fallback is required, create a dedicated rollback PR with explicit runbook updates.

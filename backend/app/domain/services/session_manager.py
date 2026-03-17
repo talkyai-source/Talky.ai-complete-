@@ -100,7 +100,7 @@ class SessionManager:
         call_id: str,
         campaign_id: str,
         lead_id: str,
-        vonage_call_uuid: str,
+        provider_call_id: str,
         system_prompt: str,
         voice_id: str,
         websocket: WebSocket,
@@ -114,7 +114,7 @@ class SessionManager:
             call_id: Unique call identifier
             campaign_id: Campaign ID
             lead_id: Lead ID
-            vonage_call_uuid: Vonage's call UUID
+            provider_call_id: Provider call identifier (PBX UUID, browser session ID, etc.)
             system_prompt: AI system prompt
             voice_id: TTS voice ID
             websocket: Active WebSocket connection
@@ -130,7 +130,7 @@ class SessionManager:
             campaign_id=campaign_id,
             lead_id=lead_id,
             tenant_id=tenant_id,
-            vonage_call_uuid=vonage_call_uuid,
+            provider_call_id=provider_call_id,
             system_prompt=system_prompt,
             voice_id=voice_id,
             language=language,

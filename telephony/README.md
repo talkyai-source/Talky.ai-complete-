@@ -21,16 +21,34 @@ Out of scope:
 - Python AI business logic (stays under `backend/`)
 - Frontend dashboard/UI code
 
+## Active Plan Authority
+
+1. Frozen plan (single source of truth):
+   - `telephony/docs/phase_3/19_talk_lee_frozen_integration_plan.md`
+2. Current status tracker:
+   - `telephony/docs/phase_3/20_status_against_frozen_talk_lee_plan.md`
+3. Phase-definition alignment map:
+   - `telephony/docs/phase_3/21_phase_definition_map_and_alignment.md`
+
+Legacy WS-based docs are retained as historical evidence only.
+
 ## Folder Layout
 
 - `docs/` - architecture, migration plan, cutover checklists, runbooks
-- `kamailio/` - SBC configuration and scripts
+- `opensips/` - active SBC configuration and scripts
+- `asterisk/` - primary B2BUA/media runtime (active)
+- `kamailio/` - backup-only SBC snapshot (non-active)
 - `rtpengine/` - RTP relay configuration and scripts
-- `freeswitch/` - FreeSWITCH configs and dialplan
+- `freeswitch/` - backup B2BUA runtime (non-active by default)
 - `modules/` - custom C/C++ code (if/when required)
 - `deploy/` - docker/helm/terraform deployment artifacts
 - `scripts/` - validation and bootstrap scripts
 - `tests/` - telephony-level integration and smoke tests
+- `../services/voice-gateway-cpp` - C++ gateway target path for Day 4+
+
+Current active SIP edge runtime: `opensips/`.
+Current active media/B2BUA runtime: `asterisk/`.
+FreeSWITCH backup runtime is opt-in via compose profile `backup`.
 
 ## Migration Principle
 
@@ -40,35 +58,11 @@ Out of scope:
 4. Cut over gradually.
 5. Remove legacy paths only after stability window.
 
-See `docs/02_migration_plan.md` for the detailed plan.
+See `docs/phase_1/02_migration_plan.md` for the detailed plan.
 
-## WS-A/WS-B Quick Start
+## Execution Rule
 
-1. Copy env template:
-   - `cp telephony/deploy/docker/.env.telephony.example telephony/deploy/docker/.env.telephony`
-2. Start and verify WS-A:
-   - `bash telephony/scripts/verify_ws_a.sh telephony/deploy/docker/.env.telephony`
-3. Apply WS-B security baseline and verify:
-   - `bash telephony/scripts/verify_ws_b.sh telephony/deploy/docker/.env.telephony`
-4. Apply WS-C call-control baseline and verify:
-   - `bash telephony/scripts/verify_ws_c.sh telephony/deploy/docker/.env.telephony`
-5. Apply WS-D media/latency baseline and verify:
-   - `bash telephony/scripts/verify_ws_d.sh telephony/deploy/docker/.env.telephony`
-6. Apply WS-E canary/rollback baseline and verify:
-   - `bash telephony/scripts/verify_ws_e.sh telephony/deploy/docker/.env.telephony`
-7. Review gated status:
-   - `telephony/docs/07_phase_one_gated_checklist.md`
-8. Review WS-B implementation log:
-   - `telephony/docs/08_ws_b_security_signaling_implementation.md`
-9. Review WS-C plan:
-   - `telephony/docs/10_ws_c_call_control_transfer_plan.md`
-10. Review WS-C implementation log:
-   - `telephony/docs/11_ws_c_call_control_transfer_implementation.md`
-11. Review WS-D execution plan:
-   - `telephony/docs/12_ws_d_media_bridge_latency_plan.md`
-12. Review WS-D baseline report:
-   - `telephony/docs/phase1_baseline_latency.md`
-13. Review WS-E canary/rollback plan:
-   - `telephony/docs/13_ws_e_canary_rollback_plan.md`
-14. Review WS-E implementation evidence:
-   - `telephony/docs/14_ws_e_canary_rollback_implementation.md`
+1. Execute only by frozen day plan sequence (Day 0 -> Day 10).
+2. Do not start the next day until current-day acceptance is closed.
+3. Keep OpenSIPS and Asterisk as primary runtime.
+4. Keep Kamailio and FreeSWITCH as backup-only runtime.

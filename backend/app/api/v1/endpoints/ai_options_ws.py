@@ -9,7 +9,7 @@ Day 41: Refactored to use VoiceOrchestrator for lifecycle management.
 import json
 import asyncio
 import logging
-from typing import Dict
+from typing import Dict, Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
@@ -81,7 +81,9 @@ You are a live product demo on the Talky.ai website. Visitors click the "Ask AI"
 You are NOT booking appointments. You are NOT making sales calls. You are simply answering questions about the product.
 
 ## Rules
-- Keep responses SHORT (1-2 sentences max) — this is a voice conversation
+- Keep responses short and naturally spoken
+- Use plain spoken sentences only — no markdown, no bullets, no headings, and no XML or HTML tags
+- Usually answer in 1 to 2 sentences, but if asked about pricing, plans, or packages you may use up to 4 short sentences so all tiers are covered
 - Be mild, informative, and helpful — no hard selling or pressure
 - Describe the product and packages when asked
 - If someone asks pricing, briefly mention the three tiers
@@ -134,7 +136,8 @@ def _create_agent_config(agent_name: str, personality: str) -> AgentConfig:
                 "Keep responses brief - 1 to 2 sentences",
                 "Describe the product and packages only",
                 "Do not try to book appointments or schedule calls",
-                "Never mention technical terms or that you are automated"
+                "Never mention technical terms or that you are automated",
+                "Never use markdown, bullet lists, headings, or XML tags in spoken replies"
             ]
         ),
         max_conversation_turns=20,
@@ -200,6 +203,7 @@ async def voice_demo_websocket(websocket: WebSocket, session_id: str):
 
     voice_session = None
     barge_in_event = asyncio.Event()
+    receiver_task: Optional[asyncio.Task] = None
 
     try:
         # Wait for config message
@@ -264,7 +268,85 @@ async def voice_demo_websocket(websocket: WebSocket, session_id: str):
         # 3. Start pipeline (so STT can detect barge-in during intro)
         await orchestrator.start_pipeline(voice_session, websocket)
 
-        # 4. Greeting
+        call_id = voice_session.call_id
+        gateway = voice_session.media_gateway
+        greeting_active = True
+
+        async def _receive_messages() -> None:
+            """
+            Consume websocket frames continuously so mic audio does not backlog
+            during the greeting.
+            """
+            while gateway.is_session_active(call_id):
+                try:
+                    message = await asyncio.wait_for(websocket.receive(), timeout=30.0)
+                    message_type = message.get("type")
+
+                    if message_type == "websocket.disconnect":
+                        logger.info(f"Voice demo websocket disconnected: {session_id}")
+                        break
+
+                    if message_type != "websocket.receive":
+                        continue
+
+                    audio_data = message.get("bytes")
+                    if isinstance(audio_data, (bytes, bytearray)):
+                        if not audio_data:
+                            continue
+
+                        audio_bytes = bytes(audio_data)
+                        await gateway.on_audio_received(call_id, audio_bytes)
+
+                        if greeting_active and len(audio_bytes) >= 256:
+                            samples = [
+                                int.from_bytes(audio_bytes[i:i+2], "little", signed=True)
+                                for i in range(0, min(len(audio_bytes), 256), 2)
+                            ]
+                            energy = sum(abs(sample) for sample in samples) / len(samples)
+                            if energy > 300:
+                                barge_in_event.set()
+                                await websocket.send_json({"type": "barge_in"})
+                        continue
+
+                    text_data = message.get("text")
+                    if not text_data:
+                        continue
+
+                    try:
+                        data = json.loads(text_data)
+                    except json.JSONDecodeError:
+                        logger.debug(
+                            f"Ignoring non-JSON websocket text frame: {text_data[:120]}"
+                        )
+                        continue
+
+                    if data.get("type") == "end_call":
+                        await gateway.on_call_ended(call_id, "user_ended")
+                        break
+                    if data.get("type") == "playback_complete":
+                        mark_playback_complete = getattr(gateway, "mark_playback_complete", None)
+                        if callable(mark_playback_complete):
+                            mark_playback_complete(call_id)
+                        continue
+
+                except asyncio.TimeoutError:
+                    try:
+                        await websocket.send_json({"type": "heartbeat"})
+                    except (WebSocketDisconnect, RuntimeError):
+                        break
+                    continue
+                except WebSocketDisconnect:
+                    break
+                except RuntimeError as e:
+                    if "disconnect message has been received" in str(e):
+                        logger.info(f"Voice demo websocket closed after disconnect: {session_id}")
+                        break
+                    raise
+
+        # 4. Start receiver before greeting to avoid stale buffered mic audio.
+        receiver_task = asyncio.create_task(_receive_messages())
+
+        # 5. Greeting
         # For linear16 mono audio: bytes/sec = sample_rate * 2.
         # Keep greeting chunks moderate to reduce jitter and avoid large burst playback.
         pcm_bytes_per_second = max(8000, int(ai_config.tts_sample_rate) * 2)
@@ -278,43 +360,10 @@ async def voice_demo_websocket(websocket: WebSocket, session_id: str):
             first_chunk_bytes=greeting_first_chunk_bytes,
             regular_chunk_bytes=greeting_regular_chunk_bytes,
         )
+        greeting_active = False
 
-        # 5. Message loop — stays in endpoint (WebSocket I/O is transport concern)
-        call_id = voice_session.call_id
-        gateway = voice_session.media_gateway
-
-        while gateway.is_session_active(call_id):
-            try:
-                message = await asyncio.wait_for(
-                    websocket.receive(), timeout=30.0
-                )
-
-                if "bytes" in message:
-                    audio_data = message["bytes"]
-                    await gateway.on_audio_received(call_id, audio_data)
-
-                    # Barge-in detection
-                    if len(audio_data) >= 256:
-                        samples = [
-                            int.from_bytes(audio_data[i:i+2], "little", signed=True)
-                            for i in range(0, min(len(audio_data), 256), 2)
-                        ]
-                        energy = sum(abs(s) for s in samples) / len(samples)
-                        if energy > 300:
-                            barge_in_event.set()
-                            await websocket.send_json({"type": "barge_in"})
-
-                elif "text" in message:
-                    data = json.loads(message["text"])
-                    if data.get("type") == "end_call":
-                        await gateway.on_call_ended(call_id, "user_ended")
-                        break
-
-            except asyncio.TimeoutError:
-                await websocket.send_json({"type": "heartbeat"})
-                continue
-            except WebSocketDisconnect:
-                break
+        # 6. Keep endpoint alive until receiver exits (disconnect/end_call).
+        await receiver_task
 
     except WebSocketDisconnect:
         logger.info(f"Voice demo disconnected: {session_id}")
@@ -325,6 +374,12 @@ async def voice_demo_websocket(websocket: WebSocket, session_id: str):
         except Exception:
             pass
     finally:
+        if receiver_task and not receiver_task.done():
+            receiver_task.cancel()
+            try:
+                await receiver_task
+            except asyncio.CancelledError:
+                pass
         if voice_session:
             await container.voice_orchestrator.end_session(voice_session)
         logger.info(f"Voice demo ended: {session_id}")

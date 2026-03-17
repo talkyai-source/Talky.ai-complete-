@@ -1,0 +1,16 @@
+{
+  "session_id": "day4-verify-session",
+  "state": "running",
+  "stop_reason": "running",
+  "packets_in": 64,
+  "packets_out": 64,
+  "bytes_in": 10240,
+  "bytes_out": 11008,
+  "invalid_packets": 0,
+  "dropped_packets": 0,
+  "last_rtp_rx_ms_ago": 1260,
+  "last_rtp_tx_ms_ago": 0,
+  "tx_next_sequence": 48490,
+  "tx_next_timestamp": 3217627122,
+  "tx_ssrc": 847530218
+}

@@ -1,0 +1,7 @@
+{
+  "jitter_buffer_overflow_drops": 392,
+  "jitter_buffer_late_drops": 0,
+  "duplicate_packets": 2,
+  "out_of_order_packets": 4,
+  "dropped_packets": 392
+}

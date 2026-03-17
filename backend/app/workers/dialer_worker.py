@@ -13,7 +13,7 @@ import json
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
-from dotenv import load_dotenv
+from app.core.dotenv_compat import load_dotenv
 
 # Load environment variables
 load_dotenv()
@@ -241,24 +241,45 @@ class DialerWorker:
     
     async def _make_call(self, job: DialerJob, rules: CallingRules) -> Optional[str]:
         """
-        Initiate an outbound call via telephony provider.
-        
+        Initiate an outbound call via the active telephony provider.
+
+        Uses ``TelephonyProviderFactory`` to select the configured provider
+        (SIP/Asterisk/FreeSWITCH or Vonage) at runtime.
+
         Returns:
             call_id (UUID) if successful, None otherwise
         """
-        # TODO: Integrate with actual telephony provider (e.g. FreeSWITCH ESL)
-        # For now, log the call attempt
-        
-        logger.info(
-            f"CALL INITIATION: {job.phone_number} "
-            f"(campaign={job.campaign_id}, lead={job.lead_id})"
-        )
-        
-        # For now, generate a mock call_id
-        import uuid
-        call_id = str(uuid.uuid4())
-        
-        return call_id
+        from app.infrastructure.telephony.provider_factory import TelephonyProviderFactory
+
+        try:
+            provider = await TelephonyProviderFactory.create()
+            webhook_base = os.getenv("API_BASE_URL", "http://localhost:8000")
+            caller_id = rules.caller_id if hasattr(rules, "caller_id") else "1001"
+
+            call_id = await provider.originate_call(
+                destination=job.phone_number,
+                caller_id=caller_id,
+                webhook_base_url=webhook_base,
+                metadata={"campaign_id": job.campaign_id, "lead_id": job.lead_id},
+            )
+            # Store which provider was used so DB records are accurate
+            self._last_provider_name = provider.name
+
+            if call_id:
+                logger.info(
+                    f"CALL INITIATED via {provider.name}: {job.phone_number} "
+                    f"call_id={call_id[:8]}... "
+                    f"(campaign={job.campaign_id}, lead={job.lead_id})"
+                )
+            else:
+                logger.warning(
+                    f"CALL FAILED via {provider.name}: {job.phone_number} "
+                    f"(campaign={job.campaign_id}, lead={job.lead_id})"
+                )
+            return call_id
+        except Exception as e:
+            logger.error(f"Originate error for {job.phone_number}: {e}")
+            return None
     
     async def _get_active_tenant_ids(self) -> List[str]:
         """Get list of tenants with active/running campaigns."""
@@ -348,7 +369,7 @@ class DialerWorker:
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
                     """,
                     leg_id, call_id, talklee_call_id, "pstn_outbound", "outbound",
-                    "vonage", job.phone_number, "initiated",
+                    getattr(self, "_last_provider_name", "sip"), job.phone_number, "initiated",
                     json.dumps({"job_id": job.job_id, "campaign_id": job.campaign_id})
                 )
                 
@@ -363,7 +384,7 @@ class DialerWorker:
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
                     """,
                     call_id, talklee_call_id, leg_id, "leg_started", "dialer_worker",
-                    json.dumps({"leg_type": "pstn_outbound", "provider": "vonage"}),
+                    json.dumps({"leg_type": "pstn_outbound", "provider": getattr(self, "_last_provider_name", "sip")}),
                     "initiated"
                 )
                 

@@ -53,7 +53,7 @@ def call_session(agent_config):
         call_id="test-call-123",
         campaign_id="test-campaign-456",
         lead_id="test-lead-789",
-        vonage_call_uuid="test-vonage-uuid",
+        provider_call_id="test-vonage-uuid",
         from_number="+1234567890",
         to_number="+0987654321",
         system_prompt="You are a helpful assistant",

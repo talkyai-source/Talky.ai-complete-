@@ -5,18 +5,25 @@ import os
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
-from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+
+from app.core.dotenv_compat import load_dotenv
 
 # Load backend .env regardless of current working directory.
 _BACKEND_ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(dotenv_path=_BACKEND_ROOT / ".env", override=False)
 
 from app.api.v1.routes import api_router
-from app.core.config import get_settings
+from app.core.config import ConfigManager, get_settings
+from app.core.telephony_observability import (
+    is_metrics_request_authorized,
+    prometheus_content_type,
+    refresh_telephony_slo_metrics,
+    render_prometheus_metrics,
+)
 
 # ── Logging ──────────────────────────────────────────────────────
 # Configure root logger so all app.* loggers emit DEBUG/INFO to console.
@@ -154,6 +161,44 @@ async def health_check():
     return health
 
 
+@app.get("/metrics")
+async def prometheus_metrics(
+    x_metrics_token: str | None = Header(default=None, alias="X-Metrics-Token")
+):
+    """
+    Prometheus scrape endpoint for WS-K telephony SLO metrics.
+
+    Optional protection:
+    - Set TELEPHONY_METRICS_TOKEN
+    - Scraper must send matching X-Metrics-Token header.
+    """
+    if not is_metrics_request_authorized(x_metrics_token):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid metrics token",
+        )
+
+    from app.core.container import get_container
+
+    container = get_container()
+    if container.is_initialized:
+        await refresh_telephony_slo_metrics(container.db_pool)
+
+    return Response(
+        content=render_prometheus_metrics(),
+        media_type=prometheus_content_type(),
+    )
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    websocket_config = ConfigManager().get_websocket_config()
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8000,
+        ws="websockets",
+        ws_ping_interval=float(websocket_config.get("heartbeat_interval_seconds", 30)),
+        ws_ping_timeout=float(websocket_config.get("heartbeat_timeout_seconds", 5)),
+    )

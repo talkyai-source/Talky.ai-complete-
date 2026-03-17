@@ -1,0 +1,16 @@
+[day4] configure + build
+-- Configuring done (0.0s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/ai-lab/Desktop/Talky.ai-complete-/services/voice-gateway-cpp/build
+[ 55%] Built target voice_gateway_lib
+[ 77%] Built target voice_gateway_tests
+[100%] Built target voice_gateway
+[day4] run ctest
+Internal ctest changing into directory: /home/ai-lab/Desktop/Talky.ai-complete-/services/voice-gateway-cpp/build
+Test project /home/ai-lab/Desktop/Talky.ai-complete-/services/voice-gateway-cpp/build
+    Start 1: voice_gateway_tests
+1/1 Test #1: voice_gateway_tests ..............   Passed    0.00 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   0.00 sec

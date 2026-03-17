@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from app.utils.audio_utils import generate_sine_wave, generate_silence
-from app.infrastructure.telephony.vonage_media_gateway import VonageMediaGateway
+from app.infrastructure.telephony.browser_media_gateway import BrowserMediaGateway
 from app.infrastructure.stt.deepgram_flux import DeepgramFluxSTTProvider
 from app.infrastructure.llm.groq import GroqLLMProvider
 from app.infrastructure.tts.cartesia import CartesiaTTSProvider
@@ -46,7 +46,7 @@ async def test_audio_pipeline():
     
     # Initialize media gateway
     print("📡 Initializing media gateway...")
-    media_gateway = VonageMediaGateway()
+    media_gateway = BrowserMediaGateway()
     await media_gateway.initialize({
         "sample_rate": 16000,
         "channels": 1,
@@ -110,7 +110,7 @@ async def test_audio_pipeline():
         call_id=call_id,
         campaign_id="test-campaign",
         lead_id="test-lead",
-        vonage_call_uuid=call_id,
+        provider_call_id=call_id,
         system_prompt="You are a helpful voice assistant. Keep responses brief and conversational, under 2 sentences.",
         voice_id="6ccbfb76-1fc6-48f7-b71d-91ac6298247b",
         language="en"

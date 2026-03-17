@@ -1,0 +1,55 @@
+    -= Matching Asterisk Applications =-
+         BlindTransfer: Blind transfer channel(s) to the extension and context provided 
+    -= 1 Applications Matching =-
+    -= Matching Asterisk Applications =-
+      AttendedTransfer: Attended transfer to the extension provided and TRANSFER_CONTEXT 
+    -= 1 Applications Matching =-
+Builtin Feature           Default Current
+---------------           ------- -------
+Pickup                    *8      *8     
+Blind Transfer            #       #1     
+Attended Transfer                 *2     
+One Touch Monitor                        
+Disconnect Call           *       *0     
+Park Call                                
+One Touch MixMonitor                     
+
+Dynamic Feature           Default Current
+---------------           ------- -------
+(none)
+
+Feature Groups:
+---------------
+(none)
+[ Context 'wsm-synthetic' created by 'pbx_config' ]
+  'attended' =>     1. NoOp(WS-M synthetic attended transfer scenario) [extensions.conf:33]
+                    2. Answer()                                   [extensions.conf:34]
+                    3. Set(WSM_RESULT=attended:pass)              [extensions.conf:35]
+                    4. Set(DB(wsm/attended_pass_${UNIQUEID})=${WSM_RESULT}) [extensions.conf:36]
+                    5. Goto(wsm-synthetic,attended_target,1)      [extensions.conf:37]
+  'attended_consult' => 1. NoOp(WS-M attended consult leg)            [extensions.conf:39]
+                    2. Answer()                                   [extensions.conf:40]
+                    3. Wait(1)                                    [extensions.conf:41]
+                    4. Hangup()                                   [extensions.conf:42]
+  'attended_target' => 1. NoOp(WS-M attended transfer target)        [extensions.conf:44]
+                    2. Set(WSM_RESULT=attended_target:reached)    [extensions.conf:45]
+                    3. Set(DB(wsm/attended_target_${UNIQUEID})=${WSM_RESULT}) [extensions.conf:46]
+                    4. Hangup()                                   [extensions.conf:47]
+  'blind' =>        1. NoOp(WS-M synthetic blind transfer scenario) [extensions.conf:22]
+                    2. Answer()                                   [extensions.conf:23]
+                    3. Set(WSM_RESULT=blind:pass)                 [extensions.conf:24]
+                    4. Set(DB(wsm/blind_pass_${UNIQUEID})=${WSM_RESULT}) [extensions.conf:25]
+                    5. Goto(wsm-synthetic,blind_target,1)         [extensions.conf:26]
+  'blind_target' => 1. NoOp(WS-M blind transfer target)           [extensions.conf:28]
+                    2. Set(WSM_RESULT=blind_target:reached)       [extensions.conf:29]
+                    3. Set(DB(wsm/blind_target_${UNIQUEID})=${WSM_RESULT}) [extensions.conf:30]
+                    4. Hangup()                                   [extensions.conf:31]
+  'longcall' =>     1. NoOp(WS-M synthetic long-call scenario)    [extensions.conf:14]
+                    2. Answer()                                   [extensions.conf:15]
+                    3. Set(WSM_DURATION=12)                       [extensions.conf:16]
+                    4. Set(WSM_RESULT=longcall:${WSM_DURATION})   [extensions.conf:17]
+                    5. Set(DB(wsm/longcall_${UNIQUEID})=${WSM_RESULT}) [extensions.conf:18]
+                    6. Wait(${WSM_DURATION})                      [extensions.conf:19]
+                    7. Hangup()                                   [extensions.conf:20]
+
+-= 6 extensions (29 priorities) in 1 context. =-

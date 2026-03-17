@@ -1,7 +1,14 @@
-# Kamailio dispatcher set file
-# Format: <setid> <destination>
-# Set 1: Stable lane.
-# Set 2: Canary lane (default mirrors stable until explicitly changed).
+# Kamailio dispatcher set file — mirrors OpenSIPS dispatcher.list exactly.
+# IMPORTANT: Keep this file in sync with telephony/opensips/conf/dispatcher.list
+# so that calls behave identically regardless of which SBC is active.
+#
+# Format: <setid> <destination> <flags> <priority> <weight>
+#
+# Set 1: B2BUA pool — Asterisk (primary) + FreeSWITCH (backup).
+# Set 2: Canary lane — mirrors set 1 until explicitly overridden.
 
-1 sip:127.0.0.1:5080
-2 sip:127.0.0.1:5080
+# setid  destination              flags  priority  weight
+1 sip:127.0.0.1:5070 0 0 100   # Asterisk   (primary)
+1 sip:127.0.0.1:5080 0 1 100   # FreeSWITCH (backup, auto-failover)
+2 sip:127.0.0.1:5070 0 0 100   # Canary: stable mirror (Asterisk)
+2 sip:127.0.0.1:5080 0 1 100   # Canary: backup  mirror (FreeSWITCH)

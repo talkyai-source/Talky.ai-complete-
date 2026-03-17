@@ -32,13 +32,22 @@ providers:
       max_tokens: 150  # Keep responses concise for voice
   
   telephony:
-    active: "vonage"  # Change this to switch telephony provider
-    
+    active: "sip"  # "sip" | "vonage" | "auto"
+
+    sip:
+      pbx_backend: "auto"  # "auto" | "asterisk" | "freeswitch"
+
     vonage:
       api_key: ${VONAGE_API_KEY}
       api_secret: ${VONAGE_API_SECRET}
       application_id: ${VONAGE_APP_ID}
       private_key_path: "./config/private.key"
+      answer_url: "${API_BASE_URL}/api/v1/vonage/answer"
+      event_url: "${API_BASE_URL}/api/v1/vonage/event"
+
+    # twilio:  # Future placeholder
+    #   account_sid: ${TWILIO_ACCOUNT_SID}
+    #   auth_token: ${TWILIO_AUTH_TOKEN}
   
   storage:
     active: "postgres"

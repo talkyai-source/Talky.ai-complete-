@@ -192,7 +192,7 @@ def test_relational_select_and_relation_filter_work_for_admin_queries(connect_qu
     assert row["leads"]["phone_number"] == "123456"
 
 
-def test_upsert_single_payload_returns_single_row(connect_queue):
+def test_upsert_single_payload_returns_list_by_default(connect_queue):
     conn = FakeConn()
     conn.on_fetchrow(
         "INSERT INTO subscriptions",
@@ -217,7 +217,7 @@ def test_upsert_single_payload_returns_single_row(connect_queue):
     )
 
     assert response.error is None
-    assert response.data["id"] == "sub_1"
+    assert response.data[0]["id"] == "sub_1"
     assert "ON CONFLICT (stripe_subscription_id)" in conn.fetchrow_calls[0][0]
 
 
@@ -250,11 +250,43 @@ def test_insert_serializes_dict_payloads_for_jsonb_columns(connect_queue):
     )
 
     assert response.error is None
-    assert response.data["id"] == "evt_1"
+    assert response.data[0]["id"] == "evt_1"
 
     _sql, args = conn.fetchrow_calls[0]
     assert isinstance(args[4], str)
     assert json.loads(args[4]) == {"session_type": "voice_demo"}
+
+
+def test_select_decodes_jsonb_columns_to_native_python_values(connect_queue):
+    conn = FakeConn()
+    conn.on_fetch(
+        "FROM information_schema.columns",
+        [
+            {"column_name": "id", "udt_name": "uuid"},
+            {"column_name": "messages", "udt_name": "jsonb"},
+        ],
+    )
+    conn.on_fetch(
+        "SELECT id, messages FROM assistant_conversations",
+        [
+            {
+                "id": "conv_1",
+                "messages": '[{"role":"user","content":"hello"}]',
+            }
+        ],
+    )
+    connect_queue.append(conn)
+
+    response = (
+        QueryBuilder(None, "assistant_conversations")
+        .select("id, messages")
+        .single()
+        .execute()
+    )
+
+    assert response.error is None
+    assert response.data["id"] == "conv_1"
+    assert response.data["messages"] == [{"role": "user", "content": "hello"}]
 
 
 def test_insert_preserves_list_for_postgres_array_columns(connect_queue):
@@ -287,11 +319,62 @@ def test_insert_preserves_list_for_postgres_array_columns(connect_queue):
     )
 
     assert response.error is None
-    assert response.data["id"] == "contact_1"
+    assert response.data[0]["id"] == "contact_1"
 
     _sql, args = conn.fetchrow_calls[0]
     assert isinstance(args[1], list)
     assert args[1] == ["vip", "beta"]
+
+
+def test_insert_single_modifier_returns_object(connect_queue):
+    conn = FakeConn()
+    conn.on_fetchrow(
+        "INSERT INTO assistant_conversations",
+        {
+            "id": "conv_1",
+            "title": "Hello",
+        },
+    )
+    connect_queue.append(conn)
+
+    response = (
+        QueryBuilder(None, "assistant_conversations")
+        .insert({"title": "Hello"})
+        .single()
+        .execute()
+    )
+
+    assert response.error is None
+    assert response.data["id"] == "conv_1"
+
+
+def test_upsert_single_modifier_returns_object(connect_queue):
+    conn = FakeConn()
+    conn.on_fetchrow(
+        "INSERT INTO subscriptions",
+        {
+            "id": "sub_1",
+            "stripe_subscription_id": "stripe_sub_1",
+            "status": "active",
+        },
+    )
+    connect_queue.append(conn)
+
+    response = (
+        QueryBuilder(None, "subscriptions")
+        .upsert(
+            {
+                "stripe_subscription_id": "stripe_sub_1",
+                "status": "active",
+            },
+            on_conflict="stripe_subscription_id",
+        )
+        .single()
+        .execute()
+    )
+
+    assert response.error is None
+    assert response.data["id"] == "sub_1"
 
 
 def test_select_coerces_iso_datetime_filters_for_timestamptz_columns(connect_queue):

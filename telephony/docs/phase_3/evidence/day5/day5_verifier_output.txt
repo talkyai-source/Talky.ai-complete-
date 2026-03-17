@@ -1,0 +1,47 @@
+[1/13] Verifying Python runtime for Day 5 controller...
+python dependency check: ok
+[2/13] Ensuring required telephony containers are running...
+ Container talky-rtpengine Running 
+ Container talky-asterisk Running 
+ Container talky-opensips Running 
+ Container talky-asterisk Waiting 
+ Container talky-asterisk Healthy 
+[3/13] Reloading Asterisk to load ARI/http config...
+[4/13] Verifying ARI API reachability...
+ari ping: ok
+[5/13] Building C++ voice gateway and running unit tests...
+[6/13] Starting C++ voice gateway runtime...
+[7/13] Starting Day 5 ARI external media controller...
+[8/13] Running 20 SIP+RTP echo calls through OpenSIPS -> Asterisk -> C++ -> Asterisk...
+[day5] call=1 success=True invite=[100, 200] bye=200 rtp_sent=35 rtp_recv=30 reason=ok
+[day5] call=2 success=True invite=[100, 200] bye=200 rtp_sent=35 rtp_recv=29 reason=ok
+[day5] call=3 success=True invite=[100, 200] bye=200 rtp_sent=35 rtp_recv=29 reason=ok
+[day5] call=4 success=True invite=[100, 200] bye=200 rtp_sent=35 rtp_recv=29 reason=ok
+[day5] call=5 success=True invite=[100, 200] bye=200 rtp_sent=35 rtp_recv=29 reason=ok
+[day5] call=6 success=True invite=[100, 200] bye=200 rtp_sent=35 rtp_recv=29 reason=ok
+[day5] call=7 success=True invite=[100, 200] bye=200 rtp_sent=35 rtp_recv=29 reason=ok
+[day5] call=8 success=True invite=[100, 200] bye=200 rtp_sent=35 rtp_recv=28 reason=ok
+[day5] call=9 success=True invite=[100, 200] bye=200 rtp_sent=35 rtp_recv=29 reason=ok
+[day5] call=10 success=True invite=[100, 200] bye=200 rtp_sent=35 rtp_recv=29 reason=ok
+[day5] call=11 success=True invite=[100, 200] bye=200 rtp_sent=35 rtp_recv=29 reason=ok
+[day5] call=12 success=True invite=[100, 200] bye=200 rtp_sent=35 rtp_recv=29 reason=ok
+[day5] call=13 success=True invite=[100, 200] bye=200 rtp_sent=35 rtp_recv=29 reason=ok
+[day5] call=14 success=True invite=[100, 200] bye=200 rtp_sent=35 rtp_recv=29 reason=ok
+[day5] call=15 success=True invite=[100, 200] bye=200 rtp_sent=35 rtp_recv=29 reason=ok
+[day5] call=16 success=True invite=[100, 200] bye=200 rtp_sent=35 rtp_recv=29 reason=ok
+[day5] call=17 success=True invite=[100, 200] bye=200 rtp_sent=35 rtp_recv=29 reason=ok
+[day5] call=18 success=True invite=[100, 200] bye=200 rtp_sent=35 rtp_recv=29 reason=ok
+[day5] call=19 success=True invite=[100, 200] bye=200 rtp_sent=35 rtp_recv=30 reason=ok
+[day5] call=20 success=True invite=[100, 200] bye=200 rtp_sent=35 rtp_recv=29 reason=ok
+[day5] summary calls=20 passed=20 failed=0 rtp_sent=700 rtp_recv=581
+[9/13] Validating call results and waiting for controller completion...
+call result validation: ok
+[10/13] Capturing gateway stats and enforcing no active sessions...
+gateway stats validation: ok
+[11/13] Validating ARI cleanup (no external channels leaked)...
+ari cleanup validation: ok
+[12/13] Collecting Asterisk logs and RTP summary...
+rtp summary generated
+[13/13] Writing Day 5 evidence report...
+Day 5 verification PASSED.
+Evidence directory: /home/ai-lab/Desktop/Talky.ai-complete-/telephony/docs/phase_3/evidence/day5

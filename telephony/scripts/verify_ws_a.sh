@@ -18,6 +18,8 @@ source "$ENV_FILE"
 set +a
 
 compose_cmd=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
+SIP_PORT="${OPENSIPS_SIP_PORT:-15060}"
+ASTERISK_PORT="${ASTERISK_SIP_PORT:-5070}"
 
 echo "[1/7] Validating docker compose syntax..."
 "${compose_cmd[@]}" config -q
@@ -25,7 +27,7 @@ echo "[OK] compose config is valid"
 
 echo "[2/7] Starting WS-A services..."
 "${compose_cmd[@]}" down --remove-orphans >/dev/null 2>&1 || true
-docker rm -f talky-freeswitch talky-rtpengine talky-kamailio >/dev/null 2>&1 || true
+docker rm -f talky-asterisk talky-freeswitch talky-rtpengine talky-opensips >/dev/null 2>&1 || true
 "${compose_cmd[@]}" up -d
 
 echo "[3/7] Waiting for services to stabilize..."
@@ -33,28 +35,33 @@ sleep 12
 
 echo "[4/7] Checking required services are running..."
 running_services="$("${compose_cmd[@]}" ps --status running --services)"
-for svc in freeswitch rtpengine kamailio; do
+for svc in asterisk rtpengine opensips; do
   if ! grep -qx "$svc" <<<"$running_services"; then
     echo "[ERROR] Service is not running: $svc"
     "${compose_cmd[@]}" ps
     exit 1
   fi
 done
-echo "[OK] freeswitch, rtpengine, kamailio running"
+echo "[OK] asterisk, rtpengine, opensips running"
 
-echo "[5/7] Kamailio config syntax check..."
-"${compose_cmd[@]}" exec -T kamailio kamailio -c -f /etc/kamailio/kamailio.cfg >/dev/null
-echo "[OK] kamailio config syntax valid"
+echo "[5/7] OpenSIPS config syntax check..."
+"${compose_cmd[@]}" exec -T opensips opensips -C -f /etc/opensips/opensips.cfg >/dev/null
+echo "[OK] opensips config syntax valid"
 
-echo "[6/7] FreeSWITCH ESL and RTPengine control checks..."
-"${compose_cmd[@]}" exec -T freeswitch fs_cli -p "${FREESWITCH_ESL_PASSWORD:-ClueCon}" -x "status" >/dev/null
+echo "[6/7] Asterisk control and RTPengine checks..."
+"${compose_cmd[@]}" exec -T asterisk asterisk -rx "core show uptime seconds" >/dev/null
+"${compose_cmd[@]}" exec -T asterisk asterisk -rx "pjsip show transports" | grep -q "${ASTERISK_PORT}"
 "${compose_cmd[@]}" exec -T rtpengine sh -lc "ss -lun | grep -q ':2223'"
-echo "[OK] FreeSWITCH and rtpengine control ports reachable"
+if [[ ! -f "$TELEPHONY_ROOT/freeswitch/conf/autoload_configs/event_socket.conf.xml" ]]; then
+  echo "[ERROR] FreeSWITCH backup config missing"
+  exit 1
+fi
+echo "[OK] Asterisk primary control reachable; FreeSWITCH backup configs present; rtpengine reachable"
 
 echo "[7/7] SIP OPTIONS synthetic probe..."
 python3 "$SCRIPT_DIR/sip_options_probe.py" \
   --host 127.0.0.1 \
-  --port "${KAMAILIO_SIP_PORT:-15060}" \
+  --port "$SIP_PORT" \
   --timeout 3.0
 echo "[OK] SIP OPTIONS probe succeeded"
 

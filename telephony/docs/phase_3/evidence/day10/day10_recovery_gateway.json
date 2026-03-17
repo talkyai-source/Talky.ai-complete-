@@ -1,0 +1,9 @@
+{
+  "service": "gateway",
+  "status": "passed",
+  "start_epoch": 1772623562,
+  "recovered_epoch": 1772623562,
+  "recovery_seconds": 0,
+  "sla_seconds": 60,
+  "notes": "Gateway recovered within SLA."
+}

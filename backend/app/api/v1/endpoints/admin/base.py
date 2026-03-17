@@ -130,15 +130,7 @@ async def get_system_health(
         - LLM (Language Model)
         - TTS (Text-to-Speech)
     """
-    # In production, this would check actual provider health
-    # For now, return simulated health data
     providers = [
-        SystemHealthItem(
-            name="Telephony",
-            status="operational",
-            latency_ms=95,
-            latency_display="<120ms"
-        ),
         SystemHealthItem(
             name="STT",
             status="operational",

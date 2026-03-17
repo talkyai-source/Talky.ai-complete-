@@ -1,0 +1,9 @@
+{
+  "service": "opensips",
+  "status": "passed",
+  "start_epoch": 1772623517,
+  "recovered_epoch": 1772623532,
+  "recovery_seconds": 15,
+  "sla_seconds": 180,
+  "notes": "Recovery within SLA and SIP probe passed."
+}

@@ -234,12 +234,31 @@ class LLMGuardrails:
         
         Removes:
         - Thinking patterns ("Well, ", "So, ", "Actually, ")
+        - Hidden reasoning blocks / stray tags
+        - Markdown formatting markers
         - Excessive whitespace
         - Incomplete sentences at the end
         """
         if not response:
             return response
         
+        cleaned = response.strip()
+
+        # Remove hidden reasoning or XML-like wrappers before anything else.
+        cleaned = re.sub(r'<think\b[^>]*>[\s\S]*?</think>', ' ', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'<reasoning\b[^>]*>[\s\S]*?</reasoning>', ' ', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'<analysis\b[^>]*>[\s\S]*?</analysis>', ' ', cleaned, flags=re.IGNORECASE)
+
+        # Collapse markdown into plain text for display and conversation history.
+        cleaned = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', cleaned)
+        cleaned = re.sub(r'```[\s\S]*?```', ' ', cleaned)
+        cleaned = re.sub(r'`([^`]+)`', r'\1', cleaned)
+        cleaned = re.sub(r'^\s*#{1,6}\s*', '', cleaned, flags=re.MULTILINE)
+        cleaned = re.sub(r'^\s*>\s*', '', cleaned, flags=re.MULTILINE)
+        cleaned = re.sub(r'^\s*(?:[-*+•]|\d+[.)])\s+', '', cleaned, flags=re.MULTILINE)
+        cleaned = re.sub(r'\*\*\*?|\*\*?|__?|~~', '', cleaned)
+        cleaned = re.sub(r'<[^>]+>', ' ', cleaned)
+
         # Remove common filler starts
         filler_starts = [
             r'^(Well,?\s+)',
@@ -251,12 +270,16 @@ class LLMGuardrails:
             r'^(Of course!?\s+)',
         ]
         
-        cleaned = response.strip()
         for pattern in filler_starts:
             cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
         
         # Clean up whitespace
         cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+
+        # Numbered markdown lists can collapse onto one line during streaming,
+        # which makes "1." / "2." look like sentence endings and truncates
+        # package answers incorrectly. Strip those inline list markers here.
+        cleaned = re.sub(r'(?:(?<=\s)|^)\d+[.)]\s+(?=[A-Za-z])', '', cleaned)
         
         return cleaned
 

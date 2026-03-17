@@ -1,0 +1,12 @@
+2026-03-04T11:25:17Z | drill_start | service=opensips container=talky-opensips
+2026-03-04T11:25:31Z | restart_action | service=opensips method=compose_restart_failed fallback=soft_reload
+2026-03-04T11:25:32Z | drill_pass | service=opensips recovery=15s sla=180s
+2026-03-04T11:25:32Z | drill_start | service=asterisk container=talky-asterisk
+2026-03-04T11:25:47Z | restart_action | service=asterisk method=compose_restart_failed fallback=soft_reload
+2026-03-04T11:25:47Z | drill_pass | service=asterisk recovery=15s sla=180s
+2026-03-04T11:25:47Z | drill_start | service=rtpengine container=talky-rtpengine
+2026-03-04T11:26:02Z | restart_action | service=rtpengine method=compose_restart_failed fallback=soft_reload
+2026-03-04T11:26:02Z | drill_pass | service=rtpengine recovery=15s sla=180s
+2026-03-04T11:26:02Z | drill_start | service=gateway
+2026-03-04T11:26:02Z | drill_pass | service=gateway recovery=0s sla=60s pid=421575
+2026-03-04T11:26:02Z | drill_complete | all_recovery_drills_passed

@@ -400,6 +400,32 @@ class QueryBuilder:
                 return value
         return value
 
+    @staticmethod
+    def _decode_column_value(value: Any, udt_name: Optional[str] = None) -> Any:
+        """
+        Decode DB-native values into PostgREST-style response payloads.
+
+        asyncpg returns json/jsonb columns as raw strings unless codecs are
+        configured. The rest of the app expects Supabase/PostgREST-like native
+        dict/list values for JSON columns.
+        """
+        if value is None:
+            return None
+        if udt_name in {"json", "jsonb"} and isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return value
+        return value
+
+    def _decode_row(self, row: Dict[str, Any], column_types: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        if not column_types:
+            return dict(row)
+        return {
+            key: self._decode_column_value(value, column_types.get(key))
+            for key, value in dict(row).items()
+        }
+
     async def _get_table_column_types(self, conn) -> Dict[str, str]:
         """
         Return mapping: column_name -> udt_name for the current table.
@@ -443,7 +469,7 @@ class QueryBuilder:
         order_sql = self._build_order_clause()
 
         sql = f"SELECT {base_select} FROM {self.table_name} {where_sql} {order_sql}"
-        base_rows = [dict(r) for r in await conn.fetch(sql, *args)]
+        base_rows = [self._decode_row(r, base_column_types) for r in await conn.fetch(sql, *args)]
 
         if not base_rows:
             empty_data: Union[Dict[str, Any], List[Dict[str, Any]], None]
@@ -507,7 +533,13 @@ class QueryBuilder:
 
                 rel_sql = f"SELECT {rel_select} FROM {rel.table} WHERE id = ANY($1){rel_extra}"
                 rel_rows = await conn.fetch(rel_sql, rel_ids, *rel_where_args)
-                rel_map = {r["id"]: dict(r) for r in rel_rows}
+                rel_map = {
+                    decoded["id"]: decoded
+                    for decoded in (
+                        self._decode_row(r, rel_column_types)
+                        for r in rel_rows
+                    )
+                }
 
             filtered_rows: List[Dict[str, Any]] = []
             relation_has_filters = bool(relation_filters.get(rel.table))
@@ -570,7 +602,7 @@ class QueryBuilder:
 
         sql = f"SELECT {base_cols} FROM {self.table_name} {where_sql} {order_sql} {limit_sql} {offset_sql}"
         rows = await conn.fetch(sql, *args)
-        data = [dict(r) for r in rows]
+        data = [self._decode_row(r, column_types) for r in rows]
 
         if self.single_val:
             data = data[0] if data else None
@@ -599,9 +631,11 @@ class QueryBuilder:
             sql = f"INSERT INTO {self.table_name} ({cols}) VALUES ({placeholders}) RETURNING *"
             row = await conn.fetchrow(sql, *args)
             if row:
-                results.append(dict(row))
+                results.append(self._decode_row(row, column_types))
 
-        data = results[0] if isinstance(self.inserts, dict) and results else results
+        data: Any = results
+        if self.single_val:
+            data = results[0] if results else None
         return PostgrestResponse(data=data)
 
     async def _execute_update(self, conn) -> PostgrestResponse:
@@ -623,7 +657,7 @@ class QueryBuilder:
 
         sql = f"UPDATE {self.table_name} SET {', '.join(set_parts)} {where_sql} RETURNING *"
         rows = await conn.fetch(sql, *args)
-        data = [dict(r) for r in rows]
+        data = [self._decode_row(r, column_types) for r in rows]
 
         if self.single_val:
             data = data[0] if data else None
@@ -668,9 +702,11 @@ class QueryBuilder:
 
             row = await conn.fetchrow(sql, *args)
             if row:
-                results.append(dict(row))
+                results.append(self._decode_row(row, column_types))
 
-        data = results[0] if isinstance(self.upsert_data, dict) and results else results
+        data: Any = results
+        if self.single_val:
+            data = results[0] if results else None
         return PostgrestResponse(data=data)
 
     async def _execute_delete(self, conn) -> PostgrestResponse:
@@ -678,7 +714,7 @@ class QueryBuilder:
         where_sql, args = self._build_where_clause(start_index=1, column_types=column_types)
         sql = f"DELETE FROM {self.table_name} {where_sql} RETURNING *"
         rows = await conn.fetch(sql, *args)
-        data = [dict(r) for r in rows]
+        data = [self._decode_row(r, column_types) for r in rows]
 
         if self.single_val:
             data = data[0] if data else None

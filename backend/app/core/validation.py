@@ -32,10 +32,6 @@ class ProviderValidator:
         "stt": [("DEEPGRAM_API_KEY", "Deepgram STT provider")],
         "tts": [("CARTESIA_API_KEY", "Cartesia TTS provider")],
         "llm": [("GROQ_API_KEY", "Groq LLM provider")],
-        "telephony": [
-            ("VONAGE_API_KEY", "Vonage telephony"),
-            ("VONAGE_API_SECRET", "Vonage telephony"),
-        ],
         "database": [
             ("DATABASE_URL", "PostgreSQL database"),
             ("JWT_SECRET", "JWT Secret for auth"),
@@ -43,9 +39,13 @@ class ProviderValidator:
         "cache": [("REDIS_URL", "Redis cache (optional)")],
     }
     
-    # Optional but recommended
     OPTIONAL_ENV_VARS = {
-        "telephony": [("VONAGE_APP_ID", "Vonage application ID")],
+        "telephony": [
+            ("VONAGE_API_KEY", "Vonage Voice and SMS API key"),
+            ("VONAGE_API_SECRET", "Vonage Voice and SMS API secret"),
+            ("VONAGE_APP_ID", "Vonage application ID (Voice + SMS)"),
+            ("VONAGE_PRIVATE_KEY_PATH", "Path to Vonage private key file (JWT auth for Voice API)"),
+        ],
     }
     
     def __init__(self, strict: bool = False):

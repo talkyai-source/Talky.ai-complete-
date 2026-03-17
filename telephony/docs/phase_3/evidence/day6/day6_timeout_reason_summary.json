@@ -1,0 +1,7 @@
+{
+  "start_timeout": 1,
+  "no_rtp_timeout": 1,
+  "no_rtp_timeout_hold": 1,
+  "final_timeout": 0,
+  "timeout_events_total": 0
+}

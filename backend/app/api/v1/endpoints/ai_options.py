@@ -18,9 +18,10 @@ import logging
 from typing import Optional, List, Set
 
 import aiohttp
-from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+
+from app.core.dotenv_compat import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()

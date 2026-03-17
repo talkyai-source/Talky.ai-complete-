@@ -1,0 +1,9 @@
+{
+  "drill_id": "N1",
+  "end_epoch": 1772116556,
+  "notes": "OpenSIPS outage drill passed.",
+  "outage_seconds": 32,
+  "recovery_seconds": 5,
+  "start_epoch": 1772116519,
+  "status": "passed"
+}

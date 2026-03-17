@@ -1,0 +1,28 @@
+{
+  "counts": {
+    "transfer_redirect_dispatched": 0,
+    "transfer_continue_dispatched": 2,
+    "transfer_failed": 0,
+    "call_rejected_concurrency": 2,
+    "transfer_rejected_concurrency": 2
+  },
+  "transfer_success_total": 2,
+  "concurrency_reject_total": 4,
+  "controller_finished": {
+    "active_sessions": 0,
+    "completed_calls": 4,
+    "event": "controller_finished",
+    "failed_calls": 0,
+    "remaining_bridges": 0,
+    "remaining_external_channels": 0,
+    "started_calls": 4,
+    "tenant_active_calls": 0,
+    "tenant_id": "day9-default",
+    "tenant_transfer_inflight": 0,
+    "transfer_attempts": 4,
+    "transfer_failures": 0,
+    "transfer_rejected": 4,
+    "transfer_successes": 2,
+    "ts": 1772548447159
+  }
+}

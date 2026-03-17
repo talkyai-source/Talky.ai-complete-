@@ -1,0 +1,77 @@
+{
+  "run_mode": "expect_success",
+  "target": "127.0.0.1:15060",
+  "bind_ip": "127.0.0.1",
+  "extension": "700",
+  "calls_requested": 5,
+  "calls_passed": 5,
+  "calls_failed": 0,
+  "duration_seconds": 0.888,
+  "results": [
+    {
+      "call_index": 1,
+      "success": true,
+      "invite_codes": [
+        100,
+        200
+      ],
+      "bye_code": 200,
+      "reason": "ok",
+      "call_id": "f38dafdc1e624d759d7132a1ef0ab007-1@talky.local",
+      "bind_ip": "127.0.0.1",
+      "target": "127.0.0.1:15060"
+    },
+    {
+      "call_index": 2,
+      "success": true,
+      "invite_codes": [
+        100,
+        200
+      ],
+      "bye_code": 200,
+      "reason": "ok",
+      "call_id": "e786ed0ed766426fad2db76f07072050-2@talky.local",
+      "bind_ip": "127.0.0.1",
+      "target": "127.0.0.1:15060"
+    },
+    {
+      "call_index": 3,
+      "success": true,
+      "invite_codes": [
+        100,
+        200
+      ],
+      "bye_code": 200,
+      "reason": "ok",
+      "call_id": "a306118677d14c08923a0c113c1de50d-3@talky.local",
+      "bind_ip": "127.0.0.1",
+      "target": "127.0.0.1:15060"
+    },
+    {
+      "call_index": 4,
+      "success": true,
+      "invite_codes": [
+        100,
+        200
+      ],
+      "bye_code": 200,
+      "reason": "ok",
+      "call_id": "4b327300aa7546948ac25c03bf79240c-4@talky.local",
+      "bind_ip": "127.0.0.1",
+      "target": "127.0.0.1:15060"
+    },
+    {
+      "call_index": 5,
+      "success": true,
+      "invite_codes": [
+        100,
+        200
+      ],
+      "bye_code": 200,
+      "reason": "ok",
+      "call_id": "a5418dc3b23c4bf0a43d3f08ba25e55d-5@talky.local",
+      "bind_ip": "127.0.0.1",
+      "target": "127.0.0.1:15060"
+    }
+  ]
+}

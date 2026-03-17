@@ -40,26 +40,56 @@ export interface AssistantActionsTable {
 
 export const ConnectorSchema = z.object({
     id: z.string(),
-    name: z.string(),
+    name: z.string().optional(),
     type: z.string(),
-    config: z.record(z.unknown()),
+    provider: z.string().optional(),
+    status: z.string().optional(),
+    accountEmail: z.string().optional(),
+    config: z.record(z.unknown()).optional(),
     createdAt: z.string(),
 });
 
 export type Connector = z.infer<typeof ConnectorSchema>;
 
-export const ConnectorResponseSchema = z.union([
-    ConnectorSchema,
-    z
-        .object({
+export const ConnectorResponseSchema = z
+    .union([
+        ConnectorSchema,
+        z.object({
             id: z.string(),
-            name: z.string(),
+            name: z.string().nullable().optional(),
             type: z.string(),
-            config: z.record(z.unknown()),
+            provider: z.string().optional(),
+            status: z.string().optional(),
+            account_email: z.string().nullable().optional(),
+            config: z.record(z.unknown()).optional(),
             created_at: z.string(),
-        })
-        .transform((v) => ({ ...v, createdAt: v.created_at })),
-]);
+        }),
+    ])
+    .transform((v) => {
+        if ("createdAt" in v) {
+            return {
+                id: v.id,
+                name: v.name ?? undefined,
+                type: v.type,
+                provider: v.provider,
+                status: v.status,
+                accountEmail: v.accountEmail ?? undefined,
+                config: v.config,
+                createdAt: v.createdAt,
+            };
+        }
+
+        return {
+            id: v.id,
+            name: v.name ?? undefined,
+            type: v.type,
+            provider: v.provider,
+            status: v.status,
+            accountEmail: v.account_email ?? undefined,
+            config: v.config,
+            createdAt: v.created_at,
+        };
+    });
 
 export const ConnectorAccountSchema = z.object({
     id: z.string(),
@@ -83,6 +113,33 @@ export const ConnectorProviderStatusSchema = z.object({
 });
 
 export type ConnectorProviderStatus = z.infer<typeof ConnectorProviderStatusSchema>;
+
+export const ConnectorProviderInfoSchema = z.union([
+    z.object({
+        provider: z.string(),
+        type: z.string(),
+        name: z.string(),
+        description: z.string(),
+        requiresOAuth: z.boolean().optional(),
+    }),
+    z
+        .object({
+            provider: z.string(),
+            type: z.string(),
+            name: z.string(),
+            description: z.string(),
+            requires_oauth: z.boolean().optional(),
+        })
+        .transform((v) => ({
+            provider: v.provider,
+            type: v.type,
+            name: v.name,
+            description: v.description,
+            requiresOAuth: v.requires_oauth,
+        })),
+]);
+
+export type ConnectorProviderInfo = z.infer<typeof ConnectorProviderInfoSchema>;
 
 export const EmailTemplateSchema = z.object({
     id: z.string(),

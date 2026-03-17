@@ -37,6 +37,35 @@ class TestHealthEndpoint:
         assert "AI Voice Dialer" in data["message"]
 
 
+class TestCorsOrigins:
+    """Tests for computed CORS allowlist behavior."""
+
+    def test_allowed_origins_include_loopback_aliases_for_frontend_url(self):
+        """localhost and 127.0.0.1 should be interchangeable in local dev."""
+        from app.core.config import Settings
+
+        settings = Settings(
+            frontend_url="http://localhost:3000",
+            api_base_url="http://localhost:8000",
+        )
+
+        assert "http://localhost:3000" in settings.allowed_origins
+        assert "http://127.0.0.1:3000" in settings.allowed_origins
+
+    def test_allowed_origins_expand_explicit_loopback_cors_origins(self):
+        """Explicit CORS origins should still gain the matching loopback alias."""
+        from app.core.config import Settings
+
+        settings = Settings(
+            cors_origins=["http://127.0.0.1:3000"],
+            frontend_url="http://localhost:3000",
+            api_base_url="http://localhost:8000",
+        )
+
+        assert "http://127.0.0.1:3000" in settings.allowed_origins
+        assert "http://localhost:3000" in settings.allowed_origins
+
+
 class TestSessionManager:
     """Basic tests for SessionManager."""
     

@@ -11,6 +11,7 @@ from typing import Optional
 from datetime import datetime
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
+from fastapi.encoders import jsonable_encoder
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client
@@ -57,7 +58,7 @@ class ConnectionManager:
             return False
         
         try:
-            await self.active_connections[connection_id].send_json(data)
+            await self.active_connections[connection_id].send_json(jsonable_encoder(data))
             return True
         except WebSocketDisconnect:
             # Client disconnected - remove from active connections
@@ -79,6 +80,15 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
+
+
+def _first_row(data):
+    """Normalize PostgREST-style responses across list and single-object shapes."""
+    if isinstance(data, list):
+        return data[0] if data else None
+    if isinstance(data, dict):
+        return data
+    return None
 
 
 # =============================================================================
@@ -126,14 +136,14 @@ async def assistant_chat(
                 })
                 return
             
-            user_id = user.id
+            user_id = str(user.id)
             
             # Get tenant_id
             profile = db_client.table("user_profiles").select(
                 "tenant_id"
             ).eq("id", user_id).single().execute()
             
-            tenant_id = profile.data.get("tenant_id") if profile.data else None
+            tenant_id = str(profile.data.get("tenant_id")) if profile.data and profile.data.get("tenant_id") else None
             if not tenant_id:
                 await manager.send_json(connection_id, {
                     "type": "error", 
@@ -167,7 +177,17 @@ async def assistant_chat(
                 ).eq("id", conversation_id).eq("tenant_id", tenant_id).single().execute()
                 
                 if conv_response.data:
-                    messages_history = conv_response.data.get("messages", [])
+                    raw_messages = conv_response.data.get("messages", [])
+                    if isinstance(raw_messages, str):
+                        try:
+                            raw_messages = json.loads(raw_messages)
+                        except json.JSONDecodeError:
+                            logger.warning(
+                                "Assistant conversation %s has non-JSON messages payload",
+                                conversation_id,
+                            )
+                            raw_messages = []
+                    messages_history = raw_messages if isinstance(raw_messages, list) else []
             except Exception:
                 pass  # Continue with empty history
         
@@ -264,30 +284,42 @@ async def assistant_chat(
                         "content": assistant_content
                     })
                     
-                    # Save conversation
-                    if current_conversation_id:
-                        db_client.table("assistant_conversations").update({
-                            "messages": messages_history,
-                            "message_count": len(messages_history),
-                            "last_message_at": datetime.utcnow().isoformat()
-                        }).eq("id", current_conversation_id).execute()
-                    else:
-                        new_conv = db_client.table("assistant_conversations").insert({
-                            "tenant_id": tenant_id,
-                            "user_id": user_id,
-                            "messages": messages_history,
-                            "message_count": len(messages_history),
-                            "title": user_content[:50] + ("..." if len(user_content) > 50 else ""),
-                            "started_at": datetime.utcnow().isoformat(),
-                            "last_message_at": datetime.utcnow().isoformat()
-                        }).execute()
-                        
-                        if new_conv.data:
-                            current_conversation_id = new_conv.data[0]["id"]
-                            await manager.send_json(connection_id, {
-                                "type": "conversation_created",
-                                "conversation_id": current_conversation_id
-                            })
+                    # Persist chat state without breaking the already-sent assistant reply.
+                    try:
+                        if current_conversation_id:
+                            db_client.table("assistant_conversations").update({
+                                "messages": messages_history,
+                                "message_count": len(messages_history),
+                                "last_message_at": datetime.utcnow().isoformat()
+                            }).eq("id", current_conversation_id).execute()
+                        else:
+                            new_conv = db_client.table("assistant_conversations").insert({
+                                "tenant_id": tenant_id,
+                                "user_id": user_id,
+                                "messages": messages_history,
+                                "message_count": len(messages_history),
+                                "title": user_content[:50] + ("..." if len(user_content) > 50 else ""),
+                                "started_at": datetime.utcnow().isoformat(),
+                                "last_message_at": datetime.utcnow().isoformat()
+                            }).single().execute()
+
+                            created_conv = _first_row(new_conv.data)
+                            if created_conv and created_conv.get("id"):
+                                current_conversation_id = str(created_conv["id"])
+                                await manager.send_json(connection_id, {
+                                    "type": "conversation_created",
+                                    "conversation_id": current_conversation_id
+                                })
+                            else:
+                                logger.warning(
+                                    "Assistant conversation insert returned unexpected payload shape: %r",
+                                    new_conv.data,
+                                )
+                    except Exception:
+                        logger.exception(
+                            "Failed to persist assistant conversation state",
+                            extra={"conversation_id": current_conversation_id},
+                        )
                 
                 except WebSocketDisconnect:
                     # Client disconnected during processing - just exit cleanly

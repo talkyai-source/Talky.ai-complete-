@@ -5,6 +5,12 @@ WebSocket server that bridges FreeSWITCH audio (via mod_audio_fork) to the AI vo
 This enables real-time bidirectional audio streaming:
 - FreeSWITCH → WebSocket → STT → AI → TTS → WebSocket → FreeSWITCH
 
+Keepalive note:
+    Protocol-level ping / pong is handled by the ASGI server (`uvicorn` using
+    the `websockets` backend) via `ws_ping_interval` / `ws_ping_timeout`.
+    This bridge adds session-level idle cleanup so stale audio sessions don't
+    linger indefinitely if no media arrives.
+
 Usage:
     The FastAPI app registers this endpoint at /ws/freeswitch-audio
     FreeSWITCH connects via dialplan: <action application="audio_fork" data="ws://..."/>
@@ -12,10 +18,13 @@ Usage:
 import asyncio
 import logging
 import struct
+from contextlib import suppress
 from typing import Optional, Callable, Dict
 from dataclasses import dataclass
 
 from fastapi import WebSocket, WebSocketDisconnect
+
+from app.core.config import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +51,33 @@ class FreeSwitchAudioBridge:
     def __init__(self):
         self._sessions: Dict[str, AudioSession] = {}
         self._background_tasks: set = set()  # Track tasks to prevent GC and log errors
+        websocket_config = self._load_websocket_config()
+        self._connection_timeout_seconds = float(
+            websocket_config.get("connection_timeout_seconds", 300)
+        )
+        self._heartbeat_interval_seconds = float(
+            websocket_config.get("heartbeat_interval_seconds", 30)
+        )
+        self._heartbeat_timeout_seconds = float(
+            websocket_config.get("heartbeat_timeout_seconds", 5)
+        )
         
         # Callbacks for voice pipeline integration
         self._on_audio_received: Optional[Callable] = None
         self._on_session_start: Optional[Callable] = None
         self._on_session_end: Optional[Callable] = None
+
+    def _load_websocket_config(self) -> Dict[str, float]:
+        """Load WebSocket timing config with safe fallbacks."""
+        try:
+            return ConfigManager().get_websocket_config()
+        except Exception as exc:
+            logger.warning("Failed to load WebSocket config, using defaults: %s", exc)
+            return {
+                "connection_timeout_seconds": 300,
+                "heartbeat_interval_seconds": 30,
+                "heartbeat_timeout_seconds": 5,
+            }
     
     def _track_task(self, coro) -> None:
         """Create a tracked background task that logs exceptions instead of swallowing them."""
@@ -80,7 +111,13 @@ class FreeSwitchAudioBridge:
         """
         await websocket.accept()
         
-        logger.info(f"🎤 FreeSWITCH audio WebSocket connected: {call_uuid[:8]}")
+        logger.info(
+            "🎤 FreeSWITCH audio WebSocket connected: %s (idle_timeout=%ss, ping_interval=%ss, ping_timeout=%ss)",
+            call_uuid[:8],
+            self._connection_timeout_seconds,
+            self._heartbeat_interval_seconds,
+            self._heartbeat_timeout_seconds,
+        )
         
         session = AudioSession(
             call_uuid=call_uuid,
@@ -97,13 +134,25 @@ class FreeSwitchAudioBridge:
             while session.active:
                 try:
                     # mod_audio_fork sends binary audio data
-                    data = await websocket.receive_bytes()
+                    data = await asyncio.wait_for(
+                        websocket.receive_bytes(),
+                        timeout=self._connection_timeout_seconds,
+                    )
                     
                     if data and self._on_audio_received:
                         # Forward to voice pipeline (tracked async task)
                         self._track_task(
                             self._on_audio_received(call_uuid, data)
                         )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "🎤 FreeSWITCH audio WebSocket idle timeout: %s after %ss",
+                        call_uuid[:8],
+                        self._connection_timeout_seconds,
+                    )
+                    with suppress(Exception):
+                        await websocket.close(code=1001, reason="audio session idle timeout")
+                    break
                         
                 except WebSocketDisconnect:
                     logger.info(f"🎤 FreeSWITCH audio WebSocket disconnected: {call_uuid[:8]}")

@@ -84,7 +84,7 @@ class TestCallSession:
             call_id="test-123",
             campaign_id="campaign-1",
             lead_id="lead-1",
-            vonage_call_uuid="vonage-uuid-123",
+            provider_call_id="vonage-uuid-123",
             system_prompt="You are a helpful assistant",
             voice_id="voice-1"
         )
@@ -92,7 +92,7 @@ class TestCallSession:
         assert session.call_id == "test-123"
         assert session.campaign_id == "campaign-1"
         assert session.lead_id == "lead-1"
-        assert session.vonage_call_uuid == "vonage-uuid-123"
+        assert session.provider_call_id == "vonage-uuid-123"
         assert session.state == CallState.CONNECTING
         assert session.turn_id == 0
         assert session.language == "en"
@@ -105,7 +105,7 @@ class TestCallSession:
             call_id="test-123",
             campaign_id="campaign-1",
             lead_id="lead-1",
-            vonage_call_uuid="vonage-uuid",
+            provider_call_id="vonage-uuid",
             system_prompt="Test",
             voice_id="voice-1",
             language="es"
@@ -119,7 +119,7 @@ class TestCallSession:
             call_id="test-123",
             campaign_id="campaign-1",
             lead_id="lead-1",
-            vonage_call_uuid="vonage-uuid",
+            provider_call_id="vonage-uuid",
             system_prompt="Test",
             voice_id="voice-1",
             tenant_id="tenant-1"
@@ -135,7 +135,7 @@ class TestCallSession:
             call_id="test-123",
             campaign_id="campaign-1",
             lead_id="lead-1",
-            vonage_call_uuid="vonage-uuid",
+            provider_call_id="vonage-uuid",
             system_prompt="Test",
             voice_id="voice-1"
         )
@@ -152,7 +152,7 @@ class TestCallSession:
             call_id="test-123",
             campaign_id="campaign-1",
             lead_id="lead-1",
-            vonage_call_uuid="vonage-uuid",
+            provider_call_id="vonage-uuid",
             system_prompt="Test",
             voice_id="voice-1"
         )
@@ -172,7 +172,7 @@ class TestCallSession:
             call_id="test-123",
             campaign_id="campaign-1",
             lead_id="lead-1",
-            vonage_call_uuid="vonage-uuid",
+            provider_call_id="vonage-uuid",
             system_prompt="Test",
             voice_id="voice-1"
         )
@@ -192,7 +192,7 @@ class TestCallSession:
             call_id="test-123",
             campaign_id="campaign-1",
             lead_id="lead-1",
-            vonage_call_uuid="vonage-uuid",
+            provider_call_id="vonage-uuid",
             system_prompt="Test",
             voice_id="voice-1"
         )
@@ -210,7 +210,7 @@ class TestCallSession:
             call_id="test-123",
             campaign_id="campaign-1",
             lead_id="lead-1",
-            vonage_call_uuid="vonage-uuid",
+            provider_call_id="vonage-uuid",
             system_prompt="Test",
             voice_id="voice-1"
         )
@@ -230,7 +230,7 @@ class TestCallSession:
             call_id="test-123",
             campaign_id="campaign-1",
             lead_id="lead-1",
-            vonage_call_uuid="vonage-uuid",
+            provider_call_id="vonage-uuid",
             system_prompt="Test",
             voice_id="voice-1"
         )
@@ -259,7 +259,7 @@ class TestCallSession:
             call_id="test-123",
             campaign_id="campaign-1",
             lead_id="lead-1",
-            vonage_call_uuid="vonage-uuid",
+            provider_call_id="vonage-uuid",
             system_prompt="Test",
             voice_id="voice-1"
         )
@@ -273,7 +273,7 @@ class TestCallSession:
             call_id="test-123",
             campaign_id="campaign-1",
             lead_id="lead-1",
-            vonage_call_uuid="vonage-uuid",
+            provider_call_id="vonage-uuid",
             system_prompt="Test prompt",
             voice_id="voice-1"
         )
@@ -305,7 +305,7 @@ class TestCallSession:
             call_id="test-123",
             campaign_id="campaign-1",
             lead_id="lead-1",
-            vonage_call_uuid="vonage-uuid",
+            provider_call_id="vonage-uuid",
             system_prompt="Test prompt",
             voice_id="voice-1"
         )
@@ -336,7 +336,7 @@ class TestCallSession:
             call_id="test-123",
             campaign_id="campaign-1",
             lead_id="lead-1",
-            vonage_call_uuid="vonage-uuid",
+            provider_call_id="vonage-uuid",
             system_prompt="Test",
             voice_id="voice-1"
         )
@@ -361,7 +361,7 @@ class TestCallSession:
             call_id="test-123",
             campaign_id="campaign-1",
             lead_id="lead-1",
-            vonage_call_uuid="vonage-uuid",
+            provider_call_id="vonage-uuid",
             system_prompt="Test",
             voice_id="voice-1"
         )

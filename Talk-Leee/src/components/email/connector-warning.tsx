@@ -27,7 +27,7 @@ export function ConnectorWarning({
                     <div className="mt-1 text-sm text-amber-100/80">{message}</div>
                     <div className="mt-3 flex flex-wrap gap-2">
                         <Link
-                            href="/settings/connectors"
+                            href="/connectors"
                             className="inline-flex items-center justify-center rounded-lg bg-amber-300 px-3 py-1.5 text-xs font-bold text-amber-950 hover:bg-amber-200 transition-colors"
                         >
                             Fix connector
@@ -39,4 +39,3 @@ export function ConnectorWarning({
         </div>
     );
 }
-

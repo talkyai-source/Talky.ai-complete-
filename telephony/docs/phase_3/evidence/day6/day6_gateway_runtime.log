@@ -1,0 +1,28 @@
+voice-gateway-cpp started host=127.0.0.1 port=18080 codec=pcmu ptime_ms=20
+event=rtp_tx session_id=day6-no-rtp-timeout seq=18209 ts=4004353480 ssrc=1988931707 state=active packets_in=3 packets_out=1
+event=rtp_tx session_id=day6-no-rtp-timeout seq=18210 ts=4004353640 ssrc=1988931707 state=active packets_in=4 packets_out=2
+event=rtp_tx session_id=day6-no-rtp-timeout seq=18211 ts=4004353800 ssrc=1988931707 state=active packets_in=4 packets_out=3
+event=rtp_tx session_id=day6-no-rtp-timeout seq=18212 ts=4004353960 ssrc=1988931707 state=active packets_in=5 packets_out=4
+event=rtp_tx session_id=day6-no-rtp-timeout seq=18213 ts=4004354120 ssrc=1988931707 state=active packets_in=5 packets_out=5
+event=rtp_tx session_id=day6-hold-timeout seq=42889 ts=3454412157 ssrc=158316416 state=active packets_in=3 packets_out=1
+event=rtp_tx session_id=day6-hold-timeout seq=42890 ts=3454412317 ssrc=158316416 state=active packets_in=4 packets_out=2
+event=rtp_tx session_id=day6-hold-timeout seq=42891 ts=3454412477 ssrc=158316416 state=active packets_in=4 packets_out=3
+event=rtp_tx session_id=day6-hold-timeout seq=42892 ts=3454412637 ssrc=158316416 state=active packets_in=5 packets_out=4
+event=rtp_tx session_id=day6-hold-timeout seq=42893 ts=3454412797 ssrc=158316416 state=active packets_in=5 packets_out=5
+event=rtp_tx session_id=day6-reorder-duplicate seq=58422 ts=251932639 ssrc=3779736039 state=active packets_in=3 packets_out=1
+event=rtp_tx session_id=day6-reorder-duplicate seq=58423 ts=251932799 ssrc=3779736039 state=active packets_in=6 packets_out=2
+event=rtp_tx session_id=day6-reorder-duplicate seq=58424 ts=251932959 ssrc=3779736039 state=active packets_in=10 packets_out=3
+event=rtp_tx session_id=day6-reorder-duplicate seq=58425 ts=251933119 ssrc=3779736039 state=active packets_in=10 packets_out=4
+event=rtp_tx session_id=day6-reorder-duplicate seq=58426 ts=251933279 ssrc=3779736039 state=active packets_in=10 packets_out=5
+event=rtp_tx session_id=day6-reorder-duplicate seq=58427 ts=251933439 ssrc=3779736039 state=active packets_in=10 packets_out=6
+event=rtp_tx session_id=day6-reorder-duplicate seq=58428 ts=251933599 ssrc=3779736039 state=active packets_in=10 packets_out=7
+event=rtp_tx session_id=day6-reorder-duplicate seq=58429 ts=251933759 ssrc=3779736039 state=active packets_in=10 packets_out=8
+event=rtp_tx session_id=day6-queue-pressure seq=35980 ts=3519038182 ssrc=3915739647 state=active packets_in=47 packets_out=1
+event=rtp_tx session_id=day6-queue-pressure seq=35981 ts=3519038342 ssrc=3915739647 state=active packets_in=400 packets_out=2
+event=rtp_tx session_id=day6-queue-pressure seq=35982 ts=3519038502 ssrc=3915739647 state=active packets_in=400 packets_out=3
+event=rtp_tx session_id=day6-queue-pressure seq=35983 ts=3519038662 ssrc=3915739647 state=active packets_in=400 packets_out=4
+event=rtp_tx session_id=day6-queue-pressure seq=35984 ts=3519038822 ssrc=3915739647 state=active packets_in=400 packets_out=5
+event=rtp_tx session_id=day6-queue-pressure seq=35985 ts=3519038982 ssrc=3915739647 state=active packets_in=400 packets_out=6
+event=rtp_tx session_id=day6-queue-pressure seq=35986 ts=3519039142 ssrc=3915739647 state=active packets_in=400 packets_out=7
+event=rtp_tx session_id=day6-queue-pressure seq=35987 ts=3519039302 ssrc=3915739647 state=active packets_in=400 packets_out=8
+voice-gateway-cpp stopped

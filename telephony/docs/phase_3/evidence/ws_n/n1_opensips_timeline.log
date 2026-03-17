@@ -1,0 +1,5 @@
+2026-02-26T14:35:18Z | drill_start | N1 OpenSIPS outage drill started
+2026-02-26T14:35:19Z | inject_stop_opensips | Stopping talky-opensips
+2026-02-26T14:35:51Z | probe_during_expected_failure | SIP probe failed as expected while OpenSIPS stopped
+2026-02-26T14:35:56Z | probe_after_success | SIP probe succeeded after OpenSIPS restart
+2026-02-26T14:35:56Z | drill_complete | N1 passed (outage_detect=32s, recovery=5s, total=37s)

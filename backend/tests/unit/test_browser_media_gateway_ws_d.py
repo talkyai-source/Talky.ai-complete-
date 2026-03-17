@@ -109,7 +109,7 @@ class TestBrowserMediaGatewayWSD:
         assert metrics["contract"]["target_buffer_ms"] == 80
         assert metrics["contract"]["max_buffer_ms"] == 320
 
-    async def test_output_buffer_trim_enforces_max_buffer(self) -> None:
+    async def test_output_buffer_preserves_audio_when_over_threshold(self) -> None:
         gateway = BrowserMediaGateway()
         await gateway.initialize(
             {
@@ -124,10 +124,40 @@ class TestBrowserMediaGatewayWSD:
         call_id = "wsd-call-5"
         await gateway.on_call_started(call_id, {"websocket": ws})
 
-        # Two chunks push buffer over cap before send threshold path.
-        await gateway.send_audio(call_id, generate_silence(80, 16000, 1, 16))
-        await gateway.send_audio(call_id, generate_silence(80, 16000, 1, 16))
+        first = generate_silence(80, 16000, 1, 16)
+        second = generate_silence(80, 16000, 1, 16)
+
+        # Two chunks exceed the nominal max buffer, but browser playback
+        # should remain lossless instead of dropping audio.
+        await gateway.send_audio(call_id, first)
+        await gateway.send_audio(call_id, second)
+        await gateway.flush_audio_buffer(call_id)
 
         metrics = gateway.get_session_metrics(call_id)
-        assert metrics["dropped_output_bytes"] > 0
-        assert metrics["bytes_sent"] > 0
+        assert metrics["dropped_output_bytes"] == 0
+        assert metrics["bytes_sent"] == len(first) + len(second)
+
+    async def test_waits_for_browser_playback_completion_signal(self) -> None:
+        gateway = BrowserMediaGateway()
+        await gateway.initialize(
+            {
+                "sample_rate": 16000,
+                "target_buffer_ms": 20,
+                "max_buffer_ms": 40,
+                "ws_send_timeout_ms": 100,
+            }
+        )
+
+        ws = _FakeWebSocket()
+        call_id = "wsd-call-6"
+        await gateway.on_call_started(call_id, {"websocket": ws})
+
+        gateway.start_playback_tracking(call_id)
+        await gateway.send_audio(call_id, generate_silence(40, 16000, 1, 16))
+        await gateway.flush_audio_buffer(call_id)
+
+        waiter = asyncio.create_task(gateway.wait_for_playback_complete(call_id))
+        await asyncio.sleep(0)
+        gateway.mark_playback_complete(call_id)
+
+        assert await waiter is True

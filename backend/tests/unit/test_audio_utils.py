@@ -201,3 +201,46 @@ class TestAudioValidation:
         duration = calculate_audio_duration_ms(audio, sample_rate=16000)
         
         assert abs(duration - 20.0) < 0.1
+
+
+class TestTTSCleaning:
+    """Tests for voice-safe text cleanup."""
+
+    def test_clean_text_for_tts_removes_reasoning_and_markdown(self):
+        from app.utils.audio_utils import clean_text_for_tts
+
+        raw = """
+<think>I should compare all plans first.</think>
+### Packages
+1. **Basic** - $29/month
+2. **Professional** - $79/month
+Talky.ai works 24/7.
+"""
+
+        cleaned = clean_text_for_tts(raw)
+
+        assert "<think>" not in cleaned
+        assert "I should compare all plans first" not in cleaned
+        assert "**" not in cleaned
+        assert "#" not in cleaned
+        assert "1." not in cleaned
+        assert "2." not in cleaned
+        assert "/month" not in cleaned
+        assert "Talky.ai" not in cleaned
+        assert "Talky AI" in cleaned
+        assert "twenty four seven" in cleaned
+        assert "29 dollars per month" in cleaned
+        assert "79 dollars per month" in cleaned
+
+    def test_clean_text_for_tts_preserves_package_boundaries_as_sentences(self):
+        from app.utils.audio_utils import clean_text_for_tts
+
+        raw = "1. Basic - $29/month 2. Professional - $79/month 3. Enterprise - $199/month"
+
+        cleaned = clean_text_for_tts(raw)
+
+        assert "Basic, 29 dollars per month." in cleaned
+        assert "Professional, 79 dollars per month." in cleaned
+        assert "Enterprise, 199 dollars per month" in cleaned
+        assert " - " not in cleaned
+        assert "2." not in cleaned

@@ -1,0 +1,5 @@
+2026-02-26T14:36:03Z | drill_start | N3 FreeSWITCH backup disruption drill started (initial_state=missing)
+2026-02-26T14:36:14Z | backup_ready | FreeSWITCH backup profile running and CLI ready
+2026-02-26T14:36:14Z | inject_stop_freeswitch | Stopping talky-freeswitch
+2026-02-26T14:36:45Z | primary_healthy | Primary stack remained healthy during backup disruption
+2026-02-26T14:36:50Z | drill_complete | N3 passed (outage_detect=31s, recovery=5s)

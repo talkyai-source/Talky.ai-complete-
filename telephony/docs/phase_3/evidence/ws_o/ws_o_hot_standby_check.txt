@@ -1,0 +1,9 @@
+UP 0 years, 0 days, 0 hours, 0 minutes, 8 seconds, 854 milliseconds, 35 microseconds
+FreeSWITCH (Version 1.10.12 -release-10222002881-a88d069d6fgit a88d069 2024-08-02 21:02:27Z 64bit) is ready
+0 session(s) since startup
+0 session(s) - peak 0, last 5min 0 
+0 session(s) per Sec out of max 30, peak 0, last 5min 0 
+1000 session(s) max
+min idle cpu 0.00/96.70
+Current Stack Size/Max 240K/8192K
+

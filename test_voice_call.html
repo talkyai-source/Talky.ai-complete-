@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Talky.ai Voice Call Test</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        .status {
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.2);
+            font-weight: bold;
+        }
+        .status.connected { background: rgba(76, 175, 80, 0.3); }
+        .status.error { background: rgba(244, 67, 54, 0.3); }
+        button {
+            width: 100%;
+            padding: 15px;
+            margin: 10px 0;
+            font-size: 18px;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: bold;
+        }
+        button:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        #startCall { background: #4CAF50; color: white; }
+        #endCall { background: #f44336; color: white; }
+        .transcript {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            min-height: 200px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .message {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 8px;
+        }
+        .user { background: rgba(33, 150, 243, 0.3); text-align: right; }
+        .ai { background: rgba(76, 175, 80, 0.3); text-align: left; }
+        .system { background: rgba(255, 152, 0, 0.3); font-style: italic; }
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin: 20px 0;
+        }
+        .metric {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+            margin: 5px 0;
+        }
+        .metric-label {
+            font-size: 12px;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎙️ Talky.ai Voice Call Test</h1>
+        
+        <div id="status" class="status">Ready to start call</div>
+        
+        <button id="startCall">Start Voice Call</button>
+        <button id="endCall" disabled>End Call</button>
+        
+        <div class="metrics">
+            <div class="metric">
+                <div class="metric-label">STT Latency</div>
+                <div class="metric-value" id="sttLatency">-</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">LLM Latency</div>
+                <div class="metric-value" id="llmLatency">-</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">TTS Latency</div>
+                <div class="metric-value" id="ttsLatency">-</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Total</div>
+                <div class="metric-value" id="totalLatency">-</div>
+            </div>
+        </div>
+        
+        <div class="transcript" id="transcript"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let audioContext = null;
+        let mediaStream = null;
+        let audioWorkletNode = null;
+        let isRecording = false;
+
+        const startButton = document.getElementById('startCall');
+        const endButton = document.getElementById('endCall');
+        const statusDiv = document.getElementById('status');
+        const transcriptDiv = document.getElementById('transcript');
+
+        function updateStatus(message, type = '') {
+            statusDiv.textContent = message;
+            statusDiv.className = 'status ' + type;
+        }
+
+        function addMessage(text, type) {
+            const msg = document.createElement('div');
+            msg.className = 'message ' + type;
+            msg.textContent = text;
+            transcriptDiv.appendChild(msg);
+            transcriptDiv.scrollTop = transcriptDiv.scrollHeight;
+        }
+
+        function updateMetric(id, value) {
+            document.getElementById(id).textContent = value;
+        }
+
+        async function startCall() {
+            try {
+                updateStatus('Requesting microphone access...', '');
+                
+                // Get microphone access
+                mediaStream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true,
+                        sampleRate: 16000
+                    } 
+                });
+                
+                updateStatus('Connecting to server...', '');
+                
+                // Connect WebSocket (using ask-ai endpoint for voice demo)
+                const sessionId = 'test-' + Date.now();
+                ws = new WebSocket(`ws://localhost:8000/api/v1/ws/ask-ai/${sessionId}`);
+                
+                ws.onopen = async () => {
+                    updateStatus('Connected! Setting up audio...', 'connected');
+                    addMessage('Call started - AI is listening', 'system');
+                    
+                    // Setup audio context
+                    audioContext = new AudioContext({ sampleRate: 16000 });
+                    const source = audioContext.createMediaStreamSource(mediaStream);
+                    
+                    // Create audio processor
+                    await audioContext.audioWorklet.addModule(
+                        'data:text/javascript,' + encodeURIComponent(`
+                            class AudioProcessor extends AudioWorkletProcessor {
+                                process(inputs, outputs, parameters) {
+                                    const input = inputs[0];
+                                    if (input.length > 0) {
+                                        const samples = input[0];
+                                        const int16 = new Int16Array(samples.length);
+                                        for (let i = 0; i < samples.length; i++) {
+                                            int16[i] = Math.max(-32768, Math.min(32767, samples[i] * 32768));
+                                        }
+                                        this.port.postMessage(int16.buffer, [int16.buffer]);
+                                    }
+                                    return true;
+                                }
+                            }
+                            registerProcessor('audio-processor', AudioProcessor);
+                        `)
+                    );
+                    
+                    audioWorkletNode = new AudioWorkletNode(audioContext, 'audio-processor');
+                    audioWorkletNode.port.onmessage = (event) => {
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send(event.data);
+                        }
+                    };
+                    
+                    source.connect(audioWorkletNode);
+                    audioWorkletNode.connect(audioContext.destination);
+                    
+                    isRecording = true;
+                    startButton.disabled = true;
+                    endButton.disabled = false;
+                    
+                    updateStatus('Call active - Speak now!', 'connected');
+                };
+                
+                ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        
+                        switch(data.type) {
+                            case 'greeting':
+                                addMessage('AI: ' + data.text, 'ai');
+                                break;
+                            case 'transcript':
+                                if (data.is_final) {
+                                    addMessage('You: ' + data.text, 'user');
+                                }
+                                break;
+                            case 'llm_response':
+                                addMessage('AI: ' + data.text, 'ai');
+                                if (data.latency_ms) {
+                                    updateMetric('llmLatency', Math.round(data.latency_ms) + 'ms');
+                                }
+                                break;
+                            case 'turn_complete':
+                                if (data.llm_latency_ms) updateMetric('llmLatency', Math.round(data.llm_latency_ms) + 'ms');
+                                if (data.tts_latency_ms) updateMetric('ttsLatency', Math.round(data.tts_latency_ms) + 'ms');
+                                if (data.total_latency_ms) updateMetric('totalLatency', Math.round(data.total_latency_ms) + 'ms');
+                                break;
+                            case 'audio':
+                                // Play audio (TTS response)
+                                playAudio(data.data);
+                                break;
+                            case 'error':
+                                addMessage('Error: ' + data.message, 'system');
+                                updateStatus('Error: ' + data.message, 'error');
+                                break;
+                        }
+                    } catch (e) {
+                        console.error('Error parsing message:', e);
+                    }
+                };
+                
+                ws.onerror = (error) => {
+                    updateStatus('Connection error', 'error');
+                    addMessage('Connection error occurred', 'system');
+                };
+                
+                ws.onclose = () => {
+                    updateStatus('Call ended', '');
+                    addMessage('Call ended', 'system');
+                    cleanup();
+                };
+                
+            } catch (error) {
+                updateStatus('Error: ' + error.message, 'error');
+                addMessage('Error: ' + error.message, 'system');
+                cleanup();
+            }
+        }
+
+        function playAudio(base64Data) {
+            try {
+                const binaryString = atob(base64Data);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                
+                audioContext.decodeAudioData(bytes.buffer, (buffer) => {
+                    const source = audioContext.createBufferSource();
+                    source.buffer = buffer;
+                    source.connect(audioContext.destination);
+                    source.start();
+                });
+            } catch (e) {
+                console.error('Error playing audio:', e);
+            }
+        }
+
+        function endCall() {
+            if (ws) {
+                ws.close();
+            }
+            cleanup();
+        }
+
+        function cleanup() {
+            isRecording = false;
+            
+            if (audioWorkletNode) {
+                audioWorkletNode.disconnect();
+                audioWorkletNode = null;
+            }
+            
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+            
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+            }
+            
+            startButton.disabled = false;
+            endButton.disabled = true;
+        }
+
+        startButton.addEventListener('click', startCall);
+        endButton.addEventListener('click', endCall);
+    </script>
+</body>
+</html>

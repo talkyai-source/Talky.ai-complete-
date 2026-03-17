@@ -1,0 +1,91 @@
+groups:
+  - name: talky_telephony_ws_k_recording
+    interval: 30s
+    rules:
+      - record: job:talky_telephony_calls_setup_success_ratio:avg5m
+        expr: avg_over_time(talky_telephony_calls_setup_success_ratio[5m])
+
+      - record: job:talky_telephony_calls_answer_latency_p95_seconds:avg5m
+        expr: avg_over_time(talky_telephony_calls_answer_latency_p95_seconds[5m])
+
+      - record: job:talky_telephony_transfers_success_ratio:avg5m
+        expr: avg_over_time(talky_telephony_transfers_success_ratio[5m])
+
+      - record: job:talky_telephony_runtime_activation_success_ratio:avg5m
+        expr: avg_over_time(talky_telephony_runtime_activation_success_ratio[5m])
+
+      - record: job:talky_telephony_runtime_rollback_latency_p95_seconds:avg5m
+        expr: avg_over_time(talky_telephony_runtime_rollback_latency_p95_seconds[5m])
+
+  - name: talky_telephony_ws_k_alerts
+    interval: 30s
+    rules:
+      - alert: TalkyTelephonyMetricsScrapeFailed
+        expr: talky_telephony_metrics_scrape_success == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: telephony
+        annotations:
+          summary: "Telephony metrics scrape is failing"
+          description: "Backend /metrics scrape failed or SLO collection query errored."
+
+      - alert: TalkyTelephonyCallSetupSLOViolation
+        expr: job:talky_telephony_calls_setup_success_ratio:avg5m < 0.985 and talky_telephony_calls_setup_attempts > 20
+        for: 10m
+        labels:
+          severity: critical
+          team: telephony
+        annotations:
+          summary: "Call setup success ratio below SLO"
+          description: "5m average call setup ratio is below 98.5% with enough traffic."
+
+      - alert: TalkyTelephonyAnswerLatencyHigh
+        expr: job:talky_telephony_calls_answer_latency_p95_seconds:avg5m > 1.5 and talky_telephony_calls_setup_attempts > 20
+        for: 10m
+        labels:
+          severity: warning
+          team: telephony
+        annotations:
+          summary: "Call answer latency P95 above threshold"
+          description: "5m average P95 answer latency is above 1.5 seconds."
+
+      - alert: TalkyTelephonyTransferSuccessLow
+        expr: job:talky_telephony_transfers_success_ratio:avg5m < 0.95 and talky_telephony_transfers_attempts > 10
+        for: 10m
+        labels:
+          severity: warning
+          team: telephony
+        annotations:
+          summary: "Transfer success ratio below threshold"
+          description: "Transfer success ratio dropped below 95% for the 5m window."
+
+      - alert: TalkyTelephonyRuntimeActivationSuccessLow
+        expr: job:talky_telephony_runtime_activation_success_ratio:avg5m < 0.999 and talky_telephony_runtime_activation_attempts > 2
+        for: 10m
+        labels:
+          severity: critical
+          team: telephony
+        annotations:
+          summary: "Runtime activation success ratio below target"
+          description: "Runtime activation success ratio is below 99.9%."
+
+      - alert: TalkyTelephonyRollbackLatencyHigh
+        expr: job:talky_telephony_runtime_rollback_latency_p95_seconds:avg5m > 60 and talky_telephony_runtime_rollback_attempts > 0
+        for: 5m
+        labels:
+          severity: warning
+          team: telephony
+        annotations:
+          summary: "Rollback latency is too high"
+          description: "Rollback p95 latency is over 60 seconds."
+
+      - alert: TalkyTelephonyCanaryFrozenTooLong
+        expr: talky_telephony_canary_frozen == 1
+        for: 1h
+        labels:
+          severity: warning
+          team: telephony
+        annotations:
+          summary: "Canary has been frozen for too long"
+          description: "Canary freeze flag has remained enabled for over one hour."

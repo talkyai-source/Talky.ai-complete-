@@ -1,13 +1,14 @@
-# FreeSWITCH Layer
+# FreeSWITCH Layer (Backup)
 
 This folder holds FreeSWITCH-specific configuration and optional custom modules.
+It is retained as a backup runtime path.
 
 ## Purpose
 
-- B2BUA call control
-- Media app execution (playback, bridge, transfer)
-- Event socket integration with Python backend
-- Audio fork/bridge to AI pipeline
+- Backup B2BUA call control path
+- Legacy media app execution (playback, bridge, transfer)
+- Backup event socket integration path
+- Fallback audio fork/bridge path
 
 ## Structure
 
@@ -21,3 +22,6 @@ This folder holds FreeSWITCH-specific configuration and optional custom modules.
 - Keep production secrets out of committed files.
 - Commit templates and examples only.
 - Any custom C/C++ module code should go in `../modules/freeswitch/`.
+- Active primary runtime is Asterisk under `../asterisk/`.
+- Docker compose starts FreeSWITCH only when backup profile is requested:
+  - `docker compose --profile backup ... up -d freeswitch`

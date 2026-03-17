@@ -4,29 +4,60 @@ import type React from "react";
 import { useMemo, useRef, useState, useCallback, useEffect } from "react";
 import { MagneticText } from "./morphing-cursor";
 import { apiBaseUrl } from "@/lib/env";
-
-// Get the base URL for WebSocket connections
-const getWsUrl = () => {
-    // In development, connect directly to backend (port 8000)
-    // In production, use the same host (with ws:// or wss://)
-    if (process.env.NODE_ENV !== "production") {
-        return "ws://127.0.0.1:8000/api/v1";
-    }
-    const baseUrl = apiBaseUrl();
-    // Convert http/https to ws/wss
-    return baseUrl.replace(/^http/, 'ws');
-};
-
-// Get HTTP base URL for health checks
-const getHttpUrl = () => {
-    if (process.env.NODE_ENV !== "production") {
-        return "http://127.0.0.1:8000";
-    }
-    return apiBaseUrl();
-};
-import { AnimatePresence, motion } from "framer-motion";
 import { CheckCircle, MessageCircle } from "lucide-react";
 import { TrustedByMarquee } from "../home/trusted-by-section";
+
+function parseConfiguredApiUrl(): URL | null {
+    try {
+        return new URL(apiBaseUrl());
+    } catch {
+        return null;
+    }
+}
+
+function normalizeUrl(url: URL): string {
+    return url.toString().replace(/\/+$/, "");
+}
+
+function resolveBackendHttpBaseUrl(): string {
+    const configuredUrl = parseConfiguredApiUrl();
+    if (configuredUrl) {
+        const rootUrl = new URL(configuredUrl.toString());
+        const cleanPath = rootUrl.pathname.replace(/\/+$/, "");
+        if (cleanPath.endsWith("/api/v1")) {
+            const basePath = cleanPath.slice(0, -"/api/v1".length);
+            rootUrl.pathname = basePath || "/";
+        } else {
+            rootUrl.pathname = cleanPath || "/";
+        }
+        rootUrl.search = "";
+        rootUrl.hash = "";
+        return normalizeUrl(rootUrl);
+    }
+
+    if (typeof window !== "undefined") {
+        return `${window.location.protocol}//${window.location.hostname}:8000`;
+    }
+
+    return "http://127.0.0.1:8000";
+}
+
+function resolveBackendWsBaseUrl(): string {
+    const configuredUrl = parseConfiguredApiUrl();
+    if (configuredUrl) {
+        configuredUrl.protocol = configuredUrl.protocol === "https:" ? "wss:" : "ws:";
+        configuredUrl.search = "";
+        configuredUrl.hash = "";
+        return normalizeUrl(configuredUrl);
+    }
+
+    if (typeof window !== "undefined") {
+        const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        return `${wsProtocol}//${window.location.hostname}:8000/api/v1`;
+    }
+
+    return "ws://127.0.0.1:8000/api/v1";
+}
 
 type AIState = "idle" | "connecting" | "listening" | "processing" | "speaking";
 
@@ -91,10 +122,11 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
 
     // Audio playback refs (for TTS from backend)
     const audioContextRef = useRef<AudioContext | null>(null);
-    const audioWorkletNodeRef = useRef<AudioWorkletNode | null>(null);
-    const isAudioContextInitializedRef = useRef<boolean>(false);
-    const audioWorkletLoadPromiseRef = useRef<Promise<void> | null>(null);
+    const audioInitPromiseRef = useRef<Promise<void> | null>(null);
+    const playbackSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+    const nextPlaybackTimeRef = useRef<number>(0);
     const ttsSampleRateRef = useRef<number>(24000);
+    const awaitingPlaybackCompleteRef = useRef<boolean>(false);
 
     // Microphone refs
     const micStreamRef = useRef<MediaStream | null>(null);
@@ -116,13 +148,6 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
             .map((text) => text.replace(/\s+/g, " ").trim())
             .filter(Boolean);
     }, [description]);
-    const descriptionSizerParagraph = useMemo(() => {
-        let longest = "";
-        for (const paragraph of descriptionParagraphs) {
-            if (paragraph.length > longest.length) longest = paragraph;
-        }
-        return longest;
-    }, [descriptionParagraphs]);
     const [descriptionIndex, setDescriptionIndex] = useState(0);
     const [descriptionRenderId, setDescriptionRenderId] = useState(0);
     const [typedChars, setTypedChars] = useState(0);
@@ -160,27 +185,26 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
         if (el) el.scrollIntoView({ behavior: "smooth" });
     }, []);
 
-    // Initialize AudioWorklet with proper lifecycle management
+    // Initialize browser-native streaming playback using the device's
+    // preferred output sample rate.
     const initializeAudioPlayer = useCallback(async () => {
         // Don't initialize if component unmounted
         if (!isMountedRef.current) return;
 
         // Return existing promise if already loading
-        if (audioWorkletLoadPromiseRef.current) {
-            return audioWorkletLoadPromiseRef.current;
+        if (audioInitPromiseRef.current) {
+            return audioInitPromiseRef.current;
         }
 
         // Create new initialization promise
-        audioWorkletLoadPromiseRef.current = (async () => {
+        audioInitPromiseRef.current = (async () => {
             try {
-                // Create AudioContext if needed
-                // Use 24000 Hz to match Deepgram TTS streaming default for best quality
+                // Let the browser choose the preferred device sample rate.
                 if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
                     audioContextRef.current = new AudioContext({
-                        sampleRate: 24000,
                         latencyHint: 'interactive'
                     });
-                    isAudioContextInitializedRef.current = false;
+                    nextPlaybackTimeRef.current = 0;
                 }
 
                 const ctx = audioContextRef.current;
@@ -201,89 +225,102 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
                 if (ctx.state !== 'running') {
                     throw new Error(`AudioContext failed to start: ${ctx.state}`);
                 }
-
-                // Load AudioWorklet module only once
-                if (!isAudioContextInitializedRef.current) {
-                    try {
-                        await ctx.audioWorklet.addModule('/audio-stream-processor.js');
-                        isAudioContextInitializedRef.current = true;
-                    } catch (err) {
-                        // Module might already be loaded, continue
-                        console.warn('AudioWorklet module load warning:', err);
-                        isAudioContextInitializedRef.current = true;
-                    }
-                }
-
-                // Create AudioWorkletNode if not exists
-                if (!audioWorkletNodeRef.current) {
-                    const workletNode = new AudioWorkletNode(ctx, 'audio-stream-processor', {
-                        numberOfInputs: 0,
-                        numberOfOutputs: 1,
-                        outputChannelCount: [1]
-                    });
-                    workletNode.connect(ctx.destination);
-                    audioWorkletNodeRef.current = workletNode;
-                }
             } catch (err) {
                 console.error('Failed to initialize audio player:', err);
                 setError('Audio playback error - please click to try again');
-                // Reset state on error
-                isAudioContextInitializedRef.current = false;
                 throw err;
             } finally {
                 // Clear promise after a delay to allow retry
                 setTimeout(() => {
-                    audioWorkletLoadPromiseRef.current = null;
+                    audioInitPromiseRef.current = null;
                 }, 100);
             }
         })();
 
-        return audioWorkletLoadPromiseRef.current;
+        return audioInitPromiseRef.current;
     }, []);
 
-    // Queue audio chunk for playback via AudioWorklet
+    // Queue PCM16 audio for sample-accurate playback. The browser handles
+    // resampling from the chunk's native rate to the device output rate.
     const queueAudioChunk = useCallback((buffer: ArrayBuffer, sampleRate: number = 24000) => {
         if (!isMountedRef.current) return;
 
-        if (audioWorkletNodeRef.current) {
-            try {
-                audioWorkletNodeRef.current.port.postMessage({
-                    audioData: buffer,
-                    sampleRate: sampleRate
-                });
-            } catch (err) {
-                console.error('Failed to queue audio chunk:', err);
+        const ctx = audioContextRef.current;
+        if (!ctx) return;
+
+        try {
+            const pcm16 = new Int16Array(buffer);
+            if (pcm16.length === 0) return;
+
+            const float32 = new Float32Array(pcm16.length);
+            for (let i = 0; i < pcm16.length; i++) {
+                float32[i] = pcm16[i] / 32768.0;
             }
+
+            const audioBuffer = ctx.createBuffer(1, float32.length, sampleRate);
+            audioBuffer.getChannelData(0).set(float32);
+
+            const source = ctx.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(ctx.destination);
+
+            const leadTimeSeconds = 0.08;
+            const startAt = Math.max(
+                ctx.currentTime + leadTimeSeconds,
+                nextPlaybackTimeRef.current || 0,
+            );
+
+            source.onended = () => {
+                playbackSourcesRef.current.delete(source);
+                if (
+                    awaitingPlaybackCompleteRef.current &&
+                    playbackSourcesRef.current.size === 0 &&
+                    wsRef.current?.readyState === WebSocket.OPEN
+                ) {
+                    awaitingPlaybackCompleteRef.current = false;
+                    wsRef.current.send(JSON.stringify({ type: "playback_complete" }));
+                }
+            };
+
+            playbackSourcesRef.current.add(source);
+            source.start(startAt);
+            nextPlaybackTimeRef.current = startAt + audioBuffer.duration;
+        } catch (err) {
+            console.error('Failed to queue audio chunk:', err);
         }
     }, []);
 
-    // Reset AudioWorklet (used on barge-in / interruption) - DOES NOT close AudioContext
+    // Stop queued playback immediately on barge-in without closing the context.
     const resetAudioPlayer = useCallback(() => {
-        if (audioWorkletNodeRef.current) {
+        awaitingPlaybackCompleteRef.current = false;
+        playbackSourcesRef.current.forEach((source) => {
             try {
-                audioWorkletNodeRef.current.port.postMessage({ reset: true });
+                source.stop();
             } catch (err) {
-                console.warn('Reset message failed:', err);
+                console.warn('Reset stop failed:', err);
             }
-        }
+        });
+        playbackSourcesRef.current.clear();
+        nextPlaybackTimeRef.current = 0;
     }, []);
 
     // Full cleanup of audio resources (call on session end)
     const cleanupAudioPlayer = useCallback(() => {
-        if (audioWorkletNodeRef.current) {
+        awaitingPlaybackCompleteRef.current = false;
+        playbackSourcesRef.current.forEach((source) => {
             try {
-                audioWorkletNodeRef.current.disconnect();
-            } catch (e) { /* ignore */ }
-            audioWorkletNodeRef.current = null;
-        }
+                source.stop();
+            } catch { /* ignore */ }
+        });
+        playbackSourcesRef.current.clear();
+        nextPlaybackTimeRef.current = 0;
         if (audioContextRef.current) {
             try {
                 audioContextRef.current.close();
-            } catch (e) { /* ignore */ }
+            } catch { /* ignore */ }
             audioContextRef.current = null;
         }
-        isAudioContextInitializedRef.current = false;
-        audioWorkletLoadPromiseRef.current = null;
+        audioInitPromiseRef.current = null;
     }, []);
 
     const startMicrophone = useCallback(async (): Promise<boolean> => {
@@ -395,8 +432,8 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
             // Received audio chunk - queue it for playback
             const arrayBuffer = payload instanceof Blob ? await payload.arrayBuffer() : payload;
 
-            // Initialize AudioWorklet on first chunk (with retry logic)
-            if (!audioWorkletNodeRef.current) {
+            // Initialize playback on first chunk (with retry logic)
+            if (!audioContextRef.current) {
                 try {
                     await initializeAudioPlayer();
                 } catch (err) {
@@ -405,7 +442,7 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
                 }
             }
 
-            // Queue chunk directly to AudioWorklet
+            // Queue chunk for sample-accurate playback
             queueAudioChunk(arrayBuffer, ttsSampleRateRef.current);
             setAiState("speaking");
             return;
@@ -443,6 +480,16 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
                 break;
             case "turn_complete":
                 setAiState("listening");
+                break;
+            case "tts_audio_complete":
+                awaitingPlaybackCompleteRef.current = true;
+                if (
+                    playbackSourcesRef.current.size === 0 &&
+                    wsRef.current?.readyState === WebSocket.OPEN
+                ) {
+                    awaitingPlaybackCompleteRef.current = false;
+                    wsRef.current.send(JSON.stringify({ type: "playback_complete" }));
+                }
                 break;
             case "barge_in":
             case "tts_interrupted":
@@ -532,7 +579,7 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
 
         // First check if backend is reachable via HTTP
         try {
-            const healthUrl = `${getHttpUrl()}/health`;
+            const healthUrl = `${resolveBackendHttpBaseUrl()}/health`;
             console.log(`[VoiceAgent] Checking backend health: ${healthUrl}`);
             const healthRes = await fetch(healthUrl, {
                 method: 'GET',
@@ -547,14 +594,14 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
         } catch (err) {
             console.error(`[VoiceAgent] Backend not reachable:`, err);
             stopMicrophone();
-            setError(`Backend not reachable at ${getHttpUrl()}. Please ensure the backend is running on port 8000.`);
+            setError(`Backend not reachable at ${resolveBackendHttpBaseUrl()}. Please ensure the backend is running on port 8000.`);
             setAiState("idle");
             connectingRef.current = false;
             return;
         }
 
         const sessionId = `demo-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-        const wsUrl = `${getWsUrl()}/ws/ask-ai/${sessionId}`;
+        const wsUrl = `${resolveBackendWsBaseUrl()}/ws/ask-ai/${sessionId}`;
         console.log(`[VoiceAgent] Connecting to: ${wsUrl}`);
 
         const ws = new WebSocket(wsUrl);

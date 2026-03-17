@@ -1,0 +1,8 @@
+{
+  "call_rejected_concurrency": 2,
+  "transfer_rejected_concurrency": 2,
+  "concurrency_reject_total": 4,
+  "tenant_id": "day9-default",
+  "tenant_max_active_calls": 2,
+  "tenant_max_transfer_inflight": 1
+}

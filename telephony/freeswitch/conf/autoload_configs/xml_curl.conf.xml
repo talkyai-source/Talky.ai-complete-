@@ -1,0 +1,22 @@
+<configuration name="xml_curl.conf" description="Talky WS-M backup xml_curl limits">
+  <bindings>
+    <binding name="directory">
+      <param name="gateway-url" value="http://127.0.0.1:8088/freeswitch/xml"/>
+      <param name="method" value="POST"/>
+      <param name="timeout" value="3000"/>
+      <param name="enable-post-var" value="true"/>
+      <param name="disable-100-continue" value="true"/>
+      <param name="retries" value="2"/>
+      <param name="retry-delay-ms" value="250"/>
+    </binding>
+    <binding name="dialplan">
+      <param name="gateway-url" value="http://127.0.0.1:8088/freeswitch/xml"/>
+      <param name="method" value="POST"/>
+      <param name="timeout" value="3000"/>
+      <param name="enable-post-var" value="true"/>
+      <param name="disable-100-continue" value="true"/>
+      <param name="retries" value="2"/>
+      <param name="retry-delay-ms" value="250"/>
+    </binding>
+  </bindings>
+</configuration>

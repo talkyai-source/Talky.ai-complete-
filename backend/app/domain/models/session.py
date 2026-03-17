@@ -54,7 +54,7 @@ class CallSession(BaseModel):
     
     # ========== Connection State ==========
     # Note: websocket is NOT serialized to Redis (runtime only)
-    vonage_call_uuid: str = Field(..., description="Vonage's call UUID")
+    provider_call_id: str = Field(..., description="Provider call identifier (PBX channel UUID, browser session ID, etc.)")
     talklee_call_id: Optional[str] = Field(None, description="Human-friendly call ID (tlk_<hex>)")
     state: CallState = Field(default=CallState.CONNECTING, description="Current session state")
     

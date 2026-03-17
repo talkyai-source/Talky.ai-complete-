@@ -1,0 +1,9 @@
+{
+  "status": "observed",
+  "markers": {
+    "timers": true,
+    "timers_min_se": true,
+    "timers_sess_expires": true
+  },
+  "note": "Session-timer integrity for Day10 should be validated with long-call profile if enabled."
+}

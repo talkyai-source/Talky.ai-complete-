@@ -13,26 +13,13 @@ import logging
 from typing import Optional
 from dataclasses import dataclass
 
-import jwt
 from fastapi import Depends, HTTPException, Header, status
 import asyncpg
 
 from app.core.container import get_db_pool_from_container
-from app.core.config import get_settings
+from app.core.jwt_security import JWTValidationError, decode_and_validate_token
 
 logger = logging.getLogger(__name__)
-
-
-def _require_jwt_secret() -> str:
-    """Return configured JWT secret or fail closed."""
-    secret = get_settings().effective_jwt_secret
-    if secret:
-        return secret
-    logger.error("JWT_SECRET is not configured")
-    raise HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail="Server authentication is not configured",
-    )
 
 
 @dataclass
@@ -95,21 +82,15 @@ async def get_current_user(
     token = parts[1]
 
     try:
-        payload = jwt.decode(
-            token,
-            _require_jwt_secret(),
-            algorithms=[get_settings().jwt_algorithm],
-        )
-    except jwt.ExpiredSignatureError:
+        payload = decode_and_validate_token(token)
+    except JWTValidationError as e:
+        if e.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
+            logger.error(e.detail)
+        else:
+            logger.warning("Token verification failed: %s", e.detail)
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has expired",
-        )
-    except jwt.InvalidTokenError as e:
-        logger.warning(f"Token verification failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
+            status_code=e.status_code,
+            detail=e.detail,
         )
 
     user_id = payload.get("sub")

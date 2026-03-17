@@ -1,9 +1,6 @@
 """
 Browser Media Gateway Implementation
-Implements MediaGateway interface for browser-based voice testing.
-
-This gateway uses the SAME interface as VonageMediaGateway, allowing
-the VoicePipelineService to work identically with browser audio.
+Implements MediaGateway interface for browser-based voice interactions.
 
 When ``telephony_mode`` is enabled (e.g. FreeSWITCH calls), outgoing
 TTS audio (Float32) is converted back to Int16 PCM before being sent
@@ -34,6 +31,9 @@ class BrowserSession:
     recording_buffer: list = field(default_factory=list)
     output_buffer: bytearray = field(default_factory=bytearray)  # Buffer for smooth TTS playback
     pending_byte: bytes = b""  # Keep odd trailing byte until next chunk (Int16 frame alignment)
+    playback_complete_event: asyncio.Event = field(default_factory=asyncio.Event)
+    playback_tracking_active: bool = False
+    playback_bytes_sent: int = 0
     is_active: bool = True
     
     # Audio metrics
@@ -53,20 +53,14 @@ class BrowserSession:
 
 class BrowserMediaGateway(MediaGateway):
     """
-    Media gateway for browser-based voice testing.
-    
-    Uses the SAME interface as VonageMediaGateway, enabling the
-    VoicePipelineService to work with browser audio input/output.
-    
+    Media gateway for browser-based voice interactions.
+
     Audio Format:
-    - Sample Rate: 16000 Hz (same as Vonage)
+    - Sample Rate: 16000 Hz
     - Bit Depth: 16-bit linear PCM
     - Channels: 1 (mono)
-    
-    The only difference from VonageMediaGateway:
     - Audio comes from browser microphone via WebSocket
     - Audio goes to browser speakers via WebSocket
-    - No RTP/G.711 encoding (browser uses raw PCM)
     """
     
     def __init__(self):
@@ -302,34 +296,30 @@ class BrowserMediaGateway(MediaGateway):
         )
 
         if len(session.output_buffer) > max_buffer_bytes:
-            overflow = len(session.output_buffer) - max_buffer_bytes
-            trim_bytes = overflow + ((self._frame_bytes - (overflow % self._frame_bytes)) % self._frame_bytes)
-            trim_bytes = min(trim_bytes, len(session.output_buffer))
-            if trim_bytes:
-                del session.output_buffer[:trim_bytes]
-                session.dropped_output_bytes += trim_bytes
-                logger.debug(
-                    "Trimmed output buffer for %s by %s bytes to enforce max_buffer_ms",
-                    call_id,
-                    trim_bytes,
-                )
+            logger.warning(
+                "Browser output buffer exceeded %sms for %s (%s bytes buffered); "
+                "sending losslessly instead of trimming audio",
+                self._max_buffer_ms,
+                call_id,
+                len(session.output_buffer),
+            )
 
-        if len(session.output_buffer) >= buf_threshold:
-            # Send buffered audio
+        while len(session.output_buffer) >= buf_threshold:
+            # Send fixed-size frames so longer TTS replies do not get
+            # time-compressed by trimming buffered audio.
             try:
-                payload = bytes(session.output_buffer)
-                # Keep final odd byte for next send so frontend always gets
-                # valid Int16-aligned payloads.
+                payload = bytes(session.output_buffer[:buf_threshold])
                 payload_remainder = len(payload) % self._frame_bytes
                 if payload_remainder != 0:
-                    session.pending_byte = payload[-payload_remainder:]
                     payload = payload[:-payload_remainder]
-                if payload:
-                    await self._send_payload(session, payload)
-                session.output_buffer = bytearray()
+                if not payload:
+                    break
+                await self._send_payload(session, payload)
+                del session.output_buffer[:len(payload)]
             except Exception as e:
                 logger.error(f"Failed to send audio: {e}")
                 session.is_active = False
+                break
     
     async def flush_audio_buffer(self, call_id: str) -> None:
         """Flush remaining audio buffer at end of TTS."""
@@ -356,6 +346,69 @@ class BrowserMediaGateway(MediaGateway):
                 session.pending_byte = b""
             except Exception as e:
                 logger.error(f"Failed to flush audio buffer: {e}")
+
+    def start_playback_tracking(self, call_id: str) -> None:
+        """Begin tracking one browser-played utterance."""
+        session = self._sessions.get(call_id)
+        if not session or not session.is_active:
+            return
+        session.playback_complete_event.clear()
+        session.playback_tracking_active = True
+        session.playback_bytes_sent = 0
+
+    def mark_playback_complete(self, call_id: str) -> None:
+        """Mark the current browser utterance as fully played."""
+        session = self._sessions.get(call_id)
+        if not session or not session.is_active:
+            return
+        if session.playback_tracking_active:
+            session.playback_complete_event.set()
+
+    async def wait_for_playback_complete(
+        self,
+        call_id: str,
+        *,
+        extra_grace_ms: int = 1200,
+        minimum_timeout_ms: int = 1000,
+        maximum_timeout_ms: int = 15000,
+    ) -> bool:
+        """
+        Wait for the browser to confirm queued audio finished playing.
+
+        Timeout is derived from the actual number of bytes sent for the
+        current utterance plus a small grace window.
+        """
+        session = self._sessions.get(call_id)
+        if not session or not session.is_active or not session.playback_tracking_active:
+            return True
+
+        bytes_per_second = max(1, self._sample_rate * self._frame_bytes)
+        expected_playback_ms = int((session.playback_bytes_sent / bytes_per_second) * 1000)
+        timeout_ms = max(
+            minimum_timeout_ms,
+            min(maximum_timeout_ms, expected_playback_ms + extra_grace_ms),
+        )
+
+        try:
+            await asyncio.wait_for(
+                session.playback_complete_event.wait(),
+                timeout=timeout_ms / 1000.0,
+            )
+            return True
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Timed out waiting for browser playback completion for %s after %sms "
+                "(expected_playback_ms=%s, bytes_sent=%s)",
+                call_id,
+                timeout_ms,
+                expected_playback_ms,
+                session.playback_bytes_sent,
+            )
+            return False
+        finally:
+            session.playback_tracking_active = False
+            session.playback_bytes_sent = 0
+            session.playback_complete_event.clear()
     
     def get_audio_queue(self, call_id: str) -> Optional[asyncio.Queue]:
         """
@@ -492,6 +545,8 @@ class BrowserMediaGateway(MediaGateway):
             session.last_send_latency_ms = elapsed_ms
             session.chunks_sent += 1
             session.total_bytes_sent += len(payload)
+            if session.playback_tracking_active:
+                session.playback_bytes_sent += len(payload)
         except asyncio.TimeoutError:
             session.ws_send_timeouts += 1
             session.dropped_output_bytes += len(payload)

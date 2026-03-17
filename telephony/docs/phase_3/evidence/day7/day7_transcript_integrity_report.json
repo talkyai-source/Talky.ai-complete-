@@ -1,0 +1,174 @@
+{
+  "calls": 12,
+  "invalid_calls": 0,
+  "reports": [
+    {
+      "call_id": "90d0db10-5db7-491c-a660-04944bd8d09b",
+      "talklee_call_id": "tlk_92f7ae90ff28",
+      "expected_talklee_call_id": "tlk_92f7ae90ff28",
+      "total_turns": 15,
+      "final_user_turns": 0,
+      "missing_talklee_call_id_turns": 0,
+      "missing_turn_index_turns": 0,
+      "mismatched_talklee_call_id_turns": 0,
+      "event_type_counts": {
+        "update": 15
+      },
+      "is_valid": true
+    },
+    {
+      "call_id": "52b2285d-5fdc-4aaf-ba7d-8fbde9bac573",
+      "talklee_call_id": "tlk_5da21832bd51",
+      "expected_talklee_call_id": "tlk_5da21832bd51",
+      "total_turns": 15,
+      "final_user_turns": 0,
+      "missing_talklee_call_id_turns": 0,
+      "missing_turn_index_turns": 0,
+      "mismatched_talklee_call_id_turns": 0,
+      "event_type_counts": {
+        "update": 15
+      },
+      "is_valid": true
+    },
+    {
+      "call_id": "0f46b547-32ca-4790-ae6b-f9bfe4170101",
+      "talklee_call_id": "tlk_aeb46aef464b",
+      "expected_talklee_call_id": "tlk_aeb46aef464b",
+      "total_turns": 15,
+      "final_user_turns": 0,
+      "missing_talklee_call_id_turns": 0,
+      "missing_turn_index_turns": 0,
+      "mismatched_talklee_call_id_turns": 0,
+      "event_type_counts": {
+        "update": 15
+      },
+      "is_valid": true
+    },
+    {
+      "call_id": "0cc39010-5a34-4815-bc7c-5e9cc36d1368",
+      "talklee_call_id": "tlk_ad310f530ff6",
+      "expected_talklee_call_id": "tlk_ad310f530ff6",
+      "total_turns": 15,
+      "final_user_turns": 0,
+      "missing_talklee_call_id_turns": 0,
+      "missing_turn_index_turns": 0,
+      "mismatched_talklee_call_id_turns": 0,
+      "event_type_counts": {
+        "update": 15
+      },
+      "is_valid": true
+    },
+    {
+      "call_id": "b337c3d6-0487-4038-bbf7-9772d96b5cbc",
+      "talklee_call_id": "tlk_08fb2462927e",
+      "expected_talklee_call_id": "tlk_08fb2462927e",
+      "total_turns": 15,
+      "final_user_turns": 0,
+      "missing_talklee_call_id_turns": 0,
+      "missing_turn_index_turns": 0,
+      "mismatched_talklee_call_id_turns": 0,
+      "event_type_counts": {
+        "update": 15
+      },
+      "is_valid": true
+    },
+    {
+      "call_id": "22dc6cfb-327a-4f91-8bba-21ab08d70ec9",
+      "talklee_call_id": "tlk_a972da35fb3c",
+      "expected_talklee_call_id": "tlk_a972da35fb3c",
+      "total_turns": 16,
+      "final_user_turns": 0,
+      "missing_talklee_call_id_turns": 0,
+      "missing_turn_index_turns": 0,
+      "mismatched_talklee_call_id_turns": 0,
+      "event_type_counts": {
+        "update": 16
+      },
+      "is_valid": true
+    },
+    {
+      "call_id": "e741f26d-0b45-455b-b9a8-59d6899bc27b",
+      "talklee_call_id": "tlk_85ec91d1b218",
+      "expected_talklee_call_id": "tlk_85ec91d1b218",
+      "total_turns": 15,
+      "final_user_turns": 0,
+      "missing_talklee_call_id_turns": 0,
+      "missing_turn_index_turns": 0,
+      "mismatched_talklee_call_id_turns": 0,
+      "event_type_counts": {
+        "update": 15
+      },
+      "is_valid": true
+    },
+    {
+      "call_id": "a70860fe-98bc-47be-96d9-881cdc03bcb7",
+      "talklee_call_id": "tlk_b72629c2d4d8",
+      "expected_talklee_call_id": "tlk_b72629c2d4d8",
+      "total_turns": 15,
+      "final_user_turns": 0,
+      "missing_talklee_call_id_turns": 0,
+      "missing_turn_index_turns": 0,
+      "mismatched_talklee_call_id_turns": 0,
+      "event_type_counts": {
+        "update": 15
+      },
+      "is_valid": true
+    },
+    {
+      "call_id": "e4b3a806-c337-4a41-97b3-9d9f44cf495a",
+      "talklee_call_id": "tlk_37ec29ed283a",
+      "expected_talklee_call_id": "tlk_37ec29ed283a",
+      "total_turns": 15,
+      "final_user_turns": 0,
+      "missing_talklee_call_id_turns": 0,
+      "missing_turn_index_turns": 0,
+      "mismatched_talklee_call_id_turns": 0,
+      "event_type_counts": {
+        "update": 15
+      },
+      "is_valid": true
+    },
+    {
+      "call_id": "66c05594-21bb-49ea-869d-6aa6ab0c04df",
+      "talklee_call_id": "tlk_02dcbcfee982",
+      "expected_talklee_call_id": "tlk_02dcbcfee982",
+      "total_turns": 15,
+      "final_user_turns": 0,
+      "missing_talklee_call_id_turns": 0,
+      "missing_turn_index_turns": 0,
+      "mismatched_talklee_call_id_turns": 0,
+      "event_type_counts": {
+        "update": 15
+      },
+      "is_valid": true
+    },
+    {
+      "call_id": "028b64c1-c7eb-4129-aa54-dd49f2a710e2",
+      "talklee_call_id": "tlk_97143db30a7c",
+      "expected_talklee_call_id": "tlk_97143db30a7c",
+      "total_turns": 15,
+      "final_user_turns": 0,
+      "missing_talklee_call_id_turns": 0,
+      "missing_turn_index_turns": 0,
+      "mismatched_talklee_call_id_turns": 0,
+      "event_type_counts": {
+        "update": 15
+      },
+      "is_valid": true
+    },
+    {
+      "call_id": "439688d3-bf67-49c3-a7e7-05c9c75dd729",
+      "talklee_call_id": "tlk_b12fd070eac3",
+      "expected_talklee_call_id": "tlk_b12fd070eac3",
+      "total_turns": 15,
+      "final_user_turns": 0,
+      "missing_talklee_call_id_turns": 0,
+      "missing_turn_index_turns": 0,
+      "mismatched_talklee_call_id_turns": 0,
+      "event_type_counts": {
+        "update": 15
+      },
+      "is_valid": true
+    }
+  ]
+}

@@ -13,11 +13,6 @@ function setSecurityHeaders(res: NextResponse, input: { csp: string; inProd: boo
     if (input.inProd && input.https) res.headers.set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
 }
 
-function devBypassAuth() {
-    if (process.env.NODE_ENV === "production") return false;
-    return process.env.TALKLEE_REQUIRE_AUTH !== "1";
-}
-
 function isHttps(req: NextRequest) {
     const forwarded = req.headers.get("x-forwarded-proto");
     if (forwarded) return forwarded.split(",")[0]!.trim().toLowerCase() === "https";
@@ -75,6 +70,7 @@ function isPublicPath(pathname: string) {
     if (pathname === "/") return true;
     if (pathname.startsWith("/auth/")) return true;
     if (pathname === "/auth") return true;
+    if (pathname.startsWith("/api/")) return true;
     if (pathname.startsWith("/connectors/callback")) return true;
     if (pathname.startsWith("/_next/")) return true;
     return false;
@@ -143,43 +139,24 @@ export function middleware(req: NextRequest) {
         "base-uri 'self'",
         "form-action 'self'",
         "frame-ancestors 'none'",
-        "upgrade-insecure-requests",
-        "block-all-mixed-content",
-    ].join("; ");
+        inProd && https ? "upgrade-insecure-requests" : undefined,
+        inProd && https ? "block-all-mixed-content" : undefined,
+    ]
+        .filter((directive): directive is string => Boolean(directive))
+        .join("; ");
 
     const requestHeaders = new Headers(req.headers);
     requestHeaders.set("content-security-policy", csp);
     requestHeaders.set("x-nonce", nonce);
 
-    const token = readCookieFromHeader(req, authTokenCookieName());
-    if (token && token.trim().length > 0) {
-        const res = NextResponse.next({ request: { headers: requestHeaders } });
-        setSecurityHeaders(res, { csp, inProd, https });
-        return res;
-    }
-
-    if (isLocalHost(req)) {
-        const res = NextResponse.next({ request: { headers: requestHeaders } });
-        setSecurityHeaders(res, { csp, inProd, https });
-        return res;
-    }
-
-    if (devBypassAuth()) {
-        const res = NextResponse.next({ request: { headers: requestHeaders } });
-        res.cookies.set({
-            name: authTokenCookieName(),
-            value: "dev-token",
-            path: "/",
-            sameSite: "lax",
-            httpOnly: false,
-            secure: false,
-            maxAge: 60 * 60 * 24 * 7,
-        });
-        setSecurityHeaders(res, { csp, inProd, https });
-        return res;
-    }
-
     if (isPublicPath(pathname)) {
+        const res = NextResponse.next({ request: { headers: requestHeaders } });
+        setSecurityHeaders(res, { csp, inProd, https });
+        return res;
+    }
+
+    const token = readCookieFromHeader(req, authTokenCookieName());
+    if (token && token.trim().length > 0 && token.trim() !== "dev-token") {
         const res = NextResponse.next({ request: { headers: requestHeaders } });
         setSecurityHeaders(res, { csp, inProd, https });
         return res;

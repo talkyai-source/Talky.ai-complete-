@@ -1,0 +1,10 @@
+{
+  "stage_levels": [
+    2
+  ],
+  "break_stage": null,
+  "safe_concurrency_threshold": 2,
+  "headroom_ratio": 0.8,
+  "recommended_concurrency": 1,
+  "ramp_gate_passed": true
+}

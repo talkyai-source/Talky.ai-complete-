@@ -17,8 +17,8 @@ from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Depends, Query
 from pydantic import BaseModel, Field, field_validator
-from dotenv import load_dotenv
 from app.core.postgres_adapter import Client
+from app.core.dotenv_compat import load_dotenv
 
 from app.domain.models.dialer_job import DialerJob, JobStatus
 from app.domain.services.queue_service import DialerQueueService

@@ -7,12 +7,29 @@ COMPOSE_FILE="$TELEPHONY_ROOT/deploy/docker/docker-compose.telephony.yml"
 
 STAGE_PERCENT="${1:-}"
 ENV_FILE="${2:-$TELEPHONY_ROOT/deploy/docker/.env.telephony}"
-FORCE_FLAG="${3:-}"
+FORCE_FLAG=0
+NO_DOCKER=0
 
 if [[ -z "$STAGE_PERCENT" ]]; then
-  echo "Usage: $0 <0|5|20|50|100> [env_file] [--force]"
+  echo "Usage: $0 <0|5|20|25|50|100> [env_file] [--force] [--no-docker]"
   exit 1
 fi
+
+for flag in "${@:3}"; do
+  case "$flag" in
+    --force)
+      FORCE_FLAG=1
+      ;;
+    --no-docker)
+      NO_DOCKER=1
+      ;;
+    *)
+      echo "[ERROR] Unknown flag: $flag"
+      echo "Usage: $0 <0|5|20|25|50|100> [env_file] [--force] [--no-docker]"
+      exit 1
+      ;;
+  esac
+done
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "[ERROR] Missing env file: $ENV_FILE"
@@ -20,10 +37,10 @@ if [[ ! -f "$ENV_FILE" ]]; then
 fi
 
 case "$STAGE_PERCENT" in
-  0|5|20|50|100) ;;
+  0|5|20|25|50|100) ;;
   *)
     echo "[ERROR] Invalid stage percent: $STAGE_PERCENT"
-    echo "Allowed stages: 0, 5, 20, 50, 100"
+    echo "Allowed stages: 0, 5, 20, 25, 50, 100"
     exit 1
     ;;
 esac
@@ -39,13 +56,13 @@ set_kv() {
   fi
 }
 
-current_freeze="$(grep -E '^KAMAILIO_CANARY_FREEZE=' "$ENV_FILE" | tail -n1 | cut -d= -f2 || true)"
+current_freeze="$(grep -E '^OPENSIPS_CANARY_FREEZE=' "$ENV_FILE" | tail -n1 | cut -d= -f2 || true)"
 if [[ -z "$current_freeze" ]]; then
   current_freeze="0"
 fi
 
-if [[ "$current_freeze" == "1" && "$STAGE_PERCENT" != "0" && "$FORCE_FLAG" != "--force" ]]; then
-  echo "[ERROR] Canary is frozen (KAMAILIO_CANARY_FREEZE=1). Use --force to override."
+if [[ "$current_freeze" == "1" && "$STAGE_PERCENT" != "0" && "$FORCE_FLAG" -ne 1 ]]; then
+  echo "[ERROR] Canary is frozen (OPENSIPS_CANARY_FREEZE=1). Use --force to override."
   exit 1
 fi
 
@@ -55,21 +72,26 @@ else
   enabled="1"
 fi
 
-set_kv "KAMAILIO_CANARY_ENABLED" "$enabled" "$ENV_FILE"
-set_kv "KAMAILIO_CANARY_PERCENT" "$STAGE_PERCENT" "$ENV_FILE"
+set_kv "OPENSIPS_CANARY_ENABLED" "$enabled" "$ENV_FILE"
+set_kv "OPENSIPS_CANARY_PERCENT" "$STAGE_PERCENT" "$ENV_FILE"
+
+if [[ "$NO_DOCKER" -eq 1 ]]; then
+  echo "[OK] Canary stage persisted (no docker apply): ${STAGE_PERCENT}%"
+  exit 0
+fi
 
 compose_cmd=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
 
 echo "[INFO] Applying canary stage ${STAGE_PERCENT}% (enabled=${enabled})"
-"${compose_cmd[@]}" up -d kamailio >/dev/null
+"${compose_cmd[@]}" up -d opensips >/dev/null
 sleep 2
 
 running_services="$("${compose_cmd[@]}" ps --status running --services)"
-if ! grep -qx "kamailio" <<<"$running_services"; then
-  echo "[ERROR] Kamailio is not running after stage update"
+if ! grep -qx "opensips" <<<"$running_services"; then
+  echo "[ERROR] OpenSIPS is not running after stage update"
   "${compose_cmd[@]}" ps
   exit 1
 fi
 
-"${compose_cmd[@]}" exec -T kamailio kamailio -c -f /etc/kamailio/kamailio.cfg >/dev/null
-echo "[OK] Canary stage applied and Kamailio config validated"
+"${compose_cmd[@]}" exec -T opensips opensips -C -f /etc/opensips/opensips.cfg >/dev/null
+echo "[OK] Canary stage applied and OpenSIPS config validated"

@@ -35,12 +35,12 @@ else
   freeze_value="0"
 fi
 
-set_kv "KAMAILIO_CANARY_FREEZE" "$freeze_value" "$ENV_FILE"
+set_kv "OPENSIPS_CANARY_FREEZE" "$freeze_value" "$ENV_FILE"
 
 compose_cmd=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
 
 echo "[INFO] Applying canary ${ACTION} state"
-"${compose_cmd[@]}" up -d kamailio >/dev/null
+"${compose_cmd[@]}" up -d opensips >/dev/null
 sleep 2
-"${compose_cmd[@]}" exec -T kamailio kamailio -c -f /etc/kamailio/kamailio.cfg >/dev/null
+"${compose_cmd[@]}" exec -T opensips opensips -C -f /etc/opensips/opensips.cfg >/dev/null
 echo "[OK] Canary ${ACTION} applied"

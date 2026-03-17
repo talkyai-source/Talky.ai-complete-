@@ -46,6 +46,9 @@ def _make_mock_gateway():
     gw.on_call_started = AsyncMock()
     gw.on_call_ended = AsyncMock()
     gw.on_audio_received = AsyncMock()
+    gw.start_playback_tracking = MagicMock()
+    gw.flush_audio_buffer = AsyncMock()
+    gw.wait_for_playback_complete = AsyncMock(return_value=True)
     gw.is_session_active = MagicMock(return_value=True)
     gw.get_audio_queue = MagicMock(return_value=asyncio.Queue())
     return gw
@@ -61,7 +64,7 @@ def _make_voice_session(
         call_id=call_id,
         campaign_id="test",
         lead_id="lead-1",
-        vonage_call_uuid="test-session",
+            provider_call_id="test-session",
         state=CallState.ACTIVE,
         conversation_state=ConversationState.GREETING,
         conversation_context=ConversationContext(),
@@ -100,6 +103,7 @@ class TestVoiceSessionConfig:
         assert cfg.session_type == "ask_ai"
         assert cfg.voice_id == "en-US-Chirp3-HD-Leda"
         assert cfg.gateway_sample_rate == 24000
+        assert cfg.event_logging_enabled is False
 
     def test_override(self):
         cfg = VoiceSessionConfig(
@@ -190,6 +194,21 @@ class TestCreateVoiceSession:
             vs = await orch.create_voice_session(VoiceSessionConfig())
             assert orch.active_session_count == 1
             assert orch.get_session(vs.call_id) is vs
+
+    @pytest.mark.asyncio
+    async def test_skips_event_logging_for_ephemeral_sessions_by_default(self):
+        db_client = MagicMock()
+        db_client.table = MagicMock()
+        orch = VoiceOrchestrator(db_client=db_client)
+
+        with patch.object(orch, "_create_stt_provider", return_value=_make_mock_provider()), \
+             patch.object(orch, "_create_llm_provider", return_value=_make_mock_provider()), \
+             patch.object(orch, "_create_tts_provider", return_value=_make_mock_provider()), \
+             patch.object(orch, "_create_media_gateway", return_value=_make_mock_gateway()):
+
+            await orch.create_voice_session(VoiceSessionConfig(session_type="ask_ai"))
+
+        db_client.table.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_call_session_fields(self):
@@ -287,6 +306,10 @@ class TestSendGreeting:
         types = [c.get("type") if isinstance(c, dict) else None for c in calls]
         assert "llm_response" in types
         assert "turn_complete" in types
+        ws.send_bytes.assert_not_called()
+        vs.media_gateway.send_audio.assert_not_awaited()
+        ws.send_bytes.assert_not_called()
+        vs.media_gateway.send_audio.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_barge_in_interrupts(self):
@@ -311,6 +334,52 @@ class TestSendGreeting:
         json_calls = [c.args[0] for c in ws.send_json.call_args_list]
         interrupted = [c for c in json_calls if c.get("type") == "tts_interrupted"]
         assert len(interrupted) == 1
+
+    @pytest.mark.asyncio
+    async def test_streams_greeting_audio_through_media_gateway(self):
+        orch = VoiceOrchestrator(db_client=None)
+        vs = _make_voice_session()
+        ws = AsyncMock()
+        barge_in = asyncio.Event()
+
+        chunk = MagicMock()
+        chunk.data = b"\x00" * 4096
+
+        async def _one_chunk(*args, **kwargs):
+            yield chunk
+
+        vs.tts_provider.stream_synthesize = _one_chunk
+
+        await orch.send_greeting(vs, "Hello!", ws, barge_in)
+
+        vs.media_gateway.start_playback_tracking.assert_called_once_with(vs.call_id)
+        vs.media_gateway.send_audio.assert_awaited_once_with(vs.call_id, chunk.data)
+        vs.media_gateway.flush_audio_buffer.assert_awaited_once_with(vs.call_id)
+        vs.media_gateway.wait_for_playback_complete.assert_awaited_once_with(vs.call_id)
+        json_calls = [c.args[0] for c in ws.send_json.call_args_list]
+        assert any(c.get("type") == "tts_audio_complete" for c in json_calls)
+        ws.send_bytes.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_streams_greeting_audio_through_media_gateway(self):
+        orch = VoiceOrchestrator(db_client=None)
+        vs = _make_voice_session()
+        ws = AsyncMock()
+        barge_in = asyncio.Event()
+
+        chunk = MagicMock()
+        chunk.data = b"\x00" * 4096
+
+        async def _one_chunk(*args, **kwargs):
+            yield chunk
+
+        vs.tts_provider.stream_synthesize = _one_chunk
+
+        await orch.send_greeting(vs, "Hello!", ws, barge_in)
+
+        vs.media_gateway.send_audio.assert_awaited_once_with(vs.call_id, chunk.data)
+        vs.media_gateway.flush_audio_buffer.assert_awaited_once_with(vs.call_id)
+        ws.send_bytes.assert_not_called()
 
 
 # =============================================================================
@@ -432,18 +501,6 @@ class TestGatewayType:
         )
         gw = await orch._create_media_gateway(config)
         assert gw is not None
-
-    @pytest.mark.asyncio
-    async def test_create_rtp_media_gateway(self):
-        """gateway_type='rtp' should create an RTPMediaGateway."""
-        orch = VoiceOrchestrator(db_client=None)
-        config = VoiceSessionConfig(
-            gateway_type="rtp",
-            gateway_sample_rate=8000,
-            tts_sample_rate=8000,
-        )
-        gw = await orch._create_media_gateway(config)
-        assert gw.name == "rtp"
 
     @pytest.mark.asyncio
     async def test_create_browser_media_gateway(self):

@@ -1,0 +1,117 @@
+{
+  "stages": [
+    {
+      "stage_index": 1,
+      "summary": {
+        "stage_label": "R1",
+        "concurrency": 2,
+        "duration_seconds": 20.0,
+        "calls_attempted": 13,
+        "calls_success": 13,
+        "calls_failed": 0,
+        "session_setup_success_ratio": 1.0,
+        "ineffective_session_attempt_percent": 0.0,
+        "srd_ms": {
+          "p50": 11.0,
+          "p95": 16.0,
+          "p99": 16.0
+        },
+        "sdd_ms": {
+          "p50": 4.0,
+          "p95": 7.0,
+          "p99": 7.0
+        },
+        "transfer": {
+          "attempted": 13,
+          "success": 13,
+          "success_ratio": 1.0
+        },
+        "barge_in": {
+          "attempted": 0,
+          "reaction_ms": {
+            "available": false,
+            "p95": null
+          }
+        },
+        "scenario_breakdown": {
+          "transfer": {
+            "attempted": 13,
+            "success": 13,
+            "failed": 0
+          }
+        },
+        "tenant_breakdown": {
+          "day10-default": {
+            "attempted": 13,
+            "success": 13,
+            "failed": 0
+          }
+        },
+        "reason_breakdown": {
+          "caller_bye_fallback": 13
+        }
+      },
+      "gate": {
+        "pass": true,
+        "reasons": []
+      }
+    },
+    {
+      "stage_index": 2,
+      "summary": {
+        "stage_label": "R2",
+        "concurrency": 3,
+        "duration_seconds": 20.0,
+        "calls_attempted": 19,
+        "calls_success": 19,
+        "calls_failed": 0,
+        "session_setup_success_ratio": 1.0,
+        "ineffective_session_attempt_percent": 0.0,
+        "srd_ms": {
+          "p50": 11.0,
+          "p95": 14.0,
+          "p99": 14.0
+        },
+        "sdd_ms": {
+          "p50": 5.0,
+          "p95": 6.0,
+          "p99": 6.0
+        },
+        "transfer": {
+          "attempted": 19,
+          "success": 19,
+          "success_ratio": 1.0
+        },
+        "barge_in": {
+          "attempted": 0,
+          "reaction_ms": {
+            "available": false,
+            "p95": null
+          }
+        },
+        "scenario_breakdown": {
+          "transfer": {
+            "attempted": 19,
+            "success": 19,
+            "failed": 0
+          }
+        },
+        "tenant_breakdown": {
+          "day10-default": {
+            "attempted": 19,
+            "success": 19,
+            "failed": 0
+          }
+        },
+        "reason_breakdown": {
+          "caller_bye_fallback": 19
+        }
+      },
+      "gate": {
+        "pass": true,
+        "reasons": []
+      }
+    }
+  ],
+  "break_stage": null
+}

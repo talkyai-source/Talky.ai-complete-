@@ -44,8 +44,8 @@ done
 
 echo "[5/6] Validating WS-D planning/report docs exist..."
 for doc in \
-  "$TELEPHONY_ROOT/docs/12_ws_d_media_bridge_latency_plan.md" \
-  "$TELEPHONY_ROOT/docs/phase1_baseline_latency.md"; do
+  "$TELEPHONY_ROOT/docs/phase_1/12_ws_d_media_bridge_latency_plan.md" \
+  "$TELEPHONY_ROOT/docs/phase_1/phase1_baseline_latency.md"; do
   if [[ ! -f "$doc" ]]; then
     echo "[ERROR] Missing WS-D document: $doc"
     exit 1

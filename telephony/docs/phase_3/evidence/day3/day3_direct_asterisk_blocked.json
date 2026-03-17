@@ -1,0 +1,24 @@
+{
+  "run_mode": "expect_blocked",
+  "target": "192.168.1.34:5070",
+  "bind_ip": "192.168.1.34",
+  "extension": "700",
+  "calls_requested": 1,
+  "calls_passed": 1,
+  "calls_failed": 0,
+  "duration_seconds": 0.041,
+  "results": [
+    {
+      "call_index": 1,
+      "success": true,
+      "invite_codes": [
+        401
+      ],
+      "bye_code": null,
+      "reason": "blocked_with_401",
+      "call_id": "1afa11540d214b14a98a6f4697a57192-1@talky.local",
+      "bind_ip": "192.168.1.34",
+      "target": "192.168.1.34:5070"
+    }
+  ]
+}

@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TELEPHONY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPOSE_FILE="$TELEPHONY_ROOT/deploy/docker/docker-compose.telephony.yml"
-DISPATCHER_FILE="$TELEPHONY_ROOT/kamailio/conf/dispatcher.list"
+DISPATCHER_FILE="$TELEPHONY_ROOT/opensips/conf/dispatcher.list"
 
 MODE="${1:-full}"
 ENV_FILE="${2:-$TELEPHONY_ROOT/deploy/docker/.env.telephony}"
@@ -45,19 +45,29 @@ fi
 
 runtime_rollback() {
   echo "[INFO] Runtime rollback: disabling canary destination state in dispatcher"
-  "${compose_cmd[@]}" up -d kamailio >/dev/null
-  "${compose_cmd[@]}" exec -T kamailio sh -lc "kamcmd dispatcher.set_state d 2 '$canary_uri' >/dev/null"
+  "${compose_cmd[@]}" up -d opensips >/dev/null
+  if ! "${compose_cmd[@]}" exec -T opensips sh -lc "opensips-cli -x mi ds_list >/dev/null 2>&1"; then
+    echo "[WARN] Dispatcher MI commands are unavailable in active runtime; skipping ds_set_state rollback step"
+    return 0
+  fi
+  if ! "${compose_cmd[@]}" exec -T opensips sh -lc "opensips-cli -x mi ds_set_state i 2 '$canary_uri' >/dev/null"; then
+    echo "[WARN] opensips-cli path failed, attempting opensipsctl fifo fallback"
+    "${compose_cmd[@]}" exec -T opensips sh -lc "opensipsctl fifo ds_set_state i 2 '$canary_uri' >/dev/null" || {
+      echo "[WARN] Runtime dispatcher state transition unavailable; continuing with durable rollback controls"
+      return 0
+    }
+  fi
   echo "[OK] Runtime rollback command applied for set=2 uri=$canary_uri"
 }
 
 durable_rollback() {
   echo "[INFO] Durable rollback: forcing canary percent to 0 and disabling canary"
-  set_kv "KAMAILIO_CANARY_ENABLED" "0" "$ENV_FILE"
-  set_kv "KAMAILIO_CANARY_PERCENT" "0" "$ENV_FILE"
-  set_kv "KAMAILIO_CANARY_FREEZE" "0" "$ENV_FILE"
-  "${compose_cmd[@]}" up -d kamailio >/dev/null
+  set_kv "OPENSIPS_CANARY_ENABLED" "0" "$ENV_FILE"
+  set_kv "OPENSIPS_CANARY_PERCENT" "0" "$ENV_FILE"
+  set_kv "OPENSIPS_CANARY_FREEZE" "0" "$ENV_FILE"
+  "${compose_cmd[@]}" up -d opensips >/dev/null
   sleep 2
-  "${compose_cmd[@]}" exec -T kamailio kamailio -c -f /etc/kamailio/kamailio.cfg >/dev/null
+  "${compose_cmd[@]}" exec -T opensips opensips -C -f /etc/opensips/opensips.cfg >/dev/null
   echo "[OK] Durable rollback applied and config validated"
 }
 

@@ -255,6 +255,27 @@ class TestResponseCleaning:
         
         assert "  " not in cleaned
 
+    def test_clean_reasoning_and_markdown_artifacts(self):
+        """Raw reasoning and markdown should not survive into spoken/display text."""
+        guardrails = LLMGuardrails()
+
+        raw = """
+<think>I should outline the pricing plan first.</think>
+### Plans
+1. **Basic** is $29/month.
+2. **Professional** is $79/month.
+"""
+
+        cleaned = guardrails.clean_response(raw)
+
+        assert "outline the pricing plan first" not in cleaned
+        assert "<think>" not in cleaned
+        assert "**" not in cleaned
+        assert "#" not in cleaned
+        assert "1." not in cleaned
+        assert "2." not in cleaned
+        assert cleaned.startswith("Plans")
+
 
 class TestGuardrailsConfig:
     """Test guardrails configuration"""

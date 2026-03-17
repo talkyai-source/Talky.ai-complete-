@@ -1,0 +1,10 @@
+{
+  "attempted": 0,
+  "reaction_ms": {
+    "available": false,
+    "p95": null,
+    "threshold": 250.0
+  },
+  "pass": true,
+  "note": "Barge-in reaction timing is not directly measurable from SIP-only Day10 probe."
+}

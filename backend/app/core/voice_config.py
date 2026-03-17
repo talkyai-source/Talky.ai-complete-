@@ -12,7 +12,7 @@ Based on:
 Usage:
     from app.core.voice_config import get_voice_config
     config = get_voice_config()
-    print(config.rtp_codec)  # "ulaw"
+    print(config.media_gateway_type)  # "browser"
 """
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,7 +23,11 @@ class VoicePipelineConfig(BaseSettings):
     Voice pipeline settings loaded from environment variables.
 
     All fields can be overridden via env vars (case-insensitive).
-    Defaults preserve existing hardcoded behaviour.
+
+    This config covers the Python-side voice pipeline: media gateways,
+    TTS settings, and worker configuration. PBX-specific settings
+    (Asterisk ARI, FreeSWITCH ESL) are read by their respective
+    adapters from env vars or providers.yaml.
     """
 
     model_config = SettingsConfigDict(
@@ -32,25 +36,9 @@ class VoicePipelineConfig(BaseSettings):
         extra="ignore",
     )
 
-    # ── RTP Media Gateway ──────────────────────────────────────
-    rtp_remote_ip: str = "127.0.0.1"
-    rtp_remote_port: int = 5004
-    rtp_local_port: int = 5005
-    rtp_codec: str = "ulaw"              # "ulaw" | "alaw"
-    rtp_sample_rate: int = 8000          # G.711 standard
-
     # ── TTS source audio ───────────────────────────────────────
-    tts_source_sample_rate: int = 24000  # Matches VoiceSessionConfig default
+    tts_source_sample_rate: int = 24000
     tts_source_format: str = "pcm_s16le"
-
-    # ── FreeSWITCH ESL ─────────────────────────────────────────
-    freeswitch_esl_host: str = "127.0.0.1"
-    freeswitch_esl_port: int = 8021
-    freeswitch_esl_password: str = "ClueCon"
-
-    # ── SIP ─────────────────────────────────────────────────────
-    sip_port: int = 5060
-    sip_external_port: int = 5080
 
     # ── API server ──────────────────────────────────────────────
     api_host: str = "0.0.0.0"
@@ -63,7 +51,7 @@ class VoicePipelineConfig(BaseSettings):
 
     # ── Provider selection ──────────────────────────────────────
     tts_provider: str = "google"
-    media_gateway_type: str = "rtp"
+    media_gateway_type: str = "browser"
 
 
 @lru_cache

@@ -1,0 +1,146 @@
+[1/16] Verifying Python runtime for Day 9 probe...
+python dependency check: ok
+[2/16] Ensuring required telephony containers are running...
+ Container talky-asterisk Running 
+ Container talky-rtpengine Running 
+ Container talky-opensips Running 
+ Container talky-asterisk Waiting 
+ Container talky-asterisk Healthy 
+[3/16] Reloading Asterisk ARI/http config...
+[4/16] Verifying ARI API reachability...
+ari ping: ok
+[5/16] Capturing ARI baseline state...
+ari baseline capture: ok
+[6/16] Building C++ voice gateway and running unit tests...
+[7/16] Starting C++ voice gateway runtime...
+[8/16] Starting ARI external media controller (Day 9 transfer mode, expected_completed_calls=4)...
+[9/16] Running Day 9 transfer probe (batches=2, calls_per_batch=3)...
+{
+  "calls": 6,
+  "success": 6,
+  "failed": 0,
+  "remote_bye_total": 0,
+  "invite_fail_total": 0,
+  "remote_bye_elapsed_ms": {
+    "p50": null,
+    "p95": null,
+    "max": null
+  },
+  "results": [
+    {
+      "batch_index": 1,
+      "call_index": 1,
+      "success": true,
+      "invite_codes": [
+        100,
+        200
+      ],
+      "invite_final_code": 200,
+      "remote_bye_received": false,
+      "remote_bye_elapsed_ms": null,
+      "caller_bye_code": 481,
+      "reason": "caller_bye_fallback",
+      "call_id": "89885d38498843bba63255292c89526d-1@talky.day9",
+      "bind_ip": "127.0.0.1",
+      "target": "127.0.0.1:15060"
+    },
+    {
+      "batch_index": 1,
+      "call_index": 2,
+      "success": true,
+      "invite_codes": [
+        100,
+        200
+      ],
+      "invite_final_code": 200,
+      "remote_bye_received": false,
+      "remote_bye_elapsed_ms": null,
+      "caller_bye_code": 481,
+      "reason": "caller_bye_fallback",
+      "call_id": "a55ec7ba082943b1934ed6799426ebe6-2@talky.day9",
+      "bind_ip": "127.0.0.1",
+      "target": "127.0.0.1:15060"
+    },
+    {
+      "batch_index": 1,
+      "call_index": 3,
+      "success": true,
+      "invite_codes": [
+        100,
+        200
+      ],
+      "invite_final_code": 200,
+      "remote_bye_received": false,
+      "remote_bye_elapsed_ms": null,
+      "caller_bye_code": 200,
+      "reason": "caller_bye_fallback",
+      "call_id": "27fa1f8cf1874aea8a52abda77aea3a7-3@talky.day9",
+      "bind_ip": "127.0.0.1",
+      "target": "127.0.0.1:15060"
+    },
+    {
+      "batch_index": 2,
+      "call_index": 4,
+      "success": true,
+      "invite_codes": [
+        100,
+        200
+      ],
+      "invite_final_code": 200,
+      "remote_bye_received": false,
+      "remote_bye_elapsed_ms": null,
+      "caller_bye_code": 200,
+      "reason": "caller_bye_fallback",
+      "call_id": "fbec1868b4e34b249ed00a5d87b18221-4@talky.day9",
+      "bind_ip": "127.0.0.1",
+      "target": "127.0.0.1:15060"
+    },
+    {
+      "batch_index": 2,
+      "call_index": 5,
+      "success": true,
+      "invite_codes": [
+        100,
+        200
+      ],
+      "invite_final_code": 200,
+      "remote_bye_received": false,
+      "remote_bye_elapsed_ms": null,
+      "caller_bye_code": 481,
+      "reason": "caller_bye_fallback",
+      "call_id": "cc68e55a2a4d4cea9fe4110c4708824b-5@talky.day9",
+      "bind_ip": "127.0.0.1",
+      "target": "127.0.0.1:15060"
+    },
+    {
+      "batch_index": 2,
+      "call_index": 6,
+      "success": true,
+      "invite_codes": [
+        100,
+        200
+      ],
+      "invite_final_code": 200,
+      "remote_bye_received": false,
+      "remote_bye_elapsed_ms": null,
+      "caller_bye_code": 481,
+      "reason": "caller_bye_fallback",
+      "call_id": "482a098b598a4216916d6efd68351b96-6@talky.day9",
+      "bind_ip": "127.0.0.1",
+      "target": "127.0.0.1:15060"
+    }
+  ]
+}
+[10/16] Waiting for ARI controller completion...
+[11/16] Validating transfer and concurrency events from ARI trace...
+ari transfer/concurrency validation: ok
+[12/16] Capturing gateway stats and enforcing no active sessions...
+gateway cleanup: ok
+[13/16] Capturing ARI post state and leak report...
+ari cleanup: ok
+[14/16] Validating probe summary contract...
+probe summary validation: ok
+[15/16] Writing Day 9 evidence markdown...
+evidence markdown: ok
+[16/16] Day 9 verifier complete.
+Day 9 verification PASSED.

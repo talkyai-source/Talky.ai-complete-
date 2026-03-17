@@ -252,15 +252,6 @@ async def get_detailed_health(
                 last_check=datetime.utcnow().isoformat() + "Z"
             ))
         
-        # Check Vonage/Telephony (ping check placeholder)
-        providers.append(SystemHealthItem(
-            name="Telephony",
-            status="operational",
-            latency_ms=95,
-            latency_display="<120ms",
-            last_check=datetime.utcnow().isoformat() + "Z"
-        ))
-        
         # Check STT service (Deepgram)
         providers.append(SystemHealthItem(
             name="STT",

@@ -56,142 +56,23 @@ class TestTTSStreamingPipeline:
         
         await tts.cleanup()
     
-    @pytest.mark.asyncio
-    async def test_tts_to_rtp_packets(self):
-        """Test TTS output can be packetized into RTP."""
-        from app.infrastructure.tts.cartesia import CartesiaTTSProvider
-        from app.utils.audio_utils import convert_for_rtp
-        from app.utils.rtp_builder import RTPPacketBuilder, PayloadType, RTPPacket
-        
-        api_key = os.getenv("CARTESIA_API_KEY")
-        if not api_key:
-            pytest.skip("CARTESIA_API_KEY not set")
-        
-        # Initialize TTS
-        tts = CartesiaTTSProvider()
-        await tts.initialize({
-            "api_key": api_key,
-            "model_id": "sonic-3",
-            "sample_rate": 22050
-        })
-        
-        # Initialize RTP builder
-        rtp_builder = RTPPacketBuilder(payload_type=PayloadType.PCMU)
-        
-        # Generate audio and build RTP packets
-        text = "Test message"
-        all_packets = []
-        
-        async for chunk in tts.stream_synthesize(
-            text=text,
-            voice_id="6ccbfb76-1fc6-48f7-b71d-91ac6298247b",
-            sample_rate=22050
-        ):
-            # Convert to G.711
-            g711_audio = convert_for_rtp(
-                chunk.data,
-                source_rate=22050,
-                source_format="pcm_f32le",
-                codec="ulaw"
-            )
-            
-            # Build RTP packets
-            packets = rtp_builder.build_packets_from_audio(g711_audio)
-            all_packets.extend(packets)
-        
-        assert len(all_packets) > 0
-        
-        # Verify packets are valid
-        for pkt_data in all_packets[:3]:
-            pkt = RTPPacket.from_bytes(pkt_data)
-            assert pkt.version == 2
-            assert pkt.payload_type == PayloadType.PCMU
-            assert len(pkt.payload) == 160  # 20ms of G.711
-        
-        await tts.cleanup()
-
-
-class TestRTPMediaGatewayIntegration:
-    """Integration tests for RTP media gateway."""
-    
-    @pytest.mark.asyncio
-    async def test_gateway_session_lifecycle(self):
-        """Test RTP session creation and cleanup."""
-        from app.infrastructure.telephony.rtp_media_gateway import RTPMediaGateway
-        
-        gateway = RTPMediaGateway()
-        await gateway.initialize({
-            "remote_ip": "127.0.0.1",
-            "remote_port": 5004,
-            "codec": "ulaw"
-        })
-        
-        # Start call
-        await gateway.on_call_started("test-call-1", {})
-        
-        session = gateway.get_session("test-call-1")
-        assert session is not None
-        assert session.codec == "ulaw"
-        assert session.udp_socket is not None
-        
-        # Verify queues exist
-        assert gateway.get_audio_queue("test-call-1") is not None
-        assert gateway.get_output_queue("test-call-1") is not None
-        
-        # End call - this deletes the session
-        await gateway.on_call_ended("test-call-1", "test_complete")
-        
-        # Verify session is cleaned up
-        assert gateway.get_session("test-call-1") is None
-        assert gateway.get_audio_queue("test-call-1") is None
-        
-        await gateway.cleanup()
-    
-    @pytest.mark.asyncio
-    async def test_gateway_with_alaw_codec(self):
-        """Test RTP gateway with A-law codec."""
-        from app.infrastructure.telephony.rtp_media_gateway import RTPMediaGateway
-        
-        gateway = RTPMediaGateway()
-        await gateway.initialize({
-            "codec": "alaw"
-        })
-        
-        await gateway.on_call_started("test-call-2", {"codec": "alaw"})
-        
-        session = gateway.get_session("test-call-2")
-        assert session.codec == "alaw"
-        
-        await gateway.on_call_ended("test-call-2", "test_complete")
-        await gateway.cleanup()
-
-
 class TestMediaGatewayFactory:
     """Integration tests for media gateway factory."""
-    
+
     @pytest.mark.asyncio
-    async def test_factory_creates_vonage_gateway(self):
-        """Test factory creates Vonage gateway."""
+    async def test_factory_creates_browser_gateway(self):
+        """Test factory creates Browser gateway."""
         from app.infrastructure.telephony.factory import MediaGatewayFactory
-        
-        gateway = MediaGatewayFactory.create("vonage")
-        assert gateway.name == "vonage"
-    
-    @pytest.mark.asyncio
-    async def test_factory_creates_rtp_gateway(self):
-        """Test factory creates RTP gateway."""
-        from app.infrastructure.telephony.factory import MediaGatewayFactory
-        
-        gateway = MediaGatewayFactory.create("rtp")
-        assert gateway.name == "rtp"
-    
+
+        gateway = MediaGatewayFactory.create("browser")
+        assert gateway.name == "browser"
+
     def test_factory_lists_gateways(self):
         """Test factory lists available gateways."""
         from app.infrastructure.telephony.factory import MediaGatewayFactory
-        
+
         gateways = MediaGatewayFactory.list_gateways()
-        assert "vonage" in gateways
-        assert "rtp" in gateways
+        assert "browser" in gateways
 
 
 class TestLatencyTrackerIntegration:

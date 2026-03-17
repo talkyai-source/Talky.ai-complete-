@@ -270,27 +270,16 @@ class TestTranscriptTurn:
 
 
 class TestMediaGatewayIntegration:
-    """Test that both gateways implement recording buffer methods."""
-    
-    def test_vonage_gateway_has_recording_buffer_methods(self):
-        """Verify VonageMediaGateway has recording buffer methods."""
-        from app.infrastructure.telephony.vonage_media_gateway import VonageMediaGateway
-        
-        gateway = VonageMediaGateway()
-        
+    """Test that browser gateway implements recording buffer methods."""
+
+    def test_browser_gateway_has_recording_buffer_methods(self):
+        """Verify BrowserMediaGateway has recording buffer methods."""
+        from app.infrastructure.telephony.browser_media_gateway import BrowserMediaGateway
+
+        gateway = BrowserMediaGateway()
+
         assert hasattr(gateway, 'get_recording_buffer')
         assert hasattr(gateway, 'clear_recording_buffer')
-        assert hasattr(gateway, '_recording_buffers')
-    
-    def test_rtp_gateway_has_recording_buffer_methods(self):
-        """Verify RTPMediaGateway has recording buffer methods."""
-        from app.infrastructure.telephony.rtp_media_gateway import RTPMediaGateway
-        
-        gateway = RTPMediaGateway()
-        
-        assert hasattr(gateway, 'get_recording_buffer')
-        assert hasattr(gateway, 'clear_recording_buffer')
-        assert hasattr(gateway, '_recording_buffers')
 
 
 # Run with: python -m pytest tests/unit/test_day10.py -v

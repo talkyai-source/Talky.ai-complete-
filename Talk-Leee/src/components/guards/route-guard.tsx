@@ -128,7 +128,7 @@ export function RouteGuard({
     }
 
     if (shouldBlockOnConnectors) {
-        const href = `/settings/connectors?required=${encodeURIComponent(requiredParam)}&next=${encodeURIComponent(next)}`;
+        const href = `/connectors?required=${encodeURIComponent(requiredParam)}&next=${encodeURIComponent(next)}`;
 
         if (isDark) {
             return (

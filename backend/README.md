@@ -51,6 +51,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - API: http://localhost:8000
 - Docs: http://localhost:8000/docs
 - Health: http://localhost:8000/health
+- Metrics: http://localhost:8000/metrics
 
 ## Architecture Principles
 

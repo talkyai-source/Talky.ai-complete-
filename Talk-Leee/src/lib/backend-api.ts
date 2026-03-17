@@ -1,18 +1,20 @@
+import { z } from "zod";
 import { createHttpClient } from "@/lib/http-client";
 import { backendEndpoints } from "@/lib/backend-endpoints";
 import {
     AssistantActionSchema,
     AssistantPlanSchema,
     AssistantRunSchema,
-    ConnectorResponseSchema,
+    CalendarEventResponseSchema,
     ConnectorAccountSchema,
+    ConnectorProviderInfoSchema,
     ConnectorProviderStatusSchema,
+    ConnectorResponseSchema,
     EmailSendResponseSchema,
     EmailTemplateResponseSchema,
     ListResponseSchema,
-    PaginatedResponseSchema,
-    CalendarEventResponseSchema,
     MeetingResponseSchema,
+    PaginatedResponseSchema,
     ReminderSchema,
     type AssistantAction,
     type AssistantPlan,
@@ -20,6 +22,7 @@ import {
     type CalendarEvent,
     type Connector,
     type ConnectorAccount,
+    type ConnectorProviderInfo,
     type ConnectorProviderStatus,
     type EmailSendResponse,
     type EmailTemplate,
@@ -29,7 +32,7 @@ import {
     type ReminderChannel,
     type ReminderStatus,
 } from "@/lib/models";
-import { extractAuthorizationUrl } from "@/lib/connectors-utils";
+import { extractAuthorizationUrl, summarizeConnectorStatuses } from "@/lib/connectors-utils";
 import { apiBaseUrl } from "@/lib/env";
 
 let _httpClient: ReturnType<typeof createHttpClient> | undefined;
@@ -44,41 +47,48 @@ function parseOrThrow<T>(schema: { parse: (v: unknown) => T }, data: unknown) {
     return schema.parse(data);
 }
 
+function parseListOrArray<T>(schema: z.ZodType<T>, data: unknown): ListResponse<T> {
+    return z
+        .union([ListResponseSchema(schema), z.array(schema).transform((items) => ({ items }))])
+        .parse(data);
+}
+
 export const backendApi = {
     health: async (signal?: AbortSignal) => {
         const data = await httpClient().request<{ status: string }>({ path: backendEndpoints.health.path, timeoutMs: 2500, signal });
         return data;
     },
     connectors: {
+        providers: async (signal?: AbortSignal): Promise<ListResponse<ConnectorProviderInfo>> => {
+            const data = await httpClient().request({ path: backendEndpoints.connectorsProviders.path, timeoutMs: 12_000, signal });
+            return parseListOrArray<ConnectorProviderInfo>(ConnectorProviderInfoSchema as z.ZodType<ConnectorProviderInfo>, data);
+        },
         list: async (signal?: AbortSignal): Promise<ListResponse<Connector>> => {
             const data = await httpClient().request({ path: backendEndpoints.connectorsList.path, timeoutMs: 12_000, signal });
-            return parseOrThrow(ListResponseSchema(ConnectorResponseSchema), data);
-        },
-        create: async (input: Pick<Connector, "name" | "type" | "config">): Promise<Connector> => {
-            const data = await httpClient().request({
-                path: backendEndpoints.connectorsCreate.path,
-                method: backendEndpoints.connectorsCreate.method,
-                body: input,
-                timeoutMs: 12_000,
-            });
-            return parseOrThrow(ConnectorResponseSchema, data);
+            return parseListOrArray<Connector>(ConnectorResponseSchema as z.ZodType<Connector>, data);
         },
         status: async (signal?: AbortSignal): Promise<ListResponse<ConnectorProviderStatus>> => {
-            const data = await httpClient().request({ path: backendEndpoints.connectorsStatus.path, timeoutMs: 12_000, signal });
-            return parseOrThrow(ListResponseSchema(ConnectorProviderStatusSchema), data);
+            const connectors = await backendApi.connectors.list(signal);
+            return parseOrThrow(ListResponseSchema(ConnectorProviderStatusSchema), {
+                items: summarizeConnectorStatuses(connectors.items),
+            });
         },
-        authorize: async (input: { type: string; redirect_uri: string }): Promise<{ authorization_url: string }> => {
+        authorizeProvider: async (input: { type: string; provider: string; name?: string }): Promise<{ authorization_url: string }> => {
             const data = await httpClient().request({
-                path: backendEndpoints.connectorsAuthorize.path.replace("{type}", encodeURIComponent(input.type)),
+                path: backendEndpoints.connectorsAuthorize.path,
                 method: backendEndpoints.connectorsAuthorize.method,
-                query: { redirect_uri: input.redirect_uri },
+                body: {
+                    type: input.type,
+                    provider: input.provider,
+                    ...(input.name ? { name: input.name } : {}),
+                },
                 timeoutMs: 12_000,
             });
             return { authorization_url: extractAuthorizationUrl(data) };
         },
-        disconnect: async (input: { type: string }): Promise<void> => {
+        disconnectById: async (input: { connectorId: string }): Promise<void> => {
             await httpClient().request({
-                path: backendEndpoints.connectorsDisconnect.path.replace("{type}", encodeURIComponent(input.type)),
+                path: backendEndpoints.connectorsDisconnect.path.replace("{connector_id}", encodeURIComponent(input.connectorId)),
                 method: backendEndpoints.connectorsDisconnect.method,
                 timeoutMs: 12_000,
             });

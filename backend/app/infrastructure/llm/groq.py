@@ -20,11 +20,16 @@ from typing import AsyncIterator, List, Optional
 from groq import AsyncGroq
 from app.domain.interfaces.llm_provider import LLMProvider
 from app.domain.models.conversation import Message, MessageRole
+from app.utils.resilience import CircuitBreaker, CircuitOpenError
 
 logger = logging.getLogger(__name__)
 
 # Default timeout for LLM responses (seconds)
 DEFAULT_LLM_TIMEOUT = 10.0
+
+# Retry configuration for transient Groq failures
+_LLM_MAX_RETRIES = 2
+_LLM_RETRY_BASE_DELAY = 0.3  # 300ms — fast first retry for voice latency budget
 
 
 class LLMTimeoutError(Exception):
@@ -54,6 +59,70 @@ class GroqLLMProvider(LLMProvider):
     
     # Default stop sequences to prevent rambling
     DEFAULT_STOP_SEQUENCES = ["User:", "Human:", "\n\n\n"]
+
+    @staticmethod
+    def _is_gpt_oss_model(model: str) -> bool:
+        """GPT-OSS models on Groq use the reasoning-specific request contract."""
+        return model.startswith("openai/gpt-oss-")
+
+    @staticmethod
+    def _is_qwen3_model(model: str) -> bool:
+        """Qwen 3 supports explicit thinking / non-thinking modes on Groq."""
+        return model.startswith("qwen/qwen3-")
+
+    @classmethod
+    def _default_top_p_for_model(cls, model: str) -> float:
+        """
+        Use Groq-documented defaults per model family instead of forcing one
+        sampling profile across all selectable AI Options models.
+        """
+        if cls._is_gpt_oss_model(model):
+            return 0.95
+        if cls._is_qwen3_model(model):
+            return 0.8
+        return 1.0
+
+    @staticmethod
+    def _inject_instructions_for_reasoning_model(
+        *,
+        system_prompt: Optional[str],
+        messages: List[dict],
+    ) -> List[dict]:
+        """
+        Groq recommends avoiding system prompts for GPT-OSS models and placing
+        instructions in a user message instead.
+        """
+        if not system_prompt:
+            return messages
+
+        instruction_block = (
+            "Conversation instructions:\n"
+            f"{system_prompt.strip()}\n\n"
+            "Apply these instructions to every reply in this conversation."
+        )
+
+        merged_messages: List[dict] = []
+        injected = False
+        for message in messages:
+            if not injected and message.get("role") == "user":
+                merged_messages.append({
+                    **message,
+                    "content": (
+                        f"{instruction_block}\n\n"
+                        f"Current user message:\n{message.get('content', '')}"
+                    ),
+                })
+                injected = True
+                continue
+            merged_messages.append(message)
+
+        if not injected:
+            merged_messages.insert(0, {
+                "role": "user",
+                "content": instruction_block,
+            })
+
+        return merged_messages
     
     def __init__(self):
         self._client: Optional[AsyncGroq] = None
@@ -64,6 +133,14 @@ class GroqLLMProvider(LLMProvider):
         # Deterministic mode settings (Day 17)
         self._deterministic_mode: bool = False
         self._deterministic_seed: Optional[int] = None
+        # Circuit breaker: trips after 5 consecutive failures, re-probes after 30s
+        self._circuit = CircuitBreaker(
+            name="groq-llm",
+            failure_threshold=5,
+            recovery_timeout=30.0,
+            success_threshold=2,
+            excluded_exceptions={ValueError, LLMTimeoutError},
+        )
     
     async def initialize(self, config: dict) -> None:
         """Initialize Groq client with configuration"""
@@ -157,7 +234,7 @@ class GroqLLMProvider(LLMProvider):
         
         Following Groq's official parameter guidelines:
         - Temperature 0.2-0.4 for factual, 0.6-0.8 for conversational
-        - top_p should be 1.0 when using temperature (use one or the other)
+        - Some reasoning-capable models have model-specific defaults/recommendations
         - Stop sequences prevent rambling
         
         Args:
@@ -182,11 +259,15 @@ class GroqLLMProvider(LLMProvider):
         
         max_tokens = max_tokens if max_tokens is not None else self._max_tokens
         
+        # Get model from kwargs or use configured default
+        model = kwargs.get("model", self._model)
+
         # Build messages array for Groq API using role channels
         groq_messages = []
         
-        # System channel: High-level persona & rules
-        if system_prompt:
+        # Groq reasoning docs recommend placing GPT-OSS instructions in a user
+        # message instead of a system message for best adherence.
+        if system_prompt and not self._is_gpt_oss_model(model):
             groq_messages.append({
                 "role": "system",
                 "content": system_prompt
@@ -204,8 +285,11 @@ class GroqLLMProvider(LLMProvider):
                 "content": msg.content
             })
         
-        # Get model from kwargs or use configured default
-        model = kwargs.get("model", self._model)
+        if self._is_gpt_oss_model(model):
+            groq_messages = self._inject_instructions_for_reasoning_model(
+                system_prompt=system_prompt,
+                messages=groq_messages,
+            )
         
         # Validate temperature (Groq accepts 0.0-2.0)
         if not 0.0 <= temperature <= 2.0:
@@ -225,38 +309,112 @@ class GroqLLMProvider(LLMProvider):
                 content_preview = msg['content'][:100] if msg['content'] else '<EMPTY>'
                 logger.debug(f"Message {i}: role={msg['role']}, content='{content_preview}...'")
             
-            # Stream completion using Groq's ultra-fast LPU
-            stream = await self._client.chat.completions.create(
-                model=model,
-                messages=groq_messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stream=True,
-                # Per Groq docs: use temperature OR top_p, not both
-                # For voice AI, we use temperature and leave top_p at 1.0
-                top_p=kwargs.get("top_p", 1.0),
-                stop=stop_sequences,
+            top_p = kwargs.get("top_p")
+            if top_p is None:
+                top_p = self._default_top_p_for_model(model)
+
+            request_kwargs = {
+                "model": model,
+                "messages": groq_messages,
+                "temperature": temperature,
+                "max_completion_tokens": max_tokens,
+                "stream": True,
+                "top_p": top_p,
+                "stop": stop_sequences,
                 # Optional: seed for deterministic outputs (useful for testing)
-                seed=kwargs.get("seed", None)
-            )
-            
-            # Yield tokens as they arrive
-            token_count = 0
-            async for chunk in stream:
-                if chunk.choices:
-                    delta = chunk.choices[0].delta
-                    if delta.content:
-                        token_count += 1
-                        yield delta.content
-            
-            logger.debug(f"Stream completed, yielded {token_count} tokens")
-            
-            if token_count == 0:
-                logger.warning("Zero tokens received from Groq")
-        
+                "seed": kwargs.get("seed", None),
+            }
+
+            reasoning_format = kwargs.get("reasoning_format")
+            include_reasoning = kwargs.get("include_reasoning")
+            reasoning_effort = kwargs.get("reasoning_effort")
+            if self._is_gpt_oss_model(model):
+                if include_reasoning is None:
+                    include_reasoning = False
+                request_kwargs["include_reasoning"] = include_reasoning
+                if reasoning_format is not None:
+                    logger.warning(
+                        "Ignoring reasoning_format=%s for GPT-OSS model %s; "
+                        "Groq documents include_reasoning for these models instead.",
+                        reasoning_format,
+                        model,
+                    )
+                if reasoning_effort is not None:
+                    request_kwargs["reasoning_effort"] = reasoning_effort
+            elif self._is_qwen3_model(model):
+                # Groq recommends non-thinking mode for general dialogue.
+                if reasoning_effort is None:
+                    reasoning_effort = "none"
+                if reasoning_format is None:
+                    reasoning_format = "hidden"
+                request_kwargs["reasoning_effort"] = reasoning_effort
+                request_kwargs["reasoning_format"] = reasoning_format
+                if include_reasoning is not None:
+                    logger.warning(
+                        "Ignoring include_reasoning=%s for Qwen model %s; "
+                        "Groq documents reasoning_format/reasoning_effort for this family.",
+                        include_reasoning,
+                        model,
+                    )
+            elif reasoning_format is not None:
+                request_kwargs["reasoning_format"] = reasoning_format
+                if reasoning_effort is not None:
+                    request_kwargs["reasoning_effort"] = reasoning_effort
+
+            # Stream completion using Groq's ultra-fast LPU
+            # Wrapped with circuit breaker + retry for transient failures
+            import random as _rand
+
+            last_err = None
+            for _attempt in range(_LLM_MAX_RETRIES + 1):
+                try:
+                    async with self._circuit:
+                        stream = await self._client.chat.completions.create(**request_kwargs)
+
+                        # Yield tokens as they arrive
+                        token_count = 0
+                        async for chunk in stream:
+                            if chunk.choices:
+                                delta = chunk.choices[0].delta
+                                if delta.content:
+                                    token_count += 1
+                                    yield delta.content
+
+                        logger.debug(f"Stream completed, yielded {token_count} tokens")
+
+                        if token_count == 0:
+                            logger.warning("Zero tokens received from Groq")
+                    # Success — break out of retry loop
+                    break
+
+                except CircuitOpenError:
+                    raise  # Don't retry when circuit is open
+
+                except Exception as e:
+                    last_err = e
+                    if _attempt < _LLM_MAX_RETRIES:
+                        _delay = min(
+                            _LLM_RETRY_BASE_DELAY * (2 ** _attempt),
+                            5.0,
+                        ) * (0.5 + _rand.random())
+                        logger.warning(
+                            f"Groq retry {_attempt + 1}/{_LLM_MAX_RETRIES} "
+                            f"after {_delay:.2f}s — {e}"
+                        )
+                        await asyncio.sleep(_delay)
+                    else:
+                        logger.error(f"Groq LLM streaming failed after retries: {e}")
+                        raise RuntimeError(f"Groq LLM streaming failed: {e}")
+
+        except CircuitOpenError as co:
+            logger.error(f"Groq circuit breaker open: {co}")
+            raise RuntimeError(f"LLM provider unavailable: {co}")
         except Exception as e:
-            logger.error(f"Groq LLM streaming failed: {str(e)}")
-            raise RuntimeError(f"Groq LLM streaming failed: {str(e)}")
+            if not isinstance(e, RuntimeError):
+                logger.error(f"Groq LLM streaming failed: {str(e)}")
+                raise RuntimeError(f"Groq LLM streaming failed: {str(e)}"
+            )
+            raise
     
     async def cleanup(self) -> None:
         """Release resources"""
@@ -283,4 +441,3 @@ class GroqLLMProvider(LLMProvider):
     def __repr__(self) -> str:
         mode = "deterministic" if self._deterministic_mode else "normal"
         return f"GroqLLMProvider(model={self._model}, temp={self._temperature}, mode={mode})"
-

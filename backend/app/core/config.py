@@ -7,11 +7,52 @@ import os
 from pathlib import Path
 from typing import Any, Dict
 from functools import lru_cache
+from urllib.parse import urlsplit, urlunsplit
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
 _ENV_FILE = _BACKEND_ROOT / ".env"
+
+
+def _normalize_origin(url: str) -> str:
+    """Return scheme://host[:port] for CORS comparisons."""
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return url
+
+    if not parsed.scheme or not parsed.hostname:
+        return url
+
+    hostname = parsed.hostname
+    if ":" in hostname and not hostname.startswith("["):
+        hostname = f"[{hostname}]"
+
+    netloc = hostname
+    if parsed.port is not None:
+        netloc = f"{hostname}:{parsed.port}"
+
+    return urlunsplit((parsed.scheme, netloc, "", "", ""))
+
+
+def _loopback_alias(origin: str) -> str | None:
+    normalized = _normalize_origin(origin)
+    try:
+        parsed = urlsplit(normalized)
+    except ValueError:
+        return None
+
+    hostname = parsed.hostname
+    if hostname == "localhost":
+        alias = "127.0.0.1"
+    elif hostname == "127.0.0.1":
+        alias = "localhost"
+    else:
+        return None
+
+    netloc = alias if parsed.port is None else f"{alias}:{parsed.port}"
+    return urlunsplit((parsed.scheme, netloc, "", "", ""))
 
 
 class Settings(BaseSettings):
@@ -44,6 +85,9 @@ class Settings(BaseSettings):
     secret_key: str | None = None
     jwt_algorithm: str = "HS256"
     jwt_expiry_hours: int = 24
+    jwt_issuer: str | None = None
+    jwt_audience: str | None = None
+    jwt_leeway_seconds: int = 30
 
     @field_validator("jwt_secret", "secret_key", mode="before")
     @classmethod
@@ -70,12 +114,31 @@ class Settings(BaseSettings):
         """
         # If cors_origins was explicitly set via env and isn't the default
         if self.cors_origins and self.cors_origins != ["http://localhost:3000"]:
-            return self.cors_origins
+            return self._expand_local_aliases(self.cors_origins)
         # Always include the frontend URL
-        origins = [self.frontend_url]
-        if self.api_base_url and self.api_base_url not in origins:
-            origins.append(self.api_base_url)
+        origins = self._expand_local_aliases([self.frontend_url])
+        api_origin = _normalize_origin(self.api_base_url) if self.api_base_url else None
+        if api_origin and api_origin not in origins:
+            origins.append(api_origin)
         return origins
+
+    @staticmethod
+    def _expand_local_aliases(origins: list[str]) -> list[str]:
+        expanded: list[str] = []
+        seen: set[str] = set()
+
+        for origin in origins:
+            normalized = _normalize_origin(origin)
+            if normalized not in seen:
+                seen.add(normalized)
+                expanded.append(normalized)
+
+            alias = _loopback_alias(normalized)
+            if alias and alias not in seen:
+                seen.add(alias)
+                expanded.append(alias)
+
+        return expanded
 
     @property
     def effective_jwt_secret(self) -> str | None:

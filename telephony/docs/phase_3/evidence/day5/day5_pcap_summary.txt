@@ -1,0 +1,8 @@
+Day 5 RTP Capture Summary (probe-based)
+====================================
+calls: 20
+passed: 20
+failed: 0
+total_rtp_packets_sent: 700
+total_rtp_packets_received: 581
+echo_verdict: PASS

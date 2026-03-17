@@ -1,0 +1,54 @@
+{
+  "summary": {
+    "stage_label": "soak",
+    "concurrency": 1,
+    "duration_seconds": 0.0,
+    "calls_attempted": 0,
+    "calls_success": 0,
+    "calls_failed": 0,
+    "session_setup_success_ratio": 0.0,
+    "ineffective_session_attempt_percent": 0.0,
+    "srd_ms": {
+      "p50": null,
+      "p95": null,
+      "p99": null
+    },
+    "sdd_ms": {
+      "p50": null,
+      "p95": null,
+      "p99": null
+    },
+    "transfer": {
+      "attempted": 0,
+      "success": 0,
+      "success_ratio": null
+    },
+    "barge_in": {
+      "attempted": 0,
+      "reaction_ms": {
+        "available": false,
+        "p95": null
+      }
+    },
+    "scenario_breakdown": {},
+    "tenant_breakdown": {}
+  },
+  "gate": {
+    "pass": true,
+    "reasons": []
+  },
+  "trend": {
+    "pass": true,
+    "reasons": [
+      "soak_skipped"
+    ],
+    "success_ratio_first_window": null,
+    "success_ratio_last_window": null,
+    "success_ratio_drop": null,
+    "mem_growth_mb": null
+  },
+  "pass": true,
+  "recommended_concurrency": 1,
+  "soak_samples": 0,
+  "skipped": true
+}

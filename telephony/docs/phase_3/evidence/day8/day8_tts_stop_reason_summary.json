@@ -1,0 +1,7 @@
+{
+  "calls": 6,
+  "stop_reasons": {
+    "tts_complete": 3,
+    "barge_in_start_of_turn": 3
+  }
+}

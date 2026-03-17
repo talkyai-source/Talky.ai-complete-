@@ -1,0 +1,1223 @@
+<--- Received SIP request (486 bytes) from UDP:127.0.0.1:15060 --->
+BYE sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 0.0.0.0:15060;branch=z9hG4bK19c.fe674277.0
+Via: SIP/2.0/UDP 127.0.0.1:57665;received=127.0.0.1;branch=z9hG4bK-acb16c6ce3b8;rport=57665
+From: <sip:probe3@127.0.0.1>;tag=8452c2f9
+To: <sip:700@127.0.0.1:15060>;tag=45e3192b-2424-4358-aacc-15b8bdf939bf
+Call-ID: a306118677d14c08923a0c113c1de50d-3@talky.local
+CSeq: 2 BYE
+Contact: <sip:probe3@127.0.0.1:57665>
+Max-Forwards: 69
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Transmitting SIP response (461 bytes) to UDP:127.0.0.1:15060 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 0.0.0.0:15060;rport=15060;received=127.0.0.1;branch=z9hG4bK19c.fe674277.0
+Via: SIP/2.0/UDP 127.0.0.1:57665;rport=57665;received=127.0.0.1;branch=z9hG4bK-acb16c6ce3b8
+Call-ID: a306118677d14c08923a0c113c1de50d-3@talky.local
+From: <sip:probe3@127.0.0.1>;tag=8452c2f9
+To: <sip:700@127.0.0.1>;tag=45e3192b-2424-4358-aacc-15b8bdf939bf
+CSeq: 2 BYE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Received SIP request (699 bytes) from UDP:127.0.0.1:15060 --->
+INVITE sip:700@127.0.0.1:5070 SIP/2.0
+Record-Route: <sip:0.0.0.0:15060;lr;ftag=064bfecf>
+Via: SIP/2.0/UDP 0.0.0.0:15060;branch=z9hG4bK19c8.148e6e94.0
+Via: SIP/2.0/UDP 127.0.0.1:34319;received=127.0.0.1;branch=z9hG4bK-e916449ca4aa;rport=34319
+From: <sip:probe4@127.0.0.1>;tag=064bfecf
+To: <sip:700@127.0.0.1:15060>
+Call-ID: 4b327300aa7546948ac25c03bf79240c-4@talky.local
+CSeq: 1 INVITE
+Contact: <sip:probe4@127.0.0.1:34319>
+Max-Forwards: 69
+User-Agent: talky-day-probe/1.0
+Content-Type: application/sdp
+Content-Length: 162
+
+v=0
+o=- 0 0 IN IP4 127.0.0.1
+s=Talky Day Probe
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 30062 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=sendrecv
+a=rtcp:30063
+a=ptime:20
+
+<--- Transmitting SIP response (480 bytes) to UDP:127.0.0.1:15060 --->
+SIP/2.0 100 Trying
+Via: SIP/2.0/UDP 0.0.0.0:15060;rport=15060;received=127.0.0.1;branch=z9hG4bK19c8.148e6e94.0
+Via: SIP/2.0/UDP 127.0.0.1:34319;rport=34319;received=127.0.0.1;branch=z9hG4bK-e916449ca4aa
+Record-Route: <sip:0.0.0.0:15060;lr;ftag=064bfecf>
+Call-ID: 4b327300aa7546948ac25c03bf79240c-4@talky.local
+From: <sip:probe4@127.0.0.1>;tag=064bfecf
+To: <sip:700@127.0.0.1>
+CSeq: 1 INVITE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Transmitting SIP response (904 bytes) to UDP:127.0.0.1:15060 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 0.0.0.0:15060;rport=15060;received=127.0.0.1;branch=z9hG4bK19c8.148e6e94.0
+Via: SIP/2.0/UDP 127.0.0.1:34319;rport=34319;received=127.0.0.1;branch=z9hG4bK-e916449ca4aa
+Record-Route: <sip:0.0.0.0:15060;lr;ftag=064bfecf>
+Call-ID: 4b327300aa7546948ac25c03bf79240c-4@talky.local
+From: <sip:probe4@127.0.0.1>;tag=064bfecf
+To: <sip:700@127.0.0.1>;tag=abb89f24-e823-42d1-b776-0c7c890b24fe
+CSeq: 1 INVITE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Contact: <sip:127.0.0.1:5070>
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, MESSAGE, INFO, REFER
+Supported: 100rel, timer, replaces, norefersub
+Content-Type: application/sdp
+Content-Length:   157
+
+v=0
+o=- 0 2 IN IP4 127.0.0.1
+s=Asterisk
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 30012 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=ptime:20
+a=maxptime:140
+a=sendrecv
+
+<--- Received SIP request (487 bytes) from UDP:127.0.0.1:15060 --->
+ACK sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 0.0.0.0:15060;branch=z9hG4bK19c8.148e6e94.2
+Via: SIP/2.0/UDP 127.0.0.1:34319;received=127.0.0.1;branch=z9hG4bK-6fc4f386c02a;rport=34319
+From: <sip:probe4@127.0.0.1>;tag=064bfecf
+To: <sip:700@127.0.0.1:15060>;tag=abb89f24-e823-42d1-b776-0c7c890b24fe
+Call-ID: 4b327300aa7546948ac25c03bf79240c-4@talky.local
+CSeq: 1 ACK
+Contact: <sip:probe4@127.0.0.1:34319>
+Max-Forwards: 69
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Received SIP request (486 bytes) from UDP:127.0.0.1:15060 --->
+BYE sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 0.0.0.0:15060;branch=z9hG4bKe8c8.224be06.0
+Via: SIP/2.0/UDP 127.0.0.1:34319;received=127.0.0.1;branch=z9hG4bK-399968db34dc;rport=34319
+From: <sip:probe4@127.0.0.1>;tag=064bfecf
+To: <sip:700@127.0.0.1:15060>;tag=abb89f24-e823-42d1-b776-0c7c890b24fe
+Call-ID: 4b327300aa7546948ac25c03bf79240c-4@talky.local
+CSeq: 2 BYE
+Contact: <sip:probe4@127.0.0.1:34319>
+Max-Forwards: 69
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Transmitting SIP response (461 bytes) to UDP:127.0.0.1:15060 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 0.0.0.0:15060;rport=15060;received=127.0.0.1;branch=z9hG4bKe8c8.224be06.0
+Via: SIP/2.0/UDP 127.0.0.1:34319;rport=34319;received=127.0.0.1;branch=z9hG4bK-399968db34dc
+Call-ID: 4b327300aa7546948ac25c03bf79240c-4@talky.local
+From: <sip:probe4@127.0.0.1>;tag=064bfecf
+To: <sip:700@127.0.0.1>;tag=abb89f24-e823-42d1-b776-0c7c890b24fe
+CSeq: 2 BYE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Received SIP request (533 bytes) from UDP:127.0.0.1:39036 --->
+INVITE sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:39036;branch=z9hG4bK-169436d908f3;rport
+From: <sip:probe1@127.0.0.1>;tag=6b7ef672
+To: <sip:700@127.0.0.1:5070>
+Call-ID: 5e8ac7e026134d6aaee5faaac6de0593-1@talky.local
+CSeq: 1 INVITE
+Contact: <sip:probe1@127.0.0.1:39036>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Type: application/sdp
+Content-Length: 136
+
+v=0
+o=- 0 0 IN IP4 127.0.0.1
+s=Talky Day Probe
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 40002 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=ptime:20
+
+<--- Transmitting SIP response (335 bytes) to UDP:127.0.0.1:39036 --->
+SIP/2.0 100 Trying
+Via: SIP/2.0/UDP 127.0.0.1:39036;rport=39036;received=127.0.0.1;branch=z9hG4bK-169436d908f3
+Call-ID: 5e8ac7e026134d6aaee5faaac6de0593-1@talky.local
+From: <sip:probe1@127.0.0.1>;tag=6b7ef672
+To: <sip:700@127.0.0.1>
+CSeq: 1 INVITE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Transmitting SIP response (759 bytes) to UDP:127.0.0.1:39036 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.1:39036;rport=39036;received=127.0.0.1;branch=z9hG4bK-169436d908f3
+Call-ID: 5e8ac7e026134d6aaee5faaac6de0593-1@talky.local
+From: <sip:probe1@127.0.0.1>;tag=6b7ef672
+To: <sip:700@127.0.0.1>;tag=88ef4bf4-6b6a-4e0d-83a5-365de9f3a19b
+CSeq: 1 INVITE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Contact: <sip:127.0.0.1:5070>
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, MESSAGE, INFO, REFER
+Supported: 100rel, timer, replaces, norefersub
+Content-Type: application/sdp
+Content-Length:   157
+
+v=0
+o=- 0 2 IN IP4 127.0.0.1
+s=Asterisk
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 30034 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=ptime:20
+a=maxptime:140
+a=sendrecv
+
+<--- Received SIP request (399 bytes) from UDP:127.0.0.1:39036 --->
+ACK sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:39036;branch=z9hG4bK-2f921bd39589;rport
+From: <sip:probe1@127.0.0.1>;tag=6b7ef672
+To: <sip:700@127.0.0.1:5070>;tag=88ef4bf4-6b6a-4e0d-83a5-365de9f3a19b
+Call-ID: 5e8ac7e026134d6aaee5faaac6de0593-1@talky.local
+CSeq: 1 ACK
+Contact: <sip:probe1@127.0.0.1:39036>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Received SIP request (697 bytes) from UDP:127.0.0.1:15060 --->
+INVITE sip:700@127.0.0.1:5070 SIP/2.0
+Record-Route: <sip:0.0.0.0:15060;lr;ftag=2561326b>
+Via: SIP/2.0/UDP 0.0.0.0:15060;branch=z9hG4bKa95.f516b55.0
+Via: SIP/2.0/UDP 127.0.0.1:39318;received=127.0.0.1;branch=z9hG4bK-6679d529ce29;rport=39318
+From: <sip:probe5@127.0.0.1>;tag=2561326b
+To: <sip:700@127.0.0.1:15060>
+Call-ID: a5418dc3b23c4bf0a43d3f08ba25e55d-5@talky.local
+CSeq: 1 INVITE
+Contact: <sip:probe5@127.0.0.1:39318>
+Max-Forwards: 69
+User-Agent: talky-day-probe/1.0
+Content-Type: application/sdp
+Content-Length: 162
+
+v=0
+o=- 0 0 IN IP4 127.0.0.1
+s=Talky Day Probe
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 30096 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=sendrecv
+a=rtcp:30097
+a=ptime:20
+
+<--- Transmitting SIP response (478 bytes) to UDP:127.0.0.1:15060 --->
+SIP/2.0 100 Trying
+Via: SIP/2.0/UDP 0.0.0.0:15060;rport=15060;received=127.0.0.1;branch=z9hG4bKa95.f516b55.0
+Via: SIP/2.0/UDP 127.0.0.1:39318;rport=39318;received=127.0.0.1;branch=z9hG4bK-6679d529ce29
+Record-Route: <sip:0.0.0.0:15060;lr;ftag=2561326b>
+Call-ID: a5418dc3b23c4bf0a43d3f08ba25e55d-5@talky.local
+From: <sip:probe5@127.0.0.1>;tag=2561326b
+To: <sip:700@127.0.0.1>
+CSeq: 1 INVITE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Transmitting SIP response (902 bytes) to UDP:127.0.0.1:15060 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 0.0.0.0:15060;rport=15060;received=127.0.0.1;branch=z9hG4bKa95.f516b55.0
+Via: SIP/2.0/UDP 127.0.0.1:39318;rport=39318;received=127.0.0.1;branch=z9hG4bK-6679d529ce29
+Record-Route: <sip:0.0.0.0:15060;lr;ftag=2561326b>
+Call-ID: a5418dc3b23c4bf0a43d3f08ba25e55d-5@talky.local
+From: <sip:probe5@127.0.0.1>;tag=2561326b
+To: <sip:700@127.0.0.1>;tag=bea31334-21b1-455e-aa93-6d34380b8969
+CSeq: 1 INVITE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Contact: <sip:127.0.0.1:5070>
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, MESSAGE, INFO, REFER
+Supported: 100rel, timer, replaces, norefersub
+Content-Type: application/sdp
+Content-Length:   157
+
+v=0
+o=- 0 2 IN IP4 127.0.0.1
+s=Asterisk
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 30076 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=ptime:20
+a=maxptime:140
+a=sendrecv
+
+<--- Received SIP request (485 bytes) from UDP:127.0.0.1:15060 --->
+ACK sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 0.0.0.0:15060;branch=z9hG4bKa95.f516b55.2
+Via: SIP/2.0/UDP 127.0.0.1:39318;received=127.0.0.1;branch=z9hG4bK-fc6cee7e73a0;rport=39318
+From: <sip:probe5@127.0.0.1>;tag=2561326b
+To: <sip:700@127.0.0.1:15060>;tag=bea31334-21b1-455e-aa93-6d34380b8969
+Call-ID: a5418dc3b23c4bf0a43d3f08ba25e55d-5@talky.local
+CSeq: 1 ACK
+Contact: <sip:probe5@127.0.0.1:39318>
+Max-Forwards: 69
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Received SIP request (486 bytes) from UDP:127.0.0.1:15060 --->
+BYE sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 0.0.0.0:15060;branch=z9hG4bK795.8e4f21c4.0
+Via: SIP/2.0/UDP 127.0.0.1:39318;received=127.0.0.1;branch=z9hG4bK-ffd3abf4ec27;rport=39318
+From: <sip:probe5@127.0.0.1>;tag=2561326b
+To: <sip:700@127.0.0.1:15060>;tag=bea31334-21b1-455e-aa93-6d34380b8969
+Call-ID: a5418dc3b23c4bf0a43d3f08ba25e55d-5@talky.local
+CSeq: 2 BYE
+Contact: <sip:probe5@127.0.0.1:39318>
+Max-Forwards: 69
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Transmitting SIP response (461 bytes) to UDP:127.0.0.1:15060 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 0.0.0.0:15060;rport=15060;received=127.0.0.1;branch=z9hG4bK795.8e4f21c4.0
+Via: SIP/2.0/UDP 127.0.0.1:39318;rport=39318;received=127.0.0.1;branch=z9hG4bK-ffd3abf4ec27
+Call-ID: a5418dc3b23c4bf0a43d3f08ba25e55d-5@talky.local
+From: <sip:probe5@127.0.0.1>;tag=2561326b
+To: <sip:700@127.0.0.1>;tag=bea31334-21b1-455e-aa93-6d34380b8969
+CSeq: 2 BYE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Received SIP request (399 bytes) from UDP:127.0.0.1:39036 --->
+BYE sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:39036;branch=z9hG4bK-9e9ca3714059;rport
+From: <sip:probe1@127.0.0.1>;tag=6b7ef672
+To: <sip:700@127.0.0.1:5070>;tag=88ef4bf4-6b6a-4e0d-83a5-365de9f3a19b
+Call-ID: 5e8ac7e026134d6aaee5faaac6de0593-1@talky.local
+CSeq: 2 BYE
+Contact: <sip:probe1@127.0.0.1:39036>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Transmitting SIP response (369 bytes) to UDP:127.0.0.1:39036 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.1:39036;rport=39036;received=127.0.0.1;branch=z9hG4bK-9e9ca3714059
+Call-ID: 5e8ac7e026134d6aaee5faaac6de0593-1@talky.local
+From: <sip:probe1@127.0.0.1>;tag=6b7ef672
+To: <sip:700@127.0.0.1>;tag=88ef4bf4-6b6a-4e0d-83a5-365de9f3a19b
+CSeq: 2 BYE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Received SIP request (533 bytes) from UDP:127.0.0.1:45789 --->
+INVITE sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:45789;branch=z9hG4bK-0a5cbe1fe81c;rport
+From: <sip:probe2@127.0.0.1>;tag=9580b524
+To: <sip:700@127.0.0.1:5070>
+Call-ID: 4e2510080ef346689c9b159877a6daaa-2@talky.local
+CSeq: 1 INVITE
+Contact: <sip:probe2@127.0.0.1:45789>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Type: application/sdp
+Content-Length: 136
+
+v=0
+o=- 0 0 IN IP4 127.0.0.1
+s=Talky Day Probe
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 40004 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=ptime:20
+
+<--- Transmitting SIP response (335 bytes) to UDP:127.0.0.1:45789 --->
+SIP/2.0 100 Trying
+Via: SIP/2.0/UDP 127.0.0.1:45789;rport=45789;received=127.0.0.1;branch=z9hG4bK-0a5cbe1fe81c
+Call-ID: 4e2510080ef346689c9b159877a6daaa-2@talky.local
+From: <sip:probe2@127.0.0.1>;tag=9580b524
+To: <sip:700@127.0.0.1>
+CSeq: 1 INVITE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Transmitting SIP response (759 bytes) to UDP:127.0.0.1:45789 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.1:45789;rport=45789;received=127.0.0.1;branch=z9hG4bK-0a5cbe1fe81c
+Call-ID: 4e2510080ef346689c9b159877a6daaa-2@talky.local
+From: <sip:probe2@127.0.0.1>;tag=9580b524
+To: <sip:700@127.0.0.1>;tag=72bd8334-6631-47d8-9fe0-22241bdb9e70
+CSeq: 1 INVITE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Contact: <sip:127.0.0.1:5070>
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, MESSAGE, INFO, REFER
+Supported: 100rel, timer, replaces, norefersub
+Content-Type: application/sdp
+Content-Length:   157
+
+v=0
+o=- 0 2 IN IP4 127.0.0.1
+s=Asterisk
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 30076 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=ptime:20
+a=maxptime:140
+a=sendrecv
+
+<--- Received SIP request (399 bytes) from UDP:127.0.0.1:45789 --->
+ACK sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:45789;branch=z9hG4bK-f154480e4a47;rport
+From: <sip:probe2@127.0.0.1>;tag=9580b524
+To: <sip:700@127.0.0.1:5070>;tag=72bd8334-6631-47d8-9fe0-22241bdb9e70
+Call-ID: 4e2510080ef346689c9b159877a6daaa-2@talky.local
+CSeq: 1 ACK
+Contact: <sip:probe2@127.0.0.1:45789>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Received SIP request (558 bytes) from UDP:192.168.1.34:54899 --->
+INVITE sip:700@192.168.1.34:5070 SIP/2.0
+Via: SIP/2.0/UDP 192.168.1.34:54899;branch=z9hG4bK-50a4360b387c;rport
+From: <sip:blocked1@192.168.1.34>;tag=74541fe1
+To: <sip:700@192.168.1.34:5070>
+Call-ID: 1afa11540d214b14a98a6f4697a57192-1@talky.local
+CSeq: 1 INVITE
+Contact: <sip:blocked1@192.168.1.34:54899>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Type: application/sdp
+Content-Length: 142
+
+v=0
+o=- 0 0 IN IP4 192.168.1.34
+s=Talky Day Probe
+c=IN IP4 192.168.1.34
+t=0 0
+m=audio 45002 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=ptime:20
+
+[Mar  2 14:08:32] [1;33mNOTICE[0m[2410]: [1;37mres_pjsip/pjsip_distributor.c[0m:[1;37m673[0m [1;37mlog_failed_request[0m: Request 'INVITE' from '<sip:blocked1@192.168.1.34>' failed for '192.168.1.34:54899' (callid: 1afa11540d214b14a98a6f4697a57192-1@talky.local) - No matching endpoint found
+<--- Transmitting SIP response (526 bytes) to UDP:192.168.1.34:54899 --->
+SIP/2.0 401 Unauthorized
+Via: SIP/2.0/UDP 192.168.1.34:54899;rport=54899;received=192.168.1.34;branch=z9hG4bK-50a4360b387c
+Call-ID: 1afa11540d214b14a98a6f4697a57192-1@talky.local
+From: <sip:blocked1@192.168.1.34>;tag=74541fe1
+To: <sip:700@192.168.1.34>;tag=z9hG4bK-50a4360b387c
+CSeq: 1 INVITE
+WWW-Authenticate: Digest realm="asterisk",nonce="1772460512/056d016e440972df28a1bcdf7b47195e",opaque="663b1570146711cc",algorithm=MD5,qop="auth"
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Received SIP request (399 bytes) from UDP:127.0.0.1:45789 --->
+BYE sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:45789;branch=z9hG4bK-d85116a51ef5;rport
+From: <sip:probe2@127.0.0.1>;tag=9580b524
+To: <sip:700@127.0.0.1:5070>;tag=72bd8334-6631-47d8-9fe0-22241bdb9e70
+Call-ID: 4e2510080ef346689c9b159877a6daaa-2@talky.local
+CSeq: 2 BYE
+Contact: <sip:probe2@127.0.0.1:45789>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Transmitting SIP response (369 bytes) to UDP:127.0.0.1:45789 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.1:45789;rport=45789;received=127.0.0.1;branch=z9hG4bK-d85116a51ef5
+Call-ID: 4e2510080ef346689c9b159877a6daaa-2@talky.local
+From: <sip:probe2@127.0.0.1>;tag=9580b524
+To: <sip:700@127.0.0.1>;tag=72bd8334-6631-47d8-9fe0-22241bdb9e70
+CSeq: 2 BYE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Received SIP request (533 bytes) from UDP:127.0.0.1:39975 --->
+INVITE sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:39975;branch=z9hG4bK-c6e8b2df0328;rport
+From: <sip:probe3@127.0.0.1>;tag=81e1f61d
+To: <sip:700@127.0.0.1:5070>
+Call-ID: 72bdd647d613472eb51e174f864c6778-3@talky.local
+CSeq: 1 INVITE
+Contact: <sip:probe3@127.0.0.1:39975>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Type: application/sdp
+Content-Length: 136
+
+v=0
+o=- 0 0 IN IP4 127.0.0.1
+s=Talky Day Probe
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 40006 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=ptime:20
+
+<--- Transmitting SIP response (335 bytes) to UDP:127.0.0.1:39975 --->
+SIP/2.0 100 Trying
+Via: SIP/2.0/UDP 127.0.0.1:39975;rport=39975;received=127.0.0.1;branch=z9hG4bK-c6e8b2df0328
+Call-ID: 72bdd647d613472eb51e174f864c6778-3@talky.local
+From: <sip:probe3@127.0.0.1>;tag=81e1f61d
+To: <sip:700@127.0.0.1>
+CSeq: 1 INVITE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Transmitting SIP response (759 bytes) to UDP:127.0.0.1:39975 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.1:39975;rport=39975;received=127.0.0.1;branch=z9hG4bK-c6e8b2df0328
+Call-ID: 72bdd647d613472eb51e174f864c6778-3@talky.local
+From: <sip:probe3@127.0.0.1>;tag=81e1f61d
+To: <sip:700@127.0.0.1>;tag=cabcec64-0e64-4ad6-a751-62909433e930
+CSeq: 1 INVITE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Contact: <sip:127.0.0.1:5070>
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, MESSAGE, INFO, REFER
+Supported: 100rel, timer, replaces, norefersub
+Content-Type: application/sdp
+Content-Length:   157
+
+v=0
+o=- 0 2 IN IP4 127.0.0.1
+s=Asterisk
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 30094 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=ptime:20
+a=maxptime:140
+a=sendrecv
+
+<--- Received SIP request (399 bytes) from UDP:127.0.0.1:39975 --->
+ACK sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:39975;branch=z9hG4bK-8331ec424a93;rport
+From: <sip:probe3@127.0.0.1>;tag=81e1f61d
+To: <sip:700@127.0.0.1:5070>;tag=cabcec64-0e64-4ad6-a751-62909433e930
+Call-ID: 72bdd647d613472eb51e174f864c6778-3@talky.local
+CSeq: 1 ACK
+Contact: <sip:probe3@127.0.0.1:39975>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Received SIP request (399 bytes) from UDP:127.0.0.1:39975 --->
+BYE sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:39975;branch=z9hG4bK-f3a768e3f75a;rport
+From: <sip:probe3@127.0.0.1>;tag=81e1f61d
+To: <sip:700@127.0.0.1:5070>;tag=cabcec64-0e64-4ad6-a751-62909433e930
+Call-ID: 72bdd647d613472eb51e174f864c6778-3@talky.local
+CSeq: 2 BYE
+Contact: <sip:probe3@127.0.0.1:39975>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Transmitting SIP response (369 bytes) to UDP:127.0.0.1:39975 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.1:39975;rport=39975;received=127.0.0.1;branch=z9hG4bK-f3a768e3f75a
+Call-ID: 72bdd647d613472eb51e174f864c6778-3@talky.local
+From: <sip:probe3@127.0.0.1>;tag=81e1f61d
+To: <sip:700@127.0.0.1>;tag=cabcec64-0e64-4ad6-a751-62909433e930
+CSeq: 2 BYE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Received SIP request (533 bytes) from UDP:127.0.0.1:38658 --->
+INVITE sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:38658;branch=z9hG4bK-4d4c2bad4b45;rport
+From: <sip:probe4@127.0.0.1>;tag=b8aeb736
+To: <sip:700@127.0.0.1:5070>
+Call-ID: a9f4667d549f4d878e326932d1858f92-4@talky.local
+CSeq: 1 INVITE
+Contact: <sip:probe4@127.0.0.1:38658>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Type: application/sdp
+Content-Length: 136
+
+v=0
+o=- 0 0 IN IP4 127.0.0.1
+s=Talky Day Probe
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 40008 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=ptime:20
+
+<--- Transmitting SIP response (335 bytes) to UDP:127.0.0.1:38658 --->
+SIP/2.0 100 Trying
+Via: SIP/2.0/UDP 127.0.0.1:38658;rport=38658;received=127.0.0.1;branch=z9hG4bK-4d4c2bad4b45
+Call-ID: a9f4667d549f4d878e326932d1858f92-4@talky.local
+From: <sip:probe4@127.0.0.1>;tag=b8aeb736
+To: <sip:700@127.0.0.1>
+CSeq: 1 INVITE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Transmitting SIP response (759 bytes) to UDP:127.0.0.1:38658 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.1:38658;rport=38658;received=127.0.0.1;branch=z9hG4bK-4d4c2bad4b45
+Call-ID: a9f4667d549f4d878e326932d1858f92-4@talky.local
+From: <sip:probe4@127.0.0.1>;tag=b8aeb736
+To: <sip:700@127.0.0.1>;tag=d73167ee-3fb6-4bb2-9277-2adef43780bd
+CSeq: 1 INVITE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Contact: <sip:127.0.0.1:5070>
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, MESSAGE, INFO, REFER
+Supported: 100rel, timer, replaces, norefersub
+Content-Type: application/sdp
+Content-Length:   157
+
+v=0
+o=- 0 2 IN IP4 127.0.0.1
+s=Asterisk
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 30016 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=ptime:20
+a=maxptime:140
+a=sendrecv
+
+<--- Received SIP request (399 bytes) from UDP:127.0.0.1:38658 --->
+ACK sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:38658;branch=z9hG4bK-3ce64b2e49f8;rport
+From: <sip:probe4@127.0.0.1>;tag=b8aeb736
+To: <sip:700@127.0.0.1:5070>;tag=d73167ee-3fb6-4bb2-9277-2adef43780bd
+Call-ID: a9f4667d549f4d878e326932d1858f92-4@talky.local
+CSeq: 1 ACK
+Contact: <sip:probe4@127.0.0.1:38658>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Received SIP request (399 bytes) from UDP:127.0.0.1:38658 --->
+BYE sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:38658;branch=z9hG4bK-f3105741962c;rport
+From: <sip:probe4@127.0.0.1>;tag=b8aeb736
+To: <sip:700@127.0.0.1:5070>;tag=d73167ee-3fb6-4bb2-9277-2adef43780bd
+Call-ID: a9f4667d549f4d878e326932d1858f92-4@talky.local
+CSeq: 2 BYE
+Contact: <sip:probe4@127.0.0.1:38658>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Transmitting SIP response (369 bytes) to UDP:127.0.0.1:38658 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.1:38658;rport=38658;received=127.0.0.1;branch=z9hG4bK-f3105741962c
+Call-ID: a9f4667d549f4d878e326932d1858f92-4@talky.local
+From: <sip:probe4@127.0.0.1>;tag=b8aeb736
+To: <sip:700@127.0.0.1>;tag=d73167ee-3fb6-4bb2-9277-2adef43780bd
+CSeq: 2 BYE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Received SIP request (533 bytes) from UDP:127.0.0.1:53211 --->
+INVITE sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:53211;branch=z9hG4bK-16ecb5fa468a;rport
+From: <sip:probe5@127.0.0.1>;tag=e51badab
+To: <sip:700@127.0.0.1:5070>
+Call-ID: 1cc5dfa00260456bab739cb79150e4e3-5@talky.local
+CSeq: 1 INVITE
+Contact: <sip:probe5@127.0.0.1:53211>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Type: application/sdp
+Content-Length: 136
+
+v=0
+o=- 0 0 IN IP4 127.0.0.1
+s=Talky Day Probe
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 40010 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=ptime:20
+
+<--- Transmitting SIP response (335 bytes) to UDP:127.0.0.1:53211 --->
+SIP/2.0 100 Trying
+Via: SIP/2.0/UDP 127.0.0.1:53211;rport=53211;received=127.0.0.1;branch=z9hG4bK-16ecb5fa468a
+Call-ID: 1cc5dfa00260456bab739cb79150e4e3-5@talky.local
+From: <sip:probe5@127.0.0.1>;tag=e51badab
+To: <sip:700@127.0.0.1>
+CSeq: 1 INVITE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Transmitting SIP response (759 bytes) to UDP:127.0.0.1:53211 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.1:53211;rport=53211;received=127.0.0.1;branch=z9hG4bK-16ecb5fa468a
+Call-ID: 1cc5dfa00260456bab739cb79150e4e3-5@talky.local
+From: <sip:probe5@127.0.0.1>;tag=e51badab
+To: <sip:700@127.0.0.1>;tag=c1cb0566-b549-4707-89b0-25ac4871052c
+CSeq: 1 INVITE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Contact: <sip:127.0.0.1:5070>
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, MESSAGE, INFO, REFER
+Supported: 100rel, timer, replaces, norefersub
+Content-Type: application/sdp
+Content-Length:   157
+
+v=0
+o=- 0 2 IN IP4 127.0.0.1
+s=Asterisk
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 30010 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=ptime:20
+a=maxptime:140
+a=sendrecv
+
+<--- Received SIP request (399 bytes) from UDP:127.0.0.1:53211 --->
+ACK sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:53211;branch=z9hG4bK-62171b9c56ca;rport
+From: <sip:probe5@127.0.0.1>;tag=e51badab
+To: <sip:700@127.0.0.1:5070>;tag=c1cb0566-b549-4707-89b0-25ac4871052c
+Call-ID: 1cc5dfa00260456bab739cb79150e4e3-5@talky.local
+CSeq: 1 ACK
+Contact: <sip:probe5@127.0.0.1:53211>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Received SIP request (399 bytes) from UDP:127.0.0.1:53211 --->
+BYE sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:53211;branch=z9hG4bK-180b3d24fe3c;rport
+From: <sip:probe5@127.0.0.1>;tag=e51badab
+To: <sip:700@127.0.0.1:5070>;tag=c1cb0566-b549-4707-89b0-25ac4871052c
+Call-ID: 1cc5dfa00260456bab739cb79150e4e3-5@talky.local
+CSeq: 2 BYE
+Contact: <sip:probe5@127.0.0.1:53211>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Transmitting SIP response (369 bytes) to UDP:127.0.0.1:53211 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.1:53211;rport=53211;received=127.0.0.1;branch=z9hG4bK-180b3d24fe3c
+Call-ID: 1cc5dfa00260456bab739cb79150e4e3-5@talky.local
+From: <sip:probe5@127.0.0.1>;tag=e51badab
+To: <sip:700@127.0.0.1>;tag=c1cb0566-b549-4707-89b0-25ac4871052c
+CSeq: 2 BYE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Received SIP request (533 bytes) from UDP:127.0.0.1:46150 --->
+INVITE sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:46150;branch=z9hG4bK-01e8e4c4836a;rport
+From: <sip:probe6@127.0.0.1>;tag=ce589ede
+To: <sip:700@127.0.0.1:5070>
+Call-ID: d0ac8603b4a748d4bc03462480600210-6@talky.local
+CSeq: 1 INVITE
+Contact: <sip:probe6@127.0.0.1:46150>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Type: application/sdp
+Content-Length: 136
+
+v=0
+o=- 0 0 IN IP4 127.0.0.1
+s=Talky Day Probe
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 40012 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=ptime:20
+
+<--- Transmitting SIP response (335 bytes) to UDP:127.0.0.1:46150 --->
+SIP/2.0 100 Trying
+Via: SIP/2.0/UDP 127.0.0.1:46150;rport=46150;received=127.0.0.1;branch=z9hG4bK-01e8e4c4836a
+Call-ID: d0ac8603b4a748d4bc03462480600210-6@talky.local
+From: <sip:probe6@127.0.0.1>;tag=ce589ede
+To: <sip:700@127.0.0.1>
+CSeq: 1 INVITE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Transmitting SIP response (759 bytes) to UDP:127.0.0.1:46150 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.1:46150;rport=46150;received=127.0.0.1;branch=z9hG4bK-01e8e4c4836a
+Call-ID: d0ac8603b4a748d4bc03462480600210-6@talky.local
+From: <sip:probe6@127.0.0.1>;tag=ce589ede
+To: <sip:700@127.0.0.1>;tag=ab86b8b8-4a8f-4011-96b2-c47e0098d572
+CSeq: 1 INVITE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Contact: <sip:127.0.0.1:5070>
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, MESSAGE, INFO, REFER
+Supported: 100rel, timer, replaces, norefersub
+Content-Type: application/sdp
+Content-Length:   157
+
+v=0
+o=- 0 2 IN IP4 127.0.0.1
+s=Asterisk
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 30038 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=ptime:20
+a=maxptime:140
+a=sendrecv
+
+<--- Received SIP request (399 bytes) from UDP:127.0.0.1:46150 --->
+ACK sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:46150;branch=z9hG4bK-b20b7a0d15ea;rport
+From: <sip:probe6@127.0.0.1>;tag=ce589ede
+To: <sip:700@127.0.0.1:5070>;tag=ab86b8b8-4a8f-4011-96b2-c47e0098d572
+Call-ID: d0ac8603b4a748d4bc03462480600210-6@talky.local
+CSeq: 1 ACK
+Contact: <sip:probe6@127.0.0.1:46150>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Received SIP request (399 bytes) from UDP:127.0.0.1:46150 --->
+BYE sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:46150;branch=z9hG4bK-69fea5b59224;rport
+From: <sip:probe6@127.0.0.1>;tag=ce589ede
+To: <sip:700@127.0.0.1:5070>;tag=ab86b8b8-4a8f-4011-96b2-c47e0098d572
+Call-ID: d0ac8603b4a748d4bc03462480600210-6@talky.local
+CSeq: 2 BYE
+Contact: <sip:probe6@127.0.0.1:46150>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Transmitting SIP response (369 bytes) to UDP:127.0.0.1:46150 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.1:46150;rport=46150;received=127.0.0.1;branch=z9hG4bK-69fea5b59224
+Call-ID: d0ac8603b4a748d4bc03462480600210-6@talky.local
+From: <sip:probe6@127.0.0.1>;tag=ce589ede
+To: <sip:700@127.0.0.1>;tag=ab86b8b8-4a8f-4011-96b2-c47e0098d572
+CSeq: 2 BYE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Received SIP request (533 bytes) from UDP:127.0.0.1:59020 --->
+INVITE sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:59020;branch=z9hG4bK-ef943b166109;rport
+From: <sip:probe7@127.0.0.1>;tag=5b65db0b
+To: <sip:700@127.0.0.1:5070>
+Call-ID: ff783172117a49fa99efd3e9442f4dc5-7@talky.local
+CSeq: 1 INVITE
+Contact: <sip:probe7@127.0.0.1:59020>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Type: application/sdp
+Content-Length: 136
+
+v=0
+o=- 0 0 IN IP4 127.0.0.1
+s=Talky Day Probe
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 40014 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=ptime:20
+
+<--- Transmitting SIP response (335 bytes) to UDP:127.0.0.1:59020 --->
+SIP/2.0 100 Trying
+Via: SIP/2.0/UDP 127.0.0.1:59020;rport=59020;received=127.0.0.1;branch=z9hG4bK-ef943b166109
+Call-ID: ff783172117a49fa99efd3e9442f4dc5-7@talky.local
+From: <sip:probe7@127.0.0.1>;tag=5b65db0b
+To: <sip:700@127.0.0.1>
+CSeq: 1 INVITE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Transmitting SIP response (759 bytes) to UDP:127.0.0.1:59020 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.1:59020;rport=59020;received=127.0.0.1;branch=z9hG4bK-ef943b166109
+Call-ID: ff783172117a49fa99efd3e9442f4dc5-7@talky.local
+From: <sip:probe7@127.0.0.1>;tag=5b65db0b
+To: <sip:700@127.0.0.1>;tag=84787f4b-d9ae-49c1-8375-3f5c0c3e70cb
+CSeq: 1 INVITE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Contact: <sip:127.0.0.1:5070>
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, MESSAGE, INFO, REFER
+Supported: 100rel, timer, replaces, norefersub
+Content-Type: application/sdp
+Content-Length:   157
+
+v=0
+o=- 0 2 IN IP4 127.0.0.1
+s=Asterisk
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 30024 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=ptime:20
+a=maxptime:140
+a=sendrecv
+
+<--- Received SIP request (399 bytes) from UDP:127.0.0.1:59020 --->
+ACK sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:59020;branch=z9hG4bK-610837fb3455;rport
+From: <sip:probe7@127.0.0.1>;tag=5b65db0b
+To: <sip:700@127.0.0.1:5070>;tag=84787f4b-d9ae-49c1-8375-3f5c0c3e70cb
+Call-ID: ff783172117a49fa99efd3e9442f4dc5-7@talky.local
+CSeq: 1 ACK
+Contact: <sip:probe7@127.0.0.1:59020>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Received SIP request (399 bytes) from UDP:127.0.0.1:59020 --->
+BYE sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:59020;branch=z9hG4bK-941239822c91;rport
+From: <sip:probe7@127.0.0.1>;tag=5b65db0b
+To: <sip:700@127.0.0.1:5070>;tag=84787f4b-d9ae-49c1-8375-3f5c0c3e70cb
+Call-ID: ff783172117a49fa99efd3e9442f4dc5-7@talky.local
+CSeq: 2 BYE
+Contact: <sip:probe7@127.0.0.1:59020>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Transmitting SIP response (369 bytes) to UDP:127.0.0.1:59020 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.1:59020;rport=59020;received=127.0.0.1;branch=z9hG4bK-941239822c91
+Call-ID: ff783172117a49fa99efd3e9442f4dc5-7@talky.local
+From: <sip:probe7@127.0.0.1>;tag=5b65db0b
+To: <sip:700@127.0.0.1>;tag=84787f4b-d9ae-49c1-8375-3f5c0c3e70cb
+CSeq: 2 BYE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Received SIP request (533 bytes) from UDP:127.0.0.1:60845 --->
+INVITE sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:60845;branch=z9hG4bK-79afff8836d9;rport
+From: <sip:probe8@127.0.0.1>;tag=80fbd9e1
+To: <sip:700@127.0.0.1:5070>
+Call-ID: 5f41c183795141b3a4919bdd9b818128-8@talky.local
+CSeq: 1 INVITE
+Contact: <sip:probe8@127.0.0.1:60845>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Type: application/sdp
+Content-Length: 136
+
+v=0
+o=- 0 0 IN IP4 127.0.0.1
+s=Talky Day Probe
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 40016 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=ptime:20
+
+<--- Transmitting SIP response (335 bytes) to UDP:127.0.0.1:60845 --->
+SIP/2.0 100 Trying
+Via: SIP/2.0/UDP 127.0.0.1:60845;rport=60845;received=127.0.0.1;branch=z9hG4bK-79afff8836d9
+Call-ID: 5f41c183795141b3a4919bdd9b818128-8@talky.local
+From: <sip:probe8@127.0.0.1>;tag=80fbd9e1
+To: <sip:700@127.0.0.1>
+CSeq: 1 INVITE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Transmitting SIP response (759 bytes) to UDP:127.0.0.1:60845 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.1:60845;rport=60845;received=127.0.0.1;branch=z9hG4bK-79afff8836d9
+Call-ID: 5f41c183795141b3a4919bdd9b818128-8@talky.local
+From: <sip:probe8@127.0.0.1>;tag=80fbd9e1
+To: <sip:700@127.0.0.1>;tag=dad348a9-9e28-4067-a416-e0562172a9e2
+CSeq: 1 INVITE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Contact: <sip:127.0.0.1:5070>
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, MESSAGE, INFO, REFER
+Supported: 100rel, timer, replaces, norefersub
+Content-Type: application/sdp
+Content-Length:   157
+
+v=0
+o=- 0 2 IN IP4 127.0.0.1
+s=Asterisk
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 30088 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=ptime:20
+a=maxptime:140
+a=sendrecv
+
+<--- Received SIP request (399 bytes) from UDP:127.0.0.1:60845 --->
+ACK sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:60845;branch=z9hG4bK-104ae9c90ad7;rport
+From: <sip:probe8@127.0.0.1>;tag=80fbd9e1
+To: <sip:700@127.0.0.1:5070>;tag=dad348a9-9e28-4067-a416-e0562172a9e2
+Call-ID: 5f41c183795141b3a4919bdd9b818128-8@talky.local
+CSeq: 1 ACK
+Contact: <sip:probe8@127.0.0.1:60845>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Received SIP request (399 bytes) from UDP:127.0.0.1:60845 --->
+BYE sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:60845;branch=z9hG4bK-700f5e6e0260;rport
+From: <sip:probe8@127.0.0.1>;tag=80fbd9e1
+To: <sip:700@127.0.0.1:5070>;tag=dad348a9-9e28-4067-a416-e0562172a9e2
+Call-ID: 5f41c183795141b3a4919bdd9b818128-8@talky.local
+CSeq: 2 BYE
+Contact: <sip:probe8@127.0.0.1:60845>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Transmitting SIP response (369 bytes) to UDP:127.0.0.1:60845 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.1:60845;rport=60845;received=127.0.0.1;branch=z9hG4bK-700f5e6e0260
+Call-ID: 5f41c183795141b3a4919bdd9b818128-8@talky.local
+From: <sip:probe8@127.0.0.1>;tag=80fbd9e1
+To: <sip:700@127.0.0.1>;tag=dad348a9-9e28-4067-a416-e0562172a9e2
+CSeq: 2 BYE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Received SIP request (533 bytes) from UDP:127.0.0.1:40543 --->
+INVITE sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:40543;branch=z9hG4bK-00cd5fb58d90;rport
+From: <sip:probe9@127.0.0.1>;tag=e521fb26
+To: <sip:700@127.0.0.1:5070>
+Call-ID: 3c0fe3965b654efd92e7a34a3f21bdd4-9@talky.local
+CSeq: 1 INVITE
+Contact: <sip:probe9@127.0.0.1:40543>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Type: application/sdp
+Content-Length: 136
+
+v=0
+o=- 0 0 IN IP4 127.0.0.1
+s=Talky Day Probe
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 40018 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=ptime:20
+
+<--- Transmitting SIP response (335 bytes) to UDP:127.0.0.1:40543 --->
+SIP/2.0 100 Trying
+Via: SIP/2.0/UDP 127.0.0.1:40543;rport=40543;received=127.0.0.1;branch=z9hG4bK-00cd5fb58d90
+Call-ID: 3c0fe3965b654efd92e7a34a3f21bdd4-9@talky.local
+From: <sip:probe9@127.0.0.1>;tag=e521fb26
+To: <sip:700@127.0.0.1>
+CSeq: 1 INVITE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Transmitting SIP response (759 bytes) to UDP:127.0.0.1:40543 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.1:40543;rport=40543;received=127.0.0.1;branch=z9hG4bK-00cd5fb58d90
+Call-ID: 3c0fe3965b654efd92e7a34a3f21bdd4-9@talky.local
+From: <sip:probe9@127.0.0.1>;tag=e521fb26
+To: <sip:700@127.0.0.1>;tag=5e6f46eb-668c-4d87-8593-4ce110aeb961
+CSeq: 1 INVITE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Contact: <sip:127.0.0.1:5070>
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, MESSAGE, INFO, REFER
+Supported: 100rel, timer, replaces, norefersub
+Content-Type: application/sdp
+Content-Length:   157
+
+v=0
+o=- 0 2 IN IP4 127.0.0.1
+s=Asterisk
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 30034 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=ptime:20
+a=maxptime:140
+a=sendrecv
+
+<--- Received SIP request (399 bytes) from UDP:127.0.0.1:40543 --->
+ACK sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:40543;branch=z9hG4bK-e4896630392c;rport
+From: <sip:probe9@127.0.0.1>;tag=e521fb26
+To: <sip:700@127.0.0.1:5070>;tag=5e6f46eb-668c-4d87-8593-4ce110aeb961
+Call-ID: 3c0fe3965b654efd92e7a34a3f21bdd4-9@talky.local
+CSeq: 1 ACK
+Contact: <sip:probe9@127.0.0.1:40543>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Received SIP request (399 bytes) from UDP:127.0.0.1:40543 --->
+BYE sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:40543;branch=z9hG4bK-dd29ab8a4217;rport
+From: <sip:probe9@127.0.0.1>;tag=e521fb26
+To: <sip:700@127.0.0.1:5070>;tag=5e6f46eb-668c-4d87-8593-4ce110aeb961
+Call-ID: 3c0fe3965b654efd92e7a34a3f21bdd4-9@talky.local
+CSeq: 2 BYE
+Contact: <sip:probe9@127.0.0.1:40543>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Transmitting SIP response (369 bytes) to UDP:127.0.0.1:40543 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.1:40543;rport=40543;received=127.0.0.1;branch=z9hG4bK-dd29ab8a4217
+Call-ID: 3c0fe3965b654efd92e7a34a3f21bdd4-9@talky.local
+From: <sip:probe9@127.0.0.1>;tag=e521fb26
+To: <sip:700@127.0.0.1>;tag=5e6f46eb-668c-4d87-8593-4ce110aeb961
+CSeq: 2 BYE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Received SIP request (536 bytes) from UDP:127.0.0.1:58700 --->
+INVITE sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:58700;branch=z9hG4bK-2c84e7964f7e;rport
+From: <sip:probe10@127.0.0.1>;tag=d9f8edbe
+To: <sip:700@127.0.0.1:5070>
+Call-ID: d2d95294204e4eb88864249045fabce1-10@talky.local
+CSeq: 1 INVITE
+Contact: <sip:probe10@127.0.0.1:58700>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Type: application/sdp
+Content-Length: 136
+
+v=0
+o=- 0 0 IN IP4 127.0.0.1
+s=Talky Day Probe
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 40020 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=ptime:20
+
+<--- Transmitting SIP response (337 bytes) to UDP:127.0.0.1:58700 --->
+SIP/2.0 100 Trying
+Via: SIP/2.0/UDP 127.0.0.1:58700;rport=58700;received=127.0.0.1;branch=z9hG4bK-2c84e7964f7e
+Call-ID: d2d95294204e4eb88864249045fabce1-10@talky.local
+From: <sip:probe10@127.0.0.1>;tag=d9f8edbe
+To: <sip:700@127.0.0.1>
+CSeq: 1 INVITE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+
+<--- Transmitting SIP response (761 bytes) to UDP:127.0.0.1:58700 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.1:58700;rport=58700;received=127.0.0.1;branch=z9hG4bK-2c84e7964f7e
+Call-ID: d2d95294204e4eb88864249045fabce1-10@talky.local
+From: <sip:probe10@127.0.0.1>;tag=d9f8edbe
+To: <sip:700@127.0.0.1>;tag=34764a34-af7d-4b25-bf03-e8f4721e9e3b
+CSeq: 1 INVITE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Contact: <sip:127.0.0.1:5070>
+Allow: OPTIONS, REGISTER, SUBSCRIBE, NOTIFY, PUBLISH, INVITE, ACK, BYE, CANCEL, UPDATE, PRACK, MESSAGE, INFO, REFER
+Supported: 100rel, timer, replaces, norefersub
+Content-Type: application/sdp
+Content-Length:   157
+
+v=0
+o=- 0 2 IN IP4 127.0.0.1
+s=Asterisk
+c=IN IP4 127.0.0.1
+t=0 0
+m=audio 30004 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=ptime:20
+a=maxptime:140
+a=sendrecv
+
+<--- Received SIP request (402 bytes) from UDP:127.0.0.1:58700 --->
+ACK sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:58700;branch=z9hG4bK-8cb51d3509dc;rport
+From: <sip:probe10@127.0.0.1>;tag=d9f8edbe
+To: <sip:700@127.0.0.1:5070>;tag=34764a34-af7d-4b25-bf03-e8f4721e9e3b
+Call-ID: d2d95294204e4eb88864249045fabce1-10@talky.local
+CSeq: 1 ACK
+Contact: <sip:probe10@127.0.0.1:58700>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Received SIP request (402 bytes) from UDP:127.0.0.1:58700 --->
+BYE sip:700@127.0.0.1:5070 SIP/2.0
+Via: SIP/2.0/UDP 127.0.0.1:58700;branch=z9hG4bK-989e4338e5bc;rport
+From: <sip:probe10@127.0.0.1>;tag=d9f8edbe
+To: <sip:700@127.0.0.1:5070>;tag=34764a34-af7d-4b25-bf03-e8f4721e9e3b
+Call-ID: d2d95294204e4eb88864249045fabce1-10@talky.local
+CSeq: 2 BYE
+Contact: <sip:probe10@127.0.0.1:58700>
+Max-Forwards: 70
+User-Agent: talky-day-probe/1.0
+Content-Length: 0
+
+
+<--- Transmitting SIP response (371 bytes) to UDP:127.0.0.1:58700 --->
+SIP/2.0 200 OK
+Via: SIP/2.0/UDP 127.0.0.1:58700;rport=58700;received=127.0.0.1;branch=z9hG4bK-989e4338e5bc
+Call-ID: d2d95294204e4eb88864249045fabce1-10@talky.local
+From: <sip:probe10@127.0.0.1>;tag=d9f8edbe
+To: <sip:700@127.0.0.1>;tag=34764a34-af7d-4b25-bf03-e8f4721e9e3b
+CSeq: 2 BYE
+Server: Asterisk PBX 20.6.0~dfsg+~cs6.13.40431414-2build5
+Content-Length:  0
+
+

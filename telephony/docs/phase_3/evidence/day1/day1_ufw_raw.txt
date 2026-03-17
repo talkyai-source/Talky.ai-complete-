@@ -1,0 +1,4 @@
+timestamp_utc=2026-03-02T13:58:47Z
+command=ufw status verbose
+Status: inactive
+status_capture=ok

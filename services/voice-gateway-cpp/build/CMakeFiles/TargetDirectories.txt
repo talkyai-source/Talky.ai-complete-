@@ -1,0 +1,6 @@
+/home/ai-lab/Desktop/Talky.ai-complete-/services/voice-gateway-cpp/build/CMakeFiles/voice_gateway_lib.dir
+/home/ai-lab/Desktop/Talky.ai-complete-/services/voice-gateway-cpp/build/CMakeFiles/voice_gateway.dir
+/home/ai-lab/Desktop/Talky.ai-complete-/services/voice-gateway-cpp/build/CMakeFiles/voice_gateway_tests.dir
+/home/ai-lab/Desktop/Talky.ai-complete-/services/voice-gateway-cpp/build/CMakeFiles/test.dir
+/home/ai-lab/Desktop/Talky.ai-complete-/services/voice-gateway-cpp/build/CMakeFiles/edit_cache.dir
+/home/ai-lab/Desktop/Talky.ai-complete-/services/voice-gateway-cpp/build/CMakeFiles/rebuild_cache.dir

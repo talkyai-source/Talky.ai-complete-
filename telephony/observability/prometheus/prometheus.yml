@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    service: talky-telephony
+    phase: ws-k
+
+rule_files:
+  - /etc/prometheus/rules/telephony_ws_k_rules.yml
+
+scrape_configs:
+  - job_name: talky_backend_telephony
+    scheme: http
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - 127.0.0.1:8000
+    # If TELEPHONY_METRICS_TOKEN is configured in backend, enable:
+    # http_headers:
+    #   X-Metrics-Token:
+    #     values: ["replace-with-real-token"]

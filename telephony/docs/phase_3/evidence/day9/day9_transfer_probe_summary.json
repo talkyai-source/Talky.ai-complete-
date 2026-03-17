@@ -1,0 +1,12 @@
+{
+  "calls": 6,
+  "success": 6,
+  "failed": 0,
+  "remote_bye_total": 0,
+  "invite_fail_total": 0,
+  "remote_bye_elapsed_ms": {
+    "p50": null,
+    "p95": null,
+    "max": null
+  }
+}

@@ -13,7 +13,7 @@ import json
 from datetime import datetime
 from typing import Optional
 
-from dotenv import load_dotenv
+from app.core.dotenv_compat import load_dotenv
 
 # Load environment variables
 load_dotenv()
@@ -120,15 +120,14 @@ class VoicePipelineWorker:
                 "api_key": os.getenv("CARTESIA_API_KEY") or os.getenv("GOOGLE_TTS_API_KEY", ""),
             })
             
-            # Media Gateway (via factory — config-driven with RTP params)
+            # Media Gateway (browser gateway for web-based voice sessions)
             self._media_gateway = MediaGatewayFactory.create(self._voice_config.media_gateway_type)
+            tts_provider = getattr(self._voice_config, "tts_provider", "google")
             await self._media_gateway.initialize({
-                "remote_ip": self._voice_config.rtp_remote_ip,
-                "remote_port": self._voice_config.rtp_remote_port,
-                "local_port": self._voice_config.rtp_local_port,
-                "codec": self._voice_config.rtp_codec,
-                "source_sample_rate": self._voice_config.tts_source_sample_rate,
-                "source_format": self._voice_config.tts_source_format,
+                "sample_rate": self._voice_config.tts_source_sample_rate,
+                "channels": 1,
+                "bit_depth": 16,
+                "tts_source_format": "f32le" if tts_provider == "google" else "s16le",
             })
             
             logger.info("AI providers initialized")
@@ -200,8 +199,9 @@ class VoicePipelineWorker:
             logger.warning(f"Pipeline already active for call {call_id}")
             return
         
-        if len(self._active_pipelines) >= self.MAX_CONCURRENT_PIPELINES:
-            logger.error(f"Max concurrent pipelines reached ({self.MAX_CONCURRENT_PIPELINES})")
+        max_pipelines = getattr(self._voice_config, "max_concurrent_pipelines", 50)
+        if len(self._active_pipelines) >= max_pipelines:
+            logger.error(f"Max concurrent pipelines reached ({max_pipelines})")
             return
         
         # Create pipeline task
@@ -222,7 +222,7 @@ class VoicePipelineWorker:
                     call_id=call_id,
                     campaign_id=event.get("campaign_id", ""),
                     lead_id=event.get("lead_id", ""),
-                    vonage_call_uuid=call_id,  # Use call_id as vonage UUID
+                    provider_call_id=call_id,
                     system_prompt="You are a helpful AI assistant.",  # Default, should come from campaign
                     voice_id=os.getenv("DEFAULT_VOICE_ID", "sonic"),
                     websocket=None,  # Will be set when WebSocket connects

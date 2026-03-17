@@ -96,7 +96,7 @@ class AIProviderConfig(BaseModel):
     """
     # LLM Configuration
     llm_provider: LLMProvider = LLMProvider.GROQ
-    llm_model: str = GroqModel.LLAMA_3_3_70B.value
+    llm_model: str = GroqModel.GPT_OSS_120B.value  # OpenAI GPT-OSS 120B - flagship reasoning model
     llm_temperature: float = Field(default=0.6, ge=0.0, le=2.0)
     llm_max_tokens: int = Field(default=150, ge=1, le=1000)
     
@@ -105,11 +105,11 @@ class AIProviderConfig(BaseModel):
     stt_model: str = DeepgramModel.NOVA_3.value
     stt_language: str = "en"
     
-    # TTS Configuration - Using Google Chirp3-HD (Cartesia disabled)
-    tts_provider: TTSProvider = TTSProvider.GOOGLE
-    tts_model: str = GoogleTTSModel.CHIRP3_HD.value  # Google Chirp3-HD
-    tts_voice_id: str = "en-US-Chirp3-HD-Leda"  # Leda - professional female
-    tts_sample_rate: int = 24000  # Google Chirp3-HD sample rate
+    # TTS Configuration - Using Deepgram Aura-2 (fast and high quality)
+    tts_provider: TTSProvider = TTSProvider.DEEPGRAM
+    tts_model: str = DeepgramTTSModel.AURA_2.value  # Deepgram Aura-2
+    tts_voice_id: str = "aura-zeus-en"  # Zeus - professional male voice
+    tts_sample_rate: int = 24000  # Deepgram Aura-2 sample rate
     
     class Config:
         use_enum_values = True
