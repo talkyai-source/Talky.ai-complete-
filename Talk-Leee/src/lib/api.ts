@@ -197,6 +197,150 @@ class ApiClient {
         const path = "/health";
         return this.client().request({ path, method: "GET", timeoutMs: 2500 });
     }
+
+    /* ---------- Passkeys (WebAuthn) ---------- */
+
+    async checkUserHasPasskeys(email: string): Promise<boolean> {
+        const path = "/auth/passkey-check";
+        const method = "POST" as const;
+        try {
+            const data = await this.client().request({
+                path,
+                method,
+                body: { email },
+                timeoutMs: 5_000,
+            });
+            return z.object({ has_passkeys: z.boolean() }).parse(data).has_passkeys;
+        } catch {
+            return false;
+        }
+    }
+
+    async beginPasskeyLogin(email?: string): Promise<{
+        ceremony_id: string;
+        options: Record<string, unknown>;
+        has_passkeys: boolean;
+    }> {
+        const path = "/auth/passkeys/login/begin";
+        const method = "POST" as const;
+        const data = await this.client().request({
+            path,
+            method,
+            body: email ? { email } : {},
+            timeoutMs: 10_000,
+        });
+        return z.object({
+            ceremony_id: z.string(),
+            options: z.record(z.unknown()),
+            has_passkeys: z.boolean(),
+        }).parse(data);
+    }
+
+    async completePasskeyLogin(
+        ceremonyId: string,
+        credentialResponse: Record<string, unknown>
+    ): Promise<LoginResponse> {
+        const path = "/auth/passkeys/login/complete";
+        const method = "POST" as const;
+        const data = await this.client().request({
+            path,
+            method,
+            body: {
+                ceremony_id: ceremonyId,
+                credential_response: credentialResponse,
+            },
+            timeoutMs: 10_000,
+        });
+        return this.parseOrThrow(LoginResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
+    }
+
+    async beginPasskeyRegistration(
+        authenticatorType: "platform" | "cross-platform" | "any" = "any",
+        displayName?: string
+    ): Promise<{ ceremony_id: string; options: Record<string, unknown> }> {
+        const path = "/auth/passkeys/register/begin";
+        const method = "POST" as const;
+        const data = await this.client().request({
+            path,
+            method,
+            body: {
+                authenticator_type: authenticatorType,
+                display_name: displayName,
+            },
+            timeoutMs: 10_000,
+        });
+        return z.object({
+            ceremony_id: z.string(),
+            options: z.record(z.unknown()),
+        }).parse(data);
+    }
+
+    async completePasskeyRegistration(
+        ceremonyId: string,
+        credentialResponse: Record<string, unknown>,
+        displayName?: string
+    ): Promise<{ passkey_id: string; message: string }> {
+        const path = "/auth/passkeys/register/complete";
+        const method = "POST" as const;
+        const data = await this.client().request({
+            path,
+            method,
+            body: {
+                ceremony_id: ceremonyId,
+                credential_response: credentialResponse,
+                display_name: displayName,
+            },
+            timeoutMs: 10_000,
+        });
+        return z.object({
+            passkey_id: z.string(),
+            message: z.string(),
+        }).parse(data);
+    }
+
+    async listPasskeys(): Promise<Array<{
+        id: string;
+        credential_id: string;
+        display_name: string;
+        device_type: string;
+        backed_up: boolean;
+        transports: string[];
+        created_at: string;
+        last_used_at?: string;
+    }>> {
+        const path = "/auth/passkeys";
+        const method = "GET" as const;
+        const data = await this.client().request({ path, method, timeoutMs: 10_000 });
+        return z.object({
+            passkeys: z.array(z.object({
+                id: z.string(),
+                credential_id: z.string(),
+                display_name: z.string(),
+                device_type: z.string(),
+                backed_up: z.boolean(),
+                transports: z.array(z.string()),
+                created_at: z.string(),
+                last_used_at: z.string().optional(),
+            })),
+        }).parse(data).passkeys;
+    }
+
+    async updatePasskey(passkeyId: string, displayName: string): Promise<void> {
+        const path = `/auth/passkeys/${passkeyId}`;
+        const method = "PATCH" as const;
+        await this.client().request({
+            path,
+            method,
+            body: { display_name: displayName },
+            timeoutMs: 10_000,
+        });
+    }
+
+    async deletePasskey(passkeyId: string): Promise<void> {
+        const path = `/auth/passkeys/${passkeyId}`;
+        const method = "DELETE" as const;
+        await this.client().request({ path, method, timeoutMs: 10_000 });
+    }
 }
 
 export const api = new ApiClient();

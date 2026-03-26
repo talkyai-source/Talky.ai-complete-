@@ -123,6 +123,14 @@ app.add_middleware(
 from app.core.tenant_middleware import TenantMiddleware
 app.add_middleware(TenantMiddleware)
 
+# Day 5: Session Security Middleware
+from app.core.session_security_middleware import SessionSecurityMiddleware
+app.add_middleware(SessionSecurityMiddleware)
+
+# Day 6: API Security Middleware (request validation, security headers)
+from app.core.api_security_middleware import APISecurityMiddleware
+app.add_middleware(APISecurityMiddleware)
+
 # Rate limiting — register the slowapi error handler
 from app.api.v1.endpoints.auth import limiter
 app.state.limiter = limiter

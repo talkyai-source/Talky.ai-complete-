@@ -3,7 +3,7 @@
  * Aligned with Talky.ai Backend API
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
 // Types - Define before usage
 export interface AdminUser {
@@ -12,6 +12,17 @@ export interface AdminUser {
     name: string;
     role: 'admin' | 'super_admin';
     tenant_id?: string;
+}
+
+export interface AuthResponse {
+    access_token: string;
+    token_type: string;
+    user_id: string;
+    email: string;
+    role: string;
+    business_name?: string;
+    minutes_remaining: number;
+    message: string;
 }
 
 export interface TenantQueryParams {
@@ -997,6 +1008,111 @@ class ApiClient {
         return this.request<AlertSettings>('/admin/alerts/settings', {
             method: 'PUT',
             body: settings
+        });
+    }
+}
+
+    // =============================================================================
+    // Passkey / WebAuthn Methods
+    // =============================================================================
+
+    async checkUserHasPasskeys(email: string): Promise<boolean> {
+        try {
+            const response = await this.request<{ has_passkeys: boolean }>('/auth/passkey-check', {
+                method: 'POST',
+                body: JSON.stringify({ email }),
+            });
+            return response.has_passkeys;
+        } catch {
+            return false;
+        }
+    }
+
+    async beginPasskeyRegistration(
+        authenticatorType: 'platform' | 'cross-platform' | 'any' = 'any',
+        displayName?: string
+    ): Promise<{ ceremony_id: string; options: Record<string, unknown> }> {
+        return this.request('/auth/passkeys/register/begin', {
+            method: 'POST',
+            body: JSON.stringify({
+                authenticator_type: authenticatorType,
+                display_name: displayName,
+            }),
+        });
+    }
+
+    async completePasskeyRegistration(
+        ceremonyId: string,
+        credentialResponse: Record<string, unknown>,
+        displayName?: string
+    ): Promise<{ passkey_id: string; message: string }> {
+        return this.request('/auth/passkeys/register/complete', {
+            method: 'POST',
+            body: JSON.stringify({
+                ceremony_id: ceremonyId,
+                credential_response: credentialResponse,
+                display_name: displayName,
+            }),
+        });
+    }
+
+    async beginPasskeyLogin(email?: string): Promise<{
+        ceremony_id: string;
+        options: Record<string, unknown>;
+        has_passkeys: boolean;
+    }> {
+        return this.request('/auth/passkeys/login/begin', {
+            method: 'POST',
+            body: JSON.stringify({ email }),
+        });
+    }
+
+    async completePasskeyLogin(
+        ceremonyId: string,
+        credentialResponse: Record<string, unknown>
+    ): Promise<AuthResponse> {
+        return this.request('/auth/passkeys/login/complete', {
+            method: 'POST',
+            body: JSON.stringify({
+                ceremony_id: ceremonyId,
+                credential_response: credentialResponse,
+            }),
+        });
+    }
+
+    async listPasskeys(): Promise<Array<{
+        id: string;
+        credential_id: string;
+        display_name: string;
+        device_type: string;
+        backed_up: boolean;
+        transports: string[];
+        created_at: string;
+        last_used_at?: string;
+    }>> {
+        const response = await this.request<{ passkeys: Array<{
+            id: string;
+            credential_id: string;
+            display_name: string;
+            device_type: string;
+            backed_up: boolean;
+            transports: string[];
+            created_at: string;
+            last_used_at?: string;
+        }> }>('/auth/passkeys');
+        return response.passkeys;
+    }
+
+    async updatePasskey(passkeyId: string, displayName: string): Promise<void> {
+        await this.request(`/auth/passkeys/${passkeyId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ display_name: displayName }),
+        });
+    }
+
+    async deletePasskey(passkeyId: string): Promise<void> {
+        await this.request(`/auth/passkeys/${passkeyId}`, {
+            method: 'DELETE',
         });
     }
 }

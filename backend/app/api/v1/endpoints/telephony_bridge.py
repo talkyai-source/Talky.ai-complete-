@@ -7,12 +7,14 @@ This endpoint is the single entry-point for ALL SIP B2BUA integrations.
 It uses CallControlAdapterFactory to obtain the active PBX adapter
 (Asterisk or FreeSWITCH) — the caller never needs to know which one is live.
 
+All call initiation routes through CallGuard (Day 7) for security validation.
+
 Endpoints
 ---------
   POST   /api/v1/sip/telephony/start            — connect to active B2BUA
   POST   /api/v1/sip/telephony/stop             — disconnect adapter
   GET    /api/v1/sip/telephony/status           — health + active calls
-  POST   /api/v1/sip/telephony/call             — originate outbound call
+  POST   /api/v1/sip/telephony/call             — originate outbound call (CallGuard protected)
   POST   /api/v1/sip/telephony/hangup/{id}      — hang up a call
   POST   /api/v1/sip/telephony/transfer/blind   — blind transfer
   POST   /api/v1/sip/telephony/transfer/attended— attended transfer
@@ -33,6 +35,8 @@ from pydantic import BaseModel, Field
 
 from app.domain.interfaces.call_control_adapter import CallControlAdapter
 from app.infrastructure.telephony.adapter_factory import CallControlAdapterFactory
+from app.domain.services.call_guard import CallGuard, GuardDecision
+from app.domain.services.abuse_detection import AbuseDetectionService
 
 logger = logging.getLogger(__name__)
 
@@ -360,22 +364,127 @@ async def telephony_status():
 
 @router.post("/call")
 async def make_call(
-    destination: str = Query(..., description="Destination extension or phone number"),
+    request: Request,
+    destination: str = Query(..., description="Destination extension or phone number (E.164)"),
     caller_id: str = Query(default="1001", description="Caller ID to display"),
+    campaign_id: Optional[str] = Query(None, description="Campaign context"),
+    tenant_id: Optional[str] = Query(None, description="Tenant ID (optional, defaults from auth)"),
 ):
-    """Originate an outbound call via the active B2BUA adapter."""
+    """
+    Originate an outbound call via the active B2BUA adapter.
+
+    This endpoint is protected by CallGuard (Day 7) which validates:
+    - Tenant/partner status
+    - Rate limits
+    - Concurrency limits
+    - Geographic restrictions
+    - DNC list
+    - Business hours
+    - Abuse patterns
+
+    Returns 429 if call is blocked/throttled, 202 if queued.
+    """
     if not _adapter or not _adapter.connected:
         raise HTTPException(status_code=400, detail="Telephony adapter not connected")
 
+    # Get tenant from request context or query param
+    # In production, get from auth/JWT token
+    effective_tenant_id = tenant_id or getattr(request.state, "tenant_id", None)
+    if not effective_tenant_id:
+        raise HTTPException(status_code=400, detail="Tenant ID required")
+
+    # Initialize CallGuard
+    from app.core.container import get_container
+    container = get_container()
+
+    guard = CallGuard(
+        db_pool=container.db_pool,
+        redis_client=getattr(container, "redis", None),
+    )
+
+    # Evaluate call through guard
+    guard_result = await guard.evaluate(
+        tenant_id=effective_tenant_id,
+        phone_number=destination,
+        campaign_id=campaign_id,
+        call_type="outbound",
+    )
+
+    # Handle guard decisions
+    if guard_result.decision == GuardDecision.BLOCK:
+        logger.warning(
+            f"Call blocked by guard: tenant={effective_tenant_id}, "
+            f"dest={destination}, reasons={guard_result.failed_checks}"
+        )
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "call_blocked",
+                "reasons": [
+                    c.reason for c in guard_result.check_results if not c.passed
+                ],
+                "guard_latency_ms": guard_result.total_latency_ms,
+            },
+        )
+
+    if guard_result.decision == GuardDecision.THROTTLE:
+        logger.warning(
+            f"Call throttled by guard: tenant={effective_tenant_id}, "
+            f"dest={destination}"
+        )
+        raise HTTPException(
+            status_code=429,
+            headers={"Retry-After": str(guard_result.retry_after_seconds or 60)},
+            detail={
+                "error": "call_throttled",
+                "retry_after_seconds": guard_result.retry_after_seconds or 60,
+                "guard_latency_ms": guard_result.total_latency_ms,
+            },
+        )
+
+    if guard_result.decision == GuardDecision.QUEUE:
+        logger.info(
+            f"Call queued by guard: tenant={effective_tenant_id}, "
+            f"dest={destination}, position={guard_result.queue_position}"
+        )
+        return JSONResponse(
+            status_code=202,  # Accepted
+            content={
+                "status": "queued",
+                "queue_position": guard_result.queue_position,
+                "estimated_wait_seconds": guard_result.retry_after_seconds,
+                "guard_latency_ms": guard_result.total_latency_ms,
+            },
+        )
+
+    # Guard passed - proceed with call
     try:
-        call_id = await _adapter.originate_call(destination=destination, caller_id=caller_id)
+        call_id = await _adapter.originate_call(
+            destination=destination,
+            caller_id=caller_id,
+        )
+
+        # Trigger post-call abuse detection (async)
+        try:
+            detector = AbuseDetectionService(
+                db_pool=container.db_pool,
+                redis_client=getattr(container, "redis", None),
+            )
+            # Note: analyze_call_initiated is for pre-call checks
+            # Post-call analysis happens in call completion handler
+        except Exception as e:
+            logger.warning(f"Failed to initialize abuse detector: {e}")
+
         return JSONResponse({
             "status": "calling",
             "call_id": call_id,
             "destination": destination,
             "adapter": _adapter.name,
+            "guard_latency_ms": guard_result.total_latency_ms,
         })
+
     except Exception as exc:
+        logger.error(f"Failed to originate call: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
 
 
