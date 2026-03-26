@@ -87,6 +87,7 @@ CMakeFiles/voice_gateway.dir/src/main.cpp.o: /home/ai-lab/Desktop/Talky.ai-compl
   /usr/include/c++/13/bits/shared_ptr_base.h \
   /usr/include/c++/13/bits/sstream.tcc \
   /usr/include/c++/13/bits/std_abs.h \
+  /usr/include/c++/13/bits/std_function.h \
   /usr/include/c++/13/bits/std_mutex.h \
   /usr/include/c++/13/bits/std_thread.h \
   /usr/include/c++/13/bits/stl_algo.h \
@@ -146,6 +147,7 @@ CMakeFiles/voice_gateway.dir/src/main.cpp.o: /home/ai-lab/Desktop/Talky.ai-compl
   /usr/include/c++/13/ext/string_conversions.h \
   /usr/include/c++/13/ext/type_traits.h \
   /usr/include/c++/13/format \
+  /usr/include/c++/13/functional \
   /usr/include/c++/13/initializer_list \
   /usr/include/c++/13/iomanip \
   /usr/include/c++/13/ios \
@@ -447,6 +449,8 @@ CMakeFiles/voice_gateway.dir/src/main.cpp.o: /home/ai-lab/Desktop/Talky.ai-compl
 
 /usr/include/x86_64-linux-gnu/bits/struct_mutex.h:
 
+/usr/include/x86_64-linux-gnu/bits/stdlib.h:
+
 /usr/include/c++/13/concepts:
 
 /usr/include/c++/13/memory:
@@ -466,10 +470,6 @@ CMakeFiles/voice_gateway.dir/src/main.cpp.o: /home/ai-lab/Desktop/Talky.ai-compl
 /usr/include/c++/13/bits/uses_allocator_args.h:
 
 /usr/include/c++/13/bits/atomic_base.h:
-
-/usr/include/c++/13/bits/uses_allocator.h:
-
-/usr/include/c++/13/bits/postypes.h:
 
 /usr/include/x86_64-linux-gnu/bits/types/mbstate_t.h:
 
@@ -516,6 +516,14 @@ CMakeFiles/voice_gateway.dir/src/main.cpp.o: /home/ai-lab/Desktop/Talky.ai-compl
 /usr/include/c++/13/bits/stl_algo.h:
 
 /usr/include/c++/13/cstddef:
+
+/usr/include/c++/13/bits/uses_allocator.h:
+
+/usr/include/c++/13/bits/postypes.h:
+
+/usr/include/c++/13/cstdint:
+
+/usr/include/c++/13/cstdlib:
 
 /usr/include/c++/13/bits/sstream.tcc:
 
@@ -601,8 +609,6 @@ CMakeFiles/voice_gateway.dir/src/main.cpp.o: /home/ai-lab/Desktop/Talky.ai-compl
 
 /usr/include/x86_64-linux-gnu/asm/errno.h:
 
-/usr/include/x86_64-linux-gnu/bits/stdlib.h:
-
 /usr/include/c++/13/bits/basic_string.h:
 
 /usr/include/libintl.h:
@@ -653,6 +659,10 @@ CMakeFiles/voice_gateway.dir/src/main.cpp.o: /home/ai-lab/Desktop/Talky.ai-compl
 
 /usr/include/c++/13/bits/predefined_ops.h:
 
+/usr/include/x86_64-linux-gnu/bits/stdlib-float.h:
+
+/usr/include/c++/13/condition_variable:
+
 /usr/include/c++/13/bits/ranges_cmp.h:
 
 /home/ai-lab/Desktop/Talky.ai-complete-/services/voice-gateway-cpp/include/voice_gateway/rtp_packet.h:
@@ -667,10 +677,6 @@ CMakeFiles/voice_gateway.dir/src/main.cpp.o: /home/ai-lab/Desktop/Talky.ai-compl
 
 /usr/include/x86_64-linux-gnu/bits/ss_flags.h:
 
-/usr/include/c++/13/condition_variable:
-
-/usr/include/x86_64-linux-gnu/bits/stdlib-float.h:
-
 /usr/include/x86_64-linux-gnu/bits/floatn.h:
 
 /home/ai-lab/Desktop/Talky.ai-complete-/services/voice-gateway-cpp/src/main.cpp:
@@ -684,6 +690,8 @@ CMakeFiles/voice_gateway.dir/src/main.cpp.o: /home/ai-lab/Desktop/Talky.ai-compl
 /usr/include/x86_64-linux-gnu/c++/13/bits/ctype_inline.h:
 
 /usr/include/x86_64-linux-gnu/bits/signal_ext.h:
+
+/usr/include/c++/13/bits/std_function.h:
 
 /usr/include/c++/13/bits/char_traits.h:
 
@@ -785,10 +793,6 @@ CMakeFiles/voice_gateway.dir/src/main.cpp.o: /home/ai-lab/Desktop/Talky.ai-compl
 
 /usr/include/c++/13/bits/locale_facets_nonio.tcc:
 
-/usr/include/c++/13/cstdint:
-
-/usr/include/c++/13/cstdlib:
-
 /usr/include/c++/13/ctime:
 
 /usr/include/c++/13/deque:
@@ -838,6 +842,8 @@ CMakeFiles/voice_gateway.dir/src/main.cpp.o: /home/ai-lab/Desktop/Talky.ai-compl
 /usr/include/x86_64-linux-gnu/bits/types/struct_timespec.h:
 
 /usr/include/x86_64-linux-gnu/bits/stdint-uintn.h:
+
+/usr/include/c++/13/functional:
 
 /usr/include/c++/13/bits/std_thread.h:
 

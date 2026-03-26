@@ -158,14 +158,14 @@ EVENT_SEVERITY = {
     AuditEvent.EMERGENCY_ACCESS_APPROVED: Severity.CRITICAL,
     AuditEvent.EMERGENCY_ACCESS_USED: Severity.CRITICAL,
     AuditEvent.SUSPICIOUS_ACTIVITY: Severity.HIGH,
-    AuditEvent.PERMISSION_DENIED: Severity.WARNING,
-    AuditEvent.MFA_DISABLED: Severity.WARNING,
-    AuditEvent.USER_SUSPENDED: Severity.WARNING,
-    AuditEvent.USER_DELETED: Severity.WARNING,
-    AuditEvent.API_KEY_REVOKED: Severity.WARNING,
-    AuditEvent.BULK_DOWNLOAD: Severity.WARNING,
-    AuditEvent.SECRET_REVOKED: Severity.WARNING,
-    AuditEvent.RATE_LIMIT_EXCEEDED: Severity.WARNING,
+    AuditEvent.PERMISSION_DENIED: Severity.MEDIUM,
+    AuditEvent.MFA_DISABLED: Severity.MEDIUM,
+    AuditEvent.USER_SUSPENDED: Severity.MEDIUM,
+    AuditEvent.USER_DELETED: Severity.MEDIUM,
+    AuditEvent.API_KEY_REVOKED: Severity.MEDIUM,
+    AuditEvent.BULK_DOWNLOAD: Severity.MEDIUM,
+    AuditEvent.SECRET_REVOKED: Severity.MEDIUM,
+    AuditEvent.RATE_LIMIT_EXCEEDED: Severity.MEDIUM,
 }
 
 

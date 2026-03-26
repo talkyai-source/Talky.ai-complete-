@@ -39,17 +39,15 @@ from typing import Any, Optional
 
 from webauthn import (
     base64url_to_bytes,
-    bytes_to_base64url,
     generate_authentication_options,
     generate_registration_options,
     options_to_json,
     verify_authentication_response,
     verify_registration_response,
 )
-from webauthn.helpers import parse_client_data_json
+from webauthn.helpers import bytes_to_base64url, parse_client_data_json
 from webauthn.helpers.structs import (
     AttestationConveyancePreference,
-    AuthenticationExtensionsLargeBlobInputs,
     AuthenticatorAttachment,
     AuthenticatorSelectionCriteria,
     PublicKeyCredentialDescriptor,

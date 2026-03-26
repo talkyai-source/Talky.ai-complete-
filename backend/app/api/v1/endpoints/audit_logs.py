@@ -10,13 +10,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from app.api.v1.dependencies import get_current_user, require_permissions
+from app.api.v1.dependencies import get_current_user, require_permissions, get_audit_logger
 from app.domain.services.audit_logger import (
     AuditEvent,
     AuditLogger,
     EventCategory,
     Severity,
-    get_audit_logger,
 )
 
 router = APIRouter(prefix="/admin/audit", tags=["Audit Logs"])

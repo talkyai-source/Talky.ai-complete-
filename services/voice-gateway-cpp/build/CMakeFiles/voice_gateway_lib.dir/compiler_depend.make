@@ -94,6 +94,7 @@ CMakeFiles/voice_gateway_lib.dir/src/http_server.cpp.o: /home/ai-lab/Desktop/Tal
   /usr/include/c++/13/bits/shared_ptr_base.h \
   /usr/include/c++/13/bits/sstream.tcc \
   /usr/include/c++/13/bits/std_abs.h \
+  /usr/include/c++/13/bits/std_function.h \
   /usr/include/c++/13/bits/std_mutex.h \
   /usr/include/c++/13/bits/std_thread.h \
   /usr/include/c++/13/bits/stl_algo.h \
@@ -153,6 +154,7 @@ CMakeFiles/voice_gateway_lib.dir/src/http_server.cpp.o: /home/ai-lab/Desktop/Tal
   /usr/include/c++/13/ext/string_conversions.h \
   /usr/include/c++/13/ext/type_traits.h \
   /usr/include/c++/13/format \
+  /usr/include/c++/13/functional \
   /usr/include/c++/13/initializer_list \
   /usr/include/c++/13/iomanip \
   /usr/include/c++/13/ios \
@@ -648,6 +650,7 @@ CMakeFiles/voice_gateway_lib.dir/src/session.cpp.o: /home/ai-lab/Desktop/Talky.a
   /usr/include/c++/13/bits/specfun.h \
   /usr/include/c++/13/bits/sstream.tcc \
   /usr/include/c++/13/bits/std_abs.h \
+  /usr/include/c++/13/bits/std_function.h \
   /usr/include/c++/13/bits/std_mutex.h \
   /usr/include/c++/13/bits/std_thread.h \
   /usr/include/c++/13/bits/stl_algo.h \
@@ -708,6 +711,7 @@ CMakeFiles/voice_gateway_lib.dir/src/session.cpp.o: /home/ai-lab/Desktop/Talky.a
   /usr/include/c++/13/ext/string_conversions.h \
   /usr/include/c++/13/ext/type_traits.h \
   /usr/include/c++/13/format \
+  /usr/include/c++/13/functional \
   /usr/include/c++/13/initializer_list \
   /usr/include/c++/13/iomanip \
   /usr/include/c++/13/ios \
@@ -1010,6 +1014,7 @@ CMakeFiles/voice_gateway_lib.dir/src/session_registry.cpp.o: /home/ai-lab/Deskto
   /usr/include/c++/13/bits/shared_ptr_base.h \
   /usr/include/c++/13/bits/sstream.tcc \
   /usr/include/c++/13/bits/std_abs.h \
+  /usr/include/c++/13/bits/std_function.h \
   /usr/include/c++/13/bits/std_mutex.h \
   /usr/include/c++/13/bits/std_thread.h \
   /usr/include/c++/13/bits/stl_algo.h \
@@ -1068,6 +1073,7 @@ CMakeFiles/voice_gateway_lib.dir/src/session_registry.cpp.o: /home/ai-lab/Deskto
   /usr/include/c++/13/ext/string_conversions.h \
   /usr/include/c++/13/ext/type_traits.h \
   /usr/include/c++/13/format \
+  /usr/include/c++/13/functional \
   /usr/include/c++/13/initializer_list \
   /usr/include/c++/13/iomanip \
   /usr/include/c++/13/ios \
@@ -1421,10 +1427,6 @@ CMakeFiles/voice_gateway_lib.dir/src/session_registry.cpp.o: /home/ai-lab/Deskto
 
 /usr/include/c++/13/bits/atomic_base.h:
 
-/usr/include/c++/13/bits/uses_allocator.h:
-
-/usr/include/c++/13/bits/postypes.h:
-
 /usr/include/x86_64-linux-gnu/bits/types/mbstate_t.h:
 
 /usr/include/c++/13/bits/unique_ptr.h:
@@ -1463,11 +1465,17 @@ CMakeFiles/voice_gateway_lib.dir/src/session_registry.cpp.o: /home/ai-lab/Deskto
 
 /usr/include/c++/13/bits/stl_algobase.h:
 
-/usr/include/c++/13/chrono:
-
 /usr/include/c++/13/bits/stl_algo.h:
 
 /usr/include/c++/13/cstddef:
+
+/usr/include/c++/13/bits/uses_allocator.h:
+
+/usr/include/c++/13/bits/postypes.h:
+
+/usr/include/c++/13/cstdint:
+
+/usr/include/c++/13/cstdlib:
 
 /usr/include/c++/13/bits/sstream.tcc:
 
@@ -1691,6 +1699,8 @@ CMakeFiles/voice_gateway_lib.dir/src/session_registry.cpp.o: /home/ai-lab/Deskto
 
 /usr/include/x86_64-linux-gnu/c++/13/bits/ctype_inline.h:
 
+/usr/include/c++/13/bits/std_function.h:
+
 /usr/include/c++/13/bits/char_traits.h:
 
 /usr/include/c++/13/bits/hashtable_policy.h:
@@ -1771,6 +1781,8 @@ CMakeFiles/voice_gateway_lib.dir/src/session_registry.cpp.o: /home/ai-lab/Deskto
 
 /usr/include/c++/13/bits/locale_classes.tcc:
 
+/usr/include/c++/13/chrono:
+
 /usr/include/c++/13/system_error:
 
 /usr/include/c++/13/compare:
@@ -1780,10 +1792,6 @@ CMakeFiles/voice_gateway_lib.dir/src/session_registry.cpp.o: /home/ai-lab/Deskto
 /usr/include/c++/13/memory:
 
 /usr/include/x86_64-linux-gnu/bits/floatn.h:
-
-/usr/include/c++/13/cstdint:
-
-/usr/include/c++/13/cstdlib:
 
 /usr/include/c++/13/cstring:
 
@@ -1836,6 +1844,8 @@ CMakeFiles/voice_gateway_lib.dir/src/session_registry.cpp.o: /home/ai-lab/Deskto
 /usr/include/c++/13/format:
 
 /usr/include/unistd.h:
+
+/usr/include/c++/13/functional:
 
 /usr/include/c++/13/tr1/bessel_function.tcc:
 

@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Any, Optional
 from uuid import UUID, uuid4
 
-import aioredis
+import redis.asyncio as aioredis
 import asyncpg
 from pydantic import BaseModel
 

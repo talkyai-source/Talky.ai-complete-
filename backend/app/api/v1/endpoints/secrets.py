@@ -10,13 +10,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.api.v1.dependencies import get_current_user, require_permissions
-from app.domain.services.audit_logger import AuditEvent, AuditLogger, get_audit_logger
+from app.api.v1.dependencies import get_current_user, require_permissions, get_audit_logger, get_secrets_manager
+from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services.secrets_manager import (
     SecretMetadata,
     SecretsManager,
     SecretType,
-    get_secrets_manager,
 )
 
 router = APIRouter(prefix="/admin/secrets", tags=["Secrets"])
