@@ -1,6 +1,6 @@
-"use client";
+﻿"use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -12,7 +12,8 @@ import { useNotificationsActions, useNotificationsState } from "@/lib/notificati
 import type { NotificationPriority, NotificationRouting, NotificationType } from "@/lib/notifications";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { Download, Trash2 } from "lucide-react";
+import { registerPasskey, listPasskeys, deletePasskey, isWebAuthnSupported, type PasskeyCredential } from "@/lib/passkeys";
+import { Download, Trash2, ShieldCheck, Fingerprint, Monitor, Loader2, Plus, Copy, Check } from "lucide-react";
 import Link from "next/link";
 
 function clampNumber(n: number, min: number, max: number) {
@@ -35,6 +36,445 @@ const notificationTypes: NotificationType[] = ["success", "warning", "error", "i
 const priorities: NotificationPriority[] = ["low", "normal", "high"];
 const routings: NotificationRouting[] = ["inApp", "webhook", "both", "none"];
 
+// ---- MFA Setup Component ----
+function MfaSetupSection() {
+    const [mfaStatus, setMfaStatus] = useState<{ enabled: boolean; recovery_codes_remaining: number } | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [actionLoading, setActionLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [message, setMessage] = useState<string | null>(null);
+
+    // Setup flow state
+    const [setupStep, setSetupStep] = useState<"idle" | "qr" | "confirm" | "codes">("idle");
+    const [qrCode, setQrCode] = useState("");
+    const [totpCode, setTotpCode] = useState("");
+    const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
+    const [codesCopied, setCodesCopied] = useState(false);
+
+    // Disable flow
+    const [disablePassword, setDisablePassword] = useState("");
+
+    const loadMfaStatus = useCallback(async () => {
+        try {
+            const status = await api.getMfaStatus();
+            setMfaStatus(status);
+        } catch {
+            setMfaStatus({ enabled: false, recovery_codes_remaining: 0 });
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => { loadMfaStatus(); }, [loadMfaStatus]);
+
+    async function handleSetupMfa() {
+        setActionLoading(true);
+        setError(null);
+        try {
+            const result = await api.setupMfa();
+            setQrCode(result.qr_code);
+            setSetupStep("qr");
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Failed to start MFA setup.");
+        } finally {
+            setActionLoading(false);
+        }
+    }
+
+    async function handleConfirmMfa() {
+        setActionLoading(true);
+        setError(null);
+        try {
+            const result = await api.confirmMfa(totpCode);
+            setRecoveryCodes(result.recovery_codes);
+            setSetupStep("codes");
+            setMessage(result.message);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Invalid code. Try again.");
+        } finally {
+            setActionLoading(false);
+        }
+    }
+
+    async function handleDisableMfa() {
+        setActionLoading(true);
+        setError(null);
+        try {
+            await api.disableMfa(disablePassword);
+            setMfaStatus({ enabled: false, recovery_codes_remaining: 0 });
+            setDisablePassword("");
+            setMessage("MFA disabled successfully.");
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Failed to disable MFA.");
+        } finally {
+            setActionLoading(false);
+        }
+    }
+
+    function handleCopyCodes() {
+        navigator.clipboard.writeText(recoveryCodes.join("\n"));
+        setCodesCopied(true);
+        setTimeout(() => setCodesCopied(false), 2000);
+    }
+
+    function handleFinishSetup() {
+        setSetupStep("idle");
+        setTotpCode("");
+        setQrCode("");
+        setRecoveryCodes([]);
+        loadMfaStatus();
+    }
+
+    if (loading) {
+        return (
+            <div className="flex items-center gap-2 text-muted-foreground text-sm py-2">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading MFA status...
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-4">
+            <div>
+                <div className="text-sm font-semibold text-gray-900 dark:text-zinc-100 flex items-center gap-2">
+                    <ShieldCheck className="h-4 w-4" />
+                    Two-Factor Authentication
+                </div>
+                <div className="mt-1 text-sm text-muted-foreground">
+                    {mfaStatus?.enabled
+                        ? `MFA is active. ${mfaStatus.recovery_codes_remaining} recovery code(s) remaining.`
+                        : "Add an extra layer of security with an authenticator app."}
+                </div>
+            </div>
+
+            {error && <div className="text-xs text-red-500 bg-red-50 border border-red-200 rounded-md p-2">{error}</div>}
+            {message && <div className="text-xs text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/30 rounded-md p-2">{message}</div>}
+
+            {/* Idle â€” MFA not enabled */}
+            {setupStep === "idle" && !mfaStatus?.enabled && (
+                <Button
+                    type="button"
+                    onClick={handleSetupMfa}
+                    disabled={actionLoading}
+                    className="border-teal-600 bg-teal-600 text-white hover:bg-teal-700 hover:border-teal-700 hover:text-white"
+                >
+                    {actionLoading ? <><Loader2 className="h-4 w-4 animate-spin" /> Setting up...</> : "Enable Two-Factor Authentication"}
+                </Button>
+            )}
+
+            {/* QR code step */}
+            {setupStep === "qr" && (
+                <div className="space-y-3">
+                    <p className="text-sm text-muted-foreground">
+                        Scan this QR code with your authenticator app (Google Authenticator, Authy, etc.):
+                    </p>
+                    {qrCode && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={qrCode} alt="TOTP QR Code" className="mx-auto w-48 h-48 rounded-lg border" />
+                    )}
+                    <div className="space-y-2">
+                        <Label htmlFor="totp-confirm">Enter the 6-digit code from your app</Label>
+                        <Input
+                            id="totp-confirm"
+                            value={totpCode}
+                            onChange={(e) => setTotpCode(e.target.value)}
+                            placeholder="123456"
+                            maxLength={6}
+                            inputMode="numeric"
+                            pattern="[0-9]{6}"
+                            className="text-center tracking-widest text-lg max-w-[200px]"
+                        />
+                    </div>
+                    <div className="flex gap-2">
+                        <Button
+                            type="button"
+                            onClick={handleConfirmMfa}
+                            disabled={actionLoading || totpCode.trim().length !== 6}
+                            className="border-teal-600 bg-teal-600 text-white hover:bg-teal-700 hover:border-teal-700 hover:text-white"
+                        >
+                            {actionLoading ? <><Loader2 className="h-4 w-4 animate-spin" /> Verifying...</> : "Verify & Activate"}
+                        </Button>
+                        <Button type="button" variant="outline" onClick={() => { setSetupStep("idle"); setQrCode(""); setTotpCode(""); setError(null); }}>
+                            Cancel
+                        </Button>
+                    </div>
+                </div>
+            )}
+
+            {/* Recovery codes shown once */}
+            {setupStep === "codes" && (
+                <div className="space-y-3">
+                    <p className="text-sm font-semibold text-amber-600 dark:text-amber-400">
+                        âš  Save these recovery codes now â€” they will not be shown again!
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 rounded-lg border bg-gray-50 dark:bg-white/5 p-3 font-mono text-sm">
+                        {recoveryCodes.map((code, i) => (
+                            <div key={i} className="text-center py-1">{code}</div>
+                        ))}
+                    </div>
+                    <div className="flex gap-2">
+                        <Button type="button" variant="outline" onClick={handleCopyCodes}>
+                            {codesCopied ? <><Check className="h-4 w-4" /> Copied!</> : <><Copy className="h-4 w-4" /> Copy codes</>}
+                        </Button>
+                        <Button
+                            type="button"
+                            onClick={handleFinishSetup}
+                            className="border-teal-600 bg-teal-600 text-white hover:bg-teal-700 hover:border-teal-700 hover:text-white"
+                        >
+                            I&apos;ve saved my codes
+                        </Button>
+                    </div>
+                </div>
+            )}
+
+            {/* MFA enabled â€” disable option */}
+            {setupStep === "idle" && mfaStatus?.enabled && (
+                <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-3 rounded-xl border border-emerald-200 dark:border-emerald-800/30 bg-emerald-50 dark:bg-emerald-900/20 px-4 py-3">
+                        <div className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">MFA Active</div>
+                        <ShieldCheck className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                    </div>
+                    <div className="space-y-2">
+                        <Label htmlFor="disable-mfa-password">Enter your password to disable MFA</Label>
+                        <Input
+                            id="disable-mfa-password"
+                            type="password"
+                            value={disablePassword}
+                            onChange={(e) => setDisablePassword(e.target.value)}
+                            placeholder="Current password"
+                        />
+                    </div>
+                    <Button
+                        type="button"
+                        variant="destructive"
+                        onClick={handleDisableMfa}
+                        disabled={actionLoading || !disablePassword.trim()}
+                    >
+                        {actionLoading ? <><Loader2 className="h-4 w-4 animate-spin" /> Disabling...</> : "Disable MFA"}
+                    </Button>
+                </div>
+            )}
+        </div>
+    );
+}
+
+// ---- Passkeys Management Component ----
+function PasskeysSection() {
+    const [passkeys, setPasskeys] = useState<PasskeyCredential[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [actionLoading, setActionLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [message, setMessage] = useState<string | null>(null);
+    const [webauthnSupported, setWebauthnSupported] = useState(false);
+
+    useEffect(() => { setWebauthnSupported(isWebAuthnSupported()); }, []);
+
+    const loadPasskeys = useCallback(async () => {
+        try {
+            const list = await listPasskeys();
+            setPasskeys(list);
+        } catch {
+            setPasskeys([]);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => { loadPasskeys(); }, [loadPasskeys]);
+
+    async function handleRegister() {
+        setActionLoading(true);
+        setError(null);
+        try {
+            await registerPasskey("any", `Passkey ${new Date().toLocaleDateString()}`);
+            setMessage("Passkey registered successfully.");
+            await loadPasskeys();
+        } catch (err) {
+            if (err instanceof Error && (err.message.includes("cancelled") || err.message.includes("abort"))) {
+                setActionLoading(false);
+                return;
+            }
+            setError(err instanceof Error ? err.message : "Failed to register passkey.");
+        } finally {
+            setActionLoading(false);
+        }
+    }
+
+    async function handleDelete(id: string) {
+        setActionLoading(true);
+        setError(null);
+        try {
+            await deletePasskey(id);
+            setMessage("Passkey removed.");
+            await loadPasskeys();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Failed to remove passkey.");
+        } finally {
+            setActionLoading(false);
+        }
+    }
+
+    return (
+        <div className="space-y-4">
+            <div>
+                <div className="text-sm font-semibold text-gray-900 dark:text-zinc-100 flex items-center gap-2">
+                    <Fingerprint className="h-4 w-4" />
+                    Passkeys
+                </div>
+                <div className="mt-1 text-sm text-muted-foreground">
+                    Sign in with biometrics or a security key â€” no password needed.
+                </div>
+            </div>
+
+            {error && <div className="text-xs text-red-500 bg-red-50 border border-red-200 rounded-md p-2">{error}</div>}
+            {message && <div className="text-xs text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/30 rounded-md p-2">{message}</div>}
+
+            {loading ? (
+                <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Loading passkeys...
+                </div>
+            ) : (
+                <>
+                    {passkeys.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No passkeys registered yet.</p>
+                    ) : (
+                        <div className="space-y-2">
+                            {passkeys.map((pk) => (
+                                <div key={pk.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm dark:border-white/10 dark:bg-white/5">
+                                    <div className="min-w-0">
+                                        <div className="text-sm font-medium truncate">{pk.display_name}</div>
+                                        <div className="text-xs text-muted-foreground">
+                                            {pk.device_type === "multiDevice" ? "Synced" : "Single device"} Â· Created {new Date(pk.created_at).toLocaleDateString()}
+                                        </div>
+                                    </div>
+                                    <Button
+                                        type="button"
+                                        variant="destructive"
+                                        size="sm"
+                                        onClick={() => handleDelete(pk.id)}
+                                        disabled={actionLoading}
+                                    >
+                                        <Trash2 className="h-3 w-3" />
+                                    </Button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {webauthnSupported && (
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={handleRegister}
+                            disabled={actionLoading}
+                        >
+                            {actionLoading ? <><Loader2 className="h-4 w-4 animate-spin" /> Adding...</> : <><Plus className="h-4 w-4" /> Add passkey</>}
+                        </Button>
+                    )}
+
+                    {!webauthnSupported && (
+                        <p className="text-xs text-muted-foreground">Passkeys are not supported in this browser.</p>
+                    )}
+                </>
+            )}
+        </div>
+    );
+}
+
+// ---- Active Sessions Component ----
+function ActiveSessionsSection() {
+    const [sessions, setSessions] = useState<Array<{
+        id: string; ip_address: string; user_agent: string | null;
+        created_at: string; last_active_at: string; is_current: boolean;
+    }>>([]);
+    const [loading, setLoading] = useState(true);
+    const [actionLoading, setActionLoading] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
+
+    const loadSessions = useCallback(async () => {
+        try {
+            const result = await api.getActiveSessions();
+            setSessions(result.sessions ?? []);
+        } catch {
+            setSessions([]);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => { loadSessions(); }, [loadSessions]);
+
+    async function handleRevoke(sessionId: string) {
+        setActionLoading(sessionId);
+        setError(null);
+        try {
+            await api.revokeSession(sessionId);
+            await loadSessions();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Failed to revoke session.");
+        } finally {
+            setActionLoading(null);
+        }
+    }
+
+    return (
+        <div className="space-y-4">
+            <div>
+                <div className="text-sm font-semibold text-gray-900 dark:text-zinc-100 flex items-center gap-2">
+                    <Monitor className="h-4 w-4" />
+                    Active Sessions
+                </div>
+                <div className="mt-1 text-sm text-muted-foreground">
+                    Manage your active login sessions across devices.
+                </div>
+            </div>
+
+            {error && <div className="text-xs text-red-500 bg-red-50 border border-red-200 rounded-md p-2">{error}</div>}
+
+            {loading ? (
+                <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Loading sessions...
+                </div>
+            ) : sessions.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No active sessions found.</p>
+            ) : (
+                <div className="space-y-2">
+                    {sessions.map((session) => (
+                        <div key={session.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm dark:border-white/10 dark:bg-white/5">
+                            <div className="min-w-0 flex-1">
+                                <div className="text-sm font-medium flex items-center gap-2">
+                                    {session.ip_address}
+                                    {session.is_current && (
+                                        <span className="inline-flex items-center rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-semibold text-teal-700 dark:bg-teal-900/40 dark:text-teal-400">
+                                            Current
+                                        </span>
+                                    )}
+                                </div>
+                                <div className="text-xs text-muted-foreground truncate">
+                                    {session.user_agent ? session.user_agent.split(" ").slice(0, 4).join(" ") : "Unknown device"}
+                                    {" Â· "}Last active {new Date(session.last_active_at).toLocaleString()}
+                                </div>
+                            </div>
+                            {!session.is_current && (
+                                <Button
+                                    type="button"
+                                    variant="destructive"
+                                    size="sm"
+                                    onClick={() => handleRevoke(session.id)}
+                                    disabled={actionLoading === session.id}
+                                >
+                                    {actionLoading === session.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Revoke"}
+                                </Button>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+// ---- Main Settings Page ----
 export default function SettingsPage() {
     const { settings } = useNotificationsState();
     const { setSettings, setCategory, setPrivacy, exportHistoryJson, clearAll } = useNotificationsActions();
@@ -404,28 +844,6 @@ export default function SettingsPage() {
                             </div>
 
                             <div className="rounded-2xl border border-gray-200 bg-white p-4 space-y-4 shadow-sm transition-[transform,background-color,box-shadow,border-color] duration-150 ease-out hover:-translate-y-0.5 hover:bg-gray-50 hover:shadow-md dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10 dark:hover:shadow-[0_10px_30px_rgba(0,0,0,0.22)]">
-                                <div>
-                                    <div className="text-sm font-semibold text-gray-900 dark:text-zinc-100">Authentication</div>
-                                    <div className="mt-1 text-sm text-muted-foreground">Security options.</div>
-                                </div>
-                                <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm transition-[transform,background-color,box-shadow,border-color] duration-150 ease-out hover:-translate-y-0.5 hover:bg-gray-50 hover:shadow-md dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10 dark:hover:shadow-[0_10px_30px_rgba(0,0,0,0.22)]">
-                                    <div className="text-sm font-semibold text-gray-900 dark:text-zinc-100">Two-factor authentication</div>
-                                    <Switch
-                                        checked={settings.account.auth.twoFactorEnabled}
-                                        onCheckedChange={(v) =>
-                                            setSettings({
-                                                account: {
-                                                    ...settings.account,
-                                                    auth: { ...settings.account.auth, twoFactorEnabled: v },
-                                                },
-                                            })
-                                        }
-                                        ariaLabel="Enable two-factor authentication"
-                                        disabled
-                                    />
-                                </div>
-                                <p className="text-xs text-muted-foreground">Two-factor authentication setup is coming soon.</p>
-
                                 <div className="space-y-2">
                                     <Label htmlFor="oldPassword">Current password</Label>
                                     <Input
@@ -511,7 +929,29 @@ export default function SettingsPage() {
                         </div>
                     </CardContent>
                 </Card>
+
+                {/* Security Section â€” MFA, Passkeys, Sessions */}
+                <Card className="dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10 dark:hover:shadow-[0_10px_30px_rgba(0,0,0,0.22)]">
+                    <CardHeader>
+                        <CardTitle className="dark:text-white">Security</CardTitle>
+                        <CardDescription>Two-factor authentication, passkeys, and active sessions.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/5">
+                            <MfaSetupSection />
+                        </div>
+
+                        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/5">
+                            <PasskeysSection />
+                        </div>
+
+                        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/5">
+                            <ActiveSessionsSection />
+                        </div>
+                    </CardContent>
+                </Card>
             </div>
         </DashboardLayout>
     );
 }
+

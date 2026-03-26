@@ -17,6 +17,8 @@ export const LoginResponseSchema = z
         business_name: z.string().optional().nullable(),
         minutes_remaining: z.number().optional(),
         message: z.string().optional(),
+        mfa_required: z.boolean().optional(),
+        mfa_challenge_token: z.string().optional().nullable(),
     })
     .passthrough()
     .transform((v) => ({
@@ -28,6 +30,8 @@ export const LoginResponseSchema = z
         business_name: v.business_name ?? undefined,
         minutes_remaining: v.minutes_remaining ?? 0,
         message: v.message ?? "",
+        mfa_required: v.mfa_required ?? false,
+        mfa_challenge_token: v.mfa_challenge_token ?? undefined,
     }));
 
 export type LoginResponse = z.infer<typeof LoginResponseSchema>;
@@ -196,6 +200,146 @@ class ApiClient {
     async health(): Promise<{ status: string }> {
         const path = "/health";
         return this.client().request({ path, method: "GET", timeoutMs: 2500 });
+    }
+
+    /* ---------- MFA (Multi-Factor Authentication) ---------- */
+
+    async getMfaStatus(): Promise<{
+        enabled: boolean;
+        verified_at: string | null;
+        recovery_codes_remaining: number;
+    }> {
+        const path = "/auth/mfa/status";
+        const method = "GET" as const;
+        const data = await this.client().request({ path, method, timeoutMs: 10_000 });
+        return z.object({
+            enabled: z.boolean(),
+            verified_at: z.string().nullable(),
+            recovery_codes_remaining: z.number(),
+        }).parse(data);
+    }
+
+    async setupMfa(): Promise<{
+        provisioning_uri: string;
+        qr_code: string;
+        issuer: string;
+        account: string;
+    }> {
+        const path = "/auth/mfa/setup";
+        const method = "POST" as const;
+        const data = await this.client().request({ path, method, timeoutMs: 10_000 });
+        return z.object({
+            provisioning_uri: z.string(),
+            qr_code: z.string(),
+            issuer: z.string(),
+            account: z.string(),
+        }).parse(data);
+    }
+
+    async confirmMfa(code: string): Promise<{
+        enabled: boolean;
+        recovery_codes: string[];
+        recovery_codes_count: number;
+        message: string;
+    }> {
+        const path = "/auth/mfa/confirm";
+        const method = "POST" as const;
+        const data = await this.client().request({
+            path,
+            method,
+            body: { code },
+            timeoutMs: 10_000,
+        });
+        return z.object({
+            enabled: z.boolean(),
+            recovery_codes: z.array(z.string()),
+            recovery_codes_count: z.number(),
+            message: z.string(),
+        }).parse(data);
+    }
+
+    async verifyMfaChallenge(
+        challengeToken: string,
+        code?: string,
+        recoveryCode?: string
+    ): Promise<LoginResponse> {
+        const path = "/auth/mfa/verify";
+        const method = "POST" as const;
+        const data = await this.client().request({
+            path,
+            method,
+            body: {
+                challenge_token: challengeToken,
+                ...(code ? { code } : {}),
+                ...(recoveryCode ? { recovery_code: recoveryCode } : {}),
+            },
+            timeoutMs: 10_000,
+        });
+        return this.parseOrThrow(LoginResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
+    }
+
+    async disableMfa(password: string): Promise<{ detail: string }> {
+        const path = "/auth/mfa/disable";
+        const method = "POST" as const;
+        return this.client().request({
+            path,
+            method,
+            body: { password },
+            timeoutMs: 10_000,
+        });
+    }
+
+    async regenerateRecoveryCodes(code: string): Promise<{
+        recovery_codes: string[];
+        recovery_codes_count: number;
+        message: string;
+    }> {
+        const path = "/auth/mfa/recovery-codes/regenerate";
+        const method = "POST" as const;
+        const data = await this.client().request({
+            path,
+            method,
+            body: { code },
+            timeoutMs: 10_000,
+        });
+        return z.object({
+            recovery_codes: z.array(z.string()),
+            recovery_codes_count: z.number(),
+            message: z.string(),
+        }).parse(data);
+    }
+
+    /* ---------- Sessions ---------- */
+
+    async getActiveSessions(): Promise<{ sessions: Array<{
+        id: string;
+        ip_address: string;
+        user_agent: string | null;
+        created_at: string;
+        last_active_at: string;
+        is_current: boolean;
+        device_info: Record<string, unknown> | null;
+    }>; total: number }> {
+        const path = "/sessions/active";
+        const method = "GET" as const;
+        return this.client().request({ path, method, timeoutMs: 10_000 });
+    }
+
+    async revokeSession(sessionId: string): Promise<{ detail: string }> {
+        const path = `/sessions/${sessionId}`;
+        const method = "DELETE" as const;
+        return this.client().request({ path, method, timeoutMs: 10_000 });
+    }
+
+    async getSessionSecurityStatus(): Promise<{
+        session_valid: boolean;
+        mfa_verified: boolean;
+        ip_match: boolean;
+        fingerprint_match: boolean;
+    }> {
+        const path = "/sessions/security-status";
+        const method = "GET" as const;
+        return this.client().request({ path, method, timeoutMs: 10_000 });
     }
 
     /* ---------- Passkeys (WebAuthn) ---------- */
