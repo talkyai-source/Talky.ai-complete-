@@ -266,7 +266,7 @@ class LLMGuardrails:
             r'^(Actually,?\s+)',
             r'^(Okay,?\s+)',
             r'^(Alright,?\s+)',
-            r'^(Sure!?\s+)',
+            r'^Sure[!,]\s+',
             r'^(Of course!?\s+)',
         ]
         
