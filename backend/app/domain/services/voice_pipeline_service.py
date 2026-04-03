@@ -63,6 +63,7 @@ class VoicePipelineService:
         *,
         stt_sample_rate: int = 16000,
         tts_sample_rate: int = 24000,
+        mute_during_tts: bool = True,
     ):
         self.stt_provider = stt_provider
         self.llm_provider = llm_provider
@@ -70,6 +71,7 @@ class VoicePipelineService:
         self.media_gateway = media_gateway
         self.stt_sample_rate = stt_sample_rate
         self.tts_sample_rate = tts_sample_rate
+        self.mute_during_tts = mute_during_tts
         
         # Day 5: Conversation management components
         self.prompt_manager = PromptManager()
@@ -84,12 +86,65 @@ class VoicePipelineService:
         
         self._active_pipelines: dict[str, bool] = {}
         
-        # Barge-in: Track interruption events per call
-        # When set, TTS should stop immediately
+        # Shared per-call interruption events. Greeting playback and normal TTS
+        # must watch the same event so a StartOfTurn always stops active speech.
         self._barge_in_events: dict[str, asyncio.Event] = {}
+        self._active_turn_tasks: dict[str, asyncio.Task] = {}
         
         # EagerEndOfTurn: Track speculative LLM tasks for cancellation on TurnResumed
         self._pending_llm_tasks: dict[str, asyncio.Task] = {}
+
+    def get_or_create_barge_in_event(self, session: CallSession) -> asyncio.Event:
+        """Return the shared interruption event for this call."""
+        event = getattr(session, "barge_in_event", None)
+        if event is None:
+            event = self._barge_in_events.get(session.call_id)
+        if event is None:
+            event = asyncio.Event()
+        session.barge_in_event = event
+        self._barge_in_events[session.call_id] = event
+        return event
+
+    def clear_barge_in_event(self, session: CallSession) -> None:
+        """Clear the shared interruption event after a new user turn is committed."""
+        self.get_or_create_barge_in_event(session).clear()
+
+    def get_active_turn_task(self, call_id: str) -> Optional[asyncio.Task]:
+        """Return the currently running turn task for this call, if any."""
+        task = self._active_turn_tasks.get(call_id)
+        if task is not None and task.done():
+            self._active_turn_tasks.pop(call_id, None)
+            return None
+        return task
+
+    def _register_active_turn_task(self, call_id: str, task: asyncio.Task) -> None:
+        """Track the active turn task and clean up bookkeeping when it finishes."""
+        self._active_turn_tasks[call_id] = task
+
+        def _cleanup(done_task: asyncio.Task) -> None:
+            current_task = self._active_turn_tasks.get(call_id)
+            if current_task is done_task:
+                self._active_turn_tasks.pop(call_id, None)
+
+        task.add_done_callback(_cleanup)
+
+    async def _wait_for_active_turn_task(
+        self,
+        call_id: str,
+        *,
+        timeout_seconds: float = 0.5,
+    ) -> None:
+        """Wait briefly for an active turn task to finish cancelling."""
+        task = self.get_active_turn_task(call_id)
+        if task is None:
+            return
+
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=timeout_seconds)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return
 
     def _response_max_sentences_for_turn(
         self,
@@ -171,8 +226,18 @@ class VoicePipelineService:
             session.state = CallState.ERROR
         
         finally:
+            active_turn_task = self.get_active_turn_task(call_id)
+            if active_turn_task is not None:
+                active_turn_task.cancel()
+                try:
+                    await active_turn_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    logger.debug("Ignoring active turn task error during pipeline shutdown", exc_info=True)
             self._active_pipelines.pop(call_id, None)
             self._barge_in_events.pop(call_id, None)
+            self._active_turn_tasks.pop(call_id, None)
             self._pending_llm_tasks.pop(call_id, None)
             session.stt_active = False
             self.latency_tracker.cleanup_call(call_id)
@@ -430,13 +495,20 @@ class VoicePipelineService:
             }
         )
         
-        # Signal TTS to stop if it's currently playing
-        if call_id in self._barge_in_events:
-            self._barge_in_events[call_id].set()
-            logger.info(f"Barge-in event set for call {call_id}")
-        
+        # Signal greeting/reply playback to stop immediately.
+        self.get_or_create_barge_in_event(session).set()
+        logger.info(f"Barge-in event set for call {call_id}")
+
+        active_turn_task = self.get_active_turn_task(call_id)
+        if active_turn_task is not None:
+            active_turn_task.cancel()
+
+        if hasattr(self.media_gateway, "clear_output_buffer"):
+            await self.media_gateway.clear_output_buffer(call_id)
+
         # Cancel current AI response (it was interrupted)
         session.current_ai_response = ""
+        session.llm_active = False
         session.tts_active = False
         
         # Update session state to listening
@@ -477,6 +549,23 @@ class VoicePipelineService:
             )
             return
         
+        active_turn_task = self.get_active_turn_task(call_id)
+        if active_turn_task is not None:
+            logger.info(
+                "waiting_for_previous_turn_shutdown",
+                extra={"call_id": call_id, "turn_id": session.turn_id},
+            )
+            await self._wait_for_active_turn_task(call_id)
+
+        active_turn_task = self.get_active_turn_task(call_id)
+        if active_turn_task is not None:
+            logger.warning(
+                "forcing_previous_turn_cancellation",
+                extra={"call_id": call_id, "turn_id": session.turn_id},
+            )
+            active_turn_task.cancel()
+            await self._wait_for_active_turn_task(call_id, timeout_seconds=0.2)
+
         logger.info(
             "turn_end",
             extra={
@@ -486,96 +575,129 @@ class VoicePipelineService:
                 "timestamp": datetime.utcnow().isoformat()
             }
         )
-        
-        # Update session state
+
+        # The previous assistant turn has now been superseded by this user turn.
+        # Clear the shared interrupt so the next reply for this transcript can speak.
+        self.clear_barge_in_event(session)
+        processing_turn_id = session.turn_id
+        session.current_user_input = ""
+        session.turn_id += 1
+        session.update_activity()
+
+        turn_task = asyncio.create_task(
+            self._run_turn(session, full_transcript, websocket, processing_turn_id)
+        )
+        self._register_active_turn_task(call_id, turn_task)
+
+    async def _run_turn(
+        self,
+        session: CallSession,
+        full_transcript: str,
+        websocket: Optional[WebSocket],
+        turn_id: int,
+    ) -> None:
+        """Process one committed user turn in a cancellable background task."""
+        call_id = session.call_id
+
         session.state = CallState.PROCESSING
         session.llm_active = True
         self.latency_tracker.mark_speech_end(call_id)
         self.latency_tracker.mark_llm_start(call_id)
-        
-        # Add user message to conversation
+
         user_message = Message(
             role=MessageRole.USER,
-            content=full_transcript
+            content=full_transcript,
         )
         session.conversation_history.append(user_message)
-        
+        _user_msg_appended = True
+
         try:
-            # Get LLM response
             llm_start = datetime.utcnow()
-            
+
             response_text = await self.get_llm_response(
                 session,
-                full_transcript
+                full_transcript,
+                turn_id=turn_id,
             )
             self.latency_tracker.mark_llm_end(call_id)
-            
+
             llm_latency = (datetime.utcnow() - llm_start).total_seconds() * 1000
             session.add_latency_measurement("llm", llm_latency)
-            
+
             logger.info(
                 "llm_response",
                 extra={
                     "call_id": call_id,
-                    "turn_id": session.turn_id,
+                    "turn_id": turn_id,
                     "response": response_text,
-                    "latency_ms": llm_latency
-                }
+                    "latency_ms": llm_latency,
+                },
             )
-            
-            # Add assistant message to conversation (only if non-empty)
-            # Empty responses can confuse the LLM on subsequent turns
-            if response_text and response_text.strip():
-                assistant_message = Message(
-                    role=MessageRole.ASSISTANT,
-                    content=response_text
-                )
-                session.conversation_history.append(assistant_message)
-            else:
-                logger.warning(
-                    f"Skipping empty assistant message for call {call_id} - "
-                    "this prevents conversation history corruption"
-                )
-            
-            # Send LLM response to WebSocket for browser display
+
             if websocket:
                 try:
-                    await websocket.send_json({
-                        "type": "llm_response",
-                        "text": response_text,
-                        "latency_ms": llm_latency
-                    })
+                    await websocket.send_json(
+                        {
+                            "type": "llm_response",
+                            "text": response_text,
+                            "latency_ms": llm_latency,
+                        }
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to send llm_response to websocket: {e}")
-            
-            # Day 10: Accumulate assistant turn for transcript
-            self.transcript_service.accumulate_turn(
-                call_id=call_id,
-                role="assistant",
-                content=response_text,
-                talklee_call_id=session.talklee_call_id,
-                turn_index=session.turn_id,
-                event_type="assistant_response",
-                is_final=True,
-                include_in_plaintext=True,
-            )
-            
-            # Synthesize TTS audio
+
             session.tts_active = True
             self.latency_tracker.mark_tts_start(call_id)
-            
+
             tts_start = datetime.utcnow()
-            
-            await self.synthesize_and_send_audio(
+            was_interrupted = await self.synthesize_and_send_audio(
                 session,
                 response_text,
                 websocket,
+                turn_id=turn_id,
             )
-            
+
             tts_latency = (datetime.utcnow() - tts_start).total_seconds() * 1000
             session.add_latency_measurement("tts", tts_latency)
-            
-            # Calculate total turn latency
+
+            if response_text and response_text.strip():
+                # Commit assistant message whether or not there was a barge-in.
+                # If barge-in occurred, this is a partial response — still commit
+                # it to maintain user→assistant alternation in history.
+                assistant_message = Message(
+                    role=MessageRole.ASSISTANT,
+                    content=response_text,
+                )
+                session.conversation_history.append(assistant_message)
+
+                self.transcript_service.accumulate_turn(
+                    call_id=call_id,
+                    role="assistant",
+                    content=response_text,
+                    talklee_call_id=session.talklee_call_id,
+                    turn_index=turn_id,
+                    event_type="assistant_response",
+                    is_final=True,
+                    include_in_plaintext=True,
+                )
+                if was_interrupted:
+                    logger.info(
+                        "assistant_reply_committed_despite_barge_in",
+                        extra={"call_id": call_id, "turn_id": turn_id},
+                    )
+            elif _user_msg_appended:
+                # LLM produced nothing. Roll back the user message to prevent
+                # consecutive user messages in history.
+                if (
+                    session.conversation_history
+                    and session.conversation_history[-1] is user_message
+                ):
+                    session.conversation_history.pop()
+                    logger.info(
+                        "user_message_rolled_back_empty_turn",
+                        extra={"call_id": call_id, "turn_id": turn_id},
+                    )
+
             total_latency = llm_latency + tts_latency
             session.add_latency_measurement("total_turn", total_latency)
 
@@ -598,31 +720,32 @@ class VoicePipelineService:
                         "response_start", tracked.response_start_latency_ms
                     )
                 self.latency_tracker.log_metrics(call_id)
-            
-            logger.info(
-                "turn_complete",
-                extra={
-                    "call_id": call_id,
-                    "turn_id": session.turn_id,
-                    "llm_latency_ms": llm_latency,
-                    "tts_latency_ms": tts_latency,
-                    "total_latency_ms": total_latency
-                }
-            )
-            
-            # Send turn_complete to WebSocket for browser display
-            if websocket:
-                try:
-                    await websocket.send_json({
-                        "type": "turn_complete",
+
+            if not was_interrupted:
+                logger.info(
+                    "turn_complete",
+                    extra={
+                        "call_id": call_id,
+                        "turn_id": turn_id,
                         "llm_latency_ms": llm_latency,
                         "tts_latency_ms": tts_latency,
-                        "total_latency_ms": total_latency
-                    })
-                except Exception as e:
-                    logger.warning(f"Failed to send turn_complete to websocket: {e}")
-            
-            # Day 17: Flush transcript to database incrementally
+                        "total_latency_ms": total_latency,
+                    },
+                )
+
+                if websocket:
+                    try:
+                        await websocket.send_json(
+                            {
+                                "type": "turn_complete",
+                                "llm_latency_ms": llm_latency,
+                                "tts_latency_ms": tts_latency,
+                                "total_latency_ms": total_latency,
+                            }
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to send turn_complete to websocket: {e}")
+
             try:
                 container = get_container()
                 if container.is_initialized:
@@ -630,34 +753,64 @@ class VoicePipelineService:
                     await self.transcript_service.flush_to_database(
                         call_id=call_id,
                         db_client=postgres_client,
-                        tenant_id=getattr(session, 'tenant_id', None),
+                        tenant_id=getattr(session, "tenant_id", None),
                         talklee_call_id=session.talklee_call_id,
                     )
                 else:
                     logger.debug("Skipping transcript flush: container not initialized")
             except Exception as e:
                 logger.warning(f"Failed to flush transcript for {call_id}: {e}")
-        
+
+        except asyncio.CancelledError:
+            if (
+                _user_msg_appended
+                and session.conversation_history
+                and session.conversation_history[-1] is user_message
+            ):
+                session.conversation_history.pop()
+                logger.info(
+                    "user_message_rolled_back_on_cancel",
+                    extra={"call_id": call_id, "turn_id": turn_id},
+                )
+            logger.info(
+                "turn_processing_cancelled",
+                extra={"call_id": call_id, "turn_id": turn_id},
+            )
+            raise
+
         except Exception as e:
+            if (
+                _user_msg_appended
+                and session.conversation_history
+                and session.conversation_history[-1] is user_message
+            ):
+                session.conversation_history.pop()
+                logger.info(
+                    "user_message_rolled_back_on_error",
+                    extra={"call_id": call_id, "turn_id": turn_id, "error": str(e)},
+                )
             logger.error(
                 f"Error processing turn: {e}",
                 extra={"call_id": call_id, "error": str(e)},
-                exc_info=True
+                exc_info=True,
             )
-        
+
         finally:
-            # Reset for next turn
-            session.increment_turn()
-            self.latency_tracker.start_turn(call_id, session.turn_id)
-            self.latency_tracker.mark_listening_start(call_id)
             session.state = CallState.LISTENING
             session.llm_active = False
             session.tts_active = False
+            session.current_ai_response = ""
+
+            current_metrics = self.latency_tracker.get_metrics(call_id)
+            if not current_metrics or current_metrics.turn_id != session.turn_id:
+                self.latency_tracker.start_turn(call_id, session.turn_id)
+                self.latency_tracker.mark_listening_start(call_id)
     
     async def get_llm_response(
         self,
         session: CallSession,
-        user_input: str
+        user_input: str,
+        turn_id: Optional[int] = None,
     ) -> str:
         """
         Get LLM response for user input using conversation state machine.
@@ -676,6 +829,7 @@ class VoicePipelineService:
             LLM response text
         """
         call_id = session.call_id
+        effective_turn_id = session.turn_id if turn_id is None else turn_id
         
         # ---------------------------------------------------------------
         # Determine prompt mode:
@@ -696,7 +850,7 @@ class VoicePipelineService:
                 "using_custom_system_prompt",
                 extra={
                     "call_id": call_id,
-                    "turn_id": session.turn_id,
+                    "turn_id": effective_turn_id,
                     "prompt_length": len(system_prompt),
                 }
             )
@@ -725,7 +879,7 @@ class VoicePipelineService:
                 "conversation_state_transition",
                 extra={
                     "call_id": call_id,
-                    "turn_id": session.turn_id,
+                    "turn_id": effective_turn_id,
                     "intent": detected_intent.value,
                     "new_state": new_state.value,
                     "objection_count": session.conversation_context.objection_count
@@ -861,7 +1015,7 @@ class VoicePipelineService:
                 "llm_timeout_fallback",
                 extra={
                     "call_id": call_id,
-                    "turn_id": session.turn_id,
+                    "turn_id": effective_turn_id,
                     "state": session.conversation_state.value
                 }
             )
@@ -902,7 +1056,7 @@ class VoicePipelineService:
             conversation_engine = ConversationEngine(session.agent_config)
             should_end, end_reason = conversation_engine.should_end_conversation(
                 state=session.conversation_state,
-                turn_count=session.turn_id,
+                turn_count=effective_turn_id,
                 context=session.conversation_context
             )
             
@@ -910,7 +1064,7 @@ class VoicePipelineService:
                 outcome = conversation_engine.determine_outcome(
                     final_state=session.conversation_state,
                     context=session.conversation_context,
-                    turn_count=session.turn_id
+                    turn_count=effective_turn_id
                 )
                 
                 logger.info(
@@ -984,7 +1138,8 @@ class VoicePipelineService:
         session: CallSession,
         text: str,
         websocket: Optional[WebSocket] = None,
-    ) -> None:
+        turn_id: Optional[int] = None,
+    ) -> bool:
         """
         Synthesize text to speech and send to output queue.
         
@@ -996,6 +1151,7 @@ class VoicePipelineService:
             text: Text to synthesize
         """
         call_id = session.call_id
+        effective_turn_id = session.turn_id if turn_id is None else turn_id
         
         # Clean text for TTS (remove markdown, emojis, etc.)
         cleaned_text = self._clean_text_for_tts(text)
@@ -1004,17 +1160,14 @@ class VoicePipelineService:
             "tts_start",
             extra={
                 "call_id": call_id,
-                "turn_id": session.turn_id,
+                "turn_id": effective_turn_id,
                 "original_text": text,
                 "cleaned_text": cleaned_text
             }
         )
         
-        # Create barge-in event for this call to track interruptions
-        barge_in_event = asyncio.Event()
-        self._barge_in_events[call_id] = barge_in_event
-        
-        was_interrupted = False
+        barge_in_event = self.get_or_create_barge_in_event(session)
+        was_interrupted = barge_in_event.is_set()
         
         # Use session voice_id if available, otherwise fall back to global config
         global_config = get_global_config()
@@ -1029,52 +1182,65 @@ class VoicePipelineService:
             f"TTS synthesizing voice_id={voice_id} sample_rate={sample_rate} "
             f"for call {call_id}"
         )
-        
-        try:
-            # Mute STT microphone during TTS to prevent echo detection
-            # This prevents the agent's voice from triggering StartOfTurn
-            if hasattr(self.stt_provider, 'mute'):
-                await self.stt_provider.mute(call_id)
-                logger.debug(f"Muted STT for call {call_id} during TTS")
 
-            if hasattr(self.media_gateway, "start_playback_tracking"):
-                self.media_gateway.start_playback_tracking(call_id)
-            
-            # Stream TTS synthesis with barge-in awareness
-            # Use cleaned text (no markdown, emojis, etc.)
-            first_audio_chunk_sent = False
-            async for audio_chunk in self.tts_provider.stream_synthesize(
-                text=cleaned_text,
-                voice_id=voice_id,
-                sample_rate=sample_rate
-            ):
-                # Check for barge-in before sending each chunk
-                if barge_in_event.is_set():
-                    logger.info(
-                        "tts_interrupted_by_barge_in",
-                        extra={
-                            "call_id": call_id,
-                            "turn_id": session.turn_id
-                        }
-                    )
-                    was_interrupted = True
-                    break
+        did_mute_stt = False
+        first_audio_chunk_sent = False
+        try:
+            if not was_interrupted:
+                # Mute STT microphone during TTS to prevent echo detection.
+                if self.mute_during_tts and hasattr(self.stt_provider, 'mute'):
+                    await self.stt_provider.mute(call_id)
+                    did_mute_stt = True
+                    logger.debug(f"Muted STT for call {call_id} during TTS")
+
+                if hasattr(self.media_gateway, "start_playback_tracking"):
+                    self.media_gateway.start_playback_tracking(call_id)
                 
-                # Send audio to media gateway
-                await self.media_gateway.send_audio(
-                    call_id,
-                    audio_chunk.data
-                )
-                if not first_audio_chunk_sent:
-                    first_audio_chunk_sent = True
-                    self.latency_tracker.mark_tts_first_chunk(call_id)
-                    self.latency_tracker.mark_response_start(call_id)
+                # Stream TTS synthesis with barge-in awareness.
+                async for audio_chunk in self.tts_provider.stream_synthesize(
+                    text=cleaned_text,
+                    voice_id=voice_id,
+                    sample_rate=sample_rate
+                ):
+                    if barge_in_event.is_set():
+                        logger.info(
+                            "tts_interrupted_by_barge_in",
+                            extra={
+                                "call_id": call_id,
+                                "turn_id": effective_turn_id
+                            }
+                        )
+                        was_interrupted = True
+                        break
+                    
+                    await self.media_gateway.send_audio(
+                        call_id,
+                        audio_chunk.data
+                    )
+                    if not first_audio_chunk_sent:
+                        first_audio_chunk_sent = True
+                        self.latency_tracker.mark_tts_first_chunk(call_id)
+                        self.latency_tracker.mark_response_start(call_id)
+        except asyncio.CancelledError:
+            was_interrupted = True
+            raise
         
         finally:
             self.latency_tracker.mark_tts_end(call_id)
-            # Flush any remaining buffered audio
-            if hasattr(self.media_gateway, 'flush_audio_buffer'):
+            # Flush remaining audio only for uninterrupted turns.
+            if not was_interrupted and hasattr(self.media_gateway, 'flush_audio_buffer'):
                 await self.media_gateway.flush_audio_buffer(call_id)
+            elif was_interrupted and hasattr(self.media_gateway, "clear_output_buffer"):
+                await self.media_gateway.clear_output_buffer(call_id)
+                if websocket:
+                    try:
+                        await websocket.send_json(
+                            {"type": "tts_interrupted", "reason": "barge_in"}
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to send tts_interrupted to websocket: {e}")
+            if was_interrupted:
+                barge_in_event.clear()
 
             waited_for_browser_playback = False
             if (
@@ -1091,21 +1257,17 @@ class VoicePipelineService:
                 await self.media_gateway.wait_for_playback_complete(call_id)
             
             # Unmute STT microphone after TTS (with small delay to prevent echo)
-            if hasattr(self.stt_provider, 'unmute'):
+            if did_mute_stt and hasattr(self.stt_provider, 'unmute'):
                 await asyncio.sleep(0.05 if waited_for_browser_playback else 0.3)
                 await self.stt_provider.unmute(call_id)
                 logger.debug(f"Unmuted STT for call {call_id} after TTS")
-            
-            # Clean up barge-in event
-            if call_id in self._barge_in_events:
-                del self._barge_in_events[call_id]
         
         if was_interrupted:
             logger.info(
                 "tts_stopped_early",
                 extra={
                     "call_id": call_id,
-                    "turn_id": session.turn_id,
+                    "turn_id": effective_turn_id,
                     "reason": "barge_in"
                 }
             )
@@ -1114,9 +1276,10 @@ class VoicePipelineService:
                 "tts_complete",
                 extra={
                     "call_id": call_id,
-                    "turn_id": session.turn_id
+                    "turn_id": effective_turn_id
                 }
             )
+        return was_interrupted
     
     async def stop_pipeline(self, call_id: str) -> None:
         """
@@ -1132,6 +1295,7 @@ class VoicePipelineService:
         
         self._active_pipelines.pop(call_id, None)
         self._barge_in_events.pop(call_id, None)
+        self._active_turn_tasks.pop(call_id, None)
     
     def is_pipeline_active(self, call_id: str) -> bool:
         """
