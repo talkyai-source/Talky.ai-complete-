@@ -104,8 +104,24 @@ class ExtendedApi {
         });
     }
 
-    getRecordingStreamUrl(recordingId: string): string {
-        return `${apiBaseUrl()}/recordings/${recordingId}/stream`;
+    async fetchRecordingBlob(recordingId: string): Promise<string> {
+        const token = this.client.getToken();
+        const headers: Record<string, string> = {};
+        if (token) {
+            headers.Authorization = `Bearer ${token}`;
+        }
+
+        const response = await fetch(`${apiBaseUrl()}/recordings/${recordingId}/stream`, {
+            headers,
+            credentials: "include",
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to fetch recording: ${response.statusText}`);
+        }
+
+        const blob = await response.blob();
+        return URL.createObjectURL(blob);
     }
 }
 

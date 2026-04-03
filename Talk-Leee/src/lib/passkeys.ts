@@ -14,7 +14,7 @@ export interface PasskeyCredential {
   id: string;
   credential_id: string;
   display_name: string;
-  device_type: "singleDevice" | "multiDevice";
+  device_type: string;
   backed_up: boolean;
   transports: string[];
   created_at: string;
@@ -32,7 +32,6 @@ export function isWebAuthnSupported(): boolean {
 export async function isConditionalUISupported(): Promise<boolean> {
   if (!isWebAuthnSupported()) return false;
   try {
-    // @ts-ignore - isConditionalMediationAvailable is newer
     return await PublicKeyCredential.isConditionalMediationAvailable();
   } catch {
     return false;
@@ -81,16 +80,17 @@ export async function loginWithPasskey(email?: string) {
   const { ceremony_id, options } = await api.beginPasskeyLogin(email);
 
   const challenge = base64urlToBuffer(options.challenge as string);
-  const allowCredentials = (options.allowCredentials as Array<{ id: string }> | undefined)?.map(
-    (cred) => ({
+  const allowCredentials = (options.allowCredentials as Array<{ id: string; type?: string }> | undefined)?.map(
+    (cred): PublicKeyCredentialDescriptor => ({
       ...cred,
+      type: "public-key",
       id: base64urlToBuffer(cred.id),
     })
   );
 
   const credential = (await navigator.credentials.get({
     publicKey: {
-      ...(options as PublicKeyCredentialRequestOptions),
+      ...(options as unknown as PublicKeyCredentialRequestOptions),
       challenge,
       allowCredentials,
     },
@@ -136,14 +136,15 @@ export async function registerPasskey(
   );
 
   const challenge = base64urlToBuffer(options.challenge as string);
-  const userId = base64urlToBuffer(options.user.id as string);
+  const userOptions = options.user as Record<string, unknown>;
+  const userId = base64urlToBuffer(userOptions.id as string);
 
   const credential = (await navigator.credentials.create({
     publicKey: {
-      ...(options as PublicKeyCredentialCreationOptions),
+      ...(options as unknown as PublicKeyCredentialCreationOptions),
       challenge,
       user: {
-        ...(options.user as PublicKeyCredentialUserEntity),
+        ...(userOptions as unknown as PublicKeyCredentialUserEntity),
         id: userId,
       },
     },
@@ -161,14 +162,14 @@ export async function registerPasskey(
     response: {
       clientDataJSON: bufferToBase64url(response.clientDataJSON),
       attestationObject: bufferToBase64url(response.attestationObject),
-      ...(response.authenticatorData && {
-        authenticatorData: bufferToBase64url(response.authenticatorData),
+      ...(response.getAuthenticatorData && {
+        authenticatorData: bufferToBase64url(response.getAuthenticatorData()),
       }),
-      ...(response.publicKey && {
-        publicKey: bufferToBase64url(response.publicKey),
+      ...(response.getPublicKey?.() && {
+        publicKey: bufferToBase64url(response.getPublicKey()!),
       }),
-      ...(response.publicKeyAlgorithm && {
-        publicKeyAlgorithm: response.publicKeyAlgorithm,
+      ...(response.getPublicKeyAlgorithm && {
+        publicKeyAlgorithm: response.getPublicKeyAlgorithm(),
       }),
     },
     ...(response.getTransports && { transports: response.getTransports() }),

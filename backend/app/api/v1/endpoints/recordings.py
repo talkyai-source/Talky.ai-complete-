@@ -115,9 +115,9 @@ async def list_recordings(
         items = []
         for recording in response.data or []:
             items.append(RecordingListItem(
-                id=recording["id"],
-                call_id=recording["call_id"],
-                created_at=recording.get("created_at", ""),
+                id=str(recording["id"]),
+                call_id=str(recording["call_id"]),
+                created_at=str(recording.get("created_at", "")),
                 duration_seconds=recording.get("duration_seconds")
             ))
         
@@ -204,6 +204,7 @@ async def stream_recording(
                 media_type=mime_type,
                 headers={
                     "Accept-Ranges": "bytes",
+                    "Content-Length": str(len(file_data)),
                     "Content-Disposition": f"inline; filename=recording_{recording_id}.wav"
                 }
             )

@@ -105,7 +105,8 @@ class SessionManager:
         voice_id: str,
         websocket: WebSocket,
         language: str = "en",
-        tenant_id: Optional[str] = None
+        tenant_id: Optional[str] = None,
+        talklee_call_id: Optional[str] = None
     ) -> CallSession:
         """
         Create a new call session
@@ -120,6 +121,7 @@ class SessionManager:
             websocket: Active WebSocket connection
             language: Language code (default: "en")
             tenant_id: Tenant ID (optional, for multi-tenancy)
+            talklee_call_id: Human-friendly call identifier for tracing
         
         Returns:
             CallSession: Created session
@@ -131,6 +133,7 @@ class SessionManager:
             lead_id=lead_id,
             tenant_id=tenant_id,
             provider_call_id=provider_call_id,
+            talklee_call_id=talklee_call_id,
             system_prompt=system_prompt,
             voice_id=voice_id,
             language=language,

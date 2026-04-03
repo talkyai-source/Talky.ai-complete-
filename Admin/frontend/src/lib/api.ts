@@ -1010,7 +1010,6 @@ class ApiClient {
             body: settings
         });
     }
-}
 
     // =============================================================================
     // Passkey / WebAuthn Methods

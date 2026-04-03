@@ -181,6 +181,12 @@ class DeepgramTTSProvider(TTSProvider):
         self._default_voice: str = "aura-2-andromeda-en"  # Customer service optimized
         self._sample_rate: int = 24000  # Deepgram streaming default
         self._session: Optional[aiohttp.ClientSession] = None
+        # Warm (persistent) WebSocket — reused across synthesis calls
+        self._warm_ws: Optional[aiohttp.ClientWebSocketResponse] = None
+        self._warm_ws_voice: Optional[str] = None
+        self._warm_ws_rate: Optional[int] = None
+        # Prevents concurrent synthesis on same connection
+        self._synthesis_lock: Optional[asyncio.Lock] = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -202,16 +208,63 @@ class DeepgramTTSProvider(TTSProvider):
         self._sample_rate = 24000 if requested_rate not in (8000, 16000, 24000, 32000, 48000) else requested_rate
 
         self._session = aiohttp.ClientSession()
-        logger.info(
-            f"DeepgramTTS initialised: voice={self._default_voice}, "
-            f"rate={self._sample_rate}"
-        )
+        self._synthesis_lock = asyncio.Lock()
+
+        # Pre-warm the WebSocket connection so the first synthesis has zero cold-start
+        try:
+            await self._get_connection(self._default_voice, self._sample_rate)
+            logger.info(
+                f"DeepgramTTS warm connection established: voice={self._default_voice}, "
+                f"rate={self._sample_rate}"
+            )
+        except Exception as e:
+            logger.warning(f"DeepgramTTS warm connection failed, will retry on first synthesis: {e}")
 
     async def cleanup(self) -> None:
         """Release resources."""
+        if self._warm_ws and not self._warm_ws.closed:
+            try:
+                await self._warm_ws.send_json({"type": "Close"})
+                await self._warm_ws.close()
+            except Exception:
+                pass
+            self._warm_ws = None
         if self._session:
             await self._session.close()
             self._session = None
+
+    async def _get_connection(
+        self, voice_id: str, rate: int
+    ) -> "aiohttp.ClientWebSocketResponse":
+        """Return the warm WebSocket if still open and params match, else open a new one."""
+        if (
+            self._warm_ws is not None
+            and not self._warm_ws.closed
+            and self._warm_ws_voice == voice_id
+            and self._warm_ws_rate == rate
+        ):
+            return self._warm_ws
+
+        # Close stale connection if params changed
+        if self._warm_ws and not self._warm_ws.closed:
+            try:
+                await self._warm_ws.send_json({"type": "Close"})
+                await self._warm_ws.close()
+            except Exception:
+                pass
+
+        url = (
+            f"{self.TTS_WS_URL}"
+            f"?model={voice_id}"
+            f"&encoding=linear16"
+            f"&sample_rate={rate}"
+            f"&container=none"
+        )
+        headers = {"Authorization": f"Token {self._api_key}"}
+        self._warm_ws = await self._session.ws_connect(url, headers=headers, heartbeat=30)
+        self._warm_ws_voice = voice_id
+        self._warm_ws_rate = rate
+        return self._warm_ws
 
     # ------------------------------------------------------------------
     # Streaming TTS via WebSocket with Text Chunking
@@ -259,67 +312,62 @@ class DeepgramTTSProvider(TTSProvider):
         if not chunks:
             logger.warning("No text chunks to synthesize")
             return
-        
+
         logger.debug(f"TTS: Split text into {len(chunks)} chunks for streaming")
 
-        url = (
-            f"{self.TTS_WS_URL}"
-            f"?model={selected_voice}"
-            f"&encoding=linear16"
-            f"&sample_rate={rate}"
-            f"&container=none"
-        )
-
-        headers = {"Authorization": f"Token {self._api_key}"}
-
+        # Acquire synthesis lock — prevents concurrent callers from interleaving
+        # messages on the shared warm connection. Released in the finally block.
+        await self._synthesis_lock.acquire()
+        sender_task: Optional[asyncio.Task] = None
         try:
-            async with self._session.ws_connect(
-                url, headers=headers, heartbeat=30
-            ) as ws:
-                # Send all chunks as separate Speak messages
-                # Deepgram processes them sequentially
-                for i, chunk in enumerate(chunks):
-                    if not chunk.strip():
-                        continue
-                    
-                    logger.debug(f"TTS chunk {i+1}/{len(chunks)}: {chunk[:50]}...")
-                    
-                    # 1. Send the text chunk to synthesize
-                    await ws.send_json({"type": "Speak", "text": chunk})
-                
-                # 2. Flush — tell Deepgram we're done sending text
-                # This forces synthesis of any remaining buffered text
+            try:
+                ws = await self._get_connection(selected_voice, rate)
+            except aiohttp.WSServerHandshakeError as e:
+                if e.status == 400:
+                    logger.error(
+                        "Deepgram TTS rejected model/voice '%s' (HTTP 400)",
+                        selected_voice,
+                    )
+                    raise RuntimeError(
+                        f"Deepgram rejected TTS voice/model '{selected_voice}'. "
+                        "Please choose a valid Aura-2 voice id."
+                    )
+                logger.error(f"Deepgram TTS WS handshake error: {e}")
+                raise RuntimeError(f"Deepgram TTS handshake error: {e}")
+            except aiohttp.ClientError as e:
+                logger.error(f"Deepgram TTS WS network error: {e}")
+                raise RuntimeError(f"Deepgram TTS network error: {e}")
+
+            # Send all text chunks + Flush concurrently while the receive loop
+            # is already running — Deepgram starts synthesising on the first
+            # Speak message, so first audio arrives ~75ms after the first send,
+            # without waiting for all chunks to be transmitted.
+            async def _send_all() -> None:
+                for chunk in chunks:
+                    if chunk.strip():
+                        await ws.send_json({"type": "Speak", "text": chunk})
                 await ws.send_json({"type": "Flush"})
 
-                # 3. Receive audio frames until Flushed confirmation
+            sender_task = asyncio.create_task(_send_all())
+
+            try:
                 async for msg in ws:
                     if msg.type == aiohttp.WSMsgType.BINARY:
-                        # Raw linear16 PCM bytes — yield immediately
-                        yield AudioChunk(
-                            data=msg.data,
-                            sample_rate=rate,
-                            channels=1,
-                        )
+                        yield AudioChunk(data=msg.data, sample_rate=rate, channels=1)
 
                     elif msg.type == aiohttp.WSMsgType.TEXT:
                         data = json.loads(msg.data)
                         event_type = data.get("type", "")
 
                         if event_type == "Flushed":
-                            # Server finished processing our Flush
                             logger.debug("Deepgram TTS Flushed — synthesis complete")
                             break
-
                         elif event_type == "Warning":
-                            logger.warning(
-                                f"Deepgram TTS warning: {data.get('warn_msg', data)}"
-                            )
-
+                            logger.warning(f"Deepgram TTS warning: {data.get('warn_msg', data)}")
                         elif event_type == "Error":
-                            err_msg = data.get('err_msg', data)
+                            err_msg = data.get("err_msg", data)
                             logger.error(f"Deepgram TTS error: {err_msg}")
                             raise RuntimeError(f"Deepgram TTS error: {err_msg}")
-
                         elif event_type == "Metadata":
                             logger.debug(f"Deepgram TTS metadata: {data}")
 
@@ -329,29 +377,25 @@ class DeepgramTTSProvider(TTSProvider):
                         aiohttp.WSMsgType.ERROR,
                     ):
                         logger.warning(f"Deepgram TTS WS closed unexpectedly: {msg}")
+                        self._warm_ws = None  # mark stale; next call reconnects
                         break
+            except Exception:
+                self._warm_ws = None
+                raise
 
-                # 4. Close gracefully
-                await ws.send_json({"type": "Close"})
-
-        except aiohttp.WSServerHandshakeError as e:
-            if e.status == 400:
-                logger.error(
-                    "Deepgram TTS rejected model/voice '%s' (HTTP 400)",
-                    selected_voice,
-                )
-                raise RuntimeError(
-                    f"Deepgram rejected TTS voice/model '{selected_voice}'. "
-                    "Please choose a valid Aura-2 voice id."
-                )
-            logger.error(f"Deepgram TTS WS handshake error: {e}")
-            raise RuntimeError(f"Deepgram TTS handshake error: {e}")
-        except aiohttp.ClientError as e:
-            logger.error(f"Deepgram TTS WS network error: {e}")
-            raise RuntimeError(f"Deepgram TTS network error: {e}")
         except Exception as e:
-            logger.error(f"Deepgram TTS WS synthesis failed: {e}", exc_info=True)
-            raise RuntimeError(f"Deepgram TTS synthesis failed: {e}")
+            if not isinstance(e, RuntimeError):
+                logger.error(f"Deepgram TTS WS synthesis failed: {e}", exc_info=True)
+                raise RuntimeError(f"Deepgram TTS synthesis failed: {e}")
+            raise
+        finally:
+            if sender_task is not None and not sender_task.done():
+                sender_task.cancel()
+                try:
+                    await asyncio.shield(sender_task)
+                except (asyncio.CancelledError, Exception):
+                    pass
+            self._synthesis_lock.release()
 
     # ------------------------------------------------------------------
     # Raw synthesis (for telephony / RTP — keeps REST fallback)

@@ -21,11 +21,17 @@ import logging
 from typing import Optional, Set
 from dataclasses import dataclass, field
 
-from fastapi import Depends, HTTPException, Header, status, Request
+from fastapi import Cookie, Depends, HTTPException, Header, status, Request
 import asyncpg
 
 from app.core.container import get_db_pool_from_container
 from app.core.jwt_security import JWTValidationError, decode_and_validate_token
+from app.core.security.device_fingerprint import generate_device_fingerprint
+from app.core.security.sessions import (
+    SESSION_COOKIE_NAME,
+    get_session_by_id,
+    validate_session,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +64,12 @@ class CurrentUser:
         """Cache user's effective permissions."""
         self._permissions = permissions
 
+    def __getitem__(self, key: str):
+        return getattr(self, key)
+
+    def get(self, key: str, default=None):
+        return getattr(self, key, default)
+
 
 def get_db_pool() -> asyncpg.Pool:
     """
@@ -81,8 +93,40 @@ def get_db_client(pool: asyncpg.Pool = Depends(get_db_pool)) -> Client:
     return Client(pool)
 
 
+def _get_client_ip(request: Request) -> str:
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+async def _resolve_cookie_session(
+    request: Request,
+    raw_session_token: str,
+    db_client: Client,
+) -> Optional[dict]:
+    session_id = getattr(request.state, "session_id", None)
+    session_user_id = getattr(request.state, "session_user_id", None)
+    if session_id and session_user_id:
+        return {
+            "id": str(session_id),
+            "user_id": str(session_user_id),
+        }
+
+    fingerprint = generate_device_fingerprint(request)
+    async with db_client.pool.acquire() as conn:
+        return await validate_session(
+            conn,
+            raw_session_token,
+            current_ip=_get_client_ip(request),
+            current_fingerprint=fingerprint,
+        )
+
+
 async def get_current_user(
+    request: Request,
     authorization: Optional[str] = Header(None, alias="Authorization"),
+    session_cookie: Optional[str] = Cookie(None, alias=SESSION_COOKIE_NAME),
     db_client: Client = Depends(get_db_client),
 ) -> CurrentUser:
     """
@@ -91,38 +135,84 @@ async def get_current_user(
     Returns CurrentUser with user info and tenant context.
     JWT is signed with JWT_SECRET (HS256).
     """
-    if not authorization:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authorization header missing",
-        )
+    user_id: Optional[str] = None
 
-    parts = authorization.split()
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authorization format. Expected: Bearer <token>",
-        )
+    if authorization:
+        parts = authorization.split()
+        if len(parts) != 2 or parts[0].lower() != "bearer":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authorization format. Expected: Bearer <token>",
+            )
 
-    token = parts[1]
+        token = parts[1]
 
-    try:
-        payload = decode_and_validate_token(token)
-    except JWTValidationError as e:
-        if e.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
-            logger.error(e.detail)
+        try:
+            payload = decode_and_validate_token(token)
+        except JWTValidationError as e:
+            if e.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
+                logger.error(e.detail)
+            else:
+                logger.warning("Token verification failed: %s", e.detail)
+            raise HTTPException(
+                status_code=e.status_code,
+                detail=e.detail,
+            )
+
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token: missing subject",
+            )
+
+        token_session_id = payload.get("sid")
+        if isinstance(token_session_id, str) and token_session_id.strip():
+            request_session_id = getattr(request.state, "session_id", None)
+            if request_session_id is not None:
+                if str(request_session_id) != token_session_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Session mismatch",
+                    )
+                request_session_user_id = getattr(request.state, "session_user_id", None)
+                if request_session_user_id is not None and str(request_session_user_id) != user_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Session mismatch",
+                    )
+            else:
+                async with db_client.pool.acquire() as conn:
+                    session = await get_session_by_id(conn, token_session_id, user_id=user_id)
+                if not session:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Invalid or expired token",
+                    )
+        elif session_cookie:
+            session = await _resolve_cookie_session(request, session_cookie, db_client)
+            if not session or str(session.get("user_id")) != user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid or expired token",
+                )
         else:
-            logger.warning("Token verification failed: %s", e.detail)
-        raise HTTPException(
-            status_code=e.status_code,
-            detail=e.detail,
-        )
-
-    user_id = payload.get("sub")
-    if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session-bound token required",
+            )
+    elif session_cookie:
+        session = await _resolve_cookie_session(request, session_cookie, db_client)
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session has expired or is invalid",
+            )
+        user_id = str(session["user_id"])
+    else:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token: missing subject",
+            detail="Authentication required",
         )
 
     # Fetch user profile with tenant info from PostgreSQL
@@ -177,7 +267,9 @@ async def require_admin(
 
 
 async def get_optional_user(
+    request: Request,
     authorization: Optional[str] = Header(None, alias="Authorization"),
+    session_cookie: Optional[str] = Cookie(None, alias=SESSION_COOKIE_NAME),
     db_client: Client = Depends(get_db_client),
 ) -> Optional[CurrentUser]:
     """
@@ -185,9 +277,15 @@ async def get_optional_user(
     Useful for endpoints that work both with and without auth.
     """
     if not authorization:
-        return None
+        if not session_cookie:
+            return None
     try:
-        return await get_current_user(authorization=authorization, db_client=db_client)
+        return await get_current_user(
+            request=request,
+            authorization=authorization,
+            session_cookie=session_cookie,
+            db_client=db_client,
+        )
     except HTTPException:
         return None
 
@@ -401,31 +499,62 @@ from app.domain.services.audit_logger import AuditLogger
 from app.domain.services.suspension_service import SuspensionService
 from app.domain.services.secrets_manager import SecretsManager
 from app.core.security.emergency_access import EmergencyAccess
+from app.core.config import get_settings
+
+
+_audit_logger_service: AuditLogger | None = None
+_suspension_service_instance: SuspensionService | None = None
+_secrets_manager_service: SecretsManager | None = None
+_emergency_access_service: EmergencyAccess | None = None
 
 
 async def get_audit_logger(
     db_pool: asyncpg.Pool = Depends(get_db_pool),
 ) -> AuditLogger:
     """Factory for AuditLogger service"""
-    return AuditLogger(db_pool)
+    global _audit_logger_service
+    if _audit_logger_service is None:
+        settings = get_settings()
+        signing_key = (
+            get_settings().effective_jwt_secret
+            if settings.environment.lower() != "production"
+            else None
+        )
+        _audit_logger_service = AuditLogger(db_pool, signing_key=signing_key)
+    return _audit_logger_service
 
 
 async def get_suspension_service(
     db_pool: asyncpg.Pool = Depends(get_db_pool),
 ) -> SuspensionService:
     """Factory for SuspensionService"""
-    return SuspensionService(db_pool)
+    global _suspension_service_instance
+    if _suspension_service_instance is None:
+        _suspension_service_instance = SuspensionService(db_pool)
+    return _suspension_service_instance
 
 
 async def get_secrets_manager(
     db_pool: asyncpg.Pool = Depends(get_db_pool),
 ) -> SecretsManager:
     """Factory for SecretsManager"""
-    return SecretsManager(db_pool)
+    global _secrets_manager_service
+    if _secrets_manager_service is None:
+        settings = get_settings()
+        master_key = (
+            settings.effective_jwt_secret.encode()
+            if settings.environment.lower() != "production" and settings.effective_jwt_secret
+            else None
+        )
+        _secrets_manager_service = SecretsManager(db_pool, master_key=master_key)
+    return _secrets_manager_service
 
 
 async def get_emergency_access(
     db_pool: asyncpg.Pool = Depends(get_db_pool),
 ) -> EmergencyAccess:
     """Factory for EmergencyAccess service"""
-    return EmergencyAccess(db_pool)
+    global _emergency_access_service
+    if _emergency_access_service is None:
+        _emergency_access_service = EmergencyAccess(db_pool)
+    return _emergency_access_service

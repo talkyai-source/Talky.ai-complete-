@@ -1,6 +1,7 @@
 """
 Secrets Management Service - Centralized secrets with envelope encryption
 """
+import logging
 import hashlib
 import hmac
 import json
@@ -16,7 +17,10 @@ from uuid import UUID, uuid4
 import redis.asyncio as aioredis
 import asyncpg
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.keywrap import aes_key_unwrap, aes_key_wrap
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 
 class SecretType(str, Enum):
@@ -98,34 +102,45 @@ class SecretsManager:
         self.redis = redis_client
         self.kms_provider = kms_provider
 
-        # Master KEK (Key Encryption Key)
-        # In production, this should come from KMS/HSM
+        self._master_kek = self._resolve_master_key(master_key)
+
+    def _resolve_master_key(self, master_key: Optional[bytes]) -> bytes:
         if master_key:
-            self._master_kek = master_key
+            return master_key
+
+        configured = (
+            os.getenv("SECRETS_MASTER_KEY")
+            or os.getenv("JWT_SECRET")
+            or os.getenv("SECRET_KEY")
+        )
+        environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+        if not configured:
+            if environment == "production":
+                raise RuntimeError("SECRETS_MASTER_KEY must be configured in production")
+            logger.warning("SECRETS_MASTER_KEY not configured; using development fallback key material")
+            configured = "development-secrets-master-key"
+
+        if isinstance(configured, bytes):
+            raw = configured
         else:
-            # Generate a development key (NOT FOR PRODUCTION)
-            self._master_kek = os.getenv(
-                "SECRETS_MASTER_KEY",
-                secrets.token_bytes(32)
-            )
-            if isinstance(self._master_kek, str):
-                self._master_kek = self._master_kek.encode()
+            cleaned = configured.strip()
+            try:
+                raw = bytes.fromhex(cleaned)
+            except ValueError:
+                raw = cleaned.encode()
+        return hashlib.sha256(raw).digest()
 
     def _generate_dek(self) -> bytes:
         """Generate a new Data Encryption Key"""
         return AESGCM.generate_key(bit_length=256)
 
     def _encrypt_dek(self, dek: bytes) -> bytes:
-        """Encrypt DEK with master KEK using simple XOR for demo (use KMS in prod)"""
-        # In production, use AWS KMS Encrypt, GCP KMS, or HashiCorp Vault
-        # This is a simplified example
-        key = hashlib.sha256(self._master_kek).digest()
-        return bytes(a ^ b for a, b in zip(dek, key))
+        """Encrypt DEK with the master KEK using RFC 3394 AES key wrap."""
+        return aes_key_wrap(self._master_kek, dek)
 
     def _decrypt_dek(self, encrypted_dek: bytes) -> bytes:
         """Decrypt DEK with master KEK"""
-        key = hashlib.sha256(self._master_kek).digest()
-        return bytes(a ^ b for a, b in zip(encrypted_dek, key))
+        return aes_key_unwrap(self._master_kek, encrypted_dek)
 
     def _encrypt_value(self, value: dict, dek: bytes) -> tuple[bytes, bytes]:
         """Encrypt secret value with DEK using AES-256-GCM"""

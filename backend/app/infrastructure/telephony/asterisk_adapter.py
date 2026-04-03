@@ -74,6 +74,16 @@ class AsteriskAdapter(CallControlAdapter):
         self._bridges: Dict[str, str] = {}
         # channel_id → gateway session_id
         self._gateway_sessions: Dict[str, str] = {}
+        # Outbound channels waiting for callee to answer:
+        # channel_id → {"bridge_id": str, "listen_port": int, "session_id": str}
+        self._pending_outbound: Dict[str, Dict[str, Any]] = {}
+        # ChannelStateChange(Up) events that arrived before _on_outbound_stasis_start
+        # ran (race condition when StasisStart is delayed in the ARI WebSocket queue).
+        self._preemptive_up_channels: set = set()
+        # Channel IDs originated by originate_call() — used as the primary
+        # routing decision in StasisStart so we don't depend on Asterisk
+        # reliably passing appArgs through PJSIP trunks.
+        self._originated_channels: set[str] = set()
 
         # Global event callbacks
         self._call_arrived_callbacks: Dict[str, Callable] = {}
@@ -306,12 +316,68 @@ class AsteriskAdapter(CallControlAdapter):
             # Skip UnicastRTP (external media) channels
             if channel_name.startswith("UnicastRTP/"):
                 return
-            # Handle both inbound and outbound calls
-            if args and args[0] in ("inbound", "outbound"):
+
+            # --- Outbound routing decision ---
+            # Three ways to identify an outbound channel:
+            # 1. channel_id matches a pre-generated ID in _originated_channels
+            # 2. appArgs[0] == "outbound" (unreliable through PJSIP trunks)
+            # 3. _originated_channels is non-empty — when originating through
+            #    a PJSIP trunk (e.g. PJSIP/1002@lan-pbx), Asterisk creates
+            #    a NEW channel for the trunk leg with a different ID than the
+            #    one we requested.  The pre-generated ID never enters Stasis;
+            #    the trunk-created channel does.  If we have any pending
+            #    originated IDs, this StasisStart is almost certainly the
+            #    trunk-created leg of that origination.
+            is_our_originated = channel_id in self._originated_channels
+            arg0 = args[0] if args else ""
+            is_trunk_leg = (
+                not is_our_originated
+                and len(self._originated_channels) > 0
+                and channel_name.startswith("PJSIP/")
+            )
+
+            if is_our_originated or arg0 == "outbound" or is_trunk_leg:
+                if is_trunk_leg:
+                    # Consume the pending originated ID since this is its trunk leg
+                    stale_id = next(iter(self._originated_channels))
+                    self._originated_channels.discard(stale_id)
+                    logger.info(
+                        f"AsteriskAdapter: matched trunk-created channel "
+                        f"{channel_id[:12]} to originated {stale_id[:12]}"
+                    )
+                else:
+                    self._originated_channels.discard(channel_id)
+                asyncio.create_task(self._on_outbound_stasis_start(channel_id))
+            else:
+                # Any other StasisStart (including inbound or unknown args)
+                # is treated as an inbound call.
                 asyncio.create_task(self._on_stasis_start(channel_id, event))
 
+        elif event_type == "ChannelStateChange":
+            # Fired when a channel transitions state, e.g. Ring → Up (callee answered).
+            channel_state = str(channel.get("state") or "").lower()
+            if channel_state == "up":
+                if channel_id in self._pending_outbound:
+                    asyncio.create_task(self._on_outbound_answered(channel_id))
+                else:
+                    # StasisStart processing may be pending as a create_task that
+                    # hasn't run yet (ARI WS delivers events faster than tasks are
+                    # scheduled).  Record the Up event so _on_outbound_stasis_start
+                    # can fire _on_outbound_answered immediately after parking.
+                    logger.debug(
+                        f"AsteriskAdapter: ChannelStateChange(Up) arrived before "
+                        f"StasisStart processed for channel={channel_id[:12]} — saved for later"
+                    )
+                    self._preemptive_up_channels.add(channel_id)
+
         elif event_type in ("StasisEnd", "ChannelDestroyed", "ChannelHangupRequest"):
-            if channel_id in self._active_sessions:
+            # Drop any preemptive Up record for channels that are now gone.
+            self._preemptive_up_channels.discard(channel_id)
+            self._originated_channels.discard(channel_id)
+            # Clean up pending outbound channels that were never answered.
+            if channel_id in self._pending_outbound:
+                asyncio.create_task(self._cleanup_pending_outbound(channel_id))
+            elif channel_id in self._active_sessions:
                 asyncio.create_task(self._on_stasis_end(channel_id, event_type))
             elif channel_id in self._ext_channels.values():
                 # External channel ended — find and clean up parent
@@ -321,6 +387,200 @@ class AsteriskAdapter(CallControlAdapter):
                 )
                 if parent:
                     asyncio.create_task(self._on_stasis_end(parent, event_type))
+
+    async def _on_outbound_stasis_start(self, channel_id: str) -> None:
+        """
+        Handle an outbound call entering Stasis (callee is still ringing).
+
+        Creates the mixing bridge and adds the outbound channel to it, then
+        stores the pending state.  The ExternalMedia channel and C++ gateway
+        session are NOT started here — they are deferred to _on_outbound_answered
+        so that no RTP timeout fires while we are waiting for the callee to pick up.
+        """
+        logger.info(f"AsteriskAdapter: outbound call ringing channel={channel_id[:12]}")
+        listen_port = await self._alloc_rtp_port()
+        session_id = f"asterisk-{channel_id[:12]}-{listen_port}"
+        bridge_id = ""
+
+        try:
+            # 1. Create mixing bridge
+            bridge = await self._ari("POST", "/bridges", params={"type": "mixing"})
+            bridge_id = bridge.get("id", "")
+            if not bridge_id:
+                raise RuntimeError("ARI bridge create returned no id")
+
+            # 2. Add outbound channel to bridge (starts ringing the remote party)
+            await self._ari(
+                "POST", f"/bridges/{bridge_id}/addChannel",
+                params={"channel": channel_id},
+                ok=(200, 204, 209),
+            )
+
+            # Park the metadata — _on_outbound_answered will complete the setup
+            self._pending_outbound[channel_id] = {
+                "bridge_id": bridge_id,
+                "listen_port": listen_port,
+                "session_id": session_id,
+            }
+
+            # Race condition: the callee may have already answered while
+            # StasisStart was sitting in the ARI WebSocket queue.  If so,
+            # ChannelStateChange(Up) was stored in _preemptive_up_channels;
+            # we must fire _on_outbound_answered right now instead of waiting.
+            if channel_id in self._preemptive_up_channels:
+                self._preemptive_up_channels.discard(channel_id)
+                logger.info(
+                    f"AsteriskAdapter: outbound call already answered (preemptive Up) "
+                    f"channel={channel_id[:12]} — completing media setup immediately"
+                )
+                asyncio.create_task(self._on_outbound_answered(channel_id))
+                return
+
+            logger.info(
+                f"AsteriskAdapter: outbound channel parked, waiting for answer "
+                f"channel={channel_id[:12]} bridge={bridge_id[:12]} rtp_port={listen_port}"
+            )
+
+        except Exception as exc:
+            logger.error(f"AsteriskAdapter: outbound stasis start failed: {exc}")
+            if bridge_id:
+                try:
+                    await self._ari("DELETE", f"/bridges/{bridge_id}", ok=(200, 204, 404, 422))
+                except Exception:
+                    pass
+            await self._release_rtp_port(listen_port)
+
+    async def _on_outbound_answered(self, channel_id: str) -> None:
+        """
+        Complete ExternalMedia + C++ gateway setup once the callee answers.
+
+        Called when ChannelStateChange fires with state=Up for a pending
+        outbound channel.  At this point RTP will flow immediately, so the
+        gateway startup timeout won't expire before audio arrives.
+        """
+        pending = self._pending_outbound.pop(channel_id, None)
+        if not pending:
+            return
+
+        bridge_id = pending["bridge_id"]
+        listen_port = pending["listen_port"]
+        session_id = pending["session_id"]
+        ext_channel_id = ""
+
+        logger.info(
+            f"AsteriskAdapter: outbound call answered — completing media setup "
+            f"channel={channel_id[:12]} rtp_port={listen_port}"
+        )
+
+        try:
+            # 3. Create ExternalMedia channel pointing at C++ Gateway RTP listener
+            ext_data = await self._ari(
+                "POST", "/channels/externalMedia",
+                params={
+                    "app": self._app_name,
+                    "external_host": f"{self._gateway_rtp_ip}:{listen_port}",
+                    "format": "ulaw",
+                    "encapsulation": "rtp",
+                    "transport": "udp",
+                    "connection_type": "client",
+                    "direction": "both",
+                },
+            )
+            ext_channel_id = ext_data.get("id", "")
+            if not ext_channel_id:
+                raise RuntimeError("ARI externalMedia returned no channel id")
+
+            # 4. Add ExternalMedia channel to bridge
+            await self._ari(
+                "POST", f"/bridges/{bridge_id}/addChannel",
+                params={"channel": ext_channel_id},
+                ok=(200, 204, 209),
+            )
+
+            # 5. Get the actual RTP address/port Asterisk allocated on its side
+            remote_ip_var = await self._ari(
+                "GET", f"/channels/{ext_channel_id}/variable",
+                params={"variable": "UNICASTRTP_LOCAL_ADDRESS"},
+            )
+            remote_port_var = await self._ari(
+                "GET", f"/channels/{ext_channel_id}/variable",
+                params={"variable": "UNICASTRTP_LOCAL_PORT"},
+            )
+            remote_ip = str(remote_ip_var.get("value", "127.0.0.1"))
+            remote_port = int(remote_port_var.get("value", 0))
+
+            # 6. Start C++ Gateway session — call is already answered so RTP is
+            #    flowing immediately; no startup-timeout risk.
+            await self._gateway(
+                "POST", "/v1/sessions/start",
+                payload={
+                    "session_id": session_id,
+                    "listen_ip": self._gateway_rtp_ip,
+                    "listen_port": listen_port,
+                    "remote_ip": remote_ip,
+                    "remote_port": remote_port,
+                    "codec": "pcmu",
+                    "ptime_ms": 20,
+                    "echo_enabled": False,
+                    "startup_no_rtp_timeout_ms": 10000,   # 10s — call is live
+                    "active_no_rtp_timeout_ms": 15000,    # 15s silence timeout
+                    "session_final_timeout_ms": 300000,   # 5-minute hard cap
+                    "audio_callback_batch_frames": 5,
+                    "audio_callback_url": (
+                        f"{os.getenv('BACKEND_INTERNAL_URL', 'http://127.0.0.1:8000')}"
+                        f"/api/v1/sip/telephony/audio/{session_id}"
+                    ),
+                },
+                ok=(200, 409),
+            )
+
+            # Track the session
+            self._active_sessions[channel_id] = {
+                "session_id": session_id,
+                "listen_port": listen_port,
+                "bridge_id": bridge_id,
+            }
+            self._ext_channels[channel_id] = ext_channel_id
+            self._bridges[channel_id] = bridge_id
+            self._gateway_sessions[channel_id] = session_id
+
+            logger.info(
+                f"AsteriskAdapter: session started (post-answer) channel={channel_id[:12]} "
+                f"session={session_id} rtp_port={listen_port}"
+            )
+
+            # 7. Notify callbacks so the AI pipeline can start
+            cb = self._call_arrived_callbacks.get(channel_id)
+            if cb:
+                asyncio.create_task(cb(channel_id))
+            elif self._on_new_call:
+                asyncio.create_task(self._on_new_call(channel_id))
+
+        except Exception as exc:
+            logger.error(f"AsteriskAdapter: outbound answered setup failed: {exc}")
+            if session_id:
+                try:
+                    await self._gateway(
+                        "POST", "/v1/sessions/stop",
+                        payload={"session_id": session_id, "reason": "setup_failed"},
+                    )
+                except Exception:
+                    pass
+            if ext_channel_id:
+                try:
+                    await self._ari("DELETE", f"/channels/{ext_channel_id}", ok=(200, 204, 404))
+                except Exception:
+                    pass
+            if bridge_id:
+                try:
+                    await self._ari("DELETE", f"/bridges/{bridge_id}", ok=(200, 204, 404, 422))
+                except Exception:
+                    pass
+            try:
+                await self._ari("DELETE", f"/channels/{channel_id}", ok=(200, 204, 404))
+            except Exception:
+                pass
+            await self._release_rtp_port(listen_port)
 
     async def _on_stasis_start(self, channel_id: str, event: Dict[str, Any]) -> None:
         """Set up ExternalMedia → C++ Gateway → AI pipeline for a new inbound call."""
@@ -457,6 +717,20 @@ class AsteriskAdapter(CallControlAdapter):
             except Exception:
                 pass
             await self._release_rtp_port(listen_port)
+
+    async def _cleanup_pending_outbound(self, channel_id: str) -> None:
+        """Release resources for an outbound call that was never answered."""
+        pending = self._pending_outbound.pop(channel_id, None)
+        if not pending:
+            return
+        await self._release_rtp_port(pending["listen_port"])
+        bridge_id = pending.get("bridge_id", "")
+        if bridge_id:
+            try:
+                await self._ari("DELETE", f"/bridges/{bridge_id}", ok=(200, 204, 404, 422))
+            except Exception:
+                pass
+        logger.info(f"AsteriskAdapter: unanswered outbound call cleaned up channel={channel_id[:12]}")
 
     async def _on_stasis_end(self, channel_id: str, reason: str) -> None:
         """Tear down C++ Gateway session and ARI bridge when a call ends."""
@@ -613,6 +887,57 @@ class AsteriskAdapter(CallControlAdapter):
         if destination == "750":
             # Test extension: route through dialplan
             endpoint = f"Local/{destination}@from-opensips"
+            # Pre-generate channel ID and register it BEFORE the ARI POST.
+            # This prevents a race condition where the StasisStart WS event
+            # arrives before the HTTP response — at that point the channel
+            # would NOT be in _originated_channels and would be mis-routed
+            # to the inbound handler.
+            pre_id = f"talky-out-{uuid.uuid4()}"
+            self._originated_channels.add(pre_id)
+            try:
+                data = await self._ari(
+                    "POST",
+                    "/channels",
+                    params={
+                        "endpoint": endpoint,
+                        "callerId": caller_id,
+                        "app": self._app_name,
+                        "appArgs": "outbound",
+                        "channelId": pre_id,
+                    },
+                )
+            except Exception:
+                self._originated_channels.discard(pre_id)
+                raise
+            channel_id = data.get("id", pre_id)
+            # ARI should use our pre_id, but if it returns something else,
+            # update the tracking set.
+            if channel_id != pre_id:
+                self._originated_channels.discard(pre_id)
+                self._originated_channels.add(channel_id)
+            logger.info(f"AsteriskAdapter: originated test call to {destination} channel={channel_id[:12]}")
+            return channel_id
+
+        # -------------------------------------------------------------------
+        # Real extensions: originate through the lan-pbx PJSIP trunk.
+        #
+        # The softphone at extension 1002 is registered to OpenSIPS (lan-pbx),
+        # NOT to the local Asterisk.  PJSIP/{destination}@lan-pbx sends the
+        # SIP INVITE through the lan-pbx trunk endpoint to OpenSIPS, which
+        # forwards it to the registered device.
+        #
+        # The channel enters Stasis immediately with appArgs=outbound.
+        # _on_outbound_stasis_start parks it; _on_outbound_answered completes
+        # the ExternalMedia + C++ gateway setup once the callee picks up.
+        # -------------------------------------------------------------------
+        endpoint = f"PJSIP/{destination}@lan-pbx"
+
+        # Pre-generate channel ID and register BEFORE ARI POST to prevent
+        # the StasisStart WS event from arriving before the HTTP response.
+        pre_id = f"talky-out-{uuid.uuid4()}"
+        self._originated_channels.add(pre_id)
+
+        try:
             data = await self._ari(
                 "POST",
                 "/channels",
@@ -621,49 +946,35 @@ class AsteriskAdapter(CallControlAdapter):
                     "callerId": caller_id,
                     "app": self._app_name,
                     "appArgs": "outbound",
+                    "channelId": pre_id,
                 },
             )
-            channel_id = data.get("id", "")
-            if not channel_id:
-                raise RuntimeError(f"AsteriskAdapter: originate_call to {destination} returned no channel id")
-            logger.info(f"AsteriskAdapter: originated test call to {destination} channel={channel_id[:12]}")
-            return channel_id
+        except Exception:
+            self._originated_channels.discard(pre_id)
+            raise
 
-        # -------------------------------------------------------------------
-        # Real extensions: Originate directly to the PJSIP endpoint.
-        #
-        # When specifying app= on the originate, the channel enters Stasis
-        # immediately.  _on_stasis_start then creates:
-        #   - An ExternalMedia channel (pointing at the C++ gateway)
-        #   - A mixing bridge that holds BOTH the callee channel and the
-        #     ExternalMedia channel
-        #
-        # The callee phone rings.  When they answer, RTP flows through the
-        # mixing bridge → ExternalMedia → C++ gateway → AI pipeline → TTS
-        # back to the callee.
-        #
-        # This is the CORRECT pattern — it keeps ALL media inside the ARI
-        # bridge.  The old Local/@ai-outbound approach used Dial() inside
-        # the dialplan which created a SEPARATE media path that bypassed
-        # the ARI bridge entirely.
-        # -------------------------------------------------------------------
-        endpoint = f"PJSIP/{destination}@lan-pbx"
-
-        data = await self._ari(
-            "POST",
-            "/channels",
-            params={
-                "endpoint": endpoint,
-                "callerId": caller_id,
-                "app": self._app_name,
-                "appArgs": "outbound",
-            },
-        )
-        channel_id = data.get("id", "")
-        if not channel_id:
-            raise RuntimeError(f"AsteriskAdapter: originate_call to {destination} returned no channel id")
+        channel_id = data.get("id", pre_id)
+        # ARI should use our pre_id, but if it returns something else,
+        # update the tracking set.
+        if channel_id != pre_id:
+            self._originated_channels.discard(pre_id)
+            self._originated_channels.add(channel_id)
 
         logger.info(f"AsteriskAdapter: originated call to {destination} via {endpoint} channel={channel_id[:12]}")
+
+        # Safety: remove the pre-generated ID from _originated_channels after
+        # 30 seconds.  For PJSIP trunk calls, the actual StasisStart channel
+        # has a different ID; the trunk-leg matcher in _handle_ari_event will
+        # consume it.  This timer prevents stale entries from leaking if the
+        # origination fails silently (no StasisStart at all).
+        async def _expire_originated(cid: str) -> None:
+            await asyncio.sleep(30)
+            if cid in self._originated_channels:
+                self._originated_channels.discard(cid)
+                logger.debug(f"AsteriskAdapter: expired stale originated channel {cid[:12]}")
+
+        asyncio.create_task(_expire_originated(channel_id))
+
         return channel_id
 
     async def hangup(self, call_id: str) -> None:

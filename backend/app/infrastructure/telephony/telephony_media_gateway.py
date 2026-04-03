@@ -27,9 +27,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.domain.interfaces.media_gateway import MediaGateway
 
@@ -50,7 +51,20 @@ class TelephonySession:
         default_factory=lambda: asyncio.Queue(maxsize=200)
     )
     recording_buffer: List[bytes] = field(default_factory=list)
+    # TTS recording: list of (sample_offset, pcm_bytes) for timeline placement.
+    # sample_offset is a running write cursor (MixMonitor-style), NOT a
+    # wall-clock timestamp.  See send_audio() for the cursor logic.
+    tts_recording_buffer: List[Tuple[int, bytes]] = field(default_factory=list)
     is_active: bool = True
+
+    # Monotonic start time (seconds) — set in on_call_started()
+    recording_start_time: float = 0.0
+    # Running sample counter for caller audio (incremented on each received chunk)
+    caller_sample_count: int = 0
+    # Running write cursor for agent audio recording (MixMonitor pattern).
+    # Advances by chunk duration after each TTS chunk.  Jumps forward to
+    # wall-clock position when a new utterance starts after a silence gap.
+    agent_rec_cursor: int = 0
 
     # TTS audio buffer for packetization (must send in 160-byte chunks for 8kHz PCMU)
     tts_buffer: bytes = field(default_factory=bytes)
@@ -142,6 +156,7 @@ class TelephonyMediaGateway(MediaGateway):
             pbx_call_id=pbx_call_id,
             adapter=adapter,
             input_queue=asyncio.Queue(maxsize=200),
+            recording_start_time=time.monotonic(),
         )
         self._sessions[call_id] = session
         logger.info("TelephonyMediaGateway: session started call_id=%s pbx=%s", call_id[:12], pbx_call_id[:12])
@@ -194,6 +209,8 @@ class TelephonyMediaGateway(MediaGateway):
         session.chunks_received += 1
         session.total_bytes_received += len(audio_chunk)
         session.recording_buffer.append(pcm_chunk)
+        # Track how many PCM16 samples the caller side has produced
+        session.caller_sample_count += len(pcm_chunk) // 2
 
         try:
             session.input_queue.put_nowait(pcm_chunk)
@@ -244,7 +261,37 @@ class TelephonyMediaGateway(MediaGateway):
             else:
                 from app.utils.audio_utils import pcm_to_ulaw
                 logger.debug(f"[TelephonyGW] Converting Int16 → μ-law")
+                pcm16 = audio_chunk
                 pcmu = pcm_to_ulaw(audio_chunk)
+
+            # -- Agent recording (MixMonitor-style running cursor) --
+            #
+            # TTS delivers audio in rapid bursts: a 3-second utterance might
+            # arrive as 15 chunks within 0.5 seconds of wall-clock time.
+            # If we stamped each chunk with wall-clock or caller_sample_count,
+            # they'd all land at nearly the same offset and overlap.
+            #
+            # Correct approach (how Asterisk MixMonitor works):
+            #   1. Compute where we are on the real-time timeline (wall clock).
+            #   2. If the cursor is behind the wall clock, a silence gap occurred
+            #      — jump the cursor forward (silence is implicitly inserted by
+            #      the mixer seeing a gap between the end of the previous chunk
+            #      and the start of this one).
+            #   3. Write the chunk at the cursor position.
+            #   4. Advance the cursor by the chunk's sample count so the NEXT
+            #      chunk of the same burst is placed contiguously after this one.
+            chunk_samples = len(pcm16) // 2
+            wall_pos = int(
+                (time.monotonic() - session.recording_start_time)
+                * self._sample_rate
+            )
+            if wall_pos > session.agent_rec_cursor:
+                session.agent_rec_cursor = wall_pos
+
+            session.tts_recording_buffer.append(
+                (session.agent_rec_cursor, pcm16)
+            )
+            session.agent_rec_cursor += chunk_samples
             
             logger.debug(f"[TelephonyGW] Converted to {len(pcmu)} bytes PCMU")
         except Exception as exc:
@@ -317,6 +364,13 @@ class TelephonyMediaGateway(MediaGateway):
             except Exception as exc:
                 logger.warning(f"[TelephonyGW] flush_tts_buffer failed for {call_id[:12]}: {exc}")
 
+    async def clear_output_buffer(self, call_id: str) -> None:
+        """Drop buffered telephony output immediately after barge-in."""
+        session = self._sessions.get(call_id)
+        if not session or not session.is_active:
+            return
+        session.tts_buffer = b""
+
     # ------------------------------------------------------------------
     # Recording buffer (required by MediaGateway interface)
     # ------------------------------------------------------------------
@@ -325,7 +379,13 @@ class TelephonyMediaGateway(MediaGateway):
         session = self._sessions.get(call_id)
         return session.recording_buffer if session else None
 
+    def get_tts_recording_buffer(self, call_id: str):
+        """Return the TTS (agent side) recording buffer."""
+        session = self._sessions.get(call_id)
+        return session.tts_recording_buffer if session else None
+
     def clear_recording_buffer(self, call_id: str) -> None:
         session = self._sessions.get(call_id)
         if session:
             session.recording_buffer.clear()
+            session.tts_recording_buffer.clear()

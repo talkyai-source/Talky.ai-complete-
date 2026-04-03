@@ -1,10 +1,10 @@
 """
 Audit Logger Service - Comprehensive audit logging with tamper-evident properties
 """
+import os
 import hashlib
 import hmac
 import json
-import secrets
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Optional
@@ -220,7 +220,19 @@ class AuditLogger:
         flush_interval_seconds: int = 5
     ):
         self.db_pool = db_pool
-        self.signing_key = signing_key or secrets.token_hex(32)
+        resolved_signing_key = (
+            signing_key
+            or os.getenv("AUDIT_LOG_SIGNING_KEY")
+            or os.getenv("APP_AUDIT_LOG_SIGNING_KEY")
+            or os.getenv("JWT_SECRET")
+            or os.getenv("SECRET_KEY")
+        )
+        environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+        if not resolved_signing_key:
+            if environment == "production":
+                raise RuntimeError("AUDIT_LOG_SIGNING_KEY must be configured in production")
+            resolved_signing_key = "development-audit-log-signing-key"
+        self.signing_key = resolved_signing_key
         self.batch_size = batch_size
         self.flush_interval_seconds = flush_interval_seconds
         self._batch: list[dict] = []

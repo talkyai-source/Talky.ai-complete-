@@ -180,7 +180,7 @@ async def list_connectors(
                 account_email = acc_response.data[0].get("account_email")
         
         connectors.append(ConnectorResponse(
-            id=conn["id"],
+            id=str(conn["id"]),
             type=conn["type"],
             provider=conn["provider"],
             name=conn.get("name"),
@@ -219,7 +219,7 @@ async def get_connector(
             account_email = acc_response.data[0].get("account_email")
     
     return ConnectorResponse(
-        id=conn["id"],
+        id=str(conn["id"]),
         type=conn["type"],
         provider=conn["provider"],
         name=conn.get("name"),

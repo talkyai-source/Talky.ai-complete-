@@ -1,3 +1,5 @@
+sk_f7e9b6a6c681a97ca11af5949e7ab37c8153431070a6b155 (elen labs)
+
 # Screenshots Directory
 
 This folder contains screenshots for the Admin Panel documentation.

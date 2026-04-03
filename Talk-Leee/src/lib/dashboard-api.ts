@@ -110,11 +110,15 @@ class DashboardApi {
     }
 
     async createCampaign(data: CampaignCreate): Promise<{ campaign: Campaign }> {
-        return this.client.request({
+        const response = await this.client.request<{ campaign: Campaign | null }>({
             path: "/campaigns",
             method: "POST",
             body: data,
         });
+        if (!response.campaign?.id) {
+            throw new Error("Campaign creation failed. The backend did not return a created campaign.");
+        }
+        return { campaign: response.campaign };
     }
 
     async startCampaign(id: string): Promise<{ message: string; jobs_enqueued: number }> {

@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field
 
 from app.domain.interfaces.call_control_adapter import CallControlAdapter
 from app.infrastructure.telephony.adapter_factory import CallControlAdapterFactory
-from app.domain.services.call_guard import CallGuard, GuardDecision
+from app.domain.services.call_guard import CallGuard, GuardDecision, GuardResult
 from app.domain.services.abuse_detection import AbuseDetectionService
 
 logger = logging.getLogger(__name__)
@@ -145,6 +145,29 @@ Start the conversation by introducing yourself and asking how you can help."""
 # Audio pipeline lifecycle (called when a new call arrives on any B2BUA)
 # ---------------------------------------------------------------------------
 
+async def _send_outbound_greeting(voice_session) -> None:
+    """
+    Send the AI's opening line after an outbound call is answered.
+
+    We wait 1 second so the Deepgram WebSocket has time to connect and the
+    media gateway session is fully ready before audio starts flowing.
+    """
+    await asyncio.sleep(1.0)
+    try:
+        greeting = (
+            "Hello! This is an AI assistant calling on behalf of our team. "
+            "How are you doing today?"
+        )
+        logger.info(f"Sending outbound greeting for call {voice_session.call_id[:12]}")
+        await voice_session.pipeline.synthesize_and_send_audio(
+            voice_session.call_session,
+            greeting,
+            websocket=None,
+        )
+    except Exception as exc:
+        logger.warning(f"Outbound greeting failed for {voice_session.call_id[:12]}: {exc}")
+
+
 async def _on_new_call(call_id: str) -> None:
     """Initialize AI pipeline when a new SIP call arrives."""
     logger.info(f"Telephony bridge: new call {call_id[:12]}")
@@ -176,15 +199,17 @@ async def _on_new_call(call_id: str) -> None:
                 {"adapter": _adapter, "pbx_call_id": call_id},
             )
 
-            # Start the voice pipeline - this handles everything naturally:
-            # 1. STT listens for user speech
-            # 2. LLM processes and responds (including initial greeting if user speaks first)
-            # 3. TTS sends audio back
-            # 4. Full conversational flow
+            # Start the voice pipeline (STT → LLM → TTS loop).
             voice_session.pipeline_task = asyncio.create_task(
                 voice_session.pipeline.start_pipeline(voice_session.call_session, None)
             )
             logger.info(f"Voice pipeline started for {call_id[:12]}")
+
+            # For outbound (campaign) calls the AI is the caller, so it must
+            # speak first.  Wait briefly for Deepgram to connect, then send the
+            # opening line.  synthesize_and_send_audio routes directly through
+            # TelephonyMediaGateway → C++ gateway → callee — no WebSocket needed.
+            asyncio.create_task(_send_outbound_greeting(voice_session))
 
         # Tell the adapter to start streaming audio.
         # For Asterisk this is a no-op (audio_callback_url handles it via C++ gateway).
@@ -216,6 +241,12 @@ async def _on_call_ended(call_id: str) -> None:
     logger.info(f"Telephony bridge: call ended {call_id[:12]}")
     voice_session = _telephony_sessions.pop(call_id, None)
     if voice_session:
+        # --- Save recording BEFORE session teardown ---
+        try:
+            await _save_call_recording(voice_session, call_id)
+        except Exception as rec_err:
+            logger.warning(f"Recording save failed for {call_id[:12]}: {rec_err}")
+
         try:
             await _get_orchestrator().end_session(voice_session)
         except Exception:
@@ -224,6 +255,141 @@ async def _on_call_ended(call_id: str) -> None:
     keys_to_remove = [k for k, v in _gateway_session_to_call_id.items() if v == call_id]
     for k in keys_to_remove:
         _gateway_session_to_call_id.pop(k, None)
+
+
+async def _save_call_recording(voice_session, call_id: str) -> None:
+    """
+    Extract the recording buffer from the media gateway, convert to WAV,
+    and persist to local storage + DB.
+
+    Must be called BEFORE end_session() destroys the gateway session.
+
+    Parameters
+    ----------
+    voice_session : VoiceSession
+        The active voice session (still holds providers / gateway).
+    call_id : str
+        The PBX channel_id (key in _telephony_sessions).  This is NOT the
+        same as calls.id — we must look up the internal UUID from
+        calls.external_call_uuid.
+    """
+    from app.domain.services.recording_service import RecordingService, RecordingBuffer, mix_stereo_recording
+    from app.core.container import get_container
+
+    gateway = voice_session.media_gateway
+    if not gateway:
+        return
+
+    caller_chunks = gateway.get_recording_buffer(voice_session.call_id)
+    agent_chunks = getattr(gateway, "get_tts_recording_buffer", lambda _: None)(voice_session.call_id)
+
+    if not caller_chunks and not agent_chunks:
+        logger.debug(f"No recording data for {call_id[:12]}")
+        return
+
+    # Mix caller (left) + agent (right) into a stereo WAV
+    wav_bytes = mix_stereo_recording(
+        caller_chunks=caller_chunks or [],
+        agent_chunks=agent_chunks or [],
+        sample_rate=8000,
+    )
+
+    # Calculate duration from caller side (continuous timeline reference)
+    caller_bytes = sum(len(c) for c in (caller_chunks or []))
+    agent_bytes = sum(len(chunk) for _, chunk in (agent_chunks or []))
+    bytes_per_sec = 8000 * 2  # 8kHz, 16-bit mono (per channel)
+    duration = caller_bytes / bytes_per_sec if bytes_per_sec else 0.0
+
+    if duration < 0.5:
+        logger.debug(f"Recording too short ({duration:.1f}s) for {call_id[:12]}, skipping")
+        return
+
+    logger.info(
+        f"Saving stereo recording for {call_id[:12]}: {duration:.1f}s, "
+        f"caller={caller_bytes}B, agent={agent_bytes}B, wav={len(wav_bytes)}B"
+    )
+
+    # Build a RecordingBuffer to carry the pre-mixed WAV through the save pipeline
+    buf = RecordingBuffer(
+        call_id=call_id,
+        sample_rate=8000,
+        channels=2,        # stereo
+        bit_depth=16,
+    )
+    buf._wav_bytes_override = wav_bytes  # pre-mixed WAV, skip re-encoding
+    buf.total_bytes = len(wav_bytes)
+
+    container = get_container()
+    if not container.is_initialized:
+        logger.warning("Cannot save recording: container not initialized")
+        return
+
+    db_client = container.db_client
+    recording_svc = RecordingService(db_client)
+
+    # --- Resolve the internal calls.id from the PBX channel_id ----------
+    # The dialer worker stores the PBX channel_id as external_call_uuid.
+    internal_call_id = None
+    tenant_id = "default"
+    campaign_id = "unknown"
+
+    try:
+        result = (
+            db_client.table("calls")
+            .select("id, tenant_id, campaign_id")
+            .eq("external_call_uuid", call_id)
+            .limit(1)
+            .execute()
+        )
+        if result.data:
+            row = result.data[0] if isinstance(result.data, list) else result.data
+            internal_call_id = str(row.get("id"))
+            tenant_id = str(row.get("tenant_id") or "default")
+            campaign_id = str(row.get("campaign_id") or "unknown")
+            logger.info(
+                f"Resolved PBX channel {call_id[:12]} → calls.id={internal_call_id}, "
+                f"tenant={tenant_id[:8]}, campaign={campaign_id[:8]}"
+            )
+    except Exception as lookup_err:
+        logger.warning(f"Failed to look up calls record for {call_id[:12]}: {lookup_err}")
+
+    # If we couldn't resolve the internal_call_id, save the file to disk
+    # anyway but skip the DB operations (FK would fail).
+    if not internal_call_id:
+        logger.warning(
+            f"No calls record found for channel {call_id[:12]}. "
+            "Saving WAV to disk only (no DB recording entry)."
+        )
+        # Still save the WAV file to local storage for manual recovery
+        try:
+            storage_path = await recording_svc.save_recording(
+                call_id=call_id,
+                buffer=buf,
+                tenant_id=tenant_id,
+                campaign_id=campaign_id,
+            )
+            if storage_path:
+                logger.info(f"WAV saved to disk: {storage_path}")
+        except Exception as save_err:
+            logger.warning(f"WAV save to disk failed: {save_err}")
+        gateway.clear_recording_buffer(voice_session.call_id)
+        return
+
+    # --- Full save: file + DB record + call update ----------------------
+    recording_id = await recording_svc.save_and_link(
+        call_id=internal_call_id,
+        buffer=buf,
+        tenant_id=tenant_id,
+        campaign_id=campaign_id,
+    )
+
+    if recording_id:
+        logger.info(f"Recording saved: {recording_id} for call {internal_call_id}")
+    else:
+        logger.warning(f"Recording save_and_link returned None for {call_id[:12]}")
+
+    # Free memory
+    gateway.clear_recording_buffer(voice_session.call_id)
 
 
 
@@ -393,6 +559,13 @@ async def make_call(
     if not effective_tenant_id:
         raise HTTPException(status_code=400, detail="Tenant ID required")
 
+    environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+    allow_dev_guard_bypass = (
+        environment != "production"
+        and os.getenv("TELEPHONY_DEV_BYPASS_GUARD_ERRORS", "true").strip().lower()
+        not in {"0", "false", "no"}
+    )
+
     # Initialize CallGuard
     from app.core.container import get_container
     container = get_container()
@@ -409,6 +582,36 @@ async def make_call(
         campaign_id=campaign_id,
         call_type="outbound",
     )
+
+    failed_reasons = [
+        check.reason for check in guard_result.check_results if not check.passed and check.reason
+    ]
+    bypassable_guard_error = (
+        guard_result.decision == GuardDecision.BLOCK
+        and bool(failed_reasons)
+        and all(
+            reason == "configuration_load_error" or reason.startswith("check_error:")
+            for reason in failed_reasons
+        )
+    )
+    if allow_dev_guard_bypass and bypassable_guard_error:
+        logger.warning(
+            "Bypassing CallGuard block in %s due to local guard configuration/schema errors: "
+            "tenant=%s dest=%s reasons=%s",
+            environment,
+            effective_tenant_id,
+            destination,
+            failed_reasons,
+        )
+        guard_result = GuardResult(
+            decision=GuardDecision.ALLOW,
+            tenant_id=guard_result.tenant_id,
+            phone_number=guard_result.phone_number,
+            check_results=guard_result.check_results,
+            failed_checks=[],
+            total_latency_ms=guard_result.total_latency_ms,
+            call_id=guard_result.call_id,
+        )
 
     # Handle guard decisions
     if guard_result.decision == GuardDecision.BLOCK:

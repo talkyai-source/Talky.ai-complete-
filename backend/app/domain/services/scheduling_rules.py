@@ -4,7 +4,7 @@ Determines if a call can be made based on tenant rules
 """
 import logging
 from typing import Tuple, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.domain.models.calling_rules import CallingRules
 
@@ -60,7 +60,11 @@ class SchedulingRuleEngine:
         
         # Rule 3: Lead cooldown check
         if lead_last_called:
-            hours_since_last_call = (datetime.utcnow() - lead_last_called).total_seconds() / 3600
+            now = datetime.now(timezone.utc)
+            # Normalize to aware datetime if the DB value is naive
+            if lead_last_called.tzinfo is None:
+                lead_last_called = lead_last_called.replace(tzinfo=timezone.utc)
+            hours_since_last_call = (now - lead_last_called).total_seconds() / 3600
             if hours_since_last_call < rules.min_hours_between_calls:
                 reason = f"lead_cooldown_{hours_since_last_call:.1f}h_of_{rules.min_hours_between_calls}h"
                 logger.debug(f"Lead cooldown active: {reason}")
@@ -110,7 +114,7 @@ class SchedulingRuleEngine:
             return 0
         
         next_window = rules.get_next_window_start()
-        delay = (next_window - datetime.now()).total_seconds()
+        delay = (next_window - datetime.now(timezone.utc)).total_seconds()
         return max(0, int(delay))
     
     def reset(self) -> None:

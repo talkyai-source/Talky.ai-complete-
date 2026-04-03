@@ -25,6 +25,7 @@ Integration:
 
 from __future__ import annotations
 
+import os
 import logging
 from typing import Optional
 
@@ -32,6 +33,7 @@ from fastapi import Request, status
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
+from app.core.config import get_settings
 from app.core.container import get_db_pool_from_container
 from app.core.security.device_fingerprint import generate_device_fingerprint
 from app.core.security.sessions import (
@@ -42,6 +44,13 @@ from app.core.security.sessions import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _session_cookie_secure() -> bool:
+    override = os.getenv("SESSION_COOKIE_SECURE", "").strip().lower()
+    if override:
+        return override in {"1", "true", "yes", "on"}
+    return get_settings().environment.lower() == "production"
 
 # Paths that are exempt from session binding checks
 _PUBLIC_PATHS = {
@@ -112,7 +121,7 @@ class SessionSecurityMiddleware(BaseHTTPMiddleware):
                     response.delete_cookie(
                         key=SESSION_COOKIE_NAME,
                         httponly=True,
-                        secure=True,
+                        secure=_session_cookie_secure(),
                         samesite="strict",
                         path="/",
                     )
@@ -130,6 +139,7 @@ class SessionSecurityMiddleware(BaseHTTPMiddleware):
 
                 # Store session info in request state for endpoints
                 request.state.session_id = session.get("id")
+                request.state.session_user_id = session.get("user_id")
                 request.state.session_is_suspicious = session.get("is_suspicious")
                 request.state.session_device_name = session.get("device_name")
 

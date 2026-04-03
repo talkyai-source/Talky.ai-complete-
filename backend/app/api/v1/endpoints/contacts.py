@@ -70,25 +70,28 @@ def normalize_phone_number(phone: str) -> str:
     
     if not cleaned:
         raise ValueError("Phone number contains no digits")
-    
-    if len(cleaned) < 7:
-        raise ValueError("Phone number too short (minimum 7 digits)")
-    
+
+    # Allow short SIP extensions (3–6 digits) to pass through as-is
+    if len(cleaned) <= 6:
+        if len(cleaned) < 3:
+            raise ValueError("Phone number too short (minimum 3 digits for SIP extensions)")
+        return cleaned  # Return raw SIP extension — no E.164 normalization
+
     if len(cleaned) > 15:
         raise ValueError("Phone number too long (maximum 15 digits)")
-    
+
     # If already has + and country code, use as-is
     if has_plus:
         return f"+{cleaned}"
-    
+
     # If 10 digits (US/Canada without country code), add +1
     if len(cleaned) == 10:
         return f"+1{cleaned}"
-    
+
     # If 11 digits starting with 1 (US/Canada with country code), add +
     if len(cleaned) == 11 and cleaned.startswith('1'):
         return f"+{cleaned}"
-    
+
     # Otherwise, return with + prefix
     return f"+{cleaned}"
 

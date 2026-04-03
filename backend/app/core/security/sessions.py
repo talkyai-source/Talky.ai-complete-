@@ -141,7 +141,8 @@ async def create_session(
     bind_to_ip: bool = True,
     bind_to_fingerprint: bool = True,
     device_fingerprint: Optional[str] = None,
-) -> str:
+    return_session_id: bool = False,
+) -> str | tuple[str, str]:
     """
     Persist a new server-side session and return the raw session token.
 
@@ -178,9 +179,10 @@ async def create_session(
 
     Returns
     -------
-    str
-        The raw, unencoded session token.  Hand this to the client; do
-        NOT log or store it yourself.
+    str | tuple[str, str]
+        The raw, unencoded session token. When ``return_session_id=True``,
+        returns ``(raw_token, session_id)`` so callers can bind downstream
+        access tokens to the revocable server-side session.
     """
     raw_token = generate_session_token()
     token_hash = _hash_token(raw_token)
@@ -202,7 +204,7 @@ async def create_session(
     # Day 5: Get next session number for this user
     session_number = await _get_next_session_number(conn, user_id)
 
-    await conn.execute(
+    row = await conn.fetchrow(
         """
         INSERT INTO security_sessions
             (user_id, session_token_hash, ip_address, user_agent,
@@ -210,6 +212,7 @@ async def create_session(
              bound_ip, ip_binding_enforced, fingerprint_binding_enforced,
              session_number, created_at, last_active_at, expires_at, revoked)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14, $15, FALSE)
+        RETURNING id
         """,
         user_id,
         token_hash,
@@ -236,6 +239,8 @@ async def create_session(
         device_info["browser"],
         expires_at.isoformat(),
     )
+    if return_session_id:
+        return raw_token, str(row["id"])
     return raw_token
 
 
@@ -773,6 +778,40 @@ async def get_session_security_status(
         status["recommendations"].append("Re-login to enable device fingerprinting")
 
     return status
+
+
+async def get_session_by_id(
+    conn: asyncpg.Connection,
+    session_id: str,
+    *,
+    user_id: Optional[str] = None,
+) -> Optional[dict]:
+    """
+    Return an active session by its primary key.
+
+    Used to bind bearer tokens to a revocable server-side session record.
+    """
+    now = _now_utc()
+    params: list[object] = [session_id, now]
+    conditions = [
+        "id = $1",
+        "revoked = FALSE",
+        "expires_at > $2",
+    ]
+    if user_id:
+        params.append(user_id)
+        conditions.append(f"user_id = ${len(params)}")
+
+    row = await conn.fetchrow(
+        f"""
+        SELECT id, user_id, created_at, last_active_at, expires_at,
+               mfa_verified, revoked, requires_verification
+        FROM   security_sessions
+        WHERE  {' AND '.join(conditions)}
+        """,
+        *params,
+    )
+    return dict(row) if row else None
 
 
 # =============================================================================

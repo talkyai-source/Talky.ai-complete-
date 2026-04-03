@@ -2,8 +2,6 @@
 
 import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode, useCallback } from "react";
 import { api } from "@/lib/api";
-import { getBrowserAuthToken } from "@/lib/auth-token";
-
 interface MeResponse {
     id: string;
     email: string;
@@ -31,12 +29,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // On mount, check for existing token and fetch user profile
     useEffect(() => {
-        const token = getBrowserAuthToken();
-        if (!token) {
-            setLoading(false);
-            return;
-        }
-        // Attempt to load real profile from backend
         api.getMe()
             .then((me) => setUser(me))
             .catch(() => {
@@ -103,11 +95,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const refreshUser = useCallback(async () => {
         setLoading(true);
         try {
-            const token = getBrowserAuthToken();
-            if (!token) {
-                setUser(null);
-                return;
-            }
             const me = await api.getMe();
             setUser(me);
         } catch {

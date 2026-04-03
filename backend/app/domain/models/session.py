@@ -106,6 +106,11 @@ class CallSession(BaseModel):
     audio_input_buffer: Optional[Any] = Field(None, exclude=True, description="Audio input queue")
     audio_output_buffer: Optional[Any] = Field(None, exclude=True, description="Audio output queue")
     transcript_buffer: Optional[Any] = Field(None, exclude=True, description="Transcript queue")
+    barge_in_event: Optional[Any] = Field(
+        None,
+        exclude=True,
+        description="Shared interruption event for greeting and reply playback",
+    )
     
     # Pydantic v2 config
     model_config = ConfigDict(
@@ -119,7 +124,13 @@ class CallSession(BaseModel):
         Excludes runtime-only fields (websocket, queues)
         """
         return self.model_dump(
-            exclude={'websocket', 'audio_input_buffer', 'audio_output_buffer', 'transcript_buffer'},
+            exclude={
+                'websocket',
+                'audio_input_buffer',
+                'audio_output_buffer',
+                'transcript_buffer',
+                'barge_in_event',
+            },
             mode='json'
         )
     
@@ -156,6 +167,7 @@ class CallSession(BaseModel):
         session.audio_input_buffer = asyncio.Queue(maxsize=100)
         session.audio_output_buffer = asyncio.Queue(maxsize=100)
         session.transcript_buffer = asyncio.Queue(maxsize=50)
+        session.barge_in_event = asyncio.Event()
         
         return session
     

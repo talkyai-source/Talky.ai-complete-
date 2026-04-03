@@ -44,7 +44,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -325,7 +325,7 @@ async def register_complete(
 @limiter.limit("10/minute")
 async def login_begin(
     request: Request,
-    body: LoginBeginRequest,
+    body: LoginBeginRequest = Body(default_factory=LoginBeginRequest),
     db_client: Client = Depends(get_db_client),
 ) -> LoginBeginResponse:
     """
@@ -398,7 +398,7 @@ async def login_begin(
 async def login_complete(
     request: Request,
     response: Response,
-    body: LoginCompleteRequest,
+    body: LoginCompleteRequest = Body(...),
     db_client: Client = Depends(get_db_client),
 ) -> LoginCompleteResponse:
     """
@@ -535,11 +535,13 @@ async def login_complete(
         )
 
         # Create session
-        raw_session_token = await create_session(
+        raw_session_token, session_id = await create_session(
             conn,
             user_id=user_id,
             ip_address=ip,
             user_agent=ua,
+            request=request,
+            return_session_id=True,
         )
 
         # Build JWT
@@ -549,6 +551,7 @@ async def login_complete(
             email=user_row["email"],
             role=user_row["role"],
             tenant_id=tenant_id,
+            session_id=session_id,
         )
 
     # Set session cookie

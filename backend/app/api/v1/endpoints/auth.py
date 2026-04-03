@@ -41,8 +41,7 @@ Endpoints:
   POST /auth/change-password   — change password + revoke all other sessions
 """
 
-from __future__ import annotations
-
+import os
 import logging
 import uuid
 from typing import Any, Optional
@@ -53,6 +52,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
+from app.core.config import get_settings
 from app.core.jwt_security import encode_access_token
 from app.core.postgres_adapter import Client
 from app.core.security.lockout import (
@@ -182,6 +182,7 @@ def _create_jwt(
     email: str,
     role: str,
     tenant_id: Optional[str],
+    session_id: Optional[str] = None,
 ) -> str:
     """Create a signed JWT access token."""
     try:
@@ -190,6 +191,7 @@ def _create_jwt(
             email=email,
             role=role,
             tenant_id=tenant_id,
+            session_id=session_id,
         )
     except Exception as exc:
         logger.error("JWT creation failed: %s", exc)
@@ -197,6 +199,13 @@ def _create_jwt(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Server authentication is not configured.",
         ) from exc
+
+
+def _session_cookie_secure() -> bool:
+    override = _normalize_optional_text(os.environ.get("SESSION_COOKIE_SECURE"))
+    if override is not None:
+        return override.lower() in {"1", "true", "yes", "on"}
+    return get_settings().environment.lower() == "production"
 
 
 def _set_session_cookie(response: Response, raw_token: str) -> None:
@@ -215,7 +224,7 @@ def _set_session_cookie(response: Response, raw_token: str) -> None:
         key=SESSION_COOKIE_NAME,
         value=raw_token,
         httponly=True,
-        secure=True,
+        secure=_session_cookie_secure(),
         samesite="strict",
         max_age=_COOKIE_MAX_AGE,
         path="/",
@@ -227,7 +236,7 @@ def _clear_session_cookie(response: Response) -> None:
     response.delete_cookie(
         key=SESSION_COOKIE_NAME,
         httponly=True,
-        secure=True,
+        secure=_session_cookie_secure(),
         samesite="strict",
         path="/",
     )
@@ -331,7 +340,7 @@ async def register(
         # Day 5: Pass request for device fingerprinting
         ip = _get_client_ip(request)
         ua = _get_user_agent(request)
-        raw_session_token = await create_session(
+        raw_session_token, session_id = await create_session(
             conn,
             user_id=user_id,
             ip_address=ip,
@@ -339,10 +348,11 @@ async def register(
             request=request,
             bind_to_ip=True,
             bind_to_fingerprint=True,
+            return_session_id=True,
         )
 
     # --- issue JWT + set cookie ------------------------------------------------
-    token = _create_jwt(user_id, body.email, "owner", str(tenant["id"]))
+    token = _create_jwt(user_id, body.email, "owner", str(tenant["id"]), session_id)
     _set_session_cookie(response, raw_session_token)
 
     return AuthTokenResponse(
@@ -532,7 +542,7 @@ async def login(
 
         # --- create new server-side session (OWASP: rotate on login) ----------
         # Day 5: Pass request for device fingerprinting
-        raw_session_token = await create_session(
+        raw_session_token, session_id = await create_session(
             conn,
             user_id=user_id,
             ip_address=ip,
@@ -540,6 +550,7 @@ async def login(
             request=request,
             bind_to_ip=True,
             bind_to_fingerprint=True,
+            return_session_id=True,
         )
 
     # --- build response --------------------------------------------------------
@@ -548,7 +559,7 @@ async def login(
         (row["minutes_allocated"] or 0) - (row["minutes_used"] or 0),
     )
     tenant_id = str(row["tenant_id"]) if row["tenant_id"] else None
-    token = _create_jwt(user_id, row["email"], row["role"], tenant_id)
+    token = _create_jwt(user_id, row["email"], row["role"], tenant_id, session_id)
 
     _set_session_cookie(response, raw_session_token)
 

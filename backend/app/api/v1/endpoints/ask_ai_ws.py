@@ -9,6 +9,7 @@ Sample Rate: 24000 Hz (Deepgram recommended for streaming TTS)
 
 Day 41: Refactored to use VoiceOrchestrator for lifecycle management.
 """
+
 import json
 import asyncio
 import logging
@@ -16,165 +17,11 @@ from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.domain.models.agent_config import AgentConfig, AgentGoal, ConversationFlow, ConversationRule
-from app.domain.services.voice_orchestrator import VoiceSessionConfig
+from app.domain.services.ask_ai_session_config import build_ask_ai_session_config
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Ask AI"])
-
-# Fixed configuration for Ask AI - using Deepgram TTS (Google commented out for switching)
-# Deepgram best practices:
-# - Voice: Andromeda (aura-2-andromeda-en) - Casual, Expressive, Comfortable for customer service
-# - Sample rate: 24000 Hz (Deepgram streaming default for best quality)
-# - Text chunking: Enabled at sentence boundaries for natural speech
-ASK_AI_CONFIG = {
-    # Deepgram Aura-2 Andromeda voice - optimized for customer service/IVR
-    # Voice characteristics: Casual, Expressive, Comfortable
-    "voice_id": "aura-2-andromeda-en",
-    "sample_rate": 24000,  # Deepgram recommended for streaming TTS (best quality)
-    "model_id": "aura-2",
-    # LLM settings — use gpt-oss-120b for accurate responses
-    "llm_model": "openai/gpt-oss-120b",
-    "llm_temperature": 0.6,
-    "llm_max_tokens": 150
-}
-
-# GOOGLE TTS CONFIGURATION (commented out - for switching back if needed)
-# ASK_AI_CONFIG_GOOGLE = {
-#     # Google Chirp3-HD Leda voice - professional female
-#     "voice_id": "en-US-Chirp3-HD-Leda",
-#     "sample_rate": 16000,  # Standard 16kHz for voice (lower latency, compatible with WebRTC)
-#     "model_id": "Chirp3-HD",
-#     # LLM settings — use gpt-oss-120b for accurate responses
-#     "llm_model": "openai/gpt-oss-120b",
-#     "llm_temperature": 0.6,
-#     "llm_max_tokens": 150
-# }
-
-# Talky.ai Product Information for the assistant
-TALKY_PRODUCT_INFO = """
-## About Talky.ai
-
-Talky.ai is a voice AI platform that lets businesses automate phone calls with natural-sounding agents. Think of it as hiring a tireless team member who can call hundreds of customers while sounding genuinely human.
-
-### Core Features
-- Automated outbound calling — follow-ups, reminders, surveys
-- Natural voice conversations — not robotic IVR menus
-- Smart lead qualification and appointment booking
-- Real-time analytics dashboard
-- Works with your existing CRM and tools
-
-### Packages
-
-**Basic — $29/month**
-- 300 call minutes, 1 AI agent, basic analytics
-
-**Professional — $79/month** (most popular)
-- 1,500 call minutes, 3 AI agents, advanced analytics, custom voices
-
-**Enterprise — $199/month**
-- 5,000 call minutes, 10 AI agents, full suite, API access
-
-### Why Businesses Love Talky
-- Sounds natural, not robotic
-- Available around the clock
-- Setup takes minutes, not weeks
-- Scales with your business
-"""
-
-ASK_AI_SYSTEM_PROMPT = f"""You are a friendly voice assistant for Talky.ai.
-
-Your personality: friendly, warm, and helpful. You're genuinely curious and positive.
-
-{TALKY_PRODUCT_INFO}
-
-## Important Guidelines
-- Keep responses short and spoken naturally
-- Use plain spoken sentences only - no markdown, no bullets, no headings, no XML or HTML tags
-- Usually answer in 1 to 2 sentences, but if asked about pricing, plans, or packages you may use up to 4 short sentences so all tiers are covered
-- Sound natural and conversational, like talking to a friend
-- Never say you are an "AI" or mention technology
-- If interrupted, stop and listen immediately
-- Answer questions about Talky naturally
-- If you don't know something, offer to have someone follow up
-- Be genuinely helpful and curious about what the user needs"""
-
-
-def _create_ask_ai_agent_config() -> AgentConfig:
-    """Create agent config optimized for Ask AI."""
-    return AgentConfig(
-        agent_name="Assistant",
-        company_name="Talky.ai",
-        business_type="Voice AI Platform",
-        goal=AgentGoal.INFORMATION_GATHERING,
-        tone="friendly, warm, and helpful",
-        flow=ConversationFlow(max_objection_attempts=3),
-        rules=ConversationRule(
-            do_not_say_rules=[
-                "Keep responses brief - 1 to 2 sentences",
-                "Be helpful and natural",
-                "Never mention technical terms or that you are an AI",
-                "Never use markdown, bullet lists, headings, or XML tags in spoken replies"
-            ]
-        ),
-        max_conversation_turns=20,
-        response_max_sentences=2
-    )
-
-
-def _build_session_config() -> VoiceSessionConfig:
-    """Build a VoiceSessionConfig for the Ask AI endpoint."""
-    return VoiceSessionConfig(
-        stt_provider_type="deepgram_flux",
-        llm_provider_type="groq",
-        # TTS Provider: "deepgram" or "google" (switch here)
-        tts_provider_type="deepgram",
-        stt_model="flux-general-en",
-        stt_sample_rate=16000,
-        stt_encoding="linear16",
-        stt_eot_threshold=0.7,
-        stt_eager_eot_threshold=None,  # EndOfTurn-only mode for reliability
-        stt_eot_timeout_ms=5000,
-        llm_model=ASK_AI_CONFIG["llm_model"],
-        llm_temperature=ASK_AI_CONFIG["llm_temperature"],
-        llm_max_tokens=ASK_AI_CONFIG["llm_max_tokens"],
-        voice_id=ASK_AI_CONFIG["voice_id"],
-        tts_sample_rate=ASK_AI_CONFIG["sample_rate"],
-        gateway_sample_rate=ASK_AI_CONFIG["sample_rate"],
-        gateway_channels=1,
-        gateway_bit_depth=16,
-        session_type="ask_ai",
-        agent_config=_create_ask_ai_agent_config(),
-        system_prompt=ASK_AI_SYSTEM_PROMPT,
-        campaign_id="ask-ai",
-        lead_id="demo-user",
-    )
-
-# GOOGLE TTS SESSION CONFIG (commented out - for switching back if needed)
-# def _build_session_config_google() -> VoiceSessionConfig:
-#     """Build a VoiceSessionConfig using Google TTS."""
-#     return VoiceSessionConfig(
-#         stt_provider_type="deepgram_flux",
-#         llm_provider_type="groq",
-#         tts_provider_type="google",
-#         stt_model="flux-general-en",
-#         stt_sample_rate=16000,
-#         stt_encoding="linear16",
-#         llm_model=ASK_AI_CONFIG_GOOGLE["llm_model"],
-#         llm_temperature=ASK_AI_CONFIG_GOOGLE["llm_temperature"],
-#         llm_max_tokens=ASK_AI_CONFIG_GOOGLE["llm_max_tokens"],
-#         voice_id=ASK_AI_CONFIG_GOOGLE["voice_id"],
-#         tts_sample_rate=ASK_AI_CONFIG_GOOGLE["sample_rate"],
-#         gateway_sample_rate=ASK_AI_CONFIG_GOOGLE["sample_rate"],
-#         gateway_channels=1,
-#         gateway_bit_depth=16,
-#         session_type="ask_ai",
-#         agent_config=_create_ask_ai_agent_config(),
-#         system_prompt=ASK_AI_SYSTEM_PROMPT,
-#         campaign_id="ask-ai",
-#         lead_id="demo-user",
-#     )
 
 
 @router.websocket("/ws/ask-ai/{session_id}")
@@ -190,27 +37,29 @@ async def ask_ai_websocket(websocket: WebSocket, session_id: str):
 
     # Get orchestrator from DI container
     from app.core.container import get_container
+
     container = get_container()
 
     voice_session = None
-    barge_in_event = asyncio.Event()
     receiver_task: Optional[asyncio.Task] = None
 
     try:
         orchestrator = container.voice_orchestrator
 
         # 1. Create session via orchestrator
-        config = _build_session_config()
+        config = build_ask_ai_session_config()
         voice_session = await orchestrator.create_voice_session(config)
 
         # 2. Send ready message
-        await websocket.send_json({
-            "type": "ready",
-            "session_id": session_id,
-            "call_id": voice_session.call_id,
-            "sample_rate": ASK_AI_CONFIG["sample_rate"],
-            "audio_format": "s16le",
-        })
+        await websocket.send_json(
+            {
+                "type": "ready",
+                "session_id": session_id,
+                "call_id": voice_session.call_id,
+                "sample_rate": config.gateway_sample_rate,
+                "audio_format": "s16le",
+            }
+        )
 
         call_id = voice_session.call_id
         gateway = voice_session.media_gateway
@@ -257,7 +106,9 @@ async def ask_ai_websocket(websocket: WebSocket, session_id: str):
                         await gateway.on_call_ended(call_id, "user_ended")
                         break
                     if data.get("type") == "playback_complete":
-                        mark_playback_complete = getattr(gateway, "mark_playback_complete", None)
+                        mark_playback_complete = getattr(
+                            gateway, "mark_playback_complete", None
+                        )
                         if callable(mark_playback_complete):
                             mark_playback_complete(call_id)
                         continue
@@ -272,7 +123,9 @@ async def ask_ai_websocket(websocket: WebSocket, session_id: str):
                     break
                 except RuntimeError as e:
                     if "disconnect message has been received" in str(e):
-                        logger.info(f"Ask AI websocket closed after disconnect: {session_id}")
+                        logger.info(
+                            f"Ask AI websocket closed after disconnect: {session_id}"
+                        )
                         break
                     raise
 
@@ -283,16 +136,10 @@ async def ask_ai_websocket(websocket: WebSocket, session_id: str):
         receiver_task = asyncio.create_task(_receive_messages())
 
         # 5. Greeting (always play full intro before listening)
-        pcm_bytes_per_second = max(8000, int(ASK_AI_CONFIG["sample_rate"]) * 2)
-        greeting_first_chunk_bytes = max(1600, pcm_bytes_per_second // 10)   # ~100ms
-        greeting_regular_chunk_bytes = max(3200, pcm_bytes_per_second // 5)  # ~200ms
         await orchestrator.send_greeting(
             voice_session,
             "Hi there! How can I help you today?",
             websocket,
-            barge_in_event,
-            first_chunk_bytes=greeting_first_chunk_bytes,
-            regular_chunk_bytes=greeting_regular_chunk_bytes,
         )
 
         # 6. Keep endpoint alive until receiver exits (disconnect/end_call).

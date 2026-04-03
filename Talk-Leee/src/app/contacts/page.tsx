@@ -29,9 +29,7 @@ export default function ContactsPage() {
             setLoading(true);
             const data = await dashboardApi.listCampaigns();
             setCampaigns(data.campaigns);
-            if (data.campaigns.length > 0) {
-                setSelectedCampaign(data.campaigns[0].id);
-            }
+            setSelectedCampaign("");
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to load campaigns");
         } finally {
@@ -89,7 +87,11 @@ export default function ContactsPage() {
     }
 
     async function handleUpload() {
-        if (!file || !selectedCampaign) return;
+        if (!selectedCampaign) {
+            setError("Select a target campaign before uploading the CSV");
+            return;
+        }
+        if (!file) return;
 
         try {
             setUploading(true);
@@ -126,8 +128,11 @@ export default function ContactsPage() {
                             {/* Campaign Select */}
                             <div className="group rounded-2xl border border-border bg-muted/60 p-4 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:bg-background hover:shadow-md">
                                 <label className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
-                                    Target Campaign
+                                    Target Campaign Required
                                 </label>
+                                <p className="mt-2 text-xs text-muted-foreground">
+                                    The CSV does not carry campaign information. Contacts are imported into the campaign you choose here.
+                                </p>
                                 <Select
                                     value={selectedCampaign}
                                     onChange={(next) => setSelectedCampaign(next)}
@@ -137,12 +142,24 @@ export default function ContactsPage() {
                                     selectClassName="rounded-xl border border-border bg-background/70 px-3 py-2 text-sm font-semibold text-foreground shadow-sm outline-none transition-colors focus:border-border focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-60 h-auto hover:bg-background/80"
                                     disabled={uploading}
                                 >
+                                    <option value="" disabled>
+                                        Select a campaign
+                                    </option>
                                     {campaigns.map((campaign) => (
                                         <option key={campaign.id} value={campaign.id}>
                                             {campaign.name}
                                         </option>
                                     ))}
                                 </Select>
+                                {!campaigns.length ? (
+                                    <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                                        No campaigns found. Create a campaign first, then upload the CSV.
+                                    </p>
+                                ) : !selectedCampaign ? (
+                                    <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                                        Select the campaign that should receive these contacts.
+                                    </p>
+                                ) : null}
                             </div>
 
                             {/* File Upload */}
@@ -198,6 +215,9 @@ export default function ContactsPage() {
                                 </code>
                                 <p className="text-xs text-muted-foreground mt-2">
                                     Only phone_number is required. Phone numbers are automatically normalized.
+                                </p>
+                                <p className="text-xs text-muted-foreground mt-2">
+                                    The target campaign is selected separately above and is not read from the CSV file.
                                 </p>
                             </div>
 

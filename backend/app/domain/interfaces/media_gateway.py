@@ -98,6 +98,19 @@ class MediaGateway(ABC):
             audio_chunk: Raw PCM audio data to send
         """
         pass
+
+    @abstractmethod
+    async def clear_output_buffer(self, call_id: str) -> None:
+        """
+        Clear any queued outbound audio for a call.
+
+        Used on barge-in so already-buffered TTS does not keep playing after
+        the caller starts speaking.
+
+        Args:
+            call_id: Unique call identifier
+        """
+        pass
     
     @abstractmethod
     def get_audio_queue(self, call_id: str) -> Optional[asyncio.Queue]:
