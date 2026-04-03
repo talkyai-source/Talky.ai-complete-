@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 from typing import Optional, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 try:
     import redis.asyncio as redis
@@ -203,10 +203,10 @@ class DialerQueueService:
             # Update job for retry
             job.attempt_number += 1
             job.status = JobStatus.RETRY_SCHEDULED
-            job.scheduled_at = datetime.utcnow() + timedelta(seconds=delay_seconds)
+            job.scheduled_at = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
             
             # Calculate execution time as Unix timestamp
-            execute_at = datetime.utcnow().timestamp() + delay_seconds
+            execute_at = datetime.now(timezone.utc).timestamp() + delay_seconds
             
             job_data = json.dumps(job.to_redis_dict())
             await self._redis.zadd(self.SCHEDULED_ZSET, {job_data: execute_at})
@@ -237,7 +237,7 @@ class DialerQueueService:
             await self.initialize()
         
         try:
-            now = datetime.utcnow().timestamp()
+            now = datetime.now(timezone.utc).timestamp()
             
             # Get all jobs due for processing
             due_jobs = await self._redis.zrangebyscore(

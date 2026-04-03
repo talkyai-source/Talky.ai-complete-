@@ -165,7 +165,18 @@ class CampaignService:
             
             # 3. Get pending leads
             leads = await self._get_pending_leads(campaign_id)
-            
+
+            if not leads:
+                # No pending/calling leads — reset failed/skipped leads so
+                # a campaign restart actually retries them.
+                reset_count = await self._reset_leads_for_restart(campaign_id)
+                if reset_count > 0:
+                    logger.info(
+                        f"Campaign {campaign_id}: reset {reset_count} "
+                        f"failed/skipped leads to pending for restart"
+                    )
+                    leads = await self._get_pending_leads(campaign_id)
+
             if not leads:
                 await self._update_campaign_status(campaign_id, "running")
                 return StartCampaignResult(
@@ -282,14 +293,25 @@ class CampaignService:
     # =========================================================================
     
     async def _get_pending_leads(self, campaign_id: str) -> List[Dict[str, Any]]:
-        """Get all pending leads for a campaign, ordered by priority."""
+        """Get all pending leads for a campaign, ordered by priority.
+        Also includes leads stuck at 'calling' from a previous crashed run."""
         response = self.db_client.table("leads").select("*")\
             .eq("campaign_id", campaign_id)\
-            .eq("status", "pending")\
+            .in_("status", ["pending", "calling"])\
             .order("priority", desc=True)\
             .order("created_at")\
             .execute()
         return response.data or []
+
+    async def _reset_leads_for_restart(self, campaign_id: str) -> int:
+        """Reset failed/skipped/calling leads to pending so a campaign restart retries them."""
+        response = self.db_client.table("leads").update({
+            "status": "pending",
+            "last_called_at": None,
+        }).eq("campaign_id", campaign_id)\
+          .in_("status", ["failed", "skipped", "calling"])\
+          .execute()
+        return len(response.data) if response.data else 0
     
     def _calculate_priority(
         self,
@@ -338,12 +360,16 @@ class CampaignService:
         priority = self._calculate_priority(lead, priority_override)
         now = datetime.utcnow()
         
+        lead_id = str(lead["id"])
+        tenant_id_str = str(tenant_id)
+        phone_number = str(lead["phone_number"])
+
         job = DialerJob(
             job_id=job_id,
-            campaign_id=campaign_id,
-            lead_id=lead["id"],
-            tenant_id=tenant_id,
-            phone_number=lead["phone_number"],
+            campaign_id=str(campaign_id),
+            lead_id=lead_id,
+            tenant_id=tenant_id_str,
+            phone_number=phone_number,
             priority=priority,
             status=JobStatus.PENDING,
             attempt_number=1,
@@ -353,10 +379,10 @@ class CampaignService:
         
         job_record = {
             "id": job_id,
-            "campaign_id": campaign_id,
-            "lead_id": lead["id"],
-            "tenant_id": tenant_id,
-            "phone_number": lead["phone_number"],
+            "campaign_id": str(campaign_id),
+            "lead_id": lead_id,
+            "tenant_id": tenant_id_str,
+            "phone_number": phone_number,
             "priority": priority,
             "status": "pending",
             "attempt_number": 1,

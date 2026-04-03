@@ -52,6 +52,7 @@ def encode_access_token(
     email: str,
     role: str,
     tenant_id: Optional[str],
+    session_id: Optional[str] = None,
 ) -> str:
     settings = get_settings()
     now = datetime.now(timezone.utc)
@@ -68,6 +69,8 @@ def encode_access_token(
         payload["iss"] = settings.jwt_issuer
     if settings.jwt_audience:
         payload["aud"] = settings.jwt_audience
+    if session_id:
+        payload["sid"] = session_id
 
     return jwt.encode(payload, _require_secret(), algorithm=_resolve_algorithm())
 
@@ -121,4 +124,3 @@ def decode_and_validate_token(token: str) -> Dict[str, Any]:
     if not isinstance(subject, str) or not subject.strip():
         raise JWTValidationError("Invalid token: missing subject")
     return payload
-

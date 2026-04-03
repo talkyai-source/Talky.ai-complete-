@@ -1,6 +1,7 @@
 """
 FastAPI Application Entry Point
 """
+import asyncio
 import os
 import logging
 from pathlib import Path
@@ -86,19 +87,83 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Configuration warnings (non-fatal in {environment}): {e}")
     
     logger.info("AI Voice Dialer started successfully")
-    
+
+    # Auto-connect telephony bridge so campaigns can originate calls immediately
+    from app.infrastructure.telephony.adapter_factory import CallControlAdapterFactory
+    from app.api.v1.endpoints import telephony_bridge as _tb
+
+    _dialer_task = None
+    try:
+        if not (_tb._adapter and _tb._adapter.connected):
+            adapter_type = os.getenv("TELEPHONY_ADAPTER", "auto")
+            _tb._adapter = await CallControlAdapterFactory.create(adapter_type)
+            _tb._adapter.register_call_event_handlers(
+                on_new_call=_tb._on_new_call,
+                on_call_ended=_tb._on_call_ended,
+                on_audio_received=_tb._on_audio_received,
+            )
+            if hasattr(_tb._adapter, "set_global_session_start_callback"):
+                _tb._adapter.set_global_session_start_callback(_tb._on_ws_session_start)
+            await _tb._adapter.connect()
+            logger.info(f"Telephony bridge auto-connected: {_tb._adapter.name}")
+        else:
+            logger.info("Telephony bridge already connected — skipping auto-connect")
+    except Exception as e:
+        logger.warning(f"Telephony bridge auto-connect failed (non-fatal): {e}")
+
+    # Start dialer worker as background asyncio task
+    _dialer_worker = None
+    try:
+        from app.workers.dialer_worker import DialerWorker
+        _dialer_worker = DialerWorker()
+        _dialer_task = asyncio.create_task(_dialer_worker.run(), name="dialer-worker")
+
+        def _on_dialer_done(task: asyncio.Task) -> None:
+            """Log any unhandled exception from the dialer worker task."""
+            exc = task.exception() if not task.cancelled() else None
+            if exc:
+                logger.error("Dialer worker task exited with exception: %s", exc, exc_info=exc)
+            elif task.cancelled():
+                logger.info("Dialer worker task was cancelled")
+            else:
+                logger.warning("Dialer worker task exited unexpectedly (no exception)")
+
+        _dialer_task.add_done_callback(_on_dialer_done)
+        logger.info("Dialer worker started as background task")
+    except Exception as e:
+        logger.warning(f"Dialer worker failed to start (non-fatal): {e}")
+
     yield  # Application is running
-    
+
     # ========================
     # SHUTDOWN
     # ========================
     logger.info("Shutting down AI Voice Dialer...")
-    
+
+    # Stop dialer worker
+    if _dialer_task and not _dialer_task.done():
+        try:
+            _dialer_worker.running = False
+            _dialer_task.cancel()
+            await _dialer_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        logger.info("Dialer worker stopped")
+
+    # Disconnect telephony bridge
+    if _tb._adapter and _tb._adapter.connected:
+        try:
+            await _tb._adapter.disconnect()
+            _tb._adapter = None
+            logger.info("Telephony bridge disconnected")
+        except Exception as e:
+            logger.error(f"Error disconnecting telephony bridge: {e}")
+
     try:
         await container.shutdown()
     except Exception as e:
         logger.error(f"Error during shutdown: {e}")
-    
+
     logger.info("AI Voice Dialer shutdown complete")
 
 

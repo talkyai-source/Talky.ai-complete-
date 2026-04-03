@@ -76,6 +76,7 @@ export default function ConnectorsPage() {
         };
 
         const onMessage = (event: MessageEvent) => {
+            if (event.origin !== window.location.origin) return;
             handleUpdated(event.data as unknown);
         };
         window.addEventListener("message", onMessage);

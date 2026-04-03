@@ -5,10 +5,11 @@ Provider-agnostic - works with any MediaGateway implementation.
 """
 import os
 import io
+import struct
 import wave
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -56,12 +57,17 @@ class RecordingBuffer:
     def get_wav_bytes(self) -> bytes:
         """
         Convert raw PCM audio to WAV format.
-        
+
         Returns:
             WAV file bytes ready for storage
         """
+        # Allow pre-mixed WAV to bypass re-encoding (stereo recordings)
+        override = getattr(self, "_wav_bytes_override", None)
+        if override:
+            return override
+
         audio_data = self.get_complete_audio()
-        
+
         # Create WAV file in memory
         wav_buffer = io.BytesIO()
         with wave.open(wav_buffer, 'wb') as wav_file:
@@ -69,7 +75,7 @@ class RecordingBuffer:
             wav_file.setsampwidth(self.bit_depth // 8)
             wav_file.setframerate(self.sample_rate)
             wav_file.writeframes(audio_data)
-        
+
         wav_buffer.seek(0)
         return wav_buffer.read()
     
@@ -85,6 +91,105 @@ class RecordingBuffer:
             f"duration={self.get_duration_seconds():.1f}s, "
             f"sample_rate={self.sample_rate})"
         )
+
+
+def mix_stereo_recording(
+    caller_chunks: List[bytes],
+    agent_chunks: List[Tuple[int, bytes]],
+    sample_rate: int = 8000,
+) -> bytes:
+    """
+    Mix caller and agent PCM16 audio into a time-aligned stereo WAV file.
+
+    Left channel  = caller (continuous stream, chunks concatenated in order).
+    Right channel = agent  (timestamped chunks placed at correct positions).
+
+    Parameters
+    ----------
+    caller_chunks : list[bytes]
+        Continuous PCM16 chunks from the caller, in arrival order.
+    agent_chunks : list[tuple[int, bytes]]
+        Each entry is ``(sample_offset, pcm16_bytes)`` where *sample_offset*
+        is a running write cursor (MixMonitor-style).  The cursor advances
+        by each chunk's sample count, so burst-delivered TTS chunks are
+        placed contiguously.  When a new utterance starts after a silence
+        gap, the cursor jumps to the current wall-clock position, inserting
+        silence implicitly (the numpy array is zero-initialized).
+    sample_rate : int
+        Samples per second (8000 for telephony).
+
+    Returns
+    -------
+    bytes
+        Complete WAV file (16-bit, stereo, *sample_rate* Hz).
+    """
+    import numpy as np
+
+    # --- Build caller timeline (left channel) ----------------------------
+    caller_pcm = b"".join(caller_chunks) if caller_chunks else b""
+    if len(caller_pcm) % 2:
+        caller_pcm += b"\x00"
+    total_caller_samples = len(caller_pcm) // 2
+
+    # --- Determine total timeline length ---------------------------------
+    # The timeline must be at least as long as the caller audio, but also
+    # long enough to contain any agent audio that extends past the caller's
+    # last sample.
+    total_samples = total_caller_samples
+    for offset, chunk in (agent_chunks or []):
+        chunk_samples = len(chunk) // 2
+        end = offset + chunk_samples
+        if end > total_samples:
+            total_samples = end
+
+    if total_samples == 0:
+        # Nothing to record
+        wav_buf = io.BytesIO()
+        with wave.open(wav_buf, "wb") as wf:
+            wf.setnchannels(2)
+            wf.setsampwidth(2)
+            wf.setframerate(sample_rate)
+            wf.writeframes(b"")
+        wav_buf.seek(0)
+        return wav_buf.read()
+
+    # --- Create numpy arrays for both channels ---------------------------
+    left = np.zeros(total_samples, dtype=np.int16)   # caller
+    right = np.zeros(total_samples, dtype=np.int16)   # agent
+
+    # Fill left channel with caller audio
+    if total_caller_samples > 0:
+        left[:total_caller_samples] = np.frombuffer(caller_pcm, dtype=np.int16)
+
+    # Place each agent chunk at its timestamped position on the right channel
+    for offset, chunk in (agent_chunks or []):
+        if len(chunk) < 2:
+            continue
+        chunk_samples = np.frombuffer(chunk, dtype=np.int16)
+        end = offset + len(chunk_samples)
+        if end > total_samples:
+            # Clip to timeline length (shouldn't happen, but safety)
+            chunk_samples = chunk_samples[: total_samples - offset]
+            end = total_samples
+        if offset < 0:
+            chunk_samples = chunk_samples[-offset:]
+            offset = 0
+        # Overlay (add) in case TTS chunks slightly overlap
+        right[offset:offset + len(chunk_samples)] += chunk_samples
+
+    # --- Interleave into stereo frames: L R L R ... ----------------------
+    stereo = np.empty(total_samples * 2, dtype=np.int16)
+    stereo[0::2] = left
+    stereo[1::2] = right
+
+    wav_buf = io.BytesIO()
+    with wave.open(wav_buf, "wb") as wf:
+        wf.setnchannels(2)
+        wf.setsampwidth(2)  # 16-bit
+        wf.setframerate(sample_rate)
+        wf.writeframes(stereo.tobytes())
+    wav_buf.seek(0)
+    return wav_buf.read()
 
 
 class RecordingService:
@@ -127,9 +232,10 @@ class RecordingService:
             Storage path string
         """
         # Sanitize IDs to prevent path traversal
-        safe_tenant = tenant_id.replace("/", "_").replace("\\", "_") if tenant_id else "default"
-        safe_campaign = campaign_id.replace("/", "_").replace("\\", "_") if campaign_id else "unknown"
-        safe_call = call_id.replace("/", "_").replace("\\", "_")
+        # Cast to str() in case values are asyncpg UUID objects
+        safe_tenant = str(tenant_id).replace("/", "_").replace("\\", "_") if tenant_id else "default"
+        safe_campaign = str(campaign_id).replace("/", "_").replace("\\", "_") if campaign_id else "unknown"
+        safe_call = str(call_id).replace("/", "_").replace("\\", "_")
         
         return f"{safe_tenant}/{safe_campaign}/{safe_call}.wav"
     

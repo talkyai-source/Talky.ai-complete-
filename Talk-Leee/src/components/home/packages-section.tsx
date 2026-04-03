@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useRef } from "react";
 import { motion, useAnimationControls } from "framer-motion";
 import type { Variants } from "framer-motion";
 import { BarChart3, Check, PhoneCall, Users } from "lucide-react";
@@ -81,6 +82,11 @@ const packages = [
 
 export function PackagesSection() {
   const controls = useAnimationControls();
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const gridVariants: Variants = {
     hidden: {},
@@ -138,7 +144,7 @@ export function PackagesSection() {
             void controls.start("show");
           }}
           onViewportLeave={() => {
-            controls.set("hidden");
+            if (mountedRef.current) controls.set("hidden");
           }}
           className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-5 items-stretch justify-items-stretch"
         >

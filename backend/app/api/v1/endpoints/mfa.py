@@ -625,11 +625,13 @@ async def verify_mfa_challenge(
         # --- SUCCESS: consume challenge + create full session -----------------
         await consume_mfa_challenge(conn, str(challenge["id"]))
 
-        raw_session_token = await create_session(
+        raw_session_token, session_id = await create_session(
             conn,
             user_id=user_id,
             ip_address=ip,
             user_agent=ua,
+            request=request,
+            return_session_id=True,
         )
 
         # Mark session as MFA verified
@@ -669,6 +671,7 @@ async def verify_mfa_challenge(
         email=user_row["email"],
         role=user_row["role"],
         tenant_id=tenant_id,
+        session_id=session_id,
     )
 
     _set_session_cookie(response, raw_session_token)

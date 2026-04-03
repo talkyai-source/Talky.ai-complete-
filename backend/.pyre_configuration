@@ -1,0 +1,10 @@
+{
+  "site_package_search_strategy": "pep561",
+  "search_path": [
+    ".",
+    "venv/lib/python3.12/site-packages"
+  ],
+  "source_directories": ["."],
+  "strict": false,
+  "python_version": "3.12"
+}

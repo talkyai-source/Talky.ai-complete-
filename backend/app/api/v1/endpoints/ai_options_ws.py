@@ -202,7 +202,6 @@ async def voice_demo_websocket(websocket: WebSocket, session_id: str):
     container = get_container()
 
     voice_session = None
-    barge_in_event = asyncio.Event()
     receiver_task: Optional[asyncio.Task] = None
 
     try:
@@ -304,7 +303,8 @@ async def voice_demo_websocket(websocket: WebSocket, session_id: str):
                             ]
                             energy = sum(abs(sample) for sample in samples) / len(samples)
                             if energy > 300:
-                                barge_in_event.set()
+                                if voice_session and voice_session.call_session.barge_in_event:
+                                    voice_session.call_session.barge_in_event.set()
                                 await websocket.send_json({"type": "barge_in"})
                         continue
 
@@ -356,7 +356,6 @@ async def voice_demo_websocket(websocket: WebSocket, session_id: str):
             voice_session,
             voice_profile["intro"],
             websocket,
-            barge_in_event,
             first_chunk_bytes=greeting_first_chunk_bytes,
             regular_chunk_bytes=greeting_regular_chunk_bytes,
         )

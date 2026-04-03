@@ -18,8 +18,21 @@ function AudioPlayer({ recordingId }: { recordingId: string }) {
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
+    const [blobUrl, setBlobUrl] = useState<string | null>(null);
+    const [loadError, setLoadError] = useState("");
 
-    const streamUrl = extendedApi.getRecordingStreamUrl(recordingId);
+    useEffect(() => {
+        let revoke = "";
+        extendedApi.fetchRecordingBlob(recordingId)
+            .then((url) => {
+                revoke = url;
+                setBlobUrl(url);
+            })
+            .catch((err) => setLoadError(err.message));
+        return () => {
+            if (revoke) URL.revokeObjectURL(revoke);
+        };
+    }, [recordingId]);
 
     function togglePlay() {
         if (audioRef.current) {
@@ -57,11 +70,19 @@ function AudioPlayer({ recordingId }: { recordingId: string }) {
         }
     }
 
+    if (loadError) {
+        return <div className="text-xs text-red-400">Failed to load audio</div>;
+    }
+
+    if (!blobUrl) {
+        return <div className="text-xs text-foreground/50">Loading audio...</div>;
+    }
+
     return (
         <div className="flex items-center gap-3">
             <audio
                 ref={audioRef}
-                src={streamUrl}
+                src={blobUrl}
                 onTimeUpdate={handleTimeUpdate}
                 onLoadedMetadata={handleLoadedMetadata}
                 onEnded={handleEnded}

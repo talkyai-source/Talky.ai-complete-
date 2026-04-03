@@ -19,29 +19,6 @@ function normalizeUrl(url: URL): string {
     return url.toString().replace(/\/+$/, "");
 }
 
-function resolveBackendHttpBaseUrl(): string {
-    const configuredUrl = parseConfiguredApiUrl();
-    if (configuredUrl) {
-        const rootUrl = new URL(configuredUrl.toString());
-        const cleanPath = rootUrl.pathname.replace(/\/+$/, "");
-        if (cleanPath.endsWith("/api/v1")) {
-            const basePath = cleanPath.slice(0, -"/api/v1".length);
-            rootUrl.pathname = basePath || "/";
-        } else {
-            rootUrl.pathname = cleanPath || "/";
-        }
-        rootUrl.search = "";
-        rootUrl.hash = "";
-        return normalizeUrl(rootUrl);
-    }
-
-    if (typeof window !== "undefined") {
-        return `${window.location.protocol}//${window.location.hostname}:8000`;
-    }
-
-    return "http://127.0.0.1:8000";
-}
-
 function resolveBackendWsBaseUrl(): string {
     const configuredUrl = parseConfiguredApiUrl();
     if (configuredUrl) {
@@ -60,6 +37,8 @@ function resolveBackendWsBaseUrl(): string {
 }
 
 type AIState = "idle" | "connecting" | "listening" | "processing" | "speaking";
+
+const MIC_WORKLET_PATH = "/worklets/pcm16-capture-processor.js";
 
 // Single voice agent - Sophia
 const SOPHIA = {
@@ -127,11 +106,18 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
     const nextPlaybackTimeRef = useRef<number>(0);
     const ttsSampleRateRef = useRef<number>(24000);
     const awaitingPlaybackCompleteRef = useRef<boolean>(false);
+    const dropIncomingAudioRef = useRef<boolean>(false);
+
+    // Jitter buffer: collect audio chunks before starting playback to absorb
+    // network variance. Prevents stutter caused by irregular chunk arrival.
+    const jitterBufferRef = useRef<ArrayBuffer[]>([]);
+    const playbackStartedRef = useRef<boolean>(false);
+    const JITTER_BUFFER_TARGET_MS = 80; // Keep startup responsive while absorbing minor variance
 
     // Microphone refs
     const micStreamRef = useRef<MediaStream | null>(null);
     const micAudioContextRef = useRef<AudioContext | null>(null);
-    const processorRef = useRef<ScriptProcessorNode | null>(null);
+    const processorRef = useRef<ScriptProcessorNode | AudioWorkletNode | null>(null);
     const animationFrameRef = useRef<number | null>(null);
     const analyserRef = useRef<AnalyserNode | null>(null);
 
@@ -209,21 +195,14 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
 
                 const ctx = audioContextRef.current;
 
-                // Resume if suspended (browser autoplay policy)
+                // Resume if suspended (browser autoplay policy).
+                // Called inside a user-gesture handler so this resolves immediately.
                 if (ctx.state === 'suspended') {
                     await ctx.resume();
                 }
 
-                // Wait for running state with timeout
-                let attempts = 0;
-                const maxAttempts = 50; // 5 seconds max wait
-                while (ctx.state !== 'running' && attempts < maxAttempts) {
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                    attempts++;
-                }
-
                 if (ctx.state !== 'running') {
-                    throw new Error(`AudioContext failed to start: ${ctx.state}`);
+                    throw new Error(`AudioContext not running: ${ctx.state}`);
                 }
             } catch (err) {
                 console.error('Failed to initialize audio player:', err);
@@ -240,21 +219,47 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
         return audioInitPromiseRef.current;
     }, []);
 
-    // Queue PCM16 audio for sample-accurate playback. The browser handles
-    // resampling from the chunk's native rate to the device output rate.
+    // Queue PCM16 audio for sample-accurate playback with jitter buffering.
+    // Collects chunks into a buffer before starting playback to absorb network
+    // variance and prevent stutter from irregular chunk arrival timing.
     const queueAudioChunk = useCallback((buffer: ArrayBuffer, sampleRate: number = 24000) => {
         if (!isMountedRef.current) return;
 
         const ctx = audioContextRef.current;
         if (!ctx) return;
 
-        try {
-            const pcm16 = new Int16Array(buffer);
-            if (pcm16.length === 0) return;
+        const pcm16 = new Int16Array(buffer);
+        if (pcm16.length === 0) return;
 
-            const float32 = new Float32Array(pcm16.length);
-            for (let i = 0; i < pcm16.length; i++) {
-                float32[i] = pcm16[i] / 32768.0;
+        // Add to jitter buffer
+        jitterBufferRef.current.push(buffer);
+
+        // Calculate total buffered duration
+        const totalSamples = jitterBufferRef.current.reduce(
+            (sum, buf) => sum + new Int16Array(buf).length,
+            0
+        );
+        const bufferedMs = (totalSamples / sampleRate) * 1000;
+
+        // Only start playback once we have enough buffered audio
+        if (!playbackStartedRef.current) {
+            if (bufferedMs < JITTER_BUFFER_TARGET_MS) {
+                return; // Still buffering
+            }
+            playbackStartedRef.current = true;
+        }
+
+        // Process all buffered chunks
+        const chunksToProcess = [...jitterBufferRef.current];
+        jitterBufferRef.current = [];
+
+        for (const chunkBuffer of chunksToProcess) {
+            const chunkPcm16 = new Int16Array(chunkBuffer);
+            if (chunkPcm16.length === 0) continue;
+
+            const float32 = new Float32Array(chunkPcm16.length);
+            for (let i = 0; i < chunkPcm16.length; i++) {
+                float32[i] = chunkPcm16[i] / 32768.0;
             }
 
             const audioBuffer = ctx.createBuffer(1, float32.length, sampleRate);
@@ -264,7 +269,7 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
             source.buffer = audioBuffer;
             source.connect(ctx.destination);
 
-            const leadTimeSeconds = 0.08;
+            const leadTimeSeconds = 0.01;
             const startAt = Math.max(
                 ctx.currentTime + leadTimeSeconds,
                 nextPlaybackTimeRef.current || 0,
@@ -285,8 +290,6 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
             playbackSourcesRef.current.add(source);
             source.start(startAt);
             nextPlaybackTimeRef.current = startAt + audioBuffer.duration;
-        } catch (err) {
-            console.error('Failed to queue audio chunk:', err);
         }
     }, []);
 
@@ -302,6 +305,9 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
         });
         playbackSourcesRef.current.clear();
         nextPlaybackTimeRef.current = 0;
+        // Clear jitter buffer on reset
+        jitterBufferRef.current = [];
+        playbackStartedRef.current = false;
     }, []);
 
     // Full cleanup of audio resources (call on session end)
@@ -314,6 +320,9 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
         });
         playbackSourcesRef.current.clear();
         nextPlaybackTimeRef.current = 0;
+        // Clear jitter buffer on cleanup
+        jitterBufferRef.current = [];
+        playbackStartedRef.current = false;
         if (audioContextRef.current) {
             try {
                 audioContextRef.current.close();
@@ -329,7 +338,10 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
         }
 
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({
+            // Reuse the pre-warmed stream if available (set by the mount effect
+            // when microphone permission was already granted). Avoids the
+            // 100-500ms getUserMedia() call on the button-click hot path.
+            const stream = micStreamRef.current ?? await navigator.mediaDevices.getUserMedia({
                 audio: {
                     sampleRate: 16000,
                     channelCount: 1,
@@ -353,33 +365,61 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
             analyserRef.current = analyser;
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
-            const updateLevel = () => {
-                if (analyserRef.current && isMountedRef.current) {
+            // Throttle audio-level polling to ~30 fps to reduce main-thread load.
+            let lastLevelTs = 0;
+            const updateLevel = (timestamp: number) => {
+                if (!analyserRef.current || !isMountedRef.current) return;
+                if (timestamp - lastLevelTs >= 33) {
                     analyserRef.current.getByteFrequencyData(dataArray);
                     const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
                     setAudioLevel(Math.min(1, average / 128));
-                    animationFrameRef.current = requestAnimationFrame(updateLevel);
+                    lastLevelTs = timestamp;
                 }
+                animationFrameRef.current = requestAnimationFrame(updateLevel);
             };
-            updateLevel();
+            animationFrameRef.current = requestAnimationFrame(updateLevel);
 
-            // Use 1024 samples = 64ms @ 16kHz (power of 2 required by ScriptProcessorNode)
-            const processor = audioContext.createScriptProcessor(1024, 1, 1);
-            processorRef.current = processor;
+            const startScriptProcessorFallback = () => {
+                const processor = audioContext.createScriptProcessor(1024, 1, 1);
+                const silentGain = audioContext.createGain();
+                silentGain.gain.value = 0;
+                processorRef.current = processor;
+                processor.onaudioprocess = (event) => {
+                    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+                    const inputData = event.inputBuffer.getChannelData(0);
+                    const pcmData = new Int16Array(inputData.length);
+                    for (let i = 0; i < inputData.length; i++) {
+                        const s = Math.max(-1, Math.min(1, inputData[i]));
+                        pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                    }
+                    wsRef.current.send(pcmData.buffer);
+                };
+                source.connect(processor);
+                processor.connect(silentGain);
+                silentGain.connect(audioContext.destination);
+            };
 
-            processor.onaudioprocess = (event) => {
-                if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-                const inputData = event.inputBuffer.getChannelData(0);
-                const pcmData = new Int16Array(inputData.length);
-                for (let i = 0; i < inputData.length; i++) {
-                    const s = Math.max(-1, Math.min(1, inputData[i]));
-                    pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            // AudioWorklet: PCM capture runs entirely off the main thread.
+            // Falls back to ScriptProcessorNode when AudioWorklet is unavailable
+            // or if the browser rejects loading the worklet module.
+            if (audioContext.audioWorklet) {
+                try {
+                    const workletUrl = new URL(MIC_WORKLET_PATH, window.location.origin).toString();
+                    await audioContext.audioWorklet.addModule(workletUrl);
+                    const workletNode = new AudioWorkletNode(audioContext, "pcm16-processor");
+                    processorRef.current = workletNode;
+                    workletNode.port.onmessage = (evt: MessageEvent<ArrayBuffer>) => {
+                        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+                        wsRef.current.send(evt.data);
+                    };
+                    source.connect(workletNode);
+                } catch (workletErr) {
+                    console.warn("[VoiceAgent] AudioWorklet unavailable, falling back to ScriptProcessorNode.", workletErr);
+                    startScriptProcessorFallback();
                 }
-                wsRef.current.send(pcmData.buffer);
-            };
-
-            source.connect(processor);
-            processor.connect(audioContext.destination);
+            } else {
+                startScriptProcessorFallback();
+            }
             return true;
         } catch (err) {
             console.error("[VoiceAgent] Microphone error:", err);
@@ -410,6 +450,9 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
             animationFrameRef.current = null;
         }
         if (processorRef.current) {
+            if (processorRef.current instanceof AudioWorkletNode) {
+                processorRef.current.port.close();
+            }
             processorRef.current.disconnect();
             processorRef.current = null;
         }
@@ -429,6 +472,10 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
         const payload = event.data;
 
         if (payload instanceof ArrayBuffer || payload instanceof Blob) {
+            if (dropIncomingAudioRef.current) {
+                return;
+            }
+
             // Received audio chunk - queue it for playback
             const arrayBuffer = payload instanceof Blob ? await payload.arrayBuffer() : payload;
 
@@ -468,6 +515,7 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
                 } else {
                     ttsSampleRateRef.current = 24000;
                 }
+                dropIncomingAudioRef.current = false;
                 // Start microphone immediately so user can barge-in during intro
                 setAiState("speaking");
                 startMicrophoneRef.current?.();
@@ -476,6 +524,7 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
                 if (data.is_final && data.text) setAiState("processing");
                 break;
             case "llm_response":
+                dropIncomingAudioRef.current = false;
                 setAiState("speaking");
                 break;
             case "turn_complete":
@@ -494,6 +543,7 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
             case "barge_in":
             case "tts_interrupted":
                 // User interrupted - reset AudioWorklet (DON'T close AudioContext)
+                dropIncomingAudioRef.current = true;
                 resetAudioPlayer();
                 setAiState("listening");
                 break;
@@ -515,6 +565,7 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
         connectingRef.current = false;
         stopMicrophone();
         ttsSampleRateRef.current = 24000;
+        dropIncomingAudioRef.current = false;
         if (wsRef.current) {
             try { wsRef.current.send(JSON.stringify({ type: "end_call" })); } catch { /* ignore */ }
             wsRef.current.close();
@@ -577,27 +628,13 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
             return;
         }
 
-        // First check if backend is reachable via HTTP
+        // Pre-initialize TTS AudioContext now while we still have a user gesture.
+        // This avoids lazy initialization on the first incoming audio chunk,
+        // which can cause a noticeable gap before playback starts.
         try {
-            const healthUrl = `${resolveBackendHttpBaseUrl()}/health`;
-            console.log(`[VoiceAgent] Checking backend health: ${healthUrl}`);
-            const healthRes = await fetch(healthUrl, {
-                method: 'GET',
-                // Short timeout for health check
-                signal: AbortSignal.timeout(5000)
-            });
-            if (!healthRes.ok) {
-                throw new Error(`Health check failed: ${healthRes.status}`);
-            }
-            const healthData = await healthRes.json();
-            console.log(`[VoiceAgent] Backend health:`, healthData);
-        } catch (err) {
-            console.error(`[VoiceAgent] Backend not reachable:`, err);
-            stopMicrophone();
-            setError(`Backend not reachable at ${resolveBackendHttpBaseUrl()}. Please ensure the backend is running on port 8000.`);
-            setAiState("idle");
-            connectingRef.current = false;
-            return;
+            await initializeAudioPlayer();
+        } catch {
+            // Non-fatal — handleMessage will retry on the first chunk
         }
 
         const sessionId = `demo-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -649,12 +686,38 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
             console.log(`[VoiceAgent] WebSocket closed: code=${event.code}, reason=${event.reason}`);
             endSession();
         };
-    }, [handleMessage, endSession, cleanupAudioPlayer, startMicrophone, stopMicrophone]);
+    }, [handleMessage, endSession, cleanupAudioPlayer, startMicrophone, stopMicrophone, initializeAudioPlayer]);
 
     // Wrapper for startSession to handle async
     const handleStartSession = useCallback(() => {
         void startSession();
     }, [startSession]);
+
+    // Pre-warm microphone stream on mount if permission is already granted.
+    // getUserMedia() takes 100-500ms when called for the first time on button
+    // click. By calling it silently here (only when "granted"), the stream is
+    // already open and startMicrophone() returns instantly on button click.
+    useEffect(() => {
+        const prewarm = async () => {
+            if (!navigator.mediaDevices?.getUserMedia) return;
+            try {
+                const perm = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+                if (perm.state !== 'granted') return;
+                if (micStreamRef.current) return; // already have a stream
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+                });
+                if (isMountedRef.current) {
+                    micStreamRef.current = stream;
+                } else {
+                    stream.getTracks().forEach(t => t.stop());
+                }
+            } catch {
+                // Ignore — startMicrophone() will request on button click
+            }
+        };
+        prewarm();
+    }, []);
 
     // Cleanup on unmount
     useEffect(() => {

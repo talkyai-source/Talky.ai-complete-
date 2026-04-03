@@ -2013,11 +2013,11 @@ export function LiveCallsTimeSeriesChart({
           />
         ))}
 
-        {scale.ticks.map((t) => {
+        {scale.ticks.map((t, i) => {
           const y = scale.yFor(t);
           return (
             <line
-              key={`yg-${t}`}
+              key={`yg-${i}-${t}`}
               x1={chart.left}
               x2={chart.left + chart.plotW}
               y1={y}
@@ -2095,9 +2095,9 @@ export function LiveCallsTimeSeriesChart({
           })()
         ) : null}
 
-        {scale.ticks.map((t) => (
+        {scale.ticks.map((t, i) => (
           <text
-            key={`yl-${t}`}
+            key={`yl-${i}-${t}`}
             x={chart.left - 10}
             y={scale.yFor(t) + 4}
             textAnchor="end"

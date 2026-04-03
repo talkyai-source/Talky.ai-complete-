@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { authTokenCookieName } from "./lib/auth-token";
+import { backendSessionCookieName } from "./lib/auth-token";
 
 function setSecurityHeaders(res: NextResponse, input: { csp: string; inProd: boolean; https: boolean }) {
     res.headers.set("Content-Security-Policy", input.csp);
@@ -135,6 +135,7 @@ export function middleware(req: NextRequest) {
         "connect-src " + connectSrc,
         "media-src 'self' data: blob:",
         "worker-src 'self' blob:",
+        "worklet-src 'self' blob:",
         "object-src 'none'",
         "base-uri 'self'",
         "form-action 'self'",
@@ -155,8 +156,8 @@ export function middleware(req: NextRequest) {
         return res;
     }
 
-    const token = readCookieFromHeader(req, authTokenCookieName());
-    if (token && token.trim().length > 0 && token.trim() !== "dev-token") {
+    const sessionToken = readCookieFromHeader(req, backendSessionCookieName());
+    if (sessionToken && sessionToken.trim().length > 0) {
         const res = NextResponse.next({ request: { headers: requestHeaders } });
         setSecurityHeaders(res, { csp, inProd, https });
         return res;

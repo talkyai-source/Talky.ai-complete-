@@ -48,6 +48,15 @@ class CampaignStartRequest(BaseModel):
     tenant_id: Optional[str] = None  # For multi-tenant support
 
 
+class CampaignCreateRequest(BaseModel):
+    """Request body for creating a campaign."""
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    system_prompt: str = Field(..., min_length=1)
+    voice_id: str = Field(..., min_length=1, max_length=100)
+    goal: Optional[str] = None
+
+
 class ContactCreate(BaseModel):
     """
     Request body for adding a single contact to a campaign.
@@ -67,8 +76,9 @@ class ContactCreate(BaseModel):
         cleaned = re.sub(r'[\s\-\(\)\.]', '', v)
         if not cleaned:
             raise ValueError('Phone number cannot be empty')
-        if len(cleaned) < 7:
-            raise ValueError('Phone number too short')
+        # Allow SIP extensions (3-6 digits) and standard phone numbers (7+ digits)
+        if len(cleaned) < 3:
+            raise ValueError('Phone number too short (minimum 3 digits for SIP extensions)')
         return v
 
 
@@ -96,14 +106,35 @@ async def list_campaigns(
 
 @router.post("/")
 async def create_campaign(
-    campaign_data: dict,
+    campaign_data: CampaignCreateRequest,
     request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)
 ):
     """Create a new campaign"""
     try:
-        response = db_client.table("campaigns").insert(campaign_data).execute()
-        return {"campaign": response.data[0] if response.data else None}
+        if not current_user.tenant_id:
+            raise HTTPException(status_code=400, detail="Current user is not associated with a tenant")
+
+        insert_payload = {
+            "tenant_id": current_user.tenant_id,
+            "name": campaign_data.name.strip(),
+            "description": campaign_data.description.strip() if campaign_data.description else None,
+            "system_prompt": campaign_data.system_prompt.strip(),
+            "voice_id": campaign_data.voice_id.strip(),
+            "goal": campaign_data.goal.strip() if campaign_data.goal else None,
+        }
+
+        response = db_client.table("campaigns").insert(insert_payload).execute()
+        if response.error:
+            logger.error(f"Error creating campaign: {response.error}")
+            raise HTTPException(status_code=500, detail=f"Failed to create campaign: {response.error}")
+        if not response.data:
+            logger.error("Campaign insert returned no rows for tenant=%s name=%s", current_user.tenant_id, insert_payload["name"])
+            raise HTTPException(status_code=500, detail="Failed to create campaign")
+        return {"campaign": response.data[0]}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error creating campaign: {e}")
         raise HTTPException(status_code=500, detail="Failed to create campaign")
@@ -312,27 +343,29 @@ def normalize_phone_number(phone: str) -> str:
     
     if not cleaned:
         raise ValueError("Invalid phone number")
-    
-    # Validate minimum length (international minimum is 7 digits)
-    if len(cleaned) < 7:
-        raise ValueError("Phone number too short (minimum 7 digits)")
-    
+
+    # Allow short SIP extensions (3–6 digits) to pass through as-is
+    if len(cleaned) <= 6:
+        if len(cleaned) < 3:
+            raise ValueError("Phone number too short (minimum 3 digits for SIP extensions)")
+        return cleaned  # Return raw SIP extension — no E.164 normalization
+
     # Validate maximum length (E.164 max is 15 digits)
     if len(cleaned) > 15:
         raise ValueError("Phone number too long (maximum 15 digits)")
-    
+
     # If already has + and country code, use as-is
     if has_plus:
         return f"+{cleaned}"
-    
+
     # If 10 digits (US/Canada without country code), add +1
     if len(cleaned) == 10:
         return f"+1{cleaned}"
-    
+
     # If 11 digits starting with 1 (US/Canada with country code), add +
     if len(cleaned) == 11 and cleaned.startswith('1'):
         return f"+{cleaned}"
-    
+
     # Otherwise, return with + prefix
     return f"+{cleaned}"
 
@@ -341,6 +374,7 @@ def normalize_phone_number(phone: str) -> str:
 async def add_contact_to_campaign(
     campaign_id: str,
     contact: ContactCreate,
+    current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)
 ):
     """
@@ -358,10 +392,14 @@ async def add_contact_to_campaign(
         Created lead object
     """
     try:
-        # 1. Validate campaign exists
-        campaign_response = db_client.table("campaigns").select("id, name, status").eq("id", campaign_id).execute()
+        # 1. Validate campaign exists and belongs to the current tenant
+        campaign_query = db_client.table("campaigns").select("id, name, status, tenant_id").eq("id", campaign_id)
+        if current_user.tenant_id:
+            campaign_query = campaign_query.eq("tenant_id", current_user.tenant_id)
+        campaign_response = campaign_query.execute()
         if not campaign_response.data:
             raise HTTPException(status_code=404, detail="Campaign not found")
+        campaign = campaign_response.data[0]
         
         # 2. Normalize phone number
         try:
@@ -388,6 +426,7 @@ async def add_contact_to_campaign(
         lead_id = str(uuid.uuid4())
         lead_data = {
             "id": lead_id,
+            "tenant_id": campaign.get("tenant_id") or current_user.tenant_id,
             "campaign_id": campaign_id,
             "phone_number": normalized_phone,
             "first_name": contact.first_name,
@@ -402,6 +441,9 @@ async def add_contact_to_campaign(
         
         response = db_client.table("leads").insert(lead_data).execute()
         
+        if response.error:
+            logger.error(f"Error creating lead for campaign {campaign_id}: {response.error}")
+            raise HTTPException(status_code=500, detail=f"Failed to create contact: {response.error}")
         if not response.data:
             raise HTTPException(status_code=500, detail="Failed to create contact")
         

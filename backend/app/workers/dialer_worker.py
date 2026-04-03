@@ -10,7 +10,8 @@ import logging
 import os
 import signal
 import json
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
 from app.core.dotenv_compat import load_dotenv
@@ -75,8 +76,9 @@ class DialerWorker:
         # Stats
         self._jobs_processed = 0
         self._jobs_failed = 0
-        self._last_scheduled_check = datetime.utcnow()
-    
+        # Set to epoch so the very first loop iteration runs the scheduled check
+        self._last_scheduled_check = datetime(2000, 1, 1, tzinfo=timezone.utc)
+
     async def initialize(self) -> None:
         """Initialize connections to Redis and PostgreSQL."""
         logger.info("Initializing Dialer Worker...")
@@ -84,8 +86,20 @@ class DialerWorker:
         # Initialize queue service (Redis)
         await self.queue_service.initialize()
         
-        # Initialize PostgreSQL pool
-        self._db_pool = await init_db_pool()
+        # Initialize PostgreSQL pool — reuse the container's pool when running
+        # inside FastAPI to avoid creating a second connection pool.
+        try:
+            from app.core.container import get_container
+            container = get_container()
+            if container.is_initialized and container.db_pool:
+                self._db_pool = container.db_pool
+                logger.info("Dialer Worker reusing container DB pool")
+            else:
+                self._db_pool = await init_db_pool()
+                logger.info("Dialer Worker created standalone DB pool")
+        except Exception:
+            self._db_pool = await init_db_pool()
+            logger.info("Dialer Worker created standalone DB pool (fallback)")
         
         # Initialize separate Redis connection for pub/sub
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
@@ -111,12 +125,15 @@ class DialerWorker:
         
         while self.running:
             try:
-                # 1. Check for due scheduled jobs (periodically)
-                if (datetime.utcnow() - self._last_scheduled_check).total_seconds() > self.SCHEDULED_CHECK_INTERVAL:
+                # 1. Check for due scheduled jobs (every 10s)
+                now_utc = datetime.now(timezone.utc)
+                if self._last_scheduled_check.tzinfo is None:
+                    self._last_scheduled_check = self._last_scheduled_check.replace(tzinfo=timezone.utc)
+                if (now_utc - self._last_scheduled_check).total_seconds() > 10:
                     moved = await self.queue_service.process_scheduled_jobs()
                     if moved > 0:
                         logger.info(f"Moved {moved} scheduled jobs to queue")
-                    self._last_scheduled_check = datetime.utcnow()
+                    self._last_scheduled_check = now_utc
                 
                 # 2. Get active tenants
                 tenant_ids = await self._get_active_tenant_ids()
@@ -178,13 +195,33 @@ class DialerWorker:
             
             if not can_call:
                 logger.info(f"Cannot call now: {reason}")
-                
+
                 # Calculate delay until next window or retry
                 if "time_window" in reason or "day" in reason.lower():
                     delay = self.rules_engine.get_delay_until_next_window(rules)
+                    logger.info(
+                        f"Outside calling window (tz={rules.timezone}, "
+                        f"window={rules.time_window_start}-{rules.time_window_end}, "
+                        f"days={rules.allowed_days}). "
+                        f"Retrying in {delay}s (~{delay/3600:.1f}h)"
+                    )
+                elif "lead_cooldown" in reason:
+                    # The cooldown timestamp was set at call *origination* (not at answer)
+                    # due to a now-fixed bug.  Clear it and re-enqueue immediately (bypassing
+                    # the scheduled-set → 60-second wait round-trip).
+                    logger.info(
+                        f"Clearing stale last_called_at for lead {job.lead_id} "
+                        f"(was set at origination, not at answer)"
+                    )
+                    await self._clear_lead_last_called(job.lead_id)
+                    # Re-enqueue directly into the tenant queue for immediate pickup
+                    job.attempt_number += 1
+                    await self.queue_service.enqueue_job(job)
+                    await self._update_job_status(job.job_id, JobStatus.SKIPPED, reason=reason)
+                    return
                 else:
                     delay = 300  # 5 minutes for other reasons (concurrent limit, etc.)
-                
+
                 await self.queue_service.schedule_retry(job, delay_seconds=delay)
                 await self._update_job_status(job.job_id, JobStatus.SKIPPED, reason=reason)
                 return
@@ -193,27 +230,32 @@ class DialerWorker:
             self.rules_engine.register_call_start(job.tenant_id, job.campaign_id)
             
             try:
-                # 5. Initiate the call
-                call_id = await self._make_call(job, rules)
-                
-                if call_id:
-                    # 6. Create call record in database (with talklee_call_id and PSTN leg)
-                    talklee_call_id, leg_id = await self._create_call_record(job, call_id)
-                    
+                # 5. Initiate the call via the provider/PBX.
+                provider_call_id = await self._make_call(job, rules)
+
+                if provider_call_id:
+                    # 6. Create tracked DB records using an internal UUID plus provider call ID.
+                    internal_call_id, talklee_call_id, leg_id = await self._create_call_record(job, provider_call_id)
+
                     # 7. Update lead status to 'calling'
                     await self._update_lead_status(job.lead_id, "calling")
-                    
-                    # 8. Update job with call reference
-                    job.call_id = call_id
+
+                    # 8. Update job with the internal DB call UUID
+                    job.call_id = internal_call_id
                     job.status = JobStatus.PROCESSING
-                    job.processed_at = datetime.utcnow()
-                    await self._update_job_status(job.job_id, JobStatus.PROCESSING, call_id=call_id)
-                    
-                    # 9. Notify voice worker about new call (include talklee_call_id)
-                    await self._publish_call_event(call_id, job, talklee_call_id)
-                    
+                    job.processed_at = datetime.now(timezone.utc)
+                    await self._update_job_status(job.job_id, JobStatus.PROCESSING, call_id=internal_call_id)
+
+                    # 9. Notify voice worker about new call (include talklee_call_id + provider call id)
+                    await self._publish_call_event(internal_call_id, job, talklee_call_id, provider_call_id)
+
                     self._jobs_processed += 1
-                    logger.info(f"Call initiated: {call_id} for job {job.job_id}")
+                    logger.info(
+                        "Call initiated: internal_call_id=%s provider_call_id=%s job=%s",
+                        internal_call_id,
+                        provider_call_id,
+                        job.job_id,
+                    )
                 else:
                     raise Exception("No call_id returned from telephony provider")
                     
@@ -225,60 +267,81 @@ class DialerWorker:
         except Exception as e:
             self._jobs_failed += 1
             logger.error(f"Failed to process job {job.job_id}: {e}", exc_info=True)
-            
+
             # Record failure and potentially schedule retry
             job.last_error = str(e)
             job.last_outcome = CallOutcome.FAILED
-            
+
             should_retry, retry_reason = job.should_retry(goal_achieved=False)
-            
+
             if should_retry:
+                # Reset lead back to pending so it can be picked up again
+                await self._update_lead_status(job.lead_id, "pending")
                 await self.queue_service.schedule_retry(job, delay_seconds=job.RETRY_DELAY_SECONDS)
                 await self._update_job_status(job.job_id, JobStatus.RETRY_SCHEDULED, error=str(e))
             else:
+                # Max retries exceeded — mark lead as failed
+                await self._update_lead_status(job.lead_id, "failed")
                 await self.queue_service.mark_failed(job.job_id, str(e))
                 await self._update_job_status(job.job_id, JobStatus.FAILED, error=str(e))
     
     async def _make_call(self, job: DialerJob, rules: CallingRules) -> Optional[str]:
         """
-        Initiate an outbound call via the active telephony provider.
+        Initiate an outbound call through the telephony bridge HTTP endpoint.
 
-        Uses ``TelephonyProviderFactory`` to select the configured provider
-        (SIP/Asterisk/FreeSWITCH or Vonage) at runtime.
+        Delegates to POST /api/v1/sip/telephony/call so the bridge's persistent
+        ARI/ESL adapter owns the channel for its entire lifetime.  Creating a
+        separate adapter here and disconnecting it after origination caused
+        Asterisk to immediately hang up the channel (ARI drops all channels
+        belonging to a disconnected app).
 
         Returns:
-            call_id (UUID) if successful, None otherwise
+            provider call_id (Asterisk channel ID) if successful, None otherwise.
         """
-        from app.infrastructure.telephony.provider_factory import TelephonyProviderFactory
+        import aiohttp
+
+        api_base = os.getenv("API_BASE_URL", "http://localhost:8000")
+        caller_id = getattr(rules, "caller_id", None) or os.getenv("DEFAULT_CALLER_ID", "1001")
+        url = (
+            f"{api_base}/api/v1/sip/telephony/call"
+            f"?destination={job.phone_number}"
+            f"&caller_id={caller_id}"
+            f"&tenant_id={job.tenant_id}"
+            f"&campaign_id={job.campaign_id}"
+        )
 
         try:
-            provider = await TelephonyProviderFactory.create()
-            webhook_base = os.getenv("API_BASE_URL", "http://localhost:8000")
-            caller_id = rules.caller_id if hasattr(rules, "caller_id") else "1001"
+            headers = {"Content-Type": "application/json"}
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    if resp.status not in (200, 202):
+                        body = await resp.text()
+                        logger.error(
+                            "Telephony bridge rejected call: status=%s body=%s dest=%s",
+                            resp.status, body[:200], job.phone_number,
+                        )
+                        return None
 
-            call_id = await provider.originate_call(
-                destination=job.phone_number,
-                caller_id=caller_id,
-                webhook_base_url=webhook_base,
-                metadata={"campaign_id": job.campaign_id, "lead_id": job.lead_id},
-            )
-            # Store which provider was used so DB records are accurate
-            self._last_provider_name = provider.name
+                    data = await resp.json()
+                    call_id: Optional[str] = data.get("call_id")
+                    self._last_provider_name = data.get("adapter", "asterisk")
 
-            if call_id:
-                logger.info(
-                    f"CALL INITIATED via {provider.name}: {job.phone_number} "
-                    f"call_id={call_id[:8]}... "
-                    f"(campaign={job.campaign_id}, lead={job.lead_id})"
-                )
-            else:
-                logger.warning(
-                    f"CALL FAILED via {provider.name}: {job.phone_number} "
-                    f"(campaign={job.campaign_id}, lead={job.lead_id})"
-                )
-            return call_id
+                    if call_id:
+                        logger.info(
+                            "CALL INITIATED via bridge (%s): %s call_id=%s... "
+                            "(campaign=%s, lead=%s)",
+                            self._last_provider_name, job.phone_number,
+                            call_id[:8], job.campaign_id, job.lead_id,
+                        )
+                    else:
+                        logger.warning(
+                            "CALL FAILED via bridge: %s (campaign=%s, lead=%s)",
+                            job.phone_number, job.campaign_id, job.lead_id,
+                        )
+                    return call_id
+
         except Exception as e:
-            logger.error(f"Originate error for {job.phone_number}: {e}")
+            logger.error("Originate error for %s: %s", job.phone_number, e)
             return None
     
     async def _get_active_tenant_ids(self) -> List[str]:
@@ -288,13 +351,16 @@ class DialerWorker:
                 rows = await conn.fetch(
                     "SELECT DISTINCT tenant_id FROM campaigns WHERE status IN ('running', 'active')"
                 )
-                if rows:
-                    return [str(r["tenant_id"]) for r in rows]
-            return None
-            
+                tenant_ids = [str(r["tenant_id"]) for r in rows] if rows else []
+                if tenant_ids:
+                    logger.debug("Active tenants with running campaigns: %s", tenant_ids)
+                else:
+                    logger.debug("No tenants with running campaigns found in DB")
+                return tenant_ids
+
         except Exception as e:
             logger.error(f"Failed to get active tenants: {e}")
-            return None
+            return []
     
     async def _get_tenant_rules(self, tenant_id: str) -> CallingRules:
         """Get calling rules for a tenant."""
@@ -332,50 +398,65 @@ class DialerWorker:
         
         return None
     
-    async def _create_call_record(self, job: DialerJob, call_id: str) -> tuple[str, str]:
+    async def _create_call_record(self, job: DialerJob, provider_call_id: str) -> tuple[str, str, str]:
         """
-        Create a call record in the database with talklee_call_id and PSTN leg.
-        
+        Create a call record in the database with separate internal and provider IDs.
+
         Returns:
-            tuple: (talklee_call_id, leg_id)
+            tuple: (internal_call_id, talklee_call_id, leg_id)
         """
         talklee_call_id = generate_talklee_call_id()
-        
+        internal_call_id = str(uuid.uuid4())
+
         try:
             async with self._db_pool.acquire() as conn:
-                # Create call record
                 await conn.execute(
                     """
                     INSERT INTO calls (
-                        id, talklee_call_id, campaign_id, lead_id, phone_number,
-                        status, created_at, dialer_job_id, tenant_id
-                    ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, $8)
+                        id, tenant_id, campaign_id, lead_id, phone_number,
+                        external_call_uuid, status, talklee_call_id, created_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
                     """,
-                    call_id, talklee_call_id, job.campaign_id, job.lead_id,
-                    job.phone_number, "initiated", job.job_id, job.tenant_id
+                    internal_call_id,
+                    job.tenant_id,
+                    job.campaign_id,
+                    job.lead_id,
+                    job.phone_number,
+                    provider_call_id,
+                    "initiated",
+                    talklee_call_id,
                 )
-                logger.debug(f"Created call record: {call_id} with {talklee_call_id}")
-                
-                # Create PSTN leg
-                # Using direct execution instead of CallEventRepository for simplicity now
-                # or replicate behavior
-                import uuid
+                logger.debug(
+                    "Created call record internal=%s provider=%s talklee=%s",
+                    internal_call_id,
+                    provider_call_id,
+                    talklee_call_id,
+                )
+
                 leg_id = str(uuid.uuid4())
                 await conn.execute(
                     """
                     INSERT INTO call_legs (
                         id, call_id, talklee_call_id, leg_type, direction,
-                        provider, to_number, status, metadata, created_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+                        provider, provider_leg_id, to_number, status, metadata, created_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
                     """,
-                    leg_id, call_id, talklee_call_id, "pstn_outbound", "outbound",
-                    getattr(self, "_last_provider_name", "sip"), job.phone_number, "initiated",
-                    json.dumps({"job_id": job.job_id, "campaign_id": job.campaign_id})
+                    leg_id,
+                    internal_call_id,
+                    talklee_call_id,
+                    "pstn_outbound",
+                    "outbound",
+                    getattr(self, "_last_provider_name", "sip"),
+                    provider_call_id,
+                    job.phone_number,
+                    "initiated",
+                    json.dumps({
+                        "job_id": job.job_id,
+                        "campaign_id": job.campaign_id,
+                        "provider_call_id": provider_call_id,
+                    }),
                 )
-                
-                logger.debug(f"Created PSTN leg: {leg_id}")
-                
-                # Log call initiated event
+
                 await conn.execute(
                     """
                     INSERT INTO call_events (
@@ -383,31 +464,64 @@ class DialerWorker:
                         event_data, new_state, created_at
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
                     """,
-                    call_id, talklee_call_id, leg_id, "leg_started", "dialer_worker",
-                    json.dumps({"leg_type": "pstn_outbound", "provider": getattr(self, "_last_provider_name", "sip")}),
-                    "initiated"
+                    internal_call_id,
+                    talklee_call_id,
+                    leg_id,
+                    "leg_started",
+                    "dialer_worker",
+                    json.dumps({
+                        "leg_type": "pstn_outbound",
+                        "provider": getattr(self, "_last_provider_name", "sip"),
+                        "provider_call_id": provider_call_id,
+                    }),
+                    "initiated",
                 )
-                
-                return talklee_call_id, leg_id
-            
+
+                return internal_call_id, talklee_call_id, leg_id
+
         except Exception as e:
             logger.error(f"Failed to create call record: {e}")
-            return talklee_call_id, ""
+            return internal_call_id, talklee_call_id, ""
     
     async def _update_lead_status(self, lead_id: str, status: str) -> None:
         """Update lead status in database."""
         try:
             async with self._db_pool.acquire() as conn:
-                await conn.execute(
-                    """
-                    UPDATE leads SET status = $1, last_called_at = NOW()
-                    WHERE id = $2
-                    """,
-                    status, lead_id
-                )
+                if status in ("pending", "calling"):
+                    # "pending"  — resetting for retry, keep last_called_at unchanged
+                    # "calling"  — origination only, call not yet answered; setting
+                    #              last_called_at here would poison the per-lead cooldown
+                    #              and block all retries for 2 hours even if the call
+                    #              never connected.  last_called_at is set on terminal
+                    #              states (completed / failed) instead.
+                    await conn.execute(
+                        "UPDATE leads SET status = $1 WHERE id = $2",
+                        status, lead_id
+                    )
+                else:
+                    # Terminal / completion states (failed, completed, etc.) —
+                    # record the timestamp so per-lead cooldown is enforced correctly.
+                    await conn.execute(
+                        """
+                        UPDATE leads SET status = $1, last_called_at = NOW()
+                        WHERE id = $2
+                        """,
+                        status, lead_id
+                    )
         except Exception as e:
             logger.error(f"Failed to update lead status: {e}")
-    
+
+    async def _clear_lead_last_called(self, lead_id: str) -> None:
+        """Clear last_called_at so a stale origination-time timestamp cannot block retries."""
+        try:
+            async with self._db_pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE leads SET last_called_at = NULL WHERE id = $1",
+                    lead_id
+                )
+        except Exception as e:
+            logger.error(f"Failed to clear lead last_called_at: {e}")
+
     async def _update_job_status(
         self,
         job_id: str,
@@ -425,39 +539,51 @@ class DialerWorker:
                 db = Database(conn)
                 data = {
                     "status": status_val,
-                    "updated_at": datetime.utcnow()
+                    "updated_at": datetime.now(timezone.utc)
                 }
                 if call_id:
                     data["call_id"] = call_id
-                    data["processed_at"] = datetime.utcnow()
+                    data["processed_at"] = datetime.now(timezone.utc)
                 if error:
                     data["last_error"] = error
                 
                 if status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.GOAL_ACHIEVED]:
-                    data["completed_at"] = datetime.utcnow()
+                    data["completed_at"] = datetime.now(timezone.utc)
                     
                 await db.update("dialer_jobs", data, "id = $1", [job_id])
                 
         except Exception as e:
             logger.error(f"Failed to update job status: {e}")
     
-    async def _publish_call_event(self, call_id: str, job: DialerJob, talklee_call_id: str) -> None:
+    async def _publish_call_event(
+        self,
+        call_id: str,
+        job: DialerJob,
+        talklee_call_id: str,
+        provider_call_id: str,
+    ) -> None:
         """Publish call event for voice worker to pick up."""
         try:
             event = {
                 "event": "call_initiated",
                 "call_id": call_id,
                 "talklee_call_id": talklee_call_id,
+                "provider_call_id": provider_call_id,
                 "job_id": job.job_id,
                 "campaign_id": job.campaign_id,
                 "lead_id": job.lead_id,
                 "tenant_id": job.tenant_id,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
-            
+
             await self._redis.publish("voice:calls:active", json.dumps(event))
-            logger.debug(f"Published call event for {call_id} ({talklee_call_id})")
-            
+            logger.debug(
+                "Published call event internal=%s provider=%s talklee=%s",
+                call_id,
+                provider_call_id,
+                talklee_call_id,
+            )
+
         except Exception as e:
             logger.error(f"Failed to publish call event: {e}")
     

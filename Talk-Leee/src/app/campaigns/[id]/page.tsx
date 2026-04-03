@@ -1,18 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { dashboardApi, Campaign, Contact } from "@/lib/dashboard-api";
+import { extendedApi, BulkImportResponse } from "@/lib/extended-api";
 import {
     ArrowLeft,
     Play,
     Pause,
     Square,
     Plus,
+    Upload,
     Users,
     Phone,
     CheckCircle,
@@ -63,6 +65,12 @@ export default function CampaignDetailPage() {
     const [loading, setLoading] = useState(true);
     const [actionLoading, setActionLoading] = useState(false);
     const [error, setError] = useState("");
+
+    // CSV Upload
+    const csvInputRef = useRef<HTMLInputElement>(null);
+    const [csvFile, setCsvFile] = useState<File | null>(null);
+    const [csvUploading, setCsvUploading] = useState(false);
+    const [csvResult, setCsvResult] = useState<BulkImportResponse | null>(null);
 
     // Add contact form
     const [showAddContact, setShowAddContact] = useState(false);
@@ -131,6 +139,23 @@ export default function CampaignDetailPage() {
             alert(err instanceof Error ? err.message : "Failed to stop campaign");
         } finally {
             setActionLoading(false);
+        }
+    }
+
+    async function handleCsvUpload() {
+        if (!csvFile) return;
+        try {
+            setCsvUploading(true);
+            setCsvResult(null);
+            const result = await extendedApi.uploadCSV(campaignId, csvFile, true);
+            setCsvResult(result);
+            setCsvFile(null);
+            if (csvInputRef.current) csvInputRef.current.value = "";
+            await loadData();
+        } catch (err) {
+            alert(err instanceof Error ? err.message : "CSV upload failed");
+        } finally {
+            setCsvUploading(false);
         }
     }
 
@@ -295,11 +320,44 @@ export default function CampaignDetailPage() {
                     >
                         <div className="flex items-center justify-between mb-4">
                             <h3 className="text-lg font-semibold text-foreground">Contacts</h3>
-                            <Button size="sm" onClick={() => setShowAddContact(true)}>
-                                <Plus className="w-4 h-4" />
-                                Add Contact
-                            </Button>
+                            <div className="flex gap-2">
+                                {/* CSV Upload */}
+                                <input
+                                    ref={csvInputRef}
+                                    type="file"
+                                    accept=".csv"
+                                    className="hidden"
+                                    onChange={(e) => setCsvFile(e.target.files?.[0] ?? null)}
+                                />
+                                {csvFile ? (
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-xs text-muted-foreground truncate max-w-[140px]">{csvFile.name}</span>
+                                        <Button size="sm" variant="outline" onClick={handleCsvUpload} disabled={csvUploading}>
+                                            {csvUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                                            {csvUploading ? "Uploading..." : "Upload"}
+                                        </Button>
+                                        <Button size="sm" variant="ghost" onClick={() => { setCsvFile(null); setCsvResult(null); if (csvInputRef.current) csvInputRef.current.value = ""; }}>✕</Button>
+                                    </div>
+                                ) : (
+                                    <Button size="sm" variant="outline" onClick={() => csvInputRef.current?.click()}>
+                                        <Upload className="w-4 h-4" />
+                                        Upload CSV
+                                    </Button>
+                                )}
+                                <Button size="sm" onClick={() => setShowAddContact(true)}>
+                                    <Plus className="w-4 h-4" />
+                                    Add Contact
+                                </Button>
+                            </div>
                         </div>
+                        {csvResult && (
+                            <div className={`mb-4 p-3 rounded-lg text-sm border ${csvResult.failed > 0 ? "bg-yellow-500/10 border-yellow-500/30 text-yellow-700 dark:text-yellow-400" : "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-400"}`}>
+                                ✓ Imported {csvResult.imported} of {csvResult.total_rows} contacts
+                                {csvResult.duplicates_skipped > 0 && ` · ${csvResult.duplicates_skipped} duplicates skipped`}
+                                {csvResult.failed > 0 && ` · ${csvResult.failed} failed`}
+                                <button className="ml-2 opacity-60 hover:opacity-100" onClick={() => setCsvResult(null)}>✕</button>
+                            </div>
+                        )}
 
                         {showAddContact && (
                             <form onSubmit={handleAddContact} className="mb-6 p-4 bg-muted/30 rounded-lg border border-border">

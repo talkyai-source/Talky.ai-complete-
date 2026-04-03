@@ -100,8 +100,8 @@ class ServiceContainer:
         except Exception as e:
             logger.warning(f"SessionManager initialization warning: {e}")
 
-        # 6. Initialize VoiceOrchestrator
-        self._initialize_voice_orchestrator()
+        # 6. Initialize VoiceOrchestrator and pre-warm Ask AI providers
+        await self._initialize_voice_orchestrator()
 
         # 7. Start adapter health monitor (non-blocking background task)
         try:
@@ -277,11 +277,13 @@ class ServiceContainer:
         except Exception as e:
             logger.warning(f"CallService initialization warning: {e}")
 
-    def _initialize_voice_orchestrator(self) -> None:
-        """Initialize VoiceOrchestrator."""
+    async def _initialize_voice_orchestrator(self) -> None:
+        """Initialize VoiceOrchestrator and pre-warm Ask AI provider singletons."""
         try:
             from app.domain.services.voice_orchestrator import VoiceOrchestrator
-            self._voice_orchestrator = VoiceOrchestrator(db_client=self.db_client)
+            orchestrator = VoiceOrchestrator(db_client=self.db_client)
+            await orchestrator.prewarm_ask_ai_providers()
+            self._voice_orchestrator = orchestrator
             logger.info("VoiceOrchestrator initialized")
         except Exception as e:
             logger.warning(f"VoiceOrchestrator initialization warning: {e}")

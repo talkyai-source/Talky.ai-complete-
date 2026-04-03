@@ -1,5 +1,6 @@
 const STORAGE_KEY = "talklee.auth.token";
-const COOKIE_NAME = "talklee_auth_token";
+const LEGACY_COOKIE_NAME = "talklee_auth_token";
+const BACKEND_SESSION_COOKIE_NAME = "talky_sid";
 const LEGACY_DEV_TOKEN = "dev-token";
 
 export function authTokenStorageKey() {
@@ -7,7 +8,11 @@ export function authTokenStorageKey() {
 }
 
 export function authTokenCookieName() {
-    return COOKIE_NAME;
+    return LEGACY_COOKIE_NAME;
+}
+
+export function backendSessionCookieName() {
+    return BACKEND_SESSION_COOKIE_NAME;
 }
 
 function readCookie(name: string) {
@@ -41,12 +46,17 @@ export function getBrowserAuthToken(): string | null {
             return v;
         }
     } catch {}
-    const cookie = readCookie(COOKIE_NAME);
+    const cookie = readCookie(LEGACY_COOKIE_NAME);
     if (cookie && cookie.trim().length > 0) {
         if (cookie.trim() === LEGACY_DEV_TOKEN) {
             setBrowserAuthToken(null);
             return null;
         }
+        try {
+            window.localStorage.setItem(STORAGE_KEY, cookie);
+        } catch {}
+        const isProd = process.env.NODE_ENV === "production";
+        document.cookie = `${LEGACY_COOKIE_NAME}=; Path=/; Max-Age=0; SameSite=Lax${isProd ? "; Secure" : ""}`;
         return cookie;
     }
     return null;
@@ -61,9 +71,5 @@ export function setBrowserAuthToken(token: string | null) {
 
     if (typeof document === "undefined") return;
     const isProd = process.env.NODE_ENV === "production";
-    if (!token) {
-        document.cookie = `${COOKIE_NAME}=; Path=/; Max-Age=0; SameSite=Lax${isProd ? "; Secure" : ""}`;
-        return;
-    }
-    document.cookie = `${COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; Max-Age=${60 * 60 * 24 * 7}; SameSite=Lax${isProd ? "; Secure" : ""}`;
+    document.cookie = `${LEGACY_COOKIE_NAME}=; Path=/; Max-Age=0; SameSite=Lax${isProd ? "; Secure" : ""}`;
 }

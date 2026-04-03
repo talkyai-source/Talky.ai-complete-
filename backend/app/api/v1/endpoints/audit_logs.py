@@ -3,14 +3,16 @@ Audit Logs API Endpoints
 
 Provides access to comprehensive audit trail for compliance and forensics.
 """
-from datetime import datetime
+import csv
+import io
+from datetime import datetime, timedelta
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
-from app.api.v1.dependencies import get_current_user, require_permissions, get_audit_logger
+from app.api.v1.dependencies import get_audit_logger, get_db_pool, require_permissions
 from app.domain.services.audit_logger import (
     AuditEvent,
     AuditLogger,
@@ -237,13 +239,39 @@ async def export_audit_logs(
             ]
         }
     else:
-        # Return CSV format info
-        return {
-            "export_time": datetime.utcnow().isoformat(),
-            "record_count": len(logs),
-            "format": "csv",
-            "note": "CSV generation would be implemented with streaming response",
-        }
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "event_id",
+            "event_time",
+            "event_type",
+            "severity",
+            "actor_id",
+            "tenant_id",
+            "resource_type",
+            "resource_id",
+            "action",
+            "description",
+        ])
+        for log in logs:
+            writer.writerow([
+                str(log.event_id),
+                log.event_time.isoformat(),
+                log.event_type.value if isinstance(log.event_type, AuditEvent) else log.event_type,
+                log.severity.value if isinstance(log.severity, Severity) else log.severity,
+                str(log.actor_id) if log.actor_id else "",
+                str(log.tenant_id) if log.tenant_id else "",
+                log.resource_type or "",
+                str(log.resource_id) if log.resource_id else "",
+                log.action,
+                log.description or "",
+            ])
+        filename = f"audit_logs_{start_date.date().isoformat()}_{end_date.date().isoformat()}.csv"
+        return Response(
+            content=output.getvalue(),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
 
 @router.get("/stats/events-by-type")
@@ -251,13 +279,27 @@ async def get_event_stats(
     days: int = Query(30, ge=1, le=365),
     tenant_id: Optional[UUID] = None,
     current_user: dict = Depends(require_permissions(["audit:read"])),
+    db_pool=Depends(get_db_pool),
 ):
     """Get event type distribution statistics"""
-    # Implementation would query database for aggregates
+    scoped_tenant_id = tenant_id or current_user.get("tenant_id")
+    since = datetime.utcnow() - timedelta(days=days)
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT event_type, COUNT(*) AS total
+            FROM audit_logs
+            WHERE event_time >= $1
+              AND ($2::uuid IS NULL OR tenant_id = $2)
+            GROUP BY event_type
+            ORDER BY total DESC, event_type ASC
+            """,
+            since,
+            scoped_tenant_id,
+        )
     return {
         "period_days": days,
-        "events_by_type": {},
-        "note": "Statistics aggregation would be implemented",
+        "events_by_type": {row["event_type"]: row["total"] for row in rows},
     }
 
 
@@ -265,15 +307,27 @@ async def get_event_stats(
 async def get_failed_login_stats(
     days: int = Query(7, ge=1, le=90),
     current_user: dict = Depends(require_permissions(["audit:read", "security:monitor"])),
+    db_pool=Depends(get_db_pool),
 ):
     """Get failed login analysis"""
+    since = datetime.utcnow() - timedelta(days=days)
+    async with db_pool.acquire() as conn:
+        summary = await conn.fetchrow(
+            """
+            SELECT COUNT(*) FILTER (WHERE success = FALSE) AS total_failed,
+                   COUNT(DISTINCT ip_address) FILTER (WHERE success = FALSE) AS unique_ips,
+                   COUNT(*) FILTER (WHERE failure_reason = 'account_locked') AS blocked_attempts
+            FROM login_attempts
+            WHERE attempted_at >= $1
+            """,
+            since,
+        )
     return {
         "period_days": days,
-        "total_failed": 0,
-        "unique_ips": 0,
-        "blocked_attempts": 0,
+        "total_failed": int(summary["total_failed"] or 0),
+        "unique_ips": int(summary["unique_ips"] or 0),
+        "blocked_attempts": int(summary["blocked_attempts"] or 0),
         "top_countries": [],
-        "note": "Failed login analysis would be implemented",
     }
 
 

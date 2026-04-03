@@ -92,6 +92,7 @@ function RemindersContent() {
 
     useEffect(() => {
         const onMessage = (event: MessageEvent) => {
+            if (event.origin !== window.location.origin) return;
             const data = event.data as unknown;
             if (!data || typeof data !== "object") return;
             const t = (data as Record<string, unknown>).type;

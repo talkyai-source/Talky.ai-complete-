@@ -44,7 +44,7 @@ function ConnectorsTypedCallbackInner({ providerType }: { providerType: string }
         let deliveredToOpener = false;
         try {
             if (window.opener && !window.opener.closed) {
-                window.opener.postMessage(payload, "*");
+                window.opener.postMessage(payload, window.location.origin);
                 deliveredToOpener = true;
             }
         } catch {

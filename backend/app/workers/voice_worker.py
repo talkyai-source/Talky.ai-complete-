@@ -222,11 +222,12 @@ class VoicePipelineWorker:
                     call_id=call_id,
                     campaign_id=event.get("campaign_id", ""),
                     lead_id=event.get("lead_id", ""),
-                    provider_call_id=call_id,
+                    provider_call_id=event.get("provider_call_id", call_id),
                     system_prompt="You are a helpful AI assistant.",  # Default, should come from campaign
                     voice_id=os.getenv("DEFAULT_VOICE_ID", "sonic"),
                     websocket=None,  # Will be set when WebSocket connects
-                    tenant_id=event.get("tenant_id")
+                    tenant_id=event.get("tenant_id"),
+                    talklee_call_id=event.get("talklee_call_id"),
                 )
             
             # Create pipeline service
