@@ -1,12 +1,25 @@
 """
-Billing Service
-Handles Stripe subscription operations and billing logic
+Billing Service - Complete implementation with Stripe & notifications
+Handles subscription management, payments, webhooks, and billing notifications.
+
+Day 8: Fully integrated billing with:
+- Stripe Checkout & subscriptions
+- Webhook event handling
+- Email/Slack notifications
+- Usage tracking & metering
+- Invoice management
 """
 import os
 import logging
 from typing import Optional, Dict, Any
 from datetime import datetime
 from app.core.postgres_adapter import Client
+
+from app.domain.services.audit_logger import AuditEvent, AuditLogger
+from app.domain.services.notification_service import (
+    get_notification_service,
+    NotificationChannel,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +42,9 @@ class BillingService:
     - STRIPE_MOCK_MODE environment variable is set to 'true'
     """
     
-    def __init__(self, db_client: Client):
+    def __init__(self, db_client: Client, audit_logger: Optional[AuditLogger] = None):
         self.db_client = db_client
+        self.audit_logger = audit_logger
         self.mock_mode = self._should_use_mock_mode()
         
         if not self.mock_mode and STRIPE_AVAILABLE:
@@ -370,6 +384,17 @@ class BillingService:
                 }).eq("id", tenant_id).execute()
         
         logger.info(f"Activated subscription for tenant {tenant_id}")
+
+        # Day 8: Audit log
+        if self.audit_logger:
+            await self.audit_logger.log(
+                event_type=AuditEvent.BILLING_UPDATED,
+                tenant_id=tenant_id,
+                action="subscription_activated",
+                description=f"Subscription activated via Stripe checkout: {plan_id}",
+                metadata={"subscription_id": subscription_id, "plan_id": plan_id},
+                actor_type="system"
+            )
     
     async def _handle_subscription_created(self, subscription: Dict):
         """Handle customer.subscription.created event"""
@@ -394,14 +419,27 @@ class BillingService:
             "status": "canceled",
             "canceled_at": datetime.now()
         }).eq("stripe_subscription_id", subscription["id"]).execute()
+
+        # Day 8: Audit log
+        if self.audit_logger and tenant_id:
+            await self.audit_logger.log(
+                event_type=AuditEvent.BILLING_UPDATED,
+                tenant_id=tenant_id,
+                action="subscription_deleted",
+                description="Subscription deleted/canceled via Stripe",
+                metadata={"subscription_id": subscription["id"]},
+                actor_type="system"
+            )
     
     async def _handle_invoice_paid(self, invoice: Dict):
         """Handle invoice.paid event"""
+        tenant_id = invoice.get("metadata", {}).get("tenant_id")
+
         # Store invoice record
         self.db_client.table("invoices").upsert({
             "stripe_invoice_id": invoice["id"],
             "stripe_subscription_id": invoice.get("subscription"),
-            "tenant_id": invoice.get("metadata", {}).get("tenant_id"),
+            "tenant_id": tenant_id,
             "amount_due": invoice.get("amount_due", 0),
             "amount_paid": invoice.get("amount_paid", 0),
             "currency": invoice.get("currency", "usd"),
@@ -410,20 +448,100 @@ class BillingService:
             "hosted_invoice_url": invoice.get("hosted_invoice_url"),
             "paid_at": datetime.now()
         }, on_conflict="stripe_invoice_id").execute()
-    
+
+        # Send payment success notification
+        if tenant_id:
+            # Get user email from tenant
+            tenant_data = self.db_client.table("tenants").select(
+                "business_name"
+            ).eq("id", tenant_id).single().execute()
+
+            user_email = ""
+            if tenant_data.data:
+                # Try to get admin user email
+                users = self.db_client.table("user_profiles").select(
+                    "email"
+                ).eq("tenant_id", tenant_id).eq("role", "owner").limit(1).execute()
+                if users.data:
+                    user_email = users.data[0].get("email", "")
+
+            if user_email:
+                notification_service = get_notification_service()
+                await notification_service.send_email(
+                    to_email=user_email,
+                    subject="Payment Received",
+                    html_body=f"""
+                    <html>
+                        <body style="font-family: Arial, sans-serif; color: #333;">
+                            <h1 style="color: #34C759;">Payment Successful</h1>
+                            <p>Your payment of ${invoice.get('amount_paid', 0)/100:.2f} {invoice.get('currency', 'USD').upper()} has been received.</p>
+                            <p><strong>Invoice ID:</strong> {invoice['id']}</p>
+                            <p><a href="{invoice.get('hosted_invoice_url', 'https://talky.ai/invoices')}" style="color: #007AFF;">View Invoice</a></p>
+                        </body>
+                    </html>
+                    """,
+                )
+
+            # Audit log
+            if self.audit_logger:
+                await self.audit_logger.log(
+                    event_type=AuditEvent.BILLING_UPDATED,
+                    tenant_id=tenant_id,
+                    action="payment_received",
+                    description=f"Payment received: ${invoice.get('amount_paid', 0)/100:.2f}",
+                    metadata={
+                        "invoice_id": invoice["id"],
+                        "amount": invoice.get("amount_paid", 0)
+                    },
+                    actor_type="system"
+                )
+
     async def _handle_invoice_payment_failed(self, invoice: Dict):
         """Handle invoice.payment_failed event"""
         subscription_id = invoice.get("subscription")
-        
+        tenant_id = invoice.get("metadata", {}).get("tenant_id")
+
         if subscription_id:
             self.db_client.table("subscriptions").update({
                 "status": "past_due"
             }).eq("stripe_subscription_id", subscription_id).execute()
-            
+
             # Update tenant status
-            self.db_client.table("tenants").update({
-                "subscription_status": "past_due"
-            }).eq("stripe_subscription_id", subscription_id).execute()
+            if tenant_id:
+                self.db_client.table("tenants").update({
+                    "subscription_status": "past_due"
+                }).eq("id", tenant_id).execute()
+
+        # Send payment failure notification
+        if tenant_id:
+            # Get user email
+            users = self.db_client.table("user_profiles").select(
+                "email"
+            ).eq("tenant_id", tenant_id).eq("role", "owner").limit(1).execute()
+
+            if users.data:
+                user_email = users.data[0].get("email", "")
+                if user_email:
+                    notification_service = get_notification_service()
+                    await notification_service.notify_billing_failure(
+                        user_email=user_email,
+                        amount=invoice.get("amount_due", 0) / 100,
+                        error_message=invoice.get("attempt_count", 1) > 1 and "Multiple payment attempts failed" or "Payment declined",
+                        channels=NotificationChannel.BOTH,
+                    )
+
+            # Audit log
+            if self.audit_logger:
+                await self.audit_logger.log_security_event(
+                    event_type="billing_payment_failed",
+                    severity="HIGH",
+                    description=f"Payment failed for tenant {tenant_id}: {invoice['id']}",
+                    metadata={
+                        "invoice_id": invoice["id"],
+                        "amount": invoice.get("amount_due", 0),
+                        "attempt_count": invoice.get("attempt_count", 1)
+                    },
+                )
     
     async def _sync_subscription(self, subscription: Dict):
         """Sync subscription data from Stripe to database"""
@@ -455,6 +573,21 @@ class BillingService:
                 "subscription_status": subscription["status"],
                 "stripe_subscription_id": subscription["id"]
             }).eq("id", tenant_id).execute()
+
+            # Day 8: Audit log
+            if self.audit_logger:
+                await self.audit_logger.log(
+                    event_type=AuditEvent.BILLING_UPDATED,
+                    tenant_id=tenant_id,
+                    action="subscription_synced",
+                    description=f"Subscription state synced: {subscription['status']}",
+                    metadata={
+                        "subscription_id": subscription["id"],
+                        "status": subscription["status"],
+                        "plan_id": plan_id
+                    },
+                    actor_type="system"
+                )
     
     # =========================================================================
     # Usage Tracking (for metered billing)
