@@ -419,13 +419,15 @@ class VoicePipelineService:
             await self.handle_turn_end(session, websocket)
             return
         
-        # Handle EagerEndOfTurn - start LLM early for lower latency
+        # Handle EagerEndOfTurn - store transcript for lower latency when EndOfTurn fires
         if metadata.get("eager") and transcript.text:
-            # Only start eager processing if not already processing
+            # Only update if not already processing
             if not session.llm_active and call_id not in self._pending_llm_tasks:
-                logger.info(f"EagerEndOfTurn for call {call_id} - starting speculative LLM")
-                # Store the eager transcript but don't process yet
-                # We'll process when EndOfTurn confirms
+                logger.info(
+                    f"EagerEndOfTurn for call {call_id} - storing speculative transcript, "
+                    f"waiting for EndOfTurn to confirm before dispatching LLM"
+                )
+                # Store the eager transcript; EndOfTurn will trigger the actual LLM call
                 session.current_user_input = transcript.text
             return
         
