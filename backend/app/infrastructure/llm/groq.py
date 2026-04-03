@@ -91,6 +91,10 @@ class GroqLLMProvider(LLMProvider):
         """
         Groq recommends avoiding system prompts for GPT-OSS models and placing
         instructions in a user message instead.
+
+        If the message list is empty or starts with an assistant message (e.g. the
+        Ask AI greeting), the instructions are prepended as a standalone user
+        message so that GPT-OSS always receives a user message first.
         """
         if not system_prompt:
             return messages
@@ -101,6 +105,14 @@ class GroqLLMProvider(LLMProvider):
             "Apply these instructions to every reply in this conversation."
         )
 
+        # GPT-OSS requires the first message to be user role.
+        # If history starts with an assistant message (e.g. greeting), prepend a
+        # standalone user instruction message rather than trying to inject into a
+        # later user message — that would leave the assistant message at index 0.
+        if not messages or messages[0].get("role") != "user":
+            return [{"role": "user", "content": instruction_block}, *messages]
+
+        # Normal path: inject instructions into the first user message.
         merged_messages: List[dict] = []
         injected = False
         for message in messages:
@@ -339,8 +351,13 @@ class GroqLLMProvider(LLMProvider):
                         reasoning_format,
                         model,
                     )
-                if reasoning_effort is not None:
-                    request_kwargs["reasoning_effort"] = reasoning_effort
+                # Default to "low" for voice pipelines — the model uses a small
+                # number of reasoning tokens before the first output token, which
+                # cuts TTFT by ~400-1000ms vs "medium" (the Groq default).
+                # Callers can override by passing reasoning_effort= explicitly.
+                if reasoning_effort is None:
+                    reasoning_effort = "low"
+                request_kwargs["reasoning_effort"] = reasoning_effort
             elif self._is_qwen3_model(model):
                 # Groq recommends non-thinking mode for general dialogue.
                 if reasoning_effort is None:
