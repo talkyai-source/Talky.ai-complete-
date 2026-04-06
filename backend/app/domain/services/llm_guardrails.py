@@ -259,15 +259,24 @@ class LLMGuardrails:
         cleaned = re.sub(r'\*\*\*?|\*\*?|__?|~~', '', cleaned)
         cleaned = re.sub(r'<[^>]+>', ' ', cleaned)
 
-        # Remove common filler starts
+        # Remove common filler starts.
+        # Multi-word phrases (e.g. "Sure thing!") must come before single-word
+        # patterns so the longer match wins.
         filler_starts = [
+            r'^Sure thing[!,]?\s*',     # "Sure thing!" / "Sure thing," / "Sure thing"
+            r'^No problem[!,]?\s+',     # "No problem!" / "No problem,"
+            r'^Happy to help[!,]?\s+',  # "Happy to help!"
             r'^(Well,?\s+)',
             r'^(So,?\s+)',
             r'^(Actually,?\s+)',
             r'^(Okay,?\s+)',
             r'^(Alright,?\s+)',
-            r'^Sure[!,]\s+',
-            r'^(Of course!?\s+)',
+            r'^Sure[!,]?\s+',           # "Sure!" / "Sure," / bare "Sure "
+            r'^(Of course[!,]?\s+)',
+            r'^(Absolutely[!,]?\s+)',
+            r'^(Certainly[!,]?\s+)',
+            r'^(Definitely[!,]?\s+)',
+            r'^(Great[!,]\s+)',         # "Great!" or "Great," as opener only
         ]
         
         for pattern in filler_starts:

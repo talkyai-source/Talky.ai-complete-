@@ -175,7 +175,6 @@ class LatencyTracker:
             call_id=call_id,
             turn_id=turn_id,
             listening_start_time=datetime.utcnow(),
-            speech_end_time=datetime.utcnow()
         )
         self._metrics[call_id] = metrics
         
