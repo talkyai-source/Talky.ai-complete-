@@ -124,29 +124,35 @@ class TestLatencyTracker:
     """Tests for LatencyTracker class."""
     
     def test_start_turn(self):
-        """Test starting a new turn."""
+        """Test starting a new turn — speech_end_time must NOT be pre-populated."""
         tracker = LatencyTracker()
-        
+
         tracker.start_turn("call-1", turn_id=1)
-        
+
         metrics = tracker.get_metrics("call-1")
         assert metrics is not None
         assert metrics.call_id == "call-1"
         assert metrics.turn_id == 1
-        assert metrics.speech_end_time is not None
-    
+        assert metrics.listening_start_time is not None
+        # speech_end_time must only be set via mark_speech_end, never by start_turn
+        assert metrics.speech_end_time is None, (
+            "start_turn must not pre-populate speech_end_time — "
+            "total_latency_ms must measure from actual speech-end, not listening-start"
+        )
+
     def test_mark_stages(self):
         """Test marking various pipeline stages."""
         tracker = LatencyTracker()
-        
+
         tracker.start_turn("call-1", turn_id=1)
+        tracker.mark_speech_end("call-1")    # must be called explicitly
         tracker.mark_llm_start("call-1")
         tracker.mark_llm_end("call-1")
         tracker.mark_tts_start("call-1")
         tracker.mark_audio_start("call-1")
-        
+
         metrics = tracker.get_metrics("call-1")
-        
+
         assert metrics.speech_end_time is not None
         assert metrics.llm_start_time is not None
         assert metrics.llm_end_time is not None

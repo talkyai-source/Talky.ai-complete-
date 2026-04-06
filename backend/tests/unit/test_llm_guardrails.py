@@ -342,11 +342,14 @@ def guardrails():
     return LLMGuardrails()
 
 
-def test_sure_thing_is_not_stripped(guardrails):
-    """'Sure thing' is a substantive phrase, not a filler — must not be stripped."""
+def test_sure_thing_is_stripped(guardrails):
+    """'Sure thing!' IS a filler opener and must be stripped; content must survive."""
     result = guardrails.clean_response("Sure thing! Our Basic plan costs $29/month.")
-    assert result.startswith("Sure thing"), (
-        f"'Sure thing' must not be stripped, got: '{result}'"
+    assert not result.startswith("Sure thing"), (
+        f"'Sure thing' filler must be stripped, got: '{result}'"
+    )
+    assert "Our Basic plan costs $29/month" in result, (
+        f"Content after filler must be preserved, got: '{result}'"
     )
 
 

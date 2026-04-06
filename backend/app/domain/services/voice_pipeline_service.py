@@ -189,8 +189,13 @@ class VoicePipelineService:
         metadata = transcript.metadata or {}
         self.transcript_service.bind_call_identity(call_id, session.talklee_call_id)
 
+        # Ensure latency tracker is aligned with current turn ID.
+        # Guard: do NOT reset tracker while LLM/TTS is actively processing.
+        # session.turn_id is pre-incremented before _run_turn is created, so a
+        # tracker turn_id mismatch during active processing is expected — it is
+        # NOT an indication the tracker is stale.
         current_metrics = self.latency_tracker.get_metrics(call_id)
-        if not current_metrics or current_metrics.turn_id != session.turn_id:
+        if (not current_metrics or current_metrics.turn_id != session.turn_id) and not session.llm_active:
             self.latency_tracker.start_turn(call_id, session.turn_id)
             self.latency_tracker.mark_listening_start(call_id)
 
