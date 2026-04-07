@@ -54,9 +54,12 @@ def _build_vonage_session_config():
         stt_provider_type="deepgram_flux",
         llm_provider_type="groq",
         tts_provider_type="deepgram",
-        stt_model="nova-2",
+        stt_model="flux-general-en",       # was nova-2 — use Flux for better EOT detection
         stt_sample_rate=16000,
         stt_encoding="linear16",
+        stt_eot_threshold=0.85,            # was default 0.7 — stop cutting users off
+        stt_eot_timeout_ms=1500,           # was 5000 — industry min is 1000ms; Flux integrated EOT handles accuracy
+        stt_eager_eot_threshold=None,      # disable eager — no speculative LLM yet
         llm_model=config.llm_model,
         llm_temperature=config.llm_temperature,
         llm_max_tokens=config.llm_max_tokens,
@@ -65,6 +68,8 @@ def _build_vonage_session_config():
         gateway_sample_rate=16000,
         gateway_channels=1,
         gateway_bit_depth=16,
+        gateway_target_buffer_ms=40,       # was default 100ms — saves 60ms per chunk
+        mute_during_tts=False,             # must be explicit — default True blocks barge-in
         session_type="vonage",
         telephony_provider="vonage",
         campaign_id="vonage",

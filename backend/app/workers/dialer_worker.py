@@ -351,12 +351,7 @@ class DialerWorker:
                 rows = await conn.fetch(
                     "SELECT DISTINCT tenant_id FROM campaigns WHERE status IN ('running', 'active')"
                 )
-                tenant_ids = [str(r["tenant_id"]) for r in rows] if rows else []
-                if tenant_ids:
-                    logger.debug("Active tenants with running campaigns: %s", tenant_ids)
-                else:
-                    logger.debug("No tenants with running campaigns found in DB")
-                return tenant_ids
+                return [str(r["tenant_id"]) for r in rows] if rows else []
 
         except Exception as e:
             logger.error(f"Failed to get active tenants: {e}")

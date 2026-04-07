@@ -247,20 +247,15 @@ class TelephonyMediaGateway(MediaGateway):
             return
 
         if not audio_chunk:
-            logger.debug(f"[TelephonyGW] send_audio: empty audio chunk for {call_id[:12]}")
             return
-
-        logger.debug(f"[TelephonyGW] send_audio: received {len(audio_chunk)} bytes for {call_id[:12]}, format={self._tts_source_format}")
 
         try:
             if self._tts_source_format == "f32le":
                 from app.utils.audio_utils import pcm_float32_to_int16, pcm_to_ulaw
-                logger.debug(f"[TelephonyGW] Converting Float32 → Int16 → μ-law")
                 pcm16 = pcm_float32_to_int16(audio_chunk)
                 pcmu = pcm_to_ulaw(pcm16)
             else:
                 from app.utils.audio_utils import pcm_to_ulaw
-                logger.debug(f"[TelephonyGW] Converting Int16 → μ-law")
                 pcm16 = audio_chunk
                 pcmu = pcm_to_ulaw(audio_chunk)
 
@@ -293,7 +288,6 @@ class TelephonyMediaGateway(MediaGateway):
             )
             session.agent_rec_cursor += chunk_samples
             
-            logger.debug(f"[TelephonyGW] Converted to {len(pcmu)} bytes PCMU")
         except Exception as exc:
             logger.warning(f"[TelephonyGW] TTS encode failed for {call_id[:12]}: {exc}", exc_info=True)
             return
@@ -311,7 +305,6 @@ class TelephonyMediaGateway(MediaGateway):
             session.tts_buffer = session.tts_buffer[PACKET_SIZE:]
             
             try:
-                logger.debug(f"[TelephonyGW] Sending 160-byte packet to adapter for pbx_call_id={session.pbx_call_id[:12]}")
                 await session.adapter.send_tts_audio(session.pbx_call_id, packet)
                 session.chunks_sent += 1
                 session.total_bytes_sent += len(packet)
@@ -320,10 +313,7 @@ class TelephonyMediaGateway(MediaGateway):
                 logger.warning(f"[TelephonyGW] send_tts_audio failed for {call_id[:12]}: {exc}")
                 # Don't break - try to send remaining packets
         
-        if packets_sent > 0:
-            logger.info(f"[TelephonyGW] ✅ Sent {packets_sent} packets ({packets_sent * 160} bytes) to adapter (buffered: {len(session.tts_buffer)} bytes)")
-        else:
-            logger.debug(f"[TelephonyGW] Buffering {len(pcmu)} bytes (total buffered: {len(session.tts_buffer)} bytes)")
+        # Packet-level send log removed — fires 25–50×/sec during TTS, zero diagnostic value
 
     # ------------------------------------------------------------------
     # Pipeline interface helpers
@@ -365,11 +355,28 @@ class TelephonyMediaGateway(MediaGateway):
                 logger.warning(f"[TelephonyGW] flush_tts_buffer failed for {call_id[:12]}: {exc}")
 
     async def clear_output_buffer(self, call_id: str) -> None:
-        """Drop buffered telephony output immediately after barge-in."""
+        """
+        Drop buffered telephony output immediately after barge-in.
+
+        Clears both:
+        1. Our local packetisation buffer (tts_buffer) — stops further packets
+           being sent to the C++ gateway.
+        2. The C++ gateway's internal audio queue — stops audio the gateway has
+           already buffered from continuing to play at the caller's ear.
+        """
         session = self._sessions.get(call_id)
         if not session or not session.is_active:
             return
         session.tts_buffer = b""
+        # Tell the C++ gateway to discard its buffered TTS queue immediately.
+        # Without this, audio already sent to the gateway continues to play
+        # until its internal buffer drains — the caller hears the AI speaking
+        # for 0.5–2s after barge-in has fired.
+        if hasattr(session.adapter, "interrupt_tts"):
+            try:
+                await session.adapter.interrupt_tts(session.pbx_call_id)
+            except Exception as exc:
+                logger.debug("clear_output_buffer: interrupt_tts failed: %s", exc)
 
     # ------------------------------------------------------------------
     # Recording buffer (required by MediaGateway interface)

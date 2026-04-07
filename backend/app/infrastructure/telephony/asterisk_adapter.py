@@ -827,12 +827,10 @@ class AsteriskAdapter(CallControlAdapter):
             )
             return
 
-        logger.debug(f"[AsteriskAdapter] send_tts_audio: {len(pcmu_audio)} bytes to session {session_id}")
-
         import base64
         try:
             pcmu_b64 = base64.b64encode(pcmu_audio).decode()
-            
+
             result = await self._gateway(
                 "POST",
                 "/v1/sessions/tts/play",
@@ -842,7 +840,6 @@ class AsteriskAdapter(CallControlAdapter):
                     "clear_existing": False,
                 },
             )
-            logger.debug(f"[AsteriskAdapter] ✅ Gateway accepted {len(pcmu_audio)} bytes")
         except Exception as exc:
             logger.error(f"[AsteriskAdapter] ❌ send_tts_audio failed: {exc}")
 
@@ -921,14 +918,17 @@ class AsteriskAdapter(CallControlAdapter):
         # -------------------------------------------------------------------
         # Real extensions: originate through the lan-pbx PJSIP trunk.
         #
-        # The softphone at extension 1002 is registered to OpenSIPS (lan-pbx),
-        # NOT to the local Asterisk.  PJSIP/{destination}@lan-pbx sends the
-        # SIP INVITE through the lan-pbx trunk endpoint to OpenSIPS, which
-        # forwards it to the registered device.
+        # PJSIP/{destination}@lan-pbx sends the SIP INVITE to the LAN PBX
+        # at 192.168.1.6, which forwards it to the softphone registered there.
         #
-        # The channel enters Stasis immediately with appArgs=outbound.
-        # _on_outbound_stasis_start parks it; _on_outbound_answered completes
-        # the ExternalMedia + C++ gateway setup once the callee picks up.
+        # IMPORTANT: Asterisk must NOT be registered at 192.168.1.6 as the
+        # same extension being called.  If it were, the PBX would route the
+        # INVITE back to Asterisk (loop) instead of ringing the softphone.
+        # See pjsip.conf — [lan-pbx-registration] is intentionally absent.
+        #
+        # The channel enters Stasis immediately.  _on_outbound_stasis_start
+        # parks it; _on_outbound_answered completes the ExternalMedia + C++
+        # gateway setup once the callee picks up.
         # -------------------------------------------------------------------
         endpoint = f"PJSIP/{destination}@lan-pbx"
 

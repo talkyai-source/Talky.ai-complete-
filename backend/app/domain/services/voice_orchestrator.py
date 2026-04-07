@@ -501,7 +501,7 @@ class VoiceOrchestrator:
                 and session.stt_provider
                 and hasattr(session.stt_provider, "unmute")
             ):
-                await asyncio.sleep(0.05 if waited_for_browser_playback else 0.3)
+                await asyncio.sleep(0.05 if waited_for_browser_playback else 0.1)
                 await session.stt_provider.unmute(session.call_id)
                 logger.debug(f"Unmuted STT for call {session.call_id} after greeting")
 

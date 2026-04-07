@@ -103,10 +103,11 @@ async def list_calls(
         # Map results
         items = []
         for call in response.data or []:
+            created_at = call.get("created_at", "")
             items.append(CallListItem(
-                id=call["id"],
+                id=str(call["id"]),
                 talklee_call_id=call.get("talklee_call_id"),
-                timestamp=call.get("created_at", ""),
+                timestamp=created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at),
                 to_number=call.get("phone_number", ""),
                 status=call.get("status", "unknown"),
                 duration_seconds=call.get("duration_seconds"),
@@ -162,18 +163,19 @@ async def get_call(
         if recording_response.data and len(recording_response.data) > 0:
             recording_id = recording_response.data[0]["id"]
         
+        created_at = call.get("created_at", "")
         return CallDetail(
-            id=call["id"],
+            id=str(call["id"]),
             talklee_call_id=call.get("talklee_call_id"),
-            timestamp=call.get("created_at", ""),
+            timestamp=created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at),
             to_number=call.get("phone_number", ""),
             status=call.get("status", "unknown"),
             duration_seconds=call.get("duration_seconds"),
             outcome=call.get("outcome"),
             transcript=call.get("transcript"),
-            recording_id=recording_id,
-            campaign_id=call.get("campaign_id"),
-            lead_id=call.get("lead_id"),
+            recording_id=str(recording_id) if recording_id is not None else None,
+            campaign_id=str(call["campaign_id"]) if call.get("campaign_id") else None,
+            lead_id=str(call["lead_id"]) if call.get("lead_id") else None,
             summary=call.get("summary")
         )
     

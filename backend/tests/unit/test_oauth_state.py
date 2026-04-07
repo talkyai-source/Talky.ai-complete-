@@ -7,6 +7,7 @@ import os
 import asyncio
 from unittest.mock import AsyncMock, patch, MagicMock
 import json
+import uuid
 
 # Set test environment
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379")
@@ -204,3 +205,24 @@ class TestOAuthStateManager:
         call_args = mock_redis.setex.call_args
         stored_data = json.loads(call_args[0][2])
         assert stored_data["connector_id"] == "conn-789"
+
+    @pytest.mark.asyncio
+    async def test_extra_data_uuid_is_serialized(self, mock_redis):
+        """UUID values in extra_data are converted before storage."""
+        from app.infrastructure.connectors.oauth import OAuthStateManager
+
+        manager = OAuthStateManager()
+        manager._redis = mock_redis
+        connector_id = uuid.uuid4()
+
+        await manager.create_state(
+            tenant_id="tenant-123",
+            user_id="user-456",
+            provider="gmail",
+            redirect_uri="https://example.com/callback",
+            extra_data={"connector_id": connector_id}
+        )
+
+        call_args = mock_redis.setex.call_args
+        stored_data = json.loads(call_args[0][2])
+        assert stored_data["connector_id"] == str(connector_id)

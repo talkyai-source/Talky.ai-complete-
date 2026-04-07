@@ -57,11 +57,6 @@ def validate_pcm_format(
     if duration_ms > 1000:
         return False, f"Chunk too large: {duration_ms:.1f}ms (maximum 1000ms)"
     
-    logger.debug(
-        f"Audio validation passed: {len(audio_data)} bytes, "
-        f"{duration_ms:.1f}ms @ {expected_rate}Hz"
-    )
-    
     return True, None
 
 

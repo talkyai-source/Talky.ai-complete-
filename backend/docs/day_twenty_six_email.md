@@ -54,9 +54,9 @@ Today we implemented an end-to-end email system that enables Talky.ai's AI assis
 4. Configure:
    - Name: `Talky.ai Email Integration`
    - Authorized JavaScript origins: `http://localhost:3000`
-   - Authorized redirect URIs: 
-     - `http://localhost:8000/api/v1/connectors/gmail/callback`
-     - `http://localhost:3000/integrations/callback`
+   - Authorized redirect URIs:
+     - `http://localhost:8000/api/v1/connectors/callback`
+   - The backend uses a unified connector callback route for OAuth providers
 5. Copy **Client ID** and **Client Secret**
 
 ### Step 4: Configure Environment Variables
@@ -371,7 +371,7 @@ pytest tests/unit/test_email_service.py -v
 
 ### "Invalid redirect URI"
 - Add correct callback URL to OAuth credentials
-- Must match exactly: `http://localhost:8000/api/v1/connectors/gmail/callback`
+- Must match exactly: `http://localhost:8000/api/v1/connectors/callback`
 
 ---
 
