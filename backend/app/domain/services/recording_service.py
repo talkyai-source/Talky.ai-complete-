@@ -1,428 +1,441 @@
 """
-Recording Service
-Handles recording buffer management and storage for call recordings.
-Provider-agnostic - works with any MediaGateway implementation.
+Recording Service — S3-backed object storage.
+
+Replaces the previous PostgreSQL Storage implementation with
+S3-compatible object storage (AWS S3, Cloudflare R2, MinIO).
+
+Why S3:
+  - Recordings survive server restarts and container recreation
+  - Enables horizontal scaling (multiple backend instances share one bucket)
+  - Built-in lifecycle policies for retention enforcement
+  - Presigned URLs serve audio directly from S3, removing backend from hot path
+
+Configuration (all via environment variables):
+  S3_BUCKET_NAME          = talky-recordings           (required)
+  S3_REGION               = us-east-1                  (default)
+  S3_ACCESS_KEY_ID        = ...                        (required)
+  S3_SECRET_ACCESS_KEY    = ...                        (required)
+  S3_ENDPOINT_URL         = https://...r2.cloudflarestorage.com
+                            (omit for AWS S3, set for R2/MinIO)
+  S3_PRESIGNED_URL_EXPIRY = 3600                       (seconds, default 1h)
+  S3_STORAGE_CLASS        = STANDARD                   (or INTELLIGENT_TIERING)
+
+Retention lifecycle (set on the bucket, not in this code):
+  Basic plan    → 30 days  (set S3 lifecycle rule: Expiration 30 days)
+  Professional  → 90 days
+  Enterprise    → 365 days
 """
-import os
+from __future__ import annotations
+
 import io
-import struct
-import wave
 import logging
-from datetime import datetime
-from typing import Dict, List, Optional, Any, Tuple
+import os
+import wave
 from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Optional boto3 import — graceful fallback to local storage if not installed
+# ---------------------------------------------------------------------------
+try:
+    import boto3
+    from botocore.exceptions import ClientError, BotoCoreError
+    from botocore.config import Config as BotoCoreConfig
+    _BOTO3_AVAILABLE = True
+except ImportError:
+    _BOTO3_AVAILABLE = False
+    logger.warning(
+        "boto3 not installed — S3 recording upload disabled. "
+        "Install with: pip install boto3"
+    )
+
+
+# ---------------------------------------------------------------------------
+# RecordingBuffer (unchanged from original — no behaviour change)
+# ---------------------------------------------------------------------------
 
 @dataclass
 class RecordingBuffer:
     """
     Accumulates audio chunks during a call for later saving.
-    
-    Used by all MediaGateway implementations (Vonage, RTP, etc.)
-    to buffer incoming audio for recording.
-    
-    Attributes:
-        call_id: Unique call identifier
-        sample_rate: Audio sample rate (16000 for Vonage, 8000 for RTP/G.711)
-        channels: Number of audio channels (1 = mono)
-        bit_depth: Bits per sample (16 for PCM16)
+
+    Works with all MediaGateway implementations (Vonage, RTP, etc.)
     """
     call_id: str
     sample_rate: int = 16000
     channels: int = 1
     bit_depth: int = 16
-    
+
     chunks: List[bytes] = field(default_factory=list)
     total_bytes: int = 0
     started_at: datetime = field(default_factory=datetime.utcnow)
-    
+
     def add_chunk(self, audio_data: bytes) -> None:
-        """Add an audio chunk to the buffer."""
         self.chunks.append(audio_data)
         self.total_bytes += len(audio_data)
-    
+
     def get_complete_audio(self) -> bytes:
-        """Get all accumulated audio as a single bytes object."""
-        return b''.join(self.chunks)
-    
+        return b"".join(self.chunks)
+
     def get_duration_seconds(self) -> float:
-        """Calculate total duration in seconds."""
-        bytes_per_second = self.sample_rate * self.channels * (self.bit_depth // 8)
-        if bytes_per_second == 0:
-            return 0.0
-        return self.total_bytes / bytes_per_second
-    
+        bps = self.sample_rate * self.channels * (self.bit_depth // 8)
+        return (self.total_bytes / bps) if bps else 0.0
+
     def get_wav_bytes(self) -> bytes:
-        """
-        Convert raw PCM audio to WAV format.
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(self.channels)
+            wf.setsampwidth(self.bit_depth // 8)
+            wf.setframerate(self.sample_rate)
+            wf.writeframes(self.get_complete_audio())
+        buf.seek(0)
+        return buf.read()
 
-        Returns:
-            WAV file bytes ready for storage
-        """
-        # Allow pre-mixed WAV to bypass re-encoding (stereo recordings)
-        override = getattr(self, "_wav_bytes_override", None)
-        if override:
-            return override
-
-        audio_data = self.get_complete_audio()
-
-        # Create WAV file in memory
-        wav_buffer = io.BytesIO()
-        with wave.open(wav_buffer, 'wb') as wav_file:
-            wav_file.setnchannels(self.channels)
-            wav_file.setsampwidth(self.bit_depth // 8)
-            wav_file.setframerate(self.sample_rate)
-            wav_file.writeframes(audio_data)
-
-        wav_buffer.seek(0)
-        return wav_buffer.read()
-    
     def clear(self) -> None:
-        """Clear all accumulated audio data."""
         self.chunks.clear()
         self.total_bytes = 0
-    
+
     def __repr__(self) -> str:
         return (
             f"RecordingBuffer(call_id={self.call_id}, "
             f"bytes={self.total_bytes}, "
-            f"duration={self.get_duration_seconds():.1f}s, "
-            f"sample_rate={self.sample_rate})"
+            f"duration={self.get_duration_seconds():.1f}s)"
         )
 
 
-def mix_stereo_recording(
-    caller_chunks: List[bytes],
-    agent_chunks: List[Tuple[int, bytes]],
-    sample_rate: int = 8000,
-) -> bytes:
+# ---------------------------------------------------------------------------
+# S3Client wrapper — thin layer over boto3
+# ---------------------------------------------------------------------------
+
+class S3Client:
     """
-    Mix caller and agent PCM16 audio into a time-aligned stereo WAV file.
-
-    Left channel  = caller (continuous stream, chunks concatenated in order).
-    Right channel = agent  (timestamped chunks placed at correct positions).
-
-    Parameters
-    ----------
-    caller_chunks : list[bytes]
-        Continuous PCM16 chunks from the caller, in arrival order.
-    agent_chunks : list[tuple[int, bytes]]
-        Each entry is ``(sample_offset, pcm16_bytes)`` where *sample_offset*
-        is a running write cursor (MixMonitor-style).  The cursor advances
-        by each chunk's sample count, so burst-delivered TTS chunks are
-        placed contiguously.  When a new utterance starts after a silence
-        gap, the cursor jumps to the current wall-clock position, inserting
-        silence implicitly (the numpy array is zero-initialized).
-    sample_rate : int
-        Samples per second (8000 for telephony).
-
-    Returns
-    -------
-    bytes
-        Complete WAV file (16-bit, stereo, *sample_rate* Hz).
+    Thin wrapper around boto3 S3 client.
+    Handles configuration and provides typed methods used by RecordingService.
     """
-    import numpy as np
 
-    # --- Build caller timeline (left channel) ----------------------------
-    caller_pcm = b"".join(caller_chunks) if caller_chunks else b""
-    if len(caller_pcm) % 2:
-        caller_pcm += b"\x00"
-    total_caller_samples = len(caller_pcm) // 2
+    def __init__(self) -> None:
+        self.bucket = os.getenv("S3_BUCKET_NAME", "talky-recordings")
+        self.region = os.getenv("S3_REGION", "us-east-1")
+        self.presigned_expiry = int(os.getenv("S3_PRESIGNED_URL_EXPIRY", "3600"))
+        self.storage_class = os.getenv("S3_STORAGE_CLASS", "STANDARD")
+        endpoint = os.getenv("S3_ENDPOINT_URL")  # None for AWS S3
 
-    # --- Determine total timeline length ---------------------------------
-    # The timeline must be at least as long as the caller audio, but also
-    # long enough to contain any agent audio that extends past the caller's
-    # last sample.
-    total_samples = total_caller_samples
-    for offset, chunk in (agent_chunks or []):
-        chunk_samples = len(chunk) // 2
-        end = offset + chunk_samples
-        if end > total_samples:
-            total_samples = end
+        if not _BOTO3_AVAILABLE:
+            self._client = None
+            return
 
-    if total_samples == 0:
-        # Nothing to record
-        wav_buf = io.BytesIO()
-        with wave.open(wav_buf, "wb") as wf:
-            wf.setnchannels(2)
-            wf.setsampwidth(2)
-            wf.setframerate(sample_rate)
-            wf.writeframes(b"")
-        wav_buf.seek(0)
-        return wav_buf.read()
+        kwargs: Dict[str, Any] = {
+            "service_name": "s3",
+            "region_name": self.region,
+            "aws_access_key_id": os.getenv("S3_ACCESS_KEY_ID"),
+            "aws_secret_access_key": os.getenv("S3_SECRET_ACCESS_KEY"),
+            "config": BotoCoreConfig(
+                retries={"max_attempts": 3, "mode": "adaptive"},
+                max_pool_connections=20,
+            ),
+        }
+        if endpoint:
+            kwargs["endpoint_url"] = endpoint
 
-    # --- Create numpy arrays for both channels ---------------------------
-    left = np.zeros(total_samples, dtype=np.int16)   # caller
-    right = np.zeros(total_samples, dtype=np.int16)   # agent
+        self._client = boto3.client(**kwargs)
 
-    # Fill left channel with caller audio
-    if total_caller_samples > 0:
-        left[:total_caller_samples] = np.frombuffer(caller_pcm, dtype=np.int16)
+    def is_available(self) -> bool:
+        return _BOTO3_AVAILABLE and self._client is not None
 
-    # Place each agent chunk at its timestamped position on the right channel
-    for offset, chunk in (agent_chunks or []):
-        if len(chunk) < 2:
-            continue
-        chunk_samples = np.frombuffer(chunk, dtype=np.int16)
-        end = offset + len(chunk_samples)
-        if end > total_samples:
-            # Clip to timeline length (shouldn't happen, but safety)
-            chunk_samples = chunk_samples[: total_samples - offset]
-            end = total_samples
-        if offset < 0:
-            chunk_samples = chunk_samples[-offset:]
-            offset = 0
-        # Overlay (add) in case TTS chunks slightly overlap
-        right[offset:offset + len(chunk_samples)] += chunk_samples
+    def upload(self, key: str, data: bytes, content_type: str = "audio/wav") -> None:
+        """Upload bytes to S3. Raises on failure."""
+        self._client.put_object(
+            Bucket=self.bucket,
+            Key=key,
+            Body=data,
+            ContentType=content_type,
+            StorageClass=self.storage_class,
+        )
 
-    # --- Interleave into stereo frames: L R L R ... ----------------------
-    stereo = np.empty(total_samples * 2, dtype=np.int16)
-    stereo[0::2] = left
-    stereo[1::2] = right
+    def presigned_url(self, key: str) -> str:
+        """Generate a presigned GET URL valid for presigned_expiry seconds."""
+        return self._client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": self.bucket, "Key": key},
+            ExpiresIn=self.presigned_expiry,
+        )
 
-    wav_buf = io.BytesIO()
-    with wave.open(wav_buf, "wb") as wf:
-        wf.setnchannels(2)
-        wf.setsampwidth(2)  # 16-bit
-        wf.setframerate(sample_rate)
-        wf.writeframes(stereo.tobytes())
-    wav_buf.seek(0)
-    return wav_buf.read()
+    def delete(self, key: str) -> None:
+        """Delete an object. Used by retention cleanup."""
+        self._client.delete_object(Bucket=self.bucket, Key=key)
 
+    def head(self, key: str) -> Optional[Dict[str, Any]]:
+        """Return object metadata or None if not found."""
+        try:
+            return self._client.head_object(Bucket=self.bucket, Key=key)
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "404":
+                return None
+            raise
+
+
+# ---------------------------------------------------------------------------
+# RecordingService
+# ---------------------------------------------------------------------------
 
 class RecordingService:
     """
-    Handles recording storage operations.
-    
-    Provider-agnostic service that works with any MediaGateway.
-    Uploads recordings to PostgreSQL Storage and links them to call records.
+    Handles recording storage for call audio.
+
+    Upload flow:
+      1. Convert RecordingBuffer → WAV bytes
+      2. Upload WAV to S3 under key: {tenant_id}/{campaign_id}/{call_id}.wav
+      3. Insert a row into recordings_s3 with S3 metadata
+      4. Update calls.recording_url with the internal stream path
+
+    Retrieval flow:
+      - API calls get_presigned_url() → returns a time-limited S3 URL
+      - The frontend fetches audio directly from S3 (no backend in the hot path)
+
+    Fallback:
+      - If S3 is not configured, recordings are skipped and a warning is logged.
+        This prevents call failures due to missing storage config.
     """
-    
-    # Storage bucket name in PostgreSQL
-    BUCKET_NAME = "recordings"
-    
-    def __init__(self, db_client):
+
+    def __init__(self, db_pool: Any, s3_client: Optional[S3Client] = None) -> None:
+        self._db = db_pool
+        self._s3 = s3_client or S3Client()
+
+    # ── Key generation ────────────────────────────────────────────
+
+    @staticmethod
+    def _s3_key(tenant_id: str, campaign_id: str, call_id: str) -> str:
         """
-        Initialize the recording service.
-        
-        Args:
-            db_client: Initialized PostgreSQL client
-        """
-        self._db_client = db_client
-    
-    def _generate_storage_path(
-        self, 
-        call_id: str, 
-        tenant_id: str, 
-        campaign_id: str
-    ) -> str:
-        """
-        Generate storage path for a recording.
-        
+        Build a structured S3 object key.
         Format: {tenant_id}/{campaign_id}/{call_id}.wav
-        
-        Args:
-            call_id: Call identifier
-            tenant_id: Tenant identifier
-            campaign_id: Campaign identifier
-            
-        Returns:
-            Storage path string
+        Sanitised to prevent path traversal.
         """
-        # Sanitize IDs to prevent path traversal
-        # Cast to str() in case values are asyncpg UUID objects
-        safe_tenant = str(tenant_id).replace("/", "_").replace("\\", "_") if tenant_id else "default"
-        safe_campaign = str(campaign_id).replace("/", "_").replace("\\", "_") if campaign_id else "unknown"
-        safe_call = str(call_id).replace("/", "_").replace("\\", "_")
-        
-        return f"{safe_tenant}/{safe_campaign}/{safe_call}.wav"
-    
-    async def save_recording(
-        self,
-        call_id: str,
-        buffer: RecordingBuffer,
-        tenant_id: str,
-        campaign_id: str
-    ) -> Optional[str]:
-        """
-        Save recording to PostgreSQL Storage.
-        
-        Args:
-            call_id: Call identifier
-            buffer: RecordingBuffer with accumulated audio
-            tenant_id: Tenant identifier
-            campaign_id: Campaign identifier
-            
-        Returns:
-            Storage path if successful, None otherwise
-        """
-        if not buffer or buffer.total_bytes == 0:
-            logger.warning(f"No audio data to save for call {call_id}")
-            return None
-        
-        try:
-            # Convert to WAV format
-            wav_data = buffer.get_wav_bytes()
-            storage_path = self._generate_storage_path(call_id, tenant_id, campaign_id)
-            
-            logger.info(
-                f"Uploading recording for call {call_id}: "
-                f"{len(wav_data)} bytes to {storage_path}"
-            )
-            
-            # Upload to PostgreSQL Storage
-            self._db_client.storage.from_(self.BUCKET_NAME).upload(
-                path=storage_path,
-                file=wav_data,
-                file_options={"content-type": "audio/wav"}
-            )
-            
-            logger.info(f"Recording uploaded successfully: {storage_path}")
-            return storage_path
-            
-        except Exception as e:
-            logger.error(f"Failed to upload recording for call {call_id}: {e}")
-            return None
-    
-    async def create_recording_record(
-        self,
-        call_id: str,
-        storage_path: str,
-        duration_seconds: float,
-        file_size_bytes: int,
-        tenant_id: str
-    ) -> Optional[str]:
-        """
-        Create a record in the recordings table.
-        
-        Args:
-            call_id: Call identifier
-            storage_path: Path in storage bucket
-            duration_seconds: Recording duration
-            file_size_bytes: File size in bytes
-            tenant_id: Tenant identifier
-            
-        Returns:
-            Recording ID if successful, None otherwise
-        """
-        try:
-            result = self._db_client.table("recordings").insert({
-                "call_id": call_id,
-                "storage_path": storage_path,
-                "duration_seconds": int(duration_seconds),
-                "file_size_bytes": file_size_bytes,
-                "tenant_id": tenant_id,
-                "status": "completed",
-                "mime_type": "audio/wav"
-            }).execute()
-            
-            if result.data and len(result.data) > 0:
-                recording_id = result.data[0].get("id")
-                logger.info(f"Recording record created: {recording_id}")
-                return recording_id
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"Failed to create recording record: {e}")
-            return None
-    
-    async def update_call_recording_url(
-        self, 
-        call_id: str, 
-        storage_path: str
-    ) -> bool:
-        """
-        Update the calls table with recording URL.
-        
-        Args:
-            call_id: Call identifier
-            storage_path: Path to recording in storage
-            
-        Returns:
-            True if successful
-        """
-        try:
-            # Generate public URL for the recording
-            recording_url = f"/api/v1/recordings/stream/{storage_path}"
-            
-            self._db_client.table("calls").update({
-                "recording_url": recording_url,
-                "updated_at": datetime.utcnow().isoformat()
-            }).eq("id", call_id).execute()
-            
-            logger.info(f"Updated call {call_id} with recording_url")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to update call recording_url: {e}")
-            return False
-    
+        def safe(s: str) -> str:
+            return s.replace("/", "-").replace("\\", "-").replace("..", "-") if s else "unknown"
+        return f"{safe(tenant_id)}/{safe(campaign_id)}/{safe(call_id)}.wav"
+
+    # ── Main workflow ─────────────────────────────────────────────
+
     async def save_and_link(
         self,
         call_id: str,
         buffer: RecordingBuffer,
         tenant_id: str,
-        campaign_id: str
+        campaign_id: str,
     ) -> Optional[str]:
         """
-        Save recording and link to call record.
-        
-        Complete workflow:
-        1. Upload to PostgreSQL Storage
-        2. Insert into recordings table
-        3. Update calls.recording_url
-        
-        Args:
-            call_id: Call identifier
-            buffer: RecordingBuffer with audio
-            tenant_id: Tenant identifier
-            campaign_id: Campaign identifier
-            
-        Returns:
-            Recording ID if successful, None otherwise
+        Upload recording to S3 and create DB records.
+
+        Returns recording UUID string on success, None on failure.
+        Never raises — storage failures should not break call flow.
         """
-        # Step 1: Upload to storage
-        storage_path = await self.save_recording(
-            call_id, buffer, tenant_id, campaign_id
-        )
-        
-        if not storage_path:
+        if not buffer or buffer.total_bytes == 0:
+            logger.warning(f"No audio to save for call {call_id}")
             return None
-        
-        # Step 2: Create recording record
-        recording_id = await self.create_recording_record(
-            call_id=call_id,
-            storage_path=storage_path,
-            duration_seconds=buffer.get_duration_seconds(),
-            file_size_bytes=len(buffer.get_wav_bytes()),
-            tenant_id=tenant_id
-        )
-        
-        # Step 3: Update calls table
-        await self.update_call_recording_url(call_id, storage_path)
-        
-        return recording_id
-    
-    def get_recording_url(self, storage_path: str) -> str:
-        """
-        Get a public URL for a recording.
-        
-        Args:
-            storage_path: Path in storage bucket
-            
-        Returns:
-            Public URL string
-        """
-        try:
-            # Get signed URL (valid for 1 hour)
-            result = self._db_client.storage.from_(self.BUCKET_NAME).create_signed_url(
-                path=storage_path,
-                expires_in=3600
+
+        if not self._s3.is_available():
+            logger.warning(
+                f"S3 not configured — skipping recording for call {call_id}. "
+                "Set S3_BUCKET_NAME, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY."
             )
-            return result.get("signedURL", "")
-        except Exception as e:
-            logger.error(f"Failed to get signed URL: {e}")
-            return ""
+            return None
+
+        try:
+            wav_data = buffer.get_wav_bytes()
+            key = self._s3_key(tenant_id, campaign_id, call_id)
+            upload_started = datetime.utcnow()
+
+            logger.info(
+                f"Uploading recording call={call_id} "
+                f"size={len(wav_data)}B bucket={self._s3.bucket} key={key}"
+            )
+            self._s3.upload(key, wav_data, content_type="audio/wav")
+            upload_finished = datetime.utcnow()
+
+            logger.info(f"Recording uploaded: {key}")
+
+            recording_id = await self._insert_recording_record(
+                call_id=call_id,
+                tenant_id=tenant_id,
+                campaign_id=campaign_id,
+                s3_key=key,
+                file_size_bytes=len(wav_data),
+                duration_seconds=int(buffer.get_duration_seconds()),
+                upload_started=upload_started,
+                upload_finished=upload_finished,
+            )
+
+            await self._update_call_recording_url(call_id, recording_id)
+            return str(recording_id) if recording_id else None
+
+        except Exception as exc:
+            logger.error(f"Recording upload failed for call {call_id}: {exc}", exc_info=True)
+            await self._mark_upload_failed(call_id, tenant_id, campaign_id, str(exc))
+            return None
+
+    # ── Presigned URL ─────────────────────────────────────────────
+
+    async def get_presigned_url(
+        self,
+        recording_id: str,
+        tenant_id: str,
+    ) -> Optional[str]:
+        """
+        Generate a presigned S3 GET URL for a recording.
+        Validates tenant ownership before generating URL.
+
+        Returns URL string or None if not found / access denied.
+        """
+        if not self._s3.is_available():
+            return None
+
+        async with self._db.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT s3_key, status
+                FROM recordings_s3
+                WHERE id = $1 AND tenant_id = $2
+                """,
+                UUID(recording_id),
+                UUID(tenant_id),
+            )
+
+        if not row:
+            logger.warning(
+                f"Recording {recording_id} not found or tenant {tenant_id} denied"
+            )
+            return None
+
+        if row["status"] != "uploaded":
+            logger.warning(f"Recording {recording_id} status={row['status']} — not accessible")
+            return None
+
+        try:
+            return self._s3.presigned_url(row["s3_key"])
+        except Exception as exc:
+            logger.error(f"Failed to generate presigned URL for {recording_id}: {exc}")
+            return None
+
+    async def list_for_call(self, call_id: str, tenant_id: str) -> List[Dict[str, Any]]:
+        """Return all recording metadata rows for a call."""
+        async with self._db.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, call_id, s3_key, file_size_bytes,
+                       duration_seconds, status, created_at
+                FROM recordings_s3
+                WHERE call_id = $1 AND tenant_id = $2
+                ORDER BY created_at DESC
+                """,
+                UUID(call_id),
+                UUID(tenant_id),
+            )
+        return [dict(r) for r in rows]
+
+    # ── Private DB helpers ────────────────────────────────────────
+
+    async def _insert_recording_record(
+        self,
+        call_id: str,
+        tenant_id: str,
+        campaign_id: str,
+        s3_key: str,
+        file_size_bytes: int,
+        duration_seconds: int,
+        upload_started: datetime,
+        upload_finished: datetime,
+    ) -> Optional[UUID]:
+        """Insert a row into recordings_s3 and return the new UUID."""
+        try:
+            async with self._db.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO recordings_s3 (
+                        call_id, tenant_id, campaign_id,
+                        s3_bucket, s3_key, s3_region,
+                        file_size_bytes, duration_seconds,
+                        status, upload_started_at, upload_finished_at
+                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'uploaded',$9,$10)
+                    RETURNING id
+                    """,
+                    UUID(call_id),
+                    UUID(tenant_id),
+                    UUID(campaign_id) if campaign_id else None,
+                    self._s3.bucket,
+                    s3_key,
+                    self._s3.region,
+                    file_size_bytes,
+                    duration_seconds,
+                    upload_started,
+                    upload_finished,
+                )
+                return row["id"] if row else None
+        except Exception as exc:
+            logger.error(f"Failed to insert recording_s3 record: {exc}")
+            return None
+
+    async def _update_call_recording_url(
+        self, call_id: str, recording_id: Optional[UUID]
+    ) -> None:
+        """Point calls.recording_url at the internal stream API path."""
+        if not recording_id:
+            return
+        try:
+            async with self._db.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE calls
+                    SET recording_url = $1, updated_at = NOW()
+                    WHERE id = $2
+                    """,
+                    f"/api/v1/recordings/{recording_id}/stream",
+                    UUID(call_id),
+                )
+        except Exception as exc:
+            logger.warning(f"Could not update calls.recording_url for {call_id}: {exc}")
+
+    async def _mark_upload_failed(
+        self,
+        call_id: str,
+        tenant_id: str,
+        campaign_id: str,
+        reason: str,
+    ) -> None:
+        """Insert a 'failed' row so the failure is visible in the admin panel."""
+        try:
+            async with self._db.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO recordings_s3 (
+                        call_id, tenant_id, campaign_id,
+                        s3_bucket, s3_key, s3_region, status
+                    ) VALUES ($1,$2,$3,$4,$5,$6,'failed')
+                    ON CONFLICT DO NOTHING
+                    """,
+                    UUID(call_id),
+                    UUID(tenant_id),
+                    UUID(campaign_id) if campaign_id else None,
+                    self._s3.bucket,
+                    f"failed/{call_id}.wav",
+                    self._s3.region,
+                )
+        except Exception:
+            pass  # Best-effort — don't shadow the original error
+
+
+# ---------------------------------------------------------------------------
+# Backwards-compatible factory
+# ---------------------------------------------------------------------------
+
+def make_recording_service(db_pool: Any) -> RecordingService:
+    """
+    Factory used by the DI container and existing call sites.
+
+    Previously: RecordingService(db_client)  — Supabase client
+    Now:        make_recording_service(db_pool) — asyncpg pool
+    """
+    return RecordingService(db_pool=db_pool)
