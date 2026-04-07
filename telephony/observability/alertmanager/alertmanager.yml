@@ -1,5 +1,8 @@
 global:
   resolve_timeout: 5m
+  # FIX: set your Slack webhook URL in the environment or substitute directly
+  # Generate at: https://api.slack.com/apps → Incoming Webhooks
+  slack_api_url: "${ALERTMANAGER_SLACK_WEBHOOK_URL}"
 
 route:
   receiver: telephony-default
@@ -15,7 +18,11 @@ route:
         - team="telephony"
         - severity="critical"
       receiver: telephony-critical
+      # Critical: page immediately, don't wait for grouping
+      group_wait: 10s
+      repeat_interval: 30m
       continue: false
+
     - matchers:
         - team="telephony"
         - severity="warning"
@@ -33,6 +40,55 @@ inhibit_rules:
       - alertname
 
 receivers:
+  # ── Default fallback receiver ─────────────────────────────────────
   - name: telephony-default
+    slack_configs:
+      - channel: "#talky-alerts"
+        title: "⚠️ Talky.ai Alert"
+        text: |
+          *Alert:* {{ .GroupLabels.alertname }}
+          *Severity:* {{ .CommonLabels.severity }}
+          *Summary:* {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
+
+  # ── Critical: Slack #incidents + email ───────────────────────────
+  # FIX: was empty — critical alerts now notify #incidents and on-call email
   - name: telephony-critical
+    slack_configs:
+      - channel: "#incidents"
+        title: "🔴 CRITICAL — Talky.ai Telephony"
+        color: "danger"
+        text: |
+          *Alert:* {{ .GroupLabels.alertname }}
+          *Team:* {{ .CommonLabels.team }}
+          {{ range .Alerts }}
+          *Summary:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Started:* {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}
+          {{ end }}
+        send_resolved: true
+    email_configs:
+      # FIX: replace with your on-call email
+      - to: "oncall@your-domain.com"
+        from: "alertmanager@talky.ai"
+        # Configure SMTP in global section or via environment variable
+        smarthost: "${ALERTMANAGER_SMTP_HOST}:587"
+        auth_username: "${ALERTMANAGER_SMTP_USER}"
+        auth_password: "${ALERTMANAGER_SMTP_PASSWORD}"
+        require_tls: true
+        subject: "[CRITICAL] Talky.ai: {{ .GroupLabels.alertname }}"
+        send_resolved: true
+
+  # ── Warning: Slack #talky-alerts only ────────────────────────────
+  # FIX: was empty — warnings now post to Slack
   - name: telephony-warning
+    slack_configs:
+      - channel: "#talky-alerts"
+        title: "🟡 Warning — Talky.ai Telephony"
+        color: "warning"
+        text: |
+          *Alert:* {{ .GroupLabels.alertname }}
+          {{ range .Alerts }}
+          *Summary:* {{ .Annotations.summary }}
+          *Started:* {{ .StartsAt.Format "2006-01-02 15:04:05 UTC" }}
+          {{ end }}
+        send_resolved: true
