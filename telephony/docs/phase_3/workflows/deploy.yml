@@ -1,0 +1,246 @@
+name: Deploy — Build, Push & Deploy
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: staging
+        type: choice
+        options:
+          - staging
+          - production
+      rollback_sha:
+        description: "SHA to rollback to (leave empty for normal deploy)"
+        required: false
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE: ghcr.io/${{ github.repository }}/backend
+  PYTHON_VERSION: "3.10"
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────
+  # Rollback path — re-deploy a specific previous SHA
+  # ──────────────────────────────────────────────────────────────────
+  rollback:
+    name: Rollback
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.rollback_sha != '' }}
+    environment:
+      name: ${{ github.event.inputs.environment || 'staging' }}
+
+    steps:
+      - name: Rollback to previous image
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -e
+            cd ${{ secrets.DEPLOY_PATH || '/opt/talky' }}
+            ROLLBACK_SHA="${{ github.event.inputs.rollback_sha }}"
+            ROLLBACK_IMAGE="${{ env.BACKEND_IMAGE }}:${ROLLBACK_SHA}"
+
+            echo "🔄 Rolling back to image: ${ROLLBACK_IMAGE}"
+
+            # Pull the specific SHA image
+            docker pull "${ROLLBACK_IMAGE}"
+
+            # Update .env to point to rollback image
+            sed -i "s|BACKEND_IMAGE=.*|BACKEND_IMAGE=${ROLLBACK_IMAGE}|" .env || true
+
+            # Restart with rollback image (no --build, use the pulled image)
+            BACKEND_IMAGE="${ROLLBACK_IMAGE}" docker compose up -d backend
+
+            echo "Waiting for health check..."
+            for i in $(seq 1 30); do
+              if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+                echo "✅ Rollback successful! Now running: ${ROLLBACK_IMAGE}"
+                exit 0
+              fi
+              echo "  Attempt $i/30..."
+              sleep 5
+            done
+            echo "❌ Rollback failed health check"
+            exit 1
+
+  # ──────────────────────────────────────────────────────────────────
+  # Build & Push Docker Images
+  # ──────────────────────────────────────────────────────────────────
+  build-and-push:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.rollback_sha == '' }}
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.version }}
+      image_sha_tag: ${{ steps.sha_tag.outputs.tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute SHA tag
+        id: sha_tag
+        # FIX: always produce a short-SHA tag for exact rollback targeting
+        run: echo "tag=$(echo $GITHUB_SHA | cut -c1-7)" >> $GITHUB_OUTPUT
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.BACKEND_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=,format=short
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ──────────────────────────────────────────────────────────────────
+  # Deploy to Server
+  # ──────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: ${{ github.event.inputs.rollback_sha == '' }}
+    environment:
+      name: ${{ github.event.inputs.environment || 'staging' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -e
+            cd ${{ secrets.DEPLOY_PATH || '/opt/talky' }}
+
+            # Use the exact SHA tag for this deploy — never 'latest'
+            # FIX: deploy pinned SHA image, not latest
+            SHA_TAG="${{ needs.build-and-push.outputs.image_sha_tag }}"
+            DEPLOY_IMAGE="${{ env.BACKEND_IMAGE }}:${SHA_TAG}"
+
+            echo "🚀 Deploying image: ${DEPLOY_IMAGE}"
+
+            # Record the SHA being deployed for rollback reference
+            echo "${SHA_TAG}" > .last_deployed_sha
+            echo "${DEPLOY_IMAGE}" > .last_deployed_image
+
+            # Pull the specific SHA image
+            docker pull "${DEPLOY_IMAGE}"
+
+            # FIX: Run database migrations before restarting the backend
+            # This replaces the broken init.sql re-run approach.
+            # Prereq: Alembic must be configured (see alembic/ directory).
+            # Once Alembic is set up, uncomment the line below and remove the note.
+            # docker run --rm --env-file .env "${DEPLOY_IMAGE}" alembic upgrade head
+
+            # Zero-downtime restart using the pinned SHA image
+            BACKEND_IMAGE="${DEPLOY_IMAGE}" docker compose up -d --no-build backend
+
+            # FIX: Do NOT restart Redis on every deploy — no reason to
+            # (removed: docker compose restart redis)
+
+            # Wait for health check
+            echo "Waiting for backend health check..."
+            for i in $(seq 1 30); do
+              if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+                echo "✅ Backend is healthy! SHA: ${SHA_TAG}"
+                exit 0
+              fi
+              echo "  Attempt $i/30..."
+              sleep 5
+            done
+
+            echo "❌ Backend failed health check after deploy"
+            echo "Last deployed SHA was: $(cat .last_deployed_sha 2>/dev/null || echo 'unknown')"
+            docker compose logs --tail=50 backend
+            exit 1
+
+      - name: Verify deployment
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            echo "=== Service Status ==="
+            cd ${{ secrets.DEPLOY_PATH || '/opt/talky' }}
+            docker compose ps
+            echo ""
+            echo "=== Deployed Image ==="
+            cat .last_deployed_image 2>/dev/null || echo "unknown"
+            echo ""
+            echo "=== Health Check ==="
+            curl -sf http://localhost:8000/health | python3 -m json.tool || echo "Health check failed"
+            echo ""
+            echo "=== Recent Logs ==="
+            docker compose logs --tail=10 backend
+
+  # ──────────────────────────────────────────────────────────────────
+  # Post-Deploy Notification (Slack)
+  # ──────────────────────────────────────────────────────────────────
+  notify:
+    name: Notify
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    if: always()
+
+    steps:
+      - name: Notify Slack on success
+        if: needs.deploy.result == 'success'
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "✅ *Talky.ai deployed successfully*\n*Image:* `${{ env.BACKEND_IMAGE }}:${{ needs.build-and-push.outputs.image_sha_tag }}`\n*Environment:* `${{ github.event.inputs.environment || 'staging' }}`\n*Triggered by:* ${{ github.actor }}"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true  # Don't fail the pipeline if Slack is down
+
+      - name: Notify Slack on failure
+        if: needs.deploy.result != 'success'
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "❌ *Talky.ai deploy FAILED*\n*Branch:* `${{ github.ref_name }}`\n*Environment:* `${{ github.event.inputs.environment || 'staging' }}`\n*Triggered by:* ${{ github.actor }}\n*Logs:* ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true
