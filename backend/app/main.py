@@ -87,7 +87,40 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Configuration warnings (non-fatal in {environment}): {e}")
 
     logger.info("Talky.ai started successfully")
+
+    # Auto-connect telephony bridge so campaigns can originate calls immediately.
+    # Must happen after container startup (needs event loop to be running).
+    from app.infrastructure.telephony.adapter_factory import CallControlAdapterFactory
+    from app.api.v1.endpoints import telephony_bridge as _tb
+
+    try:
+        if not (_tb._adapter and _tb._adapter.connected):
+            adapter_type = os.getenv("TELEPHONY_ADAPTER", "auto")
+            _tb._adapter = await CallControlAdapterFactory.create(adapter_type)
+            _tb._adapter.register_call_event_handlers(
+                on_new_call=_tb._on_new_call,
+                on_call_ended=_tb._on_call_ended,
+                on_audio_received=_tb._on_audio_received,
+            )
+            if hasattr(_tb._adapter, "set_global_session_start_callback"):
+                _tb._adapter.set_global_session_start_callback(_tb._on_ws_session_start)
+            await _tb._adapter.connect()
+            logger.info(f"Telephony bridge auto-connected: {_tb._adapter.name}")
+        else:
+            logger.info("Telephony bridge already connected — skipping auto-connect")
+    except Exception as e:
+        logger.warning(f"Telephony bridge auto-connect failed (non-fatal): {e}")
+
     yield
+
+    # Disconnect telephony bridge on shutdown
+    if _tb._adapter and _tb._adapter.connected:
+        try:
+            await _tb._adapter.disconnect()
+            _tb._adapter = None
+            logger.info("Telephony bridge disconnected")
+        except Exception as e:
+            logger.error(f"Error disconnecting telephony bridge: {e}")
 
     # ── Shutdown ──────────────────────────────────────────────────
     logger.info("Shutting down Talky.ai...")
