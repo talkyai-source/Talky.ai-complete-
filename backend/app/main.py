@@ -32,7 +32,8 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)-8s [%(name)s] %(message)s",
     datefmt="%H:%M:%S",
 )
-for _noisy in ("httpcore", "httpx", "hpack", "urllib3", "websockets", "opentelemetry"):
+# Quiet noisy third-party loggers
+for _noisy in ("httpcore", "httpx", "hpack", "urllib3", "websockets", "opentelemetry", "groq._base_client", "groq"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)

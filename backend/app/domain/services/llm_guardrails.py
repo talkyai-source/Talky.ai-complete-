@@ -161,22 +161,40 @@ class LLMGuardrails:
             return response
             
         max_sentences = max_sentences or self.config.max_sentences
-        
+
         # Split by sentence-ending punctuation
         sentences = re.split(r'(?<=[.!?])\s+', response.strip())
-        
-        if len(sentences) <= max_sentences:
-            return response
-        
-        # Take only max_sentences
-        truncated = ' '.join(sentences[:max_sentences])
-        
-        # Ensure it ends with punctuation
-        if truncated and truncated[-1] not in '.!?':
-            truncated += '.'
-        
-        logger.debug(f"Truncated response from {len(sentences)} to {max_sentences} sentences")
-        return truncated
+
+        if len(sentences) > max_sentences:
+            truncated = ' '.join(sentences[:max_sentences])
+            if truncated and truncated[-1] not in '.!?':
+                truncated += '.'
+            logger.debug(f"Truncated response from {len(sentences)} to {max_sentences} sentences")
+            response = truncated
+
+        # Secondary cap: enforce max characters per sentence to catch run-on sentences
+        # that the punctuation splitter won't break (e.g. one long comma-joined sentence).
+        # ~80 chars per sentence is generous but still limits the worst case.
+        max_chars = max_sentences * 80
+        if len(response) > max_chars:
+            truncated = response[:max_chars]
+            # Prefer ending at the last sentence-ending punctuation within the limit
+            for punct in ('.', '!', '?'):
+                last = truncated.rfind(punct)
+                if last > max_chars // 2:  # only use if not too early in the string
+                    truncated = response[:last + 1]
+                    break
+            else:
+                # No sentence punctuation — cut at last comma
+                last_comma = truncated.rfind(',')
+                if last_comma > max_chars // 2:
+                    truncated = response[:last_comma] + '.'
+                else:
+                    truncated = truncated.rstrip() + '.'
+            logger.debug(f"Char-capped response from {len(response)} to {max_chars} chars")
+            response = truncated
+
+        return response
     
     def validate_response(
         self,
@@ -282,6 +300,10 @@ class LLMGuardrails:
         for pattern in filler_starts:
             cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
         
+        # Strip leading em-dashes / en-dashes left behind after filler removal
+        # e.g. "Sure thing! —I'm offering..." → after stripping "Sure thing! " → "—I'm..." → "I'm..."
+        cleaned = re.sub(r'^[—–\-]+\s*', '', cleaned)
+
         # Clean up whitespace
         cleaned = re.sub(r'\s+', ' ', cleaned).strip()
 

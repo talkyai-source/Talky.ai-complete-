@@ -103,36 +103,49 @@ def _build_telephony_session_config(gateway_type: str = "browser"):
         response_max_sentences=3,
     )
 
-    # System prompt that instructs the AI to introduce itself naturally
-    system_prompt = """You are a helpful AI assistant making a phone call.
+    # System prompt — campaign-aware, no hardcoded greeting text.
+    # The LLM will generate the opening line itself based on the campaign
+    # context (agent name, company, goal) it receives here.
+    # When a campaign provides its own system_prompt via the dialer worker,
+    # that value will override this default at session creation time.
+    system_prompt = """You are an outbound phone agent for a campaign.
 
 IMPORTANT INSTRUCTIONS:
-1. When the call connects, introduce yourself with a natural human name (choose one yourself)
-2. Be warm, friendly, and professional
-3. Speak naturally like a real person would on the phone
-4. Keep responses brief and conversational
-5. Listen carefully and respond appropriately to what the person says
-6. Do NOT mention you are an AI or assistant
-7. Act like a real human having a natural phone conversation
+- Speak naturally like a real person on the phone — warm, friendly, professional
+- Keep every response short and conversational (1-2 sentences)
+- Never mention you are an AI or reference any technology
+- Do NOT use filler openers like "Certainly", "Absolutely", "Sure", "Of course"
+- Listen carefully and respond specifically to what the person says
 
-Start the conversation by introducing yourself and asking how you can help."""
+OPENING THE CALL:
+- Greet the person by saying hello and introduce yourself using your agent name and company name
+- Then in 1 sentence explain the reason for the call based on your campaign goal
+- End with a short open question to invite them to respond
+- Example structure: "Hi [name], this is [agent] from [company]. [one-sentence reason for calling]. [question]?"
+
+Your agent name, company, and campaign goal are defined in your configuration."""
 
     return VoiceSessionConfig(
         gateway_type=gateway_type,
         stt_provider_type="deepgram_flux",
         llm_provider_type="groq",
-        tts_provider_type=tts_provider_type,  # Use detected provider from global config
-        stt_model="flux-general-en",  # Flux model for deepgram_flux provider
+        tts_provider_type=tts_provider_type,
+        stt_model="flux-general-en",
         stt_sample_rate=8000,
         stt_encoding="linear16",
-        llm_model=global_config.llm_model,  # From global config
-        llm_temperature=global_config.llm_temperature,  # From global config
-        llm_max_tokens=global_config.llm_max_tokens,  # From global config
-        voice_id=tts_voice_id,  # From global config
+        stt_eot_threshold=0.85,
+        stt_eot_timeout_ms=1500,           # was 5000 — industry min is 1000ms; Flux integrated EOT handles accuracy
+        stt_eager_eot_threshold=None,
+        llm_model=global_config.llm_model,
+        llm_temperature=global_config.llm_temperature,
+        llm_max_tokens=global_config.llm_max_tokens,
+        voice_id=tts_voice_id,
         tts_sample_rate=8000,
         gateway_sample_rate=8000,
         gateway_channels=1,
         gateway_bit_depth=16,
+        gateway_target_buffer_ms=40,
+        mute_during_tts=False,
         session_type="telephony",
         campaign_id="telephony",
         lead_id="sip-caller",
@@ -147,20 +160,35 @@ Start the conversation by introducing yourself and asking how you can help."""
 
 async def _send_outbound_greeting(voice_session) -> None:
     """
-    Send the AI's opening line after an outbound call is answered.
+    Generate and speak the AI's opening line after an outbound call is answered.
 
-    We wait 1 second so the Deepgram WebSocket has time to connect and the
-    media gateway session is fully ready before audio starts flowing.
+    The greeting is generated dynamically by the LLM using the campaign's
+    system_prompt (agent name, company, goal) — no hardcoded text.
+    We wait 200ms for the Deepgram WebSocket to connect before sending audio.
     """
-    await asyncio.sleep(1.0)
+    await asyncio.sleep(0.2)
     try:
-        greeting = (
-            "Hello! This is an AI assistant calling on behalf of our team. "
-            "How are you doing today?"
-        )
-        logger.info(f"Sending outbound greeting for call {voice_session.call_id[:12]}")
+        call_id = voice_session.call_id
+        session = voice_session.call_session
+
+        logger.info(f"Generating dynamic greeting for call {call_id[:12]}")
+
+        # Empty user_input triggers the LLM to produce an opening line
+        # using the campaign system_prompt ("OPENING THE CALL" instructions).
+        greeting = await voice_session.pipeline.get_llm_response(session, "")
+
+        if not greeting:
+            logger.warning(f"LLM returned empty greeting for {call_id[:12]}, skipping")
+            return
+
+        # Clear any barge_in_event set by the callee answering ("Hello?") before
+        # TTS starts — without this, synthesize_and_send_audio would see the event
+        # already set and skip the greeting entirely (tts_stopped_early).
+        voice_session.pipeline.clear_barge_in_event(session)
+
+        logger.info(f"Outbound greeting ({len(greeting)} chars): {greeting[:80]!r}")
         await voice_session.pipeline.synthesize_and_send_audio(
-            voice_session.call_session,
+            session,
             greeting,
             websocket=None,
         )

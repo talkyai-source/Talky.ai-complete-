@@ -50,6 +50,21 @@ class OAuthStateManager:
     
     STATE_TTL_SECONDS = 300  # 5 minutes
     STATE_KEY_PREFIX = "oauth_state:"
+
+    @classmethod
+    def _json_safe(cls, value: Any) -> Any:
+        """Normalize state payloads so Redis and memory storage behave the same."""
+        if isinstance(value, uuid.UUID):
+            return str(value)
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {key: cls._json_safe(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [cls._json_safe(item) for item in value]
+        if isinstance(value, tuple):
+            return [cls._json_safe(item) for item in value]
+        return value
     
     def __init__(self, redis_url: Optional[str] = None):
         """
@@ -131,7 +146,7 @@ class OAuthStateManager:
         code_verifier = self._generate_code_verifier()
         code_challenge = self._generate_code_challenge(code_verifier)
         
-        state_data = {
+        state_data = self._json_safe({
             "tenant_id": tenant_id,
             "user_id": user_id,
             "provider": provider,
@@ -140,7 +155,7 @@ class OAuthStateManager:
             "created_at": datetime.utcnow().isoformat(),
             "expires_at": (datetime.utcnow() + timedelta(seconds=self.STATE_TTL_SECONDS)).isoformat(),
             **(extra_data or {})
-        }
+        })
         
         try:
             redis = await self._get_redis()

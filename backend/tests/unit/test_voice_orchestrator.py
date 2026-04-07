@@ -294,8 +294,8 @@ class TestPrewarmAskAIProviders:
 
         assert len(captured) == 4
         config = captured[0]
-        assert config.stt_eager_eot_threshold == 0.4
-        assert config.stt_eot_timeout_ms == 3000
+        assert config.stt_eager_eot_threshold is None
+        assert config.stt_eot_timeout_ms == 5000
         assert config.mute_during_tts is False
         assert config.llm_max_tokens == 90
 
