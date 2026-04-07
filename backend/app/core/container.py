@@ -2,21 +2,8 @@
 Dependency Injection Container
 Manages creation and lifecycle of all services and providers.
 
-Uses asyncpg-backed PostgreSQL connections.
-
-Usage:
-    from app.core.container import get_container
-
-    # In startup:
-    container = get_container()
-    await container.startup()
-
-    # Access services:
-    db_pool = container.db_pool
-    queue = container.queue_service
-
-    # In shutdown:
-    await container.shutdown()
+FIX: Redis connection now reads REDIS_PASSWORD from environment and
+     builds the authenticated connection URL correctly.
 """
 import os
 import logging
@@ -37,6 +24,34 @@ from app.core.postgres_adapter import Client
 logger = logging.getLogger(__name__)
 
 
+def _build_redis_url() -> str:
+    """
+    Build a Redis connection URL from individual env vars or REDIS_URL.
+
+    Priority:
+      1. REDIS_URL if set (user-provided full URL)
+      2. Constructed from REDIS_HOST + REDIS_PORT + REDIS_PASSWORD
+
+    The docker-compose.yml sets requirepass, so REDIS_PASSWORD must be
+    included in the URL for authentication to succeed.
+    """
+    # If a full URL is explicitly set, use it as-is
+    explicit_url = os.getenv("REDIS_URL", "").strip()
+    if explicit_url:
+        return explicit_url
+
+    host     = os.getenv("REDIS_HOST", "localhost")
+    port     = os.getenv("REDIS_PORT", "6379")
+    db       = os.getenv("REDIS_DB", "0")
+    password = os.getenv("REDIS_PASSWORD", "").strip()
+
+    if password:
+        # redis://:password@host:port/db
+        return f"redis://:{password}@{host}:{port}/{db}"
+    else:
+        return f"redis://{host}:{port}/{db}"
+
+
 class ServiceContainer:
     """
     Central container for all application services.
@@ -45,16 +60,9 @@ class ServiceContainer:
     - Singleton service instances
     - Async startup/shutdown lifecycle
     - Proper resource cleanup
-
-    Services managed:
-    - asyncpg connection pool
-    - Redis client (optional, for queue/session)
-    - Queue service (DialerQueueService)
-    - Session manager (SessionManager)
     """
 
     def __init__(self):
-        """Initialize container - services are created lazily on startup()."""
         self._db_pool: Optional[asyncpg.Pool] = None
         self._db_client: Optional[Client] = None
         self._redis: Optional["redis.Redis"] = None
@@ -66,30 +74,24 @@ class ServiceContainer:
         self._initialized = False
 
     async def startup(self) -> None:
-        """
-        Initialize all services.
-
-        Called during FastAPI lifespan startup.
-        Order matters — dependencies are initialized first.
-        """
         if self._initialized:
             logger.warning("Container already initialized")
             return
 
         logger.info("Initializing service container...")
 
-        # 1. Initialize PostgreSQL connection pool
+        # 1. PostgreSQL
         self._db_pool = await init_db_pool()
         self._db_client = Client(self._db_pool)
         logger.info("PostgreSQL connection pool initialized")
 
-        # 2. Initialize Redis (optional — graceful fallback)
+        # 2. Redis (with auth)
         await self._initialize_redis()
 
-        # 3. Initialize queue service (uses Redis if available)
+        # 3. Queue
         await self._initialize_queue_service()
 
-        # 4. Initialize CallService
+        # 4. CallService
         self._initialize_call_service()
 
         # 5. Session manager
@@ -100,10 +102,10 @@ class ServiceContainer:
         except Exception as e:
             logger.warning(f"SessionManager initialization warning: {e}")
 
-        # 6. Initialize VoiceOrchestrator and pre-warm Ask AI providers
-        await self._initialize_voice_orchestrator()
+        # 6. VoiceOrchestrator
+        self._initialize_voice_orchestrator()
 
-        # 7. Start adapter health monitor (non-blocking background task)
+        # 7. Adapter health monitor
         try:
             from app.infrastructure.telephony.adapter_factory import AdapterRegistry
             interval = float(os.getenv("ADAPTER_HEALTH_INTERVAL", "30"))
@@ -117,14 +119,8 @@ class ServiceContainer:
         logger.info("Service container startup complete")
 
     async def shutdown(self) -> None:
-        """
-        Gracefully shutdown all services.
-
-        Called during FastAPI lifespan shutdown.
-        """
         logger.info("Shutting down service container...")
 
-        # Stop adapter health monitor and disconnect cached adapters first
         if self._adapter_registry_started:
             try:
                 from app.infrastructure.telephony.adapter_factory import AdapterRegistry
@@ -133,12 +129,6 @@ class ServiceContainer:
             except Exception as e:
                 logger.error("Adapter registry stop error: %s", e)
             self._adapter_registry_started = False
-
-        if self._voice_orchestrator:
-            try:
-                logger.info("VoiceOrchestrator shutdown complete")
-            except Exception as e:
-                logger.error(f"VoiceOrchestrator shutdown error: {e}")
 
         if self._session_manager:
             try:
@@ -161,7 +151,6 @@ class ServiceContainer:
             except Exception as e:
                 logger.error(f"Redis close error: {e}")
 
-        # Close PostgreSQL pool
         await close_db_pool()
         self._db_client = None
         logger.info("PostgreSQL pool closed")
@@ -169,60 +158,48 @@ class ServiceContainer:
         self._initialized = False
         logger.info("Service container shutdown complete")
 
-    # =====================================
-    # Service Accessors
-    # =====================================
+    # ── Accessors ─────────────────────────────────────────────────
 
     @property
     def db_pool(self) -> asyncpg.Pool:
-        """Get asyncpg connection pool."""
         if not self._db_pool:
             raise RuntimeError("Container not initialized. Call startup() first.")
         return self._db_pool
 
-    # Keep .db_client as an alias pointing to db_pool for backward compat
-    # (services that do `container.db_client` should receive adapter client)
     @property
     def db_client(self):
-        """Backward-compat alias → returns Postgres adapter client."""
         if not self._db_client:
             raise RuntimeError("Container not initialized. Call startup() first.")
         return self._db_client
 
     @property
     def redis(self) -> Optional["redis.Redis"]:
-        """Get Redis client (None if not available)."""
         return self._redis
 
     @property
     def redis_enabled(self) -> bool:
-        """Check if Redis is available."""
         return self._redis is not None
 
     @property
     def queue_service(self):
-        """Get DialerQueueService instance."""
         if not self._queue_service:
             raise RuntimeError("Queue service not initialized")
         return self._queue_service
 
     @property
     def session_manager(self):
-        """Get SessionManager instance."""
         if not self._session_manager:
             raise RuntimeError("SessionManager not initialized")
         return self._session_manager
 
     @property
     def call_service(self):
-        """Get CallService instance."""
         if not self._call_service:
             raise RuntimeError("CallService not initialized")
         return self._call_service
 
     @property
     def voice_orchestrator(self):
-        """Get VoiceOrchestrator instance."""
         if not self._voice_orchestrator:
             raise RuntimeError("VoiceOrchestrator not initialized")
         return self._voice_orchestrator
@@ -231,32 +208,34 @@ class ServiceContainer:
     def is_initialized(self) -> bool:
         return self._initialized
 
-    # =====================================
-    # Private Initializers
-    # =====================================
+    # ── Private initializers ──────────────────────────────────────
 
     async def _initialize_redis(self) -> None:
-        """Initialize Redis connection with graceful fallback."""
+        """Initialize Redis with password authentication."""
         if not REDIS_AVAILABLE:
             logger.warning("redis.asyncio not installed — queue features will use fallback")
             return
 
-        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+        redis_url = _build_redis_url()
+        # Log URL with password masked
+        log_url = redis_url.replace(
+            os.getenv("REDIS_PASSWORD", "NOPASSWORD"),
+            "***"
+        ) if os.getenv("REDIS_PASSWORD") else redis_url
 
         try:
             self._redis = redis.from_url(
                 redis_url,
                 encoding="utf-8",
-                decode_responses=True
+                decode_responses=True,
             )
             await self._redis.ping()
-            logger.info(f"Redis connected: {redis_url}")
+            logger.info(f"Redis connected: {log_url}")
         except Exception as e:
             logger.warning(f"Redis not available ({e}) — using in-memory fallback")
             self._redis = None
 
     async def _initialize_queue_service(self) -> None:
-        """Initialize DialerQueueService."""
         try:
             from app.domain.services.queue_service import DialerQueueService
             self._queue_service = DialerQueueService(redis_client=self._redis)
@@ -266,43 +245,31 @@ class ServiceContainer:
             logger.warning(f"Queue service initialization warning: {e}")
 
     def _initialize_call_service(self) -> None:
-        """Initialize CallService with db_pool and queue dependencies."""
         try:
             from app.domain.services.call_service import CallService
             self._call_service = CallService(
                 db_client=self.db_client,
-                queue_service=self._queue_service
+                queue_service=self._queue_service,
             )
             logger.info("CallService initialized")
         except Exception as e:
             logger.warning(f"CallService initialization warning: {e}")
 
-    async def _initialize_voice_orchestrator(self) -> None:
-        """Initialize VoiceOrchestrator and pre-warm Ask AI provider singletons."""
+    def _initialize_voice_orchestrator(self) -> None:
         try:
             from app.domain.services.voice_orchestrator import VoiceOrchestrator
-            orchestrator = VoiceOrchestrator(db_client=self.db_client)
-            await orchestrator.prewarm_ask_ai_providers()
-            self._voice_orchestrator = orchestrator
+            self._voice_orchestrator = VoiceOrchestrator(db_client=self.db_client)
             logger.info("VoiceOrchestrator initialized")
         except Exception as e:
             logger.warning(f"VoiceOrchestrator initialization warning: {e}")
 
 
-# =====================================
-# Singleton Container Instance
-# =====================================
+# ── Singleton ──────────────────────────────────────────────────────
 
 _container: Optional[ServiceContainer] = None
 
 
 def get_container() -> ServiceContainer:
-    """
-    Get the global container instance.
-
-    Creates the container if it doesn't exist.
-    Call container.startup() before use.
-    """
     global _container
     if _container is None:
         _container = ServiceContainer()
@@ -310,29 +277,12 @@ def get_container() -> ServiceContainer:
 
 
 def reset_container() -> None:
-    """
-    Reset global container (for testing only).
-
-    WARNING: Only use in tests!
-    """
+    """Reset global container — for testing only."""
     global _container
     _container = None
 
 
-# =====================================
-# FastAPI Dependencies
-# =====================================
-
 def get_db_pool_from_container() -> asyncpg.Pool:
-    """
-    FastAPI dependency — get asyncpg pool from container.
-
-    Usage:
-        @router.get("/example")
-        async def example(pool: asyncpg.Pool = Depends(get_db_pool_from_container)):
-            async with pool.acquire() as conn:
-                ...
-    """
     container = get_container()
     if not container.is_initialized:
         raise RuntimeError("Container not initialized")
@@ -340,7 +290,6 @@ def get_db_pool_from_container() -> asyncpg.Pool:
 
 
 def get_db_client_from_container():
-    """FastAPI dependency - get adapter client from container."""
     container = get_container()
     if not container.is_initialized:
         raise RuntimeError("Container not initialized")
