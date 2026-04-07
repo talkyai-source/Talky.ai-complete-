@@ -1,6 +1,5 @@
 # ========================================
 # Talky.ai Backend - Python Dependencies
-# Generated for Ubuntu (migrated from Windows)
 # ========================================
 
 # --- Core Framework ---
@@ -9,7 +8,6 @@ uvicorn[standard]==0.27.0
 starlette==0.35.1
 python-multipart==0.0.6
 slowapi>=0.1.9
-
 
 # --- Configuration & Settings ---
 pydantic==2.12.5
@@ -21,7 +19,9 @@ PyYAML==6.0.1
 sqlalchemy==2.0.25
 psycopg2-binary==2.9.11
 asyncpg==0.29.0
-# supabase removed — using local PostgreSQL via asyncpg
+
+# --- Database Migrations (NEW) ---
+alembic==1.13.1
 
 # --- Cache & Queue ---
 redis==5.0.1
@@ -71,6 +71,20 @@ Jinja2>=3.1.0
 # --- Audio Processing ---
 numpy>=1.26.0
 pydub==0.25.1
+
+# --- Object Storage — S3 / R2 (NEW) ---
+boto3>=1.34.0
+botocore>=1.34.0
+
+# --- OpenTelemetry — Distributed Tracing (NEW) ---
+opentelemetry-api>=1.24.0
+opentelemetry-sdk>=1.24.0
+opentelemetry-instrumentation-fastapi>=0.45b0
+opentelemetry-instrumentation-asyncpg>=0.45b0
+opentelemetry-instrumentation-redis>=0.45b0
+# OTLP exporter — sends traces to Grafana Tempo, Jaeger, etc.
+# Remove if you only want console output in dev.
+opentelemetry-exporter-otlp-proto-grpc>=1.24.0
 
 # --- Monitoring & Utilities ---
 prometheus-client==0.19.0
