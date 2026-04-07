@@ -1,2 +1,100 @@
+# ============================================================
+# Talky.ai — .gitignore
+# ============================================================
+
+# ── Secrets & environment files ──────────────────────────────
 .env
+.env.local
+.env.production
+.env.staging
 Admin/frontend/.env
+**/.env
+**/.env.local
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# ── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+venv/
+env/
+.venv/
+
+# ── Node / Next.js / React ────────────────────────────────────
+node_modules/
+.next/
+.nuxt/
+dist/
+out/
+build/
+*.tsbuildinfo
+.npm/
+.eslintcache
+.storybook-out/
+storybook-static/
+
+# ── Docker ────────────────────────────────────────────────────
+.docker/
+
+# ── Audio & recordings (never commit binary call data) ────────
+backend/audio_files/*.wav
+backend/audio_files/*.mp3
+backend/audio_files/*.ogg
+freeswitch-recordings/
+*.wav
+*.mp3
+*.ogg
+*.opus
+
+# ── Logs ──────────────────────────────────────────────────────
+*.log
+logs/
+backend/logs/
+*.log.*
+
+# ── OS & editor files ─────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+
+# ── C++ build artifacts ───────────────────────────────────────
+services/voice-gateway-cpp/build/
+services/voice-gateway-cpp/build-asan/
+*.o
+*.a
+*.out
+CMakeCache.txt
+CMakeFiles/
+
+# ── Test & coverage artifacts ─────────────────────────────────
+.pytest_cache/
+test-results/
+playwright-report/
+test-output/
+
+# ── Temporary files ───────────────────────────────────────────
+*.tmp
+*.temp
+*.bak
+*.orig
