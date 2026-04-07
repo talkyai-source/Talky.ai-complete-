@@ -236,7 +236,6 @@ class VoiceOrchestrator:
             media_gateway=media_gateway,
             stt_sample_rate=config.stt_sample_rate,
             tts_sample_rate=config.tts_sample_rate,
-            mute_during_tts=config.mute_during_tts,
         )
 
         # --- Build CallSession ---
