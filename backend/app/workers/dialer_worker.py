@@ -590,7 +590,7 @@ class DialerWorker:
         # Close connections
         await self.queue_service.close()
         if self._redis:
-            await self._redis.close()
+            await self._redis.aclose()
         
         if self._db_pool:
             await close_db_pool()
