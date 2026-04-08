@@ -30,10 +30,11 @@ from __future__ import annotations
 import io
 import logging
 import os
+import struct
 import wave
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,11 @@ class RecordingBuffer:
         return (self.total_bytes / bps) if bps else 0.0
 
     def get_wav_bytes(self) -> bytes:
+        # Telephony path pre-mixes a stereo WAV externally (mix_stereo_recording)
+        # and stores it here to skip re-encoding. Use it if present.
+        override = getattr(self, "_wav_bytes_override", None)
+        if override:
+            return override
         buf = io.BytesIO()
         with wave.open(buf, "wb") as wf:
             wf.setnchannels(self.channels)
@@ -238,11 +244,10 @@ class RecordingService:
             return None
 
         if not self._s3.is_available():
-            logger.warning(
-                f"S3 not configured — skipping recording for call {call_id}. "
-                "Set S3_BUCKET_NAME, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY."
+            logger.info(
+                f"S3 not configured — saving recording locally for call {call_id}."
             )
-            return None
+            return await self._save_local(call_id, buffer, tenant_id, campaign_id)
 
         try:
             wav_data = buffer.get_wav_bytes()
@@ -276,6 +281,71 @@ class RecordingService:
             logger.error(f"Recording upload failed for call {call_id}: {exc}", exc_info=True)
             await self._mark_upload_failed(call_id, tenant_id, campaign_id, str(exc))
             return None
+
+    # ── Local file fallback ───────────────────────────────────────
+
+    async def _save_local(
+        self,
+        call_id: str,
+        buffer: RecordingBuffer,
+        tenant_id: str = "unknown",
+        campaign_id: str = "unknown",
+    ) -> Optional[str]:
+        """
+        Save recording to local filesystem when S3 is not configured.
+        Also inserts a row into recordings_s3 (status='local') so the
+        frontend can list and stream local recordings.
+
+        Directory is controlled by the LOCAL_RECORDINGS_DIR environment variable
+        (default: ./recordings relative to the working directory).
+
+        Returns the recording UUID string on success, None on failure.
+        """
+        recordings_dir = os.getenv("LOCAL_RECORDINGS_DIR", "./recordings")
+        os.makedirs(recordings_dir, exist_ok=True)
+        abs_dir = os.path.abspath(recordings_dir)
+        filepath = os.path.join(abs_dir, f"{call_id}.wav")
+        try:
+            wav_data = buffer.get_wav_bytes()
+            if not wav_data:
+                logger.warning(f"No WAV data to save locally for call {call_id}")
+                return None
+            with open(filepath, "wb") as fh:
+                fh.write(wav_data)
+            logger.info(
+                f"Recording saved locally: {filepath} ({len(wav_data):,} bytes, "
+                f"{buffer.get_duration_seconds():.1f}s)"
+            )
+        except Exception as exc:
+            logger.error(f"Local recording save failed for call {call_id}: {exc}", exc_info=True)
+            return None
+
+        # Insert DB record so the frontend can find this recording.
+        # s3_bucket='local' identifies it as local-disk storage.
+        # status='uploaded' satisfies the DB check constraint; the stream
+        # endpoint inspects s3_bucket to decide whether to serve locally.
+        now = datetime.utcnow()
+        recording_id = await self._insert_recording_record(
+            call_id=call_id,
+            tenant_id=tenant_id,
+            campaign_id=campaign_id,
+            s3_key=filepath,
+            file_size_bytes=len(wav_data),
+            duration_seconds=int(buffer.get_duration_seconds()),
+            upload_started=now,
+            upload_finished=now,
+            s3_bucket="local",
+            s3_region="local",
+            status="uploaded",
+        )
+
+        if recording_id:
+            await self._update_call_recording_url(call_id, recording_id)
+            logger.info(f"Local recording registered in DB: recording_id={recording_id}")
+            return str(recording_id)
+        else:
+            logger.warning(f"Local recording saved to disk but DB insert failed for {call_id}")
+            return filepath
 
     # ── Presigned URL ─────────────────────────────────────────────
 
@@ -348,6 +418,9 @@ class RecordingService:
         duration_seconds: int,
         upload_started: datetime,
         upload_finished: datetime,
+        s3_bucket: Optional[str] = None,
+        s3_region: Optional[str] = None,
+        status: str = "uploaded",
     ) -> Optional[UUID]:
         """Insert a row into recordings_s3 and return the new UUID."""
         try:
@@ -359,17 +432,18 @@ class RecordingService:
                         s3_bucket, s3_key, s3_region,
                         file_size_bytes, duration_seconds,
                         status, upload_started_at, upload_finished_at
-                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'uploaded',$9,$10)
+                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
                     RETURNING id
                     """,
                     UUID(call_id),
                     UUID(tenant_id),
                     UUID(campaign_id) if campaign_id else None,
-                    self._s3.bucket,
+                    s3_bucket if s3_bucket is not None else self._s3.bucket,
                     s3_key,
-                    self._s3.region,
+                    s3_region if s3_region is not None else self._s3.region,
                     file_size_bytes,
                     duration_seconds,
+                    status,
                     upload_started,
                     upload_finished,
                 )
@@ -425,6 +499,93 @@ class RecordingService:
                 )
         except Exception:
             pass  # Best-effort — don't shadow the original error
+
+
+# ---------------------------------------------------------------------------
+# mix_stereo_recording — telephony two-channel recording mixer
+# ---------------------------------------------------------------------------
+
+def mix_stereo_recording(
+    caller_chunks: List[bytes],
+    agent_chunks: List[Tuple[int, bytes]],
+    sample_rate: int = 8000,
+) -> bytes:
+    """
+    Mix caller (left) and agent (right) PCM16 audio into a stereo WAV.
+
+    Parameters
+    ----------
+    caller_chunks : list[bytes]
+        Sequential 16-bit little-endian PCM audio from the caller.
+        Chunks are concatenated in order to form the left channel.
+    agent_chunks : list[tuple[int, bytes]]
+        Agent TTS audio as (sample_offset, pcm_bytes) pairs where
+        sample_offset is the absolute sample position (MixMonitor cursor)
+        at which each chunk should be placed.
+        Chunks may overlap the right channel only at their offset position.
+    sample_rate : int
+        Sample rate in Hz (must be 8000 for telephony PCMU path).
+
+    Returns
+    -------
+    bytes
+        Stereo WAV file (2 channels, 16-bit, sample_rate Hz).
+    """
+    # Build left channel (caller) as a flat bytearray of int16 samples
+    caller_pcm = b"".join(caller_chunks)
+    caller_samples = len(caller_pcm) // 2  # int16 = 2 bytes per sample
+
+    # Determine the length needed for the right channel (agent)
+    max_agent_end = 0
+    for offset, chunk in agent_chunks:
+        end = offset + (len(chunk) // 2)
+        if end > max_agent_end:
+            max_agent_end = end
+
+    total_samples = max(caller_samples, max_agent_end)
+    if total_samples == 0:
+        # Nothing to mix — return an empty stereo WAV
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(2)
+            wf.setsampwidth(2)
+            wf.setframerate(sample_rate)
+            wf.writeframes(b"")
+        buf.seek(0)
+        return buf.read()
+
+    # Build right channel (agent) buffer — zero-initialised (silence)
+    agent_buf = bytearray(total_samples * 2)
+    for offset, chunk in agent_chunks:
+        byte_pos = offset * 2
+        end_pos = byte_pos + len(chunk)
+        if end_pos > len(agent_buf):
+            # Trim to fit (guards against cursor drift)
+            chunk = chunk[: len(agent_buf) - byte_pos]
+            end_pos = len(agent_buf)
+        if byte_pos < len(agent_buf):
+            agent_buf[byte_pos:end_pos] = chunk
+
+    # Pad left channel with silence if shorter than total
+    left_pad = total_samples * 2 - len(caller_pcm)
+    left_buf = caller_pcm + bytes(left_pad) if left_pad > 0 else caller_pcm
+
+    # Interleave left/right samples into stereo PCM16
+    stereo = bytearray(total_samples * 4)  # 2 channels × 2 bytes
+    for i in range(total_samples):
+        l_off = i * 2
+        s_off = i * 4
+        stereo[s_off:s_off + 2] = left_buf[l_off:l_off + 2]
+        stereo[s_off + 2:s_off + 4] = agent_buf[l_off:l_off + 2]
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(2)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(bytes(stereo))
+    buf.seek(0)
+    return buf.read()
 
 
 # ---------------------------------------------------------------------------

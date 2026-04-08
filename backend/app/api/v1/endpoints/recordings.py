@@ -6,8 +6,10 @@ Updated to use RecordingService with S3 presigned URLs.
 - Stream/URL: returns a presigned S3 GET URL (audio served directly from S3)
 - Plan-based retention access control is preserved
 """
+import os
+
 from fastapi import APIRouter, HTTPException, Depends, Query
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timezone
@@ -134,16 +136,36 @@ async def stream_recording(
     db_client: Client = Depends(get_db_client),
 ):
     """
-    Redirect to presigned S3 URL for audio streaming.
-    The browser/client follows the redirect and fetches audio directly from S3.
-    This removes the backend from the audio streaming hot path.
+    Stream a recording.
+    - Local recordings (status='local'): served directly as FileResponse.
+    - S3 recordings (status='uploaded'): 302 redirect to presigned S3 URL.
     """
     tenant_id = str(current_user.tenant_id)
-    service = make_recording_service(db_client.pool)
 
+    async with db_client.pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, s3_key, s3_bucket, status
+            FROM recordings_s3
+            WHERE id = $1 AND tenant_id = $2
+            """,
+            __import__("uuid").UUID(recording_id),
+            __import__("uuid").UUID(tenant_id),
+        )
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    if row["s3_bucket"] == "local":
+        filepath = row["s3_key"]
+        if not os.path.isfile(filepath):
+            raise HTTPException(status_code=404, detail="Recording file not found on disk")
+        return FileResponse(filepath, media_type="audio/wav", filename=f"{recording_id}.wav")
+
+    # S3 path: generate presigned URL and redirect
+    service = make_recording_service(db_client.pool)
     url = await service.get_presigned_url(recording_id, tenant_id)
     if not url:
         raise HTTPException(status_code=404, detail="Recording not found or expired")
 
-    # 302 redirect — client fetches audio directly from S3
     return RedirectResponse(url=url, status_code=302)

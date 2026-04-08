@@ -107,12 +107,17 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
     const ttsSampleRateRef = useRef<number>(24000);
     const awaitingPlaybackCompleteRef = useRef<boolean>(false);
     const dropIncomingAudioRef = useRef<boolean>(false);
+    // Generation counter: incremented on every barge-in/reset. Async audio
+    // handlers capture this value before awaiting arrayBuffer() and discard
+    // their result if the generation has advanced — prevents stale audio from
+    // being queued after resetAudioPlayer clears the pipeline.
+    const audioGenerationRef = useRef<number>(0);
 
     // Jitter buffer: collect audio chunks before starting playback to absorb
     // network variance. Prevents stutter caused by irregular chunk arrival.
     const jitterBufferRef = useRef<ArrayBuffer[]>([]);
     const playbackStartedRef = useRef<boolean>(false);
-    const JITTER_BUFFER_TARGET_MS = 80; // Keep startup responsive while absorbing minor variance
+    const JITTER_BUFFER_TARGET_MS = 40; // Smaller buffer = faster barge-in response
 
     // Microphone refs
     const micStreamRef = useRef<MediaStream | null>(null);
@@ -296,6 +301,8 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
     // Stop queued playback immediately on barge-in without closing the context.
     const resetAudioPlayer = useCallback(() => {
         awaitingPlaybackCompleteRef.current = false;
+        // Advance generation so in-flight async handlers discard stale audio
+        audioGenerationRef.current += 1;
         playbackSourcesRef.current.forEach((source) => {
             try {
                 source.stop();
@@ -476,8 +483,17 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
                 return;
             }
 
+            // Capture generation before any await — if it changes during the
+            // await, a barge-in happened and this chunk is stale.
+            const gen = audioGenerationRef.current;
+
             // Received audio chunk - queue it for playback
             const arrayBuffer = payload instanceof Blob ? await payload.arrayBuffer() : payload;
+
+            // After await: check if barge-in happened while we were decoding
+            if (dropIncomingAudioRef.current || audioGenerationRef.current !== gen) {
+                return;
+            }
 
             // Initialize playback on first chunk (with retry logic)
             if (!audioContextRef.current) {
@@ -487,6 +503,11 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
                     console.error("Failed to initialize audio for chunk:", err);
                     return; // Skip this chunk if audio can't be initialized
                 }
+            }
+
+            // Final generation check after init await
+            if (dropIncomingAudioRef.current || audioGenerationRef.current !== gen) {
+                return;
             }
 
             // Queue chunk for sample-accurate playback

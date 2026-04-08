@@ -116,6 +116,7 @@ IMPORTANT INSTRUCTIONS:
 - Never mention you are an AI or reference any technology
 - Do NOT use filler openers like "Certainly", "Absolutely", "Sure", "Of course"
 - Listen carefully and respond specifically to what the person says
+- If your previous response shows [interrupted by caller], the caller spoke over you — do NOT repeat what you already said, just respond naturally to what they are saying now
 
 OPENING THE CALL:
 - Greet the person by saying hello and introduce yourself using your agent name and company name
@@ -134,8 +135,8 @@ Your agent name, company, and campaign goal are defined in your configuration.""
         stt_sample_rate=8000,
         stt_encoding="linear16",
         stt_eot_threshold=0.85,
-        stt_eot_timeout_ms=1500,           # was 5000 — industry min is 1000ms; Flux integrated EOT handles accuracy
-        stt_eager_eot_threshold=None,
+        stt_eot_timeout_ms=500,            # was 800 — Flux p50 EndOfTurn fires at ~260ms; 500ms is a safe ceiling
+        stt_eager_eot_threshold=0.4,       # enable EagerEndOfTurn: fires 150–250ms before standard EOT
         llm_model=global_config.llm_model,
         llm_temperature=global_config.llm_temperature,
         llm_max_tokens=global_config.llm_max_tokens,
@@ -164,13 +165,23 @@ async def _send_outbound_greeting(voice_session) -> None:
 
     The greeting is generated dynamically by the LLM using the campaign's
     system_prompt (agent name, company, goal) — no hardcoded text.
-    We wait 200ms for the Deepgram WebSocket to connect before sending audio.
+    Short delay for async task scheduling; the gateway session is already
+    initialized by _on_new_call before this task is created.
     """
-    await asyncio.sleep(0.2)
-    try:
-        call_id = voice_session.call_id
-        session = voice_session.call_session
+    from app.domain.models.conversation import Message, MessageRole
 
+    await asyncio.sleep(0.05)
+    call_id = voice_session.call_id
+    session = voice_session.call_session
+
+    # Mark LLM as active so handle_turn_end in the pipeline skips any early
+    # caller speech ("Hello?") that arrives before the greeting plays.
+    if session.llm_active:
+        logger.debug(f"Greeting skipped — LLM already active for {call_id[:12]}")
+        return
+    session.llm_active = True
+
+    try:
         logger.info(f"Generating dynamic greeting for call {call_id[:12]}")
 
         # Empty user_input triggers the LLM to produce an opening line
@@ -181,9 +192,17 @@ async def _send_outbound_greeting(voice_session) -> None:
             logger.warning(f"LLM returned empty greeting for {call_id[:12]}, skipping")
             return
 
+        # Persist the greeting in conversation_history so the LLM has context
+        # about what the AI already said.  Without this the next turn sees an
+        # empty history, the LLM re-reads "OPENING THE CALL" instructions,
+        # and generates a duplicate greeting.
+        session.conversation_history.append(
+            Message(role=MessageRole.ASSISTANT, content=greeting)
+        )
+
         # Clear any barge_in_event set by the callee answering ("Hello?") before
         # TTS starts — without this, synthesize_and_send_audio would see the event
-        # already set and skip the greeting entirely (tts_stopped_early).
+        # already set and skip the greeting entirely.
         voice_session.pipeline.clear_barge_in_event(session)
 
         logger.info(f"Outbound greeting ({len(greeting)} chars): {greeting[:80]!r}")
@@ -193,7 +212,9 @@ async def _send_outbound_greeting(voice_session) -> None:
             websocket=None,
         )
     except Exception as exc:
-        logger.warning(f"Outbound greeting failed for {voice_session.call_id[:12]}: {exc}")
+        logger.warning(f"Outbound greeting failed for {call_id[:12]}: {exc}")
+    finally:
+        session.llm_active = False
 
 
 async def _on_new_call(call_id: str) -> None:
@@ -353,7 +374,7 @@ async def _save_call_recording(voice_session, call_id: str) -> None:
         return
 
     db_client = container.db_client
-    recording_svc = RecordingService(db_client)
+    recording_svc = RecordingService(db_client.pool)  # pool, not Client wrapper
 
     # --- Resolve the internal calls.id from the PBX channel_id ----------
     # The dialer worker stores the PBX channel_id as external_call_uuid.

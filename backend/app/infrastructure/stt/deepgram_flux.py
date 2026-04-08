@@ -197,7 +197,8 @@ class DeepgramFluxSTTProvider(STTProvider):
         language: str = "en",
         context: Optional[str] = None,
         call_id: Optional[str] = None,
-        on_eager_end_of_turn: Optional[Callable[[str], None]] = None
+        on_eager_end_of_turn: Optional[Callable[[str], None]] = None,
+        on_barge_in: Optional[Callable[[], None]] = None,
     ) -> AsyncIterator[TranscriptChunk]:
         """
         Stream audio to Deepgram Flux with optimized configuration.
@@ -401,7 +402,17 @@ class DeepgramFluxSTTProvider(STTProvider):
                             # Cancel any speculative processing
                             if eager_state:
                                 eager_state.reset()
-                            # Signal barge-in to stop TTS immediately
+                            # Directly notify the pipeline's barge-in event so TTS
+                            # synthesis stops immediately — even while the pipeline
+                            # loop is blocked inside handle_turn_end and cannot
+                            # consume the BargeInSignal from the transcript queue.
+                            if on_barge_in:
+                                try:
+                                    on_barge_in()
+                                except Exception:
+                                    pass
+                            # Also queue the signal for handle_barge_in bookkeeping
+                            # (clears output buffer, updates session state)
                             barge_in = BargeInSignal()
                             await transcript_queue.put(barge_in)
                         

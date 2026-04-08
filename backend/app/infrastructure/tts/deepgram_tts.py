@@ -51,10 +51,11 @@ DEEPGRAM_VOICES = [
 # Call center bots: Complete sentences (most natural)
 # Long-form content: 200-400 characters for better intonation
 #
-# Ask-AI prioritizes naturalness over absolute minimum latency, so keep
-# chunks sentence-oriented with a moderate max size.
-CHUNK_MAX_CHARS = 180
-CHUNK_FIRST_MAX_CHARS = 90
+# Voice assistants: 50-100 character chunks for best latency (per Deepgram).
+# Smaller chunks = faster time-to-first-byte + faster barge-in response
+# because less audio is buffered server-side when an interrupt fires.
+CHUNK_MAX_CHARS = 100
+CHUNK_FIRST_MAX_CHARS = 50
 
 
 def _chunk_text_by_sentences(text: str, max_first_chunk: int = CHUNK_FIRST_MAX_CHARS, max_chunk: int = CHUNK_MAX_CHARS) -> List[str]:
@@ -220,6 +221,34 @@ class DeepgramTTSProvider(TTSProvider):
         except Exception as e:
             logger.warning(f"DeepgramTTS warm connection failed, will retry on first synthesis: {e}")
 
+    async def clear_queue(self) -> None:
+        """Send Deepgram Clear message to cancel buffered TTS audio.
+
+        Per Deepgram docs (https://developers.deepgram.com/docs/tts-ws-clear):
+        Clear resets the internal text and audio buffer and stops sending new
+        audio chunks as soon as possible.  This is the correct way to handle
+        barge-in — without it, already-buffered audio continues arriving after
+        the caller starts speaking.
+
+        After Clear the warm WebSocket is in a dirty state (a ``ClearResponse``
+        event is pending), so we discard it and let the next synthesis open a
+        fresh connection.
+        """
+        ws = self._warm_ws
+        if ws is not None and not ws.closed:
+            try:
+                await ws.send_json({"type": "Clear"})
+                logger.debug("Sent Deepgram TTS Clear message")
+            except Exception as exc:
+                logger.debug("Failed to send TTS Clear: %s", exc)
+            # The connection now has a pending ClearResponse + possibly stale
+            # audio bytes.  Discard it so the next synthesis starts clean.
+            self._warm_ws = None
+            try:
+                await ws.close()
+            except Exception:
+                pass
+
     async def cleanup(self) -> None:
         """Release resources."""
         if self._warm_ws and not self._warm_ws.closed:
@@ -319,6 +348,11 @@ class DeepgramTTSProvider(TTSProvider):
         # messages on the shared warm connection. Released in the finally block.
         await self._synthesis_lock.acquire()
         sender_task: Optional[asyncio.Task] = None
+        # Track whether synthesis completed cleanly with a Flushed event.
+        # If False in the finally block the warm WS is in a dirty state
+        # (stale audio/Flushed messages buffered) and must be discarded so the
+        # next synthesis opens a fresh connection rather than reading stale data.
+        flushed_cleanly = False
         try:
             try:
                 ws = await self._get_connection(selected_voice, rate)
@@ -361,6 +395,7 @@ class DeepgramTTSProvider(TTSProvider):
 
                         if event_type == "Flushed":
                             logger.debug("Deepgram TTS Flushed — synthesis complete")
+                            flushed_cleanly = True
                             break
                         elif event_type == "Warning":
                             logger.warning(f"Deepgram TTS warning: {data.get('warn_msg', data)}")
@@ -395,6 +430,14 @@ class DeepgramTTSProvider(TTSProvider):
                     await asyncio.shield(sender_task)
                 except (asyncio.CancelledError, Exception):
                     pass
+            # If synthesis was interrupted (barge-in, error, or GeneratorExit from
+            # the outer async-for break), the warm WebSocket has unread messages
+            # (stale audio chunks and/or the Flushed event) that would be consumed
+            # by the *next* synthesis call — causing it to read stale data and yield
+            # nothing (TTS-total: 0ms, silence on all subsequent turns).
+            # Discard the connection so _get_connection opens a fresh one next time.
+            if not flushed_cleanly:
+                self._warm_ws = None
             self._synthesis_lock.release()
 
     # ------------------------------------------------------------------
