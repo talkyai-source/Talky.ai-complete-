@@ -40,10 +40,13 @@ class DeepgramSTT(STTProvider):
         self._encoding = config.get("encoding", "linear16")
     
     async def stream_transcribe(
-        self, 
+        self,
         audio_stream: AsyncIterator[AudioChunk],
         language: str = "en",
-        context: Optional[str] = None
+        context: Optional[str] = None,
+        call_id: Optional[str] = None,
+        on_eager_end_of_turn=None,
+        on_barge_in=None,
     ) -> AsyncIterator[TranscriptChunk]:
         """Stream transcription from Deepgram using v2 API"""
         if not self._client:

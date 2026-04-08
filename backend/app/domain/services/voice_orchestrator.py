@@ -481,6 +481,15 @@ class VoiceOrchestrator:
                 session.media_gateway, "clear_output_buffer"
             ):
                 await session.media_gateway.clear_output_buffer(session.call_id)
+                # Tell Deepgram TTS to stop generating further audio chunks.
+                # Without this, already-buffered text continues to produce audio
+                # that arrives after the barge-in, causing audio overlap.
+                clear_tts = getattr(session.tts_provider, "clear_queue", None)
+                if clear_tts:
+                    try:
+                        await clear_tts()
+                    except Exception as _exc:
+                        logger.debug("clear_queue on greeting barge-in failed: %s", _exc)
             if (
                 not was_interrupted
                 and sent_audio

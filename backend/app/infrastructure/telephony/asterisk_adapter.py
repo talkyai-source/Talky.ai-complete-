@@ -525,7 +525,8 @@ class AsteriskAdapter(CallControlAdapter):
                     "startup_no_rtp_timeout_ms": 10000,   # 10s — call is live
                     "active_no_rtp_timeout_ms": 15000,    # 15s silence timeout
                     "session_final_timeout_ms": 300000,   # 5-minute hard cap
-                    "audio_callback_batch_frames": 5,
+                    "jitter_buffer_prefetch_frames": 1,   # was default 3 (60ms) — loopback has no jitter; 1 frame = 20ms
+                    "audio_callback_batch_frames": 4,     # was 5 (100ms) — Deepgram recommends 80ms chunks
                     "audio_callback_url": (
                         f"{os.getenv('BACKEND_INTERNAL_URL', 'http://127.0.0.1:8000')}"
                         f"/api/v1/sip/telephony/audio/{session_id}"
@@ -656,10 +657,11 @@ class AsteriskAdapter(CallControlAdapter):
                     "startup_no_rtp_timeout_ms": 30000,  # 30 seconds (was 5s default)
                     "active_no_rtp_timeout_ms": 15000,   # 15 seconds (was 8s default)
                     "session_final_timeout_ms": 300000,  # 5 minutes (was 2 hours default)
-                    # Batch 5 audio frames (100ms) per HTTP callback POST to reduce
-                    # TCP overhead from 50 POSTs/sec → 10 POSTs/sec per session.
-                    # 100ms latency is well within the acceptable range for voice AI.
-                    "audio_callback_batch_frames": 5,
+                    "jitter_buffer_prefetch_frames": 1,   # was default 3 (60ms) — loopback has no jitter; 1 frame = 20ms
+                    # Batch 4 audio frames (80ms) per HTTP callback POST — Deepgram's
+                    # recommended chunk size for optimal STT model performance.
+                    # Reduces TCP overhead vs 20ms/frame while staying at the sweet spot.
+                    "audio_callback_batch_frames": 4,
                     # Tell the gateway to POST audio chunks to our backend callback
                     "audio_callback_url": (
                         f"{os.getenv('BACKEND_INTERNAL_URL', 'http://127.0.0.1:8000')}"
