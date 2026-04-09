@@ -10,6 +10,7 @@ export interface ModelInfo {
     price?: string;
     context_window?: number;
     is_preview?: boolean;
+    provider?: string;
 }
 
 export interface VoiceInfo {
@@ -23,6 +24,7 @@ export interface VoiceInfo {
     preview_text: string;
     provider: string;
     tags: string[];
+    preview_url?: string;
 }
 
 export interface ProviderListResponse {
@@ -117,6 +119,7 @@ const RawModelSchema = z
         contextWindow: z.number().nullish(),
         is_preview: z.boolean().optional(),
         isPreview: z.boolean().optional(),
+        provider: z.string().optional(),
     })
     .passthrough();
 
@@ -132,6 +135,8 @@ const RawVoiceSchema = z
         accentColor: z.string().optional(),
         preview_text: z.string().optional(),
         previewText: z.string().optional(),
+        preview_url: z.string().nullish(),
+        previewUrl: z.string().nullish(),
         provider: z.string(),
         tags: z.array(z.string()).optional(),
     })
@@ -255,6 +260,7 @@ function normalizeModel(model: z.infer<typeof RawModelSchema>): ModelInfo {
         price: model.price ?? undefined,
         context_window: model.context_window ?? model.contextWindow ?? undefined,
         is_preview: model.is_preview ?? model.isPreview,
+        provider: model.provider,
     };
 }
 
@@ -270,6 +276,7 @@ function normalizeVoice(voice: z.infer<typeof RawVoiceSchema>): VoiceInfo {
         preview_text: voice.preview_text ?? voice.previewText ?? "",
         provider: voice.provider,
         tags: voice.tags ?? [],
+        preview_url: voice.preview_url ?? voice.previewUrl ?? undefined,
     };
 }
 

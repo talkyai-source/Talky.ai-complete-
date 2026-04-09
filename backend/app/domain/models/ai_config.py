@@ -24,6 +24,7 @@ class TTSProvider(str, Enum):
     CARTESIA = "cartesia"
     GOOGLE = "google"
     DEEPGRAM = "deepgram"
+    ELEVENLABS = "elevenlabs"
 
 
 class GroqModel(str, Enum):
@@ -71,6 +72,7 @@ class ModelInfo(BaseModel):
     price: Optional[str] = None
     context_window: Optional[int] = None
     is_preview: bool = False
+    provider: Optional[str] = None
 
 
 class VoiceInfo(BaseModel):
@@ -85,6 +87,7 @@ class VoiceInfo(BaseModel):
     preview_text: str = "Hello, I am your AI voice assistant. How can I help you today?"
     provider: str = "cartesia"
     tags: List[str] = []
+    preview_url: Optional[str] = None
 
 
 class AIProviderConfig(BaseModel):
@@ -181,7 +184,8 @@ GROQ_MODELS = [
         speed="280 tokens/s",
         price="$0.59 input / $0.79 output per 1M tokens",
         context_window=131072,
-        is_preview=False
+        is_preview=False,
+        provider="groq",
     ),
     ModelInfo(
         id=GroqModel.LLAMA_3_1_8B.value,
@@ -190,7 +194,8 @@ GROQ_MODELS = [
         speed="560 tokens/s",
         price="$0.05 input / $0.08 output per 1M tokens",
         context_window=131072,
-        is_preview=False
+        is_preview=False,
+        provider="groq",
     ),
     ModelInfo(
         id=GroqModel.GPT_OSS_120B.value,
@@ -199,7 +204,8 @@ GROQ_MODELS = [
         speed="500 tokens/s",
         price="$0.15 input / $0.60 output per 1M tokens",
         context_window=131072,
-        is_preview=False
+        is_preview=False,
+        provider="groq",
     ),
     ModelInfo(
         id=GroqModel.GPT_OSS_20B.value,
@@ -208,7 +214,8 @@ GROQ_MODELS = [
         speed="1000 tokens/s",
         price="$0.075 input / $0.30 output per 1M tokens",
         context_window=131072,
-        is_preview=False
+        is_preview=False,
+        provider="groq",
     ),
     # Preview Models (for evaluation, may change)
     ModelInfo(
@@ -218,7 +225,8 @@ GROQ_MODELS = [
         speed="600 tokens/s",
         price="$0.20 input / $0.60 output per 1M tokens",
         context_window=131072,
-        is_preview=True
+        is_preview=True,
+        provider="groq",
     ),
     ModelInfo(
         id=GroqModel.LLAMA_4_SCOUT.value,
@@ -227,7 +235,8 @@ GROQ_MODELS = [
         speed="750 tokens/s",
         price="$0.11 input / $0.34 output per 1M tokens",
         context_window=131072,
-        is_preview=True
+        is_preview=True,
+        provider="groq",
     ),
     ModelInfo(
         id=GroqModel.QWEN_3_32B.value,
@@ -236,7 +245,8 @@ GROQ_MODELS = [
         speed="400 tokens/s",
         price="$0.29 input / $0.59 output per 1M tokens",
         context_window=131072,
-        is_preview=True
+        is_preview=True,
+        provider="groq",
     ),
     ModelInfo(
         id=GroqModel.KIMI_K2.value,
@@ -245,7 +255,8 @@ GROQ_MODELS = [
         speed="200 tokens/s",
         price="$1.00 input / $3.00 output per 1M tokens",
         context_window=262144,
-        is_preview=True
+        is_preview=True,
+        provider="groq",
     ),
 ]
 
@@ -254,13 +265,15 @@ DEEPGRAM_MODELS = [
         id=DeepgramModel.NOVA_3.value,
         name="Nova 3",
         description="Best accuracy, real-time optimized, multilingual",
-        speed="Real-time"
+        speed="Real-time",
+        provider="deepgram",
     ),
     ModelInfo(
         id=DeepgramModel.NOVA_2.value,
         name="Nova 2",
         description="Fast and cost-effective for batch processing",
-        speed="Real-time"
+        speed="Real-time",
+        provider="deepgram",
     ),
 ]
 
@@ -269,13 +282,15 @@ CARTESIA_MODELS = [
         id=CartesiaModel.SONIC_3.value,
         name="Sonic 3",
         description="Latest model with best quality and speed",
-        speed="~90ms latency"
+        speed="~90ms latency",
+        provider="cartesia",
     ),
     ModelInfo(
         id=CartesiaModel.SONIC_2.value,
         name="Sonic 2",
         description="Previous generation, still highly capable",
-        speed="~100ms latency"
+        speed="~100ms latency",
+        provider="cartesia",
     ),
 ]
 
@@ -284,7 +299,8 @@ GOOGLE_TTS_MODELS = [
         id=GoogleTTSModel.CHIRP3_HD.value,
         name="Chirp 3: HD",
         description="Latest generation with realism and emotional resonance",
-        speed="~200ms latency"
+        speed="~200ms latency",
+        provider="google",
     ),
 ]
 
@@ -294,6 +310,31 @@ DEEPGRAM_TTS_MODELS = [
         name="Aura-2",
         description="Deepgram's latest low-latency neural text-to-speech model family.",
         speed="Streaming optimized",
+        provider="deepgram",
+    ),
+]
+
+ELEVENLABS_TTS_MODELS = [
+    ModelInfo(
+        id="eleven_flash_v2_5",
+        name="Flash v2.5",
+        description="ElevenLabs real-time model tuned for the lowest latency voice interactions.",
+        speed="~75ms latency",
+        provider="elevenlabs",
+    ),
+    ModelInfo(
+        id="eleven_multilingual_v2",
+        name="Multilingual v2",
+        description="Highest-quality ElevenLabs model with strong multilingual support and richer expression.",
+        speed="High quality",
+        provider="elevenlabs",
+    ),
+    ModelInfo(
+        id="eleven_turbo_v2_5",
+        name="Turbo v2.5",
+        description="Fast ElevenLabs model with a quality/latency balance suited to production voice agents.",
+        speed="Low latency",
+        provider="elevenlabs",
     ),
 ]
 

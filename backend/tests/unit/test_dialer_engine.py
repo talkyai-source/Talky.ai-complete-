@@ -465,6 +465,36 @@ class TestQueueService:
         # Should use rpush to tenant queue
         mock_redis.rpush.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_clear_campaign_jobs_removes_priority_tenant_and_scheduled_entries(self):
+        """Campaign stop cleanup should purge queued and scheduled jobs for that campaign only."""
+        from app.domain.services.queue_service import DialerQueueService
+
+        target_entry = json.dumps({"job_id": "job-1", "campaign_id": "campaign-a"})
+        keep_entry = json.dumps({"job_id": "job-2", "campaign_id": "campaign-b"})
+        scheduled_target = json.dumps({"job_id": "job-3", "campaign_id": "campaign-a"})
+
+        mock_redis = AsyncMock()
+        mock_redis.lrange = AsyncMock(side_effect=[
+            [target_entry, keep_entry],
+            [target_entry],
+        ])
+        mock_redis.scan = AsyncMock(return_value=(0, ["dialer:tenant:tenant-1:queue"]))
+        mock_redis.zrange = AsyncMock(return_value=[scheduled_target, keep_entry])
+        mock_redis.delete = AsyncMock()
+        mock_redis.rpush = AsyncMock()
+        mock_redis.zrem = AsyncMock()
+
+        service = DialerQueueService(redis_client=mock_redis)
+        service._initialized = True
+
+        removed = await service.clear_campaign_jobs("campaign-a")
+
+        assert removed == 3
+        mock_redis.delete.assert_any_call(service.PRIORITY_QUEUE)
+        mock_redis.delete.assert_any_call("dialer:tenant:tenant-1:queue")
+        mock_redis.zrem.assert_awaited_once_with(service.SCHEDULED_ZSET, scheduled_target)
+
 
 # Run tests if executed directly
 if __name__ == "__main__":

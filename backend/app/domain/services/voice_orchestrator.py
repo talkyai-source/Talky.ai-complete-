@@ -51,7 +51,7 @@ class VoiceSessionConfig:
     # Provider selection
     stt_provider_type: str = "deepgram_flux"
     llm_provider_type: str = "groq"
-    tts_provider_type: str = "google"  # "google" | "deepgram"
+    tts_provider_type: str = "google"  # "google" | "deepgram" | "elevenlabs"
 
     # STT settings
     stt_model: str = "flux-general-en"
@@ -68,6 +68,7 @@ class VoiceSessionConfig:
 
     # TTS settings
     voice_id: str = "en-US-Chirp3-HD-Leda"
+    tts_model: str = ""
     tts_sample_rate: int = 24000
 
     # Gateway
@@ -76,7 +77,7 @@ class VoiceSessionConfig:
     gateway_input_sample_rate: Optional[int] = None
     gateway_channels: int = 1
     gateway_bit_depth: int = 16
-    gateway_target_buffer_ms: int = 100  # Output buffer coalescing threshold
+    gateway_target_buffer_ms: int = 40   # Output buffer coalescing threshold (40ms for faster barge-in)
     mute_during_tts: bool = True
 
     # Session metadata
@@ -353,7 +354,7 @@ class VoiceOrchestrator:
 
         async def _pipeline_with_error_handling():
             try:
-                await session.pipeline.start_pipeline(session.call_session, websocket)
+                await session.pipeline.start_pipeline(session.call_session, websocket=websocket)
             except Exception as e:
                 logger.error(f"Pipeline error for {session.call_id[:8]}: {e}")
                 raise
@@ -471,6 +472,15 @@ class VoiceOrchestrator:
                         audio_chunk.data,
                     )
                     sent_audio = True
+                    # Check barge-in immediately after send — it may have fired
+                    # during the gateway send await before the next chunk arrives.
+                    if interrupt_event.is_set():
+                        was_interrupted = True
+                        interrupt_event.clear()
+                        await websocket.send_json(
+                            {"type": "tts_interrupted", "reason": "barge_in"}
+                        )
+                        break
 
             # Flush any buffered browser audio at end of greeting.
             if not was_interrupted and hasattr(
@@ -662,6 +672,18 @@ class VoiceOrchestrator:
                     "sample_rate": config.tts_sample_rate,
                 }
             )
+        elif config.tts_provider_type == "elevenlabs":
+            from app.infrastructure.tts.elevenlabs_tts import ElevenLabsTTSProvider
+
+            provider = ElevenLabsTTSProvider()
+            await provider.initialize(
+                {
+                    "api_key": os.getenv("ELEVENLABS_API_KEY"),
+                    "voice_id": config.voice_id,
+                    "model_id": config.tts_model or "eleven_flash_v2_5",
+                    "sample_rate": config.tts_sample_rate,
+                }
+            )
         else:
             # Default: Google TTS Streaming
             from app.infrastructure.tts.google_tts_streaming import (
@@ -692,7 +714,7 @@ class VoiceOrchestrator:
             "bit_depth": config.gateway_bit_depth,
             "target_buffer_ms": config.gateway_target_buffer_ms,
             "tts_source_format": "s16le"
-            if config.tts_provider_type == "deepgram"
+            if config.tts_provider_type in {"deepgram", "elevenlabs"}
             else "f32le",
         }
 

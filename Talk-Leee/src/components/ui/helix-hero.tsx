@@ -659,7 +659,9 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
         }
 
         const sessionId = `demo-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+        // To test Deepgram Voice Agent API bridge: swap the two lines below
         const wsUrl = `${resolveBackendWsBaseUrl()}/ws/ask-ai/${sessionId}`;
+        // const wsUrl = `ws://127.0.0.1:8001/ws/ask-ai/${sessionId}`; // deepgram-agent-test bridge
         console.log(`[VoiceAgent] Connecting to: ${wsUrl}`);
 
         const ws = new WebSocket(wsUrl);

@@ -279,6 +279,13 @@ class DialerQueueService:
         await self._redis.srem(self.PROCESSING_SET, job_id)
         await self._redis.hincrby(self.STATS_KEY, "total_failed", 1)
         logger.debug(f"Job {job_id} marked failed: {error}")
+
+    async def mark_skipped(self, job_id: str, reason: str = "skipped") -> None:
+        """Mark a dequeued job as skipped without treating it as a failure."""
+        await self._redis.srem(self.PROCESSING_SET, job_id)
+        await self._redis.hincrby(self.STATS_KEY, "total_skipped", 1)
+        await self._redis.hincrby(self.STATS_KEY, f"outcome_{reason}", 1)
+        logger.debug(f"Job {job_id} marked skipped: {reason}")
     
     async def _mark_processing(self, job_id: str) -> None:
         """Mark a job as currently being processed."""
@@ -398,7 +405,86 @@ class DialerQueueService:
         except Exception as e:
             logger.error(f"Failed to clear queue: {e}")
             return 0
-    
+
+    async def clear_campaign_jobs(self, campaign_id: str) -> int:
+        """
+        Remove queued and scheduled jobs for a specific campaign.
+
+        Processing jobs are intentionally left alone; the worker enforces the
+        stop at originate time for anything already dequeued.
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        try:
+            removed = 0
+            removed += await self._remove_campaign_jobs_from_list(self.PRIORITY_QUEUE, campaign_id)
+
+            cursor = 0
+            while True:
+                cursor, keys = await self._redis.scan(
+                    cursor,
+                    match="dialer:tenant:*:queue",
+                    count=50,
+                )
+                for key in keys:
+                    removed += await self._remove_campaign_jobs_from_list(key, campaign_id)
+                if cursor == 0:
+                    break
+
+            removed += await self._remove_campaign_jobs_from_scheduled(campaign_id)
+
+            logger.info("Cleared %s queued jobs for campaign %s", removed, campaign_id)
+            return removed
+        except Exception as e:
+            logger.error(f"Failed to clear campaign jobs for {campaign_id}: {e}")
+            return 0
+
+    async def _remove_campaign_jobs_from_list(self, key: str, campaign_id: str) -> int:
+        """Filter one Redis list in place, preserving job order."""
+        entries = await self._redis.lrange(key, 0, -1)
+        if not entries:
+            return 0
+
+        kept_entries: list[str] = []
+        removed = 0
+        for entry in entries:
+            try:
+                payload = json.loads(entry)
+            except Exception:
+                kept_entries.append(entry)
+                continue
+
+            if payload.get("campaign_id") == campaign_id:
+                removed += 1
+            else:
+                kept_entries.append(entry)
+
+        if removed:
+            await self._redis.delete(key)
+            if kept_entries:
+                await self._redis.rpush(key, *kept_entries)
+
+        return removed
+
+    async def _remove_campaign_jobs_from_scheduled(self, campaign_id: str) -> int:
+        """Remove scheduled retry entries for one campaign."""
+        entries = await self._redis.zrange(self.SCHEDULED_ZSET, 0, -1)
+        if not entries:
+            return 0
+
+        removed = 0
+        for entry in entries:
+            try:
+                payload = json.loads(entry)
+            except Exception:
+                continue
+            if payload.get("campaign_id") == campaign_id:
+                await self._redis.zrem(self.SCHEDULED_ZSET, entry)
+                removed += 1
+
+        return removed
+
     async def close(self) -> None:
         """Close Redis connection."""
         if self._redis:

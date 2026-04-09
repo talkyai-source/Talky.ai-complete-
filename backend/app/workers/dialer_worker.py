@@ -179,6 +179,19 @@ class DialerWorker:
         logger.info(f"Processing job {job.job_id} for lead {job.lead_id} (attempt {job.attempt_number})")
         
         try:
+            campaign_status = await self._get_campaign_status(job.campaign_id)
+            if campaign_status not in {"running", "active"}:
+                reason = f"campaign_not_runnable:{campaign_status or 'missing'}"
+                logger.info(
+                    "Skipping job %s because campaign %s is %s",
+                    job.job_id,
+                    job.campaign_id,
+                    campaign_status or "missing",
+                )
+                await self.queue_service.mark_skipped(job.job_id, reason="campaign_stopped")
+                await self._update_job_status(job.job_id, JobStatus.SKIPPED, error=reason)
+                return
+
             # 1. Get tenant calling rules
             rules = await self._get_tenant_rules(job.tenant_id)
             
@@ -356,6 +369,18 @@ class DialerWorker:
         except Exception as e:
             logger.error(f"Failed to get active tenants: {e}")
             return []
+
+    async def _get_campaign_status(self, campaign_id: str) -> Optional[str]:
+        """Return campaign status so dequeued jobs can be revalidated before originate."""
+        try:
+            async with self._db_pool.acquire() as conn:
+                return await conn.fetchval(
+                    "SELECT status FROM campaigns WHERE id = $1",
+                    campaign_id,
+                )
+        except Exception as e:
+            logger.error(f"Failed to get campaign status for {campaign_id}: {e}")
+            return None
     
     async def _get_tenant_rules(self, tenant_id: str) -> CallingRules:
         """Get calling rules for a tenant."""

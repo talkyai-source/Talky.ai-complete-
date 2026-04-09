@@ -59,15 +59,33 @@ interface LiveCallState {
 
 const GOOGLE_TTS_MODEL = "Chirp3-HD";
 const DEEPGRAM_TTS_MODEL = "aura-2";
+const ELEVENLABS_TTS_MODEL = "eleven_flash_v2_5";
 
-function getDefaultTtsModel(provider: string): string {
+function getFallbackDefaultTtsModel(provider: string): string {
     if (provider === "deepgram") return DEEPGRAM_TTS_MODEL;
+    if (provider === "elevenlabs") return ELEVENLABS_TTS_MODEL;
     if (provider === "google") return GOOGLE_TTS_MODEL;
     return GOOGLE_TTS_MODEL;
 }
 
+function getProviderTtsModels(provider: string, providers: ProviderListResponse | null): Array<ProviderListResponse["tts"]["models"][number]> {
+    return (providers?.tts.models ?? []).filter((model) => {
+        if (!model.provider) return true;
+        return model.provider === provider;
+    });
+}
+
+function getDefaultTtsModel(provider: string, providers: ProviderListResponse | null): string {
+    const providerModels = getProviderTtsModels(provider, providers);
+    if (providerModels.length > 0) {
+        const stableModel = providerModels.find((model) => !model.is_preview);
+        return (stableModel ?? providerModels[0]).id;
+    }
+    return getFallbackDefaultTtsModel(provider);
+}
+
 function getDefaultTtsSampleRate(provider: string): number {
-    if (provider === "google" || provider === "deepgram") return 24000;
+    if (provider === "google" || provider === "deepgram" || provider === "elevenlabs") return 24000;
     return 16000;
 }
 
@@ -123,6 +141,7 @@ export default function AIOptionsPage() {
     const ttsSampleRateRef = useRef<number>(24000);
     const ttsAudioFormatRef = useRef<"s16le" | "f32le">("s16le");
     const awaitingPlaybackCompleteRef = useRef(false);
+    const voicePreviewAudioRef = useRef<HTMLAudioElement | null>(null);
 
     // Microphone capture refs
     const micStreamRef = useRef<MediaStream | null>(null);
@@ -147,9 +166,12 @@ export default function AIOptionsPage() {
 
             const uniqueVoices = dedupeVoicesById(voicesData);
             const providerVoices = uniqueVoices.filter((voice) => voice.provider === configData.tts_provider);
+            const providerModels = getProviderTtsModels(configData.tts_provider, providersData);
             const normalizedConfig: AIProviderConfig = {
                 ...configData,
-                tts_model: getDefaultTtsModel(configData.tts_provider),
+                tts_model: providerModels.some((model) => model.id === configData.tts_model)
+                    ? configData.tts_model
+                    : getDefaultTtsModel(configData.tts_provider, providersData),
                 tts_sample_rate: getDefaultTtsSampleRate(configData.tts_provider),
                 tts_voice_id: providerVoices.some((voice) => voice.id === configData.tts_voice_id)
                     ? configData.tts_voice_id
@@ -159,8 +181,11 @@ export default function AIOptionsPage() {
             setProviders(providersData);
             setVoices(uniqueVoices);
             setConfig(normalizedConfig);
-            const voiceProviders = new Set(uniqueVoices.map((voice) => voice.provider));
-            const initialProvider = voiceProviders.has(normalizedConfig.tts_provider)
+            const providerOptions = new Set([
+                ...providersData.tts.providers,
+                ...uniqueVoices.map((voice) => voice.provider),
+            ]);
+            const initialProvider = providerOptions.has(normalizedConfig.tts_provider)
                 ? normalizedConfig.tts_provider
                 : (uniqueVoices[0]?.provider ?? normalizedConfig.tts_provider);
             setTtsProvider(initialProvider);
@@ -176,11 +201,16 @@ export default function AIOptionsPage() {
         try {
             const normalizedConfig: AIProviderConfig = {
                 ...config,
-                tts_model: getDefaultTtsModel(config.tts_provider),
+                tts_model: config.tts_model || getDefaultTtsModel(config.tts_provider, providers),
                 tts_sample_rate: getDefaultTtsSampleRate(config.tts_provider),
             };
             const saved = await aiOptionsApi.saveConfig(normalizedConfig);
-            setConfig(saved);
+            setConfig({
+                ...saved,
+                tts_model: saved.tts_model || getDefaultTtsModel(saved.tts_provider, providers),
+                tts_sample_rate: getDefaultTtsSampleRate(saved.tts_provider),
+            });
+            setTtsProvider(saved.tts_provider);
             setSaveSuccess(true);
             setTimeout(() => setSaveSuccess(false), 3000);
         } catch (err) {
@@ -218,9 +248,35 @@ export default function AIOptionsPage() {
 
     // Preview a specific voice by ID (for individual voice cards)
     async function handlePreviewVoiceById(voiceId: string) {
+        const selectedVoice = voices.find((voice) => voice.id === voiceId);
         try {
             setPreviewingVoiceId(voiceId);
             setError("");
+
+            if (voicePreviewAudioRef.current) {
+                voicePreviewAudioRef.current.pause();
+                voicePreviewAudioRef.current.currentTime = 0;
+                voicePreviewAudioRef.current = null;
+            }
+
+            if (selectedVoice?.preview_url) {
+                const audio = new Audio(selectedVoice.preview_url);
+                voicePreviewAudioRef.current = audio;
+                audio.onended = () => {
+                    if (voicePreviewAudioRef.current === audio) {
+                        voicePreviewAudioRef.current = null;
+                    }
+                    setPreviewingVoiceId(null);
+                };
+                audio.onerror = () => {
+                    if (voicePreviewAudioRef.current === audio) {
+                        voicePreviewAudioRef.current = null;
+                    }
+                    setPreviewingVoiceId(null);
+                };
+                await audio.play();
+                return;
+            }
 
             const response = await aiOptionsApi.previewVoice({
                 voice_id: voiceId,
@@ -239,9 +295,10 @@ export default function AIOptionsPage() {
             }
 
             // Keep playback sample-rate aligned with provider output to avoid speed/pitch artifacts.
-            const selectedVoice = voices.find((voice) => voice.id === voiceId);
             const sampleRate =
-                selectedVoice?.provider === "google" || selectedVoice?.provider === "deepgram"
+                selectedVoice?.provider === "google"
+                || selectedVoice?.provider === "deepgram"
+                || selectedVoice?.provider === "elevenlabs"
                     ? 24000
                     : 16000;
 
@@ -683,11 +740,17 @@ export default function AIOptionsPage() {
             if (wsRef.current) {
                 wsRef.current.close();
             }
+            if (voicePreviewAudioRef.current) {
+                voicePreviewAudioRef.current.pause();
+                voicePreviewAudioRef.current = null;
+            }
             cleanupAudioPlayer();
         };
     }, [cleanupAudioPlayer]);
 
-    const availableTtsProviders = Array.from(new Set(voices.map((voice) => voice.provider)));
+    const availableTtsProviders = Array.from(
+        new Set([...(providers?.tts.providers ?? []), ...voices.map((voice) => voice.provider)])
+    );
     const voiceNameCounts = useMemo(() => {
         const counts = new Map<string, number>();
         for (const voice of voices) {
@@ -702,6 +765,8 @@ export default function AIOptionsPage() {
         const language = (voice.language || "unknown").toUpperCase();
         return `${voice.name} (${language})`;
     }, [voiceNameCounts]);
+    const voicesForSelectedProvider = voices.filter((voice) => voice.provider === ttsProvider);
+    const ttsModelsForSelectedProvider = getProviderTtsModels(ttsProvider, providers);
 
     return (
         <DashboardLayout title="AI Options" description="Configure LLM, STT, and TTS providers">
@@ -1009,7 +1074,7 @@ export default function AIOptionsPage() {
                                         <Volume2 className="w-5 h-5 text-emerald-400" />
                                     </div>
                                     <div>
-                                        <h3 className="text-lg font-semibold text-white group-hover:text-gray-900 dark:group-hover:text-white">TTS Voice ({voices.filter(v => v.provider === ttsProvider).length} available)</h3>
+                                        <h3 className="text-lg font-semibold text-white group-hover:text-gray-900 dark:group-hover:text-white">TTS Voice ({voicesForSelectedProvider.length} available)</h3>
                                         <p className="text-sm text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-400">Select a voice for your AI agent</p>
                                     </div>
                                 </div>
@@ -1032,7 +1097,7 @@ export default function AIOptionsPage() {
                                                         return {
                                                             ...prev,
                                                             tts_provider: providerName,
-                                                            tts_model: getDefaultTtsModel(providerName),
+                                                            tts_model: getDefaultTtsModel(providerName, providers),
                                                             tts_voice_id: nextVoiceId,
                                                             tts_sample_rate: getDefaultTtsSampleRate(providerName),
                                                         };
@@ -1051,18 +1116,50 @@ export default function AIOptionsPage() {
                                 </div>
                             </div>
 
+                            <div className="mb-4">
+                                <label className="block text-sm font-medium text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-400 mb-2">
+                                    TTS Model
+                                </label>
+                                <select
+                                    value={config.tts_model}
+                                    onChange={(e) => setConfig({ ...config, tts_model: e.target.value })}
+                                    className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white group-hover:text-gray-900 group-hover:bg-black/5 group-hover:border-black/10 dark:group-hover:text-white dark:group-hover:bg-white/5 dark:group-hover:border-white/10 focus:outline-none focus:border-emerald-500/50"
+                                >
+                                    {ttsModelsForSelectedProvider.map((model) => (
+                                        <option key={model.id} value={model.id} className="bg-gray-900">
+                                            {model.name}
+                                        </option>
+                                    ))}
+                                </select>
+                                {ttsModelsForSelectedProvider.find((model) => model.id === config.tts_model) && (
+                                    <div className="mt-3 p-3 bg-emerald-500/10 rounded-lg border border-emerald-500/20">
+                                        <p className="text-sm text-emerald-300">
+                                            {ttsModelsForSelectedProvider.find((model) => model.id === config.tts_model)?.description}
+                                        </p>
+                                        <p className="text-xs text-emerald-400 mt-1">
+                                            Speed: {ttsModelsForSelectedProvider.find((model) => model.id === config.tts_model)?.speed || "n/a"}
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+
                             {/* Voice Cards Grid - Filtered by Provider */}
                             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
-                                {voices
-                                    .filter(voice => voice.provider === ttsProvider)
-                                    .map((voice) => (
+                                {voicesForSelectedProvider.length === 0 && (
+                                    <div className="col-span-full rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200">
+                                        No voices are available for `{ttsProvider}` right now. Check that the provider key is valid and reload this page.
+                                    </div>
+                                )}
+                                {voicesForSelectedProvider.map((voice) => (
                                         <div
                                             key={voice.id}
                                             onClick={() => setConfig({
                                                 ...config,
                                                 tts_voice_id: voice.id,
                                                 tts_provider: voice.provider,
-                                                tts_model: getDefaultTtsModel(voice.provider),
+                                                tts_model: ttsModelsForSelectedProvider.some((model) => model.id === config.tts_model)
+                                                    ? config.tts_model
+                                                    : getDefaultTtsModel(voice.provider, providers),
                                                 tts_sample_rate: getDefaultTtsSampleRate(voice.provider),
                                             })}
                                             className={`relative p-3 rounded-lg border cursor-pointer transition-all hover:scale-[1.02] ${config.tts_voice_id === voice.id
@@ -1132,7 +1229,7 @@ export default function AIOptionsPage() {
                             {/* Selected Voice Preview */}
                             {(() => {
                                 const selectedVoice = voices.find(v => v.id === config.tts_voice_id);
-                                if (!selectedVoice) return null;
+                                if (!selectedVoice || selectedVoice.provider !== ttsProvider) return null;
                                 return (
                                     <div className="p-4 bg-emerald-500/10 rounded-lg border border-emerald-500/30">
                                         <div className="flex items-center gap-3">

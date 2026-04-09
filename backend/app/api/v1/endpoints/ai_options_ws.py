@@ -147,11 +147,10 @@ def _create_agent_config(agent_name: str, personality: str) -> AgentConfig:
 
 def _build_session_config(ai_config: AIProviderConfig, agent_name: str, personality: str) -> VoiceSessionConfig:
     """Build a VoiceSessionConfig for the Voice Demo endpoint."""
-    tts_provider_type = "deepgram" if ai_config.tts_provider == "deepgram" else "google"
     return VoiceSessionConfig(
         stt_provider_type="deepgram_flux",
         llm_provider_type="groq",
-        tts_provider_type=tts_provider_type,
+        tts_provider_type=ai_config.tts_provider,
         stt_model="flux-general-en",
         stt_sample_rate=16000,
         stt_encoding="linear16",
@@ -159,6 +158,7 @@ def _build_session_config(ai_config: AIProviderConfig, agent_name: str, personal
         llm_temperature=ai_config.llm_temperature,
         llm_max_tokens=ai_config.llm_max_tokens,
         voice_id=ai_config.tts_voice_id,
+        tts_model=ai_config.tts_model,
         tts_sample_rate=ai_config.tts_sample_rate,
         gateway_sample_rate=ai_config.tts_sample_rate,
         gateway_channels=1,

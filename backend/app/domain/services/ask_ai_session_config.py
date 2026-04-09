@@ -111,6 +111,7 @@ def build_ask_ai_session_config() -> VoiceSessionConfig:
         llm_temperature=ASK_AI_CONFIG["llm_temperature"],
         llm_max_tokens=ASK_AI_CONFIG["llm_max_tokens"],
         voice_id=ASK_AI_CONFIG["voice_id"],
+        tts_model=ASK_AI_CONFIG["model_id"],
         tts_sample_rate=ASK_AI_CONFIG["sample_rate"],
         gateway_sample_rate=ASK_AI_CONFIG["sample_rate"],
         gateway_input_sample_rate=16000,

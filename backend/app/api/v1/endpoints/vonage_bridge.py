@@ -53,7 +53,7 @@ def _build_vonage_session_config():
         gateway_type="browser",
         stt_provider_type="deepgram_flux",
         llm_provider_type="groq",
-        tts_provider_type="deepgram",
+        tts_provider_type=config.tts_provider,
         stt_model="flux-general-en",       # was nova-2 — use Flux for better EOT detection
         stt_sample_rate=16000,
         stt_encoding="linear16",
@@ -64,6 +64,7 @@ def _build_vonage_session_config():
         llm_temperature=config.llm_temperature,
         llm_max_tokens=config.llm_max_tokens,
         voice_id=config.tts_voice_id,
+        tts_model=config.tts_model,
         tts_sample_rate=16000,
         gateway_sample_rate=16000,
         gateway_channels=1,

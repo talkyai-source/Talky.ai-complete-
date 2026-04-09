@@ -10,7 +10,12 @@ This is a singleton service that maintains the current configuration.
 import os
 import random
 from typing import Optional
-from app.domain.models.ai_config import AIProviderConfig, CARTESIA_VOICES, GOOGLE_CHIRP3_VOICES
+from app.domain.models.ai_config import (
+    AIProviderConfig,
+    CARTESIA_VOICES,
+    DEEPGRAM_AURA2_VOICES,
+    GOOGLE_CHIRP3_VOICES,
+)
 
 # Global configuration - applies to all voice interactions
 _global_config: Optional[AIProviderConfig] = None
@@ -77,8 +82,8 @@ def get_selected_voice_info() -> dict:
                 "accent_color": voice.accent_color,
             }
     
-    # Search Google Chirp 3 HD voices
-    for voice in GOOGLE_CHIRP3_VOICES:
+    # Search Google Chirp 3 HD and Deepgram Aura-2 voices
+    for voice in [*GOOGLE_CHIRP3_VOICES, *DEEPGRAM_AURA2_VOICES]:
         if voice.id == config.tts_voice_id:
             return {
                 "id": voice.id,
@@ -166,4 +171,3 @@ def get_selected_model_info() -> dict:
         "id": config.llm_model,
         "name": "Unknown Model",
     }
-

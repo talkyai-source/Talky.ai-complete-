@@ -52,9 +52,8 @@ def pipeline_service():
 async def test_barge_in_with_empty_llm_response_rolls_back_user_message(
     pipeline_service, fake_session
 ):
-    """Barge-in with no LLM output: user message rolled back, history stays empty."""
-    pipeline_service.get_llm_response = AsyncMock(return_value="")
-    pipeline_service.synthesize_and_send_audio = AsyncMock(return_value=True)
+    """Empty response from _stream_llm_and_tts: user message rolled back."""
+    pipeline_service._stream_llm_and_tts = AsyncMock(return_value=("", 100.0, 0.0))
 
     await pipeline_service._run_turn(
         session=fake_session, full_transcript="What are your pricing plans?",
@@ -70,9 +69,10 @@ async def test_barge_in_with_empty_llm_response_rolls_back_user_message(
 async def test_barge_in_with_llm_response_commits_both_messages(
     pipeline_service, fake_session
 ):
-    """Barge-in after LLM responded: both user and assistant committed."""
-    pipeline_service.get_llm_response = AsyncMock(return_value="Our Basic plan is $29/month.")
-    pipeline_service.synthesize_and_send_audio = AsyncMock(return_value=True)
+    """Non-empty response (even with interrupted TTS): both messages committed."""
+    pipeline_service._stream_llm_and_tts = AsyncMock(
+        return_value=("Our Basic plan is $29/month.", 100.0, 50.0)
+    )
 
     await pipeline_service._run_turn(
         session=fake_session, full_transcript="What are your pricing plans?",
@@ -87,9 +87,10 @@ async def test_barge_in_with_llm_response_commits_both_messages(
 
 @pytest.mark.asyncio
 async def test_llm_exception_rolls_back_user_message(pipeline_service, fake_session):
-    """LLM exception: user message rolled back."""
-    pipeline_service.get_llm_response = AsyncMock(side_effect=RuntimeError("Groq timeout"))
-    pipeline_service.synthesize_and_send_audio = AsyncMock(return_value=False)
+    """Exception inside _stream_llm_and_tts: user message rolled back."""
+    pipeline_service._stream_llm_and_tts = AsyncMock(
+        side_effect=RuntimeError("Groq timeout")
+    )
 
     await pipeline_service._run_turn(
         session=fake_session, full_transcript="Tell me about your plans.",
@@ -104,8 +105,9 @@ async def test_llm_exception_rolls_back_user_message(pipeline_service, fake_sess
 @pytest.mark.asyncio
 async def test_cancellation_rolls_back_user_message(pipeline_service, fake_session):
     """asyncio.CancelledError: user message rolled back, error re-raised."""
-    pipeline_service.get_llm_response = AsyncMock(side_effect=asyncio.CancelledError())
-    pipeline_service.synthesize_and_send_audio = AsyncMock(return_value=False)
+    pipeline_service._stream_llm_and_tts = AsyncMock(
+        side_effect=asyncio.CancelledError()
+    )
 
     with pytest.raises(asyncio.CancelledError):
         await pipeline_service._run_turn(
@@ -121,8 +123,9 @@ async def test_cancellation_rolls_back_user_message(pipeline_service, fake_sessi
 @pytest.mark.asyncio
 async def test_normal_turn_commits_user_and_assistant(pipeline_service, fake_session):
     """Normal turn: both messages committed in correct order."""
-    pipeline_service.get_llm_response = AsyncMock(return_value="Happy to help!")
-    pipeline_service.synthesize_and_send_audio = AsyncMock(return_value=False)
+    pipeline_service._stream_llm_and_tts = AsyncMock(
+        return_value=("Happy to help!", 80.0, 120.0)
+    )
 
     await pipeline_service._run_turn(
         session=fake_session, full_transcript="Hi, can you help?",
@@ -140,9 +143,8 @@ async def test_normal_turn_commits_user_and_assistant(pipeline_service, fake_ses
 async def test_two_interrupted_turns_never_consecutive_user_messages(
     pipeline_service, fake_session
 ):
-    """Two back-to-back empty-interrupted turns: no consecutive user messages."""
-    pipeline_service.get_llm_response = AsyncMock(return_value="")
-    pipeline_service.synthesize_and_send_audio = AsyncMock(return_value=True)
+    """Two back-to-back empty turns: no consecutive user messages in history."""
+    pipeline_service._stream_llm_and_tts = AsyncMock(return_value=("", 100.0, 0.0))
 
     await pipeline_service._run_turn(
         session=fake_session, full_transcript="First.", websocket=None, turn_id=1
