@@ -141,6 +141,7 @@ Your agent name, company, and campaign goal are defined in your configuration.""
         llm_temperature=global_config.llm_temperature,
         llm_max_tokens=global_config.llm_max_tokens,
         voice_id=tts_voice_id,
+        tts_model=global_config.tts_model,
         tts_sample_rate=8000,
         gateway_sample_rate=8000,
         gateway_channels=1,
@@ -210,6 +211,7 @@ async def _send_outbound_greeting(voice_session) -> None:
             session,
             greeting,
             websocket=None,
+            track_latency=False,
         )
     except Exception as exc:
         logger.warning(f"Outbound greeting failed for {call_id[:12]}: {exc}")

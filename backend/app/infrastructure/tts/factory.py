@@ -52,3 +52,9 @@ try:
 except ImportError:
     pass  # Google TTS Streaming not available (requires google-cloud-texttospeech)
 
+# Auto-register ElevenLabs TTS
+try:
+    from app.infrastructure.tts.elevenlabs_tts import ElevenLabsTTSProvider
+    TTSFactory.register("elevenlabs", ElevenLabsTTSProvider)
+except ImportError:
+    pass

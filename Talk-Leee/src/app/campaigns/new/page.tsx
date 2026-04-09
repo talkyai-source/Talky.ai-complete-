@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { dashboardApi } from "@/lib/dashboard-api";
-import { aiOptionsApi, VoiceInfo } from "@/lib/ai-options-api";
+import { aiOptionsApi, AIProviderConfig, VoiceInfo } from "@/lib/ai-options-api";
 import { captureException } from "@/lib/monitoring";
 import { ArrowLeft, Loader2, Play, RefreshCw, Volume2, Check } from "lucide-react";
 import { motion } from "framer-motion";
@@ -19,6 +19,8 @@ export default function NewCampaignPage() {
     const [voices, setVoices] = useState<VoiceInfo[]>([]);
     const [loadingVoices, setLoadingVoices] = useState(true);
     const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null);
+    const [globalAiConfig, setGlobalAiConfig] = useState<AIProviderConfig | null>(null);
+    const previewAudioRef = useRef<HTMLAudioElement | null>(null);
 
     const [formData, setFormData] = useState({
         name: "",
@@ -33,11 +35,19 @@ export default function NewCampaignPage() {
         async function fetchVoices() {
             try {
                 setLoadingVoices(true);
-                const voiceList = await aiOptionsApi.getVoices();
+                const [voiceList, config] = await Promise.all([
+                    aiOptionsApi.getVoices(),
+                    aiOptionsApi.getConfig(),
+                ]);
+                const providerVoices = voiceList.filter((voice) => voice.provider === config.tts_provider);
                 setVoices(voiceList);
-                // Set default to first voice if available
-                if (voiceList.length > 0) {
-                    setFormData((prev) => (prev.voice_id ? prev : { ...prev, voice_id: voiceList[0].id }));
+                setGlobalAiConfig(config);
+                if (providerVoices.length > 0) {
+                    setFormData((prev) => (
+                        prev.voice_id && providerVoices.some((voice) => voice.id === prev.voice_id)
+                            ? prev
+                            : { ...prev, voice_id: providerVoices[0].id }
+                    ));
                 }
             } catch (err) {
                 captureException(err, { area: "campaigns-new", kind: "voices" });
@@ -60,8 +70,34 @@ export default function NewCampaignPage() {
 
     // Preview a voice
     async function handlePreviewVoice(voiceId: string) {
+        const voice = voices.find((item) => item.id === voiceId);
         try {
             setPreviewingVoiceId(voiceId);
+
+            if (previewAudioRef.current) {
+                previewAudioRef.current.pause();
+                previewAudioRef.current.currentTime = 0;
+                previewAudioRef.current = null;
+            }
+
+            if (voice?.preview_url) {
+                const audio = new Audio(voice.preview_url);
+                previewAudioRef.current = audio;
+                audio.onended = () => {
+                    if (previewAudioRef.current === audio) {
+                        previewAudioRef.current = null;
+                    }
+                    setPreviewingVoiceId(null);
+                };
+                audio.onerror = () => {
+                    if (previewAudioRef.current === audio) {
+                        previewAudioRef.current = null;
+                    }
+                    setPreviewingVoiceId(null);
+                };
+                await audio.play();
+                return;
+            }
 
             const response = await aiOptionsApi.previewVoice({
                 voice_id: voiceId,
@@ -79,8 +115,15 @@ export default function NewCampaignPage() {
                 audioArray[i] = dataView.getFloat32(i * 4, true);
             }
 
-            const audioContext = new AudioContext({ sampleRate: 16000 });
-            const audioBuffer = audioContext.createBuffer(1, audioArray.length, 16000);
+            const sampleRate =
+                voice?.provider === "google"
+                || voice?.provider === "deepgram"
+                || voice?.provider === "elevenlabs"
+                    ? 24000
+                    : 16000;
+
+            const audioContext = new AudioContext({ sampleRate });
+            const audioBuffer = audioContext.createBuffer(1, audioArray.length, sampleRate);
             audioBuffer.getChannelData(0).set(audioArray);
 
             const source = audioContext.createBufferSource();
@@ -98,8 +141,25 @@ export default function NewCampaignPage() {
         }
     }
 
+    useEffect(() => {
+        return () => {
+            if (previewAudioRef.current) {
+                previewAudioRef.current.pause();
+                previewAudioRef.current = null;
+            }
+        };
+    }, []);
+
+    const campaignVoices = globalAiConfig
+        ? voices.filter((voice) => voice.provider === globalAiConfig.tts_provider)
+        : voices;
+
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
+        if (!formData.voice_id) {
+            setError("Select a voice from the active global TTS provider before creating a campaign.");
+            return;
+        }
         setLoading(true);
         setError("");
 
@@ -191,23 +251,36 @@ export default function NewCampaignPage() {
 
                         {/* Voice Selection - Updated to use AI Options voices */}
                         <div className="space-y-2">
-                            <Label>AI Voice ({voices.length} available)</Label>
+                            <Label>AI Voice ({campaignVoices.length} available)</Label>
+                            {globalAiConfig && (
+                                <p className="text-xs text-muted-foreground">
+                                    Campaign voices follow your global AI Options TTS provider:{" "}
+                                    <span className="font-medium text-foreground">{globalAiConfig.tts_provider}</span>{" "}
+                                    on model{" "}
+                                    <span className="font-medium text-foreground">{globalAiConfig.tts_model}</span>.
+                                </p>
+                            )}
                             {loadingVoices ? (
                                 <div className="flex items-center justify-center py-8">
                                     <RefreshCw className="w-5 h-5 animate-spin text-muted-foreground" />
                                     <span className="ml-2 text-muted-foreground">Loading voices...</span>
                                 </div>
                             ) : (
-                                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                                    {voices.map((voice) => (
-                                        <div
-                                            key={voice.id}
-                                            onClick={() => setFormData((prev) => ({ ...prev, voice_id: voice.id }))}
-                                            className={`relative p-3 rounded-lg border cursor-pointer transition-colors ${formData.voice_id === voice.id
-                                                    ? "border-emerald-500 bg-emerald-500/20"
-                                                    : "border-border bg-muted/30 hover:bg-muted/40"
-                                                }`}
-                                        >
+                                campaignVoices.length === 0 ? (
+                                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+                                        No voices are available for the current global TTS provider yet. Save a valid provider in AI Options first.
+                                    </div>
+                                ) : (
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                        {campaignVoices.map((voice) => (
+                                            <div
+                                                key={voice.id}
+                                                onClick={() => setFormData((prev) => ({ ...prev, voice_id: voice.id }))}
+                                                className={`relative p-3 rounded-lg border cursor-pointer transition-colors ${formData.voice_id === voice.id
+                                                        ? "border-emerald-500 bg-emerald-500/20"
+                                                        : "border-border bg-muted/30 hover:bg-muted/40"
+                                                    }`}
+                                            >
                                             {/* Play Preview Button */}
                                             <button
                                                 type="button"
@@ -251,6 +324,9 @@ export default function NewCampaignPage() {
                                                             {voice.gender}
                                                         </span>
                                                     )}
+                                                    <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                                                        {(voice.language || "unknown").toUpperCase()}
+                                                    </span>
                                                 </div>
                                             </div>
 
@@ -260,9 +336,10 @@ export default function NewCampaignPage() {
                                                     <Check className="w-4 h-4 text-emerald-400" />
                                                 </div>
                                             )}
-                                        </div>
-                                    ))}
-                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )
                             )}
                         </div>
 
@@ -292,7 +369,7 @@ export default function NewCampaignPage() {
                         )}
 
                         <div className="flex gap-4">
-                            <Button type="submit" disabled={loading}>
+                            <Button type="submit" disabled={loading || !formData.voice_id}>
                                 {loading ? (
                                     <>
                                         <Loader2 className="w-4 h-4 animate-spin" />

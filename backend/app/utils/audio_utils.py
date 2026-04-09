@@ -266,9 +266,10 @@ def pcm_float32_to_int16(pcm_f32: bytes) -> bytes:
     # Convert bytes to float32 array
     audio_f32 = np.frombuffer(pcm_f32, dtype=np.float32)
     
-    # Scale and convert to int16
-    # Clip to prevent overflow
-    audio_int16 = np.clip(audio_f32 * 32768.0, -32768, 32767).astype(np.int16)
+    # Soft-saturate via tanh before scaling.  tanh maps ℝ → (-1, 1) smoothly,
+    # so hot signals (>0 dBFS) are gently compressed rather than hard-clipped.
+    # Hard clip (np.clip) creates harmonic distortion; tanh preserves waveform shape.
+    audio_int16 = (np.tanh(audio_f32) * 32767.0).astype(np.int16)
     
     return audio_int16.tobytes()
 

@@ -278,14 +278,24 @@ class CampaignService:
             "completed_at": datetime.utcnow().isoformat()
         }).eq("id", campaign_id).execute()
         
+        cleared_jobs = 0
         if clear_queue:
-            # Mark pending jobs as skipped
+            # Mark queued/scheduled jobs as skipped in the database.
             self.db_client.table("dialer_jobs").update({
                 "status": "skipped",
                 "last_error": "Campaign stopped"
-            }).eq("campaign_id", campaign_id).eq("status", "pending").execute()
-        
-        logger.info(f"Campaign {campaign_id} stopped (clear_queue={clear_queue})")
+            }).eq("campaign_id", campaign_id).in_("status", ["pending", "retry_scheduled"]).execute()
+
+            queue_service = await self._get_queue_service()
+            cleared_jobs = await queue_service.clear_campaign_jobs(campaign_id)
+            await self._cleanup_queue_service()
+
+        logger.info(
+            "Campaign %s stopped (clear_queue=%s, cleared_jobs=%s)",
+            campaign_id,
+            clear_queue,
+            cleared_jobs,
+        )
         return response.data[0]
     
     # =========================================================================

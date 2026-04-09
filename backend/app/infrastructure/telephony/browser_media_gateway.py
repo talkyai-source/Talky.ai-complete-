@@ -41,6 +41,9 @@ class BrowserSession:
         default_factory=lambda: asyncio.Queue(maxsize=100)
     )
     recording_buffer: list = field(default_factory=list)
+    # Cumulative byte count of recording_buffer contents (avoids O(n) sum on
+    # every append).  Used to enforce the memory cap without iterating the list.
+    recording_buffer_bytes: int = 0
     output_buffer: bytearray = field(
         default_factory=bytearray
     )  # Buffer for smooth TTS playback
@@ -239,8 +242,16 @@ class BrowserMediaGateway(MediaGateway):
         session.chunks_received += 1
         session.total_bytes_received += len(chunk_to_process)
 
-        # Add to recording buffer
+        # Add to recording buffer with memory cap.
+        # At 16 kHz / 16-bit mono, 1 hour of audio ≈ 115 MB.
+        # Cap at 60 minutes (≈ 115 MB) by evicting the oldest chunks when over
+        # budget.  Eviction is rare — most calls are under 30 minutes.
+        _MAX_RECORDING_BYTES = 115_200_000  # 60 min @ 16kHz 16-bit mono
         session.recording_buffer.append(chunk_to_process)
+        session.recording_buffer_bytes += len(chunk_to_process)
+        while session.recording_buffer_bytes > _MAX_RECORDING_BYTES and session.recording_buffer:
+            evicted = session.recording_buffer.pop(0)
+            session.recording_buffer_bytes -= len(evicted)
 
         # Buffer for STT processing
         try:
@@ -249,16 +260,18 @@ class BrowserMediaGateway(MediaGateway):
                 session.max_input_queue_depth, session.input_queue.qsize()
             )
         except asyncio.QueueFull:
-            # Drop oldest to maintain real-time
-            try:
-                session.input_queue.get_nowait()
-                session.input_queue.put_nowait(chunk_to_process)
-                session.dropped_input_chunks += 1
-                session.max_input_queue_depth = max(
-                    session.max_input_queue_depth, session.input_queue.qsize()
-                )
-            except asyncio.QueueEmpty:
-                pass
+            # Queue full — drop the *newest* (incoming) chunk so STT continues
+            # to receive a contiguous, unbroken stream of the audio it already
+            # started processing.  Dropping the oldest would create a temporal
+            # jump in the stream: STT hears frame N, then frame N+100 with no
+            # transition — producing garbled transcription.
+            session.dropped_input_chunks += 1
+            logger.debug(
+                "Input queue full for %s — dropping latest frame "
+                "(total dropped: %d)",
+                call_id,
+                session.dropped_input_chunks,
+            )
 
     async def send_audio(self, call_id: str, audio_chunk: bytes) -> None:
         """
@@ -297,7 +310,11 @@ class BrowserMediaGateway(MediaGateway):
         try:
             if self._tts_source_format == "f32le":
                 float32_arr = np.frombuffer(audio_chunk, dtype=np.float32)
-                int16_arr = (np.clip(float32_arr, -1.0, 1.0) * 32767.0).astype(np.int16)
+                # tanh soft-saturates hot signals instead of hard-clipping them.
+                # Hard clip (np.clip) creates harmonic distortion on peaks; tanh
+                # smoothly compresses amplitudes > 1.0 while leaving normal levels
+                # virtually unchanged (tanh(0.9) ≈ 0.716 vs clip → 0.716 — same).
+                int16_arr = (np.tanh(float32_arr) * 32767.0).astype(np.int16)
                 audio_chunk = int16_arr.tobytes()
             elif self._tts_source_format == "auto":
                 # Fallback heuristic only when source format is unknown.
@@ -309,7 +326,7 @@ class BrowserMediaGateway(MediaGateway):
                         else float("inf")
                     )
                     if np.isfinite(max_val) and max_val <= 1.5:
-                        int16_arr = (np.clip(float32_arr, -1.0, 1.0) * 32767.0).astype(
+                        int16_arr = (np.tanh(float32_arr) * 32767.0).astype(
                             np.int16
                         )
                         audio_chunk = int16_arr.tobytes()
@@ -392,10 +409,28 @@ class BrowserMediaGateway(MediaGateway):
                 logger.error(f"Failed to flush audio buffer: {e}")
 
     async def clear_output_buffer(self, call_id: str) -> None:
-        """Discard buffered outbound audio immediately."""
+        """Discard buffered outbound audio on barge-in with a fade-out to prevent click/pop."""
         session = self._sessions.get(call_id)
         if not session or not session.is_active:
             return
+
+        # Apply a 5ms linear ramp-to-zero on the tail of the output buffer and
+        # send it before discarding the rest.  At 16kHz 16-bit mono:
+        #   5ms = 80 samples = 160 bytes.
+        # Cutting a waveform at non-zero amplitude creates a step discontinuity
+        # perceived as a click or pop.  The fade brings the signal to zero
+        # smoothly so the abrupt silence that follows is inaudible.
+        import numpy as np
+        FADE_BYTES = 160  # 5ms at 16kHz 16-bit mono
+        buf = session.output_buffer
+        if len(buf) >= FADE_BYTES:
+            tail = np.frombuffer(bytes(buf[-FADE_BYTES:]), dtype=np.int16).copy()
+            ramp = np.linspace(1.0, 0.0, len(tail), dtype=np.float32)
+            faded = (tail * ramp).astype(np.int16)
+            try:
+                await self._send_payload(session, faded.tobytes())
+            except Exception:
+                pass
 
         session.output_buffer = bytearray()
         session.pending_byte = b""
@@ -527,6 +562,7 @@ class BrowserMediaGateway(MediaGateway):
         session = self._sessions.get(call_id)
         if session:
             session.recording_buffer.clear()
+            session.recording_buffer_bytes = 0
 
     async def cleanup(self) -> None:
         """Clean up all sessions."""

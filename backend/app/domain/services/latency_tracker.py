@@ -42,6 +42,8 @@ class LatencyMetrics:
     response_start_time: Optional[datetime] = None
     tts_end_time: Optional[datetime] = None
     audio_start_time: Optional[datetime] = None
+    turn_outcome: str = "in_progress"
+    interruption_reason: Optional[str] = None
     
     @property
     def total_latency_ms(self) -> Optional[float]:
@@ -130,6 +132,8 @@ class LatencyMetrics:
             "time_to_first_audio_ms": self.time_to_first_audio_ms,
             "response_start_latency_ms": self.response_start_latency_ms,
             "is_within_target": self.is_within_target,
+            "turn_outcome": self.turn_outcome,
+            "interruption_reason": self.interruption_reason,
             "timestamps": {
                 "listening_start": self.listening_start_time.isoformat() if self.listening_start_time else None,
                 "stt_first_transcript": self.stt_first_transcript_time.isoformat() if self.stt_first_transcript_time else None,
@@ -165,12 +169,18 @@ class LatencyTracker:
     
     def start_turn(self, call_id: str, turn_id: int) -> None:
         """
-        Start tracking a new turn (user finished speaking).
+        Start tracking a new turn.
         
         Args:
             call_id: Call identifier
             turn_id: Turn number in the conversation
         """
+        existing = self._metrics.get(call_id)
+        if existing and existing.turn_id == turn_id:
+            if existing.listening_start_time is None:
+                existing.listening_start_time = datetime.utcnow()
+            return
+
         metrics = LatencyMetrics(
             call_id=call_id,
             turn_id=turn_id,
@@ -190,7 +200,7 @@ class LatencyTracker:
 
     def mark_listening_start(self, call_id: str) -> None:
         """Mark when turn listening window starts."""
-        if call_id in self._metrics:
+        if call_id in self._metrics and self._metrics[call_id].listening_start_time is None:
             self._metrics[call_id].listening_start_time = datetime.utcnow()
 
     def mark_stt_first_transcript(self, call_id: str) -> None:
@@ -225,12 +235,12 @@ class LatencyTracker:
     
     def mark_tts_end(self, call_id: str) -> None:
         """Mark when TTS synthesis completes."""
-        if call_id in self._metrics:
+        if call_id in self._metrics and self._metrics[call_id].tts_end_time is None:
             self._metrics[call_id].tts_end_time = datetime.utcnow()
     
     def mark_audio_start(self, call_id: str) -> None:
         """Mark when first audio chunk is sent to caller."""
-        if call_id in self._metrics:
+        if call_id in self._metrics and self._metrics[call_id].audio_start_time is None:
             self._metrics[call_id].audio_start_time = datetime.utcnow()
 
     def mark_response_start(self, call_id: str) -> None:
@@ -244,6 +254,18 @@ class LatencyTracker:
                 self._metrics[call_id].response_start_time = now
             if self._metrics[call_id].audio_start_time is None:
                 self._metrics[call_id].audio_start_time = now
+
+    def mark_interrupted(self, call_id: str, reason: str = "barge_in") -> None:
+        """Mark the active turn as interrupted before a full reply completed."""
+        if call_id in self._metrics:
+            metrics = self._metrics[call_id]
+            metrics.turn_outcome = "interrupted"
+            metrics.interruption_reason = reason
+
+    def mark_completed(self, call_id: str) -> None:
+        """Mark the active turn as completed if it was not interrupted."""
+        if call_id in self._metrics and self._metrics[call_id].turn_outcome == "in_progress":
+            self._metrics[call_id].turn_outcome = "completed"
     
     def get_metrics(self, call_id: str) -> Optional[LatencyMetrics]:
         """
@@ -289,7 +311,10 @@ class LatencyTracker:
         
         # Log summary
         total = metrics.total_latency_ms
-        status = "OK" if metrics.is_within_target else "SLOW"
+        if metrics.turn_outcome == "interrupted":
+            status = "INTERRUPTED"
+        else:
+            status = "OK" if metrics.is_within_target else "SLOW"
         
         # Handle None values for formatting
         total_str = f"{total:.0f}" if total is not None else "N/A"
@@ -312,7 +337,9 @@ class LatencyTracker:
                 "tts_latency_ms": metrics.tts_latency_ms,
                 "tts_first_chunk_ms": metrics.tts_first_chunk_ms,
                 "response_start_latency_ms": metrics.response_start_latency_ms,
-                "is_within_target": metrics.is_within_target
+                "is_within_target": metrics.is_within_target,
+                "turn_outcome": metrics.turn_outcome,
+                "interruption_reason": metrics.interruption_reason,
             }
         )
 

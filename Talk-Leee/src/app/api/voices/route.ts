@@ -17,8 +17,8 @@ const VoiceApiItemSchema = z
     id: z.string(),
     name: z.string(),
     description: z.string().optional(),
-    preview_url: z.string().optional(),
-    previewUrl: z.string().optional(),
+    preview_url: z.string().nullish(),
+    previewUrl: z.string().nullish(),
   })
   .passthrough();
 

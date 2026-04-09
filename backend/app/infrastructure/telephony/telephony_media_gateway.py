@@ -69,6 +69,11 @@ class TelephonySession:
     # TTS audio buffer for packetization (must send in 160-byte chunks for 8kHz PCMU)
     tts_buffer: bytes = field(default_factory=bytes)
 
+    # Real-time pacing cursor for TTS delivery (see send_audio).
+    # Tracks the monotonic clock position up to which audio has been scheduled
+    # to play at the C++ gateway.  None = start of a new burst.
+    _tts_send_deadline: Optional[float] = field(default=None)
+
     # Metrics
     chunks_received: int = 0
     chunks_sent: int = 0
@@ -208,7 +213,16 @@ class TelephonyMediaGateway(MediaGateway):
 
         session.chunks_received += 1
         session.total_bytes_received += len(audio_chunk)
+
+        # Recording buffer with memory cap.
+        # 8 kHz / 16-bit mono: 60 min ≈ 57.6 MB.
+        _MAX_RECORDING_BYTES = 57_600_000
         session.recording_buffer.append(pcm_chunk)
+        session.recording_buffer_bytes = getattr(session, "recording_buffer_bytes", 0) + len(pcm_chunk)
+        while session.recording_buffer_bytes > _MAX_RECORDING_BYTES and session.recording_buffer:
+            evicted = session.recording_buffer.pop(0)
+            session.recording_buffer_bytes -= len(evicted)
+
         # Track how many PCM16 samples the caller side has produced
         session.caller_sample_count += len(pcm_chunk) // 2
 
@@ -292,28 +306,60 @@ class TelephonyMediaGateway(MediaGateway):
             logger.warning(f"[TelephonyGW] TTS encode failed for {call_id[:12]}: {exc}", exc_info=True)
             return
 
-        # Buffer the PCMU audio and send in 160-byte packets
-        # 160 bytes = 20ms of 8kHz PCMU audio (8000 samples/sec ÷ 1000 × 20ms = 160 bytes)
-        session.tts_buffer += pcmu
-        
-        # Send complete 160-byte packets
+        # Buffer the PCMU audio and send in 160-byte packets with real-time pacing.
+        #
+        # WITHOUT pacing: TTS generates a 7-second utterance in ~0.5s and sends all
+        # 350 packets to the C++ gateway immediately.  The gateway buffers them all
+        # and plays at real-time rate.  When barge-in fires, interrupt_tts must clear
+        # 7s of buffered audio — if the endpoint is slow or absent, the caller hears
+        # the agent speaking for seconds after interrupting.
+        #
+        # WITH pacing: asyncio.sleep() yields the event loop so STT barge-in callbacks
+        # can fire between packets.  The C++ gateway never accumulates more than
+        # TARGET_AHEAD_S seconds of pre-buffered audio.  When barge-in fires:
+        #   1. synthesize_and_send_audio detects the event and stops sending.
+        #   2. clear_output_buffer clears the Python buffer and calls interrupt_tts.
+        #   3. Only ≤ TARGET_AHEAD_S of audio is left in the gateway — at most
+        #      ~200ms instead of 7s.
+        #
+        # 160 bytes = 20ms of audio at 8kHz PCMU (8000 samples/s × 0.020s × 1 byte).
         PACKET_SIZE = 160
-        packets_sent = 0
-        
+        PACKET_DURATION_S = PACKET_SIZE / self._sample_rate   # 0.020 s at 8 kHz
+        TARGET_AHEAD_S    = 0.200                              # keep ≤ 200 ms ahead
+
+        session.tts_buffer += pcmu
+
         while len(session.tts_buffer) >= PACKET_SIZE:
             packet = session.tts_buffer[:PACKET_SIZE]
             session.tts_buffer = session.tts_buffer[PACKET_SIZE:]
-            
+
+            now = time.monotonic()
+            deadline = session._tts_send_deadline
+
+            # Initialise (or re-initialise after a silence gap) the pacing cursor.
+            # After a gap the deadline is in the past, so treat it as "now" to allow
+            # the first few packets to send immediately (fill the initial TARGET_AHEAD
+            # buffer) before pacing kicks in.
+            if deadline is None or deadline < now:
+                deadline = now
+
+            # How far ahead will the gateway be after receiving this packet?
+            next_deadline = deadline + PACKET_DURATION_S
+            overshoot = next_deadline - now - TARGET_AHEAD_S
+            if overshoot > 0.001:
+                # Yield the event loop while waiting.  STT barge-in callbacks fire
+                # here, so synthesize_and_send_audio can detect barge-in between
+                # individual 20ms packets even inside a single chunk.
+                await asyncio.sleep(overshoot)
+
             try:
                 await session.adapter.send_tts_audio(session.pbx_call_id, packet)
                 session.chunks_sent += 1
                 session.total_bytes_sent += len(packet)
-                packets_sent += 1
             except Exception as exc:
                 logger.warning(f"[TelephonyGW] send_tts_audio failed for {call_id[:12]}: {exc}")
-                # Don't break - try to send remaining packets
-        
-        # Packet-level send log removed — fires 25–50×/sec during TTS, zero diagnostic value
+
+            session._tts_send_deadline = next_deadline
 
     # ------------------------------------------------------------------
     # Pipeline interface helpers
@@ -367,7 +413,23 @@ class TelephonyMediaGateway(MediaGateway):
         session = self._sessions.get(call_id)
         if not session or not session.is_active:
             return
+
+        # Send a single silent PCMU packet (160 bytes × 0x7F) before discarding
+        # the buffer.  µ-law 0x7F encodes to zero PCM amplitude, so this gives the
+        # C++ gateway one 20ms frame of silence to land on before interrupt_tts
+        # flushes its queue.  It is not a true ramp (PCMU is non-linear), but it
+        # prevents the gateway from cutting a non-zero waveform dead — the most
+        # audible part of the click/pop artifact.
+        PCMU_SILENCE = b"\x7f" * 160
+        if session.tts_buffer:
+            try:
+                await session.adapter.send_tts_audio(session.pbx_call_id, PCMU_SILENCE)
+            except Exception:
+                pass
+
         session.tts_buffer = b""
+        # Reset real-time pacing cursor so the next utterance gets a fresh burst window.
+        session._tts_send_deadline = None
         # Tell the C++ gateway to discard its buffered TTS queue immediately.
         # Without this, audio already sent to the gateway continues to play
         # until its internal buffer drains — the caller hears the AI speaking

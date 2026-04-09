@@ -140,6 +140,23 @@ class TestLatencyTracker:
             "total_latency_ms must measure from actual speech-end, not listening-start"
         )
 
+    def test_start_turn_same_turn_preserves_existing_metrics(self):
+        """Restarting the same turn must not wipe timestamps already captured."""
+        tracker = LatencyTracker()
+        tracker.start_turn("call-1", turn_id=1)
+
+        metrics = tracker.get_metrics("call-1")
+        assert metrics is not None
+        original_listening_start = metrics.listening_start_time
+        metrics.stt_first_transcript_time = datetime.utcnow()
+
+        tracker.start_turn("call-1", turn_id=1)
+
+        metrics = tracker.get_metrics("call-1")
+        assert metrics is not None
+        assert metrics.listening_start_time == original_listening_start
+        assert metrics.stt_first_transcript_time is not None
+
     def test_mark_stages(self):
         """Test marking various pipeline stages."""
         tracker = LatencyTracker()
@@ -170,6 +187,19 @@ class TestLatencyTracker:
         history = tracker.get_history("call-1")
         assert len(history) == 1
         assert history[0].turn_id == 1
+
+    def test_interrupted_turn_outcome_is_preserved(self):
+        """Interrupted turns should not later be overwritten as completed."""
+        tracker = LatencyTracker()
+
+        tracker.start_turn("call-1", turn_id=1)
+        tracker.mark_interrupted("call-1", reason="barge_in")
+        tracker.mark_completed("call-1")
+
+        metrics = tracker.get_metrics("call-1")
+        assert metrics is not None
+        assert metrics.turn_outcome == "interrupted"
+        assert metrics.interruption_reason == "barge_in"
     
     def test_average_latency(self):
         """Test average latency calculation."""

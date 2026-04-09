@@ -116,12 +116,48 @@ async def create_campaign(
         if not current_user.tenant_id:
             raise HTTPException(status_code=400, detail="Current user is not associated with a tenant")
 
+        from app.api.v1.endpoints.ai_options import (
+            _english_google_voices,
+            _fetch_tenant_config,
+            _get_deepgram_voices_for_current_key,
+            get_elevenlabs_voices_for_current_key,
+        )
+        from app.domain.models.ai_config import AIProviderConfig
+
+        selected_voice_id = campaign_data.voice_id.strip()
+
+        async with db_client.pool.acquire() as conn:
+            ai_config = await _fetch_tenant_config(conn, current_user.tenant_id)
+        if ai_config is None:
+            ai_config = AIProviderConfig()
+
+        if ai_config.tts_provider == "google":
+            valid_voice_ids = {voice.id for voice in _english_google_voices()}
+        elif ai_config.tts_provider == "deepgram":
+            valid_voice_ids = {
+                voice.id for voice in await _get_deepgram_voices_for_current_key()
+            }
+        else:
+            valid_voice_ids = {
+                voice.id for voice in await get_elevenlabs_voices_for_current_key()
+            }
+
+        if selected_voice_id not in valid_voice_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Voice '{selected_voice_id}' is not available for the current "
+                    f"global TTS provider '{ai_config.tts_provider}'. Update AI Options "
+                    "or choose a matching campaign voice."
+                ),
+            )
+
         insert_payload = {
             "tenant_id": current_user.tenant_id,
             "name": campaign_data.name.strip(),
             "description": campaign_data.description.strip() if campaign_data.description else None,
             "system_prompt": campaign_data.system_prompt.strip(),
-            "voice_id": campaign_data.voice_id.strip(),
+            "voice_id": selected_voice_id,
             "goal": campaign_data.goal.strip() if campaign_data.goal else None,
         }
 

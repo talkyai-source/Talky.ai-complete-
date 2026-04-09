@@ -437,8 +437,51 @@ class DeepgramTTSProvider(TTSProvider):
             # nothing (TTS-total: 0ms, silence on all subsequent turns).
             # Discard the connection so _get_connection opens a fresh one next time.
             if not flushed_cleanly:
+                # Snapshot voice/rate before nulling so the pre-warm task can
+                # use the same parameters as the interrupted synthesis.
+                _prewarm_voice = self._warm_ws_voice or self._default_voice
+                _prewarm_rate  = self._warm_ws_rate  or self._sample_rate
                 self._warm_ws = None
+                # Kick off a background reconnect immediately so the warm WS is
+                # ready before the next turn starts (~200-500ms later).  Without
+                # this, the next synthesis call incurs a cold WebSocket handshake
+                # (~75ms) that could otherwise be hidden during barge-in processing.
+                asyncio.create_task(
+                    self._prewarm_after_interrupt(_prewarm_voice, _prewarm_rate),
+                    name="deepgram_tts_prewarm",
+                )
             self._synthesis_lock.release()
+
+    # ------------------------------------------------------------------
+    # Background pre-warm after barge-in
+    # ------------------------------------------------------------------
+
+    async def _prewarm_after_interrupt(self, voice_id: str, rate: int) -> None:
+        """
+        Re-establish the warm WebSocket connection in the background after a
+        barge-in discards the previous one.
+
+        The next synthesis call arrives ~200-500ms after barge-in (after the
+        caller finishes speaking and LLM generates a response).  Running the
+        ~75ms WebSocket handshake here hides it behind that dead time so the
+        next turn starts with zero cold-start overhead.
+
+        Guards:
+        - No-op if a warm WS already exists (another path re-warmed it first).
+        - Synthesis lock is NOT held — this runs freely in the background.
+        - Any exception is swallowed; a failure just means the next synthesis
+          opens its own connection via _get_connection as normal.
+        """
+        if self._warm_ws is not None and not self._warm_ws.closed:
+            return  # already warm — nothing to do
+        try:
+            await self._get_connection(voice_id, rate)
+            logger.debug(
+                "DeepgramTTS: background pre-warm complete (voice=%s, rate=%d)",
+                voice_id, rate,
+            )
+        except Exception as exc:
+            logger.debug("DeepgramTTS: background pre-warm failed: %s", exc)
 
     # ------------------------------------------------------------------
     # Raw synthesis (for telephony / RTP — keeps REST fallback)

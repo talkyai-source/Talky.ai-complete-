@@ -19,6 +19,7 @@ from typing import Optional, List, Set
 
 import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from app.core.dotenv_compat import load_dotenv
@@ -38,12 +39,21 @@ from app.domain.models.ai_config import (
     DEEPGRAM_MODELS,
     GOOGLE_TTS_MODELS,
     DEEPGRAM_TTS_MODELS,
+    ELEVENLABS_TTS_MODELS,
     GOOGLE_CHIRP3_VOICES,
     DEEPGRAM_AURA2_VOICES,
 )
 from app.infrastructure.llm.groq import GroqLLMProvider
 from app.infrastructure.tts.google_tts_streaming import GoogleTTSStreamingProvider
 from app.infrastructure.tts.deepgram_tts import DeepgramTTSProvider
+from app.infrastructure.tts.elevenlabs_tts import ElevenLabsTTSProvider
+from app.infrastructure.tts.elevenlabs_catalog import (
+    ensure_elevenlabs_preview_cached,
+    get_elevenlabs_tts_models_for_current_key,
+    get_elevenlabs_voice_by_id,
+    get_elevenlabs_voices_for_current_key,
+    elevenlabs_enabled,
+)
 from app.domain.models.conversation import Message, MessageRole
 from app.api.v1.dependencies import get_current_user, get_db_client
 from app.core.postgres_adapter import Client
@@ -260,6 +270,18 @@ async def _get_deepgram_voices_for_current_key() -> List[VoiceInfo]:
     return filtered
 
 
+async def _find_elevenlabs_voice(voice_id: str) -> Optional[VoiceInfo]:
+    if not elevenlabs_enabled():
+        return None
+    return await get_elevenlabs_voice_by_id(voice_id)
+
+
+async def _get_all_tts_voices() -> List[VoiceInfo]:
+    deepgram_voices = await _get_deepgram_voices_for_current_key()
+    elevenlabs_voices = await get_elevenlabs_voices_for_current_key()
+    return [*_english_google_voices(), *deepgram_voices, *elevenlabs_voices]
+
+
 def _linear16_to_float32le_bytes(pcm16_data: bytes) -> bytes:
     """
     Convert little-endian linear16 PCM bytes to float32 little-endian bytes.
@@ -285,6 +307,20 @@ async def list_providers():
     Returns:
         ProviderListResponse with LLM, STT, and TTS options
     """
+    elevenlabs_models = (
+        await get_elevenlabs_tts_models_for_current_key()
+        if elevenlabs_enabled()
+        else []
+    )
+    tts_providers = ["google", "deepgram"]
+    tts_models = [
+        *(model.model_dump() for model in GOOGLE_TTS_MODELS),
+        *(model.model_dump() for model in DEEPGRAM_TTS_MODELS),
+    ]
+    if elevenlabs_enabled():
+        tts_providers.append("elevenlabs")
+        tts_models.extend(model.model_dump() for model in (elevenlabs_models or ELEVENLABS_TTS_MODELS))
+
     return ProviderListResponse(
         llm={
             "providers": ["groq"],
@@ -295,11 +331,8 @@ async def list_providers():
             "models": [model.model_dump() for model in DEEPGRAM_MODELS]
         },
         tts={
-            "providers": ["google", "deepgram"],
-            "models": [
-                *(model.model_dump() for model in GOOGLE_TTS_MODELS),
-                *(model.model_dump() for model in DEEPGRAM_TTS_MODELS),
-            ],
+            "providers": tts_providers,
+            "models": tts_models,
         }
     )
 
@@ -320,8 +353,34 @@ async def list_voices():
     Returns:
         List of VoiceInfo with voice details and preview info
     """
-    deepgram_voices = await _get_deepgram_voices_for_current_key()
-    return [*_english_google_voices(), *deepgram_voices]
+    return await _get_all_tts_voices()
+
+
+@router.get("/voices/{voice_id}/sample")
+async def get_voice_sample(voice_id: str):
+    """
+    Serve a cached ElevenLabs preview sample without generating fresh TTS.
+    """
+    voice = await _find_elevenlabs_voice(voice_id)
+    if voice is None or voice.provider != "elevenlabs":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Preview sample not available for this voice",
+        )
+
+    sample_path = await ensure_elevenlabs_preview_cached(voice_id)
+    if sample_path is None or not sample_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Voice sample unavailable",
+        )
+
+    return FileResponse(
+        sample_path,
+        media_type="audio/mpeg",
+        filename=f"{voice_id}.mp3",
+        headers={"cache-control": "public, max-age=86400"},
+    )
 
 
 class VoicePreviewRequest(BaseModel):
@@ -365,11 +424,13 @@ async def preview_voice(request: VoicePreviewRequest):
             voice.id: voice
             for voice in _english_deepgram_static_voices()
         }
+        elevenlabs_voice = await _find_elevenlabs_voice(request.voice_id)
 
         voice_info = (
             _find_google_voice(request.voice_id)
             or deepgram_voice_map.get(request.voice_id)
             or deepgram_static_voice_map.get(request.voice_id)
+            or elevenlabs_voice
         )
         voice_name = voice_info.name if voice_info else "Unknown Voice"
         voice_id = request.voice_id
@@ -397,6 +458,21 @@ async def preview_voice(request: VoicePreviewRequest):
                 )
             tts = DeepgramTTSProvider()
             await tts.initialize({"voice_id": voice_id, "sample_rate": sample_rate})
+            output_is_linear16 = True
+        elif elevenlabs_voice is not None:
+            if not os.getenv("ELEVENLABS_API_KEY"):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="ElevenLabs API key not configured",
+                )
+            tts = ElevenLabsTTSProvider()
+            await tts.initialize(
+                {
+                    "voice_id": voice_id,
+                    "model_id": "eleven_flash_v2_5",
+                    "sample_rate": sample_rate,
+                }
+            )
             output_is_linear16 = True
         else:
             raise HTTPException(
@@ -540,6 +616,7 @@ async def test_tts(request: TTSTestRequest):
         deepgram_voices = await _get_deepgram_voices_for_current_key()
         deepgram_voice_ids = {voice.id for voice in deepgram_voices}
         deepgram_static_voice_ids = {voice.id for voice in _english_deepgram_static_voices()}
+        elevenlabs_voice = await _find_elevenlabs_voice(voice_id)
 
         if _is_google_voice(voice_id):
             import os as _os
@@ -568,6 +645,22 @@ async def test_tts(request: TTSTestRequest):
             await tts.initialize({"voice_id": voice_id, "sample_rate": sample_rate})
             output_is_linear16 = True
             model_name = "aura-2"
+        elif elevenlabs_voice is not None:
+            if not os.getenv("ELEVENLABS_API_KEY"):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="ElevenLabs API key not configured",
+                )
+            tts = ElevenLabsTTSProvider()
+            await tts.initialize(
+                {
+                    "voice_id": voice_id,
+                    "model_id": request.model or "eleven_flash_v2_5",
+                    "sample_rate": sample_rate,
+                }
+            )
+            output_is_linear16 = True
+            model_name = request.model or "eleven_flash_v2_5"
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -660,6 +753,23 @@ async def get_config(
                     config.tts_voice_id,
                     tenant_id,
                 )
+        elif config.tts_provider == "elevenlabs":
+            elevenlabs_voices = await get_elevenlabs_voices_for_current_key()
+            valid_voice_ids = {voice.id for voice in elevenlabs_voices}
+            if valid_voice_ids and config.tts_voice_id not in valid_voice_ids:
+                elevenlabs_models = await get_elevenlabs_tts_models_for_current_key()
+                old_voice_id = config.tts_voice_id
+                config.tts_voice_id = elevenlabs_voices[0].id
+                config.tts_model = elevenlabs_models[0].id if elevenlabs_models else "eleven_flash_v2_5"
+                if config.tts_sample_rate not in {8000, 16000, 22050, 24000, 44100}:
+                    config.tts_sample_rate = 24000
+                await _upsert_tenant_config(conn, tenant_id, config)
+                logger.info(
+                    "Auto-corrected invalid ElevenLabs voice id '%s' to '%s' for tenant %s",
+                    old_voice_id,
+                    config.tts_voice_id,
+                    tenant_id,
+                )
 
     # Keep voice pipeline in sync with tenant-selected config.
     set_global_config(config)
@@ -697,10 +807,10 @@ async def save_config(
             detail="User is not associated with a tenant",
         )
 
-    if config.tts_provider not in {"google", "deepgram"}:
+    if config.tts_provider not in {"google", "deepgram", "elevenlabs"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid TTS provider. Supported providers: google, deepgram.",
+            detail="Invalid TTS provider. Supported providers: google, deepgram, elevenlabs.",
         )
     
     # Validate LLM model
@@ -714,10 +824,14 @@ async def save_config(
     if config.tts_provider == "google":
         valid_tts_models = [m.id for m in GOOGLE_TTS_MODELS]
         valid_voice_ids = {voice.id for voice in _english_google_voices()}
-    else:
+    elif config.tts_provider == "deepgram":
         valid_tts_models = [m.id for m in DEEPGRAM_TTS_MODELS]
         deepgram_voices = await _get_deepgram_voices_for_current_key()
         valid_voice_ids = {voice.id for voice in deepgram_voices}
+    else:
+        valid_tts_models = [m.id for m in await get_elevenlabs_tts_models_for_current_key()]
+        elevenlabs_voices = await get_elevenlabs_voices_for_current_key()
+        valid_voice_ids = {voice.id for voice in elevenlabs_voices}
 
     if config.tts_model not in valid_tts_models:
         raise HTTPException(
@@ -748,6 +862,15 @@ async def save_config(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Aura-2 sample_rate must be one of 8000, 16000, 24000, 32000, 48000",
+        )
+
+    if (
+        config.tts_provider == "elevenlabs"
+        and config.tts_sample_rate not in {8000, 16000, 22050, 24000, 44100}
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ElevenLabs sample_rate must be one of 8000, 16000, 22050, 24000, 44100",
         )
 
     async with db_client.pool.acquire() as conn:
@@ -824,6 +947,20 @@ async def run_benchmark(config: AIProviderConfig):
                 )
             tts = DeepgramTTSProvider()
             await tts.initialize({"voice_id": voice_id, "sample_rate": sample_rate})
+        elif config.tts_provider == "elevenlabs":
+            if not os.getenv("ELEVENLABS_API_KEY"):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="ElevenLabs API key not configured",
+                )
+            tts = ElevenLabsTTSProvider()
+            await tts.initialize(
+                {
+                    "voice_id": voice_id,
+                    "model_id": config.tts_model or "eleven_flash_v2_5",
+                    "sample_rate": sample_rate,
+                }
+            )
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
