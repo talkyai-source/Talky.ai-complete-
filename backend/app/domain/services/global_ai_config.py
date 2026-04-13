@@ -63,27 +63,23 @@ def set_global_config(config: AIProviderConfig) -> AIProviderConfig:
 def get_selected_voice_info() -> dict:
     """
     Get details about the currently selected voice.
-    Searches both Cartesia and Google Chirp 3 HD voices.
-    
+    Searches Cartesia, Google Chirp 3 HD, Deepgram Aura-2, and ElevenLabs voices.
+
     Returns:
         Dictionary with voice name, id, gender, and other info
     """
     config = get_global_config()
-    
-    # Search Cartesia voices
-    for voice in CARTESIA_VOICES:
-        if voice.id == config.tts_voice_id:
-            return {
-                "id": voice.id,
-                "name": voice.name,
-                "description": voice.description,
-                "gender": voice.gender,
-                "accent": voice.accent,
-                "accent_color": voice.accent_color,
-            }
-    
-    # Search Google Chirp 3 HD and Deepgram Aura-2 voices
-    for voice in [*GOOGLE_CHIRP3_VOICES, *DEEPGRAM_AURA2_VOICES]:
+
+    # Build a combined static list — include ElevenLabs from in-memory cache
+    # if available (populated after first /voices API call or prefetch).
+    try:
+        from app.infrastructure.tts.elevenlabs_catalog import _elevenlabs_voices_cache
+        el_voices = list(_elevenlabs_voices_cache) if _elevenlabs_voices_cache else []
+    except Exception:
+        el_voices = []
+
+    all_voices = [*CARTESIA_VOICES, *GOOGLE_CHIRP3_VOICES, *DEEPGRAM_AURA2_VOICES, *el_voices]
+    for voice in all_voices:
         if voice.id == config.tts_voice_id:
             return {
                 "id": voice.id,

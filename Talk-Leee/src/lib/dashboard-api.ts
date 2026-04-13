@@ -40,6 +40,7 @@ export interface CampaignCreate {
 export interface Call {
     id: string;
     campaign_id: string;
+    campaign_name?: string;
     lead_id: string;
     phone_number: string;
     status: string;
@@ -80,6 +81,7 @@ interface CallListItem {
     status: string;
     duration_seconds?: number;
     outcome?: string;
+    campaign_name?: string;
 }
 
 // Dashboard API - Real backend integration
@@ -191,8 +193,9 @@ class DashboardApi {
         // Map backend CallListItem to frontend Call format
         const calls: Call[] = response.items.map(item => ({
             id: item.id,
-            campaign_id: "", // Not included in list response
-            lead_id: "", // Not included in list response
+            campaign_id: "",
+            campaign_name: item.campaign_name,
+            lead_id: "",
             phone_number: item.to_number,
             status: item.status,
             outcome: item.outcome,

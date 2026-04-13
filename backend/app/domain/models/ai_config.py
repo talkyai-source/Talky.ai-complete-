@@ -99,9 +99,9 @@ class AIProviderConfig(BaseModel):
     """
     # LLM Configuration
     llm_provider: LLMProvider = LLMProvider.GROQ
-    llm_model: str = GroqModel.GPT_OSS_120B.value  # OpenAI GPT-OSS 120B - flagship reasoning model
+    llm_model: str = GroqModel.LLAMA_3_1_8B.value  # llama-3.1-8b-instant — Groq's recommended voice model (560 t/s, ~90ms TTFT)
     llm_temperature: float = Field(default=0.6, ge=0.0, le=2.0)
-    llm_max_tokens: int = Field(default=150, ge=1, le=1000)
+    llm_max_tokens: int = Field(default=90, ge=1, le=1000)  # 90 tokens ≈ 2 sentences; voice guideline for low latency
     
     # STT Configuration
     stt_provider: STTProvider = STTProvider.DEEPGRAM

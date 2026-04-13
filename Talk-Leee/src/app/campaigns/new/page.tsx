@@ -35,10 +35,11 @@ export default function NewCampaignPage() {
         async function fetchVoices() {
             try {
                 setLoadingVoices(true);
-                const [voiceList, config] = await Promise.all([
+                const [voicesResult, config] = await Promise.all([
                     aiOptionsApi.getVoices(),
                     aiOptionsApi.getConfig(),
                 ]);
+                const voiceList = voicesResult.voices;
                 const providerVoices = voiceList.filter((voice) => voice.provider === config.tts_provider);
                 setVoices(voiceList);
                 setGlobalAiConfig(config);

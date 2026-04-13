@@ -88,6 +88,47 @@ async def lifespan(app: FastAPI):
 
     logger.info("Talky.ai started successfully")
 
+    # ── 4. Restore saved AI config ────────────────────────────────
+    # Load the most-recently saved tenant config from DB so the global AI
+    # config (TTS provider, voice, LLM model) survives server restarts and
+    # hot-reloads without requiring the user to re-visit AI Options first.
+    try:
+        from app.domain.services.global_ai_config import set_global_config
+        from app.domain.models.ai_config import AIProviderConfig
+        db_client = container.db_client
+        async with db_client.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT llm_provider, llm_model, llm_temperature, llm_max_tokens,
+                       stt_provider, stt_model, stt_language,
+                       tts_provider, tts_model, tts_voice_id, tts_sample_rate
+                FROM tenant_ai_configs
+                ORDER BY updated_at DESC NULLS LAST
+                LIMIT 1
+                """
+            )
+        if row:
+            saved = AIProviderConfig(
+                llm_provider=row["llm_provider"],
+                llm_model=row["llm_model"],
+                llm_temperature=row["llm_temperature"],
+                llm_max_tokens=row["llm_max_tokens"],
+                stt_provider=row["stt_provider"],
+                stt_model=row["stt_model"],
+                stt_language=row["stt_language"],
+                tts_provider=row["tts_provider"],
+                tts_model=row["tts_model"],
+                tts_voice_id=row["tts_voice_id"],
+                tts_sample_rate=row["tts_sample_rate"],
+            )
+            set_global_config(saved)
+            logger.info(
+                "AI config restored from DB: tts=%s voice=%s llm=%s",
+                saved.tts_provider, saved.tts_voice_id, saved.llm_model,
+            )
+    except Exception as exc:
+        logger.warning("Could not restore AI config from DB (using defaults): %s", exc)
+
     # Auto-connect telephony bridge so campaigns can originate calls immediately.
     # Must happen after container startup (needs event loop to be running).
     from app.infrastructure.telephony.adapter_factory import CallControlAdapterFactory

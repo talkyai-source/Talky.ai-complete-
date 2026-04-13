@@ -113,7 +113,7 @@ const RawModelSchema = z
         id: z.string(),
         name: z.string(),
         description: z.string(),
-        speed: z.string().optional(),
+        speed: z.string().nullish(),
         price: z.string().nullish(),
         context_window: z.number().nullish(),
         contextWindow: z.number().nullish(),
@@ -256,7 +256,7 @@ function normalizeModel(model: z.infer<typeof RawModelSchema>): ModelInfo {
         id: model.id,
         name: model.name,
         description: model.description,
-        speed: model.speed,
+        speed: model.speed ?? undefined,
         price: model.price ?? undefined,
         context_window: model.context_window ?? model.contextWindow ?? undefined,
         is_preview: model.is_preview ?? model.isPreview,
@@ -349,9 +349,18 @@ class AIOptionsApi {
     }
 
     // Get available TTS voices
-    async getVoices(): Promise<VoiceInfo[]> {
+    async getVoices(): Promise<{ voices: VoiceInfo[]; elevenlabs_error?: string }> {
         const data = await requestPath<unknown>("/ai-options/voices", { timeoutMs: 12_000 });
-        return z.array(RawVoiceSchema).parse(data).map(normalizeVoice);
+        // Backend returns { voices: [...], elevenlabs_error?: string }
+        if (data && typeof data === "object" && "voices" in data) {
+            const envelope = data as { voices: unknown[]; elevenlabs_error?: string };
+            return {
+                voices: z.array(RawVoiceSchema).parse(envelope.voices).map(normalizeVoice),
+                elevenlabs_error: envelope.elevenlabs_error,
+            };
+        }
+        // Fallback: bare array (legacy)
+        return { voices: z.array(RawVoiceSchema).parse(data).map(normalizeVoice) };
     }
 
     // Preview a voice with sample audio
@@ -378,13 +387,22 @@ class AIOptionsApi {
     }
 
     // Save configuration
-    async saveConfig(config: AIProviderConfig): Promise<AIProviderConfig> {
+    async saveConfig(config: AIProviderConfig): Promise<{ config: AIProviderConfig; latency_warnings: string[] }> {
         const data = await requestPath<unknown>("/ai-options/config", {
             method: "POST",
             body: config,
             timeoutMs: 12_000,
         });
-        return normalizeConfig(RawConfigSchema.parse(data));
+        // Backend returns AIProviderConfigWithWarnings: { config: {...}, latency_warnings: [...] }
+        if (data && typeof data === "object" && "config" in data) {
+            const envelope = data as { config: unknown; latency_warnings?: string[] };
+            return {
+                config: normalizeConfig(RawConfigSchema.parse(envelope.config)),
+                latency_warnings: envelope.latency_warnings ?? [],
+            };
+        }
+        // Fallback: bare config (legacy / test environments)
+        return { config: normalizeConfig(RawConfigSchema.parse(data)), latency_warnings: [] };
     }
 
     // Test LLM with message
@@ -420,6 +438,21 @@ class AIOptionsApi {
             model: parsed.model,
             voice_id: parsed.voice_id ?? parsed.voiceId ?? request.voice_id,
         };
+    }
+
+    // Pre-download and cache all voice samples on the server
+    async prefetchAllSamples(): Promise<{ cached: number; skipped_already_cached: number; failed: number; failures: Array<{ voice_id: string; error: string }> }> {
+        const data = await requestPath<unknown>("/ai-options/voices/prefetch", {
+            method: "POST",
+            timeoutMs: 300_000, // up to 5 min for large voice libraries
+        });
+        return data as ReturnType<AIOptionsApi["prefetchAllSamples"]> extends Promise<infer R> ? R : never;
+    }
+
+    // Get prefetch cache status
+    async getPrefetchStatus(): Promise<{ deepgram_key_configured: boolean; elevenlabs_key_configured: boolean; preview_samples_cached: number; elevenlabs_mp3_samples_cached: number }> {
+        const data = await requestPath<unknown>("/ai-options/voices/prefetch-status");
+        return data as ReturnType<AIOptionsApi["getPrefetchStatus"]> extends Promise<infer R> ? R : never;
     }
 
     // Run full benchmark

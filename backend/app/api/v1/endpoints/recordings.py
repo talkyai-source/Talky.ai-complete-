@@ -29,6 +29,7 @@ router = APIRouter(prefix="/recordings", tags=["recordings"])
 class RecordingListItem(BaseModel):
     id: str
     call_id: str
+    phone_number: Optional[str] = None
     created_at: str
     duration_seconds: Optional[int] = None
     file_size_bytes: Optional[int] = None
@@ -77,8 +78,10 @@ async def list_recordings(
         rows = await conn.fetch(
             f"""
             SELECT r.id, r.call_id, r.created_at,
-                   r.duration_seconds, r.file_size_bytes, r.status
+                   r.duration_seconds, r.file_size_bytes, r.status,
+                   c.phone_number
             FROM recordings_s3 r
+            LEFT JOIN calls c ON c.id = r.call_id
             WHERE {where}
             ORDER BY r.created_at DESC
             LIMIT ${idx} OFFSET ${idx+1}
@@ -94,6 +97,7 @@ async def list_recordings(
         RecordingListItem(
             id=str(r["id"]),
             call_id=str(r["call_id"]),
+            phone_number=r["phone_number"],
             created_at=r["created_at"].isoformat(),
             duration_seconds=r["duration_seconds"],
             file_size_bytes=r["file_size_bytes"],

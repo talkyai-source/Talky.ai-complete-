@@ -63,50 +63,54 @@ class CartesiaTTSProvider(TTSProvider):
         **kwargs
     ) -> AsyncIterator[AudioChunk]:
         """
-        Stream synthesized audio using Cartesia WebSocket API.
-        
-        Based on LiveKit's official implementation for jitter-free streaming.
-        Uses pcm_s16le encoding for browser compatibility.
-        
+        Stream synthesized audio using Cartesia WebSocket API (true streaming).
+
+        Uses the WebSocket endpoint so Cartesia starts sending audio ~40ms after
+        the request — first audio arrives before synthesis is complete.
+
+        The previous implementation used POST /tts/bytes (REST) which waits for
+        the entire audio to be generated before sending any bytes.  That endpoint
+        is non-streaming despite the iter_chunked read loop; every sentence
+        incurred 400-900ms silence before the first audio sample reached the user.
+
         Args:
-            text: Text to synthesize
-            voice_id: Voice identifier
-            sample_rate: Audio sample rate (default 24000 as recommended)
-            **kwargs: Additional parameters:
-                - language: Language code (default: "en")
-                - speed: Speed 0.6-1.5 for Sonic-3
-                - emotion: Emotion string (e.g., "content", "excited")
-        
+            text: Text to synthesize (one sentence from the pipeline)
+            voice_id: Cartesia voice ID
+            sample_rate: Output sample rate (default 24000)
+            **kwargs: language, speed, emotion
+
         Yields:
-            AudioChunk: Streaming audio chunks
+            AudioChunk with Float32 PCM data (gateway converts to Int16)
         """
         if not self._session:
             raise RuntimeError("Cartesia client not initialized. Call initialize() first.")
-        
+
         selected_voice_id = voice_id or self._voice_id
         language = kwargs.get("language", self._language)
         speed = kwargs.get("speed")
         emotion = kwargs.get("emotion")
-        
-        # Build request payload following official Cartesia format
-        voice_config: Dict[str, Any] = {
-            "mode": "id",
-            "id": selected_voice_id
-        }
-        
+
+        ws_url = (
+            f"wss://api.cartesia.ai/tts/websocket"
+            f"?api_key={self._api_key}"
+            f"&cartesia_version={self.API_VERSION}"
+        )
+
+        voice_config: Dict[str, Any] = {"mode": "id", "id": selected_voice_id}
         payload: Dict[str, Any] = {
             "model_id": self._model_id,
             "transcript": text,
             "voice": voice_config,
             "output_format": {
                 "container": "raw",
-                "encoding": "pcm_s16le",  # Use Int16 (like Google TTS), convert to Float32 for browser
-                "sample_rate": sample_rate
+                "encoding": "pcm_s16le",
+                "sample_rate": sample_rate,
             },
-            "language": language
+            "language": language,
+            "context_id": os.urandom(8).hex(),
+            "continue": False,
         }
-        
-        # Add generation_config for Sonic-3 speed/emotion (official method)
+
         generation_config: Dict[str, Any] = {}
         if speed is not None:
             generation_config["speed"] = speed
@@ -114,56 +118,61 @@ class CartesiaTTSProvider(TTSProvider):
             generation_config["emotion"] = emotion
         if generation_config:
             payload["generation_config"] = generation_config
-            logger.info(f"[Cartesia] Using generation_config: {generation_config}")
-        
-        logger.info(f"[Cartesia] Synthesizing: '{text[:50]}...' voice={selected_voice_id}")
-        
+
+        logger.debug("[Cartesia] WS stream: '%s...' voice=%s", text[:50], selected_voice_id)
+
         try:
-            # Use bytes endpoint for simple streaming (SSE approach)
-            headers = {
-                "X-API-Key": self._api_key,
-                "Cartesia-Version": self.API_VERSION,
-                "Content-Type": "application/json",
-                "Accept": "audio/*"
-            }
-            
-            async with self._session.post(
-                f"{self.API_BASE_URL}/tts/bytes",
-                headers=headers,
-                json=payload,
-                timeout=aiohttp.ClientTimeout(total=30)
-            ) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    logger.error(f"[Cartesia] API error {response.status}: {error_text}")
-                    raise RuntimeError(f"Cartesia API error: {response.status}")
-                
-                # Stream audio chunks - read larger chunks for smooth playback
-                # For pcm_s16le: 2 bytes per sample, ~500ms chunks
-                chunk_size = sample_rate * 2 // 2  # ~500ms of audio (2 bytes per sample)
-                
-                async for chunk in response.content.iter_chunked(chunk_size):
-                    if chunk:
-                        # Convert Int16 to Float32 for browser playback (same as Google TTS)
-                        int16_array = np.frombuffer(chunk, dtype=np.int16)
-                        float32_array = (int16_array.astype(np.float32) / 32768.0)
-                        float32_data = float32_array.tobytes()
-                        
-                        yield AudioChunk(
-                            data=float32_data,
-                            sample_rate=sample_rate,
-                            channels=1
-                        )
-        
+            async with self._session.ws_connect(
+                ws_url,
+                timeout=aiohttp.ClientTimeout(connect=3.0, sock_read=10.0),
+            ) as ws:
+                await ws.send_str(json.dumps(payload))
+
+                async for msg in ws:
+                    if msg.type == aiohttp.WSMsgType.TEXT:
+                        data = json.loads(msg.data)
+
+                        if data.get("data"):
+                            # Audio arrives as base64-encoded Int16 PCM
+                            audio_bytes = base64.b64decode(data["data"])
+                            if not audio_bytes:
+                                continue
+                            # Align to Int16 frame boundary (2 bytes/sample)
+                            if len(audio_bytes) % 2 != 0:
+                                audio_bytes = audio_bytes[:-1]
+                            # Convert Int16 → Float32 so the media gateway's
+                            # tts_source_format="f32le" path applies tanh saturation
+                            int16_arr = np.frombuffer(audio_bytes, dtype=np.int16)
+                            float32_data = (int16_arr.astype(np.float32) / 32768.0).tobytes()
+                            yield AudioChunk(
+                                data=float32_data,
+                                sample_rate=sample_rate,
+                                channels=1,
+                            )
+
+                        elif data.get("done"):
+                            break
+
+                        elif data.get("type") == "error":
+                            logger.error("[Cartesia WS] Error: %s", data)
+                            raise RuntimeError(f"Cartesia WS error: {data}")
+
+                    elif msg.type in (
+                        aiohttp.WSMsgType.CLOSED,
+                        aiohttp.WSMsgType.ERROR,
+                    ):
+                        logger.warning("[Cartesia WS] Connection closed: %s", msg)
+                        break
+
         except asyncio.TimeoutError:
-            logger.error("[Cartesia] Request timeout")
-            raise RuntimeError("Cartesia TTS request timeout")
-        except aiohttp.ClientError as e:
-            logger.error(f"[Cartesia] Client error: {e}")
-            raise RuntimeError(f"Cartesia TTS error: {e}")
-        except Exception as e:
-            logger.error(f"[Cartesia] TTS synthesis failed: {e}")
-            raise RuntimeError(f"Cartesia TTS synthesis failed: {e}")
+            raise RuntimeError("Cartesia TTS WebSocket timeout")
+        except aiohttp.ClientError as exc:
+            raise RuntimeError(f"Cartesia TTS WebSocket error: {exc}")
+        except Exception as exc:
+            if not isinstance(exc, RuntimeError):
+                logger.error("[Cartesia] synthesis failed: %s", exc, exc_info=True)
+                raise RuntimeError(f"Cartesia TTS synthesis failed: {exc}")
+            raise
     
     async def stream_synthesize_websocket(
         self,

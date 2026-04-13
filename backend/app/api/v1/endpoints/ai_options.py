@@ -15,6 +15,7 @@ import base64
 import struct
 import asyncio
 import logging
+from pathlib import Path
 from typing import Optional, List, Set
 
 import aiohttp
@@ -52,6 +53,7 @@ from app.infrastructure.tts.elevenlabs_catalog import (
     get_elevenlabs_tts_models_for_current_key,
     get_elevenlabs_voice_by_id,
     get_elevenlabs_voices_for_current_key,
+    get_elevenlabs_last_error,
     elevenlabs_enabled,
 )
 from app.domain.models.conversation import Message, MessageRole
@@ -67,6 +69,13 @@ _DEEPGRAM_MODELS_CACHE_TTL_SECONDS = 300.0
 _deepgram_voice_cache_ids: Optional[Set[str]] = None
 _deepgram_voice_cache_expires_at: float = 0.0
 _deepgram_voice_cache_lock = asyncio.Lock()
+
+# Disk cache for generated float32 PCM previews (keyed by provider + voice_id).
+# ElevenLabs stores MP3 in its own cache dir; this stores decoded float32 for
+# both Deepgram and ElevenLabs so /voices/preview is served from disk on
+# subsequent calls without hitting any external API.
+_VOICE_PREVIEW_CACHE_DIR = Path("/tmp/talky-voice-preview-cache")
+_PREVIEW_SAMPLE_TEXT = "Hello, I am your AI voice assistant. How can I help you today?"
 
 
 async def _fetch_tenant_config(conn, tenant_id: str) -> Optional[AIProviderConfig]:
@@ -299,6 +308,31 @@ def _linear16_to_float32le_bytes(pcm16_data: bytes) -> bytes:
     )
 
 
+def _preview_cache_path(voice_id: str) -> Path:
+    safe = "".join(ch for ch in voice_id if ch.isalnum() or ch in {"-", "_"})
+    return _VOICE_PREVIEW_CACHE_DIR / f"{safe or 'voice'}.f32"
+
+
+def _load_preview_cache(voice_id: str) -> Optional[bytes]:
+    path = _preview_cache_path(voice_id)
+    try:
+        if path.exists() and path.stat().st_size > 0:
+            return path.read_bytes()
+    except OSError:
+        pass
+    return None
+
+
+def _save_preview_cache(voice_id: str, float32_bytes: bytes) -> None:
+    try:
+        _VOICE_PREVIEW_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = _preview_cache_path(voice_id).with_suffix(".tmp")
+        tmp.write_bytes(float32_bytes)
+        tmp.replace(_preview_cache_path(voice_id))
+    except OSError as exc:
+        logger.warning("Could not write preview cache for %s: %s", voice_id, exc)
+
+
 @router.get("/providers", response_model=ProviderListResponse)
 async def list_providers():
     """
@@ -337,23 +371,19 @@ async def list_providers():
     )
 
 
-@router.get("/voices", response_model=List[VoiceInfo])
+@router.get("/voices")
 async def list_voices():
     """
-    Get all available TTS voices (curated list for voice agents).
-    
-    Returns curated voices optimized for voice AI agents.
-    These voices are pre-selected for clarity, naturalness, and
-    suitability for business calls.
-    
-    Includes:
-    - Google Chirp 3 HD voices
-    - Deepgram Aura-2 voices
-    
-    Returns:
-        List of VoiceInfo with voice details and preview info
+    Get all available TTS voices.  Returns a JSON object with a `voices` list
+    and an optional `elevenlabs_error` string when the ElevenLabs API key is
+    invalid or the API returned an error.
     """
-    return await _get_all_tts_voices()
+    voices = await _get_all_tts_voices()
+    el_error = get_elevenlabs_last_error() if elevenlabs_enabled() else None
+    response: dict = {"voices": [v.model_dump() for v in voices]}
+    if el_error:
+        response["elevenlabs_error"] = el_error
+    return response
 
 
 @router.get("/voices/{voice_id}/sample")
@@ -417,6 +447,19 @@ async def preview_voice(request: VoicePreviewRequest):
         VoicePreviewResponse with base64 audio data
     """
     try:
+        # Serve from disk cache when available — no external API call needed.
+        cached = _load_preview_cache(request.voice_id)
+        if cached:
+            audio_base64 = base64.b64encode(cached).decode("utf-8")
+            duration_seconds = len(cached) / (24000 * 4)
+            return VoicePreviewResponse(
+                voice_id=request.voice_id,
+                voice_name=request.voice_id,
+                audio_base64=audio_base64,
+                duration_seconds=duration_seconds,
+                latency_ms=0.0,
+            )
+
         tts = None
         deepgram_voices = await _get_deepgram_voices_for_current_key()
         deepgram_voice_map = {voice.id: voice for voice in deepgram_voices}
@@ -424,33 +467,36 @@ async def preview_voice(request: VoicePreviewRequest):
             voice.id: voice
             for voice in _english_deepgram_static_voices()
         }
-        elevenlabs_voice = await _find_elevenlabs_voice(request.voice_id)
 
-        voice_info = (
-            _find_google_voice(request.voice_id)
-            or deepgram_voice_map.get(request.voice_id)
-            or deepgram_static_voice_map.get(request.voice_id)
-            or elevenlabs_voice
-        )
-        voice_name = voice_info.name if voice_info else "Unknown Voice"
         voice_id = request.voice_id
         sample_rate = 24000
 
-        if _is_google_voice(voice_id):
-            backend_dir = os.path.dirname(
-                os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-            )
-            creds_path = os.path.join(backend_dir, "config", "google-service-account.json")
-            if not os.path.exists(creds_path):
+        # Determine provider by checking in order — avoids hitting ElevenLabs
+        # API with Google/Deepgram voice IDs (which returns a 400 error).
+        is_google = _is_google_voice(voice_id)
+        is_deepgram = voice_id in deepgram_voice_map or voice_id in deepgram_static_voice_map
+        elevenlabs_voice = None if (is_google or is_deepgram) else await _find_elevenlabs_voice(voice_id)
+
+        voice_info = (
+            _find_google_voice(voice_id)
+            or deepgram_voice_map.get(voice_id)
+            or deepgram_static_voice_map.get(voice_id)
+            or elevenlabs_voice
+        )
+        voice_name = voice_info.name if voice_info else "Unknown Voice"
+
+        if is_google:
+            # Use GOOGLE_APPLICATION_CREDENTIALS from env (set in .env).
+            creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+            if not creds_path or not os.path.exists(creds_path):
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail=f"Google service account file not found at: {creds_path}",
+                    detail="Google service account credentials not configured. Set GOOGLE_APPLICATION_CREDENTIALS in .env",
                 )
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
             tts = GoogleTTSStreamingProvider()
             await tts.initialize({"voice_id": voice_id, "sample_rate": sample_rate})
             output_is_linear16 = False
-        elif voice_id in deepgram_voice_map or voice_id in deepgram_static_voice_map:
+        elif is_deepgram:
             if not os.getenv("DEEPGRAM_API_KEY"):
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -495,10 +541,13 @@ async def preview_voice(request: VoicePreviewRequest):
 
         combined_audio = b"".join(audio_chunks)
         if output_is_linear16:
-            # Deepgram returns linear16 PCM; convert to float32 for frontend preview playback.
+            # Deepgram/ElevenLabs return linear16 PCM; convert to float32 for frontend.
             combined_audio = _linear16_to_float32le_bytes(combined_audio)
-        audio_base64 = base64.b64encode(combined_audio).decode("utf-8")
 
+        # Persist to disk so subsequent preview requests skip the API call entirely.
+        _save_preview_cache(request.voice_id, combined_audio)
+
+        audio_base64 = base64.b64encode(combined_audio).decode("utf-8")
         duration_seconds = len(combined_audio) / (sample_rate * 4)
         latency_ms = (end_time - start_time) * 1000
 
@@ -517,6 +566,126 @@ async def preview_voice(request: VoicePreviewRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Voice preview failed: {str(e)}"
         )
+
+
+@router.get("/voices/prefetch-status")
+async def get_prefetch_status():
+    """
+    Return how many voice preview samples are cached on disk, plus whether
+    each provider key is configured.
+    """
+    cached_ids: List[str] = []
+    try:
+        if _VOICE_PREVIEW_CACHE_DIR.exists():
+            cached_ids = [p.stem for p in _VOICE_PREVIEW_CACHE_DIR.glob("*.f32")]
+    except OSError:
+        pass
+
+    # Also count ElevenLabs MP3 cache (downloaded preview files)
+    from app.infrastructure.tts.elevenlabs_catalog import (
+        _ELEVENLABS_PREVIEW_CACHE_DIR,
+        elevenlabs_api_key,
+    )
+    el_mp3_count = 0
+    try:
+        if _ELEVENLABS_PREVIEW_CACHE_DIR.exists():
+            el_mp3_count = sum(1 for p in _ELEVENLABS_PREVIEW_CACHE_DIR.glob("*.mp3"))
+    except OSError:
+        pass
+
+    return {
+        "deepgram_key_configured": bool(os.getenv("DEEPGRAM_API_KEY")),
+        "elevenlabs_key_configured": bool(elevenlabs_api_key()),
+        "preview_samples_cached": len(cached_ids),
+        "elevenlabs_mp3_samples_cached": el_mp3_count,
+    }
+
+
+@router.post("/voices/prefetch")
+async def prefetch_all_voice_samples():
+    """
+    Pre-download and cache preview samples for every available voice.
+
+    - ElevenLabs: downloads each voice's pre-recorded MP3 from the ElevenLabs CDN
+      (no TTS token consumed) AND generates a float32 PCM sample via the Flash model.
+    - Deepgram: synthesizes a short sample via the TTS API and caches float32 PCM.
+
+    After this completes, all /voices/preview requests are served from disk cache
+    without hitting any external API.
+    """
+    all_voices = await _get_all_tts_voices()
+    sample_rate = 24000
+
+    results: dict = {"ok": [], "failed": [], "skipped": []}
+
+    async def _cache_one(voice: VoiceInfo) -> None:
+        voice_id = voice.id
+
+        # Already cached — skip.
+        if _load_preview_cache(voice_id):
+            results["skipped"].append(voice_id)
+            return
+
+        try:
+            if voice.provider == "elevenlabs":
+                # Step 1: download the pre-recorded MP3 (no token cost).
+                from app.infrastructure.tts.elevenlabs_catalog import ensure_elevenlabs_preview_cached
+                await ensure_elevenlabs_preview_cached(voice_id)
+
+                # Step 2: synthesize via TTS to build the float32 PCM cache entry.
+                if not os.getenv("ELEVENLABS_API_KEY"):
+                    results["skipped"].append(voice_id)
+                    return
+                tts = ElevenLabsTTSProvider()
+                await tts.initialize({
+                    "voice_id": voice_id,
+                    "model_id": "eleven_flash_v2_5",
+                    "sample_rate": sample_rate,
+                })
+                chunks: List[bytes] = []
+                async for chunk in tts.stream_synthesize(
+                    text=_PREVIEW_SAMPLE_TEXT, voice_id=voice_id, sample_rate=sample_rate
+                ):
+                    chunks.append(chunk.data)
+                await tts.cleanup()
+                pcm = _linear16_to_float32le_bytes(b"".join(chunks))
+                _save_preview_cache(voice_id, pcm)
+
+            elif voice.provider == "deepgram":
+                if not os.getenv("DEEPGRAM_API_KEY"):
+                    results["skipped"].append(voice_id)
+                    return
+                tts = DeepgramTTSProvider()
+                await tts.initialize({"voice_id": voice_id, "sample_rate": sample_rate})
+                chunks = []
+                async for chunk in tts.stream_synthesize(
+                    text=_PREVIEW_SAMPLE_TEXT, voice_id=voice_id, sample_rate=sample_rate
+                ):
+                    chunks.append(chunk.data)
+                await tts.cleanup()
+                pcm = _linear16_to_float32le_bytes(b"".join(chunks))
+                _save_preview_cache(voice_id, pcm)
+
+            else:
+                # Google Chirp — preview works fine via on-demand TTS; skip prefetch.
+                results["skipped"].append(voice_id)
+                return
+
+            results["ok"].append(voice_id)
+
+        except Exception as exc:
+            logger.warning("Prefetch failed for voice %s: %s", voice_id, exc)
+            results["failed"].append({"voice_id": voice_id, "error": str(exc)})
+
+    # Run all voices concurrently (bounded by provider rate limits in practice).
+    await asyncio.gather(*(_cache_one(v) for v in all_voices), return_exceptions=True)
+
+    return {
+        "cached": len(results["ok"]),
+        "skipped_already_cached": len(results["skipped"]),
+        "failed": len(results["failed"]),
+        "failures": results["failed"],
+    }
 
 
 @router.post("/test/llm", response_model=LLMTestResponse)
@@ -776,7 +945,7 @@ async def get_config(
     return config
 
 
-@router.post("/config", response_model=AIProviderConfig)
+@router.post("/config", response_model=AIProviderConfigWithWarnings)
 async def save_config(
     config: AIProviderConfig,
     current_user=Depends(get_current_user),
@@ -784,18 +953,18 @@ async def save_config(
 ):
     """
     Save AI provider configuration GLOBALLY.
-    
+
     This configuration is used for ALL voice interactions:
     - Dummy calls
     - Real phone calls
     - SIP calls
     - Voice pipeline throughout the application
-    
+
     Args:
         config: AIProviderConfig with desired settings
-    
+
     Returns:
-        Saved AIProviderConfig
+        AIProviderConfigWithWarnings — saved config plus soft latency advisory warnings
     """
     from app.domain.models.ai_config import GoogleTTSModel, DeepgramTTSModel
     from app.domain.services.global_ai_config import set_global_config
@@ -876,9 +1045,66 @@ async def save_config(
     async with db_client.pool.acquire() as conn:
         await _upsert_tenant_config(conn, tenant_id, config)
 
+    # Compute soft latency warnings — advisory only, never blocks saving.
+    # Sources: Groq official docs 2025, Cresta voice latency post 2025.
+    FAST_MODELS = {
+        "llama-3.1-8b-instant",
+        "openai/gpt-oss-20b",
+        "meta-llama/llama-4-scout-17b-16e-instruct",
+    }
+    SLOW_MODELS = {
+        "openai/gpt-oss-120b",
+        "moonshotai/kimi-k2-instruct-0905",
+    }
+    PREVIEW_MODELS = {
+        "meta-llama/llama-4-maverick-17b-128e-instruct",
+        "meta-llama/llama-4-scout-17b-16e-instruct",
+        "qwen/qwen3-32b",
+        "moonshotai/kimi-k2-instruct-0905",
+    }
+
+    latency_warnings: list[str] = []
+
+    if config.llm_model in SLOW_MODELS:
+        latency_warnings.append(
+            f"'{config.llm_model}' is a large reasoning model. "
+            "Expected TTFT: 300–600ms vs ~90ms for llama-3.1-8b-instant. "
+            "Recommended for quality use cases, not real-time voice."
+        )
+    elif config.llm_model not in FAST_MODELS:
+        latency_warnings.append(
+            f"'{config.llm_model}' has moderate latency (~150–250ms TTFT). "
+            "For lowest latency, use llama-3.1-8b-instant (560 t/s on Groq)."
+        )
+
+    if config.llm_model in PREVIEW_MODELS:
+        latency_warnings.append(
+            f"'{config.llm_model}' is a preview model. "
+            "Preview models may have higher latency, rate limits, or instability in production."
+        )
+
+    if config.llm_max_tokens > 150:
+        latency_warnings.append(
+            f"llm_max_tokens={config.llm_max_tokens} allows long responses. "
+            "Each extra 50 tokens adds ~50–100ms TTS latency per turn. "
+            "Voice guideline: keep under 100 tokens (1–2 sentences)."
+        )
+    elif config.llm_max_tokens > 100:
+        latency_warnings.append(
+            f"llm_max_tokens={config.llm_max_tokens}. "
+            "Voice guideline is 90 tokens (2 sentences). "
+            "Higher values may produce longer responses than callers expect."
+        )
+
     # Applies immediately to active voice pipeline selection.
     set_global_config(config)
-    return config
+    return AIProviderConfigWithWarnings(config=config, latency_warnings=latency_warnings)
+
+
+class AIProviderConfigWithWarnings(BaseModel):
+    """AIProviderConfig plus soft latency warnings returned by save_config."""
+    config: AIProviderConfig
+    latency_warnings: list[str] = []
 
 
 class LatencyBenchmarkResponse(BaseModel):

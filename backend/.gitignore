@@ -61,3 +61,7 @@ Thumbs.db
 # Misc
 *.bak
 *.tmp
+
+# Google service account keys - NEVER commit
+*service_account*.json
+gen-lang-client-*.json

@@ -44,6 +44,12 @@ class FreeSwitchAdapter(CallControlAdapter):
             port=int(esl_port or os.getenv("FREESWITCH_ESL_PORT", "8021")),
             password=esl_password or os.getenv("FREESWITCH_ESL_PASSWORD", "ClueCon"),
         )
+        if self._esl_config.password == "ClueCon":
+            logger.warning(
+                "FreeSwitchAdapter: ESL password is the factory default 'ClueCon' — "
+                "this is a known RCE vector (Rapid7 CVE) if port 8021 is reachable. "
+                "Set FREESWITCH_ESL_PASSWORD env var."
+            )
         self._audio_fork_ws_url = audio_fork_ws_url or os.getenv(
             "FREESWITCH_AUDIO_FORK_WS_URL",
             "ws://127.0.0.1:8000/api/v1/sip/telephony/ws-audio",

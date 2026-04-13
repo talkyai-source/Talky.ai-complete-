@@ -10,6 +10,7 @@ lower sample-rate / smaller frame size typical of telephony.
 
 import asyncio
 import logging
+from collections import deque
 from typing import Dict, Any, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -40,7 +41,7 @@ class BrowserSession:
     output_queue: asyncio.Queue = field(
         default_factory=lambda: asyncio.Queue(maxsize=100)
     )
-    recording_buffer: list = field(default_factory=list)
+    recording_buffer: deque = field(default_factory=deque)
     # Cumulative byte count of recording_buffer contents (avoids O(n) sum on
     # every append).  Used to enforce the memory cap without iterating the list.
     recording_buffer_bytes: int = 0
@@ -71,6 +72,15 @@ class BrowserSession:
     ws_send_timeouts: int = 0
     ws_send_errors: int = 0
     last_send_latency_ms: float = 0.0
+
+
+class SessionGoneError(Exception):
+    """Raised by send_audio when the browser session has already been torn down.
+
+    Propagates up through synthesize_and_send_audio so the TTS generator
+    stops immediately instead of logging dozens of 'Unknown session for send'
+    warnings until the Deepgram stream drains naturally.
+    """
 
 
 class BrowserMediaGateway(MediaGateway):
@@ -250,7 +260,7 @@ class BrowserMediaGateway(MediaGateway):
         session.recording_buffer.append(chunk_to_process)
         session.recording_buffer_bytes += len(chunk_to_process)
         while session.recording_buffer_bytes > _MAX_RECORDING_BYTES and session.recording_buffer:
-            evicted = session.recording_buffer.pop(0)
+            evicted = session.recording_buffer.popleft()
             session.recording_buffer_bytes -= len(evicted)
 
         # Buffer for STT processing
@@ -286,11 +296,14 @@ class BrowserMediaGateway(MediaGateway):
         """
         session = self._sessions.get(call_id)
         if not session:
-            logger.warning(f"Unknown session for send: {call_id}")
-            return
+            # Raise instead of returning silently: the TTS pipeline catches
+            # this and breaks out of the synthesis loop immediately, stopping
+            # the 80+ "Unknown session" warning flood that occurs when the
+            # browser disconnects while audio is still being streamed.
+            raise SessionGoneError(call_id)
 
         if not session.is_active:
-            return
+            raise SessionGoneError(call_id)
 
         # Maintain 16-bit frame alignment across chunk boundaries.
         if session.pending_byte:

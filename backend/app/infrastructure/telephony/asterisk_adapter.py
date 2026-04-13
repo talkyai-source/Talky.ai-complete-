@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import random
 import uuid
 from typing import Any, Callable, Coroutine, Dict, List, Optional
 
@@ -57,6 +58,11 @@ class AsteriskAdapter(CallControlAdapter):
         self._ari_port = int(ari_port or os.getenv("ASTERISK_ARI_PORT", "8088"))
         self._ari_username = ari_username or os.getenv("ASTERISK_ARI_USER", "talky")
         self._ari_password = ari_password or os.getenv("ASTERISK_ARI_PASSWORD", "talky_local_only_change_me")
+        if self._ari_password in ("talky_local_only_change_me", "talky", "admin", "password", ""):
+            logger.warning(
+                "AsteriskAdapter: ARI password is a known default — "
+                "set ASTERISK_ARI_PASSWORD env var in production"
+            )
         self._gateway_base_url = (gateway_base_url or os.getenv("ASTERISK_GATEWAY_BASE_URL", "http://127.0.0.1:18080")).rstrip("/")
         self._app_name = app_name or os.getenv("ASTERISK_ARI_APP", "talky_ai")
         self._gateway_rtp_ip = gateway_rtp_ip or os.getenv("ASTERISK_GATEWAY_RTP_IP", "127.0.0.1")
@@ -267,9 +273,11 @@ class AsteriskAdapter(CallControlAdapter):
             f"ws://{self._ari_host}:{self._ari_port}/ari/events"
             f"?app={self._app_name}&api_key={api_key}"
         )
-        logger.info(f"AsteriskAdapter: connecting ARI WS {ws_url}")
+        safe_url = ws_url.replace(api_key, f"{self._ari_username}:***")
+        logger.info("AsteriskAdapter: connecting ARI WS %s", safe_url)
 
         connector = aiohttp.TCPConnector()
+        _reconnect_attempts = 0
         async with aiohttp.ClientSession(connector=connector) as sess:
             while not self._stop_event.is_set():
                 try:
@@ -278,6 +286,7 @@ class AsteriskAdapter(CallControlAdapter):
                         heartbeat=20,
                         timeout=aiohttp.ClientWSTimeout(ws_close=5),
                     ) as ws:
+                        _reconnect_attempts = 0
                         logger.info("AsteriskAdapter: ARI WS connected")
                         async for msg in ws:
                             if self._stop_event.is_set():
@@ -299,10 +308,14 @@ class AsteriskAdapter(CallControlAdapter):
                 except Exception as exc:
                     if self._stop_event.is_set():
                         return
+                    _reconnect_attempts += 1
+                    delay = min(0.25 * (2 ** (_reconnect_attempts - 1)), 30.0) * (0.5 + random.random())
                     logger.warning(
-                        f"AsteriskAdapter: ARI WS disconnected ({exc}); reconnecting in 3s"
+                        "AsteriskAdapter: ARI WS disconnected (attempt=%d, retry_in=%.1fs) — %s",
+                        _reconnect_attempts, delay, exc,
+                        extra={"ari_reconnect_attempt": _reconnect_attempts, "retry_delay_s": round(delay, 2)},
                     )
-                    await asyncio.sleep(3)
+                    await asyncio.sleep(delay)
 
     async def _handle_ari_event(self, event: Dict[str, Any]) -> None:
         """Process ARI events and drive the session lifecycle."""
