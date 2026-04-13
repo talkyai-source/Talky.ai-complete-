@@ -26,6 +26,7 @@ export interface CallAnalyticsResponse {
 export interface Recording {
     id: string;
     call_id: string;
+    phone_number?: string;
     created_at: string;
     duration_seconds?: number;
 }

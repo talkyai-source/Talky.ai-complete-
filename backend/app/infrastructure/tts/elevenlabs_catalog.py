@@ -40,6 +40,14 @@ _elevenlabs_voices_cache_lock = asyncio.Lock()
 _elevenlabs_preview_url_cache: dict[str, str] = {}
 _elevenlabs_preview_download_locks: dict[str, asyncio.Lock] = {}
 
+# Last error from ElevenLabs API — exposed to the /providers endpoint so the
+# frontend can show a meaningful message instead of "0 voices available".
+_elevenlabs_last_error: Optional[str] = None
+
+
+def get_elevenlabs_last_error() -> Optional[str]:
+    return _elevenlabs_last_error
+
 
 def elevenlabs_api_key() -> Optional[str]:
     api_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
@@ -264,6 +272,7 @@ async def get_elevenlabs_voices_for_current_key() -> list[VoiceInfo]:
             _elevenlabs_voices_cache_expires_at = now + _ELEVENLABS_CACHE_TTL_SECONDS
             return []
 
+        global _elevenlabs_last_error
         try:
             voices: list[VoiceInfo] = []
             next_page_token: Optional[str] = None
@@ -291,8 +300,11 @@ async def get_elevenlabs_voices_for_current_key() -> list[VoiceInfo]:
 
             deduped = {voice.id: voice for voice in voices}
             _elevenlabs_voices_cache = list(deduped.values())
+            _elevenlabs_last_error = None
         except Exception as exc:
-            logger.warning("ElevenLabs voices lookup failed: %s", exc)
+            error_msg = str(exc)
+            logger.warning("ElevenLabs voices lookup failed: %s", error_msg)
+            _elevenlabs_last_error = error_msg
             _elevenlabs_voices_cache = []
 
         _elevenlabs_voices_cache_expires_at = time.time() + _ELEVENLABS_CACHE_TTL_SECONDS

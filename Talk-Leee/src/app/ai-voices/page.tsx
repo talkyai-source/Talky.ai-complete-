@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
 import { motion } from "framer-motion";
-import { Play, Pause, Loader2 } from "lucide-react";
+import { Play, Pause, Loader2, Download, CheckCircle2, AlertCircle } from "lucide-react";
 import { aiOptionsApi, type VoiceInfo } from "@/lib/ai-options-api";
 
 type VoiceCard = {
@@ -49,12 +49,21 @@ function decodeFloat32Base64(input: string): Float32Array {
   return output;
 }
 
+type PrefetchState =
+  | { status: "idle" }
+  | { status: "running" }
+  | { status: "done"; cached: number; failed: number }
+  | { status: "error"; message: string };
+
 export default function AiVoicesPage() {
   const [voices, setVoices] = useState<VoiceCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const audioRef = useRef<{ ctx: AudioContext; source: AudioBufferSourceNode } | null>(null);
+  const [prefetch, setPrefetch] = useState<PrefetchState>({ status: "idle" });
+  const [cachedCount, setCachedCount] = useState<number | null>(null);
+  const [activeProvider, setActiveProvider] = useState<string>("all");
 
   const stopPreview = useCallback(async () => {
     const current = audioRef.current;
@@ -78,8 +87,15 @@ export default function AiVoicesPage() {
     const fetchVoices = async () => {
       try {
         setError(null);
-        const data = await aiOptionsApi.getVoices();
-        setVoices(data.map(toVoiceCard));
+        const [voicesResult, status] = await Promise.all([
+          aiOptionsApi.getVoices(),
+          aiOptionsApi.getPrefetchStatus().catch(() => null),
+        ]);
+        setVoices(voicesResult.voices.map(toVoiceCard));
+        if (voicesResult.elevenlabs_error) {
+          setError(`ElevenLabs: ${voicesResult.elevenlabs_error.includes("401") ? "API key invalid or expired — update ELEVENLABS_API_KEY in .env and restart." : voicesResult.elevenlabs_error}`);
+        }
+        if (status) setCachedCount(status.preview_samples_cached);
       } catch (err) {
         setError(err instanceof Error ? err.message : "An unknown error occurred");
       } finally {
@@ -92,6 +108,17 @@ export default function AiVoicesPage() {
       void stopPreview();
     };
   }, [stopPreview]);
+
+  const handlePrefetch = useCallback(async () => {
+    setPrefetch({ status: "running" });
+    try {
+      const result = await aiOptionsApi.prefetchAllSamples();
+      setPrefetch({ status: "done", cached: result.cached, failed: result.failed });
+      setCachedCount((prev) => (prev ?? 0) + result.cached);
+    } catch (err) {
+      setPrefetch({ status: "error", message: err instanceof Error ? err.message : "Prefetch failed" });
+    }
+  }, []);
 
   const handlePreview = useCallback(
     async (voice: VoiceCard) => {
@@ -160,6 +187,45 @@ export default function AiVoicesPage() {
           </motion.p>
         </div>
 
+        {/* Prefetch banner */}
+        {!loading && !error && (
+          <div className="flex items-center justify-between mb-8 rounded-2xl border border-border bg-muted/60 px-5 py-3">
+            <div className="text-sm text-muted-foreground">
+              {cachedCount !== null ? (
+                <span><span className="font-semibold text-foreground">{cachedCount}</span> samples cached — previews play instantly</span>
+              ) : (
+                <span>Download all samples once so previews never hit the API again.</span>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              {prefetch.status === "done" && (
+                <span className="flex items-center gap-1 text-xs text-emerald-400">
+                  <CheckCircle2 className="w-4 h-4" />
+                  {prefetch.cached} new · {prefetch.failed} failed
+                </span>
+              )}
+              {prefetch.status === "error" && (
+                <span className="flex items-center gap-1 text-xs text-red-400">
+                  <AlertCircle className="w-4 h-4" />
+                  {prefetch.message}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => void handlePrefetch()}
+                disabled={prefetch.status === "running"}
+                className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:opacity-60"
+              >
+                {prefetch.status === "running" ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Downloading…</>
+                ) : (
+                  <><Download className="w-4 h-4" /> Download All Samples</>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+
         {loading ? (
           <div className="flex justify-center items-center py-20" role="status" aria-live="polite" aria-busy="true">
             <Loader2 className="w-12 h-12 text-indigo-600 animate-spin" aria-hidden />
@@ -177,8 +243,29 @@ export default function AiVoicesPage() {
             </button>
           </div>
         ) : (
+          <>
+            {/* Provider filter tabs */}
+            {voices.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-8">
+                {["all", ...Array.from(new Set(voices.map((v) => v.provider)))].map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setActiveProvider(p)}
+                    className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
+                      activeProvider === p
+                        ? "bg-indigo-600 text-white"
+                        : "border border-border bg-transparent text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {p === "all" ? `All (${voices.length})` : `${p} (${voices.filter((v) => v.provider === p).length})`}
+                  </button>
+                ))}
+              </div>
+            )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {voices.map((voice, index) => (
+            {voices.filter((v) => activeProvider === "all" || v.provider === activeProvider).map((voice, index) => (
               <motion.div
                 key={voice.id}
                 initial={{ opacity: 0, y: 20 }}
@@ -228,6 +315,7 @@ export default function AiVoicesPage() {
               </motion.div>
             ))}
           </div>
+          </>
         )}
       </div>
 

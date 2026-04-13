@@ -19,6 +19,7 @@ from app.domain.models.conversation import AudioChunk, TranscriptChunk, Message,
 from app.domain.models.conversation_state import ConversationState, CallOutcomeType
 from app.domain.interfaces.stt_provider import STTProvider
 from app.infrastructure.llm.groq import GroqLLMProvider, LLMTimeoutError
+from app.infrastructure.telephony.browser_media_gateway import SessionGoneError
 from app.domain.interfaces.tts_provider import TTSProvider
 from app.domain.interfaces.media_gateway import MediaGateway
 from app.domain.services.conversation_engine import ConversationEngine
@@ -27,6 +28,7 @@ from app.domain.services.transcript_service import TranscriptService
 from app.domain.services.llm_guardrails import LLMGuardrails, LLMGuardrailsConfig, get_guardrails
 from app.domain.services.latency_tracker import get_latency_tracker
 from app.domain.services.global_ai_config import get_global_config
+from app.domain.services.ask_ai_constants import TALKY_PRODUCT_INFO as _ASK_AI_PRODUCT_INFO, PRODUCT_KEYWORDS as _ASK_AI_PRODUCT_KEYWORDS
 from app.core.container import get_container
 from app.core.postgres_adapter import Client as PostgresAdapterClient
 from app.core.telemetry import get_tracer, pipeline_span, record_latency, voice_span
@@ -76,6 +78,20 @@ class VoicePipelineService:
     def _response_max_sentences_for_turn(self, turn_id: int) -> Optional[int]:
         """First turn: limit to 2 sentences for faster response start."""
         return 2 if turn_id == 0 else None
+
+    @staticmethod
+    def _is_repetitive_transcript(text: str) -> bool:
+        """
+        Detect Deepgram Flux hallucination: repetitive STT output (GitHub #1524).
+        Returns True when a single word dominates >50% of a 6+ word transcript.
+        Normal speech ("I'd like to know about your pricing") never hits this.
+        """
+        words = text.lower().split()
+        if len(words) < 6:
+            return False
+        from collections import Counter
+        top_count = Counter(words).most_common(1)[0][1]
+        return (top_count / len(words)) > 0.5
 
     # Conjunctions that signal a natural clause break after a comma.
     # Only these trigger early TTS flush — avoids splitting at list commas
@@ -156,6 +172,12 @@ class VoicePipelineService:
             self._barge_in_events[call_id] = asyncio.Event()
             session.barge_in_event = self._barge_in_events[call_id]
 
+        # Wire barge-in event into TelephonyMediaGateway so its pacing loop can
+        # exit early instead of draining a full TTS chunk before detection.
+        set_barge_in = getattr(self.media_gateway, "set_barge_in_event", None)
+        if set_barge_in:
+            set_barge_in(call_id, self._barge_in_events[call_id])
+
         with voice_span("pipeline.start", call_id=call_id,
                         tenant_id=getattr(session, "tenant_id", None)) as span:
             span.set_attribute("voice.call_id", call_id)
@@ -174,7 +196,17 @@ class VoicePipelineService:
                     exc_info=True,
                 )
             finally:
-                self._pending_llm_tasks.pop(call_id, None)
+                # Cancel orphaned LLM task — asyncio children are NOT auto-cancelled
+                # when their parent task is cancelled.
+                pending_task = self._pending_llm_tasks.pop(call_id, None)
+                if pending_task and not pending_task.done():
+                    pending_task.cancel()
+                    try:
+                        await pending_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                # Remove barge-in event so a future session cannot inherit stale state.
+                self._barge_in_events.pop(call_id, None)
                 session.stt_active = False
                 self.latency_tracker.cleanup_call(call_id)
                 logger.info("pipeline_end", extra={"call_id": call_id})
@@ -238,8 +270,8 @@ class VoicePipelineService:
                         for k, v in stats.items():
                             try:
                                 stt_span.set_attribute(f"stt.{k}", v)
-                            except Exception:
-                                pass
+                            except Exception as _e:
+                                logger.debug("stt_span_attr k=%s: %s", k, _e)
 
     # ── Transcript handling ────────────────────────────────────────
 
@@ -310,7 +342,31 @@ class VoicePipelineService:
                 logger.warning(f"Failed to send transcript to websocket: {e}")
 
         if self.stt_provider.detect_turn_end(transcript):
-            await self.handle_turn_end(session, websocket, source="final")
+            # Run as a task (not awaited) so the consumer stays unblocked and
+            # can process a TurnResumed that arrives before the LLM completes.
+            #
+            # Why this matters: Deepgram's barge-in state machine occasionally
+            # sends EndOfTurn → TurnResumed in that order (e.g. user pauses
+            # mid-phrase → EndOfTurn fires → user continues → TurnResumed).
+            # With the old `await handle_turn_end(...)` pattern the consumer
+            # was blocked for the full LLM+TTS duration (~2-10s) — TurnResumed
+            # sat in the queue and arrived too late to cancel the LLM call.
+            # Result: AI responded to a partial/stale transcript ("But") while
+            # the user's real question ("But what is your offering?") was split
+            # across two EndOfTurns, producing a totally off-topic answer.
+            existing = self._pending_llm_tasks.get(call_id)
+            if existing and not existing.done():
+                # A speculative or prior final task is still in flight — skip.
+                logger.debug(
+                    "final turn_end skipped: pending task already running for %s",
+                    call_id[:12],
+                )
+                return
+            session._speculative_history_len = len(session.conversation_history)
+            task = asyncio.create_task(
+                self.handle_turn_end(session, websocket, source="final")
+            )
+            self._pending_llm_tasks[call_id] = task
             return
 
         if metadata.get("eager") and transcript.text:
@@ -366,6 +422,17 @@ class VoicePipelineService:
 
         if not full_transcript:
             logger.debug(f"Empty transcript, skipping turn", extra={"call_id": call_id})
+            return
+
+        # Guard against the confirmed Deepgram Flux hallucination bug (GitHub #1524)
+        # where the STT model outputs repetitive nonsense text ("blah blah blah…").
+        # Heuristic: if a single word accounts for >50% of a 6+ word transcript,
+        # treat it as a hallucination and skip — avoids sending garbage to the LLM.
+        if self._is_repetitive_transcript(full_transcript):
+            logger.warning(
+                "Repetitive STT transcript likely hallucination, skipping turn",
+                extra={"call_id": call_id, "transcript": full_transcript[:80]},
+            )
             return
 
         current_task = asyncio.current_task()
@@ -432,8 +499,10 @@ class VoicePipelineService:
             self.latency_tracker.mark_speech_end(call_id)
             self.latency_tracker.mark_llm_start(call_id)
 
-            user_message = Message(role=MessageRole.USER, content=full_transcript)
-            session.conversation_history.append(user_message)
+            # NOTE: user message is appended inside _run_turn, which owns the
+            # history snapshot + rollback on error/cancellation.  Do NOT append
+            # here — it would produce a duplicate entry visible to the LLM on
+            # every turn, wasting tokens and corrupting conversation context.
 
             try:
                 # ── LLM + TTS (sentence-pipelined) ────────────────
@@ -579,7 +648,15 @@ class VoicePipelineService:
         # did not hear the full response.  This prevents the LLM from
         # referencing content from the unheard portion and guides it to
         # respond to the caller's interruption instead.
-        if session.conversation_history:
+        #
+        # IMPORTANT: only annotate when TTS was actively playing at the
+        # moment the barge-in fired.  StartOfTurn also fires when the user
+        # simply starts their next question after the AI has already finished
+        # speaking (session.tts_active=False).  Annotating in that case
+        # falsely tells the LLM "you were interrupted" — it then behaves as
+        # if the previous response was incomplete and loses conversational
+        # context, making replies feel disconnected.
+        if session.tts_active and session.conversation_history:
             last_msg = session.conversation_history[-1]
             if (
                 last_msg.role == MessageRole.ASSISTANT
@@ -590,6 +667,7 @@ class VoicePipelineService:
                 )
 
         session.current_ai_response = ""
+        session.current_user_input = ""  # Reset so stale transcript never reaches LLM
         session.tts_active = False
         session.state = CallState.LISTENING
         # Immediately tell the media gateway (and downstream C++ gateway) to
@@ -651,6 +729,19 @@ class VoicePipelineService:
 
         messages = session.conversation_history[:]
         system_prompt = session.system_prompt
+
+        # Ask AI: inject product/pricing info only when the user's message contains
+        # relevant keywords.  On greeting and general turns this keeps the effective
+        # system prompt at ~60 tokens (vs ~360 when the product block is always present),
+        # saving 40-60ms of Groq prefill latency per non-product turn.
+        if session.campaign_id == "ask-ai" and messages:
+            last_user_text = next(
+                (m.content.lower() for m in reversed(messages) if m.role == MessageRole.USER),
+                "",
+            )
+            if any(kw in last_user_text for kw in _ASK_AI_PRODUCT_KEYWORDS):
+                system_prompt = system_prompt + "\n\n" + _ASK_AI_PRODUCT_INFO
+
         max_sentences = self._response_max_sentences_for_turn(session.turn_id)
 
         all_tokens: list[str] = []
@@ -724,15 +815,30 @@ class VoicePipelineService:
                     break
 
         except LLMTimeoutError:
-            logger.warning(f"LLM timeout for call {call_id}, using fallback")
-            buf = "I'm sorry, could you repeat that?"
-            all_tokens.clear()
-            all_tokens.append(buf)
+            if sentences_done > 0 or t_tts_first is not None:
+                # Partial content already sent to TTS — Groq stalled mid-stream.
+                # The user heard real audio; don't append a fallback on top of it.
+                logger.warning(
+                    "LLM timeout for call %s after %d sentence(s) TTS'd — "
+                    "dropping remaining buffer, no fallback", call_id, sentences_done
+                )
+                buf = ""
+                # Keep all_tokens as-is so conversation history reflects what was said
+            else:
+                # No content reached TTS yet — safe to play fallback
+                logger.warning(f"LLM timeout for call {call_id} (no TTS yet), using fallback")
+                buf = "I'm sorry, could you repeat that?"
+                all_tokens.clear()
+                all_tokens.append(buf)
         except Exception as e:
             logger.error(f"LLM streaming error for call {call_id}: {e}", exc_info=True)
-            buf = "I'm sorry, I had trouble processing that. Could you say it again?"
-            all_tokens.clear()
-            all_tokens.append(buf)
+            if sentences_done > 0 or t_tts_first is not None:
+                logger.warning("LLM error for %s after partial TTS — dropping buffer", call_id)
+                buf = ""
+            else:
+                buf = "I'm sorry, I had trouble processing that. Could you say it again?"
+                all_tokens.clear()
+                all_tokens.append(buf)
 
         t_llm_done = time.monotonic()
         self.latency_tracker.mark_llm_end(call_id)
@@ -908,14 +1014,19 @@ class VoicePipelineService:
                 barge_in_event.clear()
                 try:
                     await self.media_gateway.clear_output_buffer(call_id)
-                except Exception:
-                    pass
+                except Exception as _e:
+                    logger.debug("barge_in_clear_buffer_failed call_id=%s: %s", call_id[:8], _e)
                 if websocket:
                     try:
                         await websocket.send_json({"type": "tts_interrupted", "reason": "barge_in"})
-                    except Exception:
-                        pass
-                return
+                    except Exception as _e:
+                        logger.debug("barge_in_ws_notify_failed call_id=%s: %s", call_id[:8], _e)
+                # Must return `interrupted` (True), not bare `return` (None).
+                # A bare return gives None to the caller, which is falsy — the
+                # sentence loop in _stream_llm_and_tts would not break and would
+                # immediately call TTS again with the next sentence, causing the
+                # AI to start speaking again right after being interrupted.
+                return interrupted
 
             first_chunk = True
             async for audio_chunk in self.tts_provider.stream_synthesize(
@@ -990,6 +1101,10 @@ class VoicePipelineService:
                     except Exception as _exc:
                         logger.debug("flush buffer failed: %s", _exc)
                 completed = True
+        except SessionGoneError:
+            # Browser WebSocket was torn down while TTS was streaming.
+            # Exit the loop silently — this is normal teardown, not an error.
+            logger.debug("TTS loop stopped: browser session %s already gone", call_id)
         except Exception as e:
             logger.error(f"TTS synthesis error for call {call_id}: {e}", exc_info=True)
         finally:

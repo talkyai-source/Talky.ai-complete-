@@ -74,12 +74,21 @@ class TelephonySession:
     # to play at the C++ gateway.  None = start of a new burst.
     _tts_send_deadline: Optional[float] = field(default=None)
 
+    # Optional barge-in event: when set, send_audio exits the pacing loop early
+    # so synthesize_and_send_audio detects the interruption without waiting for
+    # the current TTS chunk to fully drain.
+    barge_in_event: Optional[asyncio.Event] = field(default=None)
+
     # Metrics
     chunks_received: int = 0
     chunks_sent: int = 0
     total_bytes_received: int = 0
     total_bytes_sent: int = 0
     dropped_input_chunks: int = 0
+
+    # Gap detection — tracks C++ gateway fire-and-forget callback drops
+    last_audio_received_at: float = field(default_factory=time.monotonic)
+    audio_gap_count: int = 0
 
 
 class TelephonyMediaGateway(MediaGateway):
@@ -164,7 +173,12 @@ class TelephonyMediaGateway(MediaGateway):
             recording_start_time=time.monotonic(),
         )
         self._sessions[call_id] = session
-        logger.info("TelephonyMediaGateway: session started call_id=%s pbx=%s", call_id[:12], pbx_call_id[:12])
+        logger.info(
+            "TelephonyMediaGateway: session started call_id=%s pbx=%s codec=pcmu sample_rate=8000 — "
+            "8kHz G.711 degrades STT accuracy vs 16kHz wideband (Deepgram trained on 16kHz)",
+            call_id[:12], pbx_call_id[:12],
+            extra={"call_id": call_id, "codec": "pcmu", "sample_rate": 8000},
+        )
 
     async def on_call_ended(self, call_id: str, reason: str = "hangup") -> None:
         """Mark session inactive and remove it from the registry."""
@@ -202,6 +216,20 @@ class TelephonyMediaGateway(MediaGateway):
 
         if not audio_chunk:
             return
+
+        # Gap detection — fire-and-forget C++ gateway callbacks can be silently dropped
+        now = time.monotonic()
+        gap_ms = (now - session.last_audio_received_at) * 1000
+        session.last_audio_received_at = now
+        # Expected batch interval is 80ms (4 frames × 20ms). Flag anything >150ms.
+        if session.chunks_received > 0 and gap_ms > 150:
+            session.audio_gap_count += 1
+            logger.warning(
+                "telephony_audio_gap call_id=%s gap_ms=%.0f total_gaps=%d — "
+                "C++ gateway may have dropped a callback (200ms fire-and-forget timeout)",
+                call_id, gap_ms, session.audio_gap_count,
+                extra={"call_id": call_id, "gap_ms": round(gap_ms), "audio_gap_count": session.audio_gap_count},
+            )
 
         # Decode PCMU → linear16
         try:
@@ -330,6 +358,13 @@ class TelephonyMediaGateway(MediaGateway):
         session.tts_buffer += pcmu
 
         while len(session.tts_buffer) >= PACKET_SIZE:
+            # Barge-in check at the top of the loop: if the pipeline's event is
+            # already set before we even sleep, discard remaining buffer and return
+            # so synthesize_and_send_audio can react immediately.
+            if session.barge_in_event and session.barge_in_event.is_set():
+                session.tts_buffer = b""
+                return
+
             packet = session.tts_buffer[:PACKET_SIZE]
             session.tts_buffer = session.tts_buffer[PACKET_SIZE:]
 
@@ -348,8 +383,8 @@ class TelephonyMediaGateway(MediaGateway):
             overshoot = next_deadline - now - TARGET_AHEAD_S
             if overshoot > 0.001:
                 # Yield the event loop while waiting.  STT barge-in callbacks fire
-                # here, so synthesize_and_send_audio can detect barge-in between
-                # individual 20ms packets even inside a single chunk.
+                # here, so the barge-in check at the top of the next iteration
+                # catches the event within one 20ms packet window.
                 await asyncio.sleep(overshoot)
 
             try:
@@ -399,6 +434,18 @@ class TelephonyMediaGateway(MediaGateway):
                 session.tts_buffer = b""
             except Exception as exc:
                 logger.warning(f"[TelephonyGW] flush_tts_buffer failed for {call_id[:12]}: {exc}")
+
+    def set_barge_in_event(self, call_id: str, event: asyncio.Event) -> None:
+        """
+        Register the pipeline's barge-in event for a session.
+
+        When the event is set, send_audio's pacing loop exits early so
+        synthesize_and_send_audio can react within one 20ms packet window
+        instead of waiting for the full TTS chunk to drain.
+        """
+        session = self._sessions.get(call_id)
+        if session:
+            session.barge_in_event = event
 
     async def clear_output_buffer(self, call_id: str) -> None:
         """

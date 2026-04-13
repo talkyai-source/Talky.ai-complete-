@@ -17,7 +17,8 @@ import os
 import asyncio
 import logging
 from typing import AsyncIterator, List, Optional
-from groq import AsyncGroq
+import httpx
+from groq import AsyncGroq, APITimeoutError as GroqAPITimeoutError, RateLimitError as GroqRateLimitError
 from app.domain.interfaces.llm_provider import LLMProvider
 from app.domain.models.conversation import Message, MessageRole
 from app.utils.resilience import CircuitBreaker, CircuitOpenError
@@ -141,7 +142,10 @@ class GroqLLMProvider(LLMProvider):
         self._config: dict = {}
         self._model: str = "llama-3.3-70b-versatile"  # Best balance for voice AI
         self._temperature: float = 0.6  # Slightly lower for more consistent responses
-        self._max_tokens: int = 100  # Voice responses should be concise
+        # 150 tokens ≈ 110 words — enough for 2-3 full sentences covering most voice
+        # responses while still keeping the AI concise.  100 truncated complex answers
+        # mid-sentence; 200+ risks overly long responses that hurt conversational feel.
+        self._max_tokens: int = 150
         # Deterministic mode settings (Day 17)
         self._deterministic_mode: bool = False
         self._deterministic_seed: Optional[int] = None
@@ -162,13 +166,24 @@ class GroqLLMProvider(LLMProvider):
         if not api_key:
             raise ValueError("Groq API key not found in config or environment")
         
-        # Initialize async client
-        self._client = AsyncGroq(api_key=api_key)
+        # Initialize async client with httpx-level timeouts (Groq SDK recommendation).
+        # read=timeout bounds TTFT — if Groq takes longer than this to produce the
+        # first token, httpx raises ReadTimeout → GroqAPITimeoutError before any
+        # token is yielded.  connect=2s fails fast on network issues.
+        self._client = AsyncGroq(
+            api_key=api_key,
+            timeout=httpx.Timeout(
+                connect=2.0,
+                read=DEFAULT_LLM_TIMEOUT,
+                write=10.0,
+                pool=5.0,
+            ),
+        )
         
         # Configuration with voice-optimized defaults
         self._model = config.get("model", "llama-3.3-70b-versatile")
         self._temperature = config.get("temperature", 0.6)
-        self._max_tokens = config.get("max_tokens", 100)
+        self._max_tokens = config.get("max_tokens", 150)
     
     def set_deterministic_mode(self, enabled: bool = True, seed: int = 42):
         """
@@ -196,42 +211,103 @@ class GroqLLMProvider(LLMProvider):
         **kwargs
     ) -> AsyncIterator[str]:
         """
-        Stream chat completion with timeout enforcement.
-        
-        Wraps stream_chat with asyncio timeout for graceful degradation.
-        
+        Stream chat completion with a true hard deadline on every token.
+
+        Two-layer timeout defence (Groq SDK recommendation + asyncio safety net):
+
+        Layer 1 — httpx.Timeout(read=timeout_seconds) set on AsyncGroq at
+          initialization.  httpx enforces this at the HTTP level: if no bytes
+          arrive within `read` seconds (including TTFT), it raises
+          GroqAPITimeoutError *before* any token is yielded.  This is the primary
+          guard and handles the slow-first-token case the old post-hoc check missed.
+
+        Layer 2 — asyncio.wait_for() per __anext__() call.  Two budgets apply:
+          - Before first token: full `remaining` wall-clock budget (TTFT guard).
+          - After first token: min(remaining, _INTERTOKEN_TIMEOUT) per token.
+            If Groq silently stalls mid-stream (confirmed bug: stream stops
+            without finish_reason or exception), we detect it in 2s and break
+            cleanly rather than waiting up to 9s and then discarding content.
+
         Args:
             messages: Conversation history
-            timeout_seconds: Maximum time to wait for response
+            timeout_seconds: Hard wall-clock limit for the entire stream
             **kwargs: Passed to stream_chat
-            
+
         Yields:
             str: Token/chunk of response
-            
+
         Raises:
-            LLMTimeoutError: If response takes longer than timeout
+            LLMTimeoutError: If no token arrives before TTFT deadline (first token only)
         """
-        start_time = asyncio.get_event_loop().time()
+        _INTERTOKEN_TIMEOUT = 2.0  # Groq confirmed bug: stream stalls silently mid-stream
+
+        t_start = asyncio.get_event_loop().time()
         tokens_received = 0
-        
+        gen = self.stream_chat(messages, **kwargs)
         try:
-            # Use manual timeout tracking (compatible with Python 3.10+)
-            async for token in self.stream_chat(messages, **kwargs):
-                # Check if we've exceeded the timeout
-                elapsed = asyncio.get_event_loop().time() - start_time
-                if elapsed > timeout_seconds:
-                    raise asyncio.TimeoutError()
-                tokens_received += 1
-                yield token
-        except asyncio.TimeoutError:
-            elapsed = asyncio.get_event_loop().time() - start_time
-            logger.error(
-                f"LLM timeout after {elapsed:.2f}s (limit: {timeout_seconds}s), "
-                f"tokens received: {tokens_received}"
-            )
-            raise LLMTimeoutError(
-                f"LLM response timed out after {timeout_seconds}s"
-            )
+            while True:
+                remaining = timeout_seconds - (asyncio.get_event_loop().time() - t_start)
+                if remaining <= 0:
+                    if tokens_received > 0:
+                        # Wall-clock expired mid-stream — treat as normal end, content already TTS'd
+                        logger.warning(
+                            "LLM wall-clock expired mid-stream (limit=%.1fs, tokens=%d) — "
+                            "treating as stream end", timeout_seconds, tokens_received
+                        )
+                        break
+                    logger.error(
+                        "LLM deadline exceeded before first token "
+                        "(limit=%.1fs)", timeout_seconds
+                    )
+                    raise LLMTimeoutError(
+                        f"LLM response timed out after {timeout_seconds}s"
+                    )
+                # Use tight inter-token timeout after first token to catch Groq silent stalls
+                token_timeout = remaining if tokens_received == 0 else min(remaining, _INTERTOKEN_TIMEOUT)
+                try:
+                    token = await asyncio.wait_for(gen.__anext__(), timeout=token_timeout)
+                    if tokens_received == 0:
+                        ttft_ms = (asyncio.get_event_loop().time() - t_start) * 1000
+                        if ttft_ms > 800:
+                            logger.warning(
+                                "High TTFT: %.0fms — likely Groq rate limiting or cold cache. "
+                                "Check Groq console for token bucket status.", ttft_ms
+                            )
+                    tokens_received += 1
+                    yield token
+                except StopAsyncIteration:
+                    break
+                except asyncio.TimeoutError:
+                    elapsed = asyncio.get_event_loop().time() - t_start
+                    if tokens_received > 0:
+                        # Inter-token stall: Groq stopped sending tokens mid-stream silently.
+                        # Content already yielded and TTS'd — break cleanly, no fallback needed.
+                        logger.warning(
+                            "Groq inter-token stall after %.2fs (tokens=%d) — "
+                            "treating as stream end (Groq silent-stall bug)",
+                            elapsed, tokens_received,
+                        )
+                        break
+                    logger.error(
+                        "LLM timeout waiting for first token after %.2fs (limit=%.1fs): %s",
+                        elapsed, timeout_seconds, "asyncio.TimeoutError",
+                    )
+                    raise LLMTimeoutError(
+                        f"LLM response timed out after {timeout_seconds}s"
+                    )
+                except GroqAPITimeoutError as exc:
+                    elapsed = asyncio.get_event_loop().time() - t_start
+                    logger.error(
+                        "LLM Groq API timeout after %.2fs (limit=%.1fs, tokens=%d): %s",
+                        elapsed, timeout_seconds, tokens_received, exc,
+                    )
+                    if tokens_received > 0:
+                        break
+                    raise LLMTimeoutError(
+                        f"LLM response timed out after {timeout_seconds}s"
+                    )
+        finally:
+            await gen.aclose()
     
     async def stream_chat(
         self,
@@ -383,6 +459,7 @@ class GroqLLMProvider(LLMProvider):
             import random as _rand
 
             last_err = None
+            tokens_yielded = 0  # Track across all attempts
             for _attempt in range(_LLM_MAX_RETRIES + 1):
                 try:
                     async with self._circuit:
@@ -395,6 +472,7 @@ class GroqLLMProvider(LLMProvider):
                                 delta = chunk.choices[0].delta
                                 if delta.content:
                                     token_count += 1
+                                    tokens_yielded += 1
                                     yield delta.content
 
                         logger.debug(f"Stream completed, yielded {token_count} tokens")
@@ -407,8 +485,29 @@ class GroqLLMProvider(LLMProvider):
                 except CircuitOpenError:
                     raise  # Don't retry when circuit is open
 
+                except GroqRateLimitError as e:
+                    # HTTP 429 — token or request bucket exhausted.
+                    # Retrying immediately won't help; log clearly so the operator
+                    # knows to upgrade the Groq plan or reduce request frequency.
+                    logger.warning(
+                        "Groq rate limit hit (HTTP 429) — TTFT spikes are likely "
+                        "rate-limit-induced. Consider upgrading to a paid Groq plan "
+                        "or reducing concurrent requests. Error: %s", e
+                    )
+                    raise RuntimeError(f"Groq rate limit exceeded: {e}")
+
                 except Exception as e:
                     last_err = e
+                    # CRITICAL: Never retry after partial output — the caller has
+                    # already received some tokens.  Retrying would yield tokens
+                    # from a new request appended to the partial first response,
+                    # producing garbled/doubled output visible to the user.
+                    if tokens_yielded > 0:
+                        logger.error(
+                            f"Groq stream error after {tokens_yielded} tokens yielded — "
+                            f"cannot retry mid-stream: {e}"
+                        )
+                        raise RuntimeError(f"Groq LLM streaming failed: {e}")
                     if _attempt < _LLM_MAX_RETRIES:
                         _delay = min(
                             _LLM_RETRY_BASE_DELAY * (2 ** _attempt),

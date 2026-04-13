@@ -336,13 +336,23 @@ class DeepgramTTSProvider(TTSProvider):
         selected_voice = voice_id or self._default_voice
         rate = sample_rate or self._sample_rate
 
-        # Chunk the text for better latency and naturalness
-        chunks = _chunk_text_by_sentences(text)
-        if not chunks:
-            logger.warning("No text chunks to synthesize")
+        # Do NOT re-chunk here.  The streaming pipeline (_stream_llm_and_tts)
+        # already performs sentence-level splitting via _find_sentence_end before
+        # calling this method — so `text` is always one complete sentence.
+        # Splitting a sentence further into 50-100 char sub-chunks causes Deepgram
+        # to synthesise each piece independently, resetting its prosodic model at
+        # every boundary.  The audible result is unnatural pitch/rhythm breaks
+        # mid-sentence ("I understand your concern" ← pause → "and I'd be happy…").
+        # Sending the full sentence as one Speak message lets Deepgram plan intonation
+        # across the whole sentence, producing natural-sounding speech.
+        # _chunk_text_by_sentences is still used by synthesize_raw (REST path) where
+        # arbitrary-length text may arrive.
+        if not text or not text.strip():
+            logger.warning("No text to synthesize")
             return
+        chunks = [text.strip()]
 
-        logger.debug(f"TTS: Split text into {len(chunks)} chunks for streaming")
+        logger.debug("TTS: sending sentence as single Speak message (%d chars)", len(text))
 
         # Acquire synthesis lock — prevents concurrent callers from interleaving
         # messages on the shared warm connection. Released in the finally block.
@@ -427,8 +437,14 @@ class DeepgramTTSProvider(TTSProvider):
             if sender_task is not None and not sender_task.done():
                 sender_task.cancel()
                 try:
-                    await asyncio.shield(sender_task)
-                except (asyncio.CancelledError, Exception):
+                    # asyncio.shield prevents outer-task cancellation from
+                    # propagating into sender_task while we wait for it to
+                    # acknowledge its own cancellation.  The 0.5s timeout
+                    # bounds the wait in case the task is stuck writing to a
+                    # dead socket (otherwise the synthesis_lock stays held for
+                    # the full sock_read=15s OS timeout).
+                    await asyncio.wait_for(asyncio.shield(sender_task), timeout=0.5)
+                except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
                     pass
             # If synthesis was interrupted (barge-in, error, or GeneratorExit from
             # the outer async-for break), the warm WebSocket has unread messages
@@ -441,7 +457,17 @@ class DeepgramTTSProvider(TTSProvider):
                 # use the same parameters as the interrupted synthesis.
                 _prewarm_voice = self._warm_ws_voice or self._default_voice
                 _prewarm_rate  = self._warm_ws_rate  or self._sample_rate
+                _stale_ws = self._warm_ws
                 self._warm_ws = None
+                # Explicitly close the stale connection so aiohttp releases the
+                # underlying TCP socket immediately rather than waiting for GC or
+                # the 30s heartbeat to time it out.  Without this, frequent barge-ins
+                # accumulate leaked file descriptors.
+                if _stale_ws is not None and not _stale_ws.closed:
+                    try:
+                        await _stale_ws.close()
+                    except Exception:
+                        pass
                 # Kick off a background reconnect immediately so the warm WS is
                 # ready before the next turn starts (~200-500ms later).  Without
                 # this, the next synthesis call incurs a cold WebSocket handshake

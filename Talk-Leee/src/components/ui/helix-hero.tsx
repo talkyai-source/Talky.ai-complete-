@@ -40,12 +40,12 @@ type AIState = "idle" | "connecting" | "listening" | "processing" | "speaking";
 
 const MIC_WORKLET_PATH = "/worklets/pcm16-capture-processor.js";
 
-// Single voice agent - Sophia
+// Single voice agent - Zephyr
 const SOPHIA = {
-    id: "sophia",
-    name: "Sophia",
+    id: "zephyr",
+    name: "Zephyr",
     gender: "female",
-    description: "Warm & Professional",
+    description: "Youthful, Vibrant",
 };
 
 const AudioVisualizer: React.FC<{ isActive: boolean; audioLevel: number }> = ({ isActive, audioLevel }) => {

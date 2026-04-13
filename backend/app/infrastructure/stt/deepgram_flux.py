@@ -249,8 +249,8 @@ class DeepgramFluxSTTProvider(STTProvider):
             "User-Agent": "TalkyAI-VoiceAgent/1.0"
         }
         
-        # Async queues
-        transcript_queue = asyncio.Queue()
+        # Bounded queue — prevents unbounded memory growth on slow consumers
+        transcript_queue: asyncio.Queue = asyncio.Queue(maxsize=50)
         stop_event = asyncio.Event()
         last_audio_time = asyncio.get_event_loop().time()
         
@@ -299,6 +299,8 @@ class DeepgramFluxSTTProvider(STTProvider):
             audio_buffer = bytearray()
             
             logger.debug("send_audio started")
+            _ws_open_time = asyncio.get_event_loop().time()
+            _first_audio_sent = False
             try:
                 async for audio_chunk in audio_stream:
                     if stop_event.is_set():
@@ -338,6 +340,16 @@ class DeepgramFluxSTTProvider(STTProvider):
                     # Send when we have optimal chunk size (~80ms)
                     while len(audio_buffer) >= FLUX_OPTIMAL_CHUNK_BYTES:
                         chunk_to_send = bytes(audio_buffer[:FLUX_OPTIMAL_CHUNK_BYTES])
+                        if not _first_audio_sent:
+                            _first_audio_sent = True
+                            elapsed_ms = (asyncio.get_event_loop().time() - _ws_open_time) * 1000
+                            if elapsed_ms > 8000:
+                                logger.warning(
+                                    "deepgram_flux_slow_start call_id=%s elapsed_ms=%.0f — "
+                                    "Flux closes connection after 10s without audio; call setup is too slow",
+                                    call_id, elapsed_ms,
+                                    extra={"call_id": call_id, "flux_startup_ms": round(elapsed_ms)},
+                                )
                         await ws.send(chunk_to_send)
                         audio_buffer = audio_buffer[FLUX_OPTIMAL_CHUNK_BYTES:]
                         chunks_sent += 1
@@ -414,9 +426,30 @@ class DeepgramFluxSTTProvider(STTProvider):
                                 except Exception:
                                     pass
                             # Also queue the signal for handle_barge_in bookkeeping
-                            # (clears output buffer, updates session state)
+                            # (clears output buffer, updates session state).
+                            # MUST NOT block: if the LLM is running and the queue
+                            # is full, a blocking put would suspend here indefinitely,
+                            # delaying the output-buffer clear until after the LLM
+                            # finishes — causing stale audio to play post-barge-in.
+                            # Solution: drop oldest non-critical Update chunks to
+                            # make room, then put_nowait.
                             barge_in = BargeInSignal()
-                            await transcript_queue.put(barge_in)
+                            try:
+                                transcript_queue.put_nowait(barge_in)
+                            except asyncio.QueueFull:
+                                drained = 0
+                                while drained < 5:
+                                    try:
+                                        transcript_queue.get_nowait()
+                                        drained += 1
+                                    except asyncio.QueueEmpty:
+                                        break
+                                try:
+                                    transcript_queue.put_nowait(barge_in)
+                                except asyncio.QueueFull:
+                                    logger.warning(
+                                        "deepgram_flux: BargeIn dropped — queue full after drain"
+                                    )
                         
                         # Handle EagerEndOfTurn - start LLM early (speculative)
                         elif event == "EagerEndOfTurn":
@@ -608,6 +641,13 @@ class DeepgramFluxSTTProvider(STTProvider):
                         f"{reconnect_count}/{FLUX_MAX_RECONNECTS} in {delay:.2f}s"
                     )
                     stop_event.clear()
+                    # Drain stale items from previous connection so the consumer
+                    # does not process transcripts from the dropped session.
+                    while not transcript_queue.empty():
+                        try:
+                            transcript_queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
                     await asyncio.sleep(delay)
 
                 except Exception as e:
@@ -623,9 +663,10 @@ class DeepgramFluxSTTProvider(STTProvider):
                 stop_reason = "stt_stream_closed"
             if stream_stats:
                 stream_stats.stop_reason = stop_reason
-            # Clean up eager state
-            if call_id and call_id in self._eager_states:
-                del self._eager_states[call_id]
+            # Clean up per-call state to prevent unbounded singleton growth
+            if call_id:
+                self._eager_states.pop(call_id, None)
+                self._stream_stats.pop(call_id, None)
     
     def detect_turn_end(self, transcript_chunk: TranscriptChunk) -> bool:
         """Detect if user finished speaking (empty final chunk = EndOfTurn)"""

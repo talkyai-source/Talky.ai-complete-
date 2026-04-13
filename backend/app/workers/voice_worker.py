@@ -123,11 +123,18 @@ class VoicePipelineWorker:
             # Media Gateway (browser gateway for web-based voice sessions)
             self._media_gateway = MediaGatewayFactory.create(self._voice_config.media_gateway_type)
             tts_provider = getattr(self._voice_config, "tts_provider", "google")
+            # Providers that yield Float32 PCM must be declared here so the
+            # media gateway applies the Float32→Int16 conversion.  Providers
+            # that yield Int16 PCM directly are declared as "s16le".
+            # google / google-streaming: yields Float32 after Int16→Float32 cast.
+            # cartesia: converts Int16→Float32 inside stream_synthesize.
+            # deepgram / elevenlabs: yield raw Int16 PCM.
+            _F32_PROVIDERS = {"google", "google-streaming", "cartesia"}
             await self._media_gateway.initialize({
                 "sample_rate": self._voice_config.tts_source_sample_rate,
                 "channels": 1,
                 "bit_depth": 16,
-                "tts_source_format": "f32le" if tts_provider == "google" else "s16le",
+                "tts_source_format": "f32le" if tts_provider in _F32_PROVIDERS else "s16le",
             })
             
             logger.info("AI providers initialized")

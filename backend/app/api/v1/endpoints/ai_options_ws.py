@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from app.domain.models.agent_config import AgentConfig, AgentGoal, ConversationFlow, ConversationRule
 from app.domain.models.ai_config import AIProviderConfig, GOOGLE_CHIRP3_VOICES, DEEPGRAM_AURA2_VOICES
+from app.infrastructure.tts.elevenlabs_catalog import get_elevenlabs_voices_for_current_key, elevenlabs_enabled
 from app.domain.services.global_ai_config import set_global_config
 from app.domain.services.voice_orchestrator import VoiceSessionConfig
 
@@ -173,15 +174,17 @@ def _build_session_config(ai_config: AIProviderConfig, agent_name: str, personal
 
 @router.get("/voices")
 async def get_available_voices():
-    """Return available voice agent info."""
-    available_voices = [
+    """Return available voice agent info including ElevenLabs if configured."""
+    static_voices = [
         voice for voice in [*GOOGLE_CHIRP3_VOICES, *DEEPGRAM_AURA2_VOICES]
         if _is_english_language(voice.language)
     ]
+    el_voices = await get_elevenlabs_voices_for_current_key() if elevenlabs_enabled() else []
+    all_voices = [*static_voices, *el_voices]
     return {
         "voices": [
-            {"id": voice.id, "name": voice.name, "gender": voice.gender, "description": voice.description}
-            for voice in available_voices
+            {"id": voice.id, "name": voice.name, "gender": voice.gender, "description": voice.description, "provider": voice.provider}
+            for voice in all_voices
         ]
     }
 

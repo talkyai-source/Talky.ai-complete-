@@ -25,6 +25,7 @@ class CallListItem(BaseModel):
     status: str
     duration_seconds: Optional[int] = None
     outcome: Optional[str] = None
+    campaign_name: Optional[str] = None
 
 
 class CallDetail(BaseModel):
@@ -74,51 +75,67 @@ async def list_calls(
         - to: End date filter
     """
     try:
-        # Build query with tenant filtering
-        query = db_client.table("calls").select(
-            "id, created_at, phone_number, status, duration_seconds, outcome",
-            count="exact"
-        )
-        query = apply_tenant_filter(query, current_user.tenant_id)
-        
-        # Apply additional filters
-        if status:
-            query = query.eq("status", status)
-        
-        if from_date:
-            query = query.gte("created_at", from_date)
-        
-        if to_date:
-            query = query.lte("created_at", to_date + "T23:59:59Z")
-        
-        # Calculate offset
+        import uuid as _uuid
+        tenant_uuid = _uuid.UUID(str(current_user.tenant_id))
         offset = (page - 1) * page_size
-        
-        # Execute with pagination
-        response = query.order("created_at", desc=True).range(offset, offset + page_size - 1).execute()
-        
-        # Get total count
-        total = response.count if response.count else 0
-        
-        # Map results
+
+        conditions = ["c.tenant_id = $1"]
+        params: list = [tenant_uuid]
+        idx = 2
+
+        if status:
+            conditions.append(f"c.status = ${idx}")
+            params.append(status)
+            idx += 1
+        if from_date:
+            conditions.append(f"c.created_at >= ${idx}")
+            params.append(from_date)
+            idx += 1
+        if to_date:
+            conditions.append(f"c.created_at <= ${idx}")
+            params.append(to_date + "T23:59:59Z")
+            idx += 1
+
+        where = " AND ".join(conditions)
+
+        async with db_client.pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT c.id, c.talklee_call_id, c.created_at, c.phone_number,
+                       c.status, c.duration_seconds, c.outcome,
+                       camp.name AS campaign_name
+                FROM calls c
+                LEFT JOIN campaigns camp ON camp.id = c.campaign_id
+                WHERE {where}
+                ORDER BY c.created_at DESC
+                LIMIT ${idx} OFFSET ${idx + 1}
+                """,
+                *params, page_size, offset,
+            )
+            total = await conn.fetchval(
+                f"SELECT COUNT(*) FROM calls c WHERE {where}",
+                *params,
+            )
+
         items = []
-        for call in response.data or []:
-            created_at = call.get("created_at", "")
+        for row in rows:
+            created_at = row["created_at"]
             items.append(CallListItem(
-                id=str(call["id"]),
-                talklee_call_id=call.get("talklee_call_id"),
+                id=str(row["id"]),
+                talklee_call_id=row["talklee_call_id"],
                 timestamp=created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at),
-                to_number=call.get("phone_number", ""),
-                status=call.get("status", "unknown"),
-                duration_seconds=call.get("duration_seconds"),
-                outcome=call.get("outcome")
+                to_number=row["phone_number"] or "",
+                status=row["status"] or "unknown",
+                duration_seconds=row["duration_seconds"],
+                outcome=row["outcome"],
+                campaign_name=row["campaign_name"],
             ))
-        
+
         return CallListResponse(
             items=items,
             page=page,
             page_size=page_size,
-            total=total
+            total=total or 0,
         )
     
     except Exception as e:
@@ -156,12 +173,15 @@ async def get_call(
         
         call = call_response.data
         
-        # Get recording if exists
+        # Get recording if exists (recordings live in recordings_s3 table)
         recording_id = None
-        recording_response = db_client.table("recordings").select("id").eq("call_id", call_id).execute()
-        
-        if recording_response.data and len(recording_response.data) > 0:
-            recording_id = recording_response.data[0]["id"]
+        async with db_client.pool.acquire() as conn:
+            rec_row = await conn.fetchrow(
+                "SELECT id FROM recordings_s3 WHERE call_id = $1 ORDER BY created_at DESC LIMIT 1",
+                __import__("uuid").UUID(call_id),
+            )
+        if rec_row:
+            recording_id = str(rec_row["id"])
         
         created_at = call.get("created_at", "")
         return CallDetail(

@@ -105,6 +105,8 @@ export default function AIOptionsPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [saveSuccess, setSaveSuccess] = useState(false);
+    const [latencyWarnings, setLatencyWarnings] = useState<string[]>([]);
+    const [elevenLabsError, setElevenLabsError] = useState<string | null>(null);
 
     // Testing state
     const [testMessage, setTestMessage] = useState("");
@@ -158,13 +160,14 @@ export default function AIOptionsPage() {
             setLoading(true);
             setError("");
 
-            const [providersData, voicesData, configData] = await Promise.all([
+            const [providersData, voicesResult, configData] = await Promise.all([
                 aiOptionsApi.getProviders(),
                 aiOptionsApi.getVoices(),
                 aiOptionsApi.getConfig(),
             ]);
 
-            const uniqueVoices = dedupeVoicesById(voicesData);
+            setElevenLabsError(voicesResult.elevenlabs_error ?? null);
+            const uniqueVoices = dedupeVoicesById(voicesResult.voices);
             const providerVoices = uniqueVoices.filter((voice) => voice.provider === configData.tts_provider);
             const providerModels = getProviderTtsModels(configData.tts_provider, providersData);
             const normalizedConfig: AIProviderConfig = {
@@ -198,13 +201,14 @@ export default function AIOptionsPage() {
 
     async function handleSaveConfig() {
         if (!config) return;
+        setLatencyWarnings([]);
         try {
             const normalizedConfig: AIProviderConfig = {
                 ...config,
                 tts_model: config.tts_model || getDefaultTtsModel(config.tts_provider, providers),
                 tts_sample_rate: getDefaultTtsSampleRate(config.tts_provider),
             };
-            const saved = await aiOptionsApi.saveConfig(normalizedConfig);
+            const { config: saved, latency_warnings } = await aiOptionsApi.saveConfig(normalizedConfig);
             setConfig({
                 ...saved,
                 tts_model: saved.tts_model || getDefaultTtsModel(saved.tts_provider, providers),
@@ -212,7 +216,11 @@ export default function AIOptionsPage() {
             });
             setTtsProvider(saved.tts_provider);
             setSaveSuccess(true);
+            setLatencyWarnings(latency_warnings);
             setTimeout(() => setSaveSuccess(false), 3000);
+            if (latency_warnings.length > 0) {
+                setTimeout(() => setLatencyWarnings([]), 8000);
+            }
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to save configuration");
         }
@@ -826,6 +834,28 @@ export default function AIOptionsPage() {
                         )}
                     </AnimatePresence>
 
+                    {/* Latency Advisory Warnings */}
+                    <AnimatePresence>
+                        {latencyWarnings.length > 0 && (
+                            <motion.div
+                                initial={{ opacity: 0, y: -10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -10 }}
+                                className="space-y-2"
+                            >
+                                {latencyWarnings.map((w, i) => (
+                                    <div
+                                        key={i}
+                                        className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300"
+                                    >
+                                        <span className="shrink-0 mt-0.5">⚠</span>
+                                        <span>{w}</span>
+                                    </div>
+                                ))}
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+
                     {/* Live Test Call - Test Full Pipeline */}
                     <motion.div
                         initial={{ opacity: 0, y: 20 }}
@@ -1146,8 +1176,15 @@ export default function AIOptionsPage() {
                             {/* Voice Cards Grid - Filtered by Provider */}
                             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
                                 {voicesForSelectedProvider.length === 0 && (
-                                    <div className="col-span-full rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200">
-                                        No voices are available for `{ttsProvider}` right now. Check that the provider key is valid and reload this page.
+                                    <div className="col-span-full rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
+                                        {ttsProvider === "elevenlabs" && elevenLabsError
+                                            ? <>
+                                                <span className="font-semibold">ElevenLabs API error:</span>{" "}
+                                                {elevenLabsError.includes("401")
+                                                    ? "API key is invalid or expired. Update ELEVENLABS_API_KEY in your .env file and restart the server."
+                                                    : elevenLabsError}
+                                              </>
+                                            : `No voices are available for "${ttsProvider}". Check that the provider key is configured and reload this page.`}
                                     </div>
                                 )}
                                 {voicesForSelectedProvider.map((voice) => (

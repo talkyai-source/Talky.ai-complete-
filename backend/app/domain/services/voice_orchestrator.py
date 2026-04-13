@@ -153,9 +153,16 @@ class VoiceOrchestrator:
         """
         self._db_client = db_client
         self._active_sessions: Dict[str, VoiceSession] = {}
-        # Singleton providers for Ask AI — initialised once at startup and
-        # reused for every session so per-click init cost is zero.
-        self._ask_ai_providers: Optional[tuple] = None
+        # Singleton providers for Ask AI — STT, LLM, and media_gateway are
+        # stateless per-call (keyed by call_id internally), safe to share.
+        # TTS is intentionally excluded from the singleton — it holds a warm
+        # WebSocket and a non-reentrant asyncio.Lock (_synthesis_lock) that
+        # serializes all synthesis calls on the same instance.  With shared TTS,
+        # N concurrent sessions queue behind that lock: session N waits
+        # (N-1) × TTS synthesis time before it can speak.  TTS is created fresh
+        # per session instead (cost: ~75ms Deepgram WebSocket handshake, hidden
+        # during greeting / pre-warm).
+        self._ask_ai_providers: Optional[tuple] = None  # (stt, llm, None, gateway)
         logger.info("VoiceOrchestrator initialised")
 
     async def prewarm_ask_ai_providers(self) -> None:
@@ -163,8 +170,10 @@ class VoiceOrchestrator:
         Pre-initialise Ask AI provider singletons at server startup.
 
         Called once by the container so that the first user who clicks
-        "Ask AI" pays zero provider-init cost.  All providers are stateless
-        (no per-call data stored on them), so sharing across sessions is safe.
+        "Ask AI" pays zero provider-init cost.  STT, LLM, and media_gateway
+        are stateless per call (keyed by call_id internally) — safe to share.
+        TTS is NOT pre-warmed here; it is created fresh per session to avoid
+        sharing the synthesis lock across concurrent sessions.
         """
         from app.domain.services.ask_ai_session_config import (
             build_ask_ai_session_config,
@@ -172,14 +181,13 @@ class VoiceOrchestrator:
 
         config = build_ask_ai_session_config()
         try:
-            providers = await asyncio.gather(
+            stt, llm, gateway = await asyncio.gather(
                 self._create_stt_provider(config),
                 self._create_llm_provider(config),
-                self._create_tts_provider(config),
                 self._create_media_gateway(config),
             )
-            self._ask_ai_providers = tuple(providers)
-            logger.info("Ask AI providers pre-warmed and ready")
+            self._ask_ai_providers = (stt, llm, None, gateway)
+            logger.info("Ask AI providers pre-warmed and ready (TTS is per-session)")
         except Exception as e:
             logger.warning(
                 f"Ask AI provider pre-warm failed (will init on first request): {e}"
@@ -204,10 +212,10 @@ class VoiceOrchestrator:
         )
 
         # --- Providers: reuse singletons for ask_ai, init fresh for all others ---
+        # TTS is always created fresh per-session (see __init__ comment for why).
         if config.session_type == "ask_ai" and self._ask_ai_providers is not None:
-            stt_provider, llm_provider, tts_provider, media_gateway = (
-                self._ask_ai_providers
-            )
+            stt_provider, llm_provider, _, media_gateway = self._ask_ai_providers
+            tts_provider = await self._create_tts_provider(config)
         else:
             (
                 stt_provider,
@@ -220,12 +228,13 @@ class VoiceOrchestrator:
                 self._create_tts_provider(config),
                 self._create_media_gateway(config),
             )
-            # Cache on first successful init if this is ask_ai
+            # Cache STT, LLM, and gateway on first successful init for ask_ai.
+            # TTS slot is left None — it is never shared.
             if config.session_type == "ask_ai" and self._ask_ai_providers is None:
                 self._ask_ai_providers = (
                     stt_provider,
                     llm_provider,
-                    tts_provider,
+                    None,
                     media_gateway,
                 )
 
@@ -318,10 +327,14 @@ class VoiceOrchestrator:
             leg_id=leg_id,
             config=config,
         )
-        self._active_sessions[call_id] = voice_session
-
-        logger.info(f"Voice session created: {call_id[:8]}")
-        return voice_session
+        try:
+            self._active_sessions[call_id] = voice_session
+            logger.info(f"Voice session created: {call_id[:8]}")
+            return voice_session
+        except Exception:
+            # Ensure we never leave a half-registered zombie session
+            self._active_sessions.pop(call_id, None)
+            raise
 
     # ------------------------------------------------------------------
     # 2. Start pipeline
@@ -525,15 +538,18 @@ class VoiceOrchestrator:
 
         tts_latency = (time.time() - tts_start) * 1000
 
-        await websocket.send_json(
-            {
-                "type": "turn_complete",
-                "llm_latency_ms": 0,
-                "tts_latency_ms": tts_latency,
-                "total_latency_ms": tts_latency,
-                "was_interrupted": was_interrupted,
-            }
-        )
+        try:
+            await websocket.send_json(
+                {
+                    "type": "turn_complete",
+                    "llm_latency_ms": 0,
+                    "tts_latency_ms": tts_latency,
+                    "total_latency_ms": tts_latency,
+                    "was_interrupted": was_interrupted,
+                }
+            )
+        except Exception:
+            pass  # WebSocket may have closed before greeting completed
 
     # ------------------------------------------------------------------
     # 4. End session — clean up everything
@@ -595,9 +611,18 @@ class VoiceOrchestrator:
                 except Exception:
                     pass
 
-        # Tear down providers — skip for singletons to keep them alive for next session
+        # Tear down providers — skip shared singletons (STT, LLM, gateway) to
+        # keep them alive for the next session.  TTS is ALWAYS cleaned up because
+        # it is per-session (holds a warm WebSocket and synthesis lock).
+        tts_provider = getattr(session, "tts_provider", None)
+        if tts_provider:
+            try:
+                await tts_provider.cleanup()
+            except Exception:
+                pass
+
         if not is_singleton_session:
-            for provider_name in ("stt_provider", "llm_provider", "tts_provider"):
+            for provider_name in ("stt_provider", "llm_provider"):
                 provider = getattr(session, provider_name, None)
                 if provider:
                     try:

@@ -100,7 +100,7 @@ def _build_telephony_session_config(gateway_type: str = "browser"):
         goal="information_gathering",  # Valid enum value
         goal_description="have a natural conversation",
         tone="friendly and professional",
-        response_max_sentences=3,
+        response_max_sentences=2,
     )
 
     # System prompt — campaign-aware, no hardcoded greeting text.
@@ -147,6 +147,13 @@ Your agent name, company, and campaign goal are defined in your configuration.""
         gateway_channels=1,
         gateway_bit_depth=16,
         gateway_target_buffer_ms=40,
+        # mute_during_tts=False enables caller barge-in on telephony.
+        # Keeping this False is intentional: deepgram_flux ignores StartOfTurn
+        # when muted (deepgram_flux.py:399-401), so True would silently disable
+        # barge-in entirely. Echo from the agent's own voice (phone network
+        # loopback) can trigger false StartOfTurn events — this is acceptable
+        # because the Deepgram Flux model is trained to suppress short echoes;
+        # a proper acoustic echo canceller (AEC) would be the right long-term fix.
         mute_during_tts=False,
         session_type="telephony",
         campaign_id="telephony",
@@ -185,9 +192,19 @@ async def _send_outbound_greeting(voice_session) -> None:
     try:
         logger.info(f"Generating dynamic greeting for call {call_id[:12]}")
 
-        # Empty user_input triggers the LLM to produce an opening line
-        # using the campaign system_prompt ("OPENING THE CALL" instructions).
-        greeting = await voice_session.pipeline.get_llm_response(session, "")
+        # Clear any barge_in_event that fired when the callee answered ("Hello?")
+        # BEFORE the LLM call.  Clearing AFTER the LLM would wipe barge-ins that
+        # fire DURING generation (callee actively talking) — those are real and
+        # should prevent the greeting from playing.
+        voice_session.pipeline.clear_barge_in_event(session)
+
+        # Use _stream_llm_and_tts instead of the sequential get_llm_response →
+        # synthesize_and_send_audio path.  The streaming path starts TTS as soon
+        # as the first sentence is ready — saving 200–500ms compared to waiting
+        # for all tokens before touching TTS at all.
+        greeting, _, _ = await voice_session.pipeline._stream_llm_and_tts(
+            session, websocket=None
+        )
 
         if not greeting:
             logger.warning(f"LLM returned empty greeting for {call_id[:12]}, skipping")
@@ -201,18 +218,7 @@ async def _send_outbound_greeting(voice_session) -> None:
             Message(role=MessageRole.ASSISTANT, content=greeting)
         )
 
-        # Clear any barge_in_event set by the callee answering ("Hello?") before
-        # TTS starts — without this, synthesize_and_send_audio would see the event
-        # already set and skip the greeting entirely.
-        voice_session.pipeline.clear_barge_in_event(session)
-
         logger.info(f"Outbound greeting ({len(greeting)} chars): {greeting[:80]!r}")
-        await voice_session.pipeline.synthesize_and_send_audio(
-            session,
-            greeting,
-            websocket=None,
-            track_latency=False,
-        )
     except Exception as exc:
         logger.warning(f"Outbound greeting failed for {call_id[:12]}: {exc}")
     finally:
