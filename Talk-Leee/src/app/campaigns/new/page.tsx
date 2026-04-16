@@ -117,7 +117,8 @@ export default function NewCampaignPage() {
             }
 
             const sampleRate =
-                voice?.provider === "google"
+                voice?.provider === "cartesia"
+                || voice?.provider === "google"
                 || voice?.provider === "deepgram"
                 || voice?.provider === "elevenlabs"
                     ? 24000

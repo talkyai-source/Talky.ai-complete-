@@ -22,7 +22,11 @@ const VoiceApiItemSchema = z
   })
   .passthrough();
 
-const VoiceApiResponseSchema = z.array(VoiceApiItemSchema);
+const VoiceApiEnvelopeSchema = z
+  .object({
+    voices: z.array(VoiceApiItemSchema),
+  })
+  .passthrough();
 
 const accentStyles = [
   { color: "text-indigo-600", bg: "bg-indigo-50" },
@@ -50,7 +54,11 @@ function mapVoice(item: z.infer<typeof VoiceApiItemSchema>, index: number): Voic
 async function fetchVoices(baseUrl: string) {
   const client = createHttpClient({ baseUrl });
   const data = await client.request({ path: "/ai-options/voices", timeoutMs: 12_000 });
-  return VoiceApiResponseSchema.parse(data);
+  const envelope = VoiceApiEnvelopeSchema.safeParse(data);
+  if (envelope.success) {
+    return envelope.data.voices;
+  }
+  return z.array(VoiceApiItemSchema).parse(data);
 }
 
 export async function GET() {
