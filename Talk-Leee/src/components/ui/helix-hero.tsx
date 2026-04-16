@@ -40,12 +40,12 @@ type AIState = "idle" | "connecting" | "listening" | "processing" | "speaking";
 
 const MIC_WORKLET_PATH = "/worklets/pcm16-capture-processor.js";
 
-// Single voice agent - Zephyr
+// Single voice agent - Tessa
 const SOPHIA = {
-    id: "zephyr",
-    name: "Zephyr",
+    id: "tessa",
+    name: "Tessa",
     gender: "female",
-    description: "Youthful, Vibrant",
+    description: "Kind Companion",
 };
 
 const AudioVisualizer: React.FC<{ isActive: boolean; audioLevel: number }> = ({ isActive, audioLevel }) => {
@@ -112,6 +112,10 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
     // their result if the generation has advanced — prevents stale audio from
     // being queued after resetAudioPlayer clears the pipeline.
     const audioGenerationRef = useRef<number>(0);
+
+    // Tessa intro greeting — pre-fetched on mount so it plays instantly on button press.
+    const tessaIntroF32Ref = useRef<Float32Array | null>(null);
+    const tessaIntroFetchedRef = useRef<boolean>(false);
 
     // Jitter buffer: collect audio chunks before starting playback to absorb
     // network variance. Prevents stutter caused by irregular chunk arrival.
@@ -337,6 +341,72 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
             audioContextRef.current = null;
         }
         audioInitPromiseRef.current = null;
+    }, []);
+
+    // Fetch Tessa's intro audio from the preview API on mount so it's ready
+    // to play the instant the user presses the button — no synthesis delay.
+    const prefetchTessaIntro = useCallback(async () => {
+        if (tessaIntroFetchedRef.current) return;
+        tessaIntroFetchedRef.current = true;
+        try {
+            const httpBase = resolveBackendWsBaseUrl()
+                .replace(/^wss:/, 'https:')
+                .replace(/^ws:/, 'http:');
+            const res = await fetch(`${httpBase}/ai-options/voices/preview`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    voice_id: '6ccbfb76-1fc6-48f7-b71d-91ac6298247b',
+                    text: "Hi, you've reached the Talk-Lee receptionist team — how can I help you today?",
+                }),
+            });
+            if (!res.ok) { tessaIntroFetchedRef.current = false; return; }
+            const data = await res.json() as { audio_base64?: string };
+            const b64 = data.audio_base64;
+            if (!b64) { tessaIntroFetchedRef.current = false; return; }
+            // Decode base64 → raw bytes → Float32Array (f32le PCM at 24 kHz)
+            const binary = atob(b64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+            tessaIntroF32Ref.current = new Float32Array(bytes.buffer);
+            console.log('[TessaIntro] Pre-fetched intro audio:', tessaIntroF32Ref.current.length, 'samples');
+        } catch (e) {
+            console.warn('[TessaIntro] Prefetch failed — intro will be skipped:', e);
+            tessaIntroFetchedRef.current = false; // allow one retry
+        }
+    }, []);
+
+    // Play the pre-fetched intro buffer through the live AudioContext.
+    // Returns a Promise that resolves when audio finishes (or immediately if
+    // no intro data is ready). Tracks the source in playbackSourcesRef so
+    // barge-in and session cleanup stop it correctly.
+    const playTessaIntro = useCallback((): Promise<void> => {
+        return new Promise((resolve) => {
+            const f32 = tessaIntroF32Ref.current;
+            const ctx = audioContextRef.current;
+            if (!f32 || !ctx || f32.length === 0) { resolve(); return; }
+            try {
+                const buf = ctx.createBuffer(1, f32.length, 24000);
+                buf.getChannelData(0).set(f32);
+                const src = ctx.createBufferSource();
+                src.buffer = buf;
+                src.connect(ctx.destination);
+                playbackSourcesRef.current.add(src);
+                // Reserve time in the playback queue so backend TTS chunks
+                // schedule after the intro instead of overlapping it.
+                const introEndTime = ctx.currentTime + buf.duration;
+                nextPlaybackTimeRef.current = introEndTime;
+                src.onended = () => {
+                    playbackSourcesRef.current.delete(src);
+                    resolve();
+                };
+                src.start(ctx.currentTime);
+                console.log('[TessaIntro] Playing intro —', buf.duration.toFixed(1), 's');
+            } catch (e) {
+                console.warn('[TessaIntro] Playback error:', e);
+                resolve();
+            }
+        });
     }, []);
 
     const startMicrophone = useCallback(async (): Promise<boolean> => {
@@ -658,6 +728,12 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
             // Non-fatal — handleMessage will retry on the first chunk
         }
 
+        // Play Tessa's pre-fetched intro greeting immediately.
+        // The WS connection happens in parallel so the pipeline is warm by the
+        // time the intro finishes — user hears no silence at all.
+        setAiState("speaking");
+        void playTessaIntro();
+
         const sessionId = `demo-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
         // To test Deepgram Voice Agent API bridge: swap the two lines below
         const wsUrl = `${resolveBackendWsBaseUrl()}/ws/ask-ai/${sessionId}`;
@@ -709,12 +785,17 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
             console.log(`[VoiceAgent] WebSocket closed: code=${event.code}, reason=${event.reason}`);
             endSession();
         };
-    }, [handleMessage, endSession, cleanupAudioPlayer, startMicrophone, stopMicrophone, initializeAudioPlayer]);
+    }, [handleMessage, endSession, cleanupAudioPlayer, startMicrophone, stopMicrophone, initializeAudioPlayer, playTessaIntro]);
 
     // Wrapper for startSession to handle async
     const handleStartSession = useCallback(() => {
         void startSession();
     }, [startSession]);
+
+    // Pre-fetch Tessa's intro audio so it's ready the moment the button is pressed.
+    useEffect(() => {
+        void prefetchTessaIntro();
+    }, [prefetchTessaIntro]);
 
     // Pre-warm microphone stream on mount if permission is already granted.
     // getUserMedia() takes 100-500ms when called for the first time on button

@@ -60,8 +60,10 @@ interface LiveCallState {
 const GOOGLE_TTS_MODEL = "Chirp3-HD";
 const DEEPGRAM_TTS_MODEL = "aura-2";
 const ELEVENLABS_TTS_MODEL = "eleven_flash_v2_5";
+const CARTESIA_TTS_MODEL = "sonic-3";
 
 function getFallbackDefaultTtsModel(provider: string): string {
+    if (provider === "cartesia") return CARTESIA_TTS_MODEL;
     if (provider === "deepgram") return DEEPGRAM_TTS_MODEL;
     if (provider === "elevenlabs") return ELEVENLABS_TTS_MODEL;
     if (provider === "google") return GOOGLE_TTS_MODEL;
@@ -85,7 +87,7 @@ function getDefaultTtsModel(provider: string, providers: ProviderListResponse | 
 }
 
 function getDefaultTtsSampleRate(provider: string): number {
-    if (provider === "google" || provider === "deepgram" || provider === "elevenlabs") return 24000;
+    if (provider === "cartesia" || provider === "google" || provider === "deepgram" || provider === "elevenlabs") return 24000;
     return 16000;
 }
 
@@ -302,9 +304,15 @@ export default function AIOptionsPage() {
                 audioArray[i] = dataView.getFloat32(i * 4, true);
             }
 
+            // Guard: createBuffer throws if frame count is 0 (empty audio from provider).
+            if (audioArray.length === 0) {
+                throw new Error("This voice returned no audio — it may be deprecated or unavailable.");
+            }
+
             // Keep playback sample-rate aligned with provider output to avoid speed/pitch artifacts.
             const sampleRate =
-                selectedVoice?.provider === "google"
+                selectedVoice?.provider === "cartesia"
+                || selectedVoice?.provider === "google"
                 || selectedVoice?.provider === "deepgram"
                 || selectedVoice?.provider === "elevenlabs"
                     ? 24000

@@ -450,7 +450,7 @@ class AIOptionsApi {
     }
 
     // Get prefetch cache status
-    async getPrefetchStatus(): Promise<{ deepgram_key_configured: boolean; elevenlabs_key_configured: boolean; preview_samples_cached: number; elevenlabs_mp3_samples_cached: number }> {
+    async getPrefetchStatus(): Promise<{ cartesia_key_configured: boolean; deepgram_key_configured: boolean; elevenlabs_key_configured: boolean; preview_samples_cached: number; elevenlabs_mp3_samples_cached: number }> {
         const data = await requestPath<unknown>("/ai-options/voices/prefetch-status");
         return data as ReturnType<AIOptionsApi["getPrefetchStatus"]> extends Promise<infer R> ? R : never;
     }
