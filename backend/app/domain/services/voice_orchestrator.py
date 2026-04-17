@@ -465,6 +465,7 @@ class VoiceOrchestrator:
                     sample_rate=(
                         session.config.tts_sample_rate if session.config else 24000
                     ),
+                    call_id=session.call_id,
                 ):
                     if interrupt_event.is_set():
                         was_interrupted = True
@@ -682,6 +683,12 @@ class VoiceOrchestrator:
                 "max_tokens": config.llm_max_tokens,
             }
         )
+        # Fire-and-forget warmup: primes httpx HTTP/2 + TLS + DNS so the first
+        # real LLM call (the first agent response in user-first mode) reuses a
+        # warm socket instead of paying the cold-connect 80–200 ms tax.
+        _warm_up = getattr(provider, "warm_up", None)
+        if _warm_up is not None:
+            asyncio.create_task(_warm_up())
         return provider
 
     async def _create_tts_provider(self, config: VoiceSessionConfig):
@@ -706,6 +713,18 @@ class VoiceOrchestrator:
                     "api_key": os.getenv("ELEVENLABS_API_KEY"),
                     "voice_id": config.voice_id,
                     "model_id": config.tts_model or "eleven_flash_v2_5",
+                    "sample_rate": config.tts_sample_rate,
+                }
+            )
+        elif config.tts_provider_type == "cartesia":
+            from app.infrastructure.tts.cartesia import CartesiaTTSProvider
+
+            provider = CartesiaTTSProvider()
+            await provider.initialize(
+                {
+                    "api_key": os.getenv("CARTESIA_API_KEY"),
+                    "voice_id": config.voice_id,
+                    "model_id": config.tts_model or "sonic-3",
                     "sample_rate": config.tts_sample_rate,
                 }
             )

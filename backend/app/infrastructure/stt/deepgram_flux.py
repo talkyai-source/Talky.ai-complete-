@@ -253,6 +253,9 @@ class DeepgramFluxSTTProvider(STTProvider):
         transcript_queue: asyncio.Queue = asyncio.Queue(maxsize=50)
         stop_event = asyncio.Event()
         last_audio_time = asyncio.get_event_loop().time()
+        # One-shot flag: logs the first non-empty EndOfTurn for baseline
+        # first-turn latency measurement (§6.1 of outbound_user_first_latency_plan.md).
+        first_final_logged = [False]
         
         async def send_silence_heartbeat(ws):
             """
@@ -493,8 +496,15 @@ class DeepgramFluxSTTProvider(STTProvider):
                         # Handle EndOfTurn - finalize turn
                         elif event == "EndOfTurn":
                             logger.info(f"Flux EndOfTurn: '{transcript_text}'")
-                            
+
                             if transcript_text and transcript_text.strip():
+                                if not first_final_logged[0]:
+                                    first_final_logged[0] = True
+                                    logger.info(
+                                        "t_stt_first_final call_id=%s",
+                                        call_id,
+                                        extra={"call_id": call_id, "t_stt_first_final": 1},
+                                    )
                                 # Use the final transcript
                                 chunk = TranscriptChunk(
                                     text=transcript_text.strip(),
@@ -565,11 +575,22 @@ class DeepgramFluxSTTProvider(STTProvider):
         try:
             while True:
                 try:
+                    _ws_handshake_start = asyncio.get_event_loop().time()
                     async with websockets.connect(url, extra_headers=headers) as ws:
+                        _ws_handshake_ms = (
+                            asyncio.get_event_loop().time() - _ws_handshake_start
+                        ) * 1000.0
                         logger.info(
-                            f"Connected to Deepgram Flux (attempt {reconnect_count + 1}, "
-                            f"eager={self._eager_eot_threshold}, eot={self._eot_threshold}, "
-                            f"timeout_ms={self._eot_timeout_ms})"
+                            "stt_ws_open call_id=%s attempt=%d handshake_ms=%.0f "
+                            "eager=%s eot=%s timeout_ms=%s",
+                            call_id, reconnect_count + 1, _ws_handshake_ms,
+                            self._eager_eot_threshold, self._eot_threshold,
+                            self._eot_timeout_ms,
+                            extra={
+                                "call_id": call_id,
+                                "stt_ws_handshake_ms": round(_ws_handshake_ms),
+                                "stt_reconnect_attempt": reconnect_count + 1,
+                            },
                         )
 
                         # Send initial silent frame (per Deepgram docs)

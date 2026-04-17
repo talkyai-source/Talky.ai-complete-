@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -85,6 +86,10 @@ class TelephonySession:
     total_bytes_received: int = 0
     total_bytes_sent: int = 0
     dropped_input_chunks: int = 0
+
+    # One-shot flag: emits t_tts_first_audio once per call for baseline
+    # first-turn latency measurement.
+    first_tts_logged: bool = False
 
     # Gap detection — tracks C++ gateway fire-and-forget callback drops
     last_audio_received_at: float = field(default_factory=time.monotonic)
@@ -351,9 +356,23 @@ class TelephonyMediaGateway(MediaGateway):
         #      ~200ms instead of 7s.
         #
         # 160 bytes = 20ms of audio at 8kHz PCMU (8000 samples/s × 0.020s × 1 byte).
+        # Opportunistic batching: when multiple packets are already buffered we
+        # POST them together, cutting HTTP round-trips on the steady-state path
+        # (50/s → ~25/s at the default batch size of 2).  The batch size is
+        # clamped so worst-case barge-in detection stays within PACKET_DURATION
+        # × TTS_BATCH_PACKETS = 40 ms (default).  The first packet after
+        # silence is still sent as soon as it is available — TTFB of the first
+        # TTS byte is unchanged from the pre-batching behaviour.  The C++
+        # gateway's enqueue_tts_ulaw accepts any multiple of 160 bytes.
         PACKET_SIZE = 160
         PACKET_DURATION_S = PACKET_SIZE / self._sample_rate   # 0.020 s at 8 kHz
         TARGET_AHEAD_S    = 0.200                              # keep ≤ 200 ms ahead
+        try:
+            MAX_BATCH_PACKETS = max(
+                1, int(os.getenv("TELEPHONY_TTS_BATCH_PACKETS", "2"))
+            )
+        except ValueError:
+            MAX_BATCH_PACKETS = 2
 
         session.tts_buffer += pcmu
 
@@ -365,8 +384,14 @@ class TelephonyMediaGateway(MediaGateway):
                 session.tts_buffer = b""
                 return
 
-            packet = session.tts_buffer[:PACKET_SIZE]
-            session.tts_buffer = session.tts_buffer[PACKET_SIZE:]
+            # Opportunistic batch: take up to MAX_BATCH_PACKETS worth of bytes
+            # that are ALREADY buffered; never wait for more to accumulate.
+            available_packets = len(session.tts_buffer) // PACKET_SIZE
+            batch_packets = min(available_packets, MAX_BATCH_PACKETS)
+            send_size = batch_packets * PACKET_SIZE
+
+            packet = session.tts_buffer[:send_size]
+            session.tts_buffer = session.tts_buffer[send_size:]
 
             now = time.monotonic()
             deadline = session._tts_send_deadline
@@ -378,19 +403,26 @@ class TelephonyMediaGateway(MediaGateway):
             if deadline is None or deadline < now:
                 deadline = now
 
-            # How far ahead will the gateway be after receiving this packet?
-            next_deadline = deadline + PACKET_DURATION_S
+            # How far ahead will the gateway be after receiving this batch?
+            next_deadline = deadline + PACKET_DURATION_S * batch_packets
             overshoot = next_deadline - now - TARGET_AHEAD_S
             if overshoot > 0.001:
                 # Yield the event loop while waiting.  STT barge-in callbacks fire
                 # here, so the barge-in check at the top of the next iteration
-                # catches the event within one 20ms packet window.
+                # catches the event within (batch_packets × 20 ms).
                 await asyncio.sleep(overshoot)
 
             try:
                 await session.adapter.send_tts_audio(session.pbx_call_id, packet)
                 session.chunks_sent += 1
                 session.total_bytes_sent += len(packet)
+                if not session.first_tts_logged:
+                    session.first_tts_logged = True
+                    logger.info(
+                        "t_tts_first_audio call_id=%s bytes=%d",
+                        call_id, len(packet),
+                        extra={"call_id": call_id, "t_tts_first_audio": 1},
+                    )
             except Exception as exc:
                 logger.warning(f"[TelephonyGW] send_tts_audio failed for {call_id[:12]}: {exc}")
 

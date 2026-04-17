@@ -35,6 +35,13 @@ class CartesiaTTSProvider(TTSProvider):
         self._encoding: str = "pcm_s16le"  # 16-bit signed little-endian PCM
         self._language: str = "en"
         self._session: Optional[aiohttp.ClientSession] = None
+        # Persistent per-call WebSocket connections.  Opening a fresh WS for
+        # every sentence added 300–600 ms of TLS/upgrade latency to the first
+        # audio chunk of each turn.  With a persistent WS the handshake is
+        # paid once per call; subsequent sentences multiplex via context_id.
+        # Ref: https://docs.cartesia.ai/api-reference/tts/websocket
+        self._call_ws: Dict[str, aiohttp.ClientWebSocketResponse] = {}
+        self._call_ws_locks: Dict[str, asyncio.Lock] = {}
     
     async def initialize(self, config: dict) -> None:
         """Initialize Cartesia client with configuration"""
@@ -55,48 +62,23 @@ class CartesiaTTSProvider(TTSProvider):
         
         logger.info(f"[Cartesia] Initialized: model={self._model_id}, voice={self._voice_id}, sample_rate={self._sample_rate}")
     
-    async def stream_synthesize(
-        self,
-        text: str,
-        voice_id: str,
-        sample_rate: int = 24000,
-        **kwargs
-    ) -> AsyncIterator[AudioChunk]:
-        """
-        Stream synthesized audio using Cartesia WebSocket API (true streaming).
-
-        Uses the WebSocket endpoint so Cartesia starts sending audio ~40ms after
-        the request — first audio arrives before synthesis is complete.
-
-        The previous implementation used POST /tts/bytes (REST) which waits for
-        the entire audio to be generated before sending any bytes.  That endpoint
-        is non-streaming despite the iter_chunked read loop; every sentence
-        incurred 400-900ms silence before the first audio sample reached the user.
-
-        Args:
-            text: Text to synthesize (one sentence from the pipeline)
-            voice_id: Cartesia voice ID
-            sample_rate: Output sample rate (default 24000)
-            **kwargs: language, speed, emotion
-
-        Yields:
-            AudioChunk with Float32 PCM data (gateway converts to Int16)
-        """
-        if not self._session:
-            raise RuntimeError("Cartesia client not initialized. Call initialize() first.")
-
-        selected_voice_id = voice_id or self._voice_id
-        language = kwargs.get("language", self._language)
-        speed = kwargs.get("speed")
-        emotion = kwargs.get("emotion")
-
-        ws_url = (
+    def _ws_url(self) -> str:
+        return (
             f"wss://api.cartesia.ai/tts/websocket"
             f"?api_key={self._api_key}"
             f"&cartesia_version={self.API_VERSION}"
         )
 
-        voice_config: Dict[str, Any] = {"mode": "id", "id": selected_voice_id}
+    def _build_payload(
+        self,
+        text: str,
+        voice_id: str,
+        sample_rate: int,
+        language: str,
+        speed,
+        emotion,
+    ) -> Dict[str, Any]:
+        voice_config: Dict[str, Any] = {"mode": "id", "id": voice_id}
         payload: Dict[str, Any] = {
             "model_id": self._model_id,
             "transcript": text,
@@ -110,7 +92,6 @@ class CartesiaTTSProvider(TTSProvider):
             "context_id": os.urandom(8).hex(),
             "continue": False,
         }
-
         generation_config: Dict[str, Any] = {}
         if speed is not None:
             generation_config["speed"] = speed
@@ -118,61 +99,200 @@ class CartesiaTTSProvider(TTSProvider):
             generation_config["emotion"] = emotion
         if generation_config:
             payload["generation_config"] = generation_config
+        return payload
+
+    async def connect_for_call(self, call_id: str) -> None:
+        """
+        Open (or re-use) a persistent Cartesia TTS WebSocket for `call_id`.
+
+        Idempotent — safe to call multiple times.  Intended to be fired in
+        parallel with ARI media setup from telephony_bridge._on_new_call so the
+        TLS/upgrade round-trip (~300–600 ms) completes before the first
+        sentence is synthesised.
+        """
+        if not self._session:
+            raise RuntimeError("Cartesia client not initialized. Call initialize() first.")
+        existing = self._call_ws.get(call_id)
+        if existing is not None and not existing.closed:
+            return
+        _t0 = asyncio.get_event_loop().time()
+        try:
+            ws = await self._session.ws_connect(
+                self._ws_url(),
+                timeout=aiohttp.ClientTimeout(connect=3.0, sock_read=30.0),
+                heartbeat=20.0,
+            )
+        except Exception as exc:
+            logger.warning("cartesia_ws_connect_failed call_id=%s: %s", call_id, exc)
+            return
+        handshake_ms = (asyncio.get_event_loop().time() - _t0) * 1000.0
+        self._call_ws[call_id] = ws
+        self._call_ws_locks.setdefault(call_id, asyncio.Lock())
+        logger.info(
+            "cartesia_ws_opened call_id=%s handshake_ms=%.0f",
+            call_id, handshake_ms,
+            extra={"call_id": call_id, "tts_ws_handshake_ms": round(handshake_ms)},
+        )
+
+    async def disconnect_for_call(self, call_id: str) -> None:
+        """Close the persistent WS for `call_id` (called from call-end path)."""
+        ws = self._call_ws.pop(call_id, None)
+        self._call_ws_locks.pop(call_id, None)
+        if ws is not None and not ws.closed:
+            try:
+                await ws.close()
+            except Exception:
+                pass
+
+    async def _get_or_open_ws(self, call_id: str):
+        ws = self._call_ws.get(call_id)
+        if ws is None or ws.closed:
+            await self.connect_for_call(call_id)
+            ws = self._call_ws.get(call_id)
+        return ws
+
+    async def stream_synthesize(
+        self,
+        text: str,
+        voice_id: str,
+        sample_rate: int = 24000,
+        **kwargs
+    ) -> AsyncIterator[AudioChunk]:
+        """
+        Stream synthesized audio using Cartesia WebSocket API (true streaming).
+
+        When `call_id` is supplied (kwargs), re-uses a persistent per-call
+        WebSocket — only the first turn pays the TLS/upgrade cost.  Subsequent
+        sentences reuse the connection with a fresh `context_id` per Cartesia's
+        multiplexing contract.
+
+        When `call_id` is absent (ad-hoc callers such as the AI Options
+        benchmark endpoints), falls back to a transient per-request WS to
+        preserve the previous behaviour.
+
+        Args:
+            text: Text to synthesize (one sentence from the pipeline)
+            voice_id: Cartesia voice ID
+            sample_rate: Output sample rate (default 24000)
+            **kwargs: language, speed, emotion, call_id
+
+        Yields:
+            AudioChunk with Float32 PCM data (gateway converts to Int16)
+        """
+        if not self._session:
+            raise RuntimeError("Cartesia client not initialized. Call initialize() first.")
+
+        selected_voice_id = voice_id or self._voice_id
+        language = kwargs.get("language", self._language)
+        speed = kwargs.get("speed")
+        emotion = kwargs.get("emotion")
+        call_id = kwargs.get("call_id")
+
+        payload = self._build_payload(
+            text, selected_voice_id, sample_rate, language, speed, emotion
+        )
 
         logger.debug("[Cartesia] WS stream: '%s...' voice=%s", text[:50], selected_voice_id)
 
+        if call_id:
+            # Persistent per-call WebSocket path — single handshake per call.
+            lock = self._call_ws_locks.setdefault(call_id, asyncio.Lock())
+            async with lock:
+                ws = await self._get_or_open_ws(call_id)
+                if ws is None:
+                    # Fallback to transient WS if connect failed
+                    async for chunk in self._stream_transient(payload, sample_rate):
+                        yield chunk
+                    return
+                chunks_yielded = False
+                try:
+                    async for chunk in self._stream_over_ws(ws, payload, sample_rate):
+                        chunks_yielded = True
+                        yield chunk
+                    return
+                except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as exc:
+                    # If any chunks were already yielded the caller has partial
+                    # audio; retrying would duplicate it.  Surface the error.
+                    if chunks_yielded:
+                        await self.disconnect_for_call(call_id)
+                        raise RuntimeError(
+                            f"Cartesia WS failed mid-generation: {exc}"
+                        )
+                    # Clean reset — WS died before any audio.  Reconnect + retry
+                    # once with a fresh context_id.
+                    logger.warning(
+                        "cartesia_ws_reconnect call_id=%s reason=%s", call_id, exc
+                    )
+                    await self.disconnect_for_call(call_id)
+                    ws = await self._get_or_open_ws(call_id)
+                    if ws is None:
+                        async for chunk in self._stream_transient(payload, sample_rate):
+                            yield chunk
+                        return
+                    payload = self._build_payload(
+                        text, selected_voice_id, sample_rate, language, speed, emotion
+                    )
+                    async for chunk in self._stream_over_ws(ws, payload, sample_rate):
+                        yield chunk
+                    return
+
+        # No call_id → legacy transient WS (one handshake per synthesis).
+        async for chunk in self._stream_transient(payload, sample_rate):
+            yield chunk
+
+    async def _stream_transient(
+        self, payload: Dict[str, Any], sample_rate: int
+    ) -> AsyncIterator[AudioChunk]:
+        """Open a short-lived WS, stream one generation, close.  Legacy path."""
         try:
             async with self._session.ws_connect(
-                ws_url,
+                self._ws_url(),
                 timeout=aiohttp.ClientTimeout(connect=3.0, sock_read=10.0),
             ) as ws:
-                await ws.send_str(json.dumps(payload))
-
-                async for msg in ws:
-                    if msg.type == aiohttp.WSMsgType.TEXT:
-                        data = json.loads(msg.data)
-
-                        if data.get("data"):
-                            # Audio arrives as base64-encoded Int16 PCM
-                            audio_bytes = base64.b64decode(data["data"])
-                            if not audio_bytes:
-                                continue
-                            # Align to Int16 frame boundary (2 bytes/sample)
-                            if len(audio_bytes) % 2 != 0:
-                                audio_bytes = audio_bytes[:-1]
-                            # Convert Int16 → Float32 so the media gateway's
-                            # tts_source_format="f32le" path applies tanh saturation
-                            int16_arr = np.frombuffer(audio_bytes, dtype=np.int16)
-                            float32_data = (int16_arr.astype(np.float32) / 32768.0).tobytes()
-                            yield AudioChunk(
-                                data=float32_data,
-                                sample_rate=sample_rate,
-                                channels=1,
-                            )
-
-                        elif data.get("done"):
-                            break
-
-                        elif data.get("type") == "error":
-                            logger.error("[Cartesia WS] Error: %s", data)
-                            raise RuntimeError(f"Cartesia WS error: {data}")
-
-                    elif msg.type in (
-                        aiohttp.WSMsgType.CLOSED,
-                        aiohttp.WSMsgType.ERROR,
-                    ):
-                        logger.warning("[Cartesia WS] Connection closed: %s", msg)
-                        break
-
+                async for chunk in self._stream_over_ws(ws, payload, sample_rate):
+                    yield chunk
         except asyncio.TimeoutError:
             raise RuntimeError("Cartesia TTS WebSocket timeout")
         except aiohttp.ClientError as exc:
             raise RuntimeError(f"Cartesia TTS WebSocket error: {exc}")
-        except Exception as exc:
-            if not isinstance(exc, RuntimeError):
-                logger.error("[Cartesia] synthesis failed: %s", exc, exc_info=True)
-                raise RuntimeError(f"Cartesia TTS synthesis failed: {exc}")
-            raise
+
+    async def _stream_over_ws(
+        self,
+        ws: aiohttp.ClientWebSocketResponse,
+        payload: Dict[str, Any],
+        sample_rate: int,
+    ) -> AsyncIterator[AudioChunk]:
+        """Send one generation and yield its audio chunks until `done` or error."""
+        await ws.send_str(json.dumps(payload))
+        async for msg in ws:
+            if msg.type == aiohttp.WSMsgType.TEXT:
+                data = json.loads(msg.data)
+
+                if data.get("data"):
+                    audio_bytes = base64.b64decode(data["data"])
+                    if not audio_bytes:
+                        continue
+                    if len(audio_bytes) % 2 != 0:
+                        audio_bytes = audio_bytes[:-1]
+                    int16_arr = np.frombuffer(audio_bytes, dtype=np.int16)
+                    float32_data = (int16_arr.astype(np.float32) / 32768.0).tobytes()
+                    yield AudioChunk(
+                        data=float32_data,
+                        sample_rate=sample_rate,
+                        channels=1,
+                    )
+                elif data.get("done"):
+                    # Generation complete; WS stays open for the next context_id.
+                    return
+                elif data.get("type") == "error":
+                    logger.error("[Cartesia WS] Error: %s", data)
+                    raise RuntimeError(f"Cartesia WS error: {data}")
+            elif msg.type in (
+                aiohttp.WSMsgType.CLOSED,
+                aiohttp.WSMsgType.ERROR,
+            ):
+                logger.warning("[Cartesia WS] Connection closed: %s", msg)
+                raise RuntimeError("Cartesia WS closed mid-generation")
     
     async def stream_synthesize_websocket(
         self,
@@ -294,6 +414,12 @@ class CartesiaTTSProvider(TTSProvider):
     
     async def cleanup(self) -> None:
         """Release resources"""
+        # Close any persistent per-call WebSockets before tearing the session.
+        for call_id in list(self._call_ws.keys()):
+            try:
+                await self.disconnect_for_call(call_id)
+            except Exception:
+                pass
         if self._session:
             await self._session.close()
             self._session = None

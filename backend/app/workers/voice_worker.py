@@ -113,6 +113,11 @@ class VoicePipelineWorker:
                 "api_key": os.getenv("GROQ_API_KEY"),
                 "model": "llama-3.1-8b-instant"
             })
+            # Prime httpx HTTP/2 + TLS pool at worker boot so the first voice
+            # session does not pay the cold-connect tax on its first turn.
+            _warm_up = getattr(self._llm_provider, "warm_up", None)
+            if _warm_up is not None:
+                asyncio.create_task(_warm_up())
             
             # TTS Provider (via factory — config-driven)
             self._tts_provider = TTSFactory.create(self._voice_config.tts_provider, {})

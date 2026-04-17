@@ -184,7 +184,40 @@ class GroqLLMProvider(LLMProvider):
         self._model = config.get("model", "llama-3.3-70b-versatile")
         self._temperature = config.get("temperature", 0.6)
         self._max_tokens = config.get("max_tokens", 150)
-    
+
+    async def warm_up(self) -> None:
+        """
+        Pre-warm the Groq httpx HTTP/2 + TLS pool and DNS cache.
+
+        In user-first telephony mode the first real LLM call is the first agent
+        response — a cold httpx connect of 80–200 ms sits directly on the
+        critical path.  Issuing a tiny max_tokens=1 completion ahead of time
+        seeds the connection pool so the first live call reuses a warm socket.
+
+        Fire-and-forget: errors are logged but do not fail session creation.
+        Ref: https://console.groq.com/docs/production-readiness/optimizing-latency
+        """
+        if self._client is None:
+            return
+        _t0 = asyncio.get_event_loop().time()
+        try:
+            await self._client.chat.completions.create(
+                model=self._model,
+                messages=[{"role": "user", "content": "hi"}],
+                max_tokens=1,
+                temperature=0.0,
+                stream=False,
+                timeout=3.0,
+            )
+            elapsed_ms = (asyncio.get_event_loop().time() - _t0) * 1000.0
+            logger.info(
+                "groq_warmup_ok model=%s warmup_ms=%.0f",
+                self._model, elapsed_ms,
+                extra={"groq_warmup_ms": round(elapsed_ms)},
+            )
+        except Exception as exc:
+            logger.warning("groq_warmup_failed model=%s: %s", self._model, exc)
+
     def set_deterministic_mode(self, enabled: bool = True, seed: int = 42):
         """
         Enable/disable deterministic mode for QA testing.
