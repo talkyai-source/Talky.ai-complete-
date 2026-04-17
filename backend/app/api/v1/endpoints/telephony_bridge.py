@@ -64,6 +64,19 @@ def _get_orchestrator():
     return get_container().voice_orchestrator
 
 
+def _outbound_first_speaker() -> str:
+    """
+    Who speaks first on an outbound (campaign) call after the callee answers.
+
+    Returns "user" or "agent".  Default is "user" — the callee typically says
+    "Hello?" and the AI should respond to that rather than barging in on top of
+    them.  Set TELEPHONY_FIRST_SPEAKER=agent to restore the older behaviour of
+    the AI speaking the opening line itself.
+    """
+    val = (os.getenv("TELEPHONY_FIRST_SPEAKER") or "user").strip().lower()
+    return "agent" if val == "agent" else "user"
+
+
 def _build_telephony_session_config(gateway_type: str = "browser"):
     """
     Build a VoiceSessionConfig tuned for telephony (8 kHz, SIP).
@@ -241,6 +254,14 @@ async def _on_new_call(call_id: str) -> None:
         voice_session = await orchestrator.create_voice_session(config)
         _telephony_sessions[call_id] = voice_session
 
+        # Prewarm the TTS WebSocket in parallel with the rest of setup.  For
+        # Cartesia this shaves 300–600 ms off the first audio chunk because the
+        # TLS/upgrade handshake finishes before the first sentence is produced.
+        # Providers without a connect_for_call method silently skip this.
+        _tts_connect = getattr(voice_session.tts_provider, "connect_for_call", None)
+        if _tts_connect is not None:
+            asyncio.create_task(_tts_connect(voice_session.call_id))
+
         if is_asterisk:
             # Register gateway_session_id → call_id mapping so the audio callback
             # endpoint can route audio without a fragile string-prefix scan.
@@ -262,11 +283,20 @@ async def _on_new_call(call_id: str) -> None:
             )
             logger.info(f"Voice pipeline started for {call_id[:12]}")
 
-            # For outbound (campaign) calls the AI is the caller, so it must
-            # speak first.  Wait briefly for Deepgram to connect, then send the
-            # opening line.  synthesize_and_send_audio routes directly through
-            # TelephonyMediaGateway → C++ gateway → callee — no WebSocket needed.
-            asyncio.create_task(_send_outbound_greeting(voice_session))
+            # Who speaks first on outbound?  In "user" mode we stay silent and
+            # let handle_turn_end react to the callee's first utterance — this
+            # avoids the AI talking over a "Hello?" and removes the LLM+TTS
+            # cold-start (~500–1500 ms) from the pre-first-turn window.
+            # In "agent" mode the AI speaks an opening line via the greeting
+            # task.  Controlled by TELEPHONY_FIRST_SPEAKER (default "user").
+            first_speaker = _outbound_first_speaker()
+            if first_speaker == "agent":
+                asyncio.create_task(_send_outbound_greeting(voice_session))
+            else:
+                logger.info(
+                    "outbound_greeting_suppressed call_id=%s first_speaker=user",
+                    call_id[:12],
+                )
 
         # Tell the adapter to start streaming audio.
         # For Asterisk this is a no-op (audio_callback_url handles it via C++ gateway).

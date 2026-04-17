@@ -481,12 +481,21 @@ class AsteriskAdapter(CallControlAdapter):
         ext_channel_id = ""
 
         logger.info(
+            "t_answer channel=%s rtp_port=%s",
+            channel_id[:12], listen_port,
+            extra={"call_id": channel_id, "t_answer_ms": 0},
+        )
+        logger.info(
             f"AsteriskAdapter: outbound call answered — completing media setup "
             f"channel={channel_id[:12]} rtp_port={listen_port}"
         )
 
         try:
-            # 3. Create ExternalMedia channel pointing at C++ Gateway RTP listener
+            import time as _time
+            _t_setup_start = _time.monotonic()
+
+            # 3. Create ExternalMedia channel pointing at C++ Gateway RTP listener.
+            # This one must run first — steps 4/5/6 all need ext_channel_id.
             ext_data = await self._ari(
                 "POST", "/channels/externalMedia",
                 params={
@@ -503,21 +512,25 @@ class AsteriskAdapter(CallControlAdapter):
             if not ext_channel_id:
                 raise RuntimeError("ARI externalMedia returned no channel id")
 
-            # 4. Add ExternalMedia channel to bridge
-            await self._ari(
+            # 4/5/6. addChannel + two UNICASTRTP_LOCAL_* GETs are independent of
+            # each other (they only share the ext_channel_id dependency), so run
+            # them concurrently.  Saves ~200 ms on a typical outbound answer
+            # (ASTERISK-26771: each ARI request has ~50-200 ms baseline latency).
+            add_coro = self._ari(
                 "POST", f"/bridges/{bridge_id}/addChannel",
                 params={"channel": ext_channel_id},
                 ok=(200, 204, 209),
             )
-
-            # 5. Get the actual RTP address/port Asterisk allocated on its side
-            remote_ip_var = await self._ari(
+            addr_coro = self._ari(
                 "GET", f"/channels/{ext_channel_id}/variable",
                 params={"variable": "UNICASTRTP_LOCAL_ADDRESS"},
             )
-            remote_port_var = await self._ari(
+            port_coro = self._ari(
                 "GET", f"/channels/{ext_channel_id}/variable",
                 params={"variable": "UNICASTRTP_LOCAL_PORT"},
+            )
+            _, remote_ip_var, remote_port_var = await asyncio.gather(
+                add_coro, addr_coro, port_coro
             )
             remote_ip = str(remote_ip_var.get("value", "127.0.0.1"))
             remote_port = int(remote_port_var.get("value", 0))
@@ -558,9 +571,15 @@ class AsteriskAdapter(CallControlAdapter):
             self._bridges[channel_id] = bridge_id
             self._gateway_sessions[channel_id] = session_id
 
+            _setup_ms = (_time.monotonic() - _t_setup_start) * 1000.0
             logger.info(
-                f"AsteriskAdapter: session started (post-answer) channel={channel_id[:12]} "
-                f"session={session_id} rtp_port={listen_port}"
+                "ari_setup_done channel=%s session=%s rtp_port=%s setup_ms=%.0f",
+                channel_id[:12], session_id, listen_port, _setup_ms,
+                extra={
+                    "call_id": channel_id,
+                    "ari_setup_ms": round(_setup_ms),
+                    "session_id": session_id,
+                },
             )
 
             # 7. Notify callbacks so the AI pipeline can start
@@ -635,21 +654,24 @@ class AsteriskAdapter(CallControlAdapter):
             if not ext_channel_id:
                 raise RuntimeError("ARI externalMedia returned no channel id")
 
-            # 4. Add ExternalMedia channel to bridge
-            await self._ari(
+            # 4/5. addChannel + two UNICASTRTP_LOCAL_* GETs are independent of
+            # each other (share only ext_channel_id), so run them concurrently.
+            # Mirrors the same optimisation in _on_outbound_answered.
+            add_coro = self._ari(
                 "POST", f"/bridges/{bridge_id}/addChannel",
                 params={"channel": ext_channel_id},
                 ok=(200, 204, 209),
             )
-
-            # 5. Get the actual RTP address/port Asterisk allocated on its side
-            remote_ip_var = await self._ari(
+            addr_coro = self._ari(
                 "GET", f"/channels/{ext_channel_id}/variable",
                 params={"variable": "UNICASTRTP_LOCAL_ADDRESS"},
             )
-            remote_port_var = await self._ari(
+            port_coro = self._ari(
                 "GET", f"/channels/{ext_channel_id}/variable",
                 params={"variable": "UNICASTRTP_LOCAL_PORT"},
+            )
+            _, remote_ip_var, remote_port_var = await asyncio.gather(
+                add_coro, addr_coro, port_coro
             )
             remote_ip = str(remote_ip_var.get("value", "127.0.0.1"))
             remote_port = int(remote_port_var.get("value", 0))

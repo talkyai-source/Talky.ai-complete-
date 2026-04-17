@@ -1033,6 +1033,7 @@ class VoicePipelineService:
                 text,
                 voice_id=session.voice_id,
                 sample_rate=self.tts_sample_rate,
+                call_id=call_id,
             ):
                 if barge_in_event and barge_in_event.is_set():
                     logger.info(f"Barge-in interrupted TTS for call {call_id}")
