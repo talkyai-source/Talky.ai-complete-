@@ -233,13 +233,14 @@ class TelephonyStaticTests(unittest.TestCase):
             "ASTERISK_ARI_HOST=127.0.0.1",
             "ASTERISK_ARI_PORT=8088",
             "ASTERISK_ARI_USERNAME=day5",
-            "ASTERISK_ARI_PASSWORD=day5_local_only_change_me",
             "ASTERISK_ARI_APP=talky_day5",
             "DAY5_TEST_EXTENSION=750",
             "ASTERISK_IMAGE=talky/asterisk:bookworm",
         ]
         for marker in required:
             self.assertIn(marker, env, f"Missing env key/value: {marker}")
+        self.assertIn("FREESWITCH_ESL_PASSWORD=", env, "Missing FREESWITCH_ESL_PASSWORD key")
+        self.assertIn("ASTERISK_ARI_PASSWORD=", env, "Missing ASTERISK_ARI_PASSWORD key")
 
     def test_docs_reflect_ws_a_ws_b_ws_c_ws_d_ws_e_progress(self) -> None:
         checklist = _read_text(CHECKLIST_DOC)

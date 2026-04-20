@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <chrono>
@@ -15,6 +16,8 @@
 #include <vector>
 
 #include "voice_gateway/rtp_packet.h"
+
+struct sockaddr_in;
 
 namespace voice_gateway {
 
@@ -117,14 +120,24 @@ public:
     void set_audio_callback(AudioCallback cb);
 
 private:
+    static constexpr std::size_t kDefaultJitterTargetDepthFrames = 6;
+    static constexpr int kPcmuClockRateHz = 8000;
+    static constexpr int kPcmuTimestampStep = 160;
+    static constexpr int kRtcpReportIntervalMs = 5000;
+
     struct QueuedRtpFrame {
         uint16_t sequence_number{0};
         uint32_t timestamp{0};
-        std::vector<uint8_t> payload;
+        std::size_t payload_size{0};
+        std::array<uint8_t, kPcmuTimestampStep> payload{};
     };
     struct QueuedTtsFrame {
         uint32_t segment_id{0};
-        std::vector<uint8_t> payload;
+        std::array<uint8_t, kPcmuTimestampStep> payload{};
+    };
+    struct JitterSlot {
+        bool occupied{false};
+        QueuedRtpFrame frame;
     };
     struct TtsSegmentState {
         std::size_t remaining_frames{0};
@@ -143,22 +156,29 @@ private:
     static int16_t sequence_diff(uint16_t lhs, uint16_t rhs);
     static bool is_power_of_two(std::size_t value);
     static int64_t millis_since(const std::chrono::steady_clock::time_point& ts);
+    static bool is_rtcp_packet(const uint8_t* data, std::size_t len);
     void fire_audio_callback(const std::vector<uint8_t>& pcmu_batch);
+    void reset_jitter_buffer_locked();
+    std::size_t jitter_index(uint16_t sequence_number) const;
+    bool insert_jitter_frame_locked(const QueuedRtpFrame& frame);
+    bool pop_next_jitter_frame_locked(QueuedRtpFrame& frame);
+    void drop_oldest_jitter_frame_locked();
+    void advance_jitter_min_seq_locked();
+    void maybe_send_rtcp_report(const sockaddr_in& remote_addr, const std::chrono::steady_clock::time_point& now);
 
     // Audio callback (optional) — fires for every received audio batch.
     // Protected by audio_callback_mutex_ to allow set_audio_callback() at any time.
     mutable std::mutex audio_callback_mutex_;
     AudioCallback audio_callback_;
 
-    static constexpr std::size_t kDefaultJitterTargetDepthFrames = 6;
-    static constexpr int kPcmuClockRateHz = 8000;
-    static constexpr int kPcmuTimestampStep = 160;
-
     SessionConfig config_;
 
     mutable std::mutex mutex_;
     std::condition_variable queue_cv_;
-    std::deque<QueuedRtpFrame> jitter_buffer_;
+    std::vector<JitterSlot> jitter_slots_;
+    std::size_t jitter_buffer_size_{0};
+    bool jitter_min_seq_valid_{false};
+    uint16_t jitter_min_seq_{0};
     std::deque<QueuedTtsFrame> tts_queue_;
     std::unordered_map<uint32_t, TtsSegmentState> tts_segments_;
     uint32_t next_tts_segment_id_{1};
@@ -209,6 +229,7 @@ private:
     bool has_prev_arrival_{false};
     uint32_t prev_rtp_timestamp_{0};
     std::chrono::steady_clock::time_point prev_arrival_time_{};
+    std::chrono::steady_clock::time_point last_rtcp_report_sent_at_{};
     double interarrival_jitter_ts_units_{0.0};
 };
 

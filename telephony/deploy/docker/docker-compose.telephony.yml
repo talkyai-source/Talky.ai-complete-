@@ -83,7 +83,10 @@ services:
         condition: service_healthy
       rtpengine:
         condition: service_started
-    command: ["opensips", "-F", "-f", "/etc/opensips/opensips.cfg"]
+    command:
+      - /bin/sh
+      - -lc
+      - export OPENSIPS_UDP_WORKERS="${OPENSIPS_UDP_WORKERS:-$(nproc)}"; exec opensips -F -f /etc/opensips/opensips.cfg
     volumes:
       - ../../opensips/conf/opensips.cfg:/etc/opensips/opensips.cfg:ro
       - ../../opensips/conf/dispatcher.list:/etc/opensips/dispatcher.list:ro
