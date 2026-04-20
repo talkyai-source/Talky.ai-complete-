@@ -28,7 +28,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -52,6 +51,7 @@ class TelephonySession:
         default_factory=lambda: asyncio.Queue(maxsize=200)
     )
     recording_buffer: List[bytes] = field(default_factory=list)
+    recording_buffer_bytes: int = 0
     # TTS recording: list of (sample_offset, pcm_bytes) for timeline placement.
     # sample_offset is a running write cursor (MixMonitor-style), NOT a
     # wall-clock timestamp.  See send_audio() for the cursor logic.
@@ -92,7 +92,7 @@ class TelephonySession:
     first_tts_logged: bool = False
 
     # Gap detection — tracks C++ gateway fire-and-forget callback drops
-    last_audio_received_at: float = field(default_factory=time.monotonic)
+    last_audio_received_at: float = 0.0
     audio_gap_count: int = 0
 
 
@@ -170,12 +170,15 @@ class TelephonyMediaGateway(MediaGateway):
                 "in metadata (must be a CallControlAdapter instance)."
             )
 
+        loop = asyncio.get_running_loop()
+        now = loop.time()
         session = TelephonySession(
             call_id=call_id,
             pbx_call_id=pbx_call_id,
             adapter=adapter,
             input_queue=asyncio.Queue(maxsize=200),
-            recording_start_time=time.monotonic(),
+            recording_start_time=now,
+            last_audio_received_at=now,
         )
         self._sessions[call_id] = session
         logger.info(
@@ -223,7 +226,8 @@ class TelephonyMediaGateway(MediaGateway):
             return
 
         # Gap detection — fire-and-forget C++ gateway callbacks can be silently dropped
-        now = time.monotonic()
+        loop = asyncio.get_running_loop()
+        now = loop.time()
         gap_ms = (now - session.last_audio_received_at) * 1000
         session.last_audio_received_at = now
         # Expected batch interval is 80ms (4 frames × 20ms). Flag anything >150ms.
@@ -251,7 +255,7 @@ class TelephonyMediaGateway(MediaGateway):
         # 8 kHz / 16-bit mono: 60 min ≈ 57.6 MB.
         _MAX_RECORDING_BYTES = 57_600_000
         session.recording_buffer.append(pcm_chunk)
-        session.recording_buffer_bytes = getattr(session, "recording_buffer_bytes", 0) + len(pcm_chunk)
+        session.recording_buffer_bytes += len(pcm_chunk)
         while session.recording_buffer_bytes > _MAX_RECORDING_BYTES and session.recording_buffer:
             evicted = session.recording_buffer.pop(0)
             session.recording_buffer_bytes -= len(evicted)
@@ -297,6 +301,7 @@ class TelephonyMediaGateway(MediaGateway):
             return
 
         try:
+            loop = asyncio.get_running_loop()
             if self._tts_source_format == "f32le":
                 from app.utils.audio_utils import pcm_float32_to_int16, pcm_to_ulaw
                 pcm16 = pcm_float32_to_int16(audio_chunk)
@@ -324,7 +329,7 @@ class TelephonyMediaGateway(MediaGateway):
             #      chunk of the same burst is placed contiguously after this one.
             chunk_samples = len(pcm16) // 2
             wall_pos = int(
-                (time.monotonic() - session.recording_start_time)
+                (loop.time() - session.recording_start_time)
                 * self._sample_rate
             )
             if wall_pos > session.agent_rec_cursor:
@@ -393,7 +398,7 @@ class TelephonyMediaGateway(MediaGateway):
             packet = session.tts_buffer[:send_size]
             session.tts_buffer = session.tts_buffer[send_size:]
 
-            now = time.monotonic()
+            now = loop.time()
             deadline = session._tts_send_deadline
 
             # Initialise (or re-initialise after a silence gap) the pacing cursor.

@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <thread>
 
 namespace voice_gateway {
@@ -141,7 +142,7 @@ bool RtpSession::start(std::string& error) {
         last_rtp_tx_time_ = started_at_;
         transition_state_locked(SessionState::Starting);
 
-        jitter_buffer_.clear();
+        reset_jitter_buffer_locked();
         tts_queue_.clear();
         tts_segments_.clear();
         next_tts_segment_id_ = 1;
@@ -153,6 +154,7 @@ bool RtpSession::start(std::string& error) {
         has_prev_arrival_ = false;
         prev_rtp_timestamp_ = 0;
         interarrival_jitter_ts_units_ = 0.0;
+        last_rtcp_report_sent_at_ = started_at_;
     }
 
     receiver_thread_ = std::thread(&RtpSession::receiver_loop, this);
@@ -197,7 +199,7 @@ SessionStatsSnapshot RtpSession::snapshot() const {
         snap.tx_ssrc = sequencer_.ssrc();
         snap.rx_interarrival_jitter_ts_units = interarrival_jitter_ts_units_;
         snap.rx_interarrival_jitter_ms = interarrival_jitter_ts_units_ / static_cast<double>(kPcmuClockRateHz / 1000);
-        snap.jitter_buffer_depth_frames = jitter_buffer_.size();
+        snap.jitter_buffer_depth_frames = jitter_buffer_size_;
         snap.tts_queue_depth_frames = tts_queue_.size();
         snap.tts_last_stop_reason = tts_last_stop_reason_;
     }
@@ -256,10 +258,13 @@ bool RtpSession::enqueue_tts_ulaw(
 
     for (std::size_t i = 0; i < frame_count; ++i) {
         const std::size_t offset = i * static_cast<std::size_t>(kPcmuTimestampStep);
-        std::vector<uint8_t> payload(
-            ulaw_audio.begin() + static_cast<std::ptrdiff_t>(offset),
-            ulaw_audio.begin() + static_cast<std::ptrdiff_t>(offset + static_cast<std::size_t>(kPcmuTimestampStep)));
-        tts_queue_.push_back(QueuedTtsFrame{segment_id, std::move(payload)});
+        QueuedTtsFrame frame{};
+        frame.segment_id = segment_id;
+        std::memcpy(
+            frame.payload.data(),
+            ulaw_audio.data() + static_cast<std::ptrdiff_t>(offset),
+            static_cast<std::size_t>(kPcmuTimestampStep));
+        tts_queue_.push_back(std::move(frame));
     }
 
     while (tts_queue_.size() > config_.tts_max_queue_frames) {
@@ -325,12 +330,20 @@ void RtpSession::receiver_loop() {
             break;
         }
 
+        if (is_rtcp_packet(buffer, static_cast<std::size_t>(n))) {
+            continue;
+        }
+
         const auto parsed = RtpPacket::parse(buffer, static_cast<std::size_t>(n));
         if (!parsed.has_value()) {
             invalid_packets_.fetch_add(1);
             continue;
         }
         if (parsed->payload_type != 0) {
+            invalid_packets_.fetch_add(1);
+            continue;
+        }
+        if (parsed->payload.size() != static_cast<std::size_t>(kPcmuTimestampStep)) {
             invalid_packets_.fetch_add(1);
             continue;
         }
@@ -367,18 +380,6 @@ void RtpSession::receiver_loop() {
                 continue;
             }
 
-            bool duplicate = false;
-            for (const auto& frame : jitter_buffer_) {
-                if (frame.sequence_number == parsed->sequence_number) {
-                    duplicate = true;
-                    break;
-                }
-            }
-            if (duplicate) {
-                duplicate_packets_.fetch_add(1);
-                continue;
-            }
-
             if (last_received_seq_valid_) {
                 const uint16_t expected_next = static_cast<uint16_t>(last_received_seq_ + 1);
                 if (parsed->sequence_number != expected_next) {
@@ -392,29 +393,19 @@ void RtpSession::receiver_loop() {
                 last_received_seq_ = parsed->sequence_number;
             }
 
-            const QueuedRtpFrame frame{parsed->sequence_number, parsed->timestamp, parsed->payload};
-
-            auto insert_pos = jitter_buffer_.end();
-            for (auto it = jitter_buffer_.begin(); it != jitter_buffer_.end(); ++it) {
-                if (sequence_diff(frame.sequence_number, it->sequence_number) < 0) {
-                    insert_pos = it;
-                    break;
-                }
-            }
-            jitter_buffer_.insert(insert_pos, frame);
-
-            while (jitter_buffer_.size() > config_.jitter_buffer_capacity_frames) {
-                jitter_buffer_.pop_front();
-                jitter_buffer_overflow_drops_.fetch_add(1);
-                dropped_packets_.fetch_add(1);
+            QueuedRtpFrame frame{};
+            frame.sequence_number = parsed->sequence_number;
+            frame.timestamp = parsed->timestamp;
+            frame.payload_size = parsed->payload.size();
+            std::memcpy(frame.payload.data(), parsed->payload.data(), frame.payload_size);
+            if (!insert_jitter_frame_locked(frame)) {
+                continue;
             }
 
             if (playout_started_) {
                 const std::size_t target_depth = std::min(kDefaultJitterTargetDepthFrames, config_.jitter_buffer_capacity_frames);
-                while (jitter_buffer_.size() > target_depth) {
-                    jitter_buffer_.pop_front();
-                    jitter_buffer_overflow_drops_.fetch_add(1);
-                    dropped_packets_.fetch_add(1);
+                while (jitter_buffer_size_ > target_depth) {
+                    drop_oldest_jitter_frame_locked();
                 }
             }
         }
@@ -442,7 +433,8 @@ void RtpSession::transmitter_loop() {
     auto next_send_time = std::chrono::steady_clock::now();
 
     while (running_.load()) {
-        std::vector<uint8_t> payload;
+        std::array<uint8_t, kPcmuTimestampStep> payload{};
+        std::size_t payload_size = 0;
         uint32_t tts_segment_id = 0;
         bool sending_tts = false;
 
@@ -458,7 +450,7 @@ void RtpSession::transmitter_loop() {
                 if (!config_.echo_enabled) {
                     return false;
                 }
-                if (jitter_buffer_.empty()) {
+                if (jitter_buffer_size_ == 0) {
                     return false;
                 }
                 if (!config_.jitter_buffer_enabled) {
@@ -467,7 +459,7 @@ void RtpSession::transmitter_loop() {
                 if (playout_started_) {
                     return true;
                 }
-                return jitter_buffer_.size() >= config_.jitter_buffer_prefetch_frames;
+                return jitter_buffer_size_ >= config_.jitter_buffer_prefetch_frames;
             });
 
             if (!running_.load()) {
@@ -476,11 +468,12 @@ void RtpSession::transmitter_loop() {
             if (!tts_queue_.empty()) {
                 QueuedTtsFrame tts_frame = std::move(tts_queue_.front());
                 tts_queue_.pop_front();
-                payload = std::move(tts_frame.payload);
+                payload = tts_frame.payload;
+                payload_size = static_cast<std::size_t>(kPcmuTimestampStep);
                 tts_segment_id = tts_frame.segment_id;
                 sending_tts = true;
             } else {
-                if (!config_.echo_enabled || jitter_buffer_.empty()) {
+                if (!config_.echo_enabled || jitter_buffer_size_ == 0) {
                     continue;
                 }
 
@@ -491,12 +484,19 @@ void RtpSession::transmitter_loop() {
                     }
                 }
 
-                QueuedRtpFrame frame = std::move(jitter_buffer_.front());
-                jitter_buffer_.pop_front();
+                QueuedRtpFrame frame{};
+                if (!pop_next_jitter_frame_locked(frame)) {
+                    continue;
+                }
                 last_played_seq_valid_ = true;
                 last_played_seq_ = frame.sequence_number;
-                payload = std::move(frame.payload);
+                payload = frame.payload;
+                payload_size = frame.payload_size;
             }
+        }
+
+        if (payload_size == 0) {
+            continue;
         }
 
         const auto now = std::chrono::steady_clock::now();
@@ -509,14 +509,29 @@ void RtpSession::transmitter_loop() {
         RtpPacket outbound;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            outbound = sequencer_.next_packet(payload, 0);
+            outbound = sequencer_.next_packet({}, 0);
         }
-        const std::vector<uint8_t> packet_bytes = outbound.serialize();
+        constexpr std::size_t kRtpHeaderSize = 12;
+        std::array<uint8_t, kRtpHeaderSize + kPcmuTimestampStep> packet_bytes{};
+        packet_bytes[0] = 0x80;
+        packet_bytes[1] = static_cast<uint8_t>(outbound.payload_type & 0x7Fu);
+        packet_bytes[2] = static_cast<uint8_t>((outbound.sequence_number >> 8) & 0xFFu);
+        packet_bytes[3] = static_cast<uint8_t>(outbound.sequence_number & 0xFFu);
+        packet_bytes[4] = static_cast<uint8_t>((outbound.timestamp >> 24) & 0xFFu);
+        packet_bytes[5] = static_cast<uint8_t>((outbound.timestamp >> 16) & 0xFFu);
+        packet_bytes[6] = static_cast<uint8_t>((outbound.timestamp >> 8) & 0xFFu);
+        packet_bytes[7] = static_cast<uint8_t>(outbound.timestamp & 0xFFu);
+        packet_bytes[8] = static_cast<uint8_t>((outbound.ssrc >> 24) & 0xFFu);
+        packet_bytes[9] = static_cast<uint8_t>((outbound.ssrc >> 16) & 0xFFu);
+        packet_bytes[10] = static_cast<uint8_t>((outbound.ssrc >> 8) & 0xFFu);
+        packet_bytes[11] = static_cast<uint8_t>(outbound.ssrc & 0xFFu);
+        std::memcpy(packet_bytes.data() + static_cast<std::ptrdiff_t>(kRtpHeaderSize), payload.data(), payload_size);
+        const std::size_t packet_size = kRtpHeaderSize + payload_size;
 
         const ssize_t sent = sendto(
             tx_socket_,
             packet_bytes.data(),
-            packet_bytes.size(),
+            packet_size,
             0,
             reinterpret_cast<const sockaddr*>(&remote_addr),
             sizeof(remote_addr));
@@ -544,6 +559,8 @@ void RtpSession::transmitter_loop() {
                 mark_tts_frame_sent_locked(tts_segment_id);
             }
         }
+
+        maybe_send_rtcp_report(remote_addr, std::chrono::steady_clock::now());
 
         std::cout << "event=rtp_tx"
                   << " session_id=" << config_.session_id
@@ -767,6 +784,173 @@ int64_t RtpSession::millis_since(const std::chrono::steady_clock::time_point& ts
     const auto now = std::chrono::steady_clock::now();
     const auto delta = std::chrono::duration_cast<std::chrono::milliseconds>(now - ts);
     return std::max<int64_t>(0, delta.count());
+}
+
+bool RtpSession::is_rtcp_packet(const uint8_t* data, const std::size_t len) {
+    if (data == nullptr || len < 8) {
+        return false;
+    }
+    const uint8_t version = static_cast<uint8_t>((data[0] >> 6) & 0x03u);
+    const uint8_t packet_type = data[1];
+    return version == 2 && packet_type >= 200 && packet_type <= 204;
+}
+
+void RtpSession::reset_jitter_buffer_locked() {
+    jitter_slots_.clear();
+    jitter_slots_.resize(config_.jitter_buffer_capacity_frames);
+    jitter_buffer_size_ = 0;
+    jitter_min_seq_valid_ = false;
+    jitter_min_seq_ = 0;
+}
+
+std::size_t RtpSession::jitter_index(const uint16_t sequence_number) const {
+    return static_cast<std::size_t>(sequence_number) & (config_.jitter_buffer_capacity_frames - 1);
+}
+
+bool RtpSession::insert_jitter_frame_locked(const QueuedRtpFrame& frame) {
+    if (jitter_slots_.empty()) {
+        reset_jitter_buffer_locked();
+    }
+
+    std::size_t index = jitter_index(frame.sequence_number);
+    JitterSlot* slot = &jitter_slots_[index];
+    if (slot->occupied && slot->frame.sequence_number == frame.sequence_number) {
+        duplicate_packets_.fetch_add(1);
+        return false;
+    }
+
+    while (jitter_buffer_size_ >= config_.jitter_buffer_capacity_frames || slot->occupied) {
+        drop_oldest_jitter_frame_locked();
+        index = jitter_index(frame.sequence_number);
+        slot = &jitter_slots_[index];
+        if (slot->occupied && slot->frame.sequence_number == frame.sequence_number) {
+            duplicate_packets_.fetch_add(1);
+            return false;
+        }
+    }
+
+    slot->occupied = true;
+    slot->frame = frame;
+    ++jitter_buffer_size_;
+    if (!jitter_min_seq_valid_ || sequence_diff(frame.sequence_number, jitter_min_seq_) < 0) {
+        jitter_min_seq_valid_ = true;
+        jitter_min_seq_ = frame.sequence_number;
+    }
+    return true;
+}
+
+bool RtpSession::pop_next_jitter_frame_locked(QueuedRtpFrame& frame) {
+    if (!jitter_min_seq_valid_ || jitter_buffer_size_ == 0) {
+        return false;
+    }
+
+    const std::size_t index = jitter_index(jitter_min_seq_);
+    JitterSlot& slot = jitter_slots_[index];
+    if (!slot.occupied || slot.frame.sequence_number != jitter_min_seq_) {
+        advance_jitter_min_seq_locked();
+        if (!jitter_min_seq_valid_) {
+            return false;
+        }
+    }
+
+    JitterSlot& current = jitter_slots_[jitter_index(jitter_min_seq_)];
+    if (!current.occupied || current.frame.sequence_number != jitter_min_seq_) {
+        return false;
+    }
+
+    frame = current.frame;
+    current.occupied = false;
+    if (jitter_buffer_size_ > 0) {
+        --jitter_buffer_size_;
+    }
+    if (jitter_buffer_size_ == 0) {
+        jitter_min_seq_valid_ = false;
+    } else {
+        advance_jitter_min_seq_locked();
+    }
+    return true;
+}
+
+void RtpSession::drop_oldest_jitter_frame_locked() {
+    if (!jitter_min_seq_valid_ || jitter_buffer_size_ == 0) {
+        return;
+    }
+
+    JitterSlot& slot = jitter_slots_[jitter_index(jitter_min_seq_)];
+    if (slot.occupied && slot.frame.sequence_number == jitter_min_seq_) {
+        slot.occupied = false;
+        if (jitter_buffer_size_ > 0) {
+            --jitter_buffer_size_;
+        }
+        jitter_buffer_overflow_drops_.fetch_add(1);
+        dropped_packets_.fetch_add(1);
+    }
+
+    if (jitter_buffer_size_ == 0) {
+        jitter_min_seq_valid_ = false;
+        return;
+    }
+    advance_jitter_min_seq_locked();
+}
+
+void RtpSession::advance_jitter_min_seq_locked() {
+    if (jitter_buffer_size_ == 0) {
+        jitter_min_seq_valid_ = false;
+        return;
+    }
+
+    uint16_t candidate = jitter_min_seq_;
+    for (std::size_t offset = 1; offset <= config_.jitter_buffer_capacity_frames; ++offset) {
+        candidate = static_cast<uint16_t>(candidate + 1);
+        const JitterSlot& slot = jitter_slots_[jitter_index(candidate)];
+        if (slot.occupied && slot.frame.sequence_number == candidate) {
+            jitter_min_seq_valid_ = true;
+            jitter_min_seq_ = candidate;
+            return;
+        }
+    }
+
+    jitter_min_seq_valid_ = false;
+    jitter_buffer_size_ = 0;
+}
+
+void RtpSession::maybe_send_rtcp_report(
+    const sockaddr_in& remote_addr,
+    const std::chrono::steady_clock::time_point& now) {
+    if (tx_socket_ < 0 || config_.remote_port == 0 || config_.remote_port == std::numeric_limits<uint16_t>::max()) {
+        return;
+    }
+
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_rtcp_report_sent_at_).count();
+    if (elapsed < kRtcpReportIntervalMs) {
+        return;
+    }
+
+    sockaddr_in rtcp_addr = remote_addr;
+    rtcp_addr.sin_port = htons(static_cast<uint16_t>(config_.remote_port + 1));
+
+    std::array<uint8_t, 8> rr{};
+    rr[0] = 0x80;
+    rr[1] = 201;  // Receiver Report
+    rr[2] = 0x00;
+    rr[3] = 0x01;  // length in 32-bit words minus one
+
+    const uint32_t ssrc = sequencer_.ssrc();
+    rr[4] = static_cast<uint8_t>((ssrc >> 24) & 0xFFu);
+    rr[5] = static_cast<uint8_t>((ssrc >> 16) & 0xFFu);
+    rr[6] = static_cast<uint8_t>((ssrc >> 8) & 0xFFu);
+    rr[7] = static_cast<uint8_t>(ssrc & 0xFFu);
+
+    const ssize_t sent = sendto(
+        tx_socket_,
+        rr.data(),
+        rr.size(),
+        0,
+        reinterpret_cast<const sockaddr*>(&rtcp_addr),
+        sizeof(rtcp_addr));
+    if (sent >= 0) {
+        last_rtcp_report_sent_at_ = now;
+    }
 }
 
 }  // namespace voice_gateway

@@ -26,6 +26,7 @@ import logging
 import os
 import random
 import uuid
+from dataclasses import dataclass
 from typing import Any, Callable, Coroutine, Dict, List, Optional
 
 import aiohttp
@@ -33,6 +34,14 @@ import aiohttp
 from app.domain.interfaces.call_control_adapter import CallControlAdapter
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _UnicastRtpCacheEntry:
+    created_key: str
+    remote_ip: Optional[str] = None
+    remote_port: Optional[int] = None
+    cached_at: float = 0.0
 
 
 class AsteriskAdapter(CallControlAdapter):
@@ -104,6 +113,11 @@ class AsteriskAdapter(CallControlAdapter):
         self._rtp_next = self._rtp_port_start
         self._rtp_in_use: set[int] = set()
         self._rtp_lock = asyncio.Lock()
+        self._channel_varset_cache: Dict[tuple[str, str], _UnicastRtpCacheEntry] = {}
+        self._channel_varset_cache_ttl_s = max(
+            1.0,
+            float(os.getenv("ASTERISK_CHANNELVARSET_CACHE_TTL_S", "120")),
+        )
 
     # ------------------------------------------------------------------
     # CallControlAdapter interface — identity
@@ -261,6 +275,149 @@ class AsteriskAdapter(CallControlAdapter):
         async with self._rtp_lock:
             self._rtp_in_use.discard(port)
 
+    def _channel_created_key(self, channel: Optional[Dict[str, Any]]) -> str:
+        if not channel:
+            return ""
+        for key in ("creationtime", "creationTime", "created_at"):
+            value = channel.get(key)
+            if value:
+                return str(value)
+        return ""
+
+    def _channel_cache_key(self, channel_id: str, created_key: str) -> tuple[str, str]:
+        return (channel_id, created_key)
+
+    def _purge_expired_channel_varset_cache(self, now: float) -> None:
+        expired = [
+            key
+            for key, entry in self._channel_varset_cache.items()
+            if now - entry.cached_at > self._channel_varset_cache_ttl_s
+        ]
+        for key in expired:
+            self._channel_varset_cache.pop(key, None)
+
+    def _update_channel_varset_cache(
+        self,
+        *,
+        channel_id: str,
+        channel: Optional[Dict[str, Any]],
+        variable: str,
+        value: Any,
+        now: float,
+    ) -> None:
+        if variable not in {"UNICASTRTP_LOCAL_ADDRESS", "UNICASTRTP_LOCAL_PORT"}:
+            return
+
+        self._purge_expired_channel_varset_cache(now)
+        created_key = self._channel_created_key(channel)
+        key = self._channel_cache_key(channel_id, created_key)
+        entry = self._channel_varset_cache.get(key)
+        if not entry:
+            entry = _UnicastRtpCacheEntry(created_key=created_key, cached_at=now)
+            self._channel_varset_cache[key] = entry
+
+        entry.cached_at = now
+        if variable == "UNICASTRTP_LOCAL_ADDRESS":
+            entry.remote_ip = str(value or "127.0.0.1")
+        elif variable == "UNICASTRTP_LOCAL_PORT":
+            try:
+                entry.remote_port = int(value)
+            except (TypeError, ValueError):
+                entry.remote_port = None
+
+    def _cache_unicastrtp_local(
+        self,
+        *,
+        channel_id: str,
+        channel: Optional[Dict[str, Any]],
+        remote_ip: str,
+        remote_port: int,
+        now: float,
+    ) -> None:
+        self._update_channel_varset_cache(
+            channel_id=channel_id,
+            channel=channel,
+            variable="UNICASTRTP_LOCAL_ADDRESS",
+            value=remote_ip,
+            now=now,
+        )
+        self._update_channel_varset_cache(
+            channel_id=channel_id,
+            channel=channel,
+            variable="UNICASTRTP_LOCAL_PORT",
+            value=remote_port,
+            now=now,
+        )
+
+    def _get_cached_unicastrtp_local(
+        self,
+        *,
+        channel_id: str,
+        channel: Optional[Dict[str, Any]],
+        now: float,
+    ) -> Optional[tuple[str, int]]:
+        self._purge_expired_channel_varset_cache(now)
+        created_key = self._channel_created_key(channel)
+
+        candidates: list[_UnicastRtpCacheEntry] = []
+        if created_key:
+            entry = self._channel_varset_cache.get(self._channel_cache_key(channel_id, created_key))
+            if entry:
+                candidates.append(entry)
+        else:
+            for (cached_channel_id, _), entry in self._channel_varset_cache.items():
+                if cached_channel_id == channel_id:
+                    candidates.append(entry)
+
+        if not candidates:
+            return None
+
+        freshest = max(candidates, key=lambda item: item.cached_at)
+        if freshest.remote_ip and freshest.remote_port:
+            return freshest.remote_ip, freshest.remote_port
+        return None
+
+    async def _resolve_unicastrtp_local(
+        self,
+        *,
+        channel_id: str,
+        channel: Optional[Dict[str, Any]],
+    ) -> tuple[str, int]:
+        loop = asyncio.get_running_loop()
+        now = loop.time()
+        cached = self._get_cached_unicastrtp_local(channel_id=channel_id, channel=channel, now=now)
+        if cached:
+            return cached
+
+        addr_var, port_var = await asyncio.gather(
+            self._ari(
+                "GET", f"/channels/{channel_id}/variable",
+                params={"variable": "UNICASTRTP_LOCAL_ADDRESS"},
+            ),
+            self._ari(
+                "GET", f"/channels/{channel_id}/variable",
+                params={"variable": "UNICASTRTP_LOCAL_PORT"},
+            ),
+        )
+        remote_ip = str(addr_var.get("value", "127.0.0.1"))
+        remote_port = int(port_var.get("value", 0))
+        self._cache_unicastrtp_local(
+            channel_id=channel_id,
+            channel=channel,
+            remote_ip=remote_ip,
+            remote_port=remote_port,
+            now=loop.time(),
+        )
+        return remote_ip, remote_port
+
+    def _drop_channel_varset_cache(self, channel_id: str) -> None:
+        stale_keys = [
+            key for key in self._channel_varset_cache
+            if key[0] == channel_id
+        ]
+        for key in stale_keys:
+            self._channel_varset_cache.pop(key, None)
+
     # ------------------------------------------------------------------
     # ARI WebSocket event listener
     # ------------------------------------------------------------------
@@ -323,6 +480,17 @@ class AsteriskAdapter(CallControlAdapter):
         channel = event.get("channel") or {}
         channel_id = str(channel.get("id") or "")
         channel_name = str(channel.get("name") or "")
+        loop = asyncio.get_running_loop()
+
+        if event_type in {"ChannelVarset", "ChannelVarSet"} and channel_id:
+            self._update_channel_varset_cache(
+                channel_id=channel_id,
+                channel=channel,
+                variable=str(event.get("variable") or ""),
+                value=event.get("value"),
+                now=loop.time(),
+            )
+            return
 
         if event_type == "StasisStart":
             args: List[str] = event.get("args", [])
@@ -491,8 +659,8 @@ class AsteriskAdapter(CallControlAdapter):
         )
 
         try:
-            import time as _time
-            _t_setup_start = _time.monotonic()
+            loop = asyncio.get_running_loop()
+            _t_setup_start = loop.time()
 
             # 3. Create ExternalMedia channel pointing at C++ Gateway RTP listener.
             # This one must run first — steps 4/5/6 all need ext_channel_id.
@@ -521,19 +689,10 @@ class AsteriskAdapter(CallControlAdapter):
                 params={"channel": ext_channel_id},
                 ok=(200, 204, 209),
             )
-            addr_coro = self._ari(
-                "GET", f"/channels/{ext_channel_id}/variable",
-                params={"variable": "UNICASTRTP_LOCAL_ADDRESS"},
+            _, (remote_ip, remote_port) = await asyncio.gather(
+                add_coro,
+                self._resolve_unicastrtp_local(channel_id=ext_channel_id, channel=ext_data),
             )
-            port_coro = self._ari(
-                "GET", f"/channels/{ext_channel_id}/variable",
-                params={"variable": "UNICASTRTP_LOCAL_PORT"},
-            )
-            _, remote_ip_var, remote_port_var = await asyncio.gather(
-                add_coro, addr_coro, port_coro
-            )
-            remote_ip = str(remote_ip_var.get("value", "127.0.0.1"))
-            remote_port = int(remote_port_var.get("value", 0))
 
             # 6. Start C++ Gateway session — call is already answered so RTP is
             #    flowing immediately; no startup-timeout risk.
@@ -571,7 +730,7 @@ class AsteriskAdapter(CallControlAdapter):
             self._bridges[channel_id] = bridge_id
             self._gateway_sessions[channel_id] = session_id
 
-            _setup_ms = (_time.monotonic() - _t_setup_start) * 1000.0
+            _setup_ms = (loop.time() - _t_setup_start) * 1000.0
             logger.info(
                 "ari_setup_done channel=%s session=%s rtp_port=%s setup_ms=%.0f",
                 channel_id[:12], session_id, listen_port, _setup_ms,
@@ -600,6 +759,7 @@ class AsteriskAdapter(CallControlAdapter):
                 except Exception:
                     pass
             if ext_channel_id:
+                self._drop_channel_varset_cache(ext_channel_id)
                 try:
                     await self._ari("DELETE", f"/channels/{ext_channel_id}", ok=(200, 204, 404))
                 except Exception:
@@ -662,19 +822,10 @@ class AsteriskAdapter(CallControlAdapter):
                 params={"channel": ext_channel_id},
                 ok=(200, 204, 209),
             )
-            addr_coro = self._ari(
-                "GET", f"/channels/{ext_channel_id}/variable",
-                params={"variable": "UNICASTRTP_LOCAL_ADDRESS"},
+            _, (remote_ip, remote_port) = await asyncio.gather(
+                add_coro,
+                self._resolve_unicastrtp_local(channel_id=ext_channel_id, channel=ext_data),
             )
-            port_coro = self._ari(
-                "GET", f"/channels/{ext_channel_id}/variable",
-                params={"variable": "UNICASTRTP_LOCAL_PORT"},
-            )
-            _, remote_ip_var, remote_port_var = await asyncio.gather(
-                add_coro, addr_coro, port_coro
-            )
-            remote_ip = str(remote_ip_var.get("value", "127.0.0.1"))
-            remote_port = int(remote_port_var.get("value", 0))
 
             # 6. Start C++ Gateway session (AI mode: echo_enabled=False once TTS hooked in)
             await self._gateway(
@@ -740,6 +891,7 @@ class AsteriskAdapter(CallControlAdapter):
                 except Exception:
                     pass
             if ext_channel_id:
+                self._drop_channel_varset_cache(ext_channel_id)
                 try:
                     await self._ari("DELETE", f"/channels/{ext_channel_id}", ok=(200, 204, 404))
                 except Exception:
@@ -786,6 +938,7 @@ class AsteriskAdapter(CallControlAdapter):
                 logger.debug(f"AsteriskAdapter: gateway stop error: {exc}")
 
         if ext_channel_id:
+            self._drop_channel_varset_cache(ext_channel_id)
             try:
                 await self._ari("DELETE", f"/channels/{ext_channel_id}", ok=(200, 204, 404))
             except Exception:

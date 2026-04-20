@@ -32,6 +32,7 @@ from app.domain.services.ask_ai_constants import TALKY_PRODUCT_INFO as _ASK_AI_P
 from app.core.container import get_container
 from app.core.postgres_adapter import Client as PostgresAdapterClient
 from app.core.telemetry import get_tracer, pipeline_span, record_latency, voice_span
+from app.core.telephony_observability import record_turn_silent_reason
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,40 @@ class VoicePipelineService:
         self._barge_in_events: dict[str, asyncio.Event] = {}
         self._pending_llm_tasks: dict[str, asyncio.Task] = {}
         self._tracer = get_tracer()
+
+    async def _await_task_after_cancel(self, task: asyncio.Task, call_id: str, label: str) -> None:
+        try:
+            await task
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            logger.warning(
+                "%s task raised before cancellation completed for call %s: %s",
+                label,
+                call_id,
+                exc,
+                exc_info=True,
+            )
+            return
+
+        exc = task.exception()
+        if exc is not None:
+            logger.warning(
+                "%s task completed with exception for call %s: %s",
+                label,
+                call_id,
+                exc,
+                exc_info=True,
+            )
+
+    def _record_silent_turn(self, call_id: str, reason: str) -> None:
+        record_turn_silent_reason(reason)
+        logger.warning(
+            "turn_silent_reason call_id=%s reason=%s",
+            call_id,
+            reason,
+            extra={"call_id": call_id, "turn_silent_reason": reason},
+        )
 
     def _response_max_sentences_for_turn(self, turn_id: int) -> Optional[int]:
         """First turn: limit to 2 sentences for faster response start."""
@@ -199,12 +234,10 @@ class VoicePipelineService:
                 # Cancel orphaned LLM task — asyncio children are NOT auto-cancelled
                 # when their parent task is cancelled.
                 pending_task = self._pending_llm_tasks.pop(call_id, None)
-                if pending_task and not pending_task.done():
-                    pending_task.cancel()
-                    try:
-                        await pending_task
-                    except (asyncio.CancelledError, Exception):
-                        pass
+                if pending_task:
+                    if not pending_task.done():
+                        pending_task.cancel()
+                    await self._await_task_after_cancel(pending_task, call_id, "orphaned_llm")
                 # Remove barge-in event so a future session cannot inherit stale state.
                 self._barge_in_events.pop(call_id, None)
                 session.stt_active = False
@@ -294,6 +327,7 @@ class VoicePipelineService:
                 task = self._pending_llm_tasks.pop(call_id)
                 if not task.done():
                     task.cancel()
+                await self._await_task_after_cancel(task, call_id, "speculative_llm")
             # Roll back any messages the speculative handle_turn_end appended
             # before being cancelled.  Without this, orphaned user/assistant
             # messages corrupt the conversation context for subsequent turns.
@@ -632,8 +666,10 @@ class VoicePipelineService:
         # running until TurnResumed arrives — wasting LLM compute and potentially
         # writing a stale user+assistant message pair to conversation history.
         speculative_task = self._pending_llm_tasks.pop(call_id, None)
-        if speculative_task and not speculative_task.done():
-            speculative_task.cancel()
+        if speculative_task:
+            if not speculative_task.done():
+                speculative_task.cancel()
+            await self._await_task_after_cancel(speculative_task, call_id, "speculative_llm")
             # Roll back any history the speculative task may have appended
             # before being cancelled (mirrors the TurnResumed rollback path).
             restore_len = getattr(session, "_speculative_history_len", None)
@@ -1002,6 +1038,8 @@ class VoicePipelineService:
 
         interrupted = False
         completed = False
+        silent_reason: Optional[str] = None
+        first_chunk = True
         try:
             # If user spoke during the LLM call, the barge-in event is already set.
             # Don't start TTS — send the stop signal immediately and return.
@@ -1028,7 +1066,6 @@ class VoicePipelineService:
                 # AI to start speaking again right after being interrupted.
                 return interrupted
 
-            first_chunk = True
             async for audio_chunk in self.tts_provider.stream_synthesize(
                 text,
                 voice_id=session.voice_id,
@@ -1105,10 +1142,17 @@ class VoicePipelineService:
         except SessionGoneError:
             # Browser WebSocket was torn down while TTS was streaming.
             # Exit the loop silently — this is normal teardown, not an error.
+            silent_reason = "session_gone"
             logger.debug("TTS loop stopped: browser session %s already gone", call_id)
         except Exception as e:
+            silent_reason = "tts_exception"
             logger.error(f"TTS synthesis error for call {call_id}: {e}", exc_info=True)
         finally:
+            if not interrupted and first_chunk:
+                if silent_reason is None and completed:
+                    silent_reason = "provider_empty_stream"
+                if silent_reason is not None:
+                    self._record_silent_turn(call_id, silent_reason)
             if track_latency:
                 self.latency_tracker.mark_tts_end(call_id)
                 if interrupted:

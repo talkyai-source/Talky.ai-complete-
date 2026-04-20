@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import asyncpg
-from prometheus_client import CONTENT_TYPE_LATEST, Gauge, REGISTRY, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, REGISTRY, generate_latest
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +99,13 @@ def _get_or_create_gauge(name: str, documentation: str) -> Gauge:
     if existing is not None:
         return existing  # type: ignore[return-value]
     return Gauge(name, documentation)
+
+
+def _get_or_create_counter(name: str, documentation: str, labelnames: tuple[str, ...] = ()) -> Counter:
+    existing = getattr(REGISTRY, "_names_to_collectors", {}).get(name)
+    if existing is not None:
+        return existing  # type: ignore[return-value]
+    return Counter(name, documentation, labelnames=labelnames)
 
 
 @dataclass(frozen=True)
@@ -238,6 +245,11 @@ CANARY_PERCENT = _get_or_create_gauge(
 CANARY_FROZEN = _get_or_create_gauge(
     "talky_telephony_canary_frozen",
     "Canary freeze flag (1 frozen, 0 unfrozen).",
+)
+TURN_SILENT_REASON_TOTAL = _get_or_create_counter(
+    "talky_telephony_turn_silent_reason_total",
+    "Count of turns that finished without outbound audio, labelled by root cause.",
+    labelnames=("reason",),
 )
 
 _TERMINAL_TRANSFER_STATUSES = {"success", "failed", "cancelled", "timed_out"}
@@ -505,3 +517,7 @@ def render_prometheus_metrics() -> bytes:
 
 def prometheus_content_type() -> str:
     return CONTENT_TYPE_LATEST
+
+
+def record_turn_silent_reason(reason: str) -> None:
+    TURN_SILENT_REASON_TOTAL.labels(reason=reason).inc()
