@@ -37,6 +37,10 @@ from app.domain.interfaces.call_control_adapter import CallControlAdapter
 from app.infrastructure.telephony.adapter_factory import CallControlAdapterFactory
 from app.domain.services.call_guard import CallGuard, GuardDecision, GuardResult
 from app.domain.services.abuse_detection import AbuseDetectionService
+from app.domain.services.telephony_session_config import (
+    build_telephony_session_config,
+    build_telephony_greeting,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +54,35 @@ _adapter: Optional[CallControlAdapter] = None
 # Active voice sessions keyed by PBX call_id (channel_id / call UUID)
 _telephony_sessions: dict[str, object] = {}  # VoiceSession objects
 
+# Max concurrent telephony sessions; override with MAX_TELEPHONY_SESSIONS env var.
+# Each session holds 1 Deepgram WS + 1 Groq connection + audio buffers (~60KB–57MB).
+# Groq free-tier llama-3.1-8b-instant hits 30K TPM at ~28-40 concurrent calls.
+_MAX_TELEPHONY_SESSIONS = int(os.getenv("MAX_TELEPHONY_SESSIONS", "50"))
+
+# Watchdog task handle — started when the adapter connects, cancelled on stop.
+_watchdog_task: Optional[asyncio.Task] = None
+
 # Maps C++ gateway session_id → PBX call_id for the audio callback path.
 # Populated in _on_new_call when the AsteriskAdapter registers a gateway session.
 _gateway_session_to_call_id: dict[str, str] = {}
+
+# Pre-warmed voice sessions created during the ringing phase of outbound calls.
+# Populated by _on_ringing when the Asterisk adapter parks an outbound channel
+# (callee is still hearing the ring tone); drained by _on_new_call once the
+# callee answers.  Each value is (VoiceSession, connect_task | None) where the
+# task is a background asyncio.gather of STT + TTS handshake coroutines.
+# LLM warmup runs as a separate fire-and-forget task and is not tracked here.
+_ringing_warmups: dict[str, tuple[object, Optional[asyncio.Task]]] = {}
+
+# Coordination events for ringing-phase warmup.  When _on_ringing starts, it
+# inserts an unset asyncio.Event for the call_id.  When the warmup completes
+# (or fails), the event is set.  _on_new_call awaits this event instead of
+# polling _ringing_warmups — this eliminates the race condition where the
+# answer path (7ms ARI setup) finishes long before the warmup (~1s for
+# create_voice_session + provider init).
+_ringing_events: dict[str, asyncio.Event] = {}
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -68,126 +98,53 @@ def _outbound_first_speaker() -> str:
     """
     Who speaks first on an outbound (campaign) call after the callee answers.
 
-    Returns "user" or "agent".  Default is "user" — the callee typically says
-    "Hello?" and the AI should respond to that rather than barging in on top of
-    them.  Set TELEPHONY_FIRST_SPEAKER=agent to restore the older behaviour of
-    the AI speaking the opening line itself.
+    Returns "user" or "agent".  Default is "agent" — the estimation agent speaks
+    an immediate greeting so the callee never hears dead silence after picking up.
+    Set TELEPHONY_FIRST_SPEAKER=user to wait for the callee to speak first
+    (useful for inbound-style testing).
     """
-    val = (os.getenv("TELEPHONY_FIRST_SPEAKER") or "user").strip().lower()
-    return "agent" if val == "agent" else "user"
+    val = (os.getenv("TELEPHONY_FIRST_SPEAKER") or "agent").strip().lower()
+    return "user" if val == "user" else "agent"
 
 
 def _build_telephony_session_config(gateway_type: str = "browser"):
     """
-    Build a VoiceSessionConfig tuned for telephony (8 kHz, SIP).
-    
-    Uses global AI config from AI Options API for voice and model selection.
-
-    Parameters
-    ----------
-    gateway_type:
-        "browser"   — used for the FreeSWITCH mod_audio_fork WebSocket path.
-        "telephony" — used for the Asterisk HTTP-callback path
-                      (TelephonyMediaGateway, no WebSocket required).
+    Thin shim kept for call-site compatibility.
+    All config logic lives in telephony_session_config.build_telephony_session_config().
     """
-    from app.domain.services.voice_orchestrator import VoiceSessionConfig
-    from app.domain.services.global_ai_config import get_global_config
-    from app.domain.models.agent_config import AgentConfig
-
-    # Get global AI configuration (from AI Options API)
-    global_config = get_global_config()
-
-    # Use the TTS provider directly from global config
-    # The global config already knows which provider to use
-    tts_provider_type = global_config.tts_provider
-    tts_voice_id = global_config.tts_voice_id
-    
-    logger.info(f"[TELEPHONY CONFIG] Using TTS provider: {tts_provider_type}, voice: {tts_voice_id}")
-
-    # Create agent config for telephony calls
-    # The LLM will generate its own human name and introduction
-    agent_config = AgentConfig(
-        agent_name="",  # LLM will choose its own name
-        company_name="",  # LLM will introduce naturally
-        business_type="general",
-        goal="information_gathering",  # Valid enum value
-        goal_description="have a natural conversation",
-        tone="friendly and professional",
-        response_max_sentences=2,
-    )
-
-    # System prompt — campaign-aware, no hardcoded greeting text.
-    # The LLM will generate the opening line itself based on the campaign
-    # context (agent name, company, goal) it receives here.
-    # When a campaign provides its own system_prompt via the dialer worker,
-    # that value will override this default at session creation time.
-    system_prompt = """You are an outbound phone agent for a campaign.
-
-IMPORTANT INSTRUCTIONS:
-- Speak naturally like a real person on the phone — warm, friendly, professional
-- Keep every response short and conversational (1-2 sentences)
-- Never mention you are an AI or reference any technology
-- Do NOT use filler openers like "Certainly", "Absolutely", "Sure", "Of course"
-- Listen carefully and respond specifically to what the person says
-- If your previous response shows [interrupted by caller], the caller spoke over you — do NOT repeat what you already said, just respond naturally to what they are saying now
-
-OPENING THE CALL:
-- Greet the person by saying hello and introduce yourself using your agent name and company name
-- Then in 1 sentence explain the reason for the call based on your campaign goal
-- End with a short open question to invite them to respond
-- Example structure: "Hi [name], this is [agent] from [company]. [one-sentence reason for calling]. [question]?"
-
-Your agent name, company, and campaign goal are defined in your configuration."""
-
-    return VoiceSessionConfig(
-        gateway_type=gateway_type,
-        stt_provider_type="deepgram_flux",
-        llm_provider_type="groq",
-        tts_provider_type=tts_provider_type,
-        stt_model="flux-general-en",
-        stt_sample_rate=8000,
-        stt_encoding="linear16",
-        stt_eot_threshold=0.85,
-        stt_eot_timeout_ms=500,            # was 800 — Flux p50 EndOfTurn fires at ~260ms; 500ms is a safe ceiling
-        stt_eager_eot_threshold=0.4,       # enable EagerEndOfTurn: fires 150–250ms before standard EOT
-        llm_model=global_config.llm_model,
-        llm_temperature=global_config.llm_temperature,
-        llm_max_tokens=global_config.llm_max_tokens,
-        voice_id=tts_voice_id,
-        tts_model=global_config.tts_model,
-        tts_sample_rate=8000,
-        gateway_sample_rate=8000,
-        gateway_channels=1,
-        gateway_bit_depth=16,
-        gateway_target_buffer_ms=40,
-        # mute_during_tts=False enables caller barge-in on telephony.
-        # Keeping this False is intentional: deepgram_flux ignores StartOfTurn
-        # when muted (deepgram_flux.py:399-401), so True would silently disable
-        # barge-in entirely. Echo from the agent's own voice (phone network
-        # loopback) can trigger false StartOfTurn events — this is acceptable
-        # because the Deepgram Flux model is trained to suppress short echoes;
-        # a proper acoustic echo canceller (AEC) would be the right long-term fix.
-        mute_during_tts=False,
-        session_type="telephony",
-        campaign_id="telephony",
-        lead_id="sip-caller",
-        agent_config=agent_config,
-        system_prompt=system_prompt,
-    )
+    return build_telephony_session_config(gateway_type=gateway_type)
 
 
 # ---------------------------------------------------------------------------
 # Audio pipeline lifecycle (called when a new call arrives on any B2BUA)
 # ---------------------------------------------------------------------------
 
+def _build_outbound_greeting(session) -> str:
+    """
+    Build the estimation agent's opening line from the session's agent_config.
+
+    Delegates to telephony_session_config.build_telephony_greeting() so the
+    greeting and the system prompt always reference the same agent_name and
+    company_name — both set in build_telephony_session_config().
+    """
+    agent_config = getattr(session, "agent_config", None)
+    agent_name = (
+        getattr(agent_config, "agent_name", None) if agent_config else None
+    ) or "your assistant"
+    company = (
+        getattr(agent_config, "company_name", None) if agent_config else None
+    ) or "All States Estimation"
+    return build_telephony_greeting(agent_name, company)
+
+
 async def _send_outbound_greeting(voice_session) -> None:
     """
-    Generate and speak the AI's opening line after an outbound call is answered.
+    Speak the AI's opening line immediately after an outbound call is answered.
 
-    The greeting is generated dynamically by the LLM using the campaign's
-    system_prompt (agent name, company, goal) — no hardcoded text.
-    Short delay for async task scheduling; the gateway session is already
-    initialized by _on_new_call before this task is created.
+    Uses a template greeting built from agent_config — same pattern as Ask AI
+    (ask_ai_ws.py line 169) which passes a hardcoded string to avoid the full
+    LLM round-trip (Groq TTFT + sentence buffering = 2–4 second silence).
+    TTS starts within ~100ms of the callee answering instead of 3+ seconds.
     """
     from app.domain.models.conversation import Message, MessageRole
 
@@ -203,44 +160,198 @@ async def _send_outbound_greeting(voice_session) -> None:
     session.llm_active = True
 
     try:
-        logger.info(f"Generating dynamic greeting for call {call_id[:12]}")
+        greeting = _build_outbound_greeting(session)
+        logger.info(f"Outbound greeting for {call_id[:12]}: {greeting!r}")
 
         # Clear any barge_in_event that fired when the callee answered ("Hello?")
-        # BEFORE the LLM call.  Clearing AFTER the LLM would wipe barge-ins that
-        # fire DURING generation (callee actively talking) — those are real and
-        # should prevent the greeting from playing.
+        # so the greeting is not immediately suppressed before a single chunk plays.
         voice_session.pipeline.clear_barge_in_event(session)
 
-        # Use _stream_llm_and_tts instead of the sequential get_llm_response →
-        # synthesize_and_send_audio path.  The streaming path starts TTS as soon
-        # as the first sentence is ready — saving 200–500ms compared to waiting
-        # for all tokens before touching TTS at all.
-        greeting, _, _ = await voice_session.pipeline._stream_llm_and_tts(
-            session, websocket=None
+        # Synthesize directly — no LLM involved.  Same path as normal AI replies
+        # so format conversion, PCMU pacing, and barge-in detection all work.
+        await voice_session.pipeline.synthesize_and_send_audio(
+            session, greeting, websocket=None
         )
 
-        if not greeting:
-            logger.warning(f"LLM returned empty greeting for {call_id[:12]}, skipping")
-            return
-
-        # Persist the greeting in conversation_history so the LLM has context
-        # about what the AI already said.  Without this the next turn sees an
-        # empty history, the LLM re-reads "OPENING THE CALL" instructions,
-        # and generates a duplicate greeting.
+        # Persist the greeting so the LLM sees it as conversation history on the
+        # first real turn.  Without this the next turn sees an empty history and
+        # the LLM re-reads "OPENING THE CALL" instructions, generating a duplicate.
         session.conversation_history.append(
             Message(role=MessageRole.ASSISTANT, content=greeting)
         )
-
-        logger.info(f"Outbound greeting ({len(greeting)} chars): {greeting[:80]!r}")
     except Exception as exc:
         logger.warning(f"Outbound greeting failed for {call_id[:12]}: {exc}")
     finally:
         session.llm_active = False
 
 
+_SESSION_INACTIVITY_TIMEOUT_S = int(os.getenv("TELEPHONY_INACTIVITY_TIMEOUT_S", "300"))  # 5 min
+_SESSION_MAX_DURATION_S = int(os.getenv("TELEPHONY_MAX_CALL_DURATION_S", "3600"))  # 1 hour
+
+
+async def _session_watchdog() -> None:
+    """
+    Periodically scan active sessions and tear down any that have been silent
+    for longer than _SESSION_INACTIVITY_TIMEOUT_S.
+
+    Prevents resource leaks when a PBX crashes or drops the control connection
+    without sending a hangup event (so _on_call_ended never fires).
+    """
+    while True:
+        try:
+            await asyncio.sleep(30)
+            stale = []
+            for call_id, vs in list(_telephony_sessions.items()):
+                # FIX 1 — last_activity_at lives on CallSession (vs.call_session),
+                # not VoiceSession (vs).  Use the pre-built is_stale() method which
+                # compares datetime correctly instead of mixing monotonic time + datetime.
+                call_session = getattr(vs, "call_session", None)
+                if call_session and call_session.is_stale(_SESSION_INACTIVITY_TIMEOUT_S):
+                    stale.append(call_id)
+            for call_id in stale:
+                logger.warning(
+                    "telephony_watchdog: stale session %s (inactive >%ds) — forcing end",
+                    call_id[:12], _SESSION_INACTIVITY_TIMEOUT_S,
+                )
+                await _on_call_ended(call_id)
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            logger.warning("telephony_watchdog error: %s", exc)
+
+
+def _pipeline_done_cb(task: asyncio.Task, call_id: str) -> None:
+    """
+    FIX 3 — Done-callback attached to Asterisk pipeline tasks.
+
+    If start_pipeline() raises an unhandled exception after being fire-and-forgot
+    via create_task(), Python logs to stderr but the session stays in
+    _telephony_sessions forever.  This callback detects the failure and triggers
+    _on_call_ended so the session is cleaned up and the PBX hangs up the channel.
+    """
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc:
+        logger.error(
+            "pipeline_task crashed for %s — triggering session teardown: %s",
+            call_id[:12], exc,
+        )
+        asyncio.create_task(_on_call_ended(call_id))
+
+
+async def _on_ringing(call_id: str) -> None:
+    """
+    Fired when the Asterisk adapter has parked an outbound channel in its
+    mixing bridge and is waiting for the callee to answer.
+
+    Pre-creates the VoiceSession and fires STT + TTS WebSocket handshakes plus
+    a fire-and-forget LLM HTTP/2 pool warm-up so that by the time the callee
+    picks up, every provider connection is already hot.  Subsequent answer
+    handling (in `_on_new_call`) just has to register the media gateway and
+    start the pipeline — no blocking warmup sits on the user's critical path.
+
+    All errors are swallowed: if ringing-phase warmup fails, `_on_new_call`
+    detects the missing entry and falls back to the normal answer-phase
+    warmup path so the call still works (just with the old ~2 s penalty).
+    """
+    if _adapter is None or getattr(_adapter, "name", "") != "asterisk":
+        return
+    if call_id in _ringing_warmups or call_id in _telephony_sessions:
+        return  # idempotent — StasisStart should fire _on_ringing at most once
+    if len(_telephony_sessions) + len(_ringing_warmups) >= _MAX_TELEPHONY_SESSIONS:
+        logger.warning(
+            "ringing_warmup_skipped_at_capacity call_id=%s", call_id[:12],
+        )
+        return
+
+    # Signal to _on_new_call that a ringing warmup is in progress.
+    # This MUST be set before any await so the event is visible immediately
+    # when the answer path checks for it (even if create_voice_session
+    # takes ~1 s).
+    evt = asyncio.Event()
+    _ringing_events[call_id] = evt
+
+    _t0 = asyncio.get_event_loop().time()
+    logger.info(f"WARMUP ringing_warmup_start {call_id[:12]}")
+    try:
+        orchestrator = _get_orchestrator()
+        config = _build_telephony_session_config(gateway_type="telephony")
+        voice_session = await orchestrator.create_voice_session(config)
+
+        # STT + TTS: persistent per-call WebSockets.  We await these (via the
+        # gathered task below) in `_on_new_call` so caller audio can flow into
+        # an already-open socket on the first turn.
+        warmup_coros = []
+        _tts_connect = getattr(voice_session.tts_provider, "connect_for_call", None)
+        if _tts_connect is not None:
+            warmup_coros.append(_tts_connect(voice_session.call_id))
+        if hasattr(voice_session.stt_provider, "pre_connect"):
+            warmup_coros.append(
+                voice_session.stt_provider.pre_connect(
+                    voice_session.call_session.call_id
+                )
+            )
+        connect_task: Optional[asyncio.Task] = None
+        if warmup_coros:
+            connect_task = asyncio.create_task(
+                asyncio.gather(*warmup_coros, return_exceptions=True)
+            )
+
+        # LLM: tiny max_tokens=1 completion that seeds the httpx HTTP/2+TLS
+        # pool.  Fire-and-forget — unlike the old answer-phase placement, the
+        # ring window is long enough (>=1 s, typically 2–10 s) that the
+        # bounded 1.5-s warmup is guaranteed to finish before the first real
+        # turn's stream request, so there is no HTTP/2 stream contention.
+        llm_warm = getattr(voice_session.llm_provider, "warm_up", None)
+        if llm_warm is not None:
+            asyncio.create_task(llm_warm())
+
+        _ringing_warmups[call_id] = (voice_session, connect_task)
+        elapsed_ms = (asyncio.get_event_loop().time() - _t0) * 1000.0
+        logger.info(
+            "WARMUP ringing_warmup_ready call_id=%s warmups=%d setup_ms=%.0f",
+            call_id[:12], len(warmup_coros), elapsed_ms,
+        )
+    except Exception as exc:
+        logger.error(
+            f"Ringing warmup failed for {call_id[:12]}: {exc}", exc_info=True
+        )
+        # Clean up partial state so `_on_new_call` takes the slow path.
+        _ringing_warmups.pop(call_id, None)
+    finally:
+        # Always signal the event so _on_new_call never waits forever.
+        evt.set()
+        # Don't remove the event here — _on_new_call will clean it up.
+
+
 async def _on_new_call(call_id: str) -> None:
     """Initialize AI pipeline when a new SIP call arrives."""
-    logger.info(f"Telephony bridge: new call {call_id[:12]}")
+    # GAP 2 — Concurrency limit: reject calls over the cap immediately.
+    if len(_telephony_sessions) >= _MAX_TELEPHONY_SESSIONS:
+        logger.error(
+            "telephony_at_capacity sessions=%d call_id=%s — rejecting",
+            len(_telephony_sessions), call_id[:12],
+        )
+        # Release any ringing-phase pre-warm so the STT/TTS sockets don't leak.
+        ringing = _ringing_warmups.pop(call_id, None)
+        if ringing is not None:
+            ringing_session, ringing_connect_task = ringing
+            if ringing_connect_task is not None and not ringing_connect_task.done():
+                ringing_connect_task.cancel()
+            try:
+                await _get_orchestrator().end_session(ringing_session)
+            except Exception:
+                pass
+        if _adapter:
+            try:
+                await _adapter.hangup(call_id)
+            except Exception:
+                pass
+        return
+
+    _new_call_t0 = asyncio.get_event_loop().time()
+    logger.info(f"BRIDGE new_call {call_id[:12]} (ringing_warmup_available={call_id in _ringing_warmups})")
     try:
         orchestrator = _get_orchestrator()
 
@@ -250,38 +361,146 @@ async def _on_new_call(call_id: str) -> None:
         is_asterisk = bool(_adapter and _adapter.name == "asterisk")
         gateway_type = "telephony" if is_asterisk else "browser"
 
-        config = _build_telephony_session_config(gateway_type=gateway_type)
-        voice_session = await orchestrator.create_voice_session(config)
+        # ── Fast path: consume the session pre-warmed in _on_ringing ─────
+        # For Asterisk outbound calls, _on_ringing created the VoiceSession
+        # and fired STT/TTS/LLM handshakes while the callee was still hearing
+        # the ring tone.  At this point the WebSockets are already open and
+        # the httpx HTTP/2 pool is warm, so we skip the answer-phase warmup
+        # gather entirely.  For inbound / FreeSWITCH / ringing-failed calls
+        # `pre` is None and we fall through to the slow path below.
+        #
+        # Event-based coordination: when preemptive Up fires, _on_ringing
+        # and _on_outbound_answered run as concurrent tasks.  _on_ringing
+        # takes ~1s (create_voice_session + provider init) while the answer
+        # ARI setup takes ~7ms.  Instead of polling, we await an
+        # asyncio.Event that _on_ringing sets when its warmup completes.
+        pre = _ringing_warmups.pop(call_id, None)
+        if pre is None and is_asterisk:
+            ringing_evt = _ringing_events.get(call_id)
+            if ringing_evt is not None:
+                logger.info(
+                    "BRIDGE waiting_for_ringing_warmup call_id=%s",
+                    call_id[:12],
+                )
+                try:
+                    await asyncio.wait_for(ringing_evt.wait(), timeout=3.0)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "BRIDGE ringing_warmup_timeout call_id=%s — "
+                        "falling back to answer-path warmup",
+                        call_id[:12],
+                    )
+                pre = _ringing_warmups.pop(call_id, None)
+                if pre is not None:
+                    _wait_ms = (asyncio.get_event_loop().time() - _new_call_t0) * 1000.0
+                    logger.info(
+                        "BRIDGE ringing_warmup_consumed call_id=%s wait_ms=%.0f",
+                        call_id[:12], _wait_ms,
+                    )
+            _ringing_events.pop(call_id, None)  # clean up event
+        connect_task: Optional[asyncio.Task] = None
+        if pre is not None:
+            voice_session, connect_task = pre  # type: ignore[assignment]
+        else:
+            config = _build_telephony_session_config(gateway_type=gateway_type)
+            voice_session = await orchestrator.create_voice_session(config)
+
         _telephony_sessions[call_id] = voice_session
 
-        # Prewarm the TTS WebSocket in parallel with the rest of setup.  For
-        # Cartesia this shaves 300–600 ms off the first audio chunk because the
-        # TLS/upgrade handshake finishes before the first sentence is produced.
-        # Providers without a connect_for_call method silently skip this.
-        _tts_connect = getattr(voice_session.tts_provider, "connect_for_call", None)
-        if _tts_connect is not None:
-            asyncio.create_task(_tts_connect(voice_session.call_id))
-
+        # ── Register media gateway BEFORE any further awaiting ──────────
+        # The C++ gateway session was started in AsteriskAdapter._on_outbound_answered
+        # and is already POSTing caller audio to /api/v1/sip/telephony/audio/{id}
+        # within ~40-100 ms of callee answering.  If media_gateway.on_call_started()
+        # is deferred, those early audio callbacks are silently dropped at
+        # TelephonyMediaGateway.on_audio_received (session-not-registered
+        # early return) — so a callee who says "Hello?" right after picking
+        # up has their opening utterance completely lost.  Registering the
+        # gateway first lets input_queue buffer the audio; the pipeline
+        # drains it as soon as it starts.
         if is_asterisk:
-            # Register gateway_session_id → call_id mapping so the audio callback
-            # endpoint can route audio without a fragile string-prefix scan.
             gateway_session_id = getattr(_adapter, "_gateway_sessions", {}).get(call_id)
             if gateway_session_id:
                 _gateway_session_to_call_id[gateway_session_id] = call_id
 
-            # Initialise TelephonyMediaGateway with the adapter and PBX call ID.
-            # This creates the session's input_queue and wires TTS output back to
-            # the C++ gateway via adapter.send_tts_audio().
             await voice_session.media_gateway.on_call_started(
                 voice_session.call_id,
                 {"adapter": _adapter, "pbx_call_id": call_id},
             )
 
-            # Start the voice pipeline (STT → LLM → TTS loop).
+        # ── Provider warmup ─────────────────────────────────────────────
+        # Fast path (pre-warm succeeded): await the ringing-phase handshake
+        # task with a short bound.  It should already be complete — the ring
+        # window is at least 1 s and handshakes take ~200–600 ms — but we
+        # cap the wait so a single stuck socket can't delay pipeline start.
+        #
+        # Slow path (no pre-warm): run STT + TTS handshakes in parallel now.
+        # LLM warmup is EXCLUDED here (unlike the ringing path): on the slow
+        # path there are only tens of ms before the first real LLM request,
+        # and a concurrent warmup + stream on the same httpx HTTP/2
+        # connection causes ~4 s of contention.  A cold LLM handshake adds
+        # only ~100-200 ms, which is acceptable for the fallback path.
+        if connect_task is not None:
+            try:
+                results = await asyncio.wait_for(connect_task, timeout=1.0)
+                if isinstance(results, list):
+                    for i, r in enumerate(results):
+                        if isinstance(r, Exception):
+                            logger.warning(
+                                "telephony_ringing_warmup[%d] failed (non-fatal): %s",
+                                i, r,
+                            )
+                _warmup_ms = (asyncio.get_event_loop().time() - _new_call_t0) * 1000.0
+                logger.info(
+                    "BRIDGE telephony_warmup_done call_id=%s source=ringing await_ms=%.0f",
+                    call_id[:12], _warmup_ms,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "telephony_ringing_warmup_slow call_id=%s — providers will "
+                    "complete handshake on first use", call_id[:12],
+                )
+        else:
+            warmup_coros = []
+            _tts_connect = getattr(voice_session.tts_provider, "connect_for_call", None)
+            if _tts_connect is not None:
+                warmup_coros.append(_tts_connect(voice_session.call_id))
+            if hasattr(voice_session.stt_provider, "pre_connect"):
+                warmup_coros.append(
+                    voice_session.stt_provider.pre_connect(
+                        voice_session.call_session.call_id
+                    )
+                )
+
+            if warmup_coros:
+                results = await asyncio.gather(*warmup_coros, return_exceptions=True)
+                for i, r in enumerate(results):
+                    if isinstance(r, Exception):
+                        logger.warning("telephony_warmup[%d] failed (non-fatal): %s", i, r)
+                _warmup_ms = (asyncio.get_event_loop().time() - _new_call_t0) * 1000.0
+                logger.info(
+                    "BRIDGE telephony_warmup_done call_id=%s source=answer warmups=%d warmup_ms=%.0f",
+                    call_id[:12], len(warmup_coros), _warmup_ms,
+                )
+
+        if is_asterisk:
+            # Start the voice pipeline (STT → LLM → TTS loop).  The media gateway
+            # and gateway_session mapping were already registered above, so any
+            # caller audio that arrived during warmup is waiting in input_queue
+            # and will be drained into Flux immediately.
             voice_session.pipeline_task = asyncio.create_task(
                 voice_session.pipeline.start_pipeline(voice_session.call_session, None)
             )
-            logger.info(f"Voice pipeline started for {call_id[:12]}")
+            # FIX 3 — attach done-callback so a crash inside start_pipeline triggers
+            # _on_call_ended rather than leaving a silent dead session.
+            voice_session.pipeline_task.add_done_callback(
+                lambda t: _pipeline_done_cb(t, call_id)
+            )
+            _pipeline_start_ms = (asyncio.get_event_loop().time() - _new_call_t0) * 1000.0
+            logger.info(
+                "BRIDGE pipeline_started call_id=%s total_setup_ms=%.0f source=%s",
+                call_id[:12], _pipeline_start_ms,
+                "ringing" if pre is not None else "answer",
+            )
 
             # Who speaks first on outbound?  In "user" mode we stay silent and
             # let handle_turn_end react to the callee's first utterance — this
@@ -305,9 +524,30 @@ async def _on_new_call(call_id: str) -> None:
         if _adapter:
             await _adapter.start_audio_stream(call_id)
 
-        logger.info(f"AI pipeline initialized for {call_id[:12]}")
+        _total_init_ms = (asyncio.get_event_loop().time() - _new_call_t0) * 1000.0
+        logger.info(
+            "BRIDGE ai_pipeline_initialized call_id=%s total_init_ms=%.0f",
+            call_id[:12], _total_init_ms,
+        )
     except Exception as exc:
         logger.error(f"Failed to initialize AI pipeline for {call_id[:12]}: {exc}", exc_info=True)
+        # GAP 3 — Error-path hangup: tell the PBX to release the channel so
+        # the caller doesn't hear silence indefinitely.  Tear down the
+        # half-initialised session (pre-warmed or otherwise) directly — the
+        # PBX hangup will fire _on_call_ended, but end_session() is idempotent
+        # and running it here guards against cases where the hangup path
+        # silently drops the StasisEnd event.
+        orphan = _telephony_sessions.pop(call_id, None)
+        if orphan is not None:
+            try:
+                await _get_orchestrator().end_session(orphan)
+            except Exception:
+                pass
+        if _adapter:
+            try:
+                await _adapter.hangup(call_id)
+            except Exception:
+                pass
 
 
 async def _on_audio_received(call_id: str, audio_bytes: bytes) -> None:
@@ -326,6 +566,23 @@ async def _on_audio_received(call_id: str, audio_bytes: bytes) -> None:
 async def _on_call_ended(call_id: str) -> None:
     """Clean up voice session when the call hangs up."""
     logger.info(f"Telephony bridge: call ended {call_id[:12]}")
+
+    # Abandoned-ring path: if the callee never answered, the session was
+    # pre-warmed during the ring but never promoted into _telephony_sessions.
+    # Tear it down here so the STT/TTS WebSockets opened in _on_ringing
+    # don't leak.  AsteriskAdapter._cleanup_pending_outbound fires this
+    # callback when StasisEnd/ChannelDestroyed arrives for a _pending_outbound
+    # channel.
+    ringing = _ringing_warmups.pop(call_id, None)
+    if ringing is not None:
+        ringing_session, ringing_connect_task = ringing
+        if ringing_connect_task is not None and not ringing_connect_task.done():
+            ringing_connect_task.cancel()
+        try:
+            await _get_orchestrator().end_session(ringing_session)
+        except Exception as exc:
+            logger.debug(f"Ringing session end_session failed for {call_id[:12]}: {exc}")
+
     voice_session = _telephony_sessions.pop(call_id, None)
     if voice_session:
         # --- Save recording BEFORE session teardown ---
@@ -491,15 +748,22 @@ async def _on_ws_session_start(call_id: str) -> None:
 
     voice_session = _telephony_sessions.get(call_id)
     if not voice_session:
-        # Race: wait briefly for session to be stored
-        for _ in range(20):
+        # GAP 4 — Race: mod_audio_fork WebSocket can connect before _on_new_call
+        # stores the session (especially under server load).  Poll for up to 2s
+        # (40 × 50ms) before giving up — was 1s (20 × 50ms).
+        for _ in range(40):
             await asyncio.sleep(0.05)
             voice_session = _telephony_sessions.get(call_id)
             if voice_session:
                 break
 
     if not voice_session:
-        logger.error(f"No voice session for WS session start: {call_id[:12]}")
+        logger.error("FS WebSocket session race timeout — hanging up call %s", call_id[:12])
+        if _adapter:
+            try:
+                await _adapter.hangup(call_id)
+            except Exception:
+                pass
         return
 
     bridge_ws = get_audio_bridge().get_websocket(call_id)
@@ -520,6 +784,9 @@ async def _on_ws_session_start(call_id: str) -> None:
                     )
                 except Exception as exc:
                     logger.error(f"Pipeline error {call_id[:12]}: {exc}", exc_info=True)
+                    # FIX 3 — trigger session teardown so the session doesn't leak
+                    # and the PBX hangs up the channel instead of staying connected.
+                    await _on_call_ended(call_id)
 
             voice_session.pipeline_task = asyncio.create_task(_run())
             logger.info(f"Voice pipeline started for {call_id[:12]}")
@@ -542,7 +809,7 @@ async def start_telephony(
     Connect to the active B2BUA and start handling calls.
     Use adapter_type='auto' to let the system choose based on health checks.
     """
-    global _adapter
+    global _adapter, _watchdog_task
 
     if _adapter and _adapter.connected:
         return JSONResponse({
@@ -569,7 +836,18 @@ async def start_telephony(
         if hasattr(_adapter, "set_global_session_start_callback"):
             _adapter.set_global_session_start_callback(_on_ws_session_start)
 
+        # For adapters that expose a ringing-phase hook (Asterisk), wire up
+        # _on_ringing so providers are warmed during ring time.  Keeps
+        # first-turn latency matched to subsequent turns (~<500 ms).
+        if hasattr(_adapter, "set_ringing_callback"):
+            _adapter.set_ringing_callback(_on_ringing)
+
         await _adapter.connect()
+
+        # GAP 5 — Start session inactivity watchdog (cancels itself on stop).
+        if _watchdog_task is None or _watchdog_task.done():
+            _watchdog_task = asyncio.create_task(_session_watchdog())
+            logger.info("telephony_watchdog: started (inactivity=%ds)", _SESSION_INACTIVITY_TIMEOUT_S)
 
         return JSONResponse({
             "status": "connected",
@@ -585,10 +863,19 @@ async def start_telephony(
 @router.post("/stop")
 async def stop_telephony():
     """Disconnect from the active B2BUA."""
-    global _adapter
+    global _adapter, _watchdog_task
 
     if not _adapter:
         return JSONResponse({"status": "not_running"})
+
+    # Cancel the inactivity watchdog before disconnecting.
+    if _watchdog_task and not _watchdog_task.done():
+        _watchdog_task.cancel()
+        try:
+            await _watchdog_task
+        except asyncio.CancelledError:
+            pass
+        _watchdog_task = None
 
     await _adapter.disconnect()
     _adapter = None
@@ -606,12 +893,33 @@ async def telephony_status():
         })
 
     healthy = await _adapter.health_check()
+
+    # FIX 7 — Expose capacity utilisation and Groq circuit-breaker state so
+    # operators can see pressure before callers start hearing apology messages.
+    # All checks are local (no network calls) — zero added latency to this endpoint.
+    provider_health: dict = {}
+    try:
+        container = _get_orchestrator().__class__  # just a way to import lazily
+        from app.core.container import get_container
+        llm = getattr(get_container(), "llm_provider", None)
+        cb = getattr(llm, "_circuit_breaker", None)
+        if cb is not None:
+            provider_health["groq_circuit"] = "open" if cb.is_open else "closed"
+    except Exception:
+        pass
+
     return JSONResponse({
         "status": "running" if healthy else "degraded",
         "connected": _adapter.connected,
         "adapter": _adapter.name,
         "active_sessions": len(_telephony_sessions),
         "healthy": healthy,
+        "capacity": {
+            "current": len(_telephony_sessions),
+            "max": _MAX_TELEPHONY_SESSIONS,
+            "pct_used": round(len(_telephony_sessions) / max(_MAX_TELEPHONY_SESSIONS, 1) * 100, 1),
+        },
+        "provider_health": provider_health,
     })
 
 
