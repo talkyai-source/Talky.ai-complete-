@@ -107,7 +107,7 @@ def _outbound_first_speaker() -> str:
     return "user" if val == "user" else "agent"
 
 
-def _build_telephony_session_config(gateway_type: str = "browser"):
+def _build_telephony_session_config(gateway_type: str = "telephony"):
     """
     Thin shim kept for call-site compatibility.
     All config logic lives in telephony_session_config.build_telephony_session_config().
@@ -502,12 +502,12 @@ async def _on_new_call(call_id: str) -> None:
                 "ringing" if pre is not None else "answer",
             )
 
-            # Who speaks first on outbound?  In "user" mode we stay silent and
-            # let handle_turn_end react to the callee's first utterance — this
-            # avoids the AI talking over a "Hello?" and removes the LLM+TTS
-            # cold-start (~500–1500 ms) from the pre-first-turn window.
-            # In "agent" mode the AI speaks an opening line via the greeting
-            # task.  Controlled by TELEPHONY_FIRST_SPEAKER (default "user").
+            # Who speaks first on outbound?  Default is "agent" — the estimation
+            # agent greets the callee immediately so they never hear dead silence.
+            # Set TELEPHONY_FIRST_SPEAKER=user to wait for the callee to speak
+            # first (useful for inbound-style testing).
+            # In "user" mode we stay silent and let handle_turn_end react to the
+            # callee's first utterance — avoids the AI talking over a "Hello?".
             first_speaker = _outbound_first_speaker()
             if first_speaker == "agent":
                 asyncio.create_task(_send_outbound_greeting(voice_session))

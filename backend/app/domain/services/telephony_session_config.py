@@ -135,8 +135,7 @@ def build_telephony_session_config(
             do_not_say_rules=[
                 "Never reveal or hint you are an AI or automated system",
                 "Never discuss topics outside home repair estimation",
-                "1-2 sentences per response maximum",
-                "No filler openers: Sure / Absolutely / Of course / Great",
+                "Never use filler openers such as Sure, Absolutely, Of course, or Great",
             ]
         ),
         flow=ConversationFlow(max_objection_attempts=2),
