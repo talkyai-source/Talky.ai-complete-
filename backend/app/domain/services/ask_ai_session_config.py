@@ -13,11 +13,11 @@ from app.domain.models.agent_config import (
 )
 from app.domain.services.voice_orchestrator import VoiceSessionConfig
 
-# Fixed configuration for Ask AI - using Google Chirp3-HD Zephyr.
+# Fixed configuration for Ask AI - using Cartesia Tessa (Kind Companion).
 ASK_AI_CONFIG = {
-    "tts_provider": "google",
-    "voice_id": "en-US-Chirp3-HD-Zephyr",  # Zephyr - Youthful, vibrant female voice
-    "model_id": "Chirp3-HD",
+    "tts_provider": "cartesia",
+    "voice_id": "6ccbfb76-1fc6-48f7-b71d-91ac6298247b",  # Tessa - Kind Companion
+    "model_id": "sonic-3",
     "sample_rate": 24000,
     "llm_model": "llama-3.1-8b-instant",   # 8.1B params — 560 t/s, ultra-low latency
     "llm_temperature": 0.6,
@@ -28,13 +28,21 @@ ASK_AI_CONFIG = {
 # Re-export from the constants module (no circular-import risk there).
 from app.domain.services.ask_ai_constants import TALKY_PRODUCT_INFO, PRODUCT_KEYWORDS  # noqa: F401
 
+# The exact greeting already played to the caller by the client-side audio clip.
+# Injected into conversation_history as the first assistant turn so the LLM
+# never re-greets and always knows what was already said.
+ASK_AI_GREETING = "Hi, you've reached the Talk-Lee receptionist team — how can I help you today?"
+
 # Lean base prompt — no product info embedded.
 # Product info is appended at inference time via keyword detection in the pipeline.
 ASK_AI_SYSTEM_PROMPT = (
-    "You are Zephyr, a warm and friendly voice assistant for Talky.ai.\n\n"
+    "You are a voice receptionist for Talk-Lee.\n\n"
+    "IMPORTANT: You have already greeted the caller with: "
+    f"\"{ASK_AI_GREETING}\" — do NOT greet again. "
+    "Jump straight to answering whatever they say next.\n\n"
     "Speak in 1 to 2 short natural sentences. "
-    "No markdown, bullets, or headings in your replies. "
-    "Go straight to the answer — no openers like \"Sure\", \"Absolutely\", \"Great\", or \"Of course\". "
+    "No markdown, bullets, or headings. "
+    "No openers like \"Sure\", \"Absolutely\", \"Great\", or \"Of course\". "
     "Never say you are an AI or mention technology. "
     "If you don't know something, offer to have someone follow up."
 )
@@ -43,7 +51,7 @@ ASK_AI_SYSTEM_PROMPT = (
 def create_ask_ai_agent_config() -> AgentConfig:
     """Create the fixed agent config used by Ask AI demo sessions."""
     return AgentConfig(
-        agent_name="Zephyr",
+        agent_name="Tessa",
         company_name="Talky.ai",
         business_type="Voice AI Platform",
         goal=AgentGoal.INFORMATION_GATHERING,

@@ -41,6 +41,10 @@ from app.domain.services.telephony_session_config import (
     build_telephony_session_config,
     build_telephony_greeting,
 )
+from app.services.scripts import (
+    bind_telephony_call,
+    save_call_transcript_on_hangup,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -141,14 +145,18 @@ async def _send_outbound_greeting(voice_session) -> None:
     """
     Speak the AI's opening line immediately after an outbound call is answered.
 
-    Uses a template greeting built from agent_config — same pattern as Ask AI
-    (ask_ai_ws.py line 169) which passes a hardcoded string to avoid the full
-    LLM round-trip (Groq TTFT + sentence buffering = 2–4 second silence).
-    TTS starts within ~100ms of the callee answering instead of 3+ seconds.
+    Fast path (pre-synthesized): The greeting audio was already synthesized
+    during the ringing phase by _on_ringing.  The buffered PCM chunks are
+    pumped directly into the media gateway — first audio reaches the callee
+    within ~5ms of this function starting (same instant-start pattern as
+    Ask AI's pre-fetched greeting).
+
+    Slow path (fallback): If ringing-phase pre-synthesis failed or was skipped,
+    falls back to real-time TTS via synthesize_and_send_audio.
     """
     from app.domain.models.conversation import Message, MessageRole
+    import time as _time
 
-    await asyncio.sleep(0.05)
     call_id = voice_session.call_id
     session = voice_session.call_session
 
@@ -160,18 +168,84 @@ async def _send_outbound_greeting(voice_session) -> None:
     session.llm_active = True
 
     try:
-        greeting = _build_outbound_greeting(session)
-        logger.info(f"Outbound greeting for {call_id[:12]}: {greeting!r}")
-
         # Clear any barge_in_event that fired when the callee answered ("Hello?")
         # so the greeting is not immediately suppressed before a single chunk plays.
         voice_session.pipeline.clear_barge_in_event(session)
 
-        # Synthesize directly — no LLM involved.  Same path as normal AI replies
-        # so format conversion, PCMU pacing, and barge-in detection all work.
-        await voice_session.pipeline.synthesize_and_send_audio(
-            session, greeting, websocket=None
-        )
+        # ── Fast path: pre-synthesized greeting from ringing phase ──────
+        presynth_chunks = getattr(voice_session, "_presynth_greeting_audio", None)
+        presynth_text = getattr(voice_session, "_presynth_greeting_text", None)
+
+        if presynth_chunks and presynth_text:
+            _t0 = _time.monotonic()
+            greeting = presynth_text
+            logger.info(
+                "outbound_greeting_presynth call_id=%s chunks=%d text=%r",
+                call_id[:12], len(presynth_chunks), greeting[:60],
+            )
+
+            session.tts_active = True
+            barge_in_event = getattr(session, "barge_in_event", None)
+            was_interrupted = False
+
+            for chunk in presynth_chunks:
+                # Check barge-in before each chunk
+                if barge_in_event and barge_in_event.is_set():
+                    was_interrupted = True
+                    barge_in_event.clear()
+                    try:
+                        await voice_session.media_gateway.clear_output_buffer(call_id)
+                    except Exception:
+                        pass
+                    logger.info("presynth_greeting_barge_in call_id=%s", call_id[:12])
+                    break
+
+                await voice_session.media_gateway.send_audio(call_id, chunk)
+
+                # Check barge-in after send
+                if barge_in_event and barge_in_event.is_set():
+                    was_interrupted = True
+                    barge_in_event.clear()
+                    try:
+                        await voice_session.media_gateway.clear_output_buffer(call_id)
+                    except Exception:
+                        pass
+                    logger.info("presynth_greeting_barge_in_post_send call_id=%s", call_id[:12])
+                    break
+
+            # Flush remaining audio in the gateway buffer
+            if not was_interrupted:
+                flush = getattr(voice_session.media_gateway, "flush_tts_buffer", None)
+                if not flush:
+                    flush = getattr(voice_session.media_gateway, "flush_audio_buffer", None)
+                if flush:
+                    try:
+                        await flush(call_id)
+                    except Exception:
+                        pass
+
+            session.tts_active = False
+            _elapsed_ms = (_time.monotonic() - _t0) * 1000.0
+            logger.info(
+                "outbound_greeting_presynth_done call_id=%s elapsed_ms=%.0f interrupted=%s",
+                call_id[:12], _elapsed_ms, was_interrupted,
+            )
+
+            # Free memory
+            voice_session._presynth_greeting_audio = None
+            voice_session._presynth_greeting_text = None
+
+        else:
+            # ── Slow path: real-time TTS (ringing pre-synth unavailable) ─
+            await asyncio.sleep(0.05)
+            greeting = _build_outbound_greeting(session)
+            logger.info(
+                "outbound_greeting_realtime call_id=%s text=%r",
+                call_id[:12], greeting[:60],
+            )
+            await voice_session.pipeline.synthesize_and_send_audio(
+                session, greeting, websocket=None
+            )
 
         # Persist the greeting so the LLM sees it as conversation history on the
         # first real turn.  Without this the next turn sees an empty history and
@@ -307,7 +381,82 @@ async def _on_ringing(call_id: str) -> None:
         if llm_warm is not None:
             asyncio.create_task(llm_warm())
 
-        _ringing_warmups[call_id] = (voice_session, connect_task)
+        # ── Pre-synthesize greeting audio during the ring window ────────
+        # After TTS connect completes, synthesize the greeting and buffer all
+        # PCM chunks.  When the callee answers, _send_outbound_greeting pumps
+        # these chunks directly into the media gateway — first audio arrives
+        # within ~5ms instead of waiting 1–3s for real-time TTS synthesis.
+        #
+        # We create a combined task that:
+        #   1. Awaits the TTS/STT connect handshakes
+        #   2. Synthesizes the greeting and stores the audio on voice_session
+        # This combined task replaces connect_task in _ringing_warmups.
+        async def _warmup_and_presynth():
+            """Await provider connections, then pre-synthesize greeting."""
+            # Step 1: Wait for TTS + STT WebSocket handshakes
+            if connect_task is not None:
+                results = await connect_task
+                if isinstance(results, list):
+                    for i, r in enumerate(results):
+                        if isinstance(r, Exception):
+                            logger.warning(
+                                "ringing_warmup_coro[%d] failed: %s", i, r,
+                            )
+
+            # Step 2: Build greeting text from session config
+            greeting_text = _build_outbound_greeting(
+                voice_session.call_session
+            )
+
+            # Step 3: Synthesize greeting and buffer all audio chunks
+            chunks: list[bytes] = []
+            _synth_t0 = asyncio.get_event_loop().time()
+            try:
+                tts_config = voice_session.config
+                async for audio_chunk in voice_session.tts_provider.stream_synthesize(
+                    text=greeting_text,
+                    voice_id=tts_config.voice_id if tts_config else "default",
+                    sample_rate=(
+                        tts_config.tts_sample_rate if tts_config else 8000
+                    ),
+                    call_id=voice_session.call_id,
+                ):
+                    raw = (
+                        audio_chunk.data
+                        if hasattr(audio_chunk, "data")
+                        else audio_chunk
+                    )
+                    if raw:
+                        # Ensure Int16 alignment (2 bytes per sample)
+                        if len(raw) % 2 != 0:
+                            raw = raw[:-1]
+                        if raw:
+                            chunks.append(raw)
+
+                _synth_ms = (asyncio.get_event_loop().time() - _synth_t0) * 1000.0
+                total_bytes = sum(len(c) for c in chunks)
+                logger.info(
+                    "WARMUP greeting_presynth_done call_id=%s "
+                    "chunks=%d bytes=%d synth_ms=%.0f",
+                    call_id[:12], len(chunks), total_bytes, _synth_ms,
+                )
+
+                # Store on the voice_session so _send_outbound_greeting can
+                # grab them without any dict lookup.
+                voice_session._presynth_greeting_audio = chunks
+                voice_session._presynth_greeting_text = greeting_text
+
+            except Exception as synth_exc:
+                logger.warning(
+                    "WARMUP greeting_presynth_failed call_id=%s: %s",
+                    call_id[:12], synth_exc,
+                )
+                # Pre-synth failure is non-fatal — _send_outbound_greeting
+                # will fall back to real-time TTS.
+
+        combined_task = asyncio.create_task(_warmup_and_presynth())
+
+        _ringing_warmups[call_id] = (voice_session, combined_task)
         elapsed_ms = (asyncio.get_event_loop().time() - _t0) * 1000.0
         logger.info(
             "WARMUP ringing_warmup_ready call_id=%s warmups=%d setup_ms=%.0f",
@@ -406,6 +555,22 @@ async def _on_new_call(call_id: str) -> None:
             voice_session = await orchestrator.create_voice_session(config)
 
         _telephony_sessions[call_id] = voice_session
+
+        # ── Bind dialer calls.id for campaign transcript persist ────────
+        # Non-destructive: stashes _dialer_call_id on voice_session without
+        # touching voice_session.call_id (STT/TTS connection maps are keyed
+        # on that). Logs and returns None for non-campaign/test calls.
+        try:
+            from app.core.container import get_container as _gc
+            _c = _gc()
+            if _c.is_initialized:
+                await bind_telephony_call(
+                    voice_session=voice_session,
+                    pbx_channel_id=call_id,
+                    db_client=_c.db_client,
+                )
+        except Exception as _bind_exc:
+            logger.debug(f"bind_telephony_call wrapper: {_bind_exc}")
 
         # ── Register media gateway BEFORE any further awaiting ──────────
         # The C++ gateway session was started in AsteriskAdapter._on_outbound_answered
@@ -585,6 +750,25 @@ async def _on_call_ended(call_id: str) -> None:
 
     voice_session = _telephony_sessions.pop(call_id, None)
     if voice_session:
+        # --- Persist transcript to dialer's calls row BEFORE teardown ----
+        # Reads the in-memory TranscriptService buffer (keyed on the
+        # session's original call_id) and writes to the dialer's calls.id
+        # resolved at _on_new_call. Never raises.
+        try:
+            pipeline = getattr(voice_session, "pipeline", None)
+            transcript_service = getattr(pipeline, "transcript_service", None)
+            if transcript_service is not None:
+                from app.core.container import get_container as _gc
+                _c = _gc()
+                _pool = _c.db_pool if _c.is_initialized else None
+                await save_call_transcript_on_hangup(
+                    voice_session=voice_session,
+                    transcript_service=transcript_service,
+                    db_pool=_pool,
+                )
+        except Exception as tx_err:
+            logger.warning(f"Transcript persist failed for {call_id[:12]}: {tx_err}")
+
         # --- Save recording BEFORE session teardown ---
         try:
             await _save_call_recording(voice_session, call_id)
@@ -1055,12 +1239,105 @@ async def make_call(
             },
         )
 
-    # Guard passed - proceed with call
+    # Guard passed — pre-warm BEFORE originating so the greeting audio is
+    # ready even when the callee answers instantly (local PBX loop).
+    #
+    # Timeline:
+    #   1. Create VoiceSession + TTS/STT connections + synthesize greeting
+    #   2. Originate the SIP call
+    #   3. When _on_new_call fires (even 0 ms later), the pre-warmed session
+    #      and pre-synthesized audio are already in _ringing_warmups.
+    pre_warm_session = None
+    try:
+        orchestrator = _get_orchestrator()
+        config = _build_telephony_session_config(gateway_type="telephony")
+        pre_warm_session = await orchestrator.create_voice_session(config)
+
+        # TTS + STT WebSocket connections
+        warmup_coros = []
+        _tts_connect = getattr(pre_warm_session.tts_provider, "connect_for_call", None)
+        if _tts_connect is not None:
+            warmup_coros.append(_tts_connect(pre_warm_session.call_id))
+        if hasattr(pre_warm_session.stt_provider, "pre_connect"):
+            warmup_coros.append(
+                pre_warm_session.stt_provider.pre_connect(
+                    pre_warm_session.call_session.call_id
+                )
+            )
+        if warmup_coros:
+            results = await asyncio.gather(*warmup_coros, return_exceptions=True)
+            for i, r in enumerate(results):
+                if isinstance(r, Exception):
+                    logger.warning("pre_originate_warmup[%d] failed: %s", i, r)
+
+        # LLM pool warm (fire-and-forget)
+        llm_warm = getattr(pre_warm_session.llm_provider, "warm_up", None)
+        if llm_warm is not None:
+            asyncio.create_task(llm_warm())
+
+        # Pre-synthesize greeting audio
+        greeting_text = _build_outbound_greeting(pre_warm_session.call_session)
+        chunks: list[bytes] = []
+        try:
+            tts_config = pre_warm_session.config
+            async for audio_chunk in pre_warm_session.tts_provider.stream_synthesize(
+                text=greeting_text,
+                voice_id=tts_config.voice_id if tts_config else "default",
+                sample_rate=(
+                    tts_config.tts_sample_rate if tts_config else 8000
+                ),
+                call_id=pre_warm_session.call_id,
+            ):
+                raw = (
+                    audio_chunk.data
+                    if hasattr(audio_chunk, "data")
+                    else audio_chunk
+                )
+                if raw:
+                    if len(raw) % 2 != 0:
+                        raw = raw[:-1]
+                    if raw:
+                        chunks.append(raw)
+
+            pre_warm_session._presynth_greeting_audio = chunks
+            pre_warm_session._presynth_greeting_text = greeting_text
+            logger.info(
+                "pre_originate_greeting_ready chunks=%d bytes=%d text=%r",
+                len(chunks), sum(len(c) for c in chunks), greeting_text[:60],
+            )
+        except Exception as synth_exc:
+            logger.warning("pre_originate_greeting_synth_failed: %s", synth_exc)
+
+    except Exception as warm_exc:
+        logger.warning("pre_originate_warmup_failed: %s — will use answer-path warmup", warm_exc)
+        if pre_warm_session is not None:
+            try:
+                await _get_orchestrator().end_session(pre_warm_session)
+            except Exception:
+                pass
+            pre_warm_session = None
+
     try:
         call_id = await _adapter.originate_call(
             destination=destination,
             caller_id=caller_id,
         )
+
+        # Store the pre-warmed session so _on_new_call (or _on_ringing) can
+        # consume it.  The key is the PBX channel ID returned by originate.
+        if pre_warm_session is not None:
+            # Mark the combined task as already-done so _on_new_call's
+            # await connect_task completes instantly.
+            done_future: asyncio.Future = asyncio.get_event_loop().create_future()
+            done_future.set_result(None)
+            _ringing_warmups[call_id] = (pre_warm_session, done_future)
+            # Also set the ringing event so _on_new_call doesn't wait.
+            evt = asyncio.Event()
+            evt.set()
+            _ringing_events[call_id] = evt
+            logger.info(
+                "pre_originate_session_stored call_id=%s", call_id[:12],
+            )
 
         # Trigger post-call abuse detection (async)
         try:
@@ -1083,6 +1360,12 @@ async def make_call(
 
     except Exception as exc:
         logger.error(f"Failed to originate call: {exc}")
+        # Clean up the pre-warmed session on originate failure
+        if pre_warm_session is not None:
+            try:
+                await _get_orchestrator().end_session(pre_warm_session)
+            except Exception:
+                pass
         raise HTTPException(status_code=500, detail=str(exc))
 
 

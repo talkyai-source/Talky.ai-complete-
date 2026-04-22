@@ -106,6 +106,12 @@ class AsteriskAdapter(CallControlAdapter):
         # Generic new-call callback (used when call_id is not yet known at registration time)
         self._on_new_call: Optional[Callable] = None
         self._on_any_call_end: Optional[Callable] = None
+        # Optional ringing-phase callback.  Fired once an outbound channel is
+        # parked in the mixing bridge and is waiting for the callee to answer.
+        # Used by the telephony bridge to pre-warm STT/TTS/LLM providers
+        # during the 2–10 s of otherwise idle ring time, so that first-turn
+        # latency after answer matches subsequent turns.
+        self._on_ringing: Optional[Callable] = None
 
         # RTP port allocator (32000–32999, matching Day 5 defaults)
         self._rtp_port_start = int(os.getenv("ASTERISK_RTP_PORT_START", "32000"))
@@ -118,6 +124,10 @@ class AsteriskAdapter(CallControlAdapter):
             1.0,
             float(os.getenv("ASTERISK_CHANNELVARSET_CACHE_TTL_S", "120")),
         )
+
+        # Per-call TTS error counters (suppresses log spam when Gateway session
+        # is not running — logs first error and every 50th thereafter).
+        self._tts_error_counts: Dict[str, int] = {}
 
     # ------------------------------------------------------------------
     # CallControlAdapter interface — identity
@@ -389,18 +399,34 @@ class AsteriskAdapter(CallControlAdapter):
         if cached:
             return cached
 
-        addr_var, port_var = await asyncio.gather(
-            self._ari(
-                "GET", f"/channels/{channel_id}/variable",
-                params={"variable": "UNICASTRTP_LOCAL_ADDRESS"},
-            ),
-            self._ari(
+        addr_var = await self._ari(
+            "GET", f"/channels/{channel_id}/variable",
+            params={"variable": "UNICASTRTP_LOCAL_ADDRESS"},
+        )
+        remote_ip = str(addr_var.get("value", "") or "127.0.0.1")
+
+        remote_port = 0
+        for attempt in range(6):
+            port_var = await self._ari(
                 "GET", f"/channels/{channel_id}/variable",
                 params={"variable": "UNICASTRTP_LOCAL_PORT"},
-            ),
-        )
-        remote_ip = str(addr_var.get("value", "127.0.0.1"))
-        remote_port = int(port_var.get("value", 0))
+            )
+            raw_port = port_var.get("value", 0)
+            try:
+                remote_port = int(raw_port) if raw_port else 0
+            except (TypeError, ValueError):
+                remote_port = 0
+            if remote_port:
+                break
+            if attempt < 5:
+                await asyncio.sleep(0.1)
+
+        if not remote_port:
+            raise RuntimeError(
+                f"UNICASTRTP_LOCAL_PORT returned 0 after retries for "
+                f"channel={channel_id[:12]}"
+            )
+
         self._cache_unicastrtp_local(
             channel_id=channel_id,
             channel=channel,
@@ -604,6 +630,16 @@ class AsteriskAdapter(CallControlAdapter):
                 "session_id": session_id,
             }
 
+            # Fire the ringing-phase callback FIRST — before checking for
+            # preemptive Up — so the bridge can start pre-warming STT/TTS/LLM
+            # connections regardless of whether the callee already answered.
+            # This fixes a critical race: when ChannelStateChange(Up) arrives
+            # before StasisStart is processed, the old code returned early and
+            # _on_ringing was never called, forcing a 2+ second answer-path
+            # warmup and causing the user's first "hello" to be lost.
+            if self._on_ringing is not None:
+                asyncio.create_task(self._on_ringing(channel_id))
+
             # Race condition: the callee may have already answered while
             # StasisStart was sitting in the ARI WebSocket queue.  If so,
             # ChannelStateChange(Up) was stored in _preemptive_up_channels;
@@ -732,8 +768,13 @@ class AsteriskAdapter(CallControlAdapter):
 
             _setup_ms = (loop.time() - _t_setup_start) * 1000.0
             logger.info(
-                "ari_setup_done channel=%s session=%s rtp_port=%s setup_ms=%.0f",
-                channel_id[:12], session_id, listen_port, _setup_ms,
+                "ari_setup_done channel=%s session=%s rtp_port=%s remote=%s:%s setup_ms=%.0f",
+                channel_id[:12],
+                session_id,
+                listen_port,
+                remote_ip,
+                remote_port,
+                _setup_ms,
                 extra={
                     "call_id": channel_id,
                     "ari_setup_ms": round(_setup_ms),
@@ -869,7 +910,7 @@ class AsteriskAdapter(CallControlAdapter):
 
             logger.info(
                 f"AsteriskAdapter: session started channel={channel_id[:12]} "
-                f"session={session_id} rtp_port={listen_port}"
+                f"session={session_id} rtp_port={listen_port} remote={remote_ip}:{remote_port}"
             )
 
             # 7. Notify any registered callback for this call_id
@@ -921,12 +962,23 @@ class AsteriskAdapter(CallControlAdapter):
                 pass
         logger.info(f"AsteriskAdapter: unanswered outbound call cleaned up channel={channel_id[:12]}")
 
+        # Signal the bridge so it can release any ringing-phase VoiceSession
+        # that was pre-created for this channel.  Without this hook, an
+        # abandoned ring would leak the STT/TTS WebSocket connections that
+        # _on_ringing opened during the ring window.
+        if self._on_any_call_end is not None:
+            try:
+                asyncio.create_task(self._on_any_call_end(channel_id))
+            except Exception as exc:
+                logger.debug(f"on_any_call_end dispatch failed for {channel_id[:12]}: {exc}")
+
     async def _on_stasis_end(self, channel_id: str, reason: str) -> None:
         """Tear down C++ Gateway session and ARI bridge when a call ends."""
         session_info = self._active_sessions.pop(channel_id, None)
         ext_channel_id = self._ext_channels.pop(channel_id, None)
         bridge_id = self._bridges.pop(channel_id, None)
         session_id = self._gateway_sessions.pop(channel_id, None)
+        self._tts_error_counts.pop(channel_id, None)
 
         if session_id:
             try:
@@ -979,6 +1031,15 @@ class AsteriskAdapter(CallControlAdapter):
         """Global callback invoked when any call ends."""
         self._on_any_call_end = callback
 
+    def set_ringing_callback(self, callback: Callable) -> None:
+        """
+        Optional callback invoked once an outbound channel has been parked
+        in its mixing bridge and is waiting for the callee to answer.
+        Used by the telephony bridge for ringing-phase provider warmup.
+        Signature: `async def callback(channel_id: str) -> None`.
+        """
+        self._on_ringing = callback
+
     def register_call_event_handlers(
         self,
         on_new_call: Callable,
@@ -1021,7 +1082,7 @@ class AsteriskAdapter(CallControlAdapter):
         try:
             pcmu_b64 = base64.b64encode(pcmu_audio).decode()
 
-            result = await self._gateway(
+            await self._gateway(
                 "POST",
                 "/v1/sessions/tts/play",
                 payload={
@@ -1030,8 +1091,18 @@ class AsteriskAdapter(CallControlAdapter):
                     "clear_existing": False,
                 },
             )
+            # Reset error counter on first successful delivery.
+            self._tts_error_counts.pop(call_id, None)
         except Exception as exc:
-            logger.error(f"[AsteriskAdapter] ❌ send_tts_audio failed: {exc}")
+            count = self._tts_error_counts.get(call_id, 0) + 1
+            self._tts_error_counts[call_id] = count
+            if count == 1:
+                logger.error(f"[AsteriskAdapter] ❌ send_tts_audio failed: {exc}")
+            elif count % 50 == 0:
+                logger.warning(
+                    f"[AsteriskAdapter] send_tts_audio still failing for {call_id[:12]} "
+                    f"({count} errors total) — last error: {exc}"
+                )
 
     async def interrupt_tts(self, call_id: str) -> None:
         """

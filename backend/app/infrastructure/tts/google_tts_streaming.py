@@ -17,7 +17,6 @@ import os
 import re
 import asyncio
 import logging
-import random
 from typing import AsyncIterator, List, Dict, Optional
 
 import numpy as np
@@ -86,6 +85,11 @@ class GoogleTTSStreamingProvider(TTSProvider):
         self._sample_rate: int = 24000  # Chirp 3: HD optimal sample rate
         self._speaking_rate: float = 1.0
         self._initialized: bool = False
+        # Per-chunk response read timeout. If Google's stream stalls on a
+        # chunk longer than this, abort promptly so the REST fallback can
+        # take over before the caller hears dead air. See
+        # docs/stability/google_tts_connection_hardening.md.
+        self._response_read_timeout_s: float = 8.0
         # Circuit breaker: trips after 5 consecutive gRPC failures
         self._circuit = CircuitBreaker(
             name="google-tts",
@@ -116,6 +120,9 @@ class GoogleTTSStreamingProvider(TTSProvider):
         self._default_language = config.get("language_code", "en-US")
         self._sample_rate = config.get("sample_rate", 24000)
         self._speaking_rate = config.get("speaking_rate", 1.0)
+        self._response_read_timeout_s = float(
+            config.get("response_read_timeout_s", 8.0)
+        )
         
         # Initialize the async gRPC client
         # Check for service account JSON in environment variable first
@@ -187,92 +194,177 @@ class GoogleTTSStreamingProvider(TTSProvider):
             raise RuntimeError(
                 "GoogleTTSStreamingProvider not initialized. Call initialize() first."
             )
-        
-        # Normalize voice_id to full format
+
         selected_voice = self._normalize_voice_id(voice_id)
         language_code = kwargs.get("language_code", self._default_language)
         speaking_rate = kwargs.get("speaking_rate", self._speaking_rate)
-        
-        logger.debug(f"Streaming TTS: voice={selected_voice}, text_length={len(text)}")
-        
-        # Configure the streaming synthesis
+
+        logger.debug(
+            "Streaming TTS: voice=%s, text_length=%d", selected_voice, len(text)
+        )
+
+        first_chunk_yielded = False
+        streaming_err: Optional[Exception] = None
+
+        try:
+            async with self._circuit:
+                async for chunk in self._streaming_attempt(
+                    text, selected_voice, language_code, sample_rate, speaking_rate
+                ):
+                    first_chunk_yielded = True
+                    yield chunk
+                return  # streaming finished cleanly
+
+        except CircuitOpenError as co:
+            logger.error("Google TTS circuit breaker open: %s", co)
+            raise RuntimeError(f"TTS provider unavailable: {co}") from co
+
+        except Exception as e:
+            streaming_err = e
+            if first_chunk_yielded:
+                logger.warning(
+                    "google_tts_streaming: streaming failed post-first-chunk — "
+                    "raising (no replay): %s",
+                    e,
+                )
+                raise RuntimeError(
+                    f"Google TTS streaming interrupted after first chunk: {e}"
+                ) from e
+
+        # Pre-first-chunk streaming failure: fall back to unary synthesis.
+        # Runs outside the circuit breaker — the fallback is the escape
+        # hatch, and counting its failures would double-count against the
+        # streaming path that already failed.
+        logger.warning(
+            "google_tts_streaming: streaming failed pre-first-chunk — "
+            "falling back to REST for sentence (%d chars): %s",
+            len(text), streaming_err,
+        )
+        async for chunk in self._rest_fallback_attempt(
+            text, selected_voice, language_code, sample_rate, speaking_rate
+        ):
+            yield chunk
+
+    async def _streaming_attempt(
+        self,
+        text: str,
+        selected_voice: str,
+        language_code: str,
+        sample_rate: int,
+        speaking_rate: float,
+    ) -> AsyncIterator[AudioChunk]:
+        """
+        Single streaming pass with per-chunk read timeout. Raises on any
+        failure. Yields AudioChunks in Float32 format.
+        """
         streaming_config = StreamingSynthesizeConfig(
             voice=VoiceSelectionParams(
                 name=selected_voice,
                 language_code=language_code,
             ),
             streaming_audio_config=StreamingAudioConfig(
-                audio_encoding=AudioEncoding.PCM,  # Raw PCM audio (Float32 compatible)
+                audio_encoding=AudioEncoding.PCM,
                 sample_rate_hertz=sample_rate,
                 speaking_rate=speaking_rate,
             ),
         )
-        
-        # Create request generator
-        async def request_generator():
-            # First request must contain config only
+
+        async def _request_generator():
             yield StreamingSynthesizeRequest(streaming_config=streaming_config)
-            
-            # Split text into sentences for optimal streaming
-            # Each sentence becomes a separate streaming request
-            sentences = self._split_into_sentences(text)
-            
-            for sentence in sentences:
+            for sentence in self._split_into_sentences(text):
                 if sentence.strip():
                     yield StreamingSynthesizeRequest(
                         input=StreamingSynthesisInput(text=sentence)
                     )
-        
-        # Retry loop with circuit breaker for gRPC transient failures
-        last_err = None
-        for _attempt in range(self._TTS_MAX_RETRIES + 1):
+
+        response_stream = await self._client.streaming_synthesize(
+            requests=_request_generator()
+        )
+
+        aiter_stream = response_stream.__aiter__()
+        chunk_count = 0
+        while True:
             try:
-                async with self._circuit:
-                    # Call streaming synthesis and yield audio chunks as they arrive
-                    response_stream = await self._client.streaming_synthesize(
-                        requests=request_generator()
-                    )
+                response = await asyncio.wait_for(
+                    aiter_stream.__anext__(),
+                    timeout=self._response_read_timeout_s,
+                )
+            except StopAsyncIteration:
+                logger.debug("Streaming TTS complete: %d chunks yielded", chunk_count)
+                return
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "google_tts_streaming: chunk read stall >%.1fs — "
+                    "aborting stream for REST fallback",
+                    self._response_read_timeout_s,
+                )
+                raise
 
-                    chunk_count = 0
-                    async for response in response_stream:
-                        if response.audio_content:
-                            chunk_count += 1
+            if not response.audio_content:
+                continue
 
-                            # Convert to Float32 for browser playback
-                            # The streaming API returns PCM audio (Int16)
-                            int16_array = np.frombuffer(response.audio_content, dtype=np.int16)
-                            float32_array = (int16_array.astype(np.float32) / 32768.0)
-                            float32_data = float32_array.tobytes()
+            int16_array = np.frombuffer(response.audio_content, dtype=np.int16)
+            float32_data = (int16_array.astype(np.float32) / 32768.0).tobytes()
+            chunk_count += 1
+            yield AudioChunk(
+                data=float32_data,
+                sample_rate=sample_rate,
+                channels=1,
+            )
 
-                            yield AudioChunk(
-                                data=float32_data,
-                                sample_rate=sample_rate,
-                                channels=1
-                            )
+    async def _rest_fallback_attempt(
+        self,
+        text: str,
+        selected_voice: str,
+        language_code: str,
+        sample_rate: int,
+        speaking_rate: float,
+    ) -> AsyncIterator[AudioChunk]:
+        """
+        Unary SynthesizeSpeech fallback. Runs when the streaming path has
+        failed before emitting any audio. Returns the entire buffer in one
+        RPC, sliced into the same AudioChunk framing as the streaming path
+        so the media gateway is unaware which path produced the audio.
+        """
+        from google.cloud.texttospeech_v1.types import (
+            SynthesizeSpeechRequest,
+            SynthesisInput,
+            AudioConfig,
+        )
 
-                    logger.debug(f"Streaming TTS complete: {chunk_count} chunks yielded")
-                # Success — stop retrying
-                break
+        request = SynthesizeSpeechRequest(
+            input=SynthesisInput(text=text),
+            voice=VoiceSelectionParams(
+                name=selected_voice,
+                language_code=language_code,
+            ),
+            audio_config=AudioConfig(
+                audio_encoding=AudioEncoding.LINEAR16,
+                sample_rate_hertz=sample_rate,
+                speaking_rate=speaking_rate,
+            ),
+        )
 
-            except CircuitOpenError as co:
-                logger.error(f"Google TTS circuit breaker open: {co}")
-                raise RuntimeError(f"TTS provider unavailable: {co}")
+        response = await self._client.synthesize_speech(request=request)
+        audio_bytes = response.audio_content or b""
+        # SynthesizeSpeech with LINEAR16 wraps PCM in a 44-byte RIFF/WAV
+        # header; strip it so the output matches the streaming path.
+        if len(audio_bytes) >= 44 and audio_bytes[:4] == b"RIFF":
+            audio_bytes = audio_bytes[44:]
 
-            except Exception as e:
-                last_err = e
-                if _attempt < self._TTS_MAX_RETRIES:
-                    _delay = min(
-                        self._TTS_RETRY_BASE_DELAY * (2 ** _attempt),
-                        5.0,
-                    ) * (0.5 + random.random())
-                    logger.warning(
-                        f"Google TTS retry {_attempt + 1}/{self._TTS_MAX_RETRIES} "
-                        f"after {_delay:.2f}s — {e}"
-                    )
-                    await asyncio.sleep(_delay)
-                else:
-                    logger.error(f"Streaming TTS error after retries: {e}")
-                    raise RuntimeError(f"Google TTS streaming synthesis failed: {str(e)}")
+        if not audio_bytes:
+            return
+
+        int16_array = np.frombuffer(audio_bytes, dtype=np.int16)
+        float32_data = (int16_array.astype(np.float32) / 32768.0).tobytes()
+
+        chunk_size = 16384
+        for i in range(0, len(float32_data), chunk_size):
+            yield AudioChunk(
+                data=float32_data[i:i + chunk_size],
+                sample_rate=sample_rate,
+                channels=1,
+            )
     
     def _normalize_voice_id(self, voice_id: str) -> str:
         """

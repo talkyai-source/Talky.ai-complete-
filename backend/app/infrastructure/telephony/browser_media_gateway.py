@@ -350,8 +350,16 @@ class BrowserMediaGateway(MediaGateway):
             # Conversion failed, assume audio is already in correct format
             logger.debug(f"Float32→Int16 conversion skipped: {conv_err}")
 
-        # Add to recording buffer
+        # Add to recording buffer.
+        # FIX 6 — Mirror the same 115 MB eviction cap that on_audio_received applies
+        # to inbound audio.  Without this cap, TTS chunks accumulate unbounded on
+        # extended calls (>60 min), risking OOM on the browser/WebSocket path.
+        _MAX_RECORDING_BYTES = 115_200_000  # 60 min @ 16kHz 16-bit mono
         session.recording_buffer.append(audio_chunk)
+        session.recording_buffer_bytes += len(audio_chunk)
+        while session.recording_buffer_bytes > _MAX_RECORDING_BYTES and session.recording_buffer:
+            evicted = session.recording_buffer.popleft()
+            session.recording_buffer_bytes -= len(evicted)
 
         bytes_per_second = self._sample_rate * self._frame_bytes
         buf_threshold = max(

@@ -70,6 +70,12 @@ class TelephonySession:
     # TTS audio buffer for packetization (must send in 160-byte chunks for 8kHz PCMU)
     tts_buffer: bytes = field(default_factory=bytes)
 
+    # GAP 9 — STT input accumulation buffer.
+    # Deepgram recommends 100–250ms chunks for optimal streaming throughput.
+    # At 8kHz linear16: 100ms = 1,600 bytes.  The C++ gateway delivers 20ms
+    # callbacks (320 bytes each), so we batch 5 frames before forwarding.
+    _stt_accumulator: bytes = field(default_factory=bytes)
+
     # Real-time pacing cursor for TTS delivery (see send_audio).
     # Tracks the monotonic clock position up to which audio has been scheduled
     # to play at the C++ gateway.  None = start of a new burst.
@@ -263,16 +269,29 @@ class TelephonyMediaGateway(MediaGateway):
         # Track how many PCM16 samples the caller side has produced
         session.caller_sample_count += len(pcm_chunk) // 2
 
+        # GAP 9 — Batch into 100ms super-frames before forwarding to STT.
+        # Deepgram's optimal receive size is 100–250ms; smaller frames increase
+        # WebSocket send overhead by 5× and degrade Flux throughput.
+        # At 8kHz linear16: 100ms = 1,600 bytes (5 × 320-byte / 20ms frames).
+        _STT_BATCH_BYTES = 1_600
+        session._stt_accumulator += pcm_chunk
+        if len(session._stt_accumulator) < _STT_BATCH_BYTES:
+            return  # Wait for more frames
+
+        # Flush the accumulated super-frame to the STT queue.
+        batch = session._stt_accumulator
+        session._stt_accumulator = b""
+
         try:
-            session.input_queue.put_nowait(pcm_chunk)
+            session.input_queue.put_nowait(batch)
         except asyncio.QueueFull:
-            # Drop oldest frame and make room (keeps latency low)
+            # Drop oldest super-frame and make room (keeps latency low)
             try:
                 session.input_queue.get_nowait()
             except asyncio.QueueEmpty:
                 pass
             try:
-                session.input_queue.put_nowait(pcm_chunk)
+                session.input_queue.put_nowait(batch)
             except asyncio.QueueFull:
                 session.dropped_input_chunks += 1
 
@@ -344,34 +363,38 @@ class TelephonyMediaGateway(MediaGateway):
             logger.warning(f"[TelephonyGW] TTS encode failed for {call_id[:12]}: {exc}", exc_info=True)
             return
 
-        # Buffer the PCMU audio and send in 160-byte packets with real-time pacing.
+        # Buffer the PCMU audio and send in real-time-paced bursts to the C++ gateway.
         #
         # WITHOUT pacing: TTS generates a 7-second utterance in ~0.5s and sends all
-        # 350 packets to the C++ gateway immediately.  The gateway buffers them all
-        # and plays at real-time rate.  When barge-in fires, interrupt_tts must clear
-        # 7s of buffered audio — if the endpoint is slow or absent, the caller hears
-        # the agent speaking for seconds after interrupting.
+        # 350 packets immediately.  The gateway buffers them and plays at real-time.
+        # When barge-in fires, interrupt_tts must clear 7s of buffered audio — the
+        # caller hears the agent speaking for seconds after interrupting.
         #
         # WITH pacing: asyncio.sleep() yields the event loop so STT barge-in callbacks
-        # can fire between packets.  The C++ gateway never accumulates more than
+        # can fire between bursts.  The C++ gateway never accumulates more than
         # TARGET_AHEAD_S seconds of pre-buffered audio.  When barge-in fires:
         #   1. synthesize_and_send_audio detects the event and stops sending.
         #   2. clear_output_buffer clears the Python buffer and calls interrupt_tts.
-        #   3. Only ≤ TARGET_AHEAD_S of audio is left in the gateway — at most
-        #      ~200ms instead of 7s.
+        #   3. Only ≤ TARGET_AHEAD_S of audio is left in the gateway — at most ~200ms.
+        #
+        # BATCHING (3 packets = 60ms per sleep): the original 1-packet-per-sleep design
+        # called asyncio.sleep() ~300 times for a 6-second utterance.  Under event loop
+        # load (STT RTP ingest + Groq streaming), each sleep can drift 10-50ms beyond
+        # its requested duration.  300 drift events accumulate into audible gaps.
+        # Batching 3 packets per sleep reduces yields to ~100 — 3× less drift surface —
+        # while keeping barge-in detection latency within one 60ms burst window.
         #
         # 160 bytes = 20ms of audio at 8kHz PCMU (8000 samples/s × 0.020s × 1 byte).
         # Opportunistic batching: when multiple packets are already buffered we
         # POST them together, cutting HTTP round-trips on the steady-state path
-        # (50/s → ~25/s at the default batch size of 2).  The batch size is
+        # (50/s -> ~25/s at the default batch size of 2).  The batch size is
         # clamped so worst-case barge-in detection stays within PACKET_DURATION
-        # × TTS_BATCH_PACKETS = 40 ms (default).  The first packet after
-        # silence is still sent as soon as it is available — TTFB of the first
-        # TTS byte is unchanged from the pre-batching behaviour.  The C++
-        # gateway's enqueue_tts_ulaw accepts any multiple of 160 bytes.
+        # x TTS_BATCH_PACKETS = 40 ms (default).  The first packet after
+        # silence is still sent as soon as it is available.  The C++ gateway's
+        # enqueue_tts_ulaw accepts any multiple of 160 bytes.
         PACKET_SIZE = 160
         PACKET_DURATION_S = PACKET_SIZE / self._sample_rate   # 0.020 s at 8 kHz
-        TARGET_AHEAD_S    = 0.200                              # keep ≤ 200 ms ahead
+        TARGET_AHEAD_S = 0.200                                # keep <= 200 ms ahead
         try:
             MAX_BATCH_PACKETS = max(
                 1, int(os.getenv("TELEPHONY_TTS_BATCH_PACKETS", "2"))
@@ -382,15 +405,14 @@ class TelephonyMediaGateway(MediaGateway):
         session.tts_buffer += pcmu
 
         while len(session.tts_buffer) >= PACKET_SIZE:
-            # Barge-in check at the top of the loop: if the pipeline's event is
-            # already set before we even sleep, discard remaining buffer and return
-            # so synthesize_and_send_audio can react immediately.
+            # Barge-in check at the top of every burst: exit immediately if the
+            # pipeline's event fired while we were sleeping or processing the last burst.
             if session.barge_in_event and session.barge_in_event.is_set():
                 session.tts_buffer = b""
                 return
 
             # Opportunistic batch: take up to MAX_BATCH_PACKETS worth of bytes
-            # that are ALREADY buffered; never wait for more to accumulate.
+            # that are already buffered; never wait for more to accumulate.
             available_packets = len(session.tts_buffer) // PACKET_SIZE
             batch_packets = min(available_packets, MAX_BATCH_PACKETS)
             send_size = batch_packets * PACKET_SIZE
@@ -402,9 +424,9 @@ class TelephonyMediaGateway(MediaGateway):
             deadline = session._tts_send_deadline
 
             # Initialise (or re-initialise after a silence gap) the pacing cursor.
-            # After a gap the deadline is in the past, so treat it as "now" to allow
-            # the first few packets to send immediately (fill the initial TARGET_AHEAD
-            # buffer) before pacing kicks in.
+            # After a gap the deadline is in the past — reset to now so the first
+            # burst sends immediately (fills the initial TARGET_AHEAD buffer) before
+            # pacing kicks in.
             if deadline is None or deadline < now:
                 deadline = now
 
@@ -414,8 +436,13 @@ class TelephonyMediaGateway(MediaGateway):
             if overshoot > 0.001:
                 # Yield the event loop while waiting.  STT barge-in callbacks fire
                 # here, so the barge-in check at the top of the next iteration
-                # catches the event within (batch_packets × 20 ms).
+                # catches the event within (batch_packets * 20 ms).
                 await asyncio.sleep(overshoot)
+
+            # Post-sleep barge-in check: the event may have fired while pacing.
+            if session.barge_in_event and session.barge_in_event.is_set():
+                session.tts_buffer = b""
+                return
 
             try:
                 await session.adapter.send_tts_audio(session.pbx_call_id, packet)

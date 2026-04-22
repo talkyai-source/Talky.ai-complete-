@@ -173,6 +173,44 @@ class GoogleTTSProvider(TTSProvider):
             for voice in CHIRP3_HD_VOICES
         ]
     
+    async def connect_for_call(self, call_id: str) -> None:
+        """
+        Pre-warm the HTTPS connection to Google TTS before the first synthesis.
+
+        aiohttp re-uses keep-alive connections from the pool, so firing a minimal
+        real synthesis here pays the DNS + TCP + TLS cost once.  The result is
+        thrown away; the connection stays open for the actual first response.
+
+        Called fire-and-forget by telephony_bridge._on_new_call() during the
+        window between call answer and the user's first utterance (~1-2 s).
+        """
+        _log = logging.getLogger(__name__)
+        if not self._session:
+            _log.debug("connect_for_call: session not initialised, skipping warmup")
+            return
+        try:
+            url = f"{self.TTS_API_URL}?key={self._api_key}"
+            warmup_payload = {
+                "input": {"text": "."},
+                "voice": {
+                    "languageCode": self._default_language,
+                    "name": self._default_voice,
+                },
+                "audioConfig": {
+                    "audioEncoding": "LINEAR16",
+                    "sampleRateHertz": self._sample_rate,
+                },
+            }
+            async with self._session.post(
+                url,
+                json=warmup_payload,
+                headers={"Content-Type": "application/json"},
+            ) as resp:
+                await resp.read()  # drain so the connection returns to the pool
+            _log.debug("google_tts warmup complete for call_id=%s", call_id[:12])
+        except Exception as exc:
+            _log.warning("google_tts connect_for_call failed (non-fatal): %s", exc)
+
     async def cleanup(self) -> None:
         """Release resources"""
         if self._session:

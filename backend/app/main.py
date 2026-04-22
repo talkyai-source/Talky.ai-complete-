@@ -154,7 +154,23 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Disconnect telephony bridge on shutdown
+    # Disconnect telephony bridge on shutdown.
+    # FIX 5 — End active voice sessions first so recordings are saved and the PBX
+    # receives a hangup signal.  Without this, callers hear abrupt disconnect and
+    # the PBX holds channels open until its own ringing/idle timeout.
+    if _tb._telephony_sessions:
+        logger.info(
+            "Shutdown: ending %d active telephony session(s) gracefully",
+            len(_tb._telephony_sessions),
+        )
+        for call_id in list(_tb._telephony_sessions.keys()):
+            try:
+                await _tb._on_call_ended(call_id)
+            except Exception as shutdown_err:
+                logger.warning(
+                    "Shutdown: error ending call %s: %s", call_id[:12], shutdown_err
+                )
+
     if _tb._adapter and _tb._adapter.connected:
         try:
             await _tb._adapter.disconnect()

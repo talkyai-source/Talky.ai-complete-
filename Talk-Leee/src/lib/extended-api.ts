@@ -38,6 +38,29 @@ export interface RecordingListResponse {
     total: number;
 }
 
+// Campaign Transcripts (Script Card)
+export interface TranscriptTurn {
+    role: "user" | "assistant";
+    content: string;
+    timestamp: string;
+}
+
+export interface CampaignCallWithTranscript {
+    call_id: string;
+    to_number: string;
+    started_at: string;
+    duration_seconds: number | null;
+    outcome: string | null;
+    turns: TranscriptTurn[];
+}
+
+export interface CampaignCallsResponse {
+    items: CampaignCallWithTranscript[];
+    page: number;
+    page_size: number;
+    total: number;
+}
+
 // Extended API - Real backend integration
 class ExtendedApi {
     private client = createHttpClient({ baseUrl: apiBaseUrl() });
@@ -123,6 +146,22 @@ class ExtendedApi {
 
         const blob = await response.blob();
         return URL.createObjectURL(blob);
+    }
+
+    // Campaign call transcripts (Script Card)
+    async getCampaignCallsWithTranscripts(
+        campaignId: string,
+        page: number = 1,
+        pageSize: number = 20
+    ): Promise<CampaignCallsResponse> {
+        return this.client.request({
+            path: `/campaigns/${campaignId}/calls`,
+            method: "GET",
+            params: {
+                page: String(page),
+                page_size: String(pageSize),
+            },
+        });
     }
 }
 

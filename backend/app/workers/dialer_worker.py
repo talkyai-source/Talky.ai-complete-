@@ -259,8 +259,15 @@ class DialerWorker:
                     job.processed_at = datetime.now(timezone.utc)
                     await self._update_job_status(job.job_id, JobStatus.PROCESSING, call_id=internal_call_id)
 
-                    # 9. Notify voice worker about new call (include talklee_call_id + provider call id)
-                    await self._publish_call_event(internal_call_id, job, talklee_call_id, provider_call_id)
+                    # 9. Voice worker notification DISABLED — telephony bridge
+                    #    handles the full call lifecycle via ARI callbacks
+                    #    (_on_ringing → warmup, _on_new_call → pipeline start).
+                    #    Publishing here caused voice_worker to create DUPLICATE
+                    #    dead pipelines (BrowserMediaGateway, no audio routed)
+                    #    that wasted Deepgram WS connections and caused API-key
+                    #    contention, adding 1-3s to the bridge's legitimate
+                    #    ringing-phase STT/TTS warmup handshake.
+                    # await self._publish_call_event(internal_call_id, job, talklee_call_id, provider_call_id)
 
                     self._jobs_processed += 1
                     logger.info(
