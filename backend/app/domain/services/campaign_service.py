@@ -186,13 +186,23 @@ class CampaignService:
                     campaign_id=campaign_id
                 )
             
-            # 4. Get queue service
+            # 4. Update campaign status to 'running' BEFORE enqueuing to Redis.
+            # The dialer worker dequeues jobs and immediately validates campaign
+            # status against the DB.  If status is updated after the Redis push,
+            # the worker sees the old status (e.g. "stopped") and skips every job.
+            await self._update_campaign_status(
+                campaign_id,
+                status="running",
+                total_leads=len(leads)
+            )
+
+            # 5. Get queue service
             queue_service = await self._get_queue_service()
-            
-            # 5. Create and enqueue jobs
+
+            # 6. Create and enqueue jobs
             jobs_created = 0
             jobs_data = []
-            
+
             for lead in leads:
                 job, job_record = self._create_job_for_lead(
                     campaign_id=campaign_id,
@@ -200,20 +210,13 @@ class CampaignService:
                     tenant_id=tenant_id,
                     priority_override=priority_override
                 )
-                
+
                 await queue_service.enqueue_job(job)
                 jobs_data.append(job_record)
                 jobs_created += 1
-            
-            # 6. Store jobs in database (batch insert)
+
+            # 7. Store jobs in database (batch insert)
             await self._store_jobs_batch(jobs_data)
-            
-            # 7. Update campaign status
-            await self._update_campaign_status(
-                campaign_id,
-                status="running",
-                total_leads=len(leads)
-            )
             
             # 8. Get queue stats
             stats = await queue_service.get_queue_stats()

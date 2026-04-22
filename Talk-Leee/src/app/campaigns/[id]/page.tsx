@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { dashboardApi, Campaign, Contact } from "@/lib/dashboard-api";
 import { extendedApi, BulkImportResponse } from "@/lib/extended-api";
+import { ScriptCard } from "@/components/campaigns/script-card";
 import {
     ArrowLeft,
     Play,
@@ -449,6 +450,9 @@ export default function CampaignDetailPage() {
                             </div>
                         )}
                     </motion.div>
+
+                    {/* Script Card — transcripts of every call with timestamps */}
+                    <ScriptCard campaignId={campaignId} />
                 </div>
             ) : null}
         </DashboardLayout>

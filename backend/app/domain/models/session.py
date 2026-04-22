@@ -111,6 +111,11 @@ class CallSession(BaseModel):
         exclude=True,
         description="Shared interruption event for greeting and reply playback",
     )
+    captured_slots: Optional[Any] = Field(
+        None,
+        exclude=True,
+        description="Per-call sticky slot store (CallState); lazy-init in pipeline",
+    )
     
     # Pydantic v2 config
     model_config = ConfigDict(

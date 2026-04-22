@@ -18,25 +18,68 @@ class TestAgentNames:
 
 
 class TestBuildTelephonyGreeting:
+    """
+    Consent-first opener contract (2026-04-22): the greeting introduces
+    the agent by name and asks permission to continue. Company name and
+    pitch are deferred to the system prompt's GREETING RESPONSE flow,
+    which fires only after the callee agrees.
+    """
+
     def test_greeting_contains_agent_name(self):
         from app.domain.services.telephony_session_config import build_telephony_greeting
         result = build_telephony_greeting("John", "All States Estimation")
         assert "John" in result
 
-    def test_greeting_contains_company_name(self):
+    def test_greeting_asks_for_permission(self):
         from app.domain.services.telephony_session_config import build_telephony_greeting
         result = build_telephony_greeting("John", "All States Estimation")
-        assert "All States Estimation" in result
+        lower = result.lower()
+        assert "minute" in lower or "moment" in lower
+        assert result.rstrip().endswith("?"), "Opener must end with a question"
 
-    def test_greeting_mentions_estimate(self):
+    def test_greeting_does_not_mention_company(self):
+        from app.domain.services.telephony_session_config import build_telephony_greeting
+        result = build_telephony_greeting("John", "All States Estimation")
+        assert "All States Estimation" not in result, (
+            "Company name must be deferred until the callee agrees"
+        )
+
+    def test_greeting_does_not_pitch(self):
         from app.domain.services.telephony_session_config import build_telephony_greeting
         result = build_telephony_greeting("Sarah", "TestCo")
-        assert "estimate" in result.lower() or "repair" in result.lower()
+        lower = result.lower()
+        for pitch_word in ("estimate", "bidding", "takeoff", "contractor", "cold call"):
+            assert pitch_word not in lower, (
+                f"Opener must not pitch — found '{pitch_word}' in: {result!r}"
+            )
+
+    def test_greeting_is_short(self):
+        from app.domain.services.telephony_session_config import build_telephony_greeting
+        result = build_telephony_greeting("Alex", "TestCo")
+        assert len(result) < 80, f"Opener must be short; got {len(result)} chars"
 
     def test_greeting_is_a_non_empty_string(self):
         from app.domain.services.telephony_session_config import build_telephony_greeting
         result = build_telephony_greeting("Alex", "TestCo")
         assert isinstance(result, str) and len(result) > 0
+
+
+class TestSystemPromptGreetingResponseFlow:
+    """The consent-first opener delegates the 'what happens next' logic
+    to the system prompt. Lock in the two branches we care about."""
+
+    def test_prompt_has_greeting_response_block(self):
+        from app.domain.services.telephony_session_config import TELEPHONY_ESTIMATION_SYSTEM_PROMPT
+        assert "GREETING RESPONSE" in TELEPHONY_ESTIMATION_SYSTEM_PROMPT
+
+    def test_prompt_has_refuse_close_line(self):
+        from app.domain.services.telephony_session_config import TELEPHONY_ESTIMATION_SYSTEM_PROMPT
+        assert "Sorry to disturb, have a nice day." in TELEPHONY_ESTIMATION_SYSTEM_PROMPT
+
+    def test_prompt_defers_company_intro_to_post_consent(self):
+        from app.domain.services.telephony_session_config import TELEPHONY_ESTIMATION_SYSTEM_PROMPT
+        # The pitch must be scoped to the 'after they agreed' branch.
+        assert "only after they agreed" in TELEPHONY_ESTIMATION_SYSTEM_PROMPT
 
 
 class TestEstimationSystemPrompt:

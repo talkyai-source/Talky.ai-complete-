@@ -38,13 +38,16 @@ from app.domain.models.ai_config import (
     VoiceInfo,
     GROQ_MODELS,
     DEEPGRAM_MODELS,
+    CARTESIA_MODELS,
     GOOGLE_TTS_MODELS,
     DEEPGRAM_TTS_MODELS,
     ELEVENLABS_TTS_MODELS,
+    CARTESIA_VOICES,
     GOOGLE_CHIRP3_VOICES,
     DEEPGRAM_AURA2_VOICES,
 )
 from app.infrastructure.llm.groq import GroqLLMProvider
+from app.infrastructure.tts.cartesia import CartesiaTTSProvider
 from app.infrastructure.tts.google_tts_streaming import GoogleTTSStreamingProvider
 from app.infrastructure.tts.deepgram_tts import DeepgramTTSProvider
 from app.infrastructure.tts.elevenlabs_tts import ElevenLabsTTSProvider
@@ -69,6 +72,15 @@ _DEEPGRAM_MODELS_CACHE_TTL_SECONDS = 300.0
 _deepgram_voice_cache_ids: Optional[Set[str]] = None
 _deepgram_voice_cache_expires_at: float = 0.0
 _deepgram_voice_cache_lock = asyncio.Lock()
+
+_CARTESIA_VOICES_URL = "https://api.cartesia.ai/voices"
+_CARTESIA_VOICE_CACHE_TTL_SECONDS = 300.0
+_cartesia_voice_cache: Optional[List[VoiceInfo]] = None
+_cartesia_voice_cache_expires_at: float = 0.0
+_cartesia_voice_cache_lock = asyncio.Lock()
+# Sync map updated by _get_live_cartesia_voices(); pre-seeded with static list so
+# sync helpers work immediately before any async fetch has run.
+_cartesia_voice_map: dict = {v.id: v for v in CARTESIA_VOICES}
 
 # Disk cache for generated float32 PCM previews (keyed by provider + voice_id).
 # ElevenLabs stores MP3 in its own cache dir; this stores decoded float32 for
@@ -172,8 +184,24 @@ def _find_google_voice(voice_id: str) -> Optional[VoiceInfo]:
     return None
 
 
+def _find_cartesia_voice(voice_id: str) -> Optional[VoiceInfo]:
+    # Prefer live-fetched map; fall back to static list on first call.
+    if _cartesia_voice_map:
+        return _cartesia_voice_map.get(voice_id)
+    for voice in CARTESIA_VOICES:
+        if voice.id == voice_id:
+            return voice
+    return None
+
+
 def _is_google_voice(voice_id: str) -> bool:
     return _find_google_voice(voice_id) is not None
+
+
+def _is_cartesia_voice(voice_id: str) -> bool:
+    if _cartesia_voice_map:
+        return voice_id in _cartesia_voice_map
+    return _find_cartesia_voice(voice_id) is not None
 
 
 def _is_english_language(language: Optional[str]) -> bool:
@@ -279,6 +307,85 @@ async def _get_deepgram_voices_for_current_key() -> List[VoiceInfo]:
     return filtered
 
 
+async def _get_live_cartesia_voices() -> List[VoiceInfo]:
+    """
+    Fetch all public English voices from the Cartesia API, cache for 5 minutes,
+    and update the module-level _cartesia_voice_map for sync lookups.
+    Falls back to the static CARTESIA_VOICES list when the API is unreachable.
+    """
+    global _cartesia_voice_cache, _cartesia_voice_cache_expires_at, _cartesia_voice_map
+
+    api_key = os.getenv("CARTESIA_API_KEY")
+    if not api_key:
+        _cartesia_voice_map = {v.id: v for v in CARTESIA_VOICES}
+        return list(CARTESIA_VOICES)
+
+    now = time.time()
+    if _cartesia_voice_cache is not None and now < _cartesia_voice_cache_expires_at:
+        return list(_cartesia_voice_cache)
+
+    async with _cartesia_voice_cache_lock:
+        now = time.time()
+        if _cartesia_voice_cache is not None and now < _cartesia_voice_cache_expires_at:
+            return list(_cartesia_voice_cache)
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=10)
+            headers = {"X-API-Key": api_key, "Cartesia-Version": "2024-06-10"}
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(_CARTESIA_VOICES_URL, headers=headers) as response:
+                    if response.status != 200:
+                        logger.warning(
+                            "Cartesia voices API returned status %s; using static fallback.",
+                            response.status,
+                        )
+                        _cartesia_voice_map = {v.id: v for v in CARTESIA_VOICES}
+                        return list(CARTESIA_VOICES)
+                    payload = await response.json()
+        except Exception as exc:
+            logger.warning("Cartesia voices fetch failed (%s); using static fallback.", exc)
+            _cartesia_voice_map = {v.id: v for v in CARTESIA_VOICES}
+            return list(CARTESIA_VOICES)
+
+        voices: List[VoiceInfo] = []
+        for entry in payload:
+            voice_id = entry.get("id", "")
+            name = entry.get("name", "")
+            language = (entry.get("language") or "").strip().lower()
+            is_public = entry.get("is_public", True)
+            if not voice_id or not name:
+                continue
+            if not is_public:
+                continue
+            # Keep only English voices (language == "en" or starts with "en-")
+            if not (language == "en" or language.startswith("en-")):
+                continue
+            voices.append(
+                VoiceInfo(
+                    id=voice_id,
+                    name=name,
+                    provider="cartesia",
+                    language="en",
+                    gender=entry.get("gender"),
+                    preview_url=None,
+                )
+            )
+
+        if not voices:
+            logger.warning("Cartesia API returned no public English voices; using static fallback.")
+            _cartesia_voice_map = {v.id: v for v in CARTESIA_VOICES}
+            return list(CARTESIA_VOICES)
+
+        # Sort alphabetically by name for consistent UI ordering.
+        voices.sort(key=lambda v: v.name.lower())
+
+        _cartesia_voice_cache = voices
+        _cartesia_voice_cache_expires_at = time.time() + _CARTESIA_VOICE_CACHE_TTL_SECONDS
+        _cartesia_voice_map = {v.id: v for v in voices}
+        logger.info("Cartesia live voice list refreshed: %d English voices.", len(voices))
+        return list(voices)
+
+
 async def _find_elevenlabs_voice(voice_id: str) -> Optional[VoiceInfo]:
     if not elevenlabs_enabled():
         return None
@@ -286,9 +393,12 @@ async def _find_elevenlabs_voice(voice_id: str) -> Optional[VoiceInfo]:
 
 
 async def _get_all_tts_voices() -> List[VoiceInfo]:
-    deepgram_voices = await _get_deepgram_voices_for_current_key()
-    elevenlabs_voices = await get_elevenlabs_voices_for_current_key()
-    return [*_english_google_voices(), *deepgram_voices, *elevenlabs_voices]
+    cartesia_voices, deepgram_voices, elevenlabs_voices = await asyncio.gather(
+        _get_live_cartesia_voices(),
+        _get_deepgram_voices_for_current_key(),
+        get_elevenlabs_voices_for_current_key(),
+    )
+    return [*cartesia_voices, *_english_google_voices(), *deepgram_voices, *elevenlabs_voices]
 
 
 def _linear16_to_float32le_bytes(pcm16_data: bytes) -> bytes:
@@ -346,8 +456,9 @@ async def list_providers():
         if elevenlabs_enabled()
         else []
     )
-    tts_providers = ["google", "deepgram"]
+    tts_providers = ["cartesia", "google", "deepgram"]
     tts_models = [
+        *(model.model_dump() for model in CARTESIA_MODELS),
         *(model.model_dump() for model in GOOGLE_TTS_MODELS),
         *(model.model_dump() for model in DEEPGRAM_TTS_MODELS),
     ]
@@ -437,6 +548,7 @@ async def preview_voice(request: VoicePreviewRequest):
     and returns the audio as base64.
     
     Supports:
+    - Cartesia Sonic voices
     - Google Chirp3-HD voices
     - Deepgram Aura-2 voices
     
@@ -461,7 +573,10 @@ async def preview_voice(request: VoicePreviewRequest):
             )
 
         tts = None
-        deepgram_voices = await _get_deepgram_voices_for_current_key()
+        cartesia_voices, deepgram_voices = await asyncio.gather(
+            _get_live_cartesia_voices(),
+            _get_deepgram_voices_for_current_key(),
+        )
         deepgram_voice_map = {voice.id: voice for voice in deepgram_voices}
         deepgram_static_voice_map = {
             voice.id: voice
@@ -473,19 +588,37 @@ async def preview_voice(request: VoicePreviewRequest):
 
         # Determine provider by checking in order — avoids hitting ElevenLabs
         # API with Google/Deepgram voice IDs (which returns a 400 error).
+        # _cartesia_voice_map is now populated by _get_live_cartesia_voices().
+        is_cartesia = _is_cartesia_voice(voice_id)
         is_google = _is_google_voice(voice_id)
         is_deepgram = voice_id in deepgram_voice_map or voice_id in deepgram_static_voice_map
-        elevenlabs_voice = None if (is_google or is_deepgram) else await _find_elevenlabs_voice(voice_id)
+        elevenlabs_voice = None if (is_cartesia or is_google or is_deepgram) else await _find_elevenlabs_voice(voice_id)
 
         voice_info = (
-            _find_google_voice(voice_id)
+            _find_cartesia_voice(voice_id)
+            or _find_google_voice(voice_id)
             or deepgram_voice_map.get(voice_id)
             or deepgram_static_voice_map.get(voice_id)
             or elevenlabs_voice
         )
         voice_name = voice_info.name if voice_info else "Unknown Voice"
 
-        if is_google:
+        if is_cartesia:
+            if not os.getenv("CARTESIA_API_KEY"):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Cartesia API key not configured",
+                )
+            tts = CartesiaTTSProvider()
+            await tts.initialize(
+                {
+                    "voice_id": voice_id,
+                    "model_id": "sonic-3",
+                    "sample_rate": sample_rate,
+                }
+            )
+            output_is_linear16 = False
+        elif is_google:
             # Use GOOGLE_APPLICATION_CREDENTIALS from env (set in .env).
             creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
             if not creds_path or not os.path.exists(creds_path):
@@ -544,6 +677,19 @@ async def preview_voice(request: VoicePreviewRequest):
             # Deepgram/ElevenLabs return linear16 PCM; convert to float32 for frontend.
             combined_audio = _linear16_to_float32le_bytes(combined_audio)
 
+        # Guard: if the provider returned no audio frames at all the voice is
+        # likely deprecated or inaccessible with this API key.  Return a clear
+        # error instead of empty base64 — the frontend would crash trying to
+        # create an AudioBuffer with 0 frames.
+        if not combined_audio:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Voice '{voice_id}' returned no audio. "
+                    "The voice may be deprecated or not available on this API key."
+                ),
+            )
+
         # Persist to disk so subsequent preview requests skip the API call entirely.
         _save_preview_cache(request.voice_id, combined_audio)
 
@@ -594,6 +740,7 @@ async def get_prefetch_status():
         pass
 
     return {
+        "cartesia_key_configured": bool(os.getenv("CARTESIA_API_KEY")),
         "deepgram_key_configured": bool(os.getenv("DEEPGRAM_API_KEY")),
         "elevenlabs_key_configured": bool(elevenlabs_api_key()),
         "preview_samples_cached": len(cached_ids),
@@ -650,6 +797,26 @@ async def prefetch_all_voice_samples():
                 await tts.cleanup()
                 pcm = _linear16_to_float32le_bytes(b"".join(chunks))
                 _save_preview_cache(voice_id, pcm)
+
+            elif voice.provider == "cartesia":
+                if not os.getenv("CARTESIA_API_KEY"):
+                    results["skipped"].append(voice_id)
+                    return
+                tts = CartesiaTTSProvider()
+                await tts.initialize(
+                    {
+                        "voice_id": voice_id,
+                        "model_id": "sonic-3",
+                        "sample_rate": sample_rate,
+                    }
+                )
+                chunks = []
+                async for chunk in tts.stream_synthesize(
+                    text=_PREVIEW_SAMPLE_TEXT, voice_id=voice_id, sample_rate=sample_rate
+                ):
+                    chunks.append(chunk.data)
+                await tts.cleanup()
+                _save_preview_cache(voice_id, b"".join(chunks))
 
             elif voice.provider == "deepgram":
                 if not os.getenv("DEEPGRAM_API_KEY"):
@@ -782,12 +949,31 @@ async def test_tts(request: TTSTestRequest):
         tts = None
         voice_id = request.voice_id
         sample_rate = request.sample_rate or 24000
-        deepgram_voices = await _get_deepgram_voices_for_current_key()
+        _, deepgram_voices = await asyncio.gather(
+            _get_live_cartesia_voices(),
+            _get_deepgram_voices_for_current_key(),
+        )
         deepgram_voice_ids = {voice.id for voice in deepgram_voices}
         deepgram_static_voice_ids = {voice.id for voice in _english_deepgram_static_voices()}
         elevenlabs_voice = await _find_elevenlabs_voice(voice_id)
 
-        if _is_google_voice(voice_id):
+        if _is_cartesia_voice(voice_id):
+            if not os.getenv("CARTESIA_API_KEY"):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Cartesia API key not configured",
+                )
+            tts = CartesiaTTSProvider()
+            await tts.initialize(
+                {
+                    "voice_id": voice_id,
+                    "model_id": request.model or "sonic-3",
+                    "sample_rate": sample_rate,
+                }
+            )
+            output_is_linear16 = False
+            model_name = request.model or "sonic-3"
+        elif _is_google_voice(voice_id):
             import os as _os
 
             backend_dir = _os.path.dirname(
@@ -922,6 +1108,22 @@ async def get_config(
                     config.tts_voice_id,
                     tenant_id,
                 )
+        elif config.tts_provider == "cartesia":
+            cartesia_voices = await _get_live_cartesia_voices()
+            valid_voice_ids = {voice.id for voice in cartesia_voices}
+            if valid_voice_ids and config.tts_voice_id not in valid_voice_ids:
+                old_voice_id = config.tts_voice_id
+                config.tts_voice_id = cartesia_voices[0].id
+                config.tts_model = "sonic-3"
+                if config.tts_sample_rate not in {8000, 16000, 24000, 32000, 44100}:
+                    config.tts_sample_rate = 24000
+                await _upsert_tenant_config(conn, tenant_id, config)
+                logger.info(
+                    "Auto-corrected stale Cartesia voice id '%s' to '%s' for tenant %s",
+                    old_voice_id,
+                    config.tts_voice_id,
+                    tenant_id,
+                )
         elif config.tts_provider == "elevenlabs":
             elevenlabs_voices = await get_elevenlabs_voices_for_current_key()
             valid_voice_ids = {voice.id for voice in elevenlabs_voices}
@@ -943,6 +1145,12 @@ async def get_config(
     # Keep voice pipeline in sync with tenant-selected config.
     set_global_config(config)
     return config
+
+
+class AIProviderConfigWithWarnings(BaseModel):
+    """AIProviderConfig plus soft latency warnings returned by save_config."""
+    config: AIProviderConfig
+    latency_warnings: list[str] = []
 
 
 @router.post("/config", response_model=AIProviderConfigWithWarnings)
@@ -976,12 +1184,12 @@ async def save_config(
             detail="User is not associated with a tenant",
         )
 
-    if config.tts_provider not in {"google", "deepgram", "elevenlabs"}:
+    if config.tts_provider not in {"cartesia", "google", "deepgram", "elevenlabs"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid TTS provider. Supported providers: google, deepgram, elevenlabs.",
+            detail="Invalid TTS provider. Supported providers: cartesia, google, deepgram, elevenlabs.",
         )
-    
+
     # Validate LLM model
     valid_llm_models = [m.id for m in GROQ_MODELS]
     if config.llm_model not in valid_llm_models:
@@ -989,8 +1197,17 @@ async def save_config(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid LLM model. Must be one of: {valid_llm_models}"
         )
-    
-    if config.tts_provider == "google":
+
+    if config.tts_provider == "cartesia":
+        if not os.getenv("CARTESIA_API_KEY"):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Cartesia API key not configured. Set CARTESIA_API_KEY in .env.",
+            )
+        valid_tts_models = [m.id for m in CARTESIA_MODELS]
+        live_cartesia = await _get_live_cartesia_voices()
+        valid_voice_ids = {voice.id for voice in live_cartesia}
+    elif config.tts_provider == "google":
         valid_tts_models = [m.id for m in GOOGLE_TTS_MODELS]
         valid_voice_ids = {voice.id for voice in _english_google_voices()}
     elif config.tts_provider == "deepgram":
@@ -1099,12 +1316,6 @@ async def save_config(
     # Applies immediately to active voice pipeline selection.
     set_global_config(config)
     return AIProviderConfigWithWarnings(config=config, latency_warnings=latency_warnings)
-
-
-class AIProviderConfigWithWarnings(BaseModel):
-    """AIProviderConfig plus soft latency warnings returned by save_config."""
-    config: AIProviderConfig
-    latency_warnings: list[str] = []
 
 
 class LatencyBenchmarkResponse(BaseModel):

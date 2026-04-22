@@ -29,13 +29,13 @@ class TestAIConfig:
         config = AIProviderConfig()
         
         assert config.llm_provider == "groq"
-        assert config.llm_model == "llama-3.3-70b-versatile"
+        assert config.llm_model == "llama-3.1-8b-instant"
         assert config.stt_provider == "deepgram"
         assert config.stt_model == "nova-3"
-        assert config.tts_provider == "google"
-        assert config.tts_model == "Chirp3-HD"
+        assert config.tts_provider == "deepgram"
+        assert config.tts_model == "aura-2"
         assert config.llm_temperature == 0.6
-        assert config.llm_max_tokens == 150
+        assert config.llm_max_tokens == 90
     
     def test_custom_config(self):
         """Test custom configuration values"""
@@ -183,7 +183,7 @@ class TestConfigSerialization:
         # Values should be strings (enum values)
         assert config_dict["llm_provider"] == "groq"
         assert config_dict["stt_provider"] == "deepgram"
-        assert config_dict["tts_provider"] == "google"
+        assert config_dict["tts_provider"] == "deepgram"
     
     def test_config_from_dict(self):
         """Test configuration can be loaded from dict"""

@@ -378,16 +378,7 @@ CARTESIA_VOICES = [
         tags=["calm", "reassuring", "support"],
         provider="cartesia"
     ),
-    VoiceInfo(
-        id="d46abd1d-2f3f-43a5-b0ad-9ebd4b9f5d48",
-        name="Lily",
-        description="Young, approachable female voice. Ideal for casual interactions.",
-        gender="female",
-        accent="American",
-        accent_color="#22c55e",  # Green
-        tags=["young", "approachable", "casual"],
-        provider="cartesia"
-    ),
+    # Lily (d46abd1d) removed — returns no audio with current API key (deprecated)
     # Professional Male Voices
     VoiceInfo(
         id="228fca29-3a0a-435c-8728-5cb483251068",
@@ -430,16 +421,7 @@ CARTESIA_VOICES = [
         provider="cartesia"
     ),
     # Storytelling / Warm Voices
-    VoiceInfo(
-        id="5345cf08-6f37-424d-a5d9-8ae1c7f3e176",
-        name="Veda Sky",
-        description="Cozy late night storyteller. Soothing and warm.",
-        gender="female",
-        accent="American",
-        accent_color="#a855f7",  # Fuchsia
-        tags=["storyteller", "soothing", "warm"],
-        provider="cartesia"
-    ),
+    # Veda Sky (5345cf08) removed — returns no audio with current API key (deprecated)
     VoiceInfo(
         id="bd9120b6-7761-47a6-a446-77ca49132781",
         name="Susie",

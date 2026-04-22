@@ -121,10 +121,15 @@ class DeepgramFluxSTTProvider(STTProvider):
         # This prevents the agent's voice from triggering StartOfTurn
         self._muted_calls: set[str] = set()
         self._mute_lock = asyncio.Lock()
-        
+
         # Eager turn state tracking
         self._eager_states: dict[str, FluxEagerTurnState] = {}
         self._stream_stats: dict[str, FluxStreamStats] = {}
+
+        # Pre-established WebSocket connections keyed by call_id.
+        # pre_connect() stores a ws here; stream_transcribe() pops and reuses it,
+        # eliminating the ~2s handshake from the hot path.
+        self._pre_connections: dict = {}
 
     def _validate_turn_config(self) -> None:
         """Validate Flux turn-detection parameter ranges."""
@@ -193,6 +198,53 @@ class DeepgramFluxSTTProvider(STTProvider):
             f"eot_timeout_ms={self._eot_timeout_ms}"
         )
     
+    async def pre_connect(self, call_id: str) -> None:
+        """
+        Establish the Deepgram Flux WebSocket connection before audio starts.
+
+        Call this immediately after session creation, before start_pipeline().
+        stream_transcribe() will pop the stored connection and reuse it,
+        skipping the ~2s WebSocket handshake from the hot path entirely.
+
+        Non-fatal: if the pre-connect fails, stream_transcribe() falls back to
+        its normal connect path automatically.
+        """
+        if not self._api_key:
+            logger.warning("pre_connect called before initialize() — skipping")
+            return
+
+        params = [
+            ("model", self._model),
+            ("encoding", self._encoding),
+            ("sample_rate", str(self._sample_rate)),
+            ("eot_threshold", str(self._eot_threshold)),
+            ("eot_timeout_ms", str(self._eot_timeout_ms)),
+        ]
+        if self._eager_eot_threshold is not None:
+            params.append(("eager_eot_threshold", str(self._eager_eot_threshold)))
+        query = "&".join(f"{k}={v}" for k, v in params)
+        url = f"wss://api.deepgram.com/v2/listen?{query}"
+        headers = {
+            "Authorization": f"Token {self._api_key}",
+            "User-Agent": "TalkyAI-VoiceAgent/1.0",
+        }
+
+        try:
+            ws = await websockets.connect(url, extra_headers=headers)
+            self._pre_connections[call_id] = ws
+            logger.info(
+                "Deepgram Flux pre-connected for call %s "
+                "(eager=%s eot=%s timeout_ms=%s)",
+                call_id, self._eager_eot_threshold,
+                self._eot_threshold, self._eot_timeout_ms,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Deepgram Flux pre_connect failed for %s — "
+                "stream_transcribe() will connect normally: %s",
+                call_id, exc,
+            )
+
     async def stream_transcribe(
         self,
         audio_stream: AsyncIterator[AudioChunk],
@@ -575,8 +627,29 @@ class DeepgramFluxSTTProvider(STTProvider):
         try:
             while True:
                 try:
-                    _ws_handshake_start = asyncio.get_event_loop().time()
-                    async with websockets.connect(url, extra_headers=headers) as ws:
+                    # Re-use a pre-established connection (pre_connect() called
+                    # before pipeline start) to skip the initial WebSocket handshake.
+                    # Only available on the first attempt (reconnect_count == 0);
+                    # subsequent reconnects always open a fresh connection.
+                    _preconn = (
+                        self._pre_connections.pop(call_id, None)
+                        if (call_id and reconnect_count == 0)
+                        else None
+                    )
+                    if _preconn is not None:
+                        ws = _preconn
+                        _ws_handshake_ms = 0.0
+                        logger.info(
+                            "Using pre-connected Deepgram Flux for %s "
+                            "(eager=%s, eot=%s, timeout_ms=%s)",
+                            call_id,
+                            self._eager_eot_threshold,
+                            self._eot_threshold,
+                            self._eot_timeout_ms,
+                        )
+                    else:
+                        _ws_handshake_start = asyncio.get_event_loop().time()
+                        ws = await websockets.connect(url, extra_headers=headers)
                         _ws_handshake_ms = (
                             asyncio.get_event_loop().time() - _ws_handshake_start
                         ) * 1000.0
@@ -593,6 +666,7 @@ class DeepgramFluxSTTProvider(STTProvider):
                             },
                         )
 
+                    try:
                         # Send initial silent frame (per Deepgram docs)
                         silent_frame = bytes(3200)  # 100ms of silence
                         await ws.send(silent_frame)
@@ -633,6 +707,11 @@ class DeepgramFluxSTTProvider(STTProvider):
                         await asyncio.gather(
                             send_task, receive_task, heartbeat_task, return_exceptions=True
                         )
+                    finally:
+                        try:
+                            await ws.close()
+                        except Exception:
+                            pass
 
                     # If send_audio finished cleanly (audio_stream exhausted), stop.
                     if stop_reason not in ("running", "stt_stream_closed"):
@@ -709,6 +788,12 @@ class DeepgramFluxSTTProvider(STTProvider):
         self._api_key = None
         self._eager_states.clear()
         self._stream_stats.clear()
+        for _ws in list(self._pre_connections.values()):
+            try:
+                await _ws.close()
+            except Exception:
+                pass
+        self._pre_connections.clear()
         logger.info("DeepgramFlux cleaned up")
     
     @property

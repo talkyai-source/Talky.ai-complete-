@@ -18,7 +18,8 @@ from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.domain.services.ask_ai_session_config import build_ask_ai_session_config
+from app.domain.services.ask_ai_session_config import build_ask_ai_session_config, ASK_AI_GREETING
+from app.domain.models.conversation import Message, MessageRole
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,12 @@ async def ask_ai_websocket(websocket: WebSocket, session_id: str):
             # 1. Create session via orchestrator
             config = build_ask_ai_session_config()
             voice_session = await orchestrator.create_voice_session(config)
+
+            # Seed conversation history with the greeting the client already played.
+            # This tells the LLM what was said so it never re-greets.
+            voice_session.call_session.conversation_history.append(
+                Message(role=MessageRole.ASSISTANT, content=ASK_AI_GREETING)
+            )
 
             # 2. Send ready message
             await websocket.send_json(
@@ -165,12 +172,7 @@ async def ask_ai_websocket(websocket: WebSocket, session_id: str):
             # 4. Start frame receiver before greeting to avoid buffered stale audio.
             receiver_task = asyncio.create_task(_receive_messages())
 
-            # 5. Greeting (always play full intro before listening)
-            await orchestrator.send_greeting(
-                voice_session,
-                "Hi there! How can I help you today?",
-                websocket,
-            )
+            # 5. Greeting is played client-side (pre-fetched audio) — no server greeting.
 
             # 6. Keep endpoint alive until receiver exits (disconnect/end_call).
             await receiver_task

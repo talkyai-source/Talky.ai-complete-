@@ -194,6 +194,50 @@ async def get_campaign(
         raise HTTPException(status_code=500, detail="Failed to get campaign")
 
 
+@router.get("/{campaign_id}/calls")
+async def list_campaign_calls_with_transcripts(
+    campaign_id: str,
+    request: Request,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """Paginated list of calls for a campaign with their transcripts.
+
+    Powers the Script Card on the campaign detail page.
+    """
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=400, detail="User is not associated with a tenant")
+
+    campaign_resp = (
+        db_client.table("campaigns")
+        .select("id, tenant_id")
+        .eq("id", campaign_id)
+        .eq("tenant_id", current_user.tenant_id)
+        .limit(1)
+        .execute()
+    )
+    if not campaign_resp.data:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    from app.services.scripts import fetch_campaign_transcripts
+    try:
+        result = await fetch_campaign_transcripts(
+            pool=db_client.pool,
+            tenant_id=current_user.tenant_id,
+            campaign_id=campaign_id,
+            page=page,
+            page_size=page_size,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"fetch_campaign_transcripts failed campaign={campaign_id}: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to load campaign transcripts")
+    return result
+
+
 @router.post("/{campaign_id}/start")
 async def start_campaign(
     campaign_id: str,

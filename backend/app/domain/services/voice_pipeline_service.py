@@ -8,6 +8,7 @@ with child spans per stage and latency attributes on each.
 """
 import asyncio
 import logging
+import os
 import time
 from typing import Optional, AsyncIterator
 from datetime import datetime
@@ -33,8 +34,27 @@ from app.core.container import get_container
 from app.core.postgres_adapter import Client as PostgresAdapterClient
 from app.core.telemetry import get_tracer, pipeline_span, record_latency, voice_span
 from app.core.telephony_observability import record_turn_silent_reason
+from app.services.scripts import (
+    CallState as CapturedSlotsState,
+    compose_system_prompt,
+    update_state_from_user_turn,
+)
 
 logger = logging.getLogger(__name__)
+
+# FIX 2 — Sliding-window history truncation to prevent context-limit crashes.
+# llama-3.1-8b-instant has an 8,192-token context window.  At ~125 tokens/turn,
+# overflow hits at ~55 turns.  Groq returns HTTP 400 and the apology TTS plays —
+# but without truncation the NEXT turn hits 400 again → infinite apology loop.
+# 20 pairs ≈ 2,500 tokens worst-case, leaving ample room for system prompt + reply.
+_MAX_HISTORY_PAIRS = int(os.getenv("VOICE_MAX_HISTORY_PAIRS", "20"))
+
+
+def _truncate_history(history: list, max_pairs: int = _MAX_HISTORY_PAIRS) -> list:
+    """Return the last max_pairs user/assistant pairs from conversation history."""
+    if len(history) <= max_pairs * 2:
+        return history[:]
+    return history[-(max_pairs * 2):]
 
 
 class VoicePipelineService:
@@ -284,6 +304,120 @@ class VoicePipelineService:
                     self.latency_tracker.start_turn(call_id, session.turn_id)
                 self.latency_tracker.mark_listening_start(call_id)
 
+            # ── Silence monitor (telephony only) ───────────────────────────────
+            # After 5-7 seconds of continuous caller silence the agent asks if the
+            # caller is still there.  Phrases are varied each time to avoid sounding
+            # robotic.  Runs in parallel with the STT consumer loop; cancelled when
+            # the pipeline exits.  Disabled for Ask AI (browser sessions).
+            _SILENCE_PHRASES = [
+                "Are you still there?",
+                "Still with me?",
+                "Hello — you still on the line?",
+                "Hey, just checking — can you hear me?",
+                "Did I lose you?",
+                "You still there? I'm here.",
+                "Just making sure I haven't lost you — you there?",
+                "Hello? Are you still with me?",
+            ]
+
+            async def _silence_monitor() -> None:
+                import random
+                # Minimum pause after AI finishes speaking before silence counts.
+                # Prevents firing immediately after TTS ends while caller is
+                # drawing breath to respond.
+                _TTS_GRACE_S = 3.0
+                _last_event_at = datetime.utcnow()
+                _tts_ended_at: Optional[datetime] = None
+                _was_active: bool = False
+                # Only arm after the FIRST complete AI response — user-speaks-first
+                # mode means there is natural silence at call start that must not
+                # trigger the monitor.
+                _had_first_exchange: bool = False
+                consecutive = 0
+                _MAX_CONSECUTIVE = 2  # give up after 2 unanswered checks
+
+                while session.stt_active and consecutive < _MAX_CONSECUTIVE:
+                    await asyncio.sleep(1.0)  # poll every second
+
+                    if not session.stt_active:
+                        break
+
+                    currently_active = session.tts_active or session.llm_active
+
+                    # AI is speaking or processing — reset baseline
+                    if currently_active:
+                        _last_event_at = datetime.utcnow()
+                        _tts_ended_at = None
+                        _was_active = True
+                        consecutive = 0
+                        continue
+
+                    # TTS/LLM just went inactive — start grace period clock
+                    if _was_active and not currently_active:
+                        _tts_ended_at = datetime.utcnow()
+                        _last_event_at = _tts_ended_at
+                        _had_first_exchange = True  # AI has spoken at least once
+                        _was_active = False
+                        consecutive = 0
+                        continue  # give the caller the full grace period first
+
+                    _was_active = False
+
+                    # Don't arm until after the first AI response (user-speaks-first)
+                    if not _had_first_exchange:
+                        _last_event_at = datetime.utcnow()
+                        continue
+
+                    # Enforce post-TTS grace period before counting silence
+                    if _tts_ended_at is not None:
+                        if (datetime.utcnow() - _tts_ended_at).total_seconds() < _TTS_GRACE_S:
+                            continue
+
+                    # User is already speaking (StartOfTurn detected before transcript)
+                    _barge_ev = self._barge_in_events.get(call_id)
+                    if _barge_ev and _barge_ev.is_set():
+                        _last_event_at = datetime.utcnow()
+                        consecutive = 0
+                        continue
+
+                    # User spoke since our last baseline — reset
+                    if session.last_activity_at > _last_event_at:
+                        _last_event_at = session.last_activity_at
+                        consecutive = 0
+                        continue
+
+                    # How long has it been since any activity?
+                    elapsed = (datetime.utcnow() - _last_event_at).total_seconds()
+                    silence_limit = random.uniform(5.0, 7.0)
+                    if elapsed < silence_limit:
+                        continue
+
+                    # Silence threshold exceeded — ask with a varied phrase
+                    phrase = random.choice(_SILENCE_PHRASES)
+                    consecutive += 1
+                    logger.info(
+                        "[SilenceMonitor] %s — %.1fs silence, asking (%d/%d): %r",
+                        call_id[:12], elapsed, consecutive, _MAX_CONSECUTIVE, phrase,
+                    )
+                    try:
+                        await self.synthesize_and_send_audio(session, phrase, websocket)
+                    except Exception as _sm_exc:
+                        logger.debug("[SilenceMonitor] TTS failed: %s", _sm_exc)
+
+                    # Reset baseline with grace period after our own TTS phrase
+                    _tts_ended_at = datetime.utcnow()
+                    _last_event_at = _tts_ended_at
+
+                logger.debug(
+                    "[SilenceMonitor] %s exiting (consecutive=%d stt_active=%s)",
+                    call_id[:12], consecutive, session.stt_active,
+                )
+
+            # Start silence monitor only for telephony (not Ask AI browser sessions)
+            _silence_task: Optional[asyncio.Task] = None
+            if getattr(session, "campaign_id", "ask-ai") != "ask-ai":
+                _silence_task = asyncio.create_task(_silence_monitor())
+
             try:
                 async for transcript in self.stt_provider.stream_transcribe(
                     audio_stream(),
@@ -295,6 +429,12 @@ class VoicePipelineService:
                 stt_span.record_exception(e)
                 logger.error(f"STT stream error: {e}", extra={"call_id": call_id})
             finally:
+                if _silence_task and not _silence_task.done():
+                    _silence_task.cancel()
+                    try:
+                        await _silence_task
+                    except asyncio.CancelledError:
+                        pass
                 record_latency(stt_span, "stt", (time.monotonic() - t_stt_start) * 1000)
                 get_stats = getattr(self.stt_provider, "get_stream_stats", None)
                 if get_stats:
@@ -469,6 +609,18 @@ class VoicePipelineService:
             )
             return
 
+        # Clear any barge-in event that was set by the user's own StartOfTurn that
+        # triggered this turn.  Deepgram Flux fires StartOfTurn for ALL speech —
+        # including normal listening-phase input — which sets barge_in_event via
+        # _on_barge_in_direct().  Without this clear, synthesize_and_send_audio sees
+        # the stale event as a "barge-in during LLM" and returns immediately without
+        # playing any audio, leaving the caller in silence.
+        # If the user speaks AGAIN while the LLM is generating, Deepgram fires a new
+        # StartOfTurn → event is set again → TTS is correctly suppressed at that point.
+        barge_in_event = self._barge_in_events.get(call_id)
+        if barge_in_event:
+            barge_in_event.clear()
+
         current_task = asyncio.current_task()
         pending_task = self._pending_llm_tasks.get(call_id)
         if pending_task and pending_task.done():
@@ -631,6 +783,17 @@ class VoicePipelineService:
                     extra={"call_id": call_id, "error": str(e)},
                     exc_info=True,
                 )
+                # GAP 7 — LLM failure apology: play a short TTS apology so the
+                # caller knows something went wrong rather than hearing silence.
+                # Use a bare try so an apology TTS failure never masks the original error.
+                try:
+                    await self.synthesize_and_send_audio(
+                        session,
+                        "I'm sorry, I'm having trouble right now. Please try again in a moment.",
+                        websocket,
+                    )
+                except Exception:
+                    pass
             finally:
                 pending_task = self._pending_llm_tasks.get(call_id)
                 if pending_task is current_task or (pending_task and pending_task.done()):
@@ -763,7 +926,7 @@ class VoicePipelineService:
         barge_in_event = self._barge_in_events.get(call_id)
         guardrails = get_guardrails()
 
-        messages = session.conversation_history[:]
+        messages = _truncate_history(session.conversation_history)
         system_prompt = session.system_prompt
 
         # Ask AI: inject product/pricing info only when the user's message contains
@@ -777,6 +940,9 @@ class VoicePipelineService:
             )
             if any(kw in last_user_text for kw in _ASK_AI_PRODUCT_KEYWORDS):
                 system_prompt = system_prompt + "\n\n" + _ASK_AI_PRODUCT_INFO
+
+        if session.captured_slots is not None:
+            system_prompt = compose_system_prompt(system_prompt, session.captured_slots)
 
         max_sentences = self._response_max_sentences_for_turn(session.turn_id)
 
@@ -937,6 +1103,12 @@ class VoicePipelineService:
             Message(role=MessageRole.USER, content=full_transcript)
         )
 
+        if session.captured_slots is None:
+            session.captured_slots = CapturedSlotsState()
+        session.captured_slots = update_state_from_user_turn(
+            session.captured_slots, full_transcript
+        )
+
         response_text = ""
         llm_latency_ms = 0.0
         tts_latency_ms = 0.0
@@ -986,6 +1158,8 @@ class VoicePipelineService:
 
             messages = session.conversation_history[:]
             system_prompt = session.system_prompt
+            if session.captured_slots is not None:
+                system_prompt = compose_system_prompt(system_prompt, session.captured_slots)
 
             max_sentences = self._response_max_sentences_for_turn(session.turn_id)
 
@@ -1040,6 +1214,7 @@ class VoicePipelineService:
         completed = False
         silent_reason: Optional[str] = None
         first_chunk = True
+        first_chunk_sent = False  # track whether any audio reached the gateway
         try:
             # If user spoke during the LLM call, the barge-in event is already set.
             # Don't start TTS — send the stop signal immediately and return.
@@ -1110,6 +1285,7 @@ class VoicePipelineService:
                 if not raw:
                     continue
                 await self.media_gateway.send_audio(call_id, raw)
+                first_chunk_sent = True  # at least one chunk reached the gateway
                 # Check barge-in again immediately after send: barge-in may have
                 # fired during the gateway send await before the next TTS chunk arrives.
                 if barge_in_event and barge_in_event.is_set():
@@ -1147,12 +1323,28 @@ class VoicePipelineService:
         except Exception as e:
             silent_reason = "tts_exception"
             logger.error(f"TTS synthesis error for call {call_id}: {e}", exc_info=True)
+            # FIX 4 — If no audio reached the gateway yet, play a one-shot fallback
+            # so the caller gets an explicit signal instead of silence.  The
+            # _tts_fallback_attempted flag prevents infinite recursion when the
+            # fallback itself fails (e.g. TTS provider is fully down).
+            if not first_chunk_sent and not getattr(session, "_tts_fallback_attempted", False):
+                session._tts_fallback_attempted = True
+                try:
+                    await self.synthesize_and_send_audio(
+                        session,
+                        "I'm sorry, I couldn't respond. Please say that again.",
+                        websocket,
+                        track_latency=False,
+                    )
+                except Exception:
+                    pass
         finally:
             if not interrupted and first_chunk:
                 if silent_reason is None and completed:
                     silent_reason = "provider_empty_stream"
                 if silent_reason is not None:
                     self._record_silent_turn(call_id, silent_reason)
+            session._tts_fallback_attempted = False
             if track_latency:
                 self.latency_tracker.mark_tts_end(call_id)
                 if interrupted:

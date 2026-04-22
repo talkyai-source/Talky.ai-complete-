@@ -207,7 +207,7 @@ class GroqLLMProvider(LLMProvider):
                 max_tokens=1,
                 temperature=0.0,
                 stream=False,
-                timeout=3.0,
+                timeout=1.5,
             )
             elapsed_ms = (asyncio.get_event_loop().time() - _t0) * 1000.0
             logger.info(

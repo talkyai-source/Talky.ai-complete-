@@ -201,7 +201,7 @@ class VoiceOrchestrator:
         """
         Initialise providers, create a CallSession, and set up event logging.
 
-        Returns a fully-wired VoiceSession.
+        Returns a fully-wired VoiceSession ready for pipeline start.
         """
         call_id = str(uuid.uuid4())
         talklee_call_id = generate_talklee_call_id()
@@ -683,17 +683,23 @@ class VoiceOrchestrator:
                 "max_tokens": config.llm_max_tokens,
             }
         )
-        # Fire-and-forget warmup: primes httpx HTTP/2 + TLS + DNS so the first
-        # real LLM call (the first agent response in user-first mode) reuses a
-        # warm socket instead of paying the cold-connect 80–200 ms tax.
-        _warm_up = getattr(provider, "warm_up", None)
-        if _warm_up is not None:
-            asyncio.create_task(_warm_up())
         return provider
 
     async def _create_tts_provider(self, config: VoiceSessionConfig):
         """Initialise and return the TTS provider."""
-        if config.tts_provider_type == "deepgram":
+        if config.tts_provider_type == "cartesia":
+            from app.infrastructure.tts.cartesia import CartesiaTTSProvider
+
+            provider = CartesiaTTSProvider()
+            await provider.initialize(
+                {
+                    "api_key": os.getenv("CARTESIA_API_KEY"),
+                    "voice_id": config.voice_id,
+                    "model_id": config.tts_model or "sonic-3",
+                    "sample_rate": config.tts_sample_rate,
+                }
+            )
+        elif config.tts_provider_type == "deepgram":
             from app.infrastructure.tts.deepgram_tts import DeepgramTTSProvider
 
             provider = DeepgramTTSProvider()
@@ -757,6 +763,8 @@ class VoiceOrchestrator:
             "channels": config.gateway_channels,
             "bit_depth": config.gateway_bit_depth,
             "target_buffer_ms": config.gateway_target_buffer_ms,
+            # Cartesia and Google output float32 PCM.
+            # Deepgram and ElevenLabs output linear16 PCM.
             "tts_source_format": "s16le"
             if config.tts_provider_type in {"deepgram", "elevenlabs"}
             else "f32le",

@@ -161,6 +161,32 @@ class ElevenLabsTTSProvider(TTSProvider):
         if last_err:
             raise RuntimeError(f"ElevenLabs TTS failed after {_EL_MAX_RETRIES} retries: {last_err}")
 
+    async def connect_for_call(self, call_id: str) -> None:
+        """
+        Pre-warm the HTTPS connection to ElevenLabs before the first synthesis.
+        aiohttp reuses keep-alive connections from the pool, so paying TCP+TLS
+        once here means subsequent synthesis calls skip that handshake entirely.
+        """
+        if not self._session or not self._voice_id:
+            logger.debug("elevenlabs connect_for_call: not ready, skipping warmup")
+            return
+        try:
+            output_format = self._output_format_for_rate(self._sample_rate)
+            url = f"{self.API_BASE_URL}/v1/text-to-speech/{self._voice_id}/stream"
+            headers = {"xi-api-key": self._api_key, "Content-Type": "application/json"}
+            payload = {"text": ".", "model_id": self._model_id}
+            async with self._session.post(
+                url,
+                headers=headers,
+                params={"output_format": output_format},
+                json=payload,
+            ) as resp:
+                await resp.read()  # drain so the connection returns to the pool
+            label = call_id[:12] if call_id and call_id != "prewarm" else "prewarm"
+            logger.debug("elevenlabs warmup complete for call_id=%s", label)
+        except Exception as exc:
+            logger.warning("elevenlabs connect_for_call failed (non-fatal): %s", exc)
+
     async def get_available_voices(self) -> List[Dict]:
         voices = await get_elevenlabs_voices_for_current_key()
         return [voice.model_dump() for voice in voices]
