@@ -1035,7 +1035,9 @@ export default function AIOptionsPage() {
                                 </div>
                                 <div>
                                     <h3 className="text-lg font-semibold text-white group-hover:text-gray-900 dark:group-hover:text-white">LLM Model</h3>
-                                    <p className="text-sm text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-400">Groq AI</p>
+                                    <p className="text-sm text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-400">
+                                        {providers?.llm.providers?.join(' / ') || 'Groq'}
+                                    </p>
                                 </div>
                             </div>
 
@@ -1044,12 +1046,21 @@ export default function AIOptionsPage() {
                                     <label className="block text-sm font-medium text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-400 mb-2">Model</label>
                                     <select
                                         value={config.llm_model}
-                                        onChange={(e) => setConfig({ ...config, llm_model: e.target.value })}
+                                        onChange={(e) => {
+                                            // Auto-set llm_provider from the selected model so a Gemini model
+                                            // never gets saved with llm_provider="groq" (or vice-versa).
+                                            const picked = providers?.llm.models.find(m => m.id === e.target.value);
+                                            setConfig({
+                                                ...config,
+                                                llm_model: e.target.value,
+                                                llm_provider: (picked?.provider as typeof config.llm_provider) || config.llm_provider,
+                                            });
+                                        }}
                                         className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white group-hover:text-gray-900 group-hover:bg-black/5 group-hover:border-black/10 dark:group-hover:text-white dark:group-hover:bg-white/5 dark:group-hover:border-white/10 focus:outline-none focus:border-purple-500/50"
                                     >
                                         {providers?.llm.models.map((model) => (
                                             <option key={model.id} value={model.id} className="bg-gray-900">
-                                                {model.name}
+                                                {model.provider ? `[${model.provider}] ${model.name}` : model.name}
                                             </option>
                                         ))}
                                     </select>

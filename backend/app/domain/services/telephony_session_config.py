@@ -320,13 +320,22 @@ def build_telephony_session_config(
         response_max_sentences=2,
     )
 
+    # Audio sample-rate strategy:
+    #   - Flux is trained on 16 kHz linear16 — feeding it 8 kHz costs ~3-5%
+    #     WER per Deepgram's published guidance, more on accented/fast speech.
+    #   - FreeSWITCH path (gateway_type="browser"): mod_audio_fork is asked to
+    #     emit 16 kHz linear16 (see start_audio_fork). End-to-end 16 kHz.
+    #   - Asterisk path (gateway_type="telephony"): the C++ Voice Gateway is
+    #     fixed at PCMU 8 kHz on the wire, so TelephonyMediaGateway upsamples
+    #     8 -> 16 on ingress and downsamples 16 -> 8 on egress. Flux still
+    #     sees 16 kHz; the carrier hop stays G.711-compatible.
     return VoiceSessionConfig(
         gateway_type=gateway_type,
         stt_provider_type="deepgram_flux",
         llm_provider_type="groq",
         tts_provider_type=tts_provider_type,
         stt_model="flux-general-en",
-        stt_sample_rate=8000,
+        stt_sample_rate=16000,
         stt_encoding="linear16",
         stt_eot_threshold=0.85,
         stt_eot_timeout_ms=500,
@@ -336,8 +345,9 @@ def build_telephony_session_config(
         llm_max_tokens=global_config.llm_max_tokens,
         voice_id=tts_voice_id,
         tts_model=global_config.tts_model,
-        tts_sample_rate=8000,
-        gateway_sample_rate=8000,
+        tts_sample_rate=16000,
+        gateway_sample_rate=16000,
+        gateway_input_sample_rate=16000,
         gateway_channels=1,
         gateway_bit_depth=16,
         gateway_target_buffer_ms=40,

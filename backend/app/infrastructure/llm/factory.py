@@ -38,3 +38,9 @@ try:
 except ImportError:
     pass  # Groq not available
 
+try:
+    from app.infrastructure.llm.gemini import GeminiLLMProvider
+    LLMFactory.register("gemini", GeminiLLMProvider)
+except ImportError:
+    pass  # google-genai not installed; Gemini provider unavailable
+

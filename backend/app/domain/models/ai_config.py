@@ -12,6 +12,7 @@ from enum import Enum
 class LLMProvider(str, Enum):
     """Available LLM providers"""
     GROQ = "groq"
+    GEMINI = "gemini"
 
 
 class STTProvider(str, Enum):
@@ -39,6 +40,16 @@ class GroqModel(str, Enum):
     LLAMA_4_SCOUT = "meta-llama/llama-4-scout-17b-16e-instruct"
     QWEN_3_32B = "qwen/qwen3-32b"
     KIMI_K2 = "moonshotai/kimi-k2-instruct-0905"
+
+
+class GeminiModel(str, Enum):
+    """Available Gemini / Gemma models served via the Google AI Studio API."""
+    GEMINI_2_5_FLASH = "gemini-2.5-flash"
+    # Reserved for Gemma 4 — uncomment and add a matching GEMINI_MODELS entry
+    # once Google AI Studio exposes them. No other code change needed; the
+    # GeminiLLMProvider already handles arbitrary model names.
+    # GEMMA_4_31B = "gemma-4-31b-it"
+    # GEMMA_4_26B_A4B = "gemma-4-26b-a4b-it"
 
 
 class DeepgramModel(str, Enum):
@@ -259,6 +270,30 @@ GROQ_MODELS = [
         provider="groq",
     ),
 ]
+
+# =============================================================================
+# GEMINI MODELS (Google AI Studio)
+# =============================================================================
+# Gemini 2.5 Flash ships now. Slots for Gemma 4 (31B dense, 26B A4B MoE) stay
+# commented out in GeminiModel above — uncomment and add an entry here when
+# Google AI Studio exposes those endpoints.
+
+GEMINI_MODELS = [
+    ModelInfo(
+        id=GeminiModel.GEMINI_2_5_FLASH.value,
+        name="Gemini 2.5 Flash",
+        description=(
+            "Google's low-latency flagship Flash model. ~1M-token context, "
+            "65K max output, optimized for streaming voice agents."
+        ),
+        speed="~250 tokens/s",
+        price="$0.30 input / $2.50 output per 1M tokens",
+        context_window=1_048_576,
+        is_preview=False,
+        provider="gemini",
+    ),
+]
+
 
 DEEPGRAM_MODELS = [
     ModelInfo(

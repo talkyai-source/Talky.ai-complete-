@@ -508,7 +508,7 @@ class RecordingService:
 def mix_stereo_recording(
     caller_chunks: List[bytes],
     agent_chunks: List[Tuple[int, bytes]],
-    sample_rate: int = 8000,
+    sample_rate: int = 16000,
 ) -> bytes:
     """
     Mix caller (left) and agent (right) PCM16 audio into a stereo WAV.
@@ -524,7 +524,9 @@ def mix_stereo_recording(
         at which each chunk should be placed.
         Chunks may overlap the right channel only at their offset position.
     sample_rate : int
-        Sample rate in Hz (must be 8000 for telephony PCMU path).
+        Sample rate in Hz of the recorded buffers. Defaults to 16000 to match
+        the post-migration internal telephony rate. Caller passes the live
+        gateway sample_rate so old 8 kHz recordings remain re-playable.
 
     Returns
     -------

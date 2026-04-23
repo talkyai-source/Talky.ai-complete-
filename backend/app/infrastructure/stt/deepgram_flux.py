@@ -26,7 +26,8 @@ import asyncio
 import random
 import websockets
 import logging
-from typing import AsyncIterator, Optional, Callable
+from collections import deque
+from typing import AsyncIterator, Optional, Callable, Deque
 from dataclasses import dataclass
 
 from app.domain.interfaces.stt_provider import STTProvider
@@ -48,6 +49,16 @@ FLUX_HEARTBEAT_SILENCE_MS = 100
 FLUX_MAX_RECONNECTS = 3          # Maximum mid-call reconnect attempts
 FLUX_RECONNECT_BASE_DELAY = 0.5  # Initial backoff (seconds)
 FLUX_RECONNECT_MAX_DELAY = 8.0   # Maximum backoff cap
+
+# Reconnect-replay buffer: keep the last N optimal-chunk frames so that on a
+# transient WS drop we can replay them to the new connection before resuming
+# the live audio stream. Caller speech that was already sent but not yet
+# transcribed (Flux had no chance to emit a TurnInfo before the close) gets a
+# second chance. Without this, brief network hiccups silently delete words
+# from the middle of an utterance.
+# 15 frames * 40ms = 600ms of replay capacity — long enough to bridge the
+# default reconnect backoff (0.5–4s with jitter) plus the new WS handshake.
+FLUX_RECONNECT_BUFFER_FRAMES = 15
 
 
 @dataclass
@@ -130,6 +141,11 @@ class DeepgramFluxSTTProvider(STTProvider):
         # pre_connect() stores a ws here; stream_transcribe() pops and reuses it,
         # eliminating the ~2s handshake from the hot path.
         self._pre_connections: dict = {}
+
+        # Per-call replay buffers (one deque each) holding the most recent
+        # optimal-chunk frames sent on the active WS. Used by stream_transcribe()
+        # to repaint audio onto a new connection after a transient drop.
+        self._reconnect_buffers: dict[str, Deque[bytes]] = {}
 
     def _validate_turn_config(self) -> None:
         """Validate Flux turn-detection parameter ranges."""
@@ -274,12 +290,18 @@ class DeepgramFluxSTTProvider(STTProvider):
         if not self._api_key:
             raise RuntimeError("Deepgram API key not set. Call initialize() first.")
         
-        # Initialize eager turn state for this call
+        # Initialize eager turn state and reconnect-replay buffer for this call
         if call_id:
             self._eager_states[call_id] = FluxEagerTurnState()
             self._stream_stats[call_id] = FluxStreamStats()
+            self._reconnect_buffers[call_id] = deque(
+                maxlen=FLUX_RECONNECT_BUFFER_FRAMES
+            )
         eager_state = self._eager_states.get(call_id) if call_id else None
         stream_stats = self._stream_stats.get(call_id) if call_id else None
+        reconnect_buffer = (
+            self._reconnect_buffers.get(call_id) if call_id else None
+        )
         stop_reason = "running"
         
         # Build WebSocket URL with Flux turn-detection parameters.
@@ -406,6 +428,13 @@ class DeepgramFluxSTTProvider(STTProvider):
                                     extra={"call_id": call_id, "flux_startup_ms": round(elapsed_ms)},
                                 )
                         await ws.send(chunk_to_send)
+                        # Stash a copy in the reconnect-replay buffer. deque
+                        # auto-evicts the oldest entry once maxlen is exceeded
+                        # so memory is bounded. The overhead is one append per
+                        # frame, no allocations beyond the bytes object we
+                        # already had.
+                        if reconnect_buffer is not None:
+                            reconnect_buffer.append(chunk_to_send)
                         audio_buffer = audio_buffer[FLUX_OPTIMAL_CHUNK_BYTES:]
                         chunks_sent += 1
                         if stream_stats:
@@ -671,6 +700,32 @@ class DeepgramFluxSTTProvider(STTProvider):
                         silent_frame = bytes(3200)  # 100ms of silence
                         await ws.send(silent_frame)
 
+                        # Reconnect-replay: on a mid-call reconnect, repaint the
+                        # last ~600ms of audio so caller speech that was lost
+                        # in-flight gets a second chance. No-op on the first
+                        # connection (buffer is empty).
+                        if (
+                            reconnect_count > 0
+                            and reconnect_buffer is not None
+                            and len(reconnect_buffer) > 0
+                        ):
+                            replay_count = len(reconnect_buffer)
+                            for replay_chunk in list(reconnect_buffer):
+                                try:
+                                    await ws.send(replay_chunk)
+                                except Exception:
+                                    break
+                            logger.info(
+                                "stt_reconnect_replay call_id=%s frames=%d "
+                                "ms=%d — repainted recent audio after WS drop",
+                                call_id, replay_count,
+                                replay_count * FLUX_OPTIMAL_CHUNK_MS,
+                                extra={
+                                    "call_id": call_id,
+                                    "stt_replay_frames": replay_count,
+                                },
+                            )
+
                         # Reset stop_event so receive/send tasks run fresh
                         stop_event.clear()
 
@@ -767,6 +822,7 @@ class DeepgramFluxSTTProvider(STTProvider):
             if call_id:
                 self._eager_states.pop(call_id, None)
                 self._stream_stats.pop(call_id, None)
+                self._reconnect_buffers.pop(call_id, None)
     
     def detect_turn_end(self, transcript_chunk: TranscriptChunk) -> bool:
         """Detect if user finished speaking (empty final chunk = EndOfTurn)"""

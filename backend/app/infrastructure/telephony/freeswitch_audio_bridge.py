@@ -34,7 +34,7 @@ class AudioSession:
     """Active audio session from FreeSWITCH."""
     call_uuid: str
     websocket: WebSocket
-    sample_rate: int = 8000
+    sample_rate: int = 16000
     channels: int = 1
     format: str = "L16"  # Linear 16-bit PCM
     active: bool = True
@@ -174,11 +174,11 @@ class FreeSwitchAudioBridge:
     async def send_audio(self, call_uuid: str, audio_data: bytes) -> bool:
         """
         Send audio back to FreeSWITCH for playback.
-        
+
         Args:
             call_uuid: Call UUID
-            audio_data: PCM audio (8kHz, 16-bit, mono)
-            
+            audio_data: PCM audio (16kHz, 16-bit, mono)
+
         Returns:
             True if sent successfully
         """
@@ -194,25 +194,25 @@ class FreeSwitchAudioBridge:
             return False
     
     async def send_audio_chunked(
-        self, 
-        call_uuid: str, 
+        self,
+        call_uuid: str,
         audio_data: bytes,
         chunk_ms: int = 20
     ) -> bool:
         """
         Send audio in properly-timed chunks for real-time playback.
-        
+
         Args:
             call_uuid: Call UUID
-            audio_data: PCM audio (8kHz, 16-bit, mono)
+            audio_data: PCM audio (16kHz, 16-bit, mono)
             chunk_ms: Chunk size in milliseconds
         """
         session = self._sessions.get(call_uuid)
         if not session or not session.active:
             return False
-        
-        # Calculate chunk size: 8000 Hz * 2 bytes * chunk_ms/1000
-        bytes_per_ms = 16  # 8000 * 2 / 1000
+
+        # Calculate chunk size: sample_rate * 2 bytes * chunk_ms/1000
+        bytes_per_ms = (session.sample_rate * 2) // 1000
         chunk_size = bytes_per_ms * chunk_ms
         
         try:

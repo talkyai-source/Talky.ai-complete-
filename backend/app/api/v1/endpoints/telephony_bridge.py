@@ -78,6 +78,28 @@ _gateway_session_to_call_id: dict[str, str] = {}
 # LLM warmup runs as a separate fire-and-forget task and is not tracked here.
 _ringing_warmups: dict[str, tuple[object, Optional[asyncio.Task]]] = {}
 
+# Parallel monotonic-time timestamps for _ringing_warmups entries — used by the
+# session watchdog to garbage-collect orphaned warmups when a callee never
+# answers and no terminal event ever fires for the channel. Without this sweep
+# the open Deepgram + TTS WebSockets leak per unanswered call.
+_ringing_warmup_created_at: dict[str, float] = {}
+
+# Maximum age (seconds) for an entry in _ringing_warmups / _ringing_events
+# before the watchdog drops it. Outbound calls almost always connect or fail
+# within ~60s; 180s is a conservative safety net for genuinely-slow carriers.
+_RINGING_MAX_AGE_S: int = 180
+
+
+def _pop_ringing_warmup(call_id: str):
+    """
+    Atomically pop a ringing-phase warmup entry and its parallel timestamp.
+
+    Returns the (VoiceSession, connect_task) tuple if present, else None.
+    Callers are responsible for cancelling the task and ending the session.
+    """
+    _ringing_warmup_created_at.pop(call_id, None)
+    return _ringing_warmups.pop(call_id, None)
+
 # Coordination events for ringing-phase warmup.  When _on_ringing starts, it
 # inserts an unset asyncio.Event for the call_id.  When the warmup completes
 # (or fails), the event is set.  _on_new_call awaits this event instead of
@@ -268,12 +290,21 @@ async def _session_watchdog() -> None:
     Periodically scan active sessions and tear down any that have been silent
     for longer than _SESSION_INACTIVITY_TIMEOUT_S.
 
+    Also sweeps orphaned ringing-phase pre-warm entries — outbound calls whose
+    callee never answered and whose terminal Asterisk event never fired (rare
+    but possible on carrier-side glitches). Without this sweep the open
+    Deepgram + TTS WebSockets leak per unanswered call and exhaust API quota
+    over a long campaign.
+
     Prevents resource leaks when a PBX crashes or drops the control connection
     without sending a hangup event (so _on_call_ended never fires).
     """
     while True:
         try:
             await asyncio.sleep(30)
+            now = asyncio.get_event_loop().time()
+
+            # ----- Active session inactivity sweep -----
             stale = []
             for call_id, vs in list(_telephony_sessions.items()):
                 # FIX 1 — last_activity_at lives on CallSession (vs.call_session),
@@ -288,6 +319,44 @@ async def _session_watchdog() -> None:
                     call_id[:12], _SESSION_INACTIVITY_TIMEOUT_S,
                 )
                 await _on_call_ended(call_id)
+
+            # ----- Orphaned ringing-warmup sweep (bug #3 / #7) -----
+            stale_ringing = [
+                cid for cid, created_at in list(_ringing_warmup_created_at.items())
+                if (now - created_at) > _RINGING_MAX_AGE_S
+            ]
+            for cid in stale_ringing:
+                ringing = _pop_ringing_warmup(cid)
+                _ringing_events.pop(cid, None)
+                logger.warning(
+                    "telephony_watchdog: orphaned ringing_warmup %s "
+                    "(age >%ds) — releasing STT/TTS sockets",
+                    cid[:12], _RINGING_MAX_AGE_S,
+                    extra={"call_id": cid, "alert": "ringing_warmup_orphan"},
+                )
+                if ringing is not None:
+                    ringing_session, ringing_connect_task = ringing
+                    if ringing_connect_task is not None and not ringing_connect_task.done():
+                        ringing_connect_task.cancel()
+                    try:
+                        await _get_orchestrator().end_session(ringing_session)
+                    except Exception as exc:
+                        logger.debug(
+                            "Watchdog end_session failed for %s: %s", cid[:12], exc,
+                        )
+
+            # ----- Orphaned ringing_events sweep -----
+            # Events without a matching warmup entry are pure leakage; drop on
+            # the same age policy. (Events with a matching warmup entry get
+            # cleaned up by the warmup sweep above.)
+            stale_events = [
+                cid for cid in list(_ringing_events.keys())
+                if cid not in _ringing_warmup_created_at
+                and cid not in _telephony_sessions
+            ]
+            for cid in stale_events:
+                _ringing_events.pop(cid, None)
+
         except asyncio.CancelledError:
             return
         except Exception as exc:
@@ -417,7 +486,7 @@ async def _on_ringing(call_id: str) -> None:
                     text=greeting_text,
                     voice_id=tts_config.voice_id if tts_config else "default",
                     sample_rate=(
-                        tts_config.tts_sample_rate if tts_config else 8000
+                        tts_config.tts_sample_rate if tts_config else 16000
                     ),
                     call_id=voice_session.call_id,
                 ):
@@ -457,6 +526,7 @@ async def _on_ringing(call_id: str) -> None:
         combined_task = asyncio.create_task(_warmup_and_presynth())
 
         _ringing_warmups[call_id] = (voice_session, combined_task)
+        _ringing_warmup_created_at[call_id] = asyncio.get_event_loop().time()
         elapsed_ms = (asyncio.get_event_loop().time() - _t0) * 1000.0
         logger.info(
             "WARMUP ringing_warmup_ready call_id=%s warmups=%d setup_ms=%.0f",
@@ -467,7 +537,7 @@ async def _on_ringing(call_id: str) -> None:
             f"Ringing warmup failed for {call_id[:12]}: {exc}", exc_info=True
         )
         # Clean up partial state so `_on_new_call` takes the slow path.
-        _ringing_warmups.pop(call_id, None)
+        _pop_ringing_warmup(call_id)
     finally:
         # Always signal the event so _on_new_call never waits forever.
         evt.set()
@@ -483,7 +553,7 @@ async def _on_new_call(call_id: str) -> None:
             len(_telephony_sessions), call_id[:12],
         )
         # Release any ringing-phase pre-warm so the STT/TTS sockets don't leak.
-        ringing = _ringing_warmups.pop(call_id, None)
+        ringing = _pop_ringing_warmup(call_id)
         if ringing is not None:
             ringing_session, ringing_connect_task = ringing
             if ringing_connect_task is not None and not ringing_connect_task.done():
@@ -523,7 +593,7 @@ async def _on_new_call(call_id: str) -> None:
         # takes ~1s (create_voice_session + provider init) while the answer
         # ARI setup takes ~7ms.  Instead of polling, we await an
         # asyncio.Event that _on_ringing sets when its warmup completes.
-        pre = _ringing_warmups.pop(call_id, None)
+        pre = _pop_ringing_warmup(call_id)
         if pre is None and is_asterisk:
             ringing_evt = _ringing_events.get(call_id)
             if ringing_evt is not None:
@@ -539,7 +609,7 @@ async def _on_new_call(call_id: str) -> None:
                         "falling back to answer-path warmup",
                         call_id[:12],
                     )
-                pre = _ringing_warmups.pop(call_id, None)
+                pre = _pop_ringing_warmup(call_id)
                 if pre is not None:
                     _wait_ms = (asyncio.get_event_loop().time() - _new_call_t0) * 1000.0
                     logger.info(
@@ -738,7 +808,7 @@ async def _on_call_ended(call_id: str) -> None:
     # don't leak.  AsteriskAdapter._cleanup_pending_outbound fires this
     # callback when StasisEnd/ChannelDestroyed arrives for a _pending_outbound
     # channel.
-    ringing = _ringing_warmups.pop(call_id, None)
+    ringing = _pop_ringing_warmup(call_id)
     if ringing is not None:
         ringing_session, ringing_connect_task = ringing
         if ringing_connect_task is not None and not ringing_connect_task.done():
@@ -815,17 +885,32 @@ async def _save_call_recording(voice_session, call_id: str) -> None:
         logger.debug(f"No recording data for {call_id[:12]}")
         return
 
+    # Resolve sample rate from the live session so this stays correct after
+    # the 8kHz -> 16kHz telephony migration. The voice_session.config holds
+    # the gateway sample rate that the recording buffers were written at.
+    rec_sample_rate = 16000
+    try:
+        cfg = getattr(voice_session, "config", None)
+        if cfg is not None:
+            rec_sample_rate = int(
+                getattr(cfg, "gateway_sample_rate", None)
+                or getattr(cfg, "stt_sample_rate", None)
+                or 16000
+            )
+    except Exception:
+        rec_sample_rate = 16000
+
     # Mix caller (left) + agent (right) into a stereo WAV
     wav_bytes = mix_stereo_recording(
         caller_chunks=caller_chunks or [],
         agent_chunks=agent_chunks or [],
-        sample_rate=8000,
+        sample_rate=rec_sample_rate,
     )
 
     # Calculate duration from caller side (continuous timeline reference)
     caller_bytes = sum(len(c) for c in (caller_chunks or []))
     agent_bytes = sum(len(chunk) for _, chunk in (agent_chunks or []))
-    bytes_per_sec = 8000 * 2  # 8kHz, 16-bit mono (per channel)
+    bytes_per_sec = rec_sample_rate * 2  # 16-bit mono (per channel)
     duration = caller_bytes / bytes_per_sec if bytes_per_sec else 0.0
 
     if duration < 0.5:
@@ -840,7 +925,7 @@ async def _save_call_recording(voice_session, call_id: str) -> None:
     # Build a RecordingBuffer to carry the pre-mixed WAV through the save pipeline
     buf = RecordingBuffer(
         call_id=call_id,
-        sample_rate=8000,
+        sample_rate=rec_sample_rate,
         channels=2,        # stereo
         bit_depth=16,
     )
@@ -1331,6 +1416,7 @@ async def make_call(
             done_future: asyncio.Future = asyncio.get_event_loop().create_future()
             done_future.set_result(None)
             _ringing_warmups[call_id] = (pre_warm_session, done_future)
+            _ringing_warmup_created_at[call_id] = asyncio.get_event_loop().time()
             # Also set the ringing event so _on_new_call doesn't wait.
             evt = asyncio.Event()
             evt.set()

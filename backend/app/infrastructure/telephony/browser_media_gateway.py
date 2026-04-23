@@ -65,6 +65,8 @@ class BrowserSession:
     total_bytes_received: int = 0
     total_bytes_sent: int = 0
     dropped_input_chunks: int = 0
+    # Rate-limit timestamp for the queue-overrun warning (one log/sec/call).
+    last_queue_drop_warn_at: float = 0.0
     input_validation_errors: int = 0
     max_input_queue_depth: int = 0
     output_buffer_peak_bytes: int = 0
@@ -276,12 +278,23 @@ class BrowserMediaGateway(MediaGateway):
             # jump in the stream: STT hears frame N, then frame N+100 with no
             # transition — producing garbled transcription.
             session.dropped_input_chunks += 1
-            logger.debug(
-                "Input queue full for %s — dropping latest frame "
-                "(total dropped: %d)",
-                call_id,
-                session.dropped_input_chunks,
-            )
+            # Rate-limited warning (one per call per second). Was logger.debug
+            # which is invisible in production — silent backpressure events
+            # cost transcript quality with zero operator signal.
+            import time as _time
+            _now = _time.monotonic()
+            if (_now - session.last_queue_drop_warn_at) > 1.0:
+                session.last_queue_drop_warn_at = _now
+                logger.warning(
+                    "stt_input_queue_overrun call_id=%s dropped_total=%d — "
+                    "STT pipeline is not draining audio fast enough",
+                    call_id, session.dropped_input_chunks,
+                    extra={
+                        "call_id": call_id,
+                        "dropped_input_chunks": session.dropped_input_chunks,
+                        "alert": "stt_input_queue_overrun",
+                    },
+                )
 
     async def send_audio(self, call_id: str, audio_chunk: bytes) -> None:
         """

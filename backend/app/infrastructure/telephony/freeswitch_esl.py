@@ -40,6 +40,26 @@ class ESLConfig:
     password: str = field(default_factory=lambda: os.getenv("FREESWITCH_ESL_PASSWORD", "ClueCon"))
     timeout: float = 10.0
 
+    def __post_init__(self) -> None:
+        # ClueCon is the factory default for FreeSWITCH ESL. Leaving it in
+        # place is a known RCE vector (Rapid7 advisory) when port 8021 is
+        # reachable from anywhere other than 127.0.0.1. Warn loudly so this
+        # never silently makes it to production.
+        if self.password == "ClueCon" and self.host not in ("127.0.0.1", "localhost", "::1"):
+            logger.warning(
+                "FreeSwitchESL: ESL password is the factory default 'ClueCon' on "
+                "non-loopback host %s:%d — this is a known RCE vector. "
+                "Set FREESWITCH_ESL_PASSWORD before exposing port %d.",
+                self.host, self.port, self.port,
+            )
+        elif self.password == "ClueCon":
+            logger.warning(
+                "FreeSwitchESL: ESL password is the factory default 'ClueCon'. "
+                "Safe on loopback (%s) but set FREESWITCH_ESL_PASSWORD before "
+                "deploying to a host where port %d may be reachable.",
+                self.host, self.port,
+            )
+
 
 @dataclass
 class CallInfo:
@@ -929,8 +949,17 @@ class FreeSwitchESL:
         return "+OK" in result
     
     async def start_audio_fork(self, uuid: str, ws_url: str) -> bool:
-        """Start audio streaming to WebSocket via mod_audio_fork."""
-        result = await self.api(f"uuid_audio_fork {uuid} start {ws_url}")
+        """
+        Start audio streaming to WebSocket via mod_audio_fork at 16kHz mono L16.
+
+        FreeSWITCH default is 8kHz; we explicitly request 16k so Deepgram Flux
+        receives audio at its native feature-extraction rate. mod_audio_fork
+        resamples internally (soxr) — if the carrier leg is G.711 the lift is
+        ~3-5% WER; if the carrier is wideband (G.722/Opus) the lift is larger.
+
+        Command form: uuid_audio_fork <uuid> start <wss-url> <mix-type> <sampling-rate>
+        """
+        result = await self.api(f"uuid_audio_fork {uuid} start {ws_url} mono 16k")
         return "+OK" in result
     
     async def stop_audio_fork(self, uuid: str) -> bool:

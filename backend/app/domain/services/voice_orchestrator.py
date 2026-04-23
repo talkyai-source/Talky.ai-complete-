@@ -65,15 +65,23 @@ class VoiceSessionConfig:
     llm_model: str = "llama-3.3-70b-versatile"
     llm_temperature: float = 0.6
     llm_max_tokens: int = 150
+    # Provider-specific knob, Gemini-only today. None = let the model decide
+    # dynamically. 0 = disable thinking entirely (fastest path, recommended for
+    # real-time voice agents where "reasoning tokens" are wasted latency).
+    # Groq and any future non-thinking provider ignore this field.
+    llm_thinking_budget: Optional[int] = None
 
     # TTS settings
     voice_id: str = "en-US-Chirp3-HD-Leda"
     tts_model: str = ""
-    tts_sample_rate: int = 24000
+    # 16 kHz is the Flux-native rate and the new telephony default. Browser
+    # demos previously used 24 kHz; they still work at 16 kHz (no audible
+    # difference on a phone-grade pipeline) and skip a resample step.
+    tts_sample_rate: int = 16000
 
     # Gateway
     gateway_type: str = "browser"  # "browser" | "telephony"
-    gateway_sample_rate: int = 24000
+    gateway_sample_rate: int = 16000
     gateway_input_sample_rate: Optional[int] = None
     gateway_channels: int = 1
     gateway_bit_depth: int = 16
@@ -670,19 +678,39 @@ class VoiceOrchestrator:
         )
         return provider
 
-    async def _create_llm_provider(self, config: VoiceSessionConfig):
-        """Initialise and return the LLM provider."""
-        from app.infrastructure.llm.groq import GroqLLMProvider
+    # Map provider type → env var holding its API key. Keep this small and
+    # explicit; if it grows past ~5 entries, move it to a config object.
+    _LLM_API_KEY_ENV = {
+        "groq": "GROQ_API_KEY",
+        "gemini": "GEMINI_API_KEY",
+    }
 
-        provider = GroqLLMProvider()
-        await provider.initialize(
-            {
-                "api_key": os.getenv("GROQ_API_KEY"),
-                "model": config.llm_model,
-                "temperature": config.llm_temperature,
-                "max_tokens": config.llm_max_tokens,
-            }
-        )
+    async def _create_llm_provider(self, config: VoiceSessionConfig):
+        """Initialise and return the LLM provider via LLMFactory.
+
+        Provider selection is driven entirely by `config.llm_provider_type`
+        (sourced from the global AIProviderConfig the user picks in the Ask AI
+        options UI). To add a new provider, register it in
+        `app/infrastructure/llm/factory.py` and add its env-var mapping to
+        `_LLM_API_KEY_ENV` above.
+        """
+        from app.infrastructure.llm.factory import LLMFactory
+
+        provider_type = config.llm_provider_type or "groq"
+        api_key_env = self._LLM_API_KEY_ENV.get(provider_type)
+        api_key = os.getenv(api_key_env) if api_key_env else None
+
+        provider = LLMFactory.create(provider_type, config={})
+        init_config: dict = {
+            "api_key": api_key,
+            "model": config.llm_model,
+            "temperature": config.llm_temperature,
+            "max_tokens": config.llm_max_tokens,
+        }
+        # Pass through Gemini-specific knobs. Non-Gemini providers ignore them.
+        if config.llm_thinking_budget is not None:
+            init_config["thinking_budget"] = config.llm_thinking_budget
+        await provider.initialize(init_config)
         return provider
 
     async def _create_tts_provider(self, config: VoiceSessionConfig):
