@@ -13,11 +13,14 @@ from app.domain.models.ai_config import (
     LLMTestRequest,
     TTSTestRequest,
     GROQ_MODELS,
+    GEMINI_MODELS,
     DEEPGRAM_MODELS,
     CARTESIA_MODELS,
     GroqModel,
+    GeminiModel,
     DeepgramModel,
     CartesiaModel,
+    LLMProvider,
 )
 
 
@@ -90,17 +93,35 @@ class TestModelInfo:
     def test_groq_models_exist(self):
         """Verify Groq model list contains expected models"""
         model_ids = [m.id for m in GROQ_MODELS]
-        
+
         assert GroqModel.LLAMA_3_3_70B.value in model_ids
         assert GroqModel.LLAMA_3_1_8B.value in model_ids
         assert GroqModel.GPT_OSS_120B.value in model_ids
         assert GroqModel.KIMI_K2.value in model_ids
-        
+
         # Verify each model has required fields
         for model in GROQ_MODELS:
             assert model.id is not None
             assert model.name is not None
             assert model.description is not None
+
+    def test_gemini_models_exist(self):
+        """Verify Gemini model list contains gemini-2.5-flash with metadata."""
+        model_ids = [m.id for m in GEMINI_MODELS]
+        assert GeminiModel.GEMINI_2_5_FLASH.value in model_ids
+
+        for model in GEMINI_MODELS:
+            assert model.id is not None
+            assert model.name is not None
+            assert model.description is not None
+            # Each Gemini entry must declare its provider so the frontend can
+            # group / badge them in the dropdown.
+            assert model.provider == "gemini"
+
+    def test_llm_provider_enum_includes_gemini(self):
+        """Catch regressions where Gemini is removed from the provider enum."""
+        assert LLMProvider.GEMINI.value == "gemini"
+        assert LLMProvider.GROQ.value == "groq"
     
     def test_deepgram_models_exist(self):
         """Verify Deepgram model list contains expected models"""

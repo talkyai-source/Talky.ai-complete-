@@ -13,16 +13,26 @@ from app.domain.models.agent_config import (
 )
 from app.domain.services.voice_orchestrator import VoiceSessionConfig
 
-# Fixed configuration for Ask AI - using Cartesia Tessa (Kind Companion).
+# Fixed configuration for Ask AI — using Cartesia Tessa (Kind Companion) +
+# Gemini 2.5 Flash with thinking DISABLED. Thinking tokens are wasted latency
+# for short conversational replies; turning them off drops TTFT meaningfully.
 ASK_AI_CONFIG = {
     "tts_provider": "cartesia",
     "voice_id": "6ccbfb76-1fc6-48f7-b71d-91ac6298247b",  # Tessa - Kind Companion
     "model_id": "sonic-3",
     "sample_rate": 24000,
-    "llm_model": "llama-3.1-8b-instant",   # 8.1B params — 560 t/s, ultra-low latency
+    # Switched from Groq llama-3.1-8b to Gemini 2.5 Flash (no thinking) on
+    # 2026-04-23. Revert to "llama-3.1-8b-instant" + llm_provider "groq" if
+    # Gemini quality regresses — see voice_orchestrator._LLM_API_KEY_ENV.
+    "llm_provider": "gemini",
+    "llm_model": "gemini-2.5-flash",
     "llm_temperature": 0.6,
     # 90 tokens covers 4-sentence pricing answers while keeping normal replies short.
     "llm_max_tokens": 90,
+    # 0 = disable Gemini's internal reasoning ("thinking") tokens entirely.
+    # Keeps TTFT low on the conversational hot path. Flip to None if you ever
+    # want the model to use its reasoning budget again.
+    "llm_thinking_budget": 0,
 }
 
 # Re-export from the constants module (no circular-import risk there).
@@ -74,7 +84,7 @@ def build_ask_ai_session_config() -> VoiceSessionConfig:
     """Build the shared Ask AI VoiceSessionConfig."""
     return VoiceSessionConfig(
         stt_provider_type="deepgram_flux",
-        llm_provider_type="groq",
+        llm_provider_type=ASK_AI_CONFIG["llm_provider"],
         tts_provider_type=ASK_AI_CONFIG["tts_provider"],
         stt_model="flux-general-en",
         stt_sample_rate=16000,
@@ -85,6 +95,7 @@ def build_ask_ai_session_config() -> VoiceSessionConfig:
         llm_model=ASK_AI_CONFIG["llm_model"],
         llm_temperature=ASK_AI_CONFIG["llm_temperature"],
         llm_max_tokens=ASK_AI_CONFIG["llm_max_tokens"],
+        llm_thinking_budget=ASK_AI_CONFIG["llm_thinking_budget"],
         voice_id=ASK_AI_CONFIG["voice_id"],
         tts_model=ASK_AI_CONFIG["model_id"],
         tts_sample_rate=ASK_AI_CONFIG["sample_rate"],

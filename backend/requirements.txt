@@ -40,6 +40,9 @@ deepgram-sdk==5.3.0
 
 # --- AI Providers: LLM ---
 groq==0.37.0
+# Google Gemini / Gemma — modern unified SDK. NOT the deprecated
+# `google-generativeai` package. Used by GeminiLLMProvider.
+google-genai>=1.0
 
 # --- AI Providers: TTS ---
 cartesia==2.0.17

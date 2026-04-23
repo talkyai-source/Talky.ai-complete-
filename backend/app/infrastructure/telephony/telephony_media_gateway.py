@@ -5,18 +5,27 @@ Implements the MediaGateway interface for SIP/RTP telephony paths that use an
 HTTP callback model instead of a persistent WebSocket (i.e. the Asterisk + C++
 Voice Gateway path).
 
+Sample-rate strategy (post 8kHz -> 16kHz migration):
+  - The C++ Voice Gateway is fixed at PCMU 8kHz on the wire (160-byte / 20ms
+    packets). That stays.
+  - Internally we run at 16kHz linear16 so Deepgram Flux receives audio at its
+    native feature-extraction rate. We upsample 8 -> 16 on ingress and
+    downsample 16 -> 8 on egress. soxr_hq is used for both (band-limited sinc).
+
 Audio flow (inbound — caller → STT):
-  C++ Gateway  →  POST /api/v1/sip/telephony/audio/{session_id}
+  C++ Gateway  →  POST /api/v1/sip/telephony/audio/{session_id}   (PCMU 8kHz)
                →  telephony_bridge.receive_gateway_audio()
                →  TelephonyMediaGateway.on_audio_received()
-               →  ulaw_to_pcm()            (G.711 μ-law → linear16)
+               →  ulaw_to_pcm()            (G.711 µ-law -> linear16 8kHz)
+               →  resample_audio() 8 -> 16 (linear16 16kHz for Flux)
                →  input_queue              (consumed by VoicePipelineService)
 
 Audio flow (outbound — TTS → caller):
   VoicePipelineService.synthesize_and_send_audio()
-               →  TelephonyMediaGateway.send_audio()
+               →  TelephonyMediaGateway.send_audio()                (linear16 16kHz)
                →  pcm_float32_to_int16()   (if TTS source is Float32)
-               →  pcm_to_ulaw()            (linear16 → G.711 μ-law)
+               →  resample_audio() 16 -> 8 (linear16 8kHz)
+               →  pcm_to_ulaw()            (linear16 -> G.711 µ-law)
                →  adapter.send_tts_audio() (CallControlAdapter → C++ Gateway)
 
 The class intentionally mirrors the session management pattern of
@@ -67,13 +76,17 @@ class TelephonySession:
     # wall-clock position when a new utterance starts after a silence gap.
     agent_rec_cursor: int = 0
 
-    # TTS audio buffer for packetization (must send in 160-byte chunks for 8kHz PCMU)
+    # TTS audio buffer for packetization (must send in 160-byte chunks for 8kHz PCMU
+    # over the wire — that is the C++ gateway contract and stays fixed even after
+    # the internal 16kHz migration; we downsample to 8kHz before this buffer).
     tts_buffer: bytes = field(default_factory=bytes)
 
-    # GAP 9 — STT input accumulation buffer.
-    # Deepgram recommends 100–250ms chunks for optimal streaming throughput.
-    # At 8kHz linear16: 100ms = 1,600 bytes.  The C++ gateway delivers 20ms
-    # callbacks (320 bytes each), so we batch 5 frames before forwarding.
+    # STT input accumulation buffer — kept for safety only.
+    # Post bug #4 fix the C++ gateway batches 40ms per callback, which after
+    # upsample to 16kHz is 1280 bytes — exactly Flux's optimal chunk size.
+    # Re-batching here only adds latency, so the threshold below is set to one
+    # frame's worth and audio passes straight through. Field is retained so
+    # session telemetry / future tweaks have a place to land.
     _stt_accumulator: bytes = field(default_factory=bytes)
 
     # Real-time pacing cursor for TTS delivery (see send_audio).
@@ -101,22 +114,33 @@ class TelephonySession:
     last_audio_received_at: float = 0.0
     audio_gap_count: int = 0
 
+    # Rate-limit timestamp for the queue-overrun warning (one log/sec/call).
+    last_queue_drop_warn_at: float = 0.0
+
 
 class TelephonyMediaGateway(MediaGateway):
     """
     Media gateway for SIP telephony sessions that deliver audio via HTTP
     callbacks from the C++ Voice Gateway (Asterisk path).
 
-    Audio format (inbound):
-        G.711 μ-law, 8 kHz, mono (PCMU) — decoded to linear16 for STT.
+    Wire format with the C++ gateway (fixed):
+        G.711 µ-law, 8 kHz, mono (PCMU). 160-byte / 20ms packets.
 
-    Audio format (outbound):
-        linear16 or Float32 from TTS — encoded to G.711 μ-law for the gateway.
+    Internal format (post 8kHz -> 16kHz migration):
+        linear16, 16 kHz, mono. We upsample on ingress (after µ-law decode)
+        and downsample on egress (before µ-law encode) so Deepgram Flux always
+        sees its native rate.
     """
+
+    # PCMU wire rate to / from the C++ Voice Gateway. Cannot change without
+    # rebuilding the C++ binary, so stays at 8 kHz.
+    _WIRE_SAMPLE_RATE: int = 8000
 
     def __init__(self) -> None:
         self._sessions: Dict[str, TelephonySession] = {}
-        self._sample_rate: int = 8000
+        # Internal rate fed to STT and produced by TTS. Defaults to 16 kHz so
+        # Flux receives audio at its native feature-extraction rate.
+        self._sample_rate: int = 16000
         self._channels: int = 1
         self._bit_depth: int = 16
         # "s16le" (Deepgram linear16 TTS) or "f32le" (Google / Cartesia TTS)
@@ -140,20 +164,25 @@ class TelephonyMediaGateway(MediaGateway):
 
         Config keys
         -----------
-        sample_rate (int): Must be 8000 for PCMU (default 8000).
+        sample_rate (int): Internal rate fed to STT / produced by TTS.
+                           Default 16000. PCMU wire rate to the C++ gateway is
+                           always 8000 regardless of this value — we resample
+                           on the boundary.
         channels    (int): Must be 1 for PCMU (default 1).
         bit_depth   (int): Must be 16 for linear16 (default 16).
         tts_source_format (str): "s16le" or "f32le" (default "s16le").
         """
-        self._sample_rate = int(config.get("sample_rate", 8000))
+        self._sample_rate = int(config.get("sample_rate", 16000))
         self._channels = int(config.get("channels", 1))
         self._bit_depth = int(config.get("bit_depth", 16))
         raw_fmt = str(config.get("tts_source_format", "s16le")).lower()
         self._tts_source_format = raw_fmt if raw_fmt in ("s16le", "f32le") else "s16le"
 
         logger.info(
-            "TelephonyMediaGateway initialized: %dHz, %d-bit, tts_source_format=%s",
+            "TelephonyMediaGateway initialized: internal=%dHz, wire=%dHz PCMU, "
+            "%d-bit, tts_source_format=%s",
             self._sample_rate,
+            self._WIRE_SAMPLE_RATE,
             self._bit_depth,
             self._tts_source_format,
         )
@@ -188,10 +217,15 @@ class TelephonyMediaGateway(MediaGateway):
         )
         self._sessions[call_id] = session
         logger.info(
-            "TelephonyMediaGateway: session started call_id=%s pbx=%s codec=pcmu sample_rate=8000 — "
-            "8kHz G.711 degrades STT accuracy vs 16kHz wideband (Deepgram trained on 16kHz)",
-            call_id[:12], pbx_call_id[:12],
-            extra={"call_id": call_id, "codec": "pcmu", "sample_rate": 8000},
+            "TelephonyMediaGateway: session started call_id=%s pbx=%s "
+            "wire=pcmu/%dHz internal=linear16/%dHz (upsample on ingress, downsample on egress)",
+            call_id[:12], pbx_call_id[:12], self._WIRE_SAMPLE_RATE, self._sample_rate,
+            extra={
+                "call_id": call_id,
+                "codec": "pcmu",
+                "wire_sample_rate": self._WIRE_SAMPLE_RATE,
+                "internal_sample_rate": self._sample_rate,
+            },
         )
 
     async def on_call_ended(self, call_id: str, reason: str = "hangup") -> None:
@@ -218,11 +252,12 @@ class TelephonyMediaGateway(MediaGateway):
     async def on_audio_received(self, call_id: str, audio_chunk: bytes) -> None:
         """
         Accept a PCMU audio chunk from the C++ gateway callback and enqueue
-        it as linear16 PCM for the STT pipeline.
+        it as 16 kHz linear16 PCM for the STT pipeline.
 
-        The C++ gateway delivers raw G.711 μ-law bytes (8-bit, 8 kHz).
-        We decode to 16-bit linear PCM here so the rest of the pipeline
-        sees the same format as browser sessions.
+        Wire: G.711 µ-law, 8 kHz, 8-bit (the C++ gateway contract).
+        We decode to 8 kHz linear16, then upsample to 16 kHz so Deepgram Flux
+        receives audio at its native feature-extraction rate. soxr_hq is used
+        for the resample (band-limited sinc).
         """
         session = self._sessions.get(call_id)
         if not session or not session.is_active:
@@ -246,41 +281,51 @@ class TelephonyMediaGateway(MediaGateway):
                 extra={"call_id": call_id, "gap_ms": round(gap_ms), "audio_gap_count": session.audio_gap_count},
             )
 
-        # Decode PCMU → linear16
+        # Decode PCMU 8kHz -> linear16 8kHz, then upsample to internal rate.
+        # Hot path: use soxr_mq (medium-quality) — ~3x faster than soxr_hq with
+        # no perceptual difference on phone-bandwidth audio (frequencies above
+        # ~3.4 kHz are empty on G.711-fed calls anyway).
         try:
-            from app.utils.audio_utils import ulaw_to_pcm
-            pcm_chunk = ulaw_to_pcm(audio_chunk)
+            from app.utils.audio_utils import ulaw_to_pcm, resample_audio
+            pcm_chunk_8k = ulaw_to_pcm(audio_chunk)
+            if self._sample_rate != self._WIRE_SAMPLE_RATE:
+                pcm_chunk = resample_audio(
+                    pcm_chunk_8k,
+                    from_rate=self._WIRE_SAMPLE_RATE,
+                    to_rate=self._sample_rate,
+                    channels=self._channels,
+                    bit_depth=self._bit_depth,
+                    res_type="soxr_mq",
+                )
+            else:
+                pcm_chunk = pcm_chunk_8k
         except Exception as exc:
-            logger.debug("TelephonyMediaGateway: ulaw_to_pcm failed for %s: %s", call_id[:12], exc)
+            logger.debug(
+                "TelephonyMediaGateway: ingress decode/resample failed for %s: %s",
+                call_id[:12], exc,
+            )
             return
 
         session.chunks_received += 1
         session.total_bytes_received += len(audio_chunk)
 
-        # Recording buffer with memory cap.
-        # 8 kHz / 16-bit mono: 60 min ≈ 57.6 MB.
-        _MAX_RECORDING_BYTES = 57_600_000
+        # Recording buffer at internal rate with memory cap.
+        # 16 kHz / 16-bit mono: 60 min ≈ 115.2 MB. 8 kHz path stays at 57.6 MB.
+        _MAX_RECORDING_BYTES = (self._sample_rate * 2) * 60 * 60  # 60 min
         session.recording_buffer.append(pcm_chunk)
         session.recording_buffer_bytes += len(pcm_chunk)
         while session.recording_buffer_bytes > _MAX_RECORDING_BYTES and session.recording_buffer:
             evicted = session.recording_buffer.pop(0)
             session.recording_buffer_bytes -= len(evicted)
 
-        # Track how many PCM16 samples the caller side has produced
+        # Track how many PCM16 samples the caller side has produced (at internal rate)
         session.caller_sample_count += len(pcm_chunk) // 2
 
-        # GAP 9 — Batch into 100ms super-frames before forwarding to STT.
-        # Deepgram's optimal receive size is 100–250ms; smaller frames increase
-        # WebSocket send overhead by 5× and degrade Flux throughput.
-        # At 8kHz linear16: 100ms = 1,600 bytes (5 × 320-byte / 20ms frames).
-        _STT_BATCH_BYTES = 1_600
-        session._stt_accumulator += pcm_chunk
-        if len(session._stt_accumulator) < _STT_BATCH_BYTES:
-            return  # Wait for more frames
-
-        # Flush the accumulated super-frame to the STT queue.
-        batch = session._stt_accumulator
-        session._stt_accumulator = b""
+        # Forward straight to STT — no re-batching.
+        # Post bug #4 the C++ gateway batches at 40ms, which after upsample is
+        # exactly Flux's optimal 1,280-byte chunk. Re-batching to 100ms here
+        # would only add 60ms of latency for no quality benefit.
+        batch = pcm_chunk
 
         try:
             session.input_queue.put_nowait(batch)
@@ -294,6 +339,22 @@ class TelephonyMediaGateway(MediaGateway):
                 session.input_queue.put_nowait(batch)
             except asyncio.QueueFull:
                 session.dropped_input_chunks += 1
+                # Rate-limited warning so backpressure is visible in production
+                # logs instead of being lost in a silent counter. One per call
+                # per second is enough to alert without flooding.
+                if (now - session.last_queue_drop_warn_at) > 1.0:
+                    session.last_queue_drop_warn_at = now
+                    logger.warning(
+                        "stt_input_queue_overrun call_id=%s dropped_total=%d — "
+                        "STT pipeline is not draining audio fast enough; check "
+                        "Deepgram WS health or per-frame resample CPU",
+                        call_id, session.dropped_input_chunks,
+                        extra={
+                            "call_id": call_id,
+                            "dropped_input_chunks": session.dropped_input_chunks,
+                            "alert": "stt_input_queue_overrun",
+                        },
+                    )
 
     # ------------------------------------------------------------------
     # Outbound audio (TTS → caller)
@@ -304,12 +365,13 @@ class TelephonyMediaGateway(MediaGateway):
         Convert TTS output to PCMU and deliver it to the caller via the
         CallControlAdapter (which forwards it to the C++ gateway).
 
-        Handles two TTS source formats:
-        - "f32le": Float32 PCM (Google, Cartesia) → Int16 → μ-law
-        - "s16le": Int16 PCM  (Deepgram)          → μ-law directly
-        
-        IMPORTANT: The C++ gateway requires audio in 160-byte packets (20ms @ 8kHz).
-        This method buffers incoming TTS audio and sends it in proper 160-byte chunks.
+        Handles two TTS source formats at the internal sample rate (16 kHz):
+        - "f32le": Float32 PCM (Google, Cartesia) -> Int16 -> downsample 16->8 -> µ-law
+        - "s16le": Int16 PCM  (Deepgram)          -> downsample 16->8 -> µ-law
+
+        IMPORTANT: The C++ gateway requires audio in 160-byte packets (20ms @ 8kHz
+        PCMU). The wire stays 8 kHz regardless of the internal rate; we resample
+        to wire rate just before µ-law encoding.
         """
         session = self._sessions.get(call_id)
         if not session or not session.is_active:
@@ -321,14 +383,31 @@ class TelephonyMediaGateway(MediaGateway):
 
         try:
             loop = asyncio.get_running_loop()
+            from app.utils.audio_utils import (
+                pcm_float32_to_int16,
+                pcm_to_ulaw,
+                resample_audio,
+            )
             if self._tts_source_format == "f32le":
-                from app.utils.audio_utils import pcm_float32_to_int16, pcm_to_ulaw
                 pcm16 = pcm_float32_to_int16(audio_chunk)
-                pcmu = pcm_to_ulaw(pcm16)
             else:
-                from app.utils.audio_utils import pcm_to_ulaw
                 pcm16 = audio_chunk
-                pcmu = pcm_to_ulaw(audio_chunk)
+
+            # Downsample internal rate -> 8 kHz wire rate before µ-law encode.
+            # soxr_mq for the same reason as ingress: phone bandwidth caps the
+            # perceptual difference vs soxr_hq, and TTS bursts are frequent.
+            if self._sample_rate != self._WIRE_SAMPLE_RATE:
+                pcm16_wire = resample_audio(
+                    pcm16,
+                    from_rate=self._sample_rate,
+                    to_rate=self._WIRE_SAMPLE_RATE,
+                    channels=self._channels,
+                    bit_depth=self._bit_depth,
+                    res_type="soxr_mq",
+                )
+            else:
+                pcm16_wire = pcm16
+            pcmu = pcm_to_ulaw(pcm16_wire)
 
             # -- Agent recording (MixMonitor-style running cursor) --
             #
@@ -384,7 +463,9 @@ class TelephonyMediaGateway(MediaGateway):
         # Batching 3 packets per sleep reduces yields to ~100 — 3× less drift surface —
         # while keeping barge-in detection latency within one 60ms burst window.
         #
-        # 160 bytes = 20ms of audio at 8kHz PCMU (8000 samples/s × 0.020s × 1 byte).
+        # 160 bytes = 20ms of audio at 8kHz PCMU on the wire (8000 samples/s
+        # × 0.020s × 1 byte). The wire rate is fixed by the C++ gateway
+        # contract; the internal rate has no effect on packet sizing.
         # Opportunistic batching: when multiple packets are already buffered we
         # POST them together, cutting HTTP round-trips on the steady-state path
         # (50/s -> ~25/s at the default batch size of 2).  The batch size is
@@ -393,8 +474,8 @@ class TelephonyMediaGateway(MediaGateway):
         # silence is still sent as soon as it is available.  The C++ gateway's
         # enqueue_tts_ulaw accepts any multiple of 160 bytes.
         PACKET_SIZE = 160
-        PACKET_DURATION_S = PACKET_SIZE / self._sample_rate   # 0.020 s at 8 kHz
-        TARGET_AHEAD_S = 0.200                                # keep <= 200 ms ahead
+        PACKET_DURATION_S = PACKET_SIZE / self._WIRE_SAMPLE_RATE   # 0.020 s at 8 kHz
+        TARGET_AHEAD_S = 0.200                                     # keep <= 200 ms ahead
         try:
             MAX_BATCH_PACKETS = max(
                 1, int(os.getenv("TELEPHONY_TTS_BATCH_PACKETS", "2"))
@@ -434,12 +515,28 @@ class TelephonyMediaGateway(MediaGateway):
             next_deadline = deadline + PACKET_DURATION_S * batch_packets
             overshoot = next_deadline - now - TARGET_AHEAD_S
             if overshoot > 0.001:
-                # Yield the event loop while waiting.  STT barge-in callbacks fire
-                # here, so the barge-in check at the top of the next iteration
-                # catches the event within (batch_packets * 20 ms).
-                await asyncio.sleep(overshoot)
+                # Wait for either the pacing window to elapse OR a barge-in
+                # event to fire. wait_for() returns early on event.set(), so
+                # we exit within microseconds of Flux signalling StartOfTurn
+                # instead of waiting up to ~40 ms for the next loop iteration.
+                if session.barge_in_event is not None:
+                    try:
+                        await asyncio.wait_for(
+                            session.barge_in_event.wait(),
+                            timeout=overshoot,
+                        )
+                        # Event fired during the wait — bail out immediately.
+                        session.tts_buffer = b""
+                        return
+                    except asyncio.TimeoutError:
+                        # Pacing window elapsed naturally; continue sending.
+                        pass
+                else:
+                    # No barge-in event registered (rare); fall back to plain sleep.
+                    await asyncio.sleep(overshoot)
 
-            # Post-sleep barge-in check: the event may have fired while pacing.
+            # Post-sleep barge-in check: the event may have fired between the
+            # sleep returning and the next iteration starting.
             if session.barge_in_event and session.barge_in_event.is_set():
                 session.tts_buffer = b""
                 return

@@ -81,16 +81,20 @@ class SIPProviderAdapter(TelephonyProviderAdapter):
         await self._ensure_adapter()
         adapter_name = self._adapter.name
         if adapter_name == "asterisk":
+            # Wire stays PCMU 8 kHz (C++ Voice Gateway contract); the gateway
+            # upsamples to 16 kHz internally before STT.
             return {
                 "type": "http_callback",
                 "sample_rate": 8000,
                 "encoding": "pcmu",
                 "channels": 1,
             }
+        # FreeSWITCH path (mod_audio_fork over WebSocket): now 16 kHz linear16
+        # so Deepgram Flux receives audio at its native rate.
         return {
             "type": "websocket",
-            "sample_rate": 8000,
-            "encoding": "pcmu",
+            "sample_rate": 16000,
+            "encoding": "linear16",
             "channels": 1,
         }
 

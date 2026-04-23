@@ -37,6 +37,7 @@ from app.domain.models.ai_config import (
     TTSTestResponse,
     VoiceInfo,
     GROQ_MODELS,
+    GEMINI_MODELS,
     DEEPGRAM_MODELS,
     CARTESIA_MODELS,
     GOOGLE_TTS_MODELS,
@@ -466,10 +467,18 @@ async def list_providers():
         tts_providers.append("elevenlabs")
         tts_models.extend(model.model_dump() for model in (elevenlabs_models or ELEVENLABS_TTS_MODELS))
 
+    # LLM providers — Gemini is exposed only when the API key is configured;
+    # without it, leaving the option in the dropdown leads to 503s on save.
+    llm_providers: list[str] = ["groq"]
+    llm_models = [model.model_dump() for model in GROQ_MODELS]
+    if os.getenv("GEMINI_API_KEY"):
+        llm_providers.append("gemini")
+        llm_models.extend(model.model_dump() for model in GEMINI_MODELS)
+
     return ProviderListResponse(
         llm={
-            "providers": ["groq"],
-            "models": [model.model_dump() for model in GROQ_MODELS]
+            "providers": llm_providers,
+            "models": llm_models,
         },
         stt={
             "providers": ["deepgram"],
@@ -1190,12 +1199,42 @@ async def save_config(
             detail="Invalid TTS provider. Supported providers: cartesia, google, deepgram, elevenlabs.",
         )
 
-    # Validate LLM model
-    valid_llm_models = [m.id for m in GROQ_MODELS]
+    # Validate LLM provider + model. Sourced from a single union so adding a
+    # new provider only requires extending GEMINI_MODELS / GROQ_MODELS — never
+    # editing this validator.
+    _llm_models_by_provider: dict[str, list[str]] = {
+        "groq": [m.id for m in GROQ_MODELS],
+        "gemini": [m.id for m in GEMINI_MODELS],
+    }
+
+    if config.llm_provider not in _llm_models_by_provider:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Invalid LLM provider '{config.llm_provider}'. "
+                f"Supported: {sorted(_llm_models_by_provider.keys())}"
+            ),
+        )
+
+    # Cross-field check: model must belong to the selected provider, otherwise
+    # the orchestrator will pass a Groq model name to Gemini (or vice-versa)
+    # and fail at first stream call.
+    valid_llm_models = _llm_models_by_provider[config.llm_provider]
     if config.llm_model not in valid_llm_models:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid LLM model. Must be one of: {valid_llm_models}"
+            detail=(
+                f"Invalid LLM model '{config.llm_model}' for provider "
+                f"'{config.llm_provider}'. Must be one of: {valid_llm_models}"
+            ),
+        )
+
+    # Refuse to save a Gemini config if the API key isn't present — caught
+    # here gives a clear 503 instead of a confusing pipeline error mid-call.
+    if config.llm_provider == "gemini" and not os.getenv("GEMINI_API_KEY"):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Gemini API key not configured. Set GEMINI_API_KEY in .env.",
         )
 
     if config.tts_provider == "cartesia":

@@ -747,7 +747,10 @@ class AsteriskAdapter(CallControlAdapter):
                     "active_no_rtp_timeout_ms": 15000,    # 15s silence timeout
                     "session_final_timeout_ms": 300000,   # 5-minute hard cap
                     "jitter_buffer_prefetch_frames": 1,   # was default 3 (60ms) — loopback has no jitter; 1 frame = 20ms
-                    "audio_callback_batch_frames": 4,     # was 5 (100ms) — Deepgram recommends 80ms chunks
+                    # 2 frames = 40ms = Deepgram Flux's optimal chunk size. Was 4 (80ms) when
+                    # we re-batched downstream; now we hand off frames at Flux's native rate so
+                    # there's no re-chunking jitter and per-call resamples drop by 50%.
+                    "audio_callback_batch_frames": 2,
                     "audio_callback_url": (
                         f"{os.getenv('BACKEND_INTERNAL_URL', 'http://127.0.0.1:8000')}"
                         f"/api/v1/sip/telephony/audio/{session_id}"
@@ -885,10 +888,10 @@ class AsteriskAdapter(CallControlAdapter):
                     "active_no_rtp_timeout_ms": 15000,   # 15 seconds (was 8s default)
                     "session_final_timeout_ms": 300000,  # 5 minutes (was 2 hours default)
                     "jitter_buffer_prefetch_frames": 1,   # was default 3 (60ms) — loopback has no jitter; 1 frame = 20ms
-                    # Batch 4 audio frames (80ms) per HTTP callback POST — Deepgram's
-                    # recommended chunk size for optimal STT model performance.
-                    # Reduces TCP overhead vs 20ms/frame while staying at the sweet spot.
-                    "audio_callback_batch_frames": 4,
+                    # 2 frames = 40ms = Deepgram Flux's optimal chunk size. Was 4 (80ms) when
+                    # we re-batched downstream; now we hand off frames at Flux's native rate so
+                    # there's no re-chunking jitter and per-call resamples drop by 50%.
+                    "audio_callback_batch_frames": 2,
                     # Tell the gateway to POST audio chunks to our backend callback
                     "audio_callback_url": (
                         f"{os.getenv('BACKEND_INTERNAL_URL', 'http://127.0.0.1:8000')}"
