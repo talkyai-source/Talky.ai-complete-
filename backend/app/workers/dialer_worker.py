@@ -191,7 +191,27 @@ class DialerWorker:
             
             # 4. Register call start (for concurrent tracking)
             self.rules_engine.register_call_start(job.tenant_id, job.campaign_id)
-            
+
+            # 4.5. Run Call Guard validation before initiating call
+            guard_decision = await self._evaluate_call_guard(job, rules)
+            if guard_decision != "allow":
+                logger.warning(f"Call guard decision for job {job.job_id}: {guard_decision}")
+
+                if guard_decision == "block":
+                    # Block the call - mark job as blocked, don't retry
+                    await self._update_job_status(job.job_id, JobStatus.BLOCKED, reason="call_guard_blocked")
+                    return
+                elif guard_decision == "throttle":
+                    # Throttle - reschedule with delay
+                    await self.queue_service.schedule_retry(job, delay_seconds=60)
+                    await self._update_job_status(job.job_id, JobStatus.SKIPPED, reason="call_guard_throttled")
+                    return
+                elif guard_decision == "queue":
+                    # Queue - reschedule to retry later
+                    await self.queue_service.schedule_retry(job, delay_seconds=30)
+                    await self._update_job_status(job.job_id, JobStatus.SKIPPED, reason="call_guard_queued")
+                    return
+
             try:
                 # 5. Initiate the call
                 call_id = await self._make_call(job, rules)
@@ -280,7 +300,36 @@ class DialerWorker:
         except Exception as e:
             logger.error(f"Originate error for {job.phone_number}: {e}")
             return None
-    
+
+    async def _evaluate_call_guard(self, job: DialerJob, rules: CallingRules) -> str:
+        """
+        Evaluate call through CallGuard security checks.
+
+        Returns:
+            "allow" | "block" | "throttle" | "queue"
+        """
+        try:
+            from app.domain.services.call_guard import CallGuard, GuardDecision
+
+            guard = CallGuard(
+                db_pool=self._db_pool,
+                redis_client=self._redis,
+            )
+
+            guard_result = await guard.evaluate(
+                tenant_id=str(job.tenant_id),
+                phone_number=job.phone_number,
+                campaign_id=str(job.campaign_id) if job.campaign_id else None,
+                call_type="outbound",
+            )
+
+            return guard_result.decision.value
+
+        except Exception as e:
+            logger.error(f"CallGuard evaluation failed for job {job.job_id}: {e}", exc_info=True)
+            # Fail-closed: errors in guard = block call
+            return "block"
+
     async def _get_active_tenant_ids(self) -> List[str]:
         """Get list of tenants with active/running campaigns."""
         try:

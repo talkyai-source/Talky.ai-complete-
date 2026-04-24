@@ -136,12 +136,14 @@ class VoiceOrchestrator:
     - Tear down all resources on session end
     """
 
-    def __init__(self, db_client=None):
+    def __init__(self, db_client=None, secrets_manager=None):
         """
         Args:
             db_client: Optional PostgreSQL client for event logging.
+            secrets_manager: Optional SecretsManager for API keys.
         """
         self._db_client = db_client
+        self._secrets_manager = secrets_manager
         self._active_sessions: Dict[str, VoiceSession] = {}
         logger.info("VoiceOrchestrator initialised")
 
@@ -480,13 +482,31 @@ class VoiceOrchestrator:
     # Private: provider factories
     # ------------------------------------------------------------------
 
+    async def _get_secret(self, secret_name: str, env_fallback: str) -> Optional[str]:
+        """Helper to get secret from manager or environment."""
+        if self._secrets_manager:
+            try:
+                # Platform secrets are stored without tenant_id
+                secret = await self._secrets_manager.get_secret(
+                    secret_name=secret_name,
+                    tenant_id=None
+                )
+                if secret and "api_key" in secret.value:
+                    return secret.value["api_key"]
+            except Exception as e:
+                logger.debug(f"Failed to get secret {secret_name} from manager: {e}")
+        
+        return os.getenv(env_fallback)
+
     async def _create_stt_provider(self, config: VoiceSessionConfig):
         """Initialise and return the STT provider."""
         from app.infrastructure.stt.deepgram_flux import DeepgramFluxSTTProvider
 
+        api_key = await self._get_secret("DEEPGRAM_API_KEY", "DEEPGRAM_API_KEY")
+        
         provider = DeepgramFluxSTTProvider()
         await provider.initialize({
-            "api_key": os.getenv("DEEPGRAM_API_KEY"),
+            "api_key": api_key,
             "model": config.stt_model,
             "sample_rate": config.stt_sample_rate,
             "encoding": config.stt_encoding,
@@ -500,9 +520,11 @@ class VoiceOrchestrator:
         """Initialise and return the LLM provider."""
         from app.infrastructure.llm.groq import GroqLLMProvider
 
+        api_key = await self._get_secret("GROQ_API_KEY", "GROQ_API_KEY")
+
         provider = GroqLLMProvider()
         await provider.initialize({
-            "api_key": os.getenv("GROQ_API_KEY"),
+            "api_key": api_key,
             "model": config.llm_model,
             "temperature": config.llm_temperature,
             "max_tokens": config.llm_max_tokens,
@@ -514,9 +536,11 @@ class VoiceOrchestrator:
         if config.tts_provider_type == "deepgram":
             from app.infrastructure.tts.deepgram_tts import DeepgramTTSProvider
 
+            api_key = await self._get_secret("DEEPGRAM_API_KEY", "DEEPGRAM_API_KEY")
+
             provider = DeepgramTTSProvider()
             await provider.initialize({
-                "api_key": os.getenv("DEEPGRAM_API_KEY"),
+                "api_key": api_key,
                 "voice_id": config.voice_id,
                 "sample_rate": config.tts_sample_rate,
             })

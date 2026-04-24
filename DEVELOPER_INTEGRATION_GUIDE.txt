@@ -1,0 +1,371 @@
+# Developer Integration Guide — Talky.ai
+# How to apply all generated files to the repository
+
+This guide tells you EXACTLY which file goes WHERE in the repo.
+Every file  match the existing folder structure — 
+you are not creating new folders in most cases, just replacing files.
+
+Think of it like this:
+  outputs/fixes/docker-compose.yml  →  copy to repo root  →  docker-compose.yml
+  outputs/upgrades/backend/app/core/telemetry.py  →  copy to  backend/app/core/telemetry.py
+
+---
+
+## STEP 1 — CI/CD workflows (GitHub Actions)
+# These replace your existing .github/workflows/ files
+
+FROM (outputs folder)                        TO (your repo)
+─────────────────────────────────────────────────────────────
+outputs/fixes/.github/workflows/ci.yml    →  .github/workflows/ci.yml
+outputs/fixes/.github/workflows/deploy.yml →  .github/workflows/deploy.yml
+
+Git commands:
+  cp outputs/fixes/.github/workflows/ci.yml .github/workflows/ci.yml
+  cp outputs/fixes/.github/workflows/deploy.yml .github/workflows/deploy.yml
+
+
+---
+
+## STEP 2 — Root config files
+# These go in the ROOT of your repo (same level as docker-compose.yml)
+
+FROM (outputs folder)               TO (your repo root)
+───────────────────────────────────────────────────────
+outputs/fixes/docker-compose.yml  →  docker-compose.yml      ← REPLACES existing
+outputs/fixes/.env.docker         →  .env.docker             ← REPLACES existing
+outputs/fixes/.gitignore          →  .gitignore              ← REPLACES existing
+
+Git commands:
+  cp outputs/fixes/docker-compose.yml docker-compose.yml
+  cp outputs/fixes/.env.docker .env.docker
+  cp outputs/fixes/.gitignore .gitignore
+
+
+---
+
+## STEP 3 — Scripts (new folder)
+# These are brand new scripts — create the folder and copy them in
+
+FROM (outputs folder)                      TO (your repo)
+─────────────────────────────────────────────────────────────
+outputs/fixes/scripts/firewall-setup.sh  →  scripts/firewall-setup.sh
+outputs/fixes/scripts/generate-secrets.sh →  scripts/generate-secrets.sh
+outputs/fixes/scripts/gen-sip-certs.sh   →  scripts/gen-sip-certs.sh
+
+Git commands:
+  mkdir -p scripts
+  cp outputs/fixes/scripts/firewall-setup.sh scripts/
+  cp outputs/fixes/scripts/generate-secrets.sh scripts/
+  cp outputs/fixes/scripts/gen-sip-certs.sh scripts/
+  chmod +x scripts/*.sh
+
+
+---
+
+## STEP 4 — Telephony configs
+# These go inside the telephony/ folder of your repo
+
+FROM (outputs folder)                                           TO (your repo)
+───────────────────────────────────────────────────────────────────────────────
+outputs/fixes/telephony/rtpengine/conf/rtpengine.conf        →  telephony/rtpengine/conf/rtpengine.conf
+outputs/fixes/telephony/opensips/conf/tls.cfg                →  telephony/opensips/conf/tls.cfg
+outputs/fixes/telephony/kamailio/conf/tls.cfg                →  telephony/kamailio/conf/tls.cfg
+outputs/fixes/telephony/observability/alertmanager/alertmanager.yml → telephony/observability/alertmanager/alertmanager.yml
+
+Git commands:
+  cp outputs/fixes/telephony/rtpengine/conf/rtpengine.conf telephony/rtpengine/conf/rtpengine.conf
+  cp outputs/fixes/telephony/opensips/conf/tls.cfg telephony/opensips/conf/tls.cfg
+  cp outputs/fixes/telephony/kamailio/conf/tls.cfg telephony/kamailio/conf/tls.cfg
+  cp outputs/fixes/telephony/observability/alertmanager/alertmanager.yml telephony/observability/alertmanager/alertmanager.yml
+
+
+---
+
+## STEP 5 — Backend: Alembic (database migrations)
+# Alembic goes inside the backend/ folder
+
+FROM (outputs folder)                              TO (your repo)
+──────────────────────────────────────────────────────────────────
+outputs/upgrades/backend/alembic.ini             →  backend/alembic.ini
+outputs/upgrades/backend/alembic/env.py          →  backend/alembic/env.py
+outputs/upgrades/backend/alembic/script.py.mako  →  backend/alembic/script.py.mako
+outputs/upgrades/backend/alembic/versions/0001_baseline.py → backend/alembic/versions/0001_baseline.py
+
+Git commands:
+  cp outputs/upgrades/backend/alembic.ini backend/alembic.ini
+  mkdir -p backend/alembic/versions
+  cp outputs/upgrades/backend/alembic/env.py backend/alembic/env.py
+  cp outputs/upgrades/backend/alembic/script.py.mako backend/alembic/script.py.mako
+  cp outputs/upgrades/backend/alembic/versions/0001_baseline.py backend/alembic/versions/0001_baseline.py
+
+After copying, run this on your server (ONE TIME ONLY):
+  cd backend
+  export DATABASE_URL="postgresql://youruser:yourpassword@localhost:5432/talkyai"
+  alembic stamp 0001_baseline
+  # This tells Alembic "the DB already exists, start tracking from here"
+
+
+---
+
+## STEP 6 — Backend: app/core/ files
+# These go inside backend/app/core/
+
+FROM (outputs folder)                          TO (your repo)
+──────────────────────────────────────────────────────────────
+outputs/upgrades/backend/app/core/telemetry.py →  backend/app/core/telemetry.py  ← NEW file
+outputs/upgrades/backend/app/core/kms.py       →  backend/app/core/kms.py        ← NEW file
+outputs/continue/backend/app/core/container.py →  backend/app/core/container.py  ← REPLACES existing
+
+Git commands:
+  cp outputs/upgrades/backend/app/core/telemetry.py backend/app/core/telemetry.py
+  cp outputs/upgrades/backend/app/core/kms.py backend/app/core/kms.py
+  cp outputs/continue/backend/app/core/container.py backend/app/core/container.py
+
+
+---
+
+## STEP 7 — Backend: app/main.py
+# This replaces your existing main.py
+
+FROM (outputs folder)                TO (your repo)
+─────────────────────────────────────────────────────
+outputs/upgrades/backend/app/main.py → backend/app/main.py  ← REPLACES existing
+
+Git command:
+  cp outputs/upgrades/backend/app/main.py backend/app/main.py
+
+
+---
+
+## STEP 8 — Backend: app/domain/services/ files
+# These go inside backend/app/domain/services/
+
+FROM (outputs folder)                                              TO (your repo)
+───────────────────────────────────────────────────────────────────────────────────
+outputs/upgrades/backend/app/domain/services/recording_service.py → backend/app/domain/services/recording_service.py    ← REPLACES
+outputs/continue/backend/app/domain/services/voice_pipeline_service.py → backend/app/domain/services/voice_pipeline_service.py ← REPLACES
+outputs/core_prompts/backend/app/domain/services/core_prompts.py  → backend/app/domain/services/core_prompts.py          ← NEW
+outputs/core_prompts/backend/app/domain/services/prompt_manager.py → backend/app/domain/services/prompt_manager.py       ← REPLACES
+outputs/dental/backend/app/domain/services/dental_workflow.py     → backend/app/domain/services/dental_workflow.py       ← NEW
+outputs/dental/backend/app/domain/services/streaming_pipeline.py  → backend/app/domain/services/streaming_pipeline.py   ← NEW
+
+Git commands:
+  cp outputs/upgrades/backend/app/domain/services/recording_service.py backend/app/domain/services/recording_service.py
+  cp outputs/continue/backend/app/domain/services/voice_pipeline_service.py backend/app/domain/services/voice_pipeline_service.py
+  cp outputs/core_prompts/backend/app/domain/services/core_prompts.py backend/app/domain/services/core_prompts.py
+  cp outputs/core_prompts/backend/app/domain/services/prompt_manager.py backend/app/domain/services/prompt_manager.py
+  cp outputs/dental/backend/app/domain/services/dental_workflow.py backend/app/domain/services/dental_workflow.py
+  cp outputs/dental/backend/app/domain/services/streaming_pipeline.py backend/app/domain/services/streaming_pipeline.py
+
+
+---
+
+## STEP 9 — Backend: API endpoint (recordings)
+# This replaces the existing recordings endpoint
+
+FROM (outputs folder)                                        TO (your repo)
+─────────────────────────────────────────────────────────────────────────────
+outputs/upgrades/backend/app/api/v1/endpoints/recordings.py → backend/app/api/v1/endpoints/recordings.py ← REPLACES
+
+Git command:
+  cp outputs/upgrades/backend/app/api/v1/endpoints/recordings.py backend/app/api/v1/endpoints/recordings.py
+
+
+---
+
+## STEP 10 — Backend: config/providers.yaml (latency fixes)
+# This replaces your providers.yaml — 9 latency optimisations inside
+
+FROM (outputs folder)                    TO (your repo)
+─────────────────────────────────────────────────────────
+outputs/dental/backend/config/providers.yaml → backend/config/providers.yaml ← REPLACES
+
+Git command:
+  cp outputs/dental/backend/config/providers.yaml backend/config/providers.yaml
+
+
+---
+
+## STEP 11 — Backend: requirements.txt (new dependencies)
+# This replaces requirements.txt — adds alembic, boto3, opentelemetry
+
+FROM (outputs folder)                       TO (your repo)
+──────────────────────────────────────────────────────────
+outputs/upgrades/backend/requirements.txt → backend/requirements.txt ← REPLACES
+
+Git command:
+  cp outputs/upgrades/backend/requirements.txt backend/requirements.txt
+
+After copying, install new dependencies:
+  cd backend
+  pip install -r requirements.txt
+
+
+---
+
+## STEP 12 — Tests
+# New test folders and files
+
+FROM (outputs folder)                                          TO (your repo)
+───────────────────────────────────────────────────────────────────────────────
+outputs/dental/backend/tests/dental/conftest.py             → backend/tests/dental/conftest.py
+outputs/dental/backend/tests/dental/test_dental_workflow.py → backend/tests/dental/test_dental_workflow.py
+outputs/core_prompts/backend/tests/core_prompts/test_core_prompts.py → backend/tests/core_prompts/test_core_prompts.py
+
+Git commands:
+  mkdir -p backend/tests/dental backend/tests/core_prompts
+  cp outputs/dental/backend/tests/dental/conftest.py backend/tests/dental/conftest.py
+  cp outputs/dental/backend/tests/dental/test_dental_workflow.py backend/tests/dental/test_dental_workflow.py
+  cp outputs/core_prompts/backend/tests/core_prompts/test_core_prompts.py backend/tests/core_prompts/test_core_prompts.py
+
+
+---
+
+## STEP 13 — Nginx (server only — NOT in repo)
+# These go on the SERVER, not in the git repo
+
+THESE FILES DO NOT GO IN GIT. They go directly on your Hetzner server.
+
+On your server:
+  sudo cp outputs/fixes/nginx/talky.conf /etc/nginx/sites-available/talky.conf
+  sudo ln -s /etc/nginx/sites-available/talky.conf /etc/nginx/sites-enabled/talky.conf
+  # Also add the rate limit lines from nginx_http_block_addition.conf
+  # into your /etc/nginx/nginx.conf inside the http {} block
+  sudo nginx -t
+  sudo systemctl reload nginx
+
+
+---
+
+## STEP 14 — Secrets manager KMS patch (manual edit)
+# This one cannot be a simple file copy — it's a patch to existing code
+# File: outputs/upgrades/backend/app/domain/services/secrets_manager_kms_patch.py
+# Open that file and read it — it tells you exactly what to change
+
+The patch file has 4 changes to make in backend/app/domain/services/secrets_manager.py:
+  1. Add import at top: from app.core.kms import get_kms_backend, KMSBackend
+  2. Replace __init__ method (shown in patch file)
+  3. Replace _encrypt_dek method with _wrap_dek
+  4. Replace _decrypt_dek method with _unwrap_dek
+
+OR run these 3 sed commands to do it automatically:
+  cd backend
+  sed -i 's/encrypted_dek = self\._encrypt_dek(dek)/encrypted_dek = await self._wrap_dek(dek)/g' app/domain/services/secrets_manager.py
+  sed -i 's/dek = self\._decrypt_dek(encrypted_dek)/dek = await self._unwrap_dek(encrypted_dek)/g' app/domain/services/secrets_manager.py
+  sed -i 's/dek = self\._decrypt_dek(row\["encrypted_dek"\])/dek = await self._unwrap_dek(row["encrypted_dek"])/g' app/domain/services/secrets_manager.py
+  # Then manually add the import and replace __init__ as shown in the patch file
+
+
+---
+
+## COMPLETE COPY — run all at once from your repo root
+
+# (Copy this entire block and run it from the root of your repo)
+
+# Step 1 — CI/CD
+cp outputs/fixes/.github/workflows/ci.yml .github/workflows/ci.yml
+cp outputs/fixes/.github/workflows/deploy.yml .github/workflows/deploy.yml
+
+# Step 2 — Root files
+cp outputs/fixes/docker-compose.yml docker-compose.yml
+cp outputs/fixes/.env.docker .env.docker
+cp outputs/fixes/.gitignore .gitignore
+
+# Step 3 — Scripts
+mkdir -p scripts
+cp outputs/fixes/scripts/firewall-setup.sh scripts/
+cp outputs/fixes/scripts/generate-secrets.sh scripts/
+cp outputs/fixes/scripts/gen-sip-certs.sh scripts/
+chmod +x scripts/*.sh
+
+# Step 4 — Telephony
+cp outputs/fixes/telephony/rtpengine/conf/rtpengine.conf telephony/rtpengine/conf/rtpengine.conf
+cp outputs/fixes/telephony/opensips/conf/tls.cfg telephony/opensips/conf/tls.cfg
+cp outputs/fixes/telephony/kamailio/conf/tls.cfg telephony/kamailio/conf/tls.cfg
+cp outputs/fixes/telephony/observability/alertmanager/alertmanager.yml telephony/observability/alertmanager/alertmanager.yml
+
+# Step 5 — Alembic
+cp outputs/upgrades/backend/alembic.ini backend/alembic.ini
+mkdir -p backend/alembic/versions
+cp outputs/upgrades/backend/alembic/env.py backend/alembic/env.py
+cp outputs/upgrades/backend/alembic/script.py.mako backend/alembic/script.py.mako
+cp outputs/upgrades/backend/alembic/versions/0001_baseline.py backend/alembic/versions/0001_baseline.py
+
+# Step 6 — Core files
+cp outputs/upgrades/backend/app/core/telemetry.py backend/app/core/telemetry.py
+cp outputs/upgrades/backend/app/core/kms.py backend/app/core/kms.py
+cp outputs/continue/backend/app/core/container.py backend/app/core/container.py
+
+# Step 7 — main.py
+cp outputs/upgrades/backend/app/main.py backend/app/main.py
+
+# Step 8 — Domain services
+cp outputs/upgrades/backend/app/domain/services/recording_service.py backend/app/domain/services/recording_service.py
+cp outputs/continue/backend/app/domain/services/voice_pipeline_service.py backend/app/domain/services/voice_pipeline_service.py
+cp outputs/core_prompts/backend/app/domain/services/core_prompts.py backend/app/domain/services/core_prompts.py
+cp outputs/core_prompts/backend/app/domain/services/prompt_manager.py backend/app/domain/services/prompt_manager.py
+cp outputs/dental/backend/app/domain/services/dental_workflow.py backend/app/domain/services/dental_workflow.py
+cp outputs/dental/backend/app/domain/services/streaming_pipeline.py backend/app/domain/services/streaming_pipeline.py
+
+# Step 9 — API endpoint
+cp outputs/upgrades/backend/app/api/v1/endpoints/recordings.py backend/app/api/v1/endpoints/recordings.py
+
+# Step 10 — providers.yaml
+cp outputs/dental/backend/config/providers.yaml backend/config/providers.yaml
+
+# Step 11 — requirements.txt
+cp outputs/upgrades/backend/requirements.txt backend/requirements.txt
+
+# Step 12 — Tests
+mkdir -p backend/tests/dental backend/tests/core_prompts
+cp outputs/dental/backend/tests/dental/conftest.py backend/tests/dental/conftest.py
+cp outputs/dental/backend/tests/dental/test_dental_workflow.py backend/tests/dental/test_dental_workflow.py
+cp outputs/core_prompts/backend/tests/core_prompts/test_core_prompts.py backend/tests/core_prompts/test_core_prompts.py
+
+echo "All files copied. Now run: cd backend && pip install -r requirements.txt"
+
+
+---
+
+## AFTER COPYING — verify it works
+
+cd backend
+pip install -r requirements.txt
+python -c "from app.core.telemetry import get_tracer; print('OTel OK')"
+python -c "from app.core.kms import get_kms_backend; print('KMS OK')"
+python -c "from app.domain.services.core_prompts import CorePromptEngine; print('Core prompts OK')"
+python -c "from app.domain.services.streaming_pipeline import stream_llm_to_tts; print('Streaming pipeline OK')"
+python -c "from app.domain.services.dental_workflow import build_dental_agent_config; print('Dental workflow OK')"
+pytest tests/core_prompts/ -v
+pytest tests/dental/ -v
+
+
+---
+
+## WHAT EACH FILE ACTUALLY WORKS
+
+ci.yml              → Adds secret scanning, Trivy image scan, removes || true so tests actually fail
+deploy.yml          → SHA-based image deploys + rollback job
+docker-compose.yml  → Removes hardcoded passwords, locks ports, adds Redis auth
+.env.docker         → Template for secrets — developer fills in real values
+.gitignore          → Proper ignore file (was only 2 lines before)
+scripts/            → Helper scripts for server setup
+rtpengine.conf      → Fixes CVE-2025-53399 (CVSS 9.3) — call hijacking vulnerability
+tls.cfg (×2)        → Enables TLS cert validation in OpenSIPS and Kamailio
+alertmanager.yml    → Wires Slack alerts so you actually know when something breaks
+alembic/            → Database migration framework — replaces dangerous init.sql re-runs
+telemetry.py        → OpenTelemetry tracing — see exactly how long each call stage takes
+kms.py              → Proper encryption for secrets using AES-256-GCM (or AWS KMS)
+container.py        → Fixes Redis not connecting because password wasn't being passed
+main.py             → Starts OTel before anything else + minor log level fix
+recording_service.py → Saves call recordings to S3/Hetzner storage instead of local disk
+voice_pipeline_service.py → Adds OTel spans to every STT/LLM/TTS stage of voice calls
+core_prompts.py     → The 3 master prompts (appointment/support/order) that work for any industry
+prompt_manager.py   → Routes any campaign to the right core prompt automatically
+dental_workflow.py  → Full dental receptionist agent config + 6 test scenarios
+streaming_pipeline.py → Pipes LLM tokens directly to TTS sentence-by-sentence (saves ~120ms)
+recordings.py       → Updated API endpoint to serve S3 presigned URLs for audio playback
+providers.yaml      → 9 latency fixes: EOT timeout 800ms, Cartesia active, llama-3.1-8b-instant
+requirements.txt    → Adds: alembic, boto3, opentelemetry packages
+test_dental_workflow.py → Full test suite for dental scenarios + latency benchmarks
+test_core_prompts.py → Tests all 3 prompts work for 18 different industries

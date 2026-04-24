@@ -287,18 +287,25 @@ async def validate_session(
     token_hash = _hash_token(raw_token)
     now = _now_utc()
 
-    # Day 5: Extended SELECT to include binding columns
+    # Day 8: Extended SELECT to include user and tenant status
     row = await conn.fetchrow(
         """
-        SELECT id, user_id, ip_address, user_agent,
-               device_fingerprint, device_name, device_type, browser, os,
-               bound_ip, ip_binding_enforced, fingerprint_binding_enforced,
-               is_suspicious, suspicious_reason, requires_verification,
-               created_at, last_active_at, expires_at, revoked
-        FROM   security_sessions
-        WHERE  session_token_hash = $1
-          AND  revoked    = FALSE
-          AND  expires_at > $2
+        SELECT s.id, s.user_id, s.ip_address, s.user_agent,
+               s.device_fingerprint, s.device_name, s.device_type, s.browser, s.os,
+               s.bound_ip, s.ip_binding_enforced, s.fingerprint_binding_enforced,
+               s.is_suspicious, s.suspicious_reason, s.requires_verification,
+               s.created_at, s.last_active_at, s.expires_at, s.revoked,
+               up.is_active as user_active,
+               t.status as tenant_status,
+               p.status as partner_status,
+               t.id as tenant_id
+        FROM   security_sessions s
+        JOIN   user_profiles up ON up.id = s.user_id
+        LEFT JOIN tenants t ON t.id = up.tenant_id
+        LEFT JOIN white_label_partners p ON p.id = t.white_label_partner_id
+        WHERE  s.session_token_hash = $1
+          AND  s.revoked    = FALSE
+          AND  s.expires_at > $2
         """,
         token_hash,
         now,
@@ -306,6 +313,22 @@ async def validate_session(
 
     if not row:
         logger.debug("validate_session: token not found, revoked, or expired")
+        return None
+
+    # Day 8: Check for suspensions (Instant Block Propagation)
+    if not row["user_active"]:
+        logger.warning("Session validated for inactive user=%s — revoking", row["user_id"])
+        await _revoke_by_id(conn, row["id"], reason="user_inactive")
+        return None
+
+    if row["tenant_status"] == "suspended":
+        logger.warning("Session validated for suspended tenant user=%s — revoking", row["user_id"])
+        await _revoke_by_id(conn, row["id"], reason="tenant_suspended")
+        return None
+
+    if row["partner_status"] == "suspended":
+        logger.warning("Session validated for suspended partner user=%s — revoking", row["user_id"])
+        await _revoke_by_id(conn, row["id"], reason="partner_suspended")
         return None
 
     session = dict(row)
