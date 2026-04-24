@@ -57,6 +57,7 @@ def get_pool() -> asyncpg.Pool:
 async def get_db():
     """
     Async context manager for a single DB connection from the pool.
+    Sets the RLS context (tenant_id and bypass_rls) automatically.
 
     Usage:
         async with get_db() as conn:
@@ -64,6 +65,22 @@ async def get_db():
     """
     pool = get_pool()
     async with pool.acquire() as conn:
+        from app.core.security.tenant_isolation import get_current_tenant_id, get_bypass_rls
+        
+        tenant_id = get_current_tenant_id()
+        bypass_rls = get_bypass_rls()
+        
+        # Set RLS context in PostgreSQL session
+        if bypass_rls:
+            await conn.execute("SET LOCAL app.bypass_rls = 'true'")
+            await conn.execute("SET LOCAL app.current_tenant_id = ''")
+        elif tenant_id:
+            await conn.execute(f"SET LOCAL app.current_tenant_id = '{tenant_id}'")
+            await conn.execute("SET LOCAL app.bypass_rls = 'false'")
+        else:
+            await conn.execute("SET LOCAL app.current_tenant_id = ''")
+            await conn.execute("SET LOCAL app.bypass_rls = 'false'")
+            
         yield conn
 
 

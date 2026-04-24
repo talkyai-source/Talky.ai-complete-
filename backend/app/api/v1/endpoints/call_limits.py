@@ -20,8 +20,18 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, validator
+from app.api.v1.dependencies import (
+    get_db_client,
+    require_admin,
+    CurrentUser,
+    get_audit_logger,
+)
+from app.domain.services.audit_logger import AuditEvent, AuditLogger
+from app.core.postgres_adapter import Client
 
 router = APIRouter(prefix="/admin", tags=["Call Limits Admin (Day 7)"])
+
+logger = __import__("logging").getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -89,23 +99,6 @@ class DncEntryResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Dependencies
-# ---------------------------------------------------------------------------
-
-async def get_db_pool():
-    """Get database pool from app state."""
-    from fastapi import Request
-    from app.core.container import get_container
-    return get_container().db_pool
-
-
-async def require_admin():
-    """Verify admin privileges."""
-    # TODO: Implement proper admin auth check
-    pass
-
-
-# ---------------------------------------------------------------------------
 # Tenant Call Limits Endpoints
 # ---------------------------------------------------------------------------
 
@@ -117,10 +110,11 @@ async def require_admin():
 )
 async def get_tenant_call_limits(
     tenant_id: UUID,
-    db_pool=Depends(get_db_pool),
+    admin_user: CurrentUser = Depends(require_admin),
+    db_client: Client = Depends(get_db_client),
 ):
-    """Get call limits for a tenant."""
-    async with db_pool.acquire() as conn:
+    """Get call limits for a tenant. Requires admin privileges."""
+    async with db_client.pool.acquire() as conn:
         row = await conn.fetchrow(
             """
             SELECT *
@@ -156,10 +150,11 @@ async def get_tenant_call_limits(
 async def update_tenant_call_limits(
     tenant_id: UUID,
     limits: TenantCallLimitsSchema,
-    db_pool=Depends(get_db_pool),
-    # admin=Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_admin),
+    db_client: Client = Depends(get_db_client),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
-    """Update call limits for a tenant."""
+    """Update call limits for a tenant. Requires admin privileges."""
     import json
     from datetime import time
 
@@ -173,7 +168,7 @@ async def update_tenant_call_limits(
         hour, minute = map(int, limits.business_hours_end.split(":"))
         business_end = time(hour, minute)
 
-    async with db_pool.acquire() as conn:
+    async with db_client.pool.acquire() as conn:
         # Deactivate existing limits
         await conn.execute(
             """
@@ -239,6 +234,22 @@ async def update_tenant_call_limits(
             True,
         )
 
+        # Log the change
+        await audit_logger.log(
+            event_type=AuditEvent.LIMITS_CHANGED,
+            actor_id=admin_user.id,
+            actor_type="user",
+            tenant_id=str(tenant_id),
+            action="call_limits_updated",
+            description=f"Call limits updated for tenant {tenant_id}",
+            metadata={
+                "calls_per_minute": limits.calls_per_minute,
+                "calls_per_hour": limits.calls_per_hour,
+                "calls_per_day": limits.calls_per_day,
+                "max_concurrent_calls": limits.max_concurrent_calls,
+            },
+        )
+
     return dict(row)
 
 
@@ -254,10 +265,11 @@ async def update_tenant_call_limits(
 )
 async def get_partner_limits(
     partner_id: UUID,
-    db_pool=Depends(get_db_pool),
+    admin_user: CurrentUser = Depends(require_admin),
+    db_client: Client = Depends(get_db_client),
 ):
-    """Get aggregate limits for a partner."""
-    async with db_pool.acquire() as conn:
+    """Get aggregate limits for a partner. Requires admin privileges."""
+    async with db_client.pool.acquire() as conn:
         row = await conn.fetchrow(
             """
             SELECT pl.*, t.name as partner_name
@@ -270,7 +282,7 @@ async def get_partner_limits(
 
     if not row:
         # Get partner name and return defaults
-        async with db_pool.acquire() as conn:
+        async with db_client.pool.acquire() as conn:
             tenant = await conn.fetchrow(
                 "SELECT name FROM tenants WHERE id = $1",
                 partner_id,
@@ -299,13 +311,14 @@ async def get_partner_limits(
 async def update_partner_limits(
     partner_id: UUID,
     limits: PartnerLimitsSchema,
-    db_pool=Depends(get_db_pool),
-    # admin=Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_admin),
+    db_client: Client = Depends(get_db_client),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
-    """Update aggregate limits for a partner."""
+    """Update aggregate limits for a partner. Requires admin privileges."""
     import json
 
-    async with db_pool.acquire() as conn:
+    async with db_client.pool.acquire() as conn:
         # Upsert partner limits
         row = await conn.fetchrow(
             """
@@ -373,9 +386,11 @@ async def update_partner_limits(
 async def add_dnc_entry(
     entry: DncEntrySchema,
     tenant_id: Optional[UUID] = Query(None, description="Tenant ID (null for global)"),
-    db_pool=Depends(get_db_pool),
+    admin_user: CurrentUser = Depends(require_admin),
+    db_client: Client = Depends(get_db_client),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
-    """Add a phone number to DNC list."""
+    """Add a phone number to DNC list. Requires admin privileges."""
     import re
     from datetime import datetime
 
@@ -390,7 +405,7 @@ async def add_dnc_entry(
     if entry.expires_at:
         expires = datetime.fromisoformat(entry.expires_at.replace("Z", "+00:00"))
 
-    async with db_pool.acquire() as conn:
+    async with db_client.pool.acquire() as conn:
         row = await conn.fetchrow(
             """
             INSERT INTO dnc_entries (
@@ -438,9 +453,10 @@ async def list_dnc_entries(
     tenant_id: Optional[UUID] = Query(None),
     phone_number: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
-    db_pool=Depends(get_db_pool),
+    admin_user: CurrentUser = Depends(require_admin),
+    db_client: Client = Depends(get_db_client),
 ):
-    """List DNC entries."""
+    """List DNC entries. Requires admin privileges."""
     query = """
         SELECT *
         FROM dnc_entries
@@ -459,7 +475,7 @@ async def list_dnc_entries(
     query += f" LIMIT ${len(params) + 1}"
     params.append(limit)
 
-    async with db_pool.acquire() as conn:
+    async with db_client.pool.acquire() as conn:
         rows = await conn.fetch(query, *params)
 
     return [
@@ -484,10 +500,12 @@ async def list_dnc_entries(
 )
 async def remove_dnc_entry(
     entry_id: UUID,
-    db_pool=Depends(get_db_pool),
+    admin_user: CurrentUser = Depends(require_admin),
+    db_client: Client = Depends(get_db_client),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
-    """Remove a DNC entry."""
-    async with db_pool.acquire() as conn:
+    """Remove a DNC entry. Requires admin privileges."""
+    async with db_client.pool.acquire() as conn:
         result = await conn.execute(
             "DELETE FROM dnc_entries WHERE id = $1",
             entry_id,
@@ -508,10 +526,12 @@ async def remove_dnc_entry(
     description="Get overview of call limits and usage across all tenants.",
 )
 async def get_call_limits_status(
-    db_pool=Depends(get_db_pool),
+    admin_user: CurrentUser = Depends(require_admin),
+    db_client: Client = Depends(get_db_client),
 ):
+    """Get call limits system status. Requires admin privileges."""
     """Get system-wide call limits status."""
-    async with db_pool.acquire() as conn:
+    async with db_client.pool.acquire() as conn:
         # Count tenants with custom limits
         custom_limits_count = await conn.fetchval(
             "SELECT COUNT(DISTINCT tenant_id) FROM tenant_call_limits WHERE is_active = TRUE"

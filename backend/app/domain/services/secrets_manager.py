@@ -13,6 +13,7 @@ from enum import Enum
 from typing import Any, Optional
 from uuid import UUID, uuid4
 
+from app.core.kms import get_kms_backend, KMSBackend
 import redis.asyncio as aioredis
 import asyncpg
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -89,43 +90,27 @@ class SecretsManager:
 
     def __init__(
         self,
-        db_pool: asyncpg.Pool,
-        master_key: Optional[bytes] = None,
-        redis_client: Optional[aioredis.Redis] = None,
-        kms_provider: Optional[str] = None,
+        db_pool,
+        master_key=None,        # kept for backward compat — ignored when KMS is configured
+        redis_client=None,
+        kms_provider=None,      # kept for backward compat — use KMS_PROVIDER env var instead
     ):
         self.db_pool = db_pool
         self.redis = redis_client
-        self.kms_provider = kms_provider
-
-        # Master KEK (Key Encryption Key)
-        # In production, this should come from KMS/HSM
-        if master_key:
-            self._master_kek = master_key
-        else:
-            # Generate a development key (NOT FOR PRODUCTION)
-            self._master_kek = os.getenv(
-                "SECRETS_MASTER_KEY",
-                secrets.token_bytes(32)
-            )
-            if isinstance(self._master_kek, str):
-                self._master_kek = self._master_kek.encode()
+        # KMS backend — auto-selects aws or local based on KMS_PROVIDER env var
+        self._kms: KMSBackend = get_kms_backend()
 
     def _generate_dek(self) -> bytes:
         """Generate a new Data Encryption Key"""
         return AESGCM.generate_key(bit_length=256)
 
-    def _encrypt_dek(self, dek: bytes) -> bytes:
-        """Encrypt DEK with master KEK using simple XOR for demo (use KMS in prod)"""
-        # In production, use AWS KMS Encrypt, GCP KMS, or HashiCorp Vault
-        # This is a simplified example
-        key = hashlib.sha256(self._master_kek).digest()
-        return bytes(a ^ b for a, b in zip(dek, key))
+    async def _wrap_dek(self, dek: bytes) -> bytes:
+        """Wrap (encrypt) a DEK using the configured KMS backend."""
+        return await self._kms.wrap_key(dek)
 
-    def _decrypt_dek(self, encrypted_dek: bytes) -> bytes:
-        """Decrypt DEK with master KEK"""
-        key = hashlib.sha256(self._master_kek).digest()
-        return bytes(a ^ b for a, b in zip(encrypted_dek, key))
+    async def _unwrap_dek(self, wrapped_dek: bytes) -> bytes:
+        """Unwrap (decrypt) a DEK using the configured KMS backend."""
+        return await self._kms.unwrap_key(wrapped_dek)
 
     def _encrypt_value(self, value: dict, dek: bytes) -> tuple[bytes, bytes]:
         """Encrypt secret value with DEK using AES-256-GCM"""
@@ -205,7 +190,7 @@ class SecretsManager:
 
         # Generate DEK and encrypt
         dek = self._generate_dek()
-        encrypted_dek = self._encrypt_dek(dek)
+        encrypted_dek = await self._wrap_dek(dek)
         ciphertext, iv = self._encrypt_value(value, dek)
 
         # Calculate expiration
@@ -301,7 +286,7 @@ class SecretsManager:
 
             # Decrypt
             encrypted_dek = row["encrypted_dek"]
-            dek = self._decrypt_dek(encrypted_dek)
+            dek = await self._unwrap_dek(encrypted_dek)
 
             try:
                 value = self._decrypt_value(
@@ -446,7 +431,7 @@ class SecretsManager:
 
             # Encrypt new value
             dek = self._generate_dek()
-            encrypted_dek = self._encrypt_dek(dek)
+            encrypted_dek = await self._wrap_dek(dek)
             ciphertext, iv = self._encrypt_value(new_value or {}, dek)
 
             await conn.execute(
@@ -650,7 +635,7 @@ class SecretsManager:
 
             for row in rows:
                 # Decrypt and check hash
-                dek = self._decrypt_dek(row["encrypted_dek"])
+                dek = await self._unwrap_dek(row["encrypted_dek"])
                 try:
                     value = self._decrypt_value(row["encrypted_value"], row["iv"], dek)
                 except Exception:

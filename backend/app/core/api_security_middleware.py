@@ -76,16 +76,36 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
             except ValueError:
                 pass
 
-        # 2. Content-Type validation
+        # 2. Content-Type validation and Payload Sanitization
         content_type = request.headers.get("content-type", "").split(";")[0].strip()
-        if content_type and request.method in ("POST", "PUT", "PATCH"):
-            # Allow any content-type for webhook endpoints
+        if request.method in ("POST", "PUT", "PATCH"):
+            # Content-Type validation
             if not self._is_webhook_path(request.url.path):
-                if content_type not in ALLOWED_CONTENT_TYPES:
+                if content_type and content_type not in ALLOWED_CONTENT_TYPES:
                     return JSONResponse(
                         status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
                         content={"detail": f"Content-Type '{content_type}' not supported"}
                     )
+
+            # Payload Sanitization (Day 6)
+            if content_type == "application/json":
+                try:
+                    # We need to read the body, sanitize it, and then replace it
+                    # because FastAPI reads it once from the stream.
+                    body = await request.body()
+                    if body:
+                        import json
+                        data = json.loads(body)
+                        sanitized_data = sanitize_json_value(data)
+                        
+                        # Re-inject the sanitized body
+                        async def receive():
+                            return {"type": "http.request", "body": json.dumps(sanitized_data).encode()}
+                        
+                        request._receive = receive
+                except Exception as e:
+                    logger.warning(f"Failed to sanitize JSON body: {e}")
+                    # Continue anyway, let FastAPI's validation handle malformed JSON
 
         # 3. User-Agent validation (basic bot detection)
         user_agent = request.headers.get("user-agent", "").lower()
@@ -95,6 +115,43 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
                 status_code=status.HTTP_403_FORBIDDEN,
                 content={"detail": "Access denied"}
             )
+
+        # 4. Global Rate Limiting (Day 6)
+        # Attempt to apply rate limiting here if not already handled by dependencies
+        # This provides a catch-all safety net.
+        try:
+            from app.core.security.api_security import get_api_rate_limiter
+            from app.core.container import get_container
+            
+            container = get_container()
+            if container.is_initialized and container.redis_enabled:
+                limiter = get_api_rate_limiter(container.redis)
+                
+                # We can't easily get user_id/tenant_id yet as auth middleware might run after
+                # But we can at least check IP tier early
+                ip = request.client.host if request.client else "unknown"
+                forwarded = request.headers.get("X-Forwarded-For")
+                if forwarded:
+                    ip = forwarded.split(",")[0].strip()
+                
+                allowed, headers, error = await limiter.check_all_tiers(
+                    ip=ip,
+                    user_id=None, # User/Tenant checked later in dependencies
+                    tenant_id=None,
+                    endpoint=request.url.path
+                )
+                
+                if not allowed:
+                    return JSONResponse(
+                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                        content={"detail": error},
+                        headers=headers
+                    )
+                
+                # Store headers to be added to response later
+                request.state.rate_limit_headers = headers
+        except Exception as e:
+            logger.error(f"Global rate limiting error: {e}")
 
         # Process request
         response = await call_next(request)
