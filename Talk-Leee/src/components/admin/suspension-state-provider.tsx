@@ -51,8 +51,18 @@ function deriveSuspensionState(me: Partial<MeResponse> | null | undefined): Susp
     if (!me) return defaultState;
     const partnerStatus = me.partner_status === "suspended" ? "suspended" : "active";
     const tenantStatus = me.tenant_status === "suspended" ? "suspended" : "active";
+    // The schema-level `suspended_scope` is a free-form string from the
+    // backend — narrow it to the runtime SuspensionScope union here.
+    const fallbackScope: SuspensionScope =
+        me.suspended_scope === "tenant" || me.suspended_scope === "partner"
+            ? me.suspended_scope
+            : null;
     const scope: SuspensionScope =
-        tenantStatus === "suspended" ? "tenant" : partnerStatus === "suspended" ? "partner" : me.suspended_scope ?? null;
+        tenantStatus === "suspended"
+            ? "tenant"
+            : partnerStatus === "suspended"
+              ? "partner"
+              : fallbackScope;
 
     return {
         partnerId: me.partner_id?.trim() ? me.partner_id : null,

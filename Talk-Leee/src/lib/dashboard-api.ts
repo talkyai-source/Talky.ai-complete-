@@ -7,6 +7,9 @@ export interface DashboardSummary {
     answered_calls: number;
     failed_calls: number;
     minutes_used: number;
+    // Plan allowance — Hisham's dashboard renders this in the usage gauge.
+    // Optional for back-compat with older backends that don't return it.
+    minutes_included?: number;
     minutes_remaining: number;
     active_campaigns: number;
 }

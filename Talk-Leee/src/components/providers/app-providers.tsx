@@ -95,6 +95,14 @@ function createAppQueryClient(onUnauthorized: () => void) {
 }
 
 import { ThemeProvider } from "./theme-provider";
+import { AuthProvider } from "@/lib/auth-context";
+import dynamic from "next/dynamic";
+
+// Keep notification toaster lazy + client-only (Next 15 SSR safety).
+const NotificationToaster = dynamic(
+    () => import("@/components/notifications/notification-toaster").then(m => m.NotificationToaster),
+    { ssr: false }
+);
 
 export function AppProviders({ children }: { children: React.ReactNode }) {
     const router = useRouter();
@@ -147,7 +155,10 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
     return (
         <QueryClientProvider client={client}>
             <ThemeProvider>
-                {children}
+                <AuthProvider>
+                    {children}
+                    <NotificationToaster />
+                </AuthProvider>
             </ThemeProvider>
         </QueryClientProvider>
     );

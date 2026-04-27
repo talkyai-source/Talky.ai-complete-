@@ -10,6 +10,18 @@ interface MeResponse {
     business_name?: string;
     role: string;
     minutes_remaining: number;
+    // Admin / suspension fields populated by the backend's /me endpoint
+    // when the user has elevated permissions or the tenant/partner is in
+    // a non-active state. All optional — older sessions without these
+    // fields just see undefined and the SuspensionStateProvider treats
+    // that as "not suspended".
+    partner_id?: string;
+    tenant_id?: string;
+    partner_status?: string;
+    tenant_status?: string;
+    suspended_scope?: string;
+    suspension_reason?: string;
+    suspended_at?: string;
 }
 
 interface AuthContextType {
