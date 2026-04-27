@@ -28,12 +28,23 @@ export interface Campaign {
     completed_at?: string;
 }
 
+export type PersonaType = "lead_gen" | "customer_support" | "receptionist";
+
 export interface CampaignCreate {
     name: string;
     description?: string;
+    // Freeform extra instructions. Appended after the persona block when
+    // persona_type is set; used as the full prompt on legacy campaigns.
     system_prompt: string;
     voice_id: string;
     goal?: string;
+
+    // Persona + campaign-slot config. Optional for back-compat — omit
+    // and the call falls back to the legacy estimation prompt path.
+    persona_type?: PersonaType;
+    company_name?: string;
+    agent_names?: string[];      // 1..3 names — rotated per call
+    campaign_slots?: Record<string, unknown>;
 }
 
 // Call Types
@@ -123,10 +134,14 @@ class DashboardApi {
         return { campaign: response.campaign };
     }
 
-    async startCampaign(id: string): Promise<{ message: string; jobs_enqueued: number }> {
+    async startCampaign(
+        id: string,
+        opts?: { first_speaker?: "agent" | "user" },
+    ): Promise<{ message: string; jobs_enqueued: number }> {
         return this.client.request({
             path: `/campaigns/${id}/start`,
             method: "POST",
+            body: { first_speaker: opts?.first_speaker ?? "agent" },
         });
     }
 

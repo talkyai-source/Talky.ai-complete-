@@ -12,7 +12,6 @@ api_router = APIRouter()
 # --- Admin endpoints ---
 from app.api.v1.endpoints.admin import router as admin_router
 from app.api.v1.endpoints.ai_options import router as ai_options_router
-from app.api.v1.endpoints.ai_options_ws import router as ai_options_ws_router
 from app.api.v1.endpoints.analytics import router as analytics_router
 from app.api.v1.endpoints.ask_ai_ws import router as ask_ai_ws_router
 
@@ -42,6 +41,11 @@ from app.api.v1.endpoints.telephony_concurrency import (
 )
 from app.api.v1.endpoints.telephony_runtime import router as telephony_runtime_router
 from app.api.v1.endpoints.telephony_sip import router as telephony_sip_router
+from app.api.v1.endpoints.dnc import router as dnc_router
+from app.api.v1.endpoints.tenant_ai_credentials import (
+    router as tenant_ai_credentials_router,
+)
+from app.api.v1.endpoints.tenant_phone_numbers import router as tenant_phone_numbers_router
 from app.api.v1.endpoints.vonage_bridge import router as vonage_bridge_router
 from app.api.v1.endpoints.webhooks import router as webhooks_router
 from app.api.v1.endpoints.webhooks_secure import router as webhooks_secure_router
@@ -72,12 +76,14 @@ api_router.include_router(webhooks_secure_router)
 api_router.include_router(assistant_ws_router)
 api_router.include_router(ask_ai_ws_router)
 api_router.include_router(ai_options_router)
-api_router.include_router(ai_options_ws_router)
 api_router.include_router(telephony_bridge_router)
 api_router.include_router(vonage_bridge_router)
 api_router.include_router(telephony_sip_router)
 api_router.include_router(telephony_runtime_router)
 api_router.include_router(telephony_concurrency_router)
+api_router.include_router(tenant_phone_numbers_router)
+api_router.include_router(tenant_ai_credentials_router)
+api_router.include_router(dnc_router)
 api_router.include_router(mfa_router)
 api_router.include_router(passkeys_router)
 api_router.include_router(rbac_router)

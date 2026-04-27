@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode, useCallback } from "react";
 import { api } from "@/lib/api";
+import { resetSessionExpiredLatch } from "@/lib/http-client";
 interface MeResponse {
     id: string;
     email: string;
@@ -41,6 +42,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const login = useCallback(async (email: string, password: string) => {
         const res = await api.login(email, password);
         api.setToken(res.access_token);
+        // Re-arm the http-client's session-expired latch so the NEXT 401
+        // (after this fresh session eventually expires) fires the redirect
+        // again.  Without this, a logout → login round-trip would leave
+        // the latch tripped and the next expiry would silently no-op.
+        resetSessionExpiredLatch();
         setUser({
             id: res.user_id,
             email: res.email,
@@ -58,6 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     ) => {
         const res = await api.register(email, password, businessName, "basic", name);
         api.setToken(res.access_token);
+        resetSessionExpiredLatch();
         setUser({
             id: res.user_id,
             email: res.email,
@@ -83,6 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const setToken = useCallback((token: string) => {
         api.setToken(token);
+        resetSessionExpiredLatch();
         // After setting token, try to load real user
         api.getMe()
             .then((me) => setUser(me))

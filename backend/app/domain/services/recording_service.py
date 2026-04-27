@@ -232,15 +232,50 @@ class RecordingService:
         buffer: RecordingBuffer,
         tenant_id: str,
         campaign_id: str,
+        destination_country_code: Optional[str] = None,
     ) -> Optional[str]:
         """
         Upload recording to S3 and create DB records.
 
         Returns recording UUID string on success, None on failure.
         Never raises — storage failures should not break call flow.
+
+        T0.4 — Consults `tenant_recording_policy` and returns None when
+        recording is disabled or consent was not collected. The caller
+        (voice pipeline) is responsible for playing the announcement
+        BEFORE the call starts — this gate only blocks the upload when
+        the policy says recording is off. If no policy row exists for
+        the tenant, the safe default is "record with two-party consent"
+        — recording proceeds.
         """
         if not buffer or buffer.total_bytes == 0:
             logger.warning(f"No audio to save for call {call_id}")
+            return None
+
+        # Consult the per-tenant recording policy. Disabled → skip.
+        try:
+            from app.domain.services.recording_policy_service import (
+                RecordingPolicyService,
+            )
+            policy = RecordingPolicyService(self._db)
+            decision = await policy.decide(
+                tenant_id=tenant_id,
+                destination_country_code=destination_country_code,
+            )
+            if not decision.should_record:
+                logger.info(
+                    "recording_skipped_by_policy call=%s tenant=%s reason=%s",
+                    call_id, tenant_id, decision.reason,
+                )
+                return None
+        except Exception as exc:
+            # Fail SAFE — if we cannot confirm the policy, we do not
+            # create a recording. Better to miss an upload than to ship
+            # non-consensual recordings to S3.
+            logger.error(
+                "recording_policy_lookup_failed call=%s tenant=%s err=%s — skipping upload",
+                call_id, tenant_id, exc,
+            )
             return None
 
         if not self._s3.is_available():

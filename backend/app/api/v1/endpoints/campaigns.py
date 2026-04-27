@@ -13,7 +13,7 @@ import os
 import uuid
 import re
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Depends, Query
 from pydantic import BaseModel, Field, field_validator
@@ -46,15 +46,40 @@ class CampaignStartRequest(BaseModel):
     """Request body for starting a campaign"""
     priority_override: Optional[int] = None  # Override priority for all jobs (1-10)
     tenant_id: Optional[str] = None  # For multi-tenant support
+    first_speaker: Literal["agent", "user"] = "agent"  # Who speaks first on answer
 
 
 class CampaignCreateRequest(BaseModel):
-    """Request body for creating a campaign."""
+    """Request body for creating a campaign.
+
+    Persona fields (persona_type, agent_names, company_name,
+    campaign_slots) are optional for backwards compatibility — when
+    absent, the campaign falls back to the legacy estimation prompt
+    path. When present, they drive the layered prompt composer at
+    call-time. The freeform `system_prompt` is kept as an escape hatch:
+    it becomes the "additional instructions" layer appended after the
+    persona block.
+    """
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     system_prompt: str = Field(..., min_length=1)
     voice_id: str = Field(..., min_length=1, max_length=100)
     goal: Optional[str] = None
+
+    # New fields — persist into campaigns.script_config JSONB.
+    persona_type: Optional[Literal["lead_gen", "customer_support", "receptionist"]] = None
+    agent_names: Optional[List[str]] = None
+    company_name: Optional[str] = None
+    campaign_slots: Optional[dict] = None
+
+    @field_validator("agent_names")
+    @classmethod
+    def _validate_agent_names(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        if v is None:
+            return None
+        # Local import — avoid circular import with app.services.scripts.
+        from app.services.scripts.prompts import validate_pool
+        return validate_pool(v)
 
 
 class ContactCreate(BaseModel):
@@ -152,6 +177,20 @@ async def create_campaign(
                 ),
             )
 
+        # Persona + campaign-slot config lives in the JSONB
+        # `script_config` column. When present, telephony_session_config
+        # uses the layered composer; when absent, the legacy prompt path
+        # fires so pre-existing campaigns keep working.
+        script_config: Optional[dict] = None
+        if campaign_data.persona_type:
+            script_config = {
+                "persona_type": campaign_data.persona_type,
+                "company_name": (campaign_data.company_name or "").strip() or None,
+                "agent_names": campaign_data.agent_names or [],
+                "campaign_slots": campaign_data.campaign_slots or {},
+                "additional_instructions": campaign_data.system_prompt.strip(),
+            }
+
         insert_payload = {
             "tenant_id": current_user.tenant_id,
             "name": campaign_data.name.strip(),
@@ -160,6 +199,8 @@ async def create_campaign(
             "voice_id": selected_voice_id,
             "goal": campaign_data.goal.strip() if campaign_data.goal else None,
         }
+        if script_config is not None:
+            insert_payload["script_config"] = script_config
 
         response = db_client.table("campaigns").insert(insert_payload).execute()
         if response.error:
@@ -255,11 +296,13 @@ async def start_campaign(
         
         tenant_id = (start_request.tenant_id if start_request else None)
         priority_override = (start_request.priority_override if start_request else None)
-        
+        first_speaker = (start_request.first_speaker if start_request else "agent")
+
         result = await service.start_campaign(
             campaign_id=campaign_id,
             tenant_id=tenant_id,
-            priority_override=priority_override
+            priority_override=priority_override,
+            first_speaker=first_speaker,
         )
         
         return {
@@ -408,41 +451,62 @@ async def get_campaign_stats(
 # Day 9: Contact Management Endpoints
 # =============================================================================
 
-def normalize_phone_number(phone: str) -> str:
+def normalize_phone_number(phone: str, default_country: str = "US") -> str:
     """
     Normalize phone number to E.164 format.
-    
+
+    T2.5 — uses libphonenumber when available so non-US numbers
+    normalise correctly. The `default_country` argument supplies the
+    ISO-3166 alpha-2 code for numbers that lack a leading +; callers
+    that know the campaign's region should pass it. Falls back to the
+    old US-centric heuristic when libphonenumber is unavailable or
+    rejects the number (keeps dev + test stable).
+
     Handles common formats:
-    - (555) 123-4567 -> +15551234567 (assumes US if no country code)
-    - 555.123.4567 -> +15551234567
-    - +44 20 7946 0958 -> +442079460958
+    - (555) 123-4567       -> +15551234567   (US-default)
+    - 555.123.4567         -> +15551234567   (US-default)
+    - 020 7946 0958 + GB   -> +442079460958  (libphonenumber-aware)
+    - +44 20 7946 0958     -> +442079460958  (explicit international)
     """
-    # Remove all non-digit characters except leading +
+    # Short SIP extensions never see E.164.
     has_plus = phone.strip().startswith('+')
     cleaned = re.sub(r'[^\d]', '', phone)
-    
+
     if not cleaned:
         raise ValueError("Invalid phone number")
 
-    # Allow short SIP extensions (3–6 digits) to pass through as-is
     if len(cleaned) <= 6:
         if len(cleaned) < 3:
             raise ValueError("Phone number too short (minimum 3 digits for SIP extensions)")
-        return cleaned  # Return raw SIP extension — no E.164 normalization
+        return cleaned  # SIP extension — pass through.
 
-    # Validate maximum length (E.164 max is 15 digits)
     if len(cleaned) > 15:
         raise ValueError("Phone number too long (maximum 15 digits)")
 
-    # If already has + and country code, use as-is
+    # Preferred path — libphonenumber. Installed as a T1.5 dep. Gives
+    # us correct region detection, handles leading-0 trunk prefixes
+    # (common in EU), and validates length per country.
+    try:
+        import phonenumbers
+        region = None if has_plus else (default_country or "US").upper()
+        parsed = phonenumbers.parse(phone, region)
+        if phonenumbers.is_valid_number(parsed):
+            return phonenumbers.format_number(
+                parsed, phonenumbers.PhoneNumberFormat.E164,
+            )
+    except Exception:
+        # libphonenumber not installed or parse failed — fall through
+        # to the legacy heuristic. Keeps dev/test stable even on a
+        # machine where phonenumbers hasn't been pip-installed.
+        pass
+
+    # Legacy US-centric fallback (pre-T2.5 behaviour).
     if has_plus:
         return f"+{cleaned}"
 
-    # If 10 digits (US/Canada without country code), add +1
     if len(cleaned) == 10:
         return f"+1{cleaned}"
 
-    # If 11 digits starting with 1 (US/Canada with country code), add +
     if len(cleaned) == 11 and cleaned.startswith('1'):
         return f"+{cleaned}"
 
@@ -481,9 +545,24 @@ async def add_contact_to_campaign(
             raise HTTPException(status_code=404, detail="Campaign not found")
         campaign = campaign_response.data[0]
         
-        # 2. Normalize phone number
+        # 2. Normalize phone number — T2.5 uses the campaign's
+        # default country (from script_config.campaign_slots or
+        # top-level default_country_code) so non-US campaigns route
+        # correctly. Falls back to US when not configured.
+        default_country = "US"
+        script_cfg = campaign.get("script_config") if isinstance(campaign, dict) else None
+        if isinstance(script_cfg, dict):
+            candidate = (
+                script_cfg.get("default_country_code")
+                or (script_cfg.get("campaign_slots") or {}).get("default_country_code")
+            )
+            if candidate:
+                default_country = str(candidate).upper()
+
         try:
-            normalized_phone = normalize_phone_number(contact.phone_number)
+            normalized_phone = normalize_phone_number(
+                contact.phone_number, default_country=default_country,
+            )
         except ValueError as e:
             raise HTTPException(status_code=400, detail=f"Invalid phone number: {str(e)}")
         

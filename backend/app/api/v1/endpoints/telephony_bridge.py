@@ -133,12 +133,20 @@ def _outbound_first_speaker() -> str:
     return "user" if val == "user" else "agent"
 
 
-def _build_telephony_session_config(gateway_type: str = "telephony"):
+def _build_telephony_session_config(
+    gateway_type: str = "telephony",
+    campaign=None,
+    agent_name: Optional[str] = None,
+):
     """
     Thin shim kept for call-site compatibility.
     All config logic lives in telephony_session_config.build_telephony_session_config().
     """
-    return build_telephony_session_config(gateway_type=gateway_type)
+    return build_telephony_session_config(
+        gateway_type=gateway_type,
+        campaign=campaign,
+        agent_name_override=agent_name,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -357,6 +365,26 @@ async def _session_watchdog() -> None:
             for cid in stale_events:
                 _ringing_events.pop(cid, None)
 
+            # ----- T1.2 global-concurrency maintenance -----
+            # Refresh a lease for every live call on this pod, then
+            # reconcile the cluster-wide set to drop orphans from
+            # crashed peers. Best-effort — failures don't touch local
+            # state.
+            try:
+                from app.domain.services.global_concurrency import (
+                    reconcile_orphans,
+                    refresh_lease,
+                )
+                from app.core.container import get_container as _gc
+                _c = _gc()
+                _redis = getattr(_c, "redis", None) if _c.is_initialized else None
+                if _redis is not None:
+                    for live_id in list(_telephony_sessions.keys()):
+                        await refresh_lease(_redis, call_id=live_id)
+                    await reconcile_orphans(_redis)
+            except Exception as exc:
+                logger.debug("global_concurrency_watchdog_step_failed err=%s", exc)
+
         except asyncio.CancelledError:
             return
         except Exception as exc:
@@ -544,29 +572,65 @@ async def _on_ringing(call_id: str) -> None:
         # Don't remove the event here — _on_new_call will clean it up.
 
 
+async def _reject_overcap_call(call_id: str) -> None:
+    """Shared teardown when a call is refused at the cap gate (per-pod
+    or global). Frees any ringing-phase pre-warm so the STT/TTS
+    WebSockets don't leak, then hangs the channel up so the caller
+    doesn't hear silence."""
+    ringing = _pop_ringing_warmup(call_id)
+    if ringing is not None:
+        ringing_session, ringing_connect_task = ringing
+        if ringing_connect_task is not None and not ringing_connect_task.done():
+            ringing_connect_task.cancel()
+        try:
+            await _get_orchestrator().end_session(ringing_session)
+        except Exception:
+            pass
+    if _adapter:
+        try:
+            await _adapter.hangup(call_id)
+        except Exception:
+            pass
+
+
 async def _on_new_call(call_id: str) -> None:
     """Initialize AI pipeline when a new SIP call arrives."""
-    # GAP 2 — Concurrency limit: reject calls over the cap immediately.
+    # Per-pod cap (existing, kept as a backstop so a single pod never
+    # exceeds its MAX_TELEPHONY_SESSIONS memory budget). The global cap
+    # below is the new cluster-wide check (T1.2).
     if len(_telephony_sessions) >= _MAX_TELEPHONY_SESSIONS:
         logger.error(
-            "telephony_at_capacity sessions=%d call_id=%s — rejecting",
+            "telephony_at_pod_capacity sessions=%d call_id=%s — rejecting",
             len(_telephony_sessions), call_id[:12],
         )
-        # Release any ringing-phase pre-warm so the STT/TTS sockets don't leak.
-        ringing = _pop_ringing_warmup(call_id)
-        if ringing is not None:
-            ringing_session, ringing_connect_task = ringing
-            if ringing_connect_task is not None and not ringing_connect_task.done():
-                ringing_connect_task.cancel()
-            try:
-                await _get_orchestrator().end_session(ringing_session)
-            except Exception:
-                pass
-        if _adapter:
-            try:
-                await _adapter.hangup(call_id)
-            except Exception:
-                pass
+        await _reject_overcap_call(call_id)
+        return
+
+    # T1.2 — cluster-wide concurrency cap. Redis-backed lease keyed on
+    # call_id. Idempotent — safe to call on every _on_new_call for the
+    # same id.  Refuses when the cluster SCARD exceeds the global cap.
+    # Falls through to allow when Redis is unavailable so a degraded
+    # Redis doesn't kill origination — the per-pod cap above is the
+    # backstop.
+    from app.domain.services.global_concurrency import (
+        acquire_lease,
+        resolve_global_cap,
+    )
+    from app.core.container import get_container
+    container = get_container()
+    redis_client = getattr(container, "redis", None)
+    lease = await acquire_lease(
+        redis_client,
+        call_id=call_id,
+        pod_id=os.getenv("POD_ID") or os.uname().nodename,
+        cap=resolve_global_cap(),
+    )
+    if not lease:
+        logger.error(
+            "telephony_at_global_capacity call_id=%s current=%s — rejecting",
+            call_id[:12], lease.current,
+        )
+        await _reject_overcap_call(call_id)
         return
 
     _new_call_t0 = asyncio.get_event_loop().time()
@@ -743,7 +807,10 @@ async def _on_new_call(call_id: str) -> None:
             # first (useful for inbound-style testing).
             # In "user" mode we stay silent and let handle_turn_end react to the
             # callee's first utterance — avoids the AI talking over a "Hello?".
-            first_speaker = _outbound_first_speaker()
+            # Prefer the per-call first_speaker stashed on the pre-warm session
+            # (set by make_call's `first_speaker` query param) so each Start button
+            # click wins over the global TELEPHONY_FIRST_SPEAKER env default.
+            first_speaker = getattr(voice_session, "_first_speaker", None) or _outbound_first_speaker()
             if first_speaker == "agent":
                 asyncio.create_task(_send_outbound_greeting(voice_session))
             else:
@@ -801,6 +868,21 @@ async def _on_audio_received(call_id: str, audio_bytes: bytes) -> None:
 async def _on_call_ended(call_id: str) -> None:
     """Clean up voice session when the call hangs up."""
     logger.info(f"Telephony bridge: call ended {call_id[:12]}")
+
+    # T1.2 — release the global concurrency lease FIRST, even if the
+    # rest of the teardown fails. The lease TTL would reap it in 10
+    # minutes regardless, but releasing eagerly keeps the cluster count
+    # accurate so the next caller isn't falsely rejected.
+    try:
+        from app.domain.services.global_concurrency import release_lease
+        from app.core.container import get_container as _gc
+        _c = _gc()
+        await release_lease(
+            getattr(_c, "redis", None) if _c.is_initialized else None,
+            call_id=call_id,
+        )
+    except Exception as exc:
+        logger.debug("global_concurrency_release_raised call=%s err=%s", call_id[:12], exc)
 
     # Abandoned-ring path: if the callee never answered, the session was
     # pre-warmed during the ring but never promoted into _telephony_sessions.
@@ -1177,6 +1259,18 @@ async def telephony_status():
     except Exception:
         pass
 
+    # T1.2 — expose the cluster-wide count alongside the per-pod one
+    # so operators can see fleet saturation at a glance.
+    from app.domain.services.global_concurrency import (
+        current_count as _global_current,
+        resolve_global_cap as _resolve_cap,
+    )
+    from app.core.container import get_container as _gc
+    _c = _gc()
+    _redis = getattr(_c, "redis", None) if _c.is_initialized else None
+    global_current = await _global_current(_redis)
+    global_cap = _resolve_cap()
+
     return JSONResponse({
         "status": "running" if healthy else "degraded",
         "connected": _adapter.connected,
@@ -1184,9 +1278,17 @@ async def telephony_status():
         "active_sessions": len(_telephony_sessions),
         "healthy": healthy,
         "capacity": {
+            # Per-pod count stays so single-pod dashboards don't break.
             "current": len(_telephony_sessions),
             "max": _MAX_TELEPHONY_SESSIONS,
             "pct_used": round(len(_telephony_sessions) / max(_MAX_TELEPHONY_SESSIONS, 1) * 100, 1),
+            # Cluster-wide view (null when Redis is unavailable).
+            "global_current": global_current,
+            "global_max": global_cap,
+            "global_pct_used": (
+                round((global_current or 0) / max(global_cap, 1) * 100, 1)
+                if global_current is not None else None
+            ),
         },
         "provider_health": provider_health,
     })
@@ -1199,6 +1301,14 @@ async def make_call(
     caller_id: str = Query(default="1001", description="Caller ID to display"),
     campaign_id: Optional[str] = Query(None, description="Campaign context"),
     tenant_id: Optional[str] = Query(None, description="Tenant ID (optional, defaults from auth)"),
+    first_speaker: Optional[Literal["agent", "user"]] = Query(
+        None,
+        description="Per-call override for who speaks first. Falls back to TELEPHONY_FIRST_SPEAKER env.",
+    ),
+    agent_name: Optional[str] = Query(
+        None,
+        description="Per-call agent name picked from the campaign's name pool. Stays stable for the whole call.",
+    ),
 ):
     """
     Originate an outbound call via the active B2BUA adapter.
@@ -1223,16 +1333,83 @@ async def make_call(
     if not effective_tenant_id:
         raise HTTPException(status_code=400, detail="Tenant ID required")
 
+    # Fail-closed bypass policy (T0.2). Historically ANY non-"production"
+    # environment plus a truthy TELEPHONY_DEV_BYPASS_GUARD_ERRORS flag would
+    # allow guard errors through. That silently disabled every safety check on
+    # staging / blank / misspelled env values and left a footgun pointed at
+    # prod. New rule: bypass is honoured ONLY when BOTH are explicitly set —
+    #   ENVIRONMENT == "development"  AND  TELEPHONY_LOCAL_DEV == "1"
+    # Any other value — blank, "staging", "prod", "production" — never bypass.
     environment = os.getenv("ENVIRONMENT", "development").strip().lower()
-    allow_dev_guard_bypass = (
-        environment != "production"
-        and os.getenv("TELEPHONY_DEV_BYPASS_GUARD_ERRORS", "true").strip().lower()
-        not in {"0", "false", "no"}
-    )
+    local_dev = os.getenv("TELEPHONY_LOCAL_DEV", "").strip().lower() in {"1", "true", "yes"}
+    bypass_flag = os.getenv("TELEPHONY_DEV_BYPASS_GUARD_ERRORS", "false").strip().lower() \
+        not in {"0", "false", "no", ""}
+    allow_dev_guard_bypass = environment == "development" and local_dev and bypass_flag
 
     # Initialize CallGuard
     from app.core.container import get_container
     container = get_container()
+
+    # T0.1 — Caller-ID ownership enforcement.
+    # Before any guard/originate work, refuse the call unless `caller_id`
+    # is registered AND verified under this tenant. In prod we also
+    # require a STIR/SHAKEN attestation token on the DID row (test-only
+    # numbers cannot dial real carriers).
+    #
+    # Ramp-in: CALLER_ID_ENFORCEMENT_MODE = enforce | log | off.
+    #   - enforce (default in prod): violation → HTTP 403.
+    #   - log    (default in dev/staging): violation → WARN + allow.
+    #   - off    : disabled entirely. Use only for first-time bring-up.
+    #
+    # This knob lets operators roll the change out per-environment
+    # without tripping every existing dev/CI workflow on day one.
+    from app.domain.services.tenant_phone_number_service import (
+        TenantPhoneNumberService,
+    )
+    did_svc = TenantPhoneNumberService(container.db_pool)
+    require_attestation = environment == "production"
+    default_mode = "enforce" if environment == "production" else "log"
+    enforcement_mode = (
+        os.getenv("CALLER_ID_ENFORCEMENT_MODE", default_mode).strip().lower()
+    )
+    if enforcement_mode not in {"enforce", "log", "off"}:
+        enforcement_mode = default_mode
+
+    if enforcement_mode != "off":
+        try:
+            caller_id_ok = await did_svc.is_verified_for_tenant(
+                tenant_id=str(effective_tenant_id),
+                e164=caller_id,
+                require_attestation=require_attestation,
+            )
+        except Exception as did_exc:
+            logger.error(
+                "caller_id_verification_lookup_failed tenant=%s caller_id=%s err=%s",
+                effective_tenant_id, caller_id, did_exc,
+            )
+            caller_id_ok = False
+
+        if not caller_id_ok:
+            logger.warning(
+                "caller_id_unauthorized tenant=%s caller_id=%s mode=%s "
+                "environment=%s require_attestation=%s",
+                effective_tenant_id, caller_id, enforcement_mode,
+                environment, require_attestation,
+            )
+            if enforcement_mode == "enforce":
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "error": "caller_id_not_verified",
+                        "message": (
+                            "The caller_id is not registered and verified under "
+                            "this tenant. Register it at POST /api/v1/"
+                            "tenant-phone-numbers and verify before dialing."
+                        ),
+                        "caller_id": caller_id,
+                        "require_attestation": require_attestation,
+                    },
+                )
 
     guard = CallGuard(
         db_pool=container.db_pool,
@@ -1332,11 +1509,48 @@ async def make_call(
     #   2. Originate the SIP call
     #   3. When _on_new_call fires (even 0 ms later), the pre-warmed session
     #      and pre-synthesized audio are already in _ringing_warmups.
+    # Resolve per-call first-speaker choice (query param > env default).
+    # The answer path reads this back off the pre-warm session in _on_new_call,
+    # falling back to _outbound_first_speaker() when no per-call value is set.
+    effective_first_speaker = (first_speaker or _outbound_first_speaker()).strip().lower()
+    if effective_first_speaker not in ("agent", "user"):
+        effective_first_speaker = "agent"
+
+    # Look up the campaign row so the session builder can route through
+    # the layered prompt composer when script_config.persona_type is set.
+    # Failure here is non-fatal — we fall back to the legacy prompt.
+    campaign_row = None
+    if campaign_id:
+        try:
+            db_client = getattr(container, "db_client", None)
+            if db_client is not None:
+                row = (
+                    db_client.table("campaigns")
+                    .select("*")
+                    .eq("id", campaign_id)
+                    .limit(1)
+                    .execute()
+                )
+                if getattr(row, "data", None):
+                    campaign_row = row.data[0]
+        except Exception as cexc:
+            logger.warning(
+                "campaign_lookup_failed campaign_id=%s err=%s — using legacy prompt",
+                campaign_id, cexc,
+            )
+
     pre_warm_session = None
     try:
         orchestrator = _get_orchestrator()
-        config = _build_telephony_session_config(gateway_type="telephony")
+        config = _build_telephony_session_config(
+            gateway_type="telephony",
+            campaign=campaign_row,
+            agent_name=agent_name,
+        )
         pre_warm_session = await orchestrator.create_voice_session(config)
+        pre_warm_session._first_speaker = effective_first_speaker
+        if agent_name:
+            pre_warm_session._agent_name = agent_name
 
         # TTS + STT WebSocket connections
         warmup_coros = []
@@ -1360,38 +1574,47 @@ async def make_call(
         if llm_warm is not None:
             asyncio.create_task(llm_warm())
 
-        # Pre-synthesize greeting audio
-        greeting_text = _build_outbound_greeting(pre_warm_session.call_session)
-        chunks: list[bytes] = []
-        try:
-            tts_config = pre_warm_session.config
-            async for audio_chunk in pre_warm_session.tts_provider.stream_synthesize(
-                text=greeting_text,
-                voice_id=tts_config.voice_id if tts_config else "default",
-                sample_rate=(
-                    tts_config.tts_sample_rate if tts_config else 8000
-                ),
-                call_id=pre_warm_session.call_id,
-            ):
-                raw = (
-                    audio_chunk.data
-                    if hasattr(audio_chunk, "data")
-                    else audio_chunk
-                )
-                if raw:
-                    if len(raw) % 2 != 0:
-                        raw = raw[:-1]
+        # Pre-synthesize greeting audio only when the agent speaks first. In
+        # "user" mode we still keep the full session / STT / TTS / LLM warm so
+        # latency on the first AI response is identical — we just don't burn
+        # a TTS round-trip on audio that will never be played.
+        if effective_first_speaker == "agent":
+            greeting_text = _build_outbound_greeting(pre_warm_session.call_session)
+            chunks: list[bytes] = []
+            try:
+                tts_config = pre_warm_session.config
+                async for audio_chunk in pre_warm_session.tts_provider.stream_synthesize(
+                    text=greeting_text,
+                    voice_id=tts_config.voice_id if tts_config else "default",
+                    sample_rate=(
+                        tts_config.tts_sample_rate if tts_config else 8000
+                    ),
+                    call_id=pre_warm_session.call_id,
+                ):
+                    raw = (
+                        audio_chunk.data
+                        if hasattr(audio_chunk, "data")
+                        else audio_chunk
+                    )
                     if raw:
-                        chunks.append(raw)
+                        if len(raw) % 2 != 0:
+                            raw = raw[:-1]
+                        if raw:
+                            chunks.append(raw)
 
-            pre_warm_session._presynth_greeting_audio = chunks
-            pre_warm_session._presynth_greeting_text = greeting_text
+                pre_warm_session._presynth_greeting_audio = chunks
+                pre_warm_session._presynth_greeting_text = greeting_text
+                logger.info(
+                    "pre_originate_greeting_ready chunks=%d bytes=%d text=%r",
+                    len(chunks), sum(len(c) for c in chunks), greeting_text[:60],
+                )
+            except Exception as synth_exc:
+                logger.warning("pre_originate_greeting_synth_failed: %s", synth_exc)
+        else:
             logger.info(
-                "pre_originate_greeting_ready chunks=%d bytes=%d text=%r",
-                len(chunks), sum(len(c) for c in chunks), greeting_text[:60],
+                "pre_originate_greeting_skipped first_speaker=user call_id=%s",
+                pre_warm_session.call_id[:12],
             )
-        except Exception as synth_exc:
-            logger.warning("pre_originate_greeting_synth_failed: %s", synth_exc)
 
     except Exception as warm_exc:
         logger.warning("pre_originate_warmup_failed: %s — will use answer-path warmup", warm_exc)

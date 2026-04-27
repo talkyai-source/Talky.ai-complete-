@@ -13,7 +13,7 @@ Day 9+ refactoring: Business logic extracted from campaigns.py endpoints
 import uuid
 import logging
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Literal, Optional, List, Dict, Any
 from dataclasses import dataclass
 
 from app.core.postgres_adapter import Client
@@ -85,11 +85,34 @@ class CampaignService:
         self._queue_service = queue_service
         self._owns_queue_service = queue_service is None
     
-    async def _get_queue_service(self) -> DialerQueueService:
-        """Get or create queue service."""
-        if self._queue_service is None:
-            self._queue_service = DialerQueueService()
-            await self._queue_service.initialize()
+    async def _get_queue_service(self):
+        """Get or create the dialer queue service.
+
+        T2.2 — when `DIALER_QUEUE_BACKEND=streams`, returns the
+        Redis Streams backend for new enqueues. The worker keeps
+        using its own list-service instance so in-flight retries
+        drain cleanly during cutover. Default behaviour is
+        unchanged.
+        """
+        if self._queue_service is not None:
+            return self._queue_service
+
+        from app.domain.services.queue_factory import get_enqueue_service
+
+        # If Redis is reachable via the container, hand it to the
+        # factory so the streams backend can attach to the live pool.
+        redis_client = None
+        try:
+            from app.core.container import get_container
+            c = get_container()
+            if c.is_initialized:
+                redis_client = getattr(c, "redis", None)
+        except Exception:
+            pass
+
+        self._queue_service = await get_enqueue_service(
+            redis_client=redis_client,
+        )
         return self._queue_service
     
     async def _cleanup_queue_service(self) -> None:
@@ -122,7 +145,8 @@ class CampaignService:
         self,
         campaign_id: str,
         tenant_id: Optional[str] = None,
-        priority_override: Optional[int] = None
+        priority_override: Optional[int] = None,
+        first_speaker: Literal["agent", "user"] = "agent",
     ) -> StartCampaignResult:
         """
         Start a campaign - enqueue all pending leads as dialer jobs.
@@ -203,12 +227,25 @@ class CampaignService:
             jobs_created = 0
             jobs_data = []
 
+            # Agent-name pool lives on the campaign — picked per-call so
+            # a single campaign can rotate through up to 3 names. The
+            # rotator itself is provider-agnostic (see
+            # app.services.scripts.prompts.pick_agent_name).
+            agent_names_pool: List[str] = []
+            script_cfg = campaign.get("script_config") if isinstance(campaign, dict) else None
+            if isinstance(script_cfg, dict):
+                raw_pool = script_cfg.get("agent_names") or []
+                if isinstance(raw_pool, list):
+                    agent_names_pool = [str(n).strip() for n in raw_pool if str(n).strip()]
+
             for lead in leads:
                 job, job_record = self._create_job_for_lead(
                     campaign_id=campaign_id,
                     lead=lead,
                     tenant_id=tenant_id,
-                    priority_override=priority_override
+                    priority_override=priority_override,
+                    first_speaker=first_speaker,
+                    agent_names_pool=agent_names_pool,
                 )
 
                 await queue_service.enqueue_job(job)
@@ -361,7 +398,9 @@ class CampaignService:
         campaign_id: str,
         lead: Dict[str, Any],
         tenant_id: str,
-        priority_override: Optional[int] = None
+        priority_override: Optional[int] = None,
+        first_speaker: Literal["agent", "user"] = "agent",
+        agent_names_pool: Optional[List[str]] = None,
     ) -> tuple:
         """
         Create a DialerJob and database record for a lead.
@@ -372,10 +411,24 @@ class CampaignService:
         job_id = str(uuid.uuid4())
         priority = self._calculate_priority(lead, priority_override)
         now = datetime.utcnow()
-        
+
         lead_id = str(lead["id"])
         tenant_id_str = str(tenant_id)
         phone_number = str(lead["phone_number"])
+
+        # Pick an agent name from the campaign pool — stays stable for
+        # the whole call. Fall back to None (legacy campaigns) so the
+        # session config can use its own default pool.
+        agent_name: Optional[str] = None
+        if agent_names_pool:
+            try:
+                from app.services.scripts.prompts import pick_agent_name
+                agent_name = pick_agent_name(agent_names_pool)
+            except Exception as exc:
+                logger.warning(
+                    "agent_name_pick_failed campaign=%s pool=%s err=%s",
+                    campaign_id, agent_names_pool, exc,
+                )
 
         job = DialerJob(
             job_id=job_id,
@@ -387,7 +440,9 @@ class CampaignService:
             status=JobStatus.PENDING,
             attempt_number=1,
             scheduled_at=now,
-            created_at=now
+            created_at=now,
+            first_speaker=first_speaker,
+            agent_name=agent_name,
         )
         
         job_record = {

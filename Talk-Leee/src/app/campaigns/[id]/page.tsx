@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { dashboardApi, Campaign, Contact } from "@/lib/dashboard-api";
 import { extendedApi, BulkImportResponse } from "@/lib/extended-api";
 import { ScriptCard } from "@/components/campaigns/script-card";
+import { Modal } from "@/components/ui/modal";
 import {
     ArrowLeft,
     Play,
@@ -73,6 +74,10 @@ export default function CampaignDetailPage() {
     const [csvUploading, setCsvUploading] = useState(false);
     const [csvResult, setCsvResult] = useState<BulkImportResponse | null>(null);
 
+    // First-speaker selector shown after the Start button is pressed
+    const [startModalOpen, setStartModalOpen] = useState(false);
+    const [firstSpeaker, setFirstSpeaker] = useState<"agent" | "user">("agent");
+
     // Add contact form
     const [showAddContact, setShowAddContact] = useState(false);
     const [contactForm, setContactForm] = useState({
@@ -107,10 +112,18 @@ export default function CampaignDetailPage() {
         }
     }, [campaignId, loadData]);
 
-    async function handleStart() {
+    function handleStartClick() {
+        // Default back to "agent" every time so a previous choice doesn't
+        // silently carry over into the next Start.
+        setFirstSpeaker("agent");
+        setStartModalOpen(true);
+    }
+
+    async function handleConfirmStart() {
         try {
             setActionLoading(true);
-            await dashboardApi.startCampaign(campaignId);
+            setStartModalOpen(false);
+            await dashboardApi.startCampaign(campaignId, { first_speaker: firstSpeaker });
             await loadData();
         } catch (err) {
             alert(err instanceof Error ? err.message : "Failed to start campaign");
@@ -221,7 +234,7 @@ export default function CampaignDetailPage() {
 
                         <div className="flex gap-2">
                             {campaign.status === "draft" || campaign.status === "paused" || campaign.status === "stopped" ? (
-                                <Button onClick={handleStart} disabled={actionLoading}>
+                                <Button onClick={handleStartClick} disabled={actionLoading}>
                                     <Play className="w-4 h-4" />
                                     Start
                                 </Button>
@@ -455,6 +468,81 @@ export default function CampaignDetailPage() {
                     <ScriptCard campaignId={campaignId} />
                 </div>
             ) : null}
+
+            <Modal
+                open={startModalOpen}
+                onOpenChange={setStartModalOpen}
+                title="Who speaks first?"
+                description="Pick who opens the conversation when the callee answers. The call pipeline pre-warms either way — this only controls whether the agent speaks an opening line or waits for the caller."
+                size="sm"
+                footer={
+                    <div className="flex justify-end gap-2">
+                        <Button
+                            variant="outline"
+                            onClick={() => setStartModalOpen(false)}
+                            disabled={actionLoading}
+                        >
+                            Cancel
+                        </Button>
+                        <Button onClick={handleConfirmStart} disabled={actionLoading}>
+                            {actionLoading ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                                <Play className="w-4 h-4" />
+                            )}
+                            Start campaign
+                        </Button>
+                    </div>
+                }
+            >
+                <div className="space-y-2">
+                    <label
+                        className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
+                            firstSpeaker === "agent"
+                                ? "border-primary bg-primary/5"
+                                : "border-border hover:bg-muted/40"
+                        }`}
+                    >
+                        <input
+                            type="radio"
+                            name="first-speaker"
+                            value="agent"
+                            checked={firstSpeaker === "agent"}
+                            onChange={() => setFirstSpeaker("agent")}
+                            className="mt-1"
+                        />
+                        <div>
+                            <div className="text-sm font-medium text-foreground">AI agent speaks first</div>
+                            <div className="text-xs text-muted-foreground">
+                                Agent plays a pre-synthesized greeting the instant the callee picks up. Best for cold outreach.
+                            </div>
+                        </div>
+                    </label>
+
+                    <label
+                        className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
+                            firstSpeaker === "user"
+                                ? "border-primary bg-primary/5"
+                                : "border-border hover:bg-muted/40"
+                        }`}
+                    >
+                        <input
+                            type="radio"
+                            name="first-speaker"
+                            value="user"
+                            checked={firstSpeaker === "user"}
+                            onChange={() => setFirstSpeaker("user")}
+                            className="mt-1"
+                        />
+                        <div>
+                            <div className="text-sm font-medium text-foreground">Caller speaks first</div>
+                            <div className="text-xs text-muted-foreground">
+                                Agent waits for the callee to say &ldquo;hello&rdquo; before responding. Feels more natural on warm lists.
+                            </div>
+                        </div>
+                    </label>
+                </div>
+            </Modal>
         </DashboardLayout>
     );
 }

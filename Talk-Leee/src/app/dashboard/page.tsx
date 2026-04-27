@@ -887,8 +887,12 @@ export default function DashboardPage() {
             setCampaigns(campaignsData.campaigns);
             setSeries(analytics.series);
         } catch (err) {
+            // 401 handling is centralised in the http-client (it clears
+            // the token and redirects to /auth/login). We deliberately
+            // do NOT set an error message here — the page is about to
+            // unmount due to the redirect, and a brief red banner during
+            // the transition is the bug the unification fixed.
             if (err instanceof ApiClientError && err.status === 401) {
-                setError("Your session expired. Please sign in again.");
                 return;
             }
             setError(err instanceof Error ? err.message : "Failed to load dashboard");

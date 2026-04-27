@@ -3,6 +3,24 @@ Shared Ask AI session config.
 
 Keeps the live Ask AI websocket endpoint and provider prewarm path on the
 same VoiceSessionConfig so turn-taking settings cannot drift.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DO NOT MIX WITH THE CAMPAIGN PROMPT COMPOSER.
+
+This module is for Ask AI only — the Talky.ai product's public web
+demo receptionist ("Hi, you've reached the Talk-Lee receptionist...").
+It uses a fixed, short prompt with product-info keyword injection.
+
+Campaign outbound telephony (lead gen / support / receptionist role)
+uses an entirely different code path:
+  - entry:    telephony_session_config.build_telephony_session_config()
+  - prompts:  app.services.scripts.prompts (guardrails + personas + slots)
+
+Do not import compose_prompt or the PERSONAS registry here, and do not
+import ASK_AI_SYSTEM_PROMPT in the telephony path. The two systems
+serve different audiences (product demo vs real customer campaigns)
+and their prompts intentionally differ in tone, length, and structure.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
 from app.domain.models.agent_config import (

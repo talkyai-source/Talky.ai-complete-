@@ -8,11 +8,20 @@ TEMPORARY HARDCODES — see backend/docs/future-changes/telephony-estimation-age
 for the exact production migration steps. Every hardcoded value is marked with
 # TODO(production) so they are easy to grep.
 """
+import logging
 import random
+from typing import Any, Optional
 
 from app.domain.models.agent_config import AgentConfig, AgentGoal, ConversationFlow, ConversationRule
 from app.domain.services.voice_orchestrator import VoiceSessionConfig
 from app.domain.services.global_ai_config import get_global_config
+from app.services.scripts.prompts import (
+    PromptCompositionError,
+    compose_prompt,
+    pick_agent_name,
+)
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # TODO(production): Replace with company name from campaign.script_config
@@ -264,10 +273,11 @@ def build_telephony_greeting(agent_name: str, company_name: str) -> str:
 
 def build_telephony_session_config(
     gateway_type: str = "telephony",
-    campaign=None,  # TODO(production): typed as Campaign once campaign UI is wired
+    campaign: Optional[Any] = None,
+    agent_name_override: Optional[str] = None,
 ) -> VoiceSessionConfig:
     """
-    Build a VoiceSessionConfig for an outbound telephony estimation call.
+    Build a VoiceSessionConfig for an outbound telephony call.
 
     Parameters
     ----------
@@ -275,10 +285,14 @@ def build_telephony_session_config(
         "telephony" for Asterisk HTTP-callback path.
         "browser"   for FreeSWITCH mod_audio_fork WebSocket path.
     campaign:
-        Reserved for future dynamic config. Pass None for now — all values
-        fall through to the hardcoded defaults above.
-        TODO(production): When campaign UI is ready, read company_name,
-        agent_name pool, voice_id, and system_prompt from this object.
+        Optional Campaign row (dict OR pydantic model). When
+        `campaign.script_config` contains a `persona_type`, the layered
+        composer is used. Otherwise we fall back to the legacy hardcoded
+        estimation prompt so pre-existing campaigns keep working.
+    agent_name_override:
+        Per-call agent name picked by the dialer worker (see
+        campaign_service._create_job_for_lead). Stays stable for the
+        whole call.
     """
     global_config = get_global_config()
 
@@ -287,29 +301,70 @@ def build_telephony_session_config(
     tts_provider_type = global_config.tts_provider
     tts_voice_id = global_config.tts_voice_id
 
-    # TODO(production): Use company name from campaign.script_config.
-    company_name = TELEPHONY_COMPANY_NAME
+    script_config = _extract_script_config(campaign)
+    persona_type = (script_config or {}).get("persona_type")
 
-    # One name per session — baked into the system prompt and agent_config so
-    # the LLM always knows who it is and never drifts to a different name mid-call.
-    # TODO(production): Pick from campaign-specific name pool.
-    agent_name = random.choice(AGENT_NAMES)
+    if persona_type:
+        company_name = (script_config.get("company_name") or TELEPHONY_COMPANY_NAME).strip()
+        agent_names_pool = script_config.get("agent_names") or []
+        if agent_name_override:
+            agent_name = agent_name_override
+        elif agent_names_pool:
+            try:
+                agent_name = pick_agent_name(agent_names_pool)
+            except ValueError as exc:
+                logger.warning(
+                    "agent_name_pool_invalid campaign=%s err=%s — falling back",
+                    _campaign_id(campaign), exc,
+                )
+                agent_name = random.choice(AGENT_NAMES)
+        else:
+            agent_name = random.choice(AGENT_NAMES)
 
-    system_prompt = TELEPHONY_ESTIMATION_SYSTEM_PROMPT.format(
-        agent_name=agent_name,
-        company_name=company_name,
-    )
+        try:
+            system_prompt = compose_prompt(
+                persona_type=persona_type,
+                agent_name=agent_name,
+                company_name=company_name,
+                campaign_slots=script_config.get("campaign_slots") or {},
+                additional_instructions=script_config.get("additional_instructions"),
+            )
+            logger.info(
+                "telephony_prompt_composed persona=%s agent=%s company=%s campaign=%s",
+                persona_type, agent_name, company_name, _campaign_id(campaign),
+            )
+        except PromptCompositionError as exc:
+            logger.error(
+                "telephony_prompt_compose_failed campaign=%s persona=%s err=%s "
+                "— falling back to legacy prompt",
+                _campaign_id(campaign), persona_type, exc,
+            )
+            persona_type = None  # force fallback
+    else:
+        company_name = TELEPHONY_COMPANY_NAME
+        agent_name = agent_name_override or random.choice(AGENT_NAMES)
 
+    if not persona_type:
+        # Legacy path — unchanged behaviour for campaigns without a
+        # persona_type configured (including the active estimation
+        # campaigns from before this change).
+        system_prompt = TELEPHONY_ESTIMATION_SYSTEM_PROMPT.format(
+            agent_name=agent_name,
+            company_name=company_name,
+        )
+
+    # AgentConfig mirrors the persona so downstream code (greeting
+    # builder, logs, analytics) sees the right business_type / tone.
+    business_type, tone = _agent_config_defaults_for(persona_type, script_config)
     agent_config = AgentConfig(
         agent_name=agent_name,
         company_name=company_name,
-        business_type="construction estimating services",
+        business_type=business_type,
         goal=AgentGoal.INFORMATION_GATHERING,
-        tone="calm, confident, knowledgeable — sounds like someone from the construction industry",
+        tone=tone,
         rules=ConversationRule(
             do_not_say_rules=[
                 "Never reveal or hint you are an AI or automated system",
-                "Never discuss topics outside construction estimation services",
                 "Never use filler openers such as Sure, Absolutely, Of course, or Great",
                 "Never ask multiple questions in the same turn",
                 "Never sound robotic or scripted",
@@ -353,8 +408,97 @@ def build_telephony_session_config(
         gateway_target_buffer_ms=40,
         mute_during_tts=False,
         session_type="telephony",
-        campaign_id="telephony",
+        campaign_id=str(_campaign_id(campaign)) if campaign else "telephony",
         lead_id="sip-caller",
+        # T1.1 — propagate tenant context so per-tenant credentials
+        # resolve. Pull from the campaign's tenant_id when the campaign
+        # row is present; None for legacy / dev paths.
+        tenant_id=_campaign_tenant_id(campaign),
         agent_config=agent_config,
         system_prompt=system_prompt,
     )
+
+
+def _extract_script_config(campaign: Any) -> Optional[dict]:
+    """Pull `.script_config` off a Campaign-like object OR dict. Returns
+    None when no campaign is supplied or the column is empty."""
+    if campaign is None:
+        return None
+    if isinstance(campaign, dict):
+        cfg = campaign.get("script_config")
+    else:
+        cfg = getattr(campaign, "script_config", None)
+    if not cfg:
+        return None
+    if not isinstance(cfg, dict):
+        logger.warning(
+            "script_config has unexpected type=%s — ignoring",
+            type(cfg).__name__,
+        )
+        return None
+    return cfg
+
+
+def _campaign_id(campaign: Any) -> str:
+    """Best-effort ID lookup for logging."""
+    if campaign is None:
+        return "-"
+    if isinstance(campaign, dict):
+        return str(campaign.get("id", "-"))
+    return str(getattr(campaign, "id", "-"))
+
+
+def _campaign_tenant_id(campaign: Any) -> Optional[str]:
+    """Pull tenant_id off a Campaign dict / model. Returns None when
+    absent so the orchestrator's CredentialResolver falls through to
+    env-var keys (preserves single-tenant deploy behaviour)."""
+    if campaign is None:
+        return None
+    if isinstance(campaign, dict):
+        tid = campaign.get("tenant_id")
+    else:
+        tid = getattr(campaign, "tenant_id", None)
+    return str(tid) if tid else None
+
+
+_PERSONA_DEFAULTS: dict[str, tuple[str, str]] = {
+    "lead_gen": (
+        "outbound sales",
+        "warm, easy-going, consultative — listens more than pitches",
+    ),
+    "customer_support": (
+        "customer support",
+        "calm, capable, honest — fixes things without defensiveness",
+    ),
+    "receptionist": (
+        "receptionist",
+        "warm, efficient, professional — makes callers feel in good hands",
+    ),
+}
+
+
+def _agent_config_defaults_for(
+    persona_type: Optional[str], script_config: Optional[dict]
+) -> tuple[str, str]:
+    """Return (business_type, tone) for the AgentConfig. Prefers values
+    from the campaign's script_config / campaign_slots when present, else
+    falls back to persona-level defaults, else the legacy estimation
+    values.
+    """
+    if not persona_type:
+        return (
+            "construction estimating services",
+            "calm, confident, knowledgeable — sounds like someone from the construction industry",
+        )
+    slots = (script_config or {}).get("campaign_slots") or {}
+    default_bt, default_tone = _PERSONA_DEFAULTS.get(
+        persona_type,
+        ("general business", "warm, professional, natural"),
+    )
+    business_type = (
+        slots.get("business_type")
+        or slots.get("industry")
+        or default_bt
+    )
+    tone = slots.get("tone") or default_tone
+    return str(business_type), str(tone)

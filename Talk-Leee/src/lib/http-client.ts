@@ -112,6 +112,48 @@ function defaultMessageForStatus(status?: number) {
     return "Request failed";
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Session-expired handler (single source of truth for 401 redirects)
+//
+// Before this, every page that called the API directly via fetch / a service
+// had its own try/catch with a per-page 401 check. Some pages redirected,
+// others showed a red error message and stayed put — inconsistent, and a
+// "still functional but expired" call was the result. The fix is to handle
+// the redirect ONCE, at the http-client layer, so every consumer (react-
+// query, direct fetch wrappers, manual try/catch) gets the same behaviour.
+//
+// The handler is module-level + idempotent. Multiple parallel requests
+// hitting 401 simultaneously trigger exactly one redirect.
+// ──────────────────────────────────────────────────────────────────────────
+
+let _sessionExpiredHandler: (() => void) | null = null;
+let _sessionExpiredFired = false;
+
+export function setSessionExpiredHandler(fn: (() => void) | null) {
+    _sessionExpiredHandler = fn;
+    // Reset the fired latch so a logout → login round-trip can re-arm.
+    _sessionExpiredFired = false;
+}
+
+/**
+ * Reset the "already fired" latch. Call after a successful login so the
+ * next 401 fires the redirect again.
+ */
+export function resetSessionExpiredLatch() {
+    _sessionExpiredFired = false;
+}
+
+function fireSessionExpired() {
+    if (_sessionExpiredFired) return;
+    _sessionExpiredFired = true;
+    if (!_sessionExpiredHandler) return;
+    try {
+        _sessionExpiredHandler();
+    } catch {
+        // Handler errors must never break the request pipeline.
+    }
+}
+
 function defaultTokenStorage(): TokenStorage {
     let mem: string | null = null;
     const key = "talklee.auth.token";
@@ -271,6 +313,22 @@ export function createHttpClient(config: HttpClientConfig) {
                         : res.status >= 500
                           ? "server_error"
                           : "http_error";
+
+            // Single source of truth for token expiry — clear the
+            // stored token, then fire the global session-expired
+            // handler so EVERY caller path (react-query, manual
+            // try/catch, fire-and-forget services) gets the same
+            // redirect-to-login behaviour. The handler is
+            // idempotent — parallel requests racing on 401 trigger
+            // exactly one redirect.
+            if (res.status === 401) {
+                try {
+                    setToken(null);
+                } catch {
+                    // ignore — clearing storage must not derail the throw
+                }
+                fireSessionExpired();
+            }
 
             throw new ApiClientError({
                 status: res.status,

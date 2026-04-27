@@ -54,10 +54,25 @@ async def lifespan(app: FastAPI):
       2. OTel flush (must come last — ensures all spans are exported)
     """
     from app.core.container import get_container
+    from app.core.prod_gate import enforce_production_gate
+    from app.core.sentry_init import init_sentry
     from app.core.telemetry import setup_telemetry, shutdown_telemetry
 
     environment = os.getenv("ENVIRONMENT", "development")
     strict_validation = environment == "production"
+
+    # ── 0. Production gate (T0.2 + T0.3) ─────────────────────────
+    # Refuse to boot in production if any obvious fatal misconfig is
+    # present — dev-bypass flags still set, default PBX passwords,
+    # missing JWT_SECRET, mock-mode billing, etc. Fail LOUD before the
+    # service container brings Redis/DB up; no silent "mostly working"
+    # production deploys.
+    enforce_production_gate()
+
+    # ── 0.5. Sentry (T2.3) ───────────────────────────────────────
+    # Before FastAPI middleware / OTEL so Sentry's integrations see
+    # every request. No-op when SENTRY_DSN is unset.
+    init_sentry()
 
     # ── 1. OpenTelemetry ─────────────────────────────────────────
     # Must be set up BEFORE the container so that asyncpg and Redis
@@ -75,6 +90,34 @@ async def lifespan(app: FastAPI):
             logger.error(f"Container startup failed: {e}")
             raise
         logger.warning(f"Container startup warning: {e}")
+
+    # ── 2.5. Redis durability probe (T2.4) ──────────────────────
+    # Loud WARN in prod when both AOF and RDB are off — dialer jobs
+    # would vanish on any Redis restart. Non-fatal: an operator might
+    # intentionally be running a cache-only Redis, in which case they
+    # can set the env.
+    try:
+        from app.core.redis_durability import probe_redis_durability
+        redis_client = getattr(container, "redis", None)
+        durability = await probe_redis_durability(redis_client)
+        app.state.redis_durability = durability
+    except Exception as exc:
+        logger.warning("redis_durability_probe_raised err=%s", exc)
+
+    # ── 2.6. Legacy-campaign audit (T2.6) ───────────────────────
+    # Count campaigns still falling through to the hardcoded
+    # estimation prompt. Loud WARN in prod when any are present so
+    # operators can migrate before we delete the fallback.
+    try:
+        from app.core.legacy_campaign_audit import (
+            audit_legacy_campaigns,
+            log_audit_summary,
+        )
+        result = await audit_legacy_campaigns(getattr(container, "db_pool", None))
+        log_audit_summary(result)
+        app.state.legacy_campaign_audit = result
+    except Exception as exc:
+        logger.debug("legacy_campaign_audit_raised err=%s", exc)
 
     # ── 3. Provider validation ────────────────────────────────────
     try:

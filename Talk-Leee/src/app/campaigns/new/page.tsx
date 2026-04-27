@@ -6,7 +6,15 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { dashboardApi } from "@/lib/dashboard-api";
+import { dashboardApi, PersonaType } from "@/lib/dashboard-api";
+import {
+    PERSONAS,
+    PersonaSpec,
+    SlotDef,
+    parseAgentNames,
+    parseKvList,
+    parseList,
+} from "@/lib/campaign-personas";
 import { aiOptionsApi, AIProviderConfig, VoiceInfo } from "@/lib/ai-options-api";
 import { captureException } from "@/lib/monitoring";
 import { ArrowLeft, Loader2, Play, RefreshCw, Volume2, Check } from "lucide-react";
@@ -29,6 +37,51 @@ export default function NewCampaignPage() {
         voice_id: "",
         goal: "",
     });
+
+    // Persona configuration. Drives the layered system prompt on the
+    // backend — one of three personas + campaign-level slot fields +
+    // 1-3 agent names rotated per call.
+    const [personaType, setPersonaType] = useState<PersonaType>("lead_gen");
+    const [companyName, setCompanyName] = useState("");
+    const [agentNamesRaw, setAgentNamesRaw] = useState("");
+    const [slotValues, setSlotValues] = useState<Record<string, string>>({});
+
+    const persona: PersonaSpec = PERSONAS.find((p) => p.value === personaType) ?? PERSONAS[0];
+
+    function setSlot(key: string, value: string) {
+        setSlotValues((prev) => ({ ...prev, [key]: value }));
+    }
+
+    // Reset slot values when persona changes — different personas need
+    // different fields, and leftover values would confuse the backend.
+    function changePersona(next: PersonaType) {
+        setPersonaType(next);
+        setSlotValues({});
+    }
+
+    function buildCampaignSlots(): Record<string, unknown> {
+        const out: Record<string, unknown> = {};
+        for (const slot of persona.slots) {
+            const raw = (slotValues[slot.key] ?? "").trim();
+            if (!raw) continue;
+            if (slot.kind === "list") {
+                out[slot.key] = parseList(raw);
+            } else if (slot.kind === "kv-list") {
+                out[slot.key] = parseKvList(raw);
+            } else {
+                out[slot.key] = raw;
+            }
+        }
+        return out;
+    }
+
+    function missingRequiredSlots(): SlotDef[] {
+        return persona.slots.filter((slot) => {
+            if (!slot.required) return false;
+            const raw = (slotValues[slot.key] ?? "").trim();
+            return !raw;
+        });
+    }
 
     // Fetch curated voices from AI Options
     useEffect(() => {
@@ -162,6 +215,21 @@ export default function NewCampaignPage() {
             setError("Select a voice from the active global TTS provider before creating a campaign.");
             return;
         }
+        const agentNames = parseAgentNames(agentNamesRaw);
+        if (agentNames.length === 0) {
+            setError("Add at least one agent name (up to three — we rotate per call).");
+            return;
+        }
+        if (!companyName.trim()) {
+            setError("Add the company or business name your agent represents.");
+            return;
+        }
+        const missing = missingRequiredSlots();
+        if (missing.length > 0) {
+            setError(`Missing required fields: ${missing.map((s) => s.label).join(", ")}`);
+            return;
+        }
+
         setLoading(true);
         setError("");
 
@@ -172,6 +240,10 @@ export default function NewCampaignPage() {
                 system_prompt: formData.system_prompt,
                 voice_id: formData.voice_id,
                 goal: formData.goal || undefined,
+                persona_type: personaType,
+                company_name: companyName.trim(),
+                agent_names: agentNames,
+                campaign_slots: buildCampaignSlots(),
             });
 
             router.push(`/campaigns/${result.campaign.id}`);
@@ -345,22 +417,124 @@ export default function NewCampaignPage() {
                             )}
                         </div>
 
-                        {/* System Prompt */}
+                        {/* Persona picker — three roles sharing the same generic guardrails. */}
                         <div className="space-y-2">
-                            <Label htmlFor="system_prompt">AI Instructions</Label>
+                            <Label>Agent role</Label>
+                            <p className="text-xs text-muted-foreground">
+                                Each role shares our generic voice guardrails (pacing, phrasing, interruption handling). You only fill in the business-specific details.
+                            </p>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                {PERSONAS.map((p) => (
+                                    <label
+                                        key={p.value}
+                                        className={`flex cursor-pointer flex-col gap-1 rounded-lg border p-3 transition-colors ${
+                                            personaType === p.value
+                                                ? "border-emerald-500 bg-emerald-500/10"
+                                                : "border-border bg-muted/30 hover:bg-muted/40"
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="radio"
+                                                name="persona_type"
+                                                value={p.value}
+                                                checked={personaType === p.value}
+                                                onChange={() => changePersona(p.value)}
+                                                disabled={loading}
+                                                className="mt-0"
+                                            />
+                                            <span className="text-sm font-medium text-foreground">{p.title}</span>
+                                        </div>
+                                        <span className="text-xs text-muted-foreground">{p.summary}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Company name + agent-name pool. */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <Label htmlFor="company_name">Company / business name</Label>
+                                <Input
+                                    id="company_name"
+                                    name="company_name"
+                                    placeholder="The name your agent says on the call"
+                                    value={companyName}
+                                    onChange={(e) => setCompanyName(e.target.value)}
+                                    required
+                                    disabled={loading}
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="agent_names">Agent names (up to 3)</Label>
+                                <Input
+                                    id="agent_names"
+                                    name="agent_names"
+                                    placeholder="Alex, Sam, Jordan"
+                                    value={agentNamesRaw}
+                                    onChange={(e) => setAgentNamesRaw(e.target.value)}
+                                    required
+                                    disabled={loading}
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                    Comma-separated. One is picked per call — supply 2–3 to rotate.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Persona-specific slot fields. */}
+                        <div className="space-y-4">
+                            <div className="text-sm font-medium text-foreground">
+                                {persona.title} — details
+                            </div>
+                            {persona.slots.map((slot) => (
+                                <div key={slot.key} className="space-y-2">
+                                    <Label htmlFor={`slot-${slot.key}`}>
+                                        {slot.label}
+                                        {slot.required ? <span className="text-red-400"> *</span> : null}
+                                    </Label>
+                                    {slot.kind === "textarea" || slot.kind === "list" || slot.kind === "kv-list" ? (
+                                        <textarea
+                                            id={`slot-${slot.key}`}
+                                            placeholder={slot.placeholder}
+                                            value={slotValues[slot.key] ?? ""}
+                                            onChange={(e) => setSlot(slot.key, e.target.value)}
+                                            disabled={loading}
+                                            rows={slot.kind === "textarea" ? 3 : 4}
+                                            className="flex w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
+                                        />
+                                    ) : (
+                                        <Input
+                                            id={`slot-${slot.key}`}
+                                            placeholder={slot.placeholder}
+                                            value={slotValues[slot.key] ?? ""}
+                                            onChange={(e) => setSlot(slot.key, e.target.value)}
+                                            disabled={loading}
+                                        />
+                                    )}
+                                    {slot.help ? (
+                                        <p className="text-xs text-muted-foreground">{slot.help}</p>
+                                    ) : null}
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Freeform "additional instructions" — appended after the persona block. */}
+                        <div className="space-y-2">
+                            <Label htmlFor="system_prompt">Additional instructions</Label>
                             <textarea
                                 id="system_prompt"
                                 name="system_prompt"
-                                placeholder="You are a friendly sales assistant calling on behalf of Acme Corp. Your goal is to schedule a product demo..."
+                                placeholder="Anything specific to this campaign that the generic rules and persona don't cover."
                                 value={formData.system_prompt}
                                 onChange={handleChange}
                                 required
                                 disabled={loading}
-                                rows={6}
+                                rows={4}
                                 className="flex w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
                             />
                             <p className="text-xs text-muted-foreground">
-                                Describe how the AI should behave during calls. Be specific about tone, objectives, and key talking points.
+                                Layered on top of the generic guardrails and the persona you picked. Optional but recommended for campaign-specific callouts.
                             </p>
                         </div>
 

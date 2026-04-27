@@ -328,7 +328,12 @@ class DialerWorker:
             f"&caller_id={caller_id}"
             f"&tenant_id={job.tenant_id}"
             f"&campaign_id={job.campaign_id}"
+            f"&first_speaker={job.first_speaker}"
         )
+        if job.agent_name:
+            # urlencode to be safe — names can contain spaces or accents.
+            from urllib.parse import quote
+            url += f"&agent_name={quote(job.agent_name, safe='')}"
 
         try:
             headers = {"Content-Type": "application/json"}
