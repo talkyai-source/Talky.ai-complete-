@@ -1,0 +1,251 @@
+Talk-lee Billing Layer Plan
+Production-grade implementation blueprint aligned to Session Layer, Voice Pipeline, White-label hierarchy, and Payment Provider synchronization
+
+1. Purpose
+This document defines the complete Billing Layer for Talk-lee. The billing layer decides what plan was purchased, what was actually used, what exceeded the plan, and what must be charged. For Talk-lee, billing truth must come from backend usage events and session closure, not from the frontend.
+2. System Position
+ 
+The billing layer consumes call/session events from the session layer and combines them with plan limits and payment-provider state. It must remain authoritative, transparent, and replay-safe.
+3. What Billing Must Cover
+Area	Simple Meaning	Why It Matters
+Plan Definition	What package the customer or partner bought	Base billing truth
+Included Usage	What is included in that plan	Avoids disputes
+Usage Ledger	Immutable record of actual usage	Source of billing trust
+Minutes Tracking	Billable duration of calls	Main voice billing unit
+Concurrent Calls	Peak or active concurrency used	Important for capacity pricing
+Overage Logic	Extra usage after included allowance	Prevents revenue leakage
+Invoice Data	Structured billing output	Needed for invoices and summaries
+Payment Status	Paid / unpaid / overdue	Drives access control
+Webhook Sync	Keep app state aligned with payment provider	Prevents billing mismatch
+Adjustments / Credits	Corrections when needed	Customer trust
+Partner Aggregation	Usage grouped under white-label partner	Needed for reseller billing
+Tenant Breakdown	Usage grouped per customer/sub-tenant	Transparency and reporting
+4. Coverage Priorities
+ 
+5. Billing Model for Talk-lee
+Recommended billable dimensions:
+•	Base subscription fee
+•	Included minutes per billing cycle
+•	Included concurrent calls
+•	Overage minutes
+•	Optional overage concurrency or hard cap
+•	Optional add-ons: additional sub-tenants, advanced analytics, premium voices, white-label branding
+6. Billing Truth: Usage Ledger
+The usage ledger must be immutable and written from session lifecycle events. Minimum fields:
+•	ledger_id
+•	session_id
+•	partner_id
+•	tenant_id
+•	plan_id
+•	call_start_time
+•	answer_time
+•	end_time
+•	billable_duration_seconds
+•	billable_minutes
+•	peak_concurrency_sample
+•	transfer_flag
+•	failure_reason
+•	created_at
+7. Billable Event Rules
+Decide and encode these rules clearly:
+1.	When does billing start — ring start, answer time, or media start?
+2.	How are minutes rounded — exact seconds, per-second, or per-minute rounding?
+3.	Do failed calls count as billable or not?
+4.	Do transfers create one billable record or multiple linked records?
+5.	What happens when included minutes end — hard stop or overage?
+6.	What happens when concurrency limit is reached — reject or overage?
+8. Billing Data / Tables
+•	plans
+•	plan_limits
+•	tenant_plan
+•	partner_plan
+•	usage_ledger
+•	usage_summary_daily
+•	usage_summary_monthly
+•	invoices
+•	invoice_line_items
+•	payments
+•	billing_events
+9. Payment Provider Integration
+Recommended provider: Stripe (or another hosted processor) for subscriptions, invoices, and payment state.
+•	Do not store raw card numbers.
+•	Verify webhook signatures.
+•	Process webhooks idempotently.
+•	Store invoice IDs and payment status references.
+•	Map provider subscription state to Talk-lee billing state.
+10. Billing States
+Recommended states:
+•	active
+•	trialing
+•	past_due
+•	grace_period
+•	suspended
+•	canceled
+11. White-label Billing Logic
+For white-label, the system must support:
+•	Partner-level aggregated usage
+•	Sub-tenant/customer usage breakdown
+•	Partner plan enforcement and overage calculation
+•	Optional internal margin tracking (later)
+•	Admin visibility into every partner’s usage and invoice state
+12. Required Endpoints / Services
+•	POST /billing/webhooks/provider
+•	GET /billing/plan
+•	GET /billing/usage/summary
+•	GET /billing/invoices
+•	GET /billing/invoices/{id}
+•	POST /billing/adjustment
+•	POST /billing/recalculate
+13. Invoice Content
+Each invoice should make the billing easy to understand:
+•	Plan name
+•	Billing period
+•	Included minutes
+•	Used minutes
+•	Overage minutes
+•	Included concurrent calls
+•	Peak concurrent calls observed
+•	Extra charges / adjustments
+•	Final amount due
+•	Payment status
+14. Implementation Order
+7.	Define plans and included usage rules
+8.	Build immutable usage ledger from session events
+9.	Build daily / monthly usage aggregation
+10.	Implement overage calculations
+11.	Create invoice-ready summaries
+12.	Integrate payment provider and verify webhooks
+13.	Add failed payment handling and grace periods
+14.	Expose admin / partner billing views
+15. Acceptance Criteria
+•	Every completed call produces a correct usage ledger entry.
+•	Minute totals and concurrency totals are reproducible from backend data.
+•	Invoice summaries match ledger totals.
+•	Payment provider webhook state matches platform billing state.
+•	Partner billing view and admin billing view show correct aggregated numbers.
+•	Over-limit usage is either blocked or charged according to the chosen rule set.
+16. Developer Note
+This billing layer must never depend on frontend calculations. The source of truth is: session events → usage ledger → aggregation → invoice summary. That is what gives the platform billing trust.
+
+
+
+
+✅ DAY 1 — Core Authentication
+Implement:
+•	password login
+•	bcrypt / Argon2 hashing
+•	login/logout APIs
+•	session creation (DB-backed)
+Add:
+•	users
+•	sessions
+Also:
+•	login rate limit
+•	failed login tracking
+________________________________________
+✅ DAY 2 — MFA (TOTP)
+Implement:
+•	Google Authenticator / Authy compatible MFA
+•	enable/disable MFA
+•	verify MFA on login
+Tables:
+•	user_mfa
+•	recovery_codes
+________________________________________
+✅ DAY 3 — Passkeys (WebAuthn)
+Implement:
+•	passkey registration
+•	passkey login
+Tables:
+•	user_passkeys
+Also:
+•	fallback login (password + MFA)
+________________________________________
+✅ DAY 4 — Roles + Tenant Isolation
+Implement:
+Roles:
+•	platform_admin
+•	partner_admin
+•	tenant_admin
+•	user
+•	readonly
+Tables:
+•	tenants
+•	tenant_users
+•	roles
+•	permissions
+Add middleware:
+•	auth check
+•	role check
+•	tenant check
+________________________________________
+✅ DAY 5 — Session Security + Device Control
+Implement:
+•	session expiration
+•	idle timeout
+•	session rotation
+•	logout all sessions
+•	device/session list (optional but recommended)
+Add:
+•	session binding (IP / device)
+________________________________________
+✅ DAY 6 — API Security + Rate Limiting
+Implement:
+Rate limiting:
+•	per user
+•	per tenant
+•	per IP
+API protection:
+•	token validation
+•	request validation
+•	payload sanitization
+Add:
+•	signed webhook verification
+•	idempotency support
+________________________________________
+✅ DAY 7 — Voice Security + Abuse Protection
+Implement:
+Before call start:
+check:
+- tenant active?
+- partner active?
+- concurrency limit?
+- rate limit?
+- allowed feature?
+Add:
+•	call_guard()
+Tables:
+•	tenant_limits
+•	partner_limits
+Add:
+•	call rate limiting
+•	concurrency enforcement
+•	abuse detection (basic)
+________________________________________
+ DAY 8 — Audit Logs + Suspension + Secrets
+Implement:
+Audit logs:
+•	login events
+•	role changes
+•	billing changes
+•	suspension events
+Tables:
+•	audit_logs
+•	security_events
+Add:
+•	partner suspension
+•	tenant suspension
+•	instant block propagation
+Secrets:
+•	central env management
+•	no hardcoded secrets
+________________________________________
+✅ FINAL SECURITY OUTPUT
+✔ Password + MFA + Passkeys
+✔ RBAC + tenant isolation
+✔ session protection
+✔ API security
+✔ voice abuse control
+✔ audit logs
+✔ suspension system
+

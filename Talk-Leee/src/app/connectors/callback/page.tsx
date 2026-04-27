@@ -44,7 +44,7 @@ function ConnectorsCallbackInner() {
         let deliveredToOpener = false;
         try {
             if (window.opener && !window.opener.closed) {
-                window.opener.postMessage(payload, window.location.origin);
+                window.opener.postMessage(payload, "*");
                 deliveredToOpener = true;
             }
         } catch {
@@ -89,7 +89,7 @@ function ConnectorsCallbackInner() {
                     <div className={parsed.ok ? "text-sm text-emerald-700" : "text-sm text-red-600"}>{parsed.message}</div>
                     <div className="flex flex-wrap items-center justify-between gap-2">
                         <Button asChild>
-                            <Link href="/connectors">Back to Connectors</Link>
+                            <Link href="/settings/connectors">Back to Connectors</Link>
                         </Button>
                         {canClose ? (
                             <Button variant="ghost" onClick={() => window.close()}>
@@ -117,7 +117,7 @@ export default function ConnectorsCallbackPage() {
                             <div className="h-4 w-2/3 animate-pulse rounded bg-foreground/10" />
                             <div className="flex flex-wrap items-center justify-between gap-2">
                                 <Button asChild>
-                                    <Link href="/connectors">Back to Connectors</Link>
+                                    <Link href="/settings/connectors">Back to Connectors</Link>
                                 </Button>
                             </div>
                         </CardContent>

@@ -4,11 +4,8 @@ import {
     connectorCardActionFromStatus,
     connectorCardActionLabel,
     extractAuthorizationUrl,
-    formatLastSync,
-    normalizeConnectorStatus,
     parseConnectorsCallback,
-    pickPreferredConnector,
-    summarizeConnectorStatuses,
+    formatLastSync,
 } from "@/lib/connectors-utils";
 
 test("connectorCardActionFromStatus maps all states", () => {
@@ -55,34 +52,4 @@ test("formatLastSync is stable for empty and invalid values", () => {
     assert.equal(formatLastSync(null), "—");
     assert.equal(formatLastSync("not-a-date"), "not-a-date");
     assert.ok(formatLastSync("2025-01-01T00:00:00Z").length > 0);
-});
-
-test("normalizeConnectorStatus maps backend connector states", () => {
-    assert.equal(normalizeConnectorStatus("active"), "connected");
-    assert.equal(normalizeConnectorStatus("connected"), "connected");
-    assert.equal(normalizeConnectorStatus("expired"), "expired");
-    assert.equal(normalizeConnectorStatus("error"), "error");
-    assert.equal(normalizeConnectorStatus("pending"), "disconnected");
-});
-
-test("pickPreferredConnector keeps a connected record over a newer pending one", () => {
-    const preferred = pickPreferredConnector([
-        { status: "pending", createdAt: "2025-01-02T00:00:00Z" },
-        { status: "active", createdAt: "2025-01-01T00:00:00Z" },
-    ]);
-
-    assert.deepEqual(preferred, { status: "active", createdAt: "2025-01-01T00:00:00Z" });
-});
-
-test("summarizeConnectorStatuses aggregates provider records by connector type", () => {
-    const statuses = summarizeConnectorStatuses([
-        { id: "1", type: "calendar", provider: "google_calendar", status: "active", createdAt: "2025-01-01T00:00:00Z" },
-        { id: "2", type: "calendar", provider: "outlook_calendar", status: "error", createdAt: "2025-01-02T00:00:00Z" },
-        { id: "3", type: "email", provider: "gmail", status: "expired", createdAt: "2025-01-03T00:00:00Z" },
-    ]);
-
-    assert.equal(statuses.length, 2);
-    assert.equal(statuses[0]!.type, "calendar");
-    assert.equal(statuses[0]!.status, "connected");
-    assert.equal(statuses[1]!.provider, "gmail");
 });

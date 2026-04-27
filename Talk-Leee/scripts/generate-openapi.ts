@@ -122,11 +122,9 @@ const openapi = {
                     },
                 },
             },
-        },
-        [backendEndpoints.connectorsAuthorize.path]: {
             post: {
-                tags: backendEndpoints.connectorsAuthorize.tags,
-                summary: backendEndpoints.connectorsAuthorize.summary,
+                tags: backendEndpoints.connectorsCreate.tags,
+                summary: backendEndpoints.connectorsCreate.summary,
                 requestBody: {
                     required: true,
                     content: {
@@ -135,33 +133,22 @@ const openapi = {
                                 type: "object",
                                 additionalProperties: false,
                                 properties: {
-                                    type: { type: "string", examples: ["calendar"] },
-                                    provider: { type: "string", examples: ["google_calendar"] },
                                     name: { type: "string", examples: ["Google Calendar"] },
+                                    type: { type: "string", examples: ["calendar"] },
+                                    config: { type: "object", additionalProperties: true, examples: [{ clientId: "..." }] },
                                 },
-                                required: ["type", "provider"],
+                                required: ["name", "type", "config"],
                             },
                             examples: {
-                                authorize: { value: { type: "calendar", provider: "google_calendar", name: "Google Calendar" } },
+                                create: { value: { name: "Google Calendar", type: "calendar", config: { clientId: "..." } } },
                             },
                         },
                     },
                 },
                 responses: {
                     "200": {
-                        description: "Authorization URL",
-                        content: {
-                            "application/json": {
-                                schema: {
-                                    type: "object",
-                                    properties: {
-                                        authorization_url: { type: "string", format: "uri" },
-                                        state: { type: "string" },
-                                    },
-                                    required: ["authorization_url", "state"],
-                                },
-                            },
-                        },
+                        description: "Created",
+                        content: { "application/json": { schema: { $ref: "#/components/schemas/Connector" } } },
                     },
                     "400": { description: "Bad request", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } },
                     "401": { description: "Unauthorized", content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } } },

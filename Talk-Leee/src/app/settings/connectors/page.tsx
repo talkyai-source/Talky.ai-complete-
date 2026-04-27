@@ -3,18 +3,16 @@
 import { useEffect, useMemo, useRef, type ComponentType } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Boxes, CalendarDays, HardDrive, Mail, UsersRound } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { ConnectorCard } from "@/components/connectors/connector-card";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { queryKeys, useConnectorProviders, useConnectors } from "@/lib/api-hooks";
-import { backendApi } from "@/lib/backend-api";
+import { useConnectorStatuses, queryKeys } from "@/lib/api-hooks";
 import { isApiClientError } from "@/lib/http-client";
-import type { Connector } from "@/lib/models";
+import type { ConnectorProviderStatus } from "@/lib/models";
 import { notificationsStore } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
-import { normalizeConnectorStatus, pickPreferredConnector, summarizeConnectorStatuses } from "@/lib/connectors-utils";
+import { CalendarDays, Mail, UsersRound, HardDrive } from "lucide-react";
 
 function formatError(err: unknown) {
     if (isApiClientError(err)) return err.message;
@@ -23,31 +21,50 @@ function formatError(err: unknown) {
 
 type ProviderType = "calendar" | "email" | "crm" | "drive";
 
-function providerVisual(input: { type: string; provider: string }): { accent: string; icon: ComponentType<{ className?: string }> } {
-    if (input.provider === "google_calendar") {
-        return { accent: "border-sky-500/20 bg-gradient-to-br from-sky-500/10 to-indigo-500/5", icon: CalendarDays };
-    }
-    if (input.provider === "outlook_calendar") {
-        return { accent: "border-blue-500/20 bg-gradient-to-br from-blue-500/10 to-cyan-500/5", icon: CalendarDays };
-    }
-    if (input.provider === "gmail" || input.type === "email") {
-        return { accent: "border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 to-cyan-500/5", icon: Mail };
-    }
-    if (input.provider === "hubspot" || input.type === "crm") {
-        return { accent: "border-fuchsia-500/20 bg-gradient-to-br from-fuchsia-500/10 to-orange-500/5", icon: UsersRound };
-    }
-    if (input.provider === "google_drive" || input.type === "drive") {
-        return { accent: "border-amber-500/20 bg-gradient-to-br from-amber-500/10 to-orange-500/5", icon: HardDrive };
-    }
-    return { accent: "border-slate-500/20 bg-gradient-to-br from-slate-500/10 to-zinc-500/5", icon: Boxes };
-}
+type ProviderCard = {
+    type: ProviderType;
+    name: string;
+    description: string;
+    accent: string;
+    icon: ComponentType<{ className?: string }>;
+};
+
+const PROVIDERS: ProviderCard[] = [
+    {
+        type: "calendar",
+        name: "Google Calendar",
+        description: "Sync events for scheduling, reminders, and meeting context.",
+        accent: "border-sky-500/20 bg-gradient-to-br from-sky-500/10 to-indigo-500/5",
+        icon: CalendarDays,
+    },
+    {
+        type: "email",
+        name: "Gmail",
+        description: "Connect inboxes for activity capture and follow-ups.",
+        accent: "border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 to-cyan-500/5",
+        icon: Mail,
+    },
+    {
+        type: "crm",
+        name: "HubSpot",
+        description: "Sync contacts and engagement history into your CRM.",
+        accent: "border-fuchsia-500/20 bg-gradient-to-br from-fuchsia-500/10 to-purple-500/5",
+        icon: UsersRound,
+    },
+    {
+        type: "drive",
+        name: "Google Drive",
+        description: "Connect file storage for documents and recordings.",
+        accent: "border-amber-500/20 bg-gradient-to-br from-amber-500/10 to-orange-500/5",
+        icon: HardDrive,
+    },
+];
 
 export default function ConnectorsPage() {
     const qc = useQueryClient();
     const router = useRouter();
     const searchParams = useSearchParams();
-    const providersQ = useConnectorProviders();
-    const connectorsQ = useConnectors();
+    const q = useConnectorStatuses();
     const seenEvents = useRef(new Set<string>());
     const lastRefreshEventRaw = useRef<string | null>(null);
 
@@ -71,12 +88,10 @@ export default function ConnectorsPage() {
                 message: message ?? (ok ? "Connection completed successfully." : "Authorization failed. Please try again."),
             });
 
-            void qc.invalidateQueries({ queryKey: queryKeys.connectors() });
             void qc.invalidateQueries({ queryKey: queryKeys.connectorStatuses() });
         };
 
         const onMessage = (event: MessageEvent) => {
-            if (event.origin !== window.location.origin) return;
             handleUpdated(event.data as unknown);
         };
         window.addEventListener("message", onMessage);
@@ -97,7 +112,6 @@ export default function ConnectorsPage() {
                 }
             }
             if (e.key !== "connectors.refresh" && e.key !== "connectors.refresh.event") return;
-            void qc.invalidateQueries({ queryKey: queryKeys.connectors() });
             void qc.invalidateQueries({ queryKey: queryKeys.connectorStatuses() });
         };
         window.addEventListener("storage", onStorage);
@@ -115,7 +129,6 @@ export default function ConnectorsPage() {
                 handleUpdated(JSON.parse(raw) as unknown);
             } catch {
             }
-            void qc.invalidateQueries({ queryKey: queryKeys.connectors() });
             void qc.invalidateQueries({ queryKey: queryKeys.connectorStatuses() });
         }, 500);
 
@@ -128,40 +141,15 @@ export default function ConnectorsPage() {
         };
     }, [qc]);
 
-    const providers = useMemo(
-        () =>
-            [...(providersQ.data?.items ?? [])].sort(
-                (a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name) || a.provider.localeCompare(b.provider)
-            ),
-        [providersQ.data?.items]
-    );
-
-    const connectorsByProvider = useMemo(() => {
-        const grouped = new Map<string, Connector[]>();
-        for (const connector of connectorsQ.data?.items ?? []) {
-            if (!connector.provider) continue;
-            const existing = grouped.get(connector.provider) ?? [];
-            existing.push(connector);
-            grouped.set(connector.provider, existing);
-        }
-
-        const result = new Map<string, Connector>();
-        for (const [provider, items] of grouped.entries()) {
-            const best = pickPreferredConnector(items);
-            if (best) result.set(provider, best);
-        }
-        return result;
-    }, [connectorsQ.data?.items]);
-
     const byType = useMemo(() => {
-        const map = new Map<ProviderType, ReturnType<typeof summarizeConnectorStatuses>[number]>();
-        for (const item of summarizeConnectorStatuses(connectorsQ.data?.items ?? [])) {
+        const map = new Map<ProviderType, ConnectorProviderStatus>();
+        for (const item of q.data?.items ?? []) {
             if (item.type === "calendar" || item.type === "email" || item.type === "crm" || item.type === "drive") {
                 map.set(item.type, item);
             }
         }
         return map;
-    }, [connectorsQ.data?.items]);
+    }, [q.data?.items]);
 
     const required = useMemo<ProviderType[]>(() => {
         const raw = searchParams.get("required") ?? "";
@@ -177,10 +165,9 @@ export default function ConnectorsPage() {
 
     const requirementsMet = useMemo(() => {
         if (required.length === 0) return false;
-        return required.every((type) => byType.get(type)?.status === "connected");
-    }, [byType, required]);
-
-    const pageError = providersQ.isError ? providersQ.error : connectorsQ.isError ? connectorsQ.error : null;
+        const items = q.data?.items ?? [];
+        return required.every((t) => items.find((x) => x.type === t)?.status === "connected");
+    }, [q.data?.items, required]);
 
     return (
         <DashboardLayout title="Connectors" description="Configure integrations and manage connector accounts.">
@@ -209,50 +196,32 @@ export default function ConnectorsPage() {
                 <Card>
                     <CardHeader>
                         <CardTitle>Providers</CardTitle>
-                        <CardDescription>Every available connector is managed here. Connect accounts, review status, and disconnect providers from one place.</CardDescription>
+                        <CardDescription>Connect your accounts to sync data and automate workflows.</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                        {pageError ? (
-                            <div className="rounded-2xl border border-red-500/30 bg-background/70 p-4 text-sm text-red-500">{formatError(pageError)}</div>
-                        ) : null}
-
-                        {connectorsQ.isLoading && providers.length > 0 ? (
-                            <div className="rounded-2xl border border-border/60 bg-background/70 p-4 text-sm text-muted-foreground">Refreshing connector states…</div>
-                        ) : null}
-
-                        {!providersQ.isLoading && providers.length === 0 ? (
-                            <div className="rounded-2xl border border-border/60 bg-background/70 p-4 text-sm text-muted-foreground">No connector providers are available.</div>
+                        {q.isError ? (
+                            <div className="rounded-2xl border border-red-500/30 bg-background/70 p-4 text-sm text-red-500">{formatError(q.error)}</div>
                         ) : null}
 
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                            {providers.map((provider) => {
-                                const connector = connectorsByProvider.get(provider.provider);
-                                const visual = providerVisual(provider);
-                                const status = connector ? normalizeConnectorStatus(connector.status) : "disconnected";
+                            {PROVIDERS.map((p) => {
+                                const data = byType.get(p.type);
+                                const Icon = p.icon;
+                                const status = data?.status ?? "disconnected";
 
                                 return (
                                     <ConnectorCard
-                                        key={provider.provider}
-                                        cardKey={provider.provider}
-                                        type={provider.type}
-                                        name={provider.name}
-                                        description={provider.description}
-                                        icon={visual.icon}
-                                        accentClassName={visual.accent}
+                                        key={p.type}
+                                        type={p.type}
+                                        name={p.name}
+                                        description={p.description}
+                                        icon={Icon}
+                                        accentClassName={p.accent}
                                         status={status}
-                                        lastSync={null}
-                                        provider={connector?.accountEmail ?? null}
-                                        errorMessage={null}
-                                        authorizeConnector={() =>
-                                            backendApi.connectors.authorizeProvider({
-                                                type: provider.type,
-                                                provider: provider.provider,
-                                                name: provider.name,
-                                            })
-                                        }
-                                        disconnectConnector={
-                                            connector ? () => backendApi.connectors.disconnectById({ connectorId: connector.id }) : undefined
-                                        }
+                                        lastSync={data?.last_sync}
+                                        provider={data?.provider}
+                                        errorMessage={data?.error_message}
+                                        oauthCallbackPath={`/connectors/${p.type}/callback`}
                                     />
                                 );
                             })}

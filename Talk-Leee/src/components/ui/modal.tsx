@@ -45,7 +45,12 @@ export function Modal({
     const titleId = useId();
     const descId = useId();
     const panelRef = useRef<HTMLDivElement | null>(null);
-    const disableMotion = Boolean((globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: unknown }).IS_REACT_ACT_ENVIRONMENT);
+    const disableMotion = useMemo(() => {
+        const actEnv = Boolean((globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: unknown }).IS_REACT_ACT_ENVIRONMENT);
+        if (actEnv) return true;
+        const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
+        return prefersReducedMotion;
+    }, []);
 
     useEffect(() => {
         if (!open) return;

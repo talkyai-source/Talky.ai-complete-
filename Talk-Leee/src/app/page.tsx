@@ -1,6 +1,8 @@
 import { Navbar } from "@/components/home/navbar";
 import { HomeLazySections } from "@/components/home/home-lazy-sections";
+import type { Metadata } from "next";
 import localFont from "next/font/local";
+import { Manrope, Orbitron } from "next/font/google";
 
 const satoshi = localFont({
   src: [
@@ -11,11 +13,30 @@ const satoshi = localFont({
   display: "swap",
 });
 
+const manrope = Manrope({
+  subsets: ["latin"],
+  variable: "--font-manrope",
+});
+
+const orbitron = Orbitron({
+  subsets: ["latin"],
+  variable: "--font-orbitron",
+});
+
+export const metadata: Metadata = {
+  title: "Talk-Lee",
+  description:
+    "Scale conversations instantly with Talkly AI. Smart voice agents deliver support, scheduling, and compliance worldwide.",
+};
+
 export default function Home() {
   return (
-    <main id="home" className={`home-navbar-offset homepage-bg ${satoshi.className}`}>
-      <Navbar />
-      <HomeLazySections />
-    </main>
+    <>
+      <link rel="preload" as="video" href="/images/ai-voice-section..mp4" />
+      <main id="home" className={`home-navbar-offset homepage-bg ${satoshi.className} ${manrope.variable} ${orbitron.variable}`}>
+        <Navbar />
+        <HomeLazySections />
+      </main>
+    </>
   );
 }

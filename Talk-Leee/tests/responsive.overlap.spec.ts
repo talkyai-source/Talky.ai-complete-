@@ -255,7 +255,7 @@ async function stubAppRoutes(page: Parameters<typeof test>[1]["page"]) {
                 tts_provider: "cartesia",
                 tts_model: "sonic-3",
                 tts_voice_id: "voice-001",
-                tts_sample_rate: 24000,
+                tts_sample_rate: 16000,
             }),
         });
     });
@@ -278,7 +278,7 @@ async function stubAppRoutes(page: Parameters<typeof test>[1]["page"]) {
                 tts_provider: "cartesia",
                 tts_model: "sonic-3",
                 tts_voice_id: "voice-001",
-                tts_sample_rate: 24000,
+                tts_sample_rate: 16000,
             }),
         });
     });
@@ -443,3 +443,4 @@ for (const vp of viewports) {
         }
     });
 }
+

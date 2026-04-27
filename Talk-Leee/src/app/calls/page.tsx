@@ -124,12 +124,11 @@ export default function CallsPage() {
                         </div>
 
                         <div className="mt-4 min-w-0 overflow-x-hidden">
-                            <div className="grid min-w-0 grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1fr)_minmax(0,1.1fr)_auto] gap-3 border-b border-border px-4 pb-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                            <div className="grid min-w-0 grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1.2fr)_auto] gap-3 border-b border-border px-4 pb-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                                 <div>Phone Number</div>
                                 <div>Status</div>
                                 <div>Outcome</div>
                                 <div>Duration</div>
-                                <div>Campaign</div>
                                 <div>Date</div>
                                 <div />
                             </div>
@@ -148,7 +147,7 @@ export default function CallsPage() {
                                         <Link
                                             href={`/calls/${call.id}`}
                                             ref={index === 0 ? firstRowRef : undefined}
-                                            className="group grid min-w-0 grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1fr)_minmax(0,1.1fr)_auto] items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 text-left transition-transform duration-150 ease-out hover:scale-[1.01] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                            className="group grid min-w-0 grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1.2fr)_auto] items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 text-left transition-transform duration-150 ease-out hover:scale-[1.01] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                         >
                                             <div className="flex min-w-0 items-center gap-3">
                                                 {getStatusIcon(call.status)}
@@ -164,7 +163,6 @@ export default function CallsPage() {
                                                 <Clock className="h-4 w-4" />
                                                 {formatDuration(call.duration_seconds)}
                                             </div>
-                                            <div className="min-w-0 truncate text-sm text-muted-foreground">{call.campaign_name || "--"}</div>
                                             <div className="min-w-0 truncate text-sm text-muted-foreground">{new Date(call.created_at).toLocaleString()}</div>
                                             <div className="flex items-center justify-end text-muted-foreground group-hover:text-foreground">
                                                 <ChevronRight className="h-5 w-5" />

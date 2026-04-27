@@ -121,7 +121,7 @@ export function defaultNotificationsSettings(): NotificationsSettings {
             },
         },
         account: {
-            profile: { name: "", email: "" },
+            profile: { name: "Demo User", email: "demo@talk-lee.ai" },
             auth: { twoFactorEnabled: false },
             linking: { google: false, github: false },
         },

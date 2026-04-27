@@ -1,7 +1,7 @@
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, screen, within, act } from "@testing-library/react";
 import { Mail } from "lucide-react";
 import { ConnectorCard } from "@/components/connectors/connector-card";
 import { ensureDom } from "@/test-utils/dom";
@@ -87,9 +87,13 @@ test("ConnectorCard calls authorize and shows loading state", async () => {
             })
         );
 
-        await user.click(screen.getByTestId("connector-email-connect"));
+        await act(async () => {
+            await user.click(screen.getByTestId("connector-email-connect"));
+        });
 
-        await new Promise((r) => setTimeout(r, 70));
+        await act(async () => {
+            await new Promise((r) => setTimeout(r, 70));
+        });
 
         assert.deepEqual(calls, ["https://provider.example/auth"]);
         assert.ok(screen.getByRole("button", { name: "Connect" }));
@@ -116,10 +120,14 @@ test("ConnectorCard confirms and calls disconnect", async () => {
         })
     );
 
-    await user.click(screen.getByRole("button", { name: "Disconnect" }));
+    await act(async () => {
+        await user.click(screen.getByRole("button", { name: "Disconnect" }));
+    });
 
     const dialog = screen.getByRole("dialog");
-    await user.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+    await act(async () => {
+        await user.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+    });
 
     assert.equal(disconnected, 1);
 });

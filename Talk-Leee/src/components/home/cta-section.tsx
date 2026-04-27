@@ -22,13 +22,11 @@ export function CTASection() {
           </div>
 
           <h2 className="text-3xl md:text-5xl font-bold text-primary dark:text-foreground mb-6 tracking-tight">
-            Ready to Transform Your
-            <br />
-            Communications?
+            Ready to Transform Your Calls?
           </h2>
           
           <p className="text-lg md:text-xl text-gray-700 dark:text-muted-foreground mb-10 max-w-2xl mx-auto">
-            Start your free trial today and experience the future of AI voice calling.
+            Start automating with Talkly AI today — scale conversations, boost efficiency, and stay compliant.
           </p>
 
           <Link href="/auth/register">

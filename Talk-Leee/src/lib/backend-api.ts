@@ -1,45 +1,55 @@
-import { z } from "zod";
 import { createHttpClient } from "@/lib/http-client";
 import { backendEndpoints } from "@/lib/backend-endpoints";
 import {
     AssistantActionSchema,
     AssistantPlanSchema,
     AssistantRunSchema,
-    CalendarEventResponseSchema,
-    ConnectorAccountSchema,
-    ConnectorProviderInfoSchema,
-    ConnectorProviderStatusSchema,
+    AuditLogEventSchema,
     ConnectorResponseSchema,
+    ConnectorAccountSchema,
+    ConnectorProviderStatusSchema,
     EmailSendResponseSchema,
     EmailTemplateResponseSchema,
     ListResponseSchema,
-    MeetingResponseSchema,
     PaginatedResponseSchema,
+    CalendarEventResponseSchema,
+    MeetingResponseSchema,
     ReminderSchema,
+    SecurityEventSchema,
+    PartnerSummarySchema,
+    TenantSummarySchema,
+    VoiceCallGuardResponseSchema,
+    VoiceCallStartResponseSchema,
     type AssistantAction,
     type AssistantPlan,
     type AssistantRun,
+    type AuditLogEvent,
     type CalendarEvent,
     type Connector,
     type ConnectorAccount,
-    type ConnectorProviderInfo,
     type ConnectorProviderStatus,
     type EmailSendResponse,
     type EmailTemplate,
     type ListResponse,
     type Meeting,
+    type PartnerSummary,
     type Reminder,
     type ReminderChannel,
     type ReminderStatus,
+    type SecurityEvent,
+    type TenantSummary,
+    type VoiceCallGuardResponse,
+    type VoiceCallStartResponse,
+    type VoiceFeature,
 } from "@/lib/models";
-import { extractAuthorizationUrl, summarizeConnectorStatuses } from "@/lib/connectors-utils";
+import { extractAuthorizationUrl } from "@/lib/connectors-utils";
 import { apiBaseUrl } from "@/lib/env";
 
 let _httpClient: ReturnType<typeof createHttpClient> | undefined;
 
 function httpClient() {
     if (_httpClient) return _httpClient;
-    _httpClient = createHttpClient({ baseUrl: apiBaseUrl() });
+    _httpClient = createHttpClient({ baseUrl: apiBaseUrl(), getToken: () => null, setToken: () => {} });
     return _httpClient;
 }
 
@@ -47,11 +57,36 @@ function parseOrThrow<T>(schema: { parse: (v: unknown) => T }, data: unknown) {
     return schema.parse(data);
 }
 
-function parseListOrArray<T>(schema: z.ZodType<T>, data: unknown): ListResponse<T> {
-    return z
-        .union([ListResponseSchema(schema), z.array(schema).transform((items) => ({ items }))])
-        .parse(data);
-}
+export type AuditLogsListInput = {
+    page?: number;
+    pageSize?: number;
+    eventType?: string;
+    from?: string;
+    to?: string;
+    userQuery?: string;
+    tenantId?: string;
+    partnerId?: string;
+};
+
+export type SecurityEventsListInput = {
+    page?: number;
+    pageSize?: number;
+    eventType?: string;
+    severity?: "low" | "medium" | "high";
+    from?: string;
+    to?: string;
+    userQuery?: string;
+    tenantId?: string;
+    partnerId?: string;
+};
+
+export type AdminResourceListInput = {
+    page?: number;
+    pageSize?: number;
+    query?: string;
+    status?: "active" | "suspended";
+    partnerId?: string;
+};
 
 export const backendApi = {
     health: async (signal?: AbortSignal) => {
@@ -59,36 +94,35 @@ export const backendApi = {
         return data;
     },
     connectors: {
-        providers: async (signal?: AbortSignal): Promise<ListResponse<ConnectorProviderInfo>> => {
-            const data = await httpClient().request({ path: backendEndpoints.connectorsProviders.path, timeoutMs: 12_000, signal });
-            return parseListOrArray<ConnectorProviderInfo>(ConnectorProviderInfoSchema as z.ZodType<ConnectorProviderInfo>, data);
-        },
         list: async (signal?: AbortSignal): Promise<ListResponse<Connector>> => {
             const data = await httpClient().request({ path: backendEndpoints.connectorsList.path, timeoutMs: 12_000, signal });
-            return parseListOrArray<Connector>(ConnectorResponseSchema as z.ZodType<Connector>, data);
+            return parseOrThrow(ListResponseSchema(ConnectorResponseSchema), data);
+        },
+        create: async (input: Pick<Connector, "name" | "type" | "config">): Promise<Connector> => {
+            const data = await httpClient().request({
+                path: backendEndpoints.connectorsCreate.path,
+                method: backendEndpoints.connectorsCreate.method,
+                body: input,
+                timeoutMs: 12_000,
+            });
+            return parseOrThrow(ConnectorResponseSchema, data);
         },
         status: async (signal?: AbortSignal): Promise<ListResponse<ConnectorProviderStatus>> => {
-            const connectors = await backendApi.connectors.list(signal);
-            return parseOrThrow(ListResponseSchema(ConnectorProviderStatusSchema), {
-                items: summarizeConnectorStatuses(connectors.items),
-            });
+            const data = await httpClient().request({ path: backendEndpoints.connectorsStatus.path, timeoutMs: 12_000, signal });
+            return parseOrThrow(ListResponseSchema(ConnectorProviderStatusSchema), data);
         },
-        authorizeProvider: async (input: { type: string; provider: string; name?: string }): Promise<{ authorization_url: string }> => {
+        authorize: async (input: { type: string; redirect_uri: string }): Promise<{ authorization_url: string }> => {
             const data = await httpClient().request({
-                path: backendEndpoints.connectorsAuthorize.path,
+                path: backendEndpoints.connectorsAuthorize.path.replace("{type}", encodeURIComponent(input.type)),
                 method: backendEndpoints.connectorsAuthorize.method,
-                body: {
-                    type: input.type,
-                    provider: input.provider,
-                    ...(input.name ? { name: input.name } : {}),
-                },
+                query: { redirect_uri: input.redirect_uri },
                 timeoutMs: 12_000,
             });
             return { authorization_url: extractAuthorizationUrl(data) };
         },
-        disconnectById: async (input: { connectorId: string }): Promise<void> => {
+        disconnect: async (input: { type: string }): Promise<void> => {
             await httpClient().request({
-                path: backendEndpoints.connectorsDisconnect.path.replace("{connector_id}", encodeURIComponent(input.connectorId)),
+                path: backendEndpoints.connectorsDisconnect.path.replace("{type}", encodeURIComponent(input.type)),
                 method: backendEndpoints.connectorsDisconnect.method,
                 timeoutMs: 12_000,
             });
@@ -279,6 +313,54 @@ export const backendApi = {
             return parseOrThrow(EmailSendResponseSchema, data);
         },
     },
+    voiceCalls: {
+        guard: async (input: {
+            tenantId?: string;
+            partnerId?: string;
+            requestedFeatures?: VoiceFeature[];
+            callId?: string;
+            providerCallId?: string;
+            allowOverage?: boolean;
+        }): Promise<VoiceCallGuardResponse> => {
+            const data = await httpClient().request({
+                path: backendEndpoints.voiceCallsGuard.path,
+                method: backendEndpoints.voiceCallsGuard.method,
+                body: {
+                    tenant_id: input.tenantId,
+                    partner_id: input.partnerId,
+                    requested_features: input.requestedFeatures,
+                    call_id: input.callId,
+                    provider_call_id: input.providerCallId,
+                    allow_overage: input.allowOverage,
+                },
+                timeoutMs: 12_000,
+            });
+            return parseOrThrow(VoiceCallGuardResponseSchema, data);
+        },
+        start: async (input: {
+            tenantId?: string;
+            partnerId?: string;
+            requestedFeatures?: VoiceFeature[];
+            callId?: string;
+            providerCallId?: string;
+            allowOverage?: boolean;
+        }): Promise<VoiceCallStartResponse> => {
+            const data = await httpClient().request({
+                path: backendEndpoints.voiceCallsStart.path,
+                method: backendEndpoints.voiceCallsStart.method,
+                body: {
+                    tenant_id: input.tenantId,
+                    partner_id: input.partnerId,
+                    requested_features: input.requestedFeatures,
+                    call_id: input.callId,
+                    provider_call_id: input.providerCallId,
+                    allow_overage: input.allowOverage,
+                },
+                timeoutMs: 12_000,
+            });
+            return parseOrThrow(VoiceCallStartResponseSchema, data);
+        },
+    },
     assistantActions: {
         list: async (signal?: AbortSignal): Promise<ListResponse<AssistantAction>> => {
             const data = await httpClient().request({ path: backendEndpoints.assistantActionsList.path, timeoutMs: 12_000, signal });
@@ -356,6 +438,122 @@ export const backendApi = {
                 timeoutMs: 12_000,
             });
             return parseOrThrow(AssistantRunSchema, data);
+        },
+    },
+    admin: {
+        auditLogs: {
+            list: async (input: AuditLogsListInput, signal?: AbortSignal): Promise<{ items: AuditLogEvent[]; total?: number; page?: number; page_size?: number }> => {
+                const data = await httpClient().request({
+                    path: backendEndpoints.auditLogsList.path,
+                    method: backendEndpoints.auditLogsList.method,
+                    query: {
+                        page: input.page,
+                        page_size: input.pageSize,
+                        event_type: input.eventType,
+                        from: input.from,
+                        to: input.to,
+                        user: input.userQuery,
+                        tenant_id: input.tenantId,
+                        partner_id: input.partnerId,
+                    },
+                    timeoutMs: 12_000,
+                    signal,
+                });
+                return parseOrThrow(PaginatedResponseSchema(AuditLogEventSchema), data);
+            },
+        },
+        securityEvents: {
+            list: async (input: SecurityEventsListInput, signal?: AbortSignal): Promise<{ items: SecurityEvent[]; total?: number; page?: number; page_size?: number }> => {
+                const data = await httpClient().request({
+                    path: backendEndpoints.securityEventsList.path,
+                    method: backendEndpoints.securityEventsList.method,
+                    query: {
+                        page: input.page,
+                        page_size: input.pageSize,
+                        event_type: input.eventType,
+                        severity: input.severity,
+                        from: input.from,
+                        to: input.to,
+                        user: input.userQuery,
+                        tenant_id: input.tenantId,
+                        partner_id: input.partnerId,
+                    },
+                    timeoutMs: 12_000,
+                    signal,
+                });
+                return parseOrThrow(PaginatedResponseSchema(SecurityEventSchema), data);
+            },
+        },
+        partners: {
+            list: async (input: AdminResourceListInput, signal?: AbortSignal): Promise<{ items: PartnerSummary[]; total?: number; page?: number; page_size?: number }> => {
+                const data = await httpClient().request({
+                    path: backendEndpoints.partnersList.path,
+                    method: backendEndpoints.partnersList.method,
+                    query: {
+                        page: input.page,
+                        page_size: input.pageSize,
+                        q: input.query,
+                        status: input.status,
+                    },
+                    timeoutMs: 12_000,
+                    signal,
+                });
+                return parseOrThrow(PaginatedResponseSchema(PartnerSummarySchema), data);
+            },
+            suspend: async (input: { partnerId: string; reason?: string }): Promise<PartnerSummary> => {
+                const data = await httpClient().request({
+                    path: backendEndpoints.partnerSuspend.path.replace("{id}", encodeURIComponent(input.partnerId)),
+                    method: backendEndpoints.partnerSuspend.method,
+                    body: input.reason ? { reason: input.reason } : {},
+                    timeoutMs: 12_000,
+                });
+                return parseOrThrow(PartnerSummarySchema, data);
+            },
+            reactivate: async (input: { partnerId: string; reason?: string }): Promise<PartnerSummary> => {
+                const data = await httpClient().request({
+                    path: backendEndpoints.partnerReactivate.path.replace("{id}", encodeURIComponent(input.partnerId)),
+                    method: backendEndpoints.partnerReactivate.method,
+                    body: input.reason ? { reason: input.reason } : {},
+                    timeoutMs: 12_000,
+                });
+                return parseOrThrow(PartnerSummarySchema, data);
+            },
+        },
+        tenants: {
+            list: async (input: AdminResourceListInput, signal?: AbortSignal): Promise<{ items: TenantSummary[]; total?: number; page?: number; page_size?: number }> => {
+                const data = await httpClient().request({
+                    path: backendEndpoints.tenantsList.path,
+                    method: backendEndpoints.tenantsList.method,
+                    query: {
+                        page: input.page,
+                        page_size: input.pageSize,
+                        q: input.query,
+                        status: input.status,
+                        partner_id: input.partnerId,
+                    },
+                    timeoutMs: 12_000,
+                    signal,
+                });
+                return parseOrThrow(PaginatedResponseSchema(TenantSummarySchema), data);
+            },
+            suspend: async (input: { tenantId: string; reason?: string }): Promise<TenantSummary> => {
+                const data = await httpClient().request({
+                    path: backendEndpoints.tenantSuspend.path.replace("{id}", encodeURIComponent(input.tenantId)),
+                    method: backendEndpoints.tenantSuspend.method,
+                    body: input.reason ? { reason: input.reason } : {},
+                    timeoutMs: 12_000,
+                });
+                return parseOrThrow(TenantSummarySchema, data);
+            },
+            reactivate: async (input: { tenantId: string; reason?: string }): Promise<TenantSummary> => {
+                const data = await httpClient().request({
+                    path: backendEndpoints.tenantReactivate.path.replace("{id}", encodeURIComponent(input.tenantId)),
+                    method: backendEndpoints.tenantReactivate.method,
+                    body: input.reason ? { reason: input.reason } : {},
+                    timeoutMs: 12_000,
+                });
+                return parseOrThrow(TenantSummarySchema, data);
+            },
         },
     },
 };

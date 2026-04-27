@@ -10,6 +10,7 @@ export default defineConfig({
         locale: "en-US",
         timezoneId: "UTC",
         screenshot: "only-on-failure",
+        reducedMotion: "reduce",
     },
     projects: [
         { name: "chromium", use: { browserName: "chromium" } },
@@ -21,6 +22,6 @@ export default defineConfig({
         command: "npm run dev -- -p 3100",
         url: "http://127.0.0.1:3100",
         reuseExistingServer: true,
-        timeout: 120_000,
+        timeout: 240_000,
     },
 });

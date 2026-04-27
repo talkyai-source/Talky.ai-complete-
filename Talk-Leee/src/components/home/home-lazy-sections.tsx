@@ -1,77 +1,43 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useRef, useState } from "react";
-
-const Hero = dynamic(() => import("@/components/ui/helix-hero").then((m) => m.Hero), {
-  ssr: false,
-  loading: () => <HeroPlaceholder />,
-});
+import { useEffect, useRef, useState } from "react";
+import { Hero } from "@/components/ui/helix-hero";
 
 const SecondaryHero = dynamic(() => import("@/components/home/secondary-hero").then((m) => m.SecondaryHero), {
-  ssr: false,
+  ssr: true,
   loading: () => <SectionPlaceholder minHeightClassName="min-h-[70vh]" />,
 });
 
 const StatsSection = dynamic(() => import("@/components/home/stats-section").then((m) => m.StatsSection), {
-  ssr: false,
+  ssr: true,
   loading: () => <SectionPlaceholder minHeightClassName="min-h-[260px]" />,
 });
 
 const FeaturesSection = dynamic(() => import("@/components/home/features-section").then((m) => m.FeaturesSection), {
-  ssr: false,
+  ssr: true,
   loading: () => <SectionPlaceholder minHeightClassName="min-h-[420px]" />,
 });
 
 const PackagesSection = dynamic(() => import("@/components/home/packages-section").then((m) => m.PackagesSection), {
-  ssr: false,
+  ssr: true,
   loading: () => <SectionPlaceholder minHeightClassName="min-h-[520px]" />,
 });
 
 const CTASection = dynamic(() => import("@/components/home/cta-section").then((m) => m.CTASection), {
-  ssr: false,
+  ssr: true,
   loading: () => <SectionPlaceholder minHeightClassName="min-h-[320px]" />,
 });
 
 const ContactSection = dynamic(() => import("@/components/home/contact-section").then((m) => m.ContactSection), {
-  ssr: false,
+  ssr: true,
   loading: () => <SectionPlaceholder minHeightClassName="min-h-[420px]" />,
 });
 
 const Footer = dynamic(() => import("@/components/home/footer").then((m) => m.Footer), {
-  ssr: false,
+  ssr: true,
   loading: () => <SectionPlaceholder minHeightClassName="min-h-[240px]" />,
 });
-
-function HeroPlaceholder() {
-  return (
-    <section className="relative overflow-hidden bg-transparent">
-      <div className="mx-auto flex min-h-[72vh] max-w-7xl flex-col items-center justify-center px-4 py-14 md:px-6 lg:px-8">
-        <div className="mb-6 text-center">
-          <h1 className="text-5xl font-bold tracking-tighter text-foreground md:text-7xl">AI VOICE</h1>
-          <h2 className="mt-2 text-4xl font-bold tracking-tighter text-foreground md:text-7xl">DIALER</h2>
-        </div>
-        <p className="mx-auto max-w-2xl text-center text-base font-light leading-relaxed text-muted-foreground md:text-lg">
-          Intelligent voice communication platform powered by advanced AI agents, built to operate at scale with high accuracy and reliability.
-        </p>
-        <div className="mt-10 flex flex-wrap justify-center gap-8">
-          <div className="text-center">
-            <div className="text-3xl font-semibold text-foreground md:text-4xl">&lt;500ms</div>
-            <div className="mt-1 text-sm uppercase tracking-wide text-muted-foreground">Response Time</div>
-          </div>
-          <div className="text-center">
-            <div className="text-3xl font-semibold text-foreground md:text-4xl">1000+</div>
-            <div className="mt-1 text-sm uppercase tracking-wide text-muted-foreground">Concurrent Calls</div>
-          </div>
-          <div className="text-center">
-            <div className="text-3xl font-semibold text-foreground md:text-4xl">94%</div>
-            <div className="mt-1 text-sm uppercase tracking-wide text-muted-foreground">Completion Rate</div>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
 
 function SectionPlaceholder({ minHeightClassName }: { minHeightClassName: string }) {
   return (
@@ -81,196 +47,230 @@ function SectionPlaceholder({ minHeightClassName }: { minHeightClassName: string
   );
 }
 
+function FAQSection() {
+  const items = [
+    {
+      question: "What is Talkly AI?",
+      answer:
+        "Talkly AI is a fully featured platform that automates phone calls with intelligent voice agents, helping teams scale conversations without queues or delays.",
+    },
+    {
+      question: "Do I need technical expertise to use Talkly AI?",
+      answer: "No. Our guided AI builder makes it simple to design call flows and prompts without coding.",
+    },
+    {
+      question: "Can Talkly AI integrate with my existing phone system or CRM?",
+      answer: "Yes. Talkly AI connects seamlessly with phone systems, CRMs like HubSpot, and lead forms.",
+    },
+    {
+      question: "How does Talkly AI learn my company information?",
+      answer: "You can upload PDFs, images, or crawl entire websites to instantly train your agent with the right knowledge.",
+    },
+    {
+      question: "Can calls be transferred to human agents?",
+      answer: "Absolutely. Talkly AI can forward calls to live agents whenever needed or requested by customers.",
+    },
+    {
+      question: "Is Talkly AI secure and compliant?",
+      answer: "Yes. We provide built‑in consent handling, encryption, GDPR/TCPA tooling, and enterprise‑grade compliance features.",
+    },
+    {
+      question: "Can I resell Talkly AI under my own brand?",
+      answer: "Yes. Our white‑label program lets you offer AI voice solutions as your own. Limited spots available.",
+    },
+    {
+      question: "Do you provide phone numbers for campaigns?",
+      answer: "Talkly AI issues dedicated numbers for your outbound and inbound campaigns.",
+    },
+  ];
+
+  return (
+    <section id="faq" className="bg-cyan-100 dark:bg-background py-20 px-4 md:px-6 lg:px-8 overflow-hidden">
+      <div className="max-w-5xl mx-auto">
+        <h2 className="text-center text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
+          Frequently Asked Questions - Talkly AI
+        </h2>
+        <div className="mt-10 space-y-3">
+          {items.map((item) => (
+            <details
+              key={item.question}
+              className="group rounded-2xl border border-gray-200 bg-transparent backdrop-blur-sm p-5 shadow-sm transition-[transform,filter,border-color,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:scale-[1.01] hover:brightness-[1.02] hover:border-gray-200 hover:shadow-md dark:border-border/70"
+              style={{
+                backgroundImage: "var(--home-card-gradient)",
+                backgroundSize: "cover",
+                backgroundRepeat: "no-repeat",
+              }}
+            >
+              <summary className="cursor-pointer list-none font-semibold text-primary dark:text-foreground">
+                {item.question}
+              </summary>
+              <p className="mt-3 text-sm sm:text-base text-gray-700 dark:text-muted-foreground leading-relaxed">
+                {item.answer}
+              </p>
+            </details>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function NavbarHeroBackgroundVideo() {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const videoARef = useRef<HTMLVideoElement | null>(null);
   const videoBRef = useRef<HTMLVideoElement | null>(null);
-  const activeIndexRef = useRef<0 | 1>(0);
-  const isCrossfadingRef = useRef(false);
-  const fadeTimeoutRef = useRef<number | null>(null);
-  const rafRef = useRef<number | null>(null);
-  const [activeIndex, setActiveIndex] = useState<0 | 1>(0);
   const [isInView, setIsInView] = useState(true);
+  const [opacityA, setOpacityA] = useState(1);
+  const [opacityB, setOpacityB] = useState(0);
+  const activeRef = useRef<"A" | "B">("A");
+  const crossfading = useRef(false);
+  const CROSSFADE_START = 0.6;
+  const CROSSFADE_MS = 500;
+
+  const fallbackPoster = `data:image/svg+xml;utf8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#001022"/>
+      <stop offset="1" stop-color="#004d5e"/>
+    </linearGradient>
+    <filter id="blur" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="44"/>
+    </filter>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+  <g filter="url(#blur)" opacity="0.9">
+    <path d="M0 780 C 240 736 480 844 720 802 C 960 760 1200 700 1440 764 C 1680 828 1800 892 1920 868 L1920 1080 L0 1080 Z" fill="#00fff0" fill-opacity="0.22"/>
+    <path d="M0 842 C 280 802 520 910 780 872 C 1040 834 1260 784 1500 836 C 1740 888 1840 936 1920 922 L1920 1080 L0 1080 Z" fill="#00bcd4" fill-opacity="0.18"/>
+    <path d="M0 910 C 240 880 520 1002 780 960 C 1040 918 1240 886 1480 916 C 1720 946 1840 990 1920 980 L1920 1080 L0 1080 Z" fill="#3b82f6" fill-opacity="0.12"/>
+  </g>
+</svg>`
+  )}`;
+
+  const safePlay = (v: HTMLVideoElement) => {
+    const p = v.play();
+    if (p && typeof (p as Promise<void>).catch === "function") (p as Promise<void>).catch(() => {});
+  };
 
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
-
     const io = new IntersectionObserver(
-      (entries) => {
-        const entry = entries[0];
-        setIsInView(Boolean(entry?.isIntersecting));
-      },
+      (entries) => setIsInView(Boolean(entries[0]?.isIntersecting)),
       { threshold: 0.01 }
     );
-
     io.observe(el);
     return () => io.disconnect();
-  }, []);
-
-  const triggerCrossfade = useCallback(() => {
-    const videoA = videoARef.current;
-    const videoB = videoBRef.current;
-    if (!videoA || !videoB) return;
-    if (isCrossfadingRef.current) return;
-
-    const fromIndex = activeIndexRef.current;
-    const toIndex: 0 | 1 = fromIndex === 0 ? 1 : 0;
-    const from = fromIndex === 0 ? videoA : videoB;
-    const to = toIndex === 0 ? videoA : videoB;
-
-    isCrossfadingRef.current = true;
-
-    try {
-      to.currentTime = 0.01;
-    } catch {}
-    const p = to.play();
-    if (p && typeof (p as Promise<void>).catch === "function") (p as Promise<void>).catch(() => {});
-
-    activeIndexRef.current = toIndex;
-    setActiveIndex(toIndex);
-
-    if (fadeTimeoutRef.current) window.clearTimeout(fadeTimeoutRef.current);
-    fadeTimeoutRef.current = window.setTimeout(() => {
-      try {
-        from.pause();
-        from.currentTime = 0.01;
-      } catch {}
-      isCrossfadingRef.current = false;
-    }, 320);
   }, []);
 
   useEffect(() => {
     const a = videoARef.current;
     const b = videoBRef.current;
     if (!a || !b) return;
-
     if (!isInView) {
-      try {
-        a.pause();
-        b.pause();
-      } catch {}
+      try { a.pause(); } catch {}
+      try { b.pause(); } catch {}
       return;
     }
-
-    const active = activeIndexRef.current === 0 ? a : b;
-    const p = active.play();
-    if (p && typeof (p as Promise<void>).catch === "function") (p as Promise<void>).catch(() => {});
+    if (activeRef.current === "A") safePlay(a);
+    else safePlay(b);
   }, [isInView]);
 
   useEffect(() => {
-    if (!isInView) return;
+    const a = videoARef.current;
+    const b = videoBRef.current;
+    if (!a || !b) return;
+    let rafId = 0;
 
-    const loopThresholdSeconds = 0.24;
-    const tick = () => {
-      const videoA = videoARef.current;
-      const videoB = videoBRef.current;
-      if (videoA && videoB && !isCrossfadingRef.current) {
-        const active = activeIndexRef.current === 0 ? videoA : videoB;
-        const duration = active.duration;
-        if (Number.isFinite(duration) && duration > 0 && !active.paused && !active.ended) {
-          const remaining = duration - active.currentTime;
-          if (remaining > 0 && remaining <= loopThresholdSeconds) triggerCrossfade();
+    const startCrossfade = (from: HTMLVideoElement, to: HTMLVideoElement, fromId: "A" | "B") => {
+      if (crossfading.current) return;
+      crossfading.current = true;
+      to.currentTime = 0;
+      safePlay(to);
+      const toId = fromId === "A" ? "B" : "A";
+      const setFrom = fromId === "A" ? setOpacityA : setOpacityB;
+      const setTo = toId === "A" ? setOpacityA : setOpacityB;
+      setTo(1);
+      setFrom(0);
+      activeRef.current = toId;
+      setTimeout(() => {
+        try { from.pause(); } catch {}
+        crossfading.current = false;
+      }, CROSSFADE_MS + 100);
+    };
+
+    const poll = () => {
+      if (activeRef.current === "A") {
+        const d = a.duration;
+        if (Number.isFinite(d) && d > 0 && d - a.currentTime <= CROSSFADE_START) {
+          startCrossfade(a, b, "A");
+        }
+      } else {
+        const d = b.duration;
+        if (Number.isFinite(d) && d > 0 && d - b.currentTime <= CROSSFADE_START) {
+          startCrossfade(b, a, "B");
         }
       }
-      rafRef.current = requestAnimationFrame(tick);
+      rafId = requestAnimationFrame(poll);
     };
 
-    rafRef.current = requestAnimationFrame(tick);
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-    };
-  }, [isInView, triggerCrossfade]);
-
-  useEffect(() => {
-    return () => {
-      if (fadeTimeoutRef.current) window.clearTimeout(fadeTimeoutRef.current);
-    };
+    rafId = requestAnimationFrame(poll);
+    return () => cancelAnimationFrame(rafId);
   }, []);
 
+  const videoClass = "absolute inset-0 h-full w-full object-cover";
+  const transitionStyle = `opacity ${CROSSFADE_MS}ms ease-in-out`;
+
   return (
-    <div ref={wrapRef} className="pointer-events-none absolute inset-x-0 top-0 z-0 h-screen overflow-hidden" aria-hidden="true">
+    <div
+      ref={wrapRef}
+      className="pointer-events-none absolute inset-x-0 top-0 z-0 h-screen overflow-hidden"
+      aria-hidden="true"
+      style={{
+        backgroundImage: `url("${fallbackPoster}")`,
+        backgroundSize: "cover",
+        backgroundRepeat: "no-repeat",
+        backgroundPosition: "center",
+        backgroundColor: "#001022",
+      }}
+    >
       <video
         ref={videoARef}
-        className="absolute inset-0 h-full w-full object-cover"
-        style={{ opacity: activeIndex === 0 ? 1 : 0, transition: "opacity 320ms ease-in-out" }}
+        className={videoClass}
+        style={{ opacity: opacityA, transition: transitionStyle }}
         src="/images/hero-navbar-video.mp4"
         autoPlay
         muted
         playsInline
         preload="metadata"
+        poster={fallbackPoster}
         disablePictureInPicture
         disableRemotePlayback
-        onLoadedMetadata={() => {
-          if (!isInView) return;
-          if (activeIndexRef.current !== 0) return;
-          const v = videoARef.current;
-          if (!v) return;
-          void v.play().catch(() => {});
-        }}
       />
       <video
         ref={videoBRef}
-        className="absolute inset-0 h-full w-full object-cover"
-        style={{ opacity: activeIndex === 1 ? 1 : 0, transition: "opacity 320ms ease-in-out" }}
+        className={videoClass}
+        style={{ opacity: opacityB, transition: transitionStyle }}
         src="/images/hero-navbar-video.mp4"
-        autoPlay
         muted
         playsInline
         preload="metadata"
         disablePictureInPicture
         disableRemotePlayback
-        onLoadedMetadata={() => {
-          if (!isInView) return;
-          if (activeIndexRef.current !== 1) return;
-          const v = videoBRef.current;
-          if (!v) return;
-          void v.play().catch(() => {});
-        }}
       />
     </div>
   );
 }
 
 export function HomeLazySections() {
-  const [enabled, setEnabled] = useState(false);
-
-  useEffect(() => {
-    const w = window as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout?: number }) => number; cancelIdleCallback?: (id: number) => void };
-    if (typeof w.requestIdleCallback === "function") {
-      const id = w.requestIdleCallback(() => setEnabled(true), { timeout: 1200 });
-      return () => w.cancelIdleCallback?.(id);
-    }
-    const id = window.setTimeout(() => setEnabled(true), 350);
-    return () => window.clearTimeout(id);
-  }, []);
-
-  if (!enabled) {
-    return (
-      <>
-        <NavbarHeroBackgroundVideo />
-        <div className="relative z-10">
-          <HeroPlaceholder />
-          <SectionPlaceholder minHeightClassName="min-h-[70vh]" />
-          <SectionPlaceholder minHeightClassName="min-h-[260px]" />
-          <SectionPlaceholder minHeightClassName="min-h-[420px]" />
-          <SectionPlaceholder minHeightClassName="min-h-[520px]" />
-          <SectionPlaceholder minHeightClassName="min-h-[320px]" />
-          <SectionPlaceholder minHeightClassName="min-h-[420px]" />
-          <SectionPlaceholder minHeightClassName="min-h-[240px]" />
-        </div>
-      </>
-    );
-  }
-
   return (
     <>
       <NavbarHeroBackgroundVideo />
       <div className="relative z-10">
         <Hero
-          title="AI Voice Dialer"
+          title="AI Voice Agent Platform for Seamless Call Automation"
           description={[
+            "Automate inbound and outbound calls with intelligent AI voice agents that deliver end-to-end customer support, appointment scheduling, and enterprise-grade engagement — 24/7.",
             "Intelligent voice communication platform powered by advanced AI agents, built to operate at scale with high accuracy and reliability. Real-time speech recognition, natural language processing, and seamless call automation support enterprise-scale outbound campaigns.",
             "The platform enables natural, human-like conversations through adaptive dialogue handling, intent detection, and contextual understanding. It ensures consistent performance across large call volumes while maintaining clarity, responsiveness, and automation efficiency for enterprise communication workflows.",
           ]}
@@ -283,9 +283,10 @@ export function HomeLazySections() {
         />
         <SecondaryHero />
         <StatsSection />
-        <FeaturesSection />
         <PackagesSection />
+        <FeaturesSection />
         <CTASection />
+        <FAQSection />
         <ContactSection />
         <Footer />
       </div>

@@ -19,7 +19,7 @@ export function ConnectorWarning({
     return (
         <div className={cn("rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4 text-amber-100", className)}>
             <div className="flex items-start gap-3">
-                <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-xl bg-amber-500/15 border border-amber-500/20 shrink-0">
+                <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-amber-500/15 border border-amber-500/20 shrink-0">
                     <AlertTriangle className="h-4 w-4 text-amber-300" aria-hidden />
                 </div>
                 <div className="min-w-0">
@@ -27,7 +27,7 @@ export function ConnectorWarning({
                     <div className="mt-1 text-sm text-amber-100/80">{message}</div>
                     <div className="mt-3 flex flex-wrap gap-2">
                         <Link
-                            href="/connectors"
+                            href="/settings/connectors"
                             className="inline-flex items-center justify-center rounded-lg bg-amber-300 px-3 py-1.5 text-xs font-bold text-amber-950 hover:bg-amber-200 transition-colors"
                         >
                             Fix connector

@@ -4,10 +4,12 @@ import React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { cn } from "@/lib/utils";
 
-export type ConfirmDialogIntent = "disconnect" | "cancel" | "delete";
+export type ConfirmDialogIntent = "disconnect" | "cancel" | "delete" | "suspend" | "reactivate";
 
 function defaultsForIntent(intent: ConfirmDialogIntent) {
     if (intent === "cancel") {
@@ -24,11 +26,35 @@ function defaultsForIntent(intent: ConfirmDialogIntent) {
             confirmLabel: "Delete",
         };
     }
+    if (intent === "suspend") {
+        return {
+            title: "Suspend account",
+            description: "This is a critical account access change.",
+            confirmLabel: "Confirm suspension",
+        };
+    }
+    if (intent === "reactivate") {
+        return {
+            title: "Reactivate account",
+            description: "This will restore access to the account.",
+            confirmLabel: "Confirm reactivation",
+        };
+    }
     return {
         title: "Disconnect",
         description: "This will stop syncing and revoke access for this connection.",
         confirmLabel: "Disconnect",
     };
+}
+
+function getWarningIconClasses(intent: ConfirmDialogIntent) {
+    if (intent === "suspend") {
+        return "border-red-500/20 bg-red-500/10 text-red-300";
+    }
+    if (intent === "reactivate") {
+        return "border-amber-500/20 bg-amber-500/10 text-amber-300";
+    }
+    return "border-red-500/20 bg-red-500/10 text-red-300";
 }
 
 export function ConfirmDialog({
@@ -46,6 +72,9 @@ export function ConfirmDialog({
     onError,
     confirmDisabled,
     className,
+    showReasonInput,
+    reasonValue,
+    onReasonChange,
 }: {
     open: boolean;
     onOpenChange: (next: boolean) => void;
@@ -61,12 +90,16 @@ export function ConfirmDialog({
     onError?: (err: unknown) => void;
     confirmDisabled?: boolean;
     className?: string;
+    showReasonInput?: boolean;
+    reasonValue?: string;
+    onReasonChange?: (value: string) => void;
 }) {
     const [pending, setPending] = useState(false);
     const [inlineError, setInlineError] = useState<string | undefined>(undefined);
     const cancelRef = useRef<HTMLButtonElement | null>(null);
 
     const defaults = useMemo(() => defaultsForIntent(intent), [intent]);
+    const warningIconClasses = useMemo(() => getWarningIconClasses(intent), [intent]);
     const resolvedTitle = title ?? defaults.title;
     const resolvedDescription = description ?? defaults.description;
     const resolvedConfirmLabel = confirmLabel ?? defaults.confirmLabel;
@@ -134,15 +167,32 @@ export function ConfirmDialog({
             }
         >
             <div className={cn("flex items-start gap-3", className)}>
-                <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl border border-red-500/20 bg-red-500/10 text-red-300 shrink-0">
+                <div className={cn("mt-0.5 flex h-9 w-9 items-center justify-center rounded-full border shrink-0", warningIconClasses)}>
                     <AlertTriangle className="h-4 w-4" aria-hidden />
                 </div>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                     <div className="text-sm font-semibold text-foreground">Warning</div>
                     <div className="mt-1 text-sm text-muted-foreground" role="alert">
                         {warningText}
                     </div>
-                    <div className="mt-2 text-xs text-muted-foreground">Review the details, then confirm to proceed.</div>
+                    {showReasonInput ? (
+                        <div className="mt-4 space-y-2">
+                            <Label htmlFor="confirm-reason" className="text-xs">
+                                Reason (optional)
+                            </Label>
+                            <Input
+                                id="confirm-reason"
+                                type="text"
+                                value={reasonValue ?? ""}
+                                onChange={(e) => onReasonChange?.(e.target.value)}
+                                placeholder="e.g., Account compromised, policy violation"
+                                maxLength={200}
+                                disabled={open ? false : true}
+                            />
+                            <div className="text-xs text-muted-foreground">{(reasonValue ?? "").length}/200</div>
+                        </div>
+                    ) : null}
+                    <div className="mt-3 text-xs text-muted-foreground">Review the details, then confirm to proceed.</div>
                     {inlineError ? (
                         <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-100" role="alert">
                             {inlineError}

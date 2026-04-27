@@ -23,39 +23,50 @@ export function MagneticText({
     const circleRef = useRef<HTMLDivElement>(null)
     const innerTextRef = useRef<HTMLDivElement>(null)
     const [isHovered, setIsHovered] = useState(false)
-    const [containerSize, setContainerSize] = useState({ width: 0, height: 0 })
 
     const mousePos = useRef({ x: 0, y: 0 })
     const currentPos = useRef({ x: 0, y: 0 })
     const animationFrameRef = useRef<number | undefined>(undefined)
 
     useEffect(() => {
-        const updateSize = () => {
-            if (containerRef.current) {
-                setContainerSize({
-                    width: containerRef.current.offsetWidth,
-                    height: containerRef.current.offsetHeight,
-                })
-            }
+        const el = containerRef.current
+        const inner = innerTextRef.current
+        if (!el || !inner) return
+
+        const update = () => {
+            inner.style.width = `${el.offsetWidth}px`
+            inner.style.height = `${el.offsetHeight}px`
         }
-        updateSize()
-        window.addEventListener("resize", updateSize)
-        return () => window.removeEventListener("resize", updateSize)
+
+        update()
+        const ro = new ResizeObserver(() => update())
+        ro.observe(el)
+        return () => ro.disconnect()
     }, [])
 
     useEffect(() => {
+        if (!isHovered) return
+        const circleEl = circleRef.current
+        const innerEl = innerTextRef.current
         const lerp = (start: number, end: number, factor: number) => start + (end - start) * factor
 
         const animate = () => {
+            const dx = mousePos.current.x - currentPos.current.x
+            const dy = mousePos.current.y - currentPos.current.y
+            if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
+                animationFrameRef.current = requestAnimationFrame(animate)
+                return
+            }
+
             currentPos.current.x = lerp(currentPos.current.x, mousePos.current.x, 0.15)
             currentPos.current.y = lerp(currentPos.current.y, mousePos.current.y, 0.15)
 
-            if (circleRef.current) {
-                circleRef.current.style.transform = `translate(${currentPos.current.x}px, ${currentPos.current.y}px) translate(-50%, -50%)`
+            if (circleEl) {
+                circleEl.style.transform = `translate(${currentPos.current.x}px, ${currentPos.current.y}px) translate(-50%, -50%) scale(1)`
             }
 
-            if (innerTextRef.current) {
-                innerTextRef.current.style.transform = `translate(${-currentPos.current.x}px, ${-currentPos.current.y}px)`
+            if (innerEl) {
+                innerEl.style.transform = `translate(${-currentPos.current.x}px, ${-currentPos.current.y}px)`
             }
 
             animationFrameRef.current = requestAnimationFrame(animate)
@@ -64,8 +75,11 @@ export function MagneticText({
         animationFrameRef.current = requestAnimationFrame(animate)
         return () => {
             if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current)
+            if (circleEl) {
+                circleEl.style.transform = `translate(${currentPos.current.x}px, ${currentPos.current.y}px) translate(-50%, -50%) scale(0)`
+            }
         }
-    }, [])
+    }, [isHovered])
 
     const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
         if (!containerRef.current) return
@@ -111,21 +125,18 @@ export function MagneticText({
                 ref={circleRef}
                 className="absolute top-0 left-0 pointer-events-none rounded-full bg-primary dark:bg-foreground overflow-hidden"
                 style={{
-                    width: isHovered ? 180 : 0,
-                    height: isHovered ? 180 : 0,
-                    transition: "width 0.5s cubic-bezier(0.33, 1, 0.68, 1), height 0.5s cubic-bezier(0.33, 1, 0.68, 1)",
-                    willChange: "transform, width, height",
+                    width: 180,
+                    height: 180,
+                    transform: `translate(${currentPos.current.x}px, ${currentPos.current.y}px) translate(-50%, -50%) scale(${isHovered ? 1 : 0})`,
+                    transition: "transform 0.5s cubic-bezier(0.33, 1, 0.68, 1)",
                 }}
             >
                 <div
                     ref={innerTextRef}
                     className="absolute flex items-center justify-center"
                     style={{
-                        width: containerSize.width,
-                        height: containerSize.height,
                         top: "50%",
                         left: "50%",
-                        willChange: "transform",
                     }}
                 >
                     <span
