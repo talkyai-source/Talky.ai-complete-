@@ -137,10 +137,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
 }
 
+// SSR-safe default. The client-side hydration replaces this with the real
+// context value once <AuthProvider> mounts. Returning a no-op shape (rather
+// than throwing) keeps Server Components rendering when consumers like
+// SuspensionStateProvider are evaluated during the server pass — including
+// inside Sentry's RSC wrapper, which can invoke layouts in a way that
+// flattens the client-component boundary.
+const SSR_FALLBACK_AUTH_CONTEXT: AuthContextType = {
+    user: null,
+    loading: true,
+    login: async () => {
+        throw new Error("useAuth used outside AuthProvider on client");
+    },
+    register: async () => {
+        throw new Error("useAuth used outside AuthProvider on client");
+    },
+    logout: async () => {
+        throw new Error("useAuth used outside AuthProvider on client");
+    },
+    setToken: () => {
+        throw new Error("useAuth used outside AuthProvider on client");
+    },
+    refreshUser: async () => {
+        throw new Error("useAuth used outside AuthProvider on client");
+    },
+};
+
 export function useAuth() {
     const context = useContext(AuthContext);
-    if (context === undefined) {
-        throw new Error("useAuth must be used within an AuthProvider");
+    if (context !== undefined) return context;
+    // On the server we're either pre-rendering for SSR or running through
+    // an RSC wrapper. Returning a safe fallback lets the page produce HTML;
+    // hydration on the client replaces this with the real provider value.
+    if (typeof window === "undefined") {
+        return SSR_FALLBACK_AUTH_CONTEXT;
     }
-    return context;
+    // Client-side without a provider is a real bug — keep the loud signal.
+    throw new Error("useAuth must be used within an AuthProvider");
 }
