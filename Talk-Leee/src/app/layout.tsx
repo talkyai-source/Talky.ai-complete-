@@ -1,44 +1,17 @@
 import type { Metadata, Viewport } from "next";
-import localFont from "next/font/local";
 import "./globals.css";
-import { AuthProvider } from "@/lib/auth-context";
-import { NotificationToaster } from "@/components/notifications/notification-toaster";
+import { SuspensionStateProvider } from "@/components/admin/suspension-state-provider";
 import { AppProviders } from "@/components/providers/app-providers";
 
-const inter = localFont({
-  src: [
-    { path: "../fonts/satoshi/Satoshi-400.woff2", weight: "400", style: "normal" },
-    { path: "../fonts/satoshi/Satoshi-500.woff2", weight: "500", style: "normal" },
-    { path: "../fonts/satoshi/Satoshi-700.woff2", weight: "700", style: "normal" },
-  ],
-  display: "swap",
-  variable: "--font-inter",
-});
-
-const manrope = localFont({
-  src: [
-    { path: "../fonts/satoshi/Satoshi-400.woff2", weight: "400", style: "normal" },
-    { path: "../fonts/satoshi/Satoshi-500.woff2", weight: "500", style: "normal" },
-    { path: "../fonts/satoshi/Satoshi-700.woff2", weight: "700", style: "normal" },
-  ],
-  display: "swap",
-  variable: "--font-manrope",
-});
-
-const orbitron = localFont({
-  src: [
-    { path: "../fonts/satoshi/Satoshi-400.woff2", weight: "400", style: "normal" },
-    { path: "../fonts/satoshi/Satoshi-500.woff2", weight: "500", style: "normal" },
-    { path: "../fonts/satoshi/Satoshi-700.woff2", weight: "700", style: "normal" },
-  ],
-  display: "swap",
-  variable: "--font-orbitron",
-});
+const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
 
 export const metadata: Metadata = {
   title: "Talk-Lee",
   description: "Intelligent voice communication platform powered by advanced AI agents",
   manifest: "/site.webmanifest",
+  icons: {
+    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
+  },
 };
 
 export const viewport: Viewport = {
@@ -51,16 +24,21 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
-        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try { document.documentElement.classList.add(localStorage.getItem('talklee.theme') || 'light') } catch(e) {}`,
+          }}
+        />
+        {apiBaseUrl && <link rel="preconnect" href={apiBaseUrl} />}
+        {apiBaseUrl && <link rel="dns-prefetch" href={apiBaseUrl} />}
       </head>
-      <body className={`${inter.variable} ${manrope.variable} ${orbitron.variable} font-sans antialiased`}>
+      <body className="font-sans antialiased">
         <AppProviders>
-          <AuthProvider>
+          <SuspensionStateProvider>
             {children}
-            <NotificationToaster />
-          </AuthProvider>
+          </SuspensionStateProvider>
         </AppProviders>
       </body>
     </html>

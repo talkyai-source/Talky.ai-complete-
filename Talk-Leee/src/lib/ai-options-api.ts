@@ -10,7 +10,6 @@ export interface ModelInfo {
     price?: string;
     context_window?: number;
     is_preview?: boolean;
-    provider?: string;
 }
 
 export interface VoiceInfo {
@@ -24,7 +23,6 @@ export interface VoiceInfo {
     preview_text: string;
     provider: string;
     tags: string[];
-    preview_url?: string;
 }
 
 export interface ProviderListResponse {
@@ -108,18 +106,31 @@ export interface LatencyBenchmarkResponse {
     total_pipeline_ms: number;
 }
 
+export const DEFAULT_CONFIG: AIProviderConfig = {
+    llm_provider: "groq",
+    llm_model: "llama-3.3-70b-versatile",
+    llm_temperature: 0.6,
+    llm_max_tokens: 150,
+    stt_provider: "deepgram",
+    stt_model: "nova-3",
+    stt_language: "en",
+    tts_provider: "cartesia",
+    tts_model: "sonic-3",
+    tts_voice_id: "f786b574-daa5-4673-aa0c-cbe3e8534c02",
+    tts_sample_rate: 16000,
+};
+
 const RawModelSchema = z
     .object({
         id: z.string(),
         name: z.string(),
         description: z.string(),
-        speed: z.string().nullish(),
-        price: z.string().nullish(),
-        context_window: z.number().nullish(),
-        contextWindow: z.number().nullish(),
+        speed: z.string().optional(),
+        price: z.string().optional(),
+        context_window: z.number().optional(),
+        contextWindow: z.number().optional(),
         is_preview: z.boolean().optional(),
         isPreview: z.boolean().optional(),
-        provider: z.string().optional(),
     })
     .passthrough();
 
@@ -129,14 +140,12 @@ const RawVoiceSchema = z
         name: z.string(),
         language: z.string().optional(),
         description: z.string(),
-        gender: z.string().nullish(),
-        accent: z.string().nullish(),
+        gender: z.string().optional(),
+        accent: z.string().optional(),
         accent_color: z.string().optional(),
         accentColor: z.string().optional(),
         preview_text: z.string().optional(),
         previewText: z.string().optional(),
-        preview_url: z.string().nullish(),
-        previewUrl: z.string().nullish(),
         provider: z.string(),
         tags: z.array(z.string()).optional(),
     })
@@ -256,11 +265,10 @@ function normalizeModel(model: z.infer<typeof RawModelSchema>): ModelInfo {
         id: model.id,
         name: model.name,
         description: model.description,
-        speed: model.speed ?? undefined,
-        price: model.price ?? undefined,
-        context_window: model.context_window ?? model.contextWindow ?? undefined,
+        speed: model.speed,
+        price: model.price,
+        context_window: model.context_window ?? model.contextWindow,
         is_preview: model.is_preview ?? model.isPreview,
-        provider: model.provider,
     };
 }
 
@@ -270,13 +278,12 @@ function normalizeVoice(voice: z.infer<typeof RawVoiceSchema>): VoiceInfo {
         name: voice.name,
         language: voice.language ?? "Unknown",
         description: voice.description,
-        gender: voice.gender ?? undefined,
-        accent: voice.accent ?? undefined,
+        gender: voice.gender,
+        accent: voice.accent,
         accent_color: voice.accent_color ?? voice.accentColor ?? "#64748B",
         preview_text: voice.preview_text ?? voice.previewText ?? "",
         provider: voice.provider,
         tags: voice.tags ?? [],
-        preview_url: voice.preview_url ?? voice.previewUrl ?? undefined,
     };
 }
 
@@ -295,77 +302,51 @@ function pickNonEmptyString(...values: Array<string | undefined>) {
     return undefined;
 }
 
-function requireNonEmptyString(fieldName: string, ...values: Array<string | undefined>) {
-    const value = pickNonEmptyString(...values);
-    if (!value) {
-        throw new Error(`Missing required config field: ${fieldName}`);
-    }
-    return value;
-}
-
-function requireFiniteNumber(fieldName: string, ...values: Array<number | undefined>) {
-    for (const value of values) {
-        if (typeof value === "number" && Number.isFinite(value)) {
-            return value;
-        }
-    }
-    throw new Error(`Missing required config field: ${fieldName}`);
-}
-
 function normalizeConfig(raw: z.infer<typeof RawConfigSchema>): AIProviderConfig {
     return {
-        llm_provider: requireNonEmptyString("llm_provider", raw.llm_provider, raw.llmProvider),
-        llm_model: requireNonEmptyString("llm_model", raw.llm_model, raw.llmModel),
-        llm_temperature: requireFiniteNumber("llm_temperature", raw.llm_temperature, raw.llmTemperature),
-        llm_max_tokens: requireFiniteNumber("llm_max_tokens", raw.llm_max_tokens, raw.llmMaxTokens),
-        stt_provider: requireNonEmptyString("stt_provider", raw.stt_provider, raw.sttProvider),
-        stt_model: requireNonEmptyString("stt_model", raw.stt_model, raw.sttModel),
-        stt_language: requireNonEmptyString("stt_language", raw.stt_language, raw.sttLanguage),
-        tts_provider: requireNonEmptyString("tts_provider", raw.tts_provider, raw.ttsProvider),
-        tts_model: requireNonEmptyString("tts_model", raw.tts_model, raw.ttsModel),
-        tts_voice_id: requireNonEmptyString("tts_voice_id", raw.tts_voice_id, raw.ttsVoiceId),
-        tts_sample_rate: requireFiniteNumber("tts_sample_rate", raw.tts_sample_rate, raw.ttsSampleRate),
+        llm_provider: pickNonEmptyString(raw.llm_provider, raw.llmProvider) ?? DEFAULT_CONFIG.llm_provider,
+        llm_model: pickNonEmptyString(raw.llm_model, raw.llmModel) ?? DEFAULT_CONFIG.llm_model,
+        llm_temperature: raw.llm_temperature ?? raw.llmTemperature ?? DEFAULT_CONFIG.llm_temperature,
+        llm_max_tokens: raw.llm_max_tokens ?? raw.llmMaxTokens ?? DEFAULT_CONFIG.llm_max_tokens,
+        stt_provider: pickNonEmptyString(raw.stt_provider, raw.sttProvider) ?? DEFAULT_CONFIG.stt_provider,
+        stt_model: pickNonEmptyString(raw.stt_model, raw.sttModel) ?? DEFAULT_CONFIG.stt_model,
+        stt_language: pickNonEmptyString(raw.stt_language, raw.sttLanguage) ?? DEFAULT_CONFIG.stt_language,
+        tts_provider: pickNonEmptyString(raw.tts_provider, raw.ttsProvider) ?? DEFAULT_CONFIG.tts_provider,
+        tts_model: pickNonEmptyString(raw.tts_model, raw.ttsModel) ?? DEFAULT_CONFIG.tts_model,
+        tts_voice_id: pickNonEmptyString(raw.tts_voice_id, raw.ttsVoiceId) ?? DEFAULT_CONFIG.tts_voice_id,
+        tts_sample_rate: raw.tts_sample_rate ?? raw.ttsSampleRate ?? DEFAULT_CONFIG.tts_sample_rate,
     };
 }
 
-async function requestPath<T>(
-    path: string,
-    opts: { method?: "GET" | "POST"; body?: unknown; timeoutMs?: number } = {},
-) {
-    const data = await httpClient().request({
-        path,
-        method: opts.method,
-        body: opts.body,
-        timeoutMs: opts.timeoutMs ?? 12_000,
-    });
-    return data as T;
+async function requestFirstMatch<T>(paths: string[], opts: { method?: "GET" | "POST"; body?: unknown; timeoutMs?: number }) {
+    let lastErr: unknown;
+    for (const path of paths) {
+        try {
+            const data = await httpClient().request({ path, method: opts.method, body: opts.body, timeoutMs: opts.timeoutMs ?? 12_000 });
+            return data as T;
+        } catch (err) {
+            lastErr = err;
+        }
+    }
+    throw lastErr;
 }
 
 class AIOptionsApi {
     // Get available providers and models
     async getProviders(): Promise<ProviderListResponse> {
-        const data = await requestPath<unknown>("/ai-options/providers", { timeoutMs: 12_000 });
+        const data = await requestFirstMatch<unknown>(["/ai/options/providers", "/ai/providers"], { timeoutMs: 12_000 });
         return normalizeProviderList(RawProviderListSchema.parse(data));
     }
 
     // Get available TTS voices
-    async getVoices(): Promise<{ voices: VoiceInfo[]; elevenlabs_error?: string }> {
-        const data = await requestPath<unknown>("/ai-options/voices", { timeoutMs: 12_000 });
-        // Backend returns { voices: [...], elevenlabs_error?: string }
-        if (data && typeof data === "object" && "voices" in data) {
-            const envelope = data as { voices: unknown[]; elevenlabs_error?: string };
-            return {
-                voices: z.array(RawVoiceSchema).parse(envelope.voices).map(normalizeVoice),
-                elevenlabs_error: envelope.elevenlabs_error,
-            };
-        }
-        // Fallback: bare array (legacy)
-        return { voices: z.array(RawVoiceSchema).parse(data).map(normalizeVoice) };
+    async getVoices(): Promise<VoiceInfo[]> {
+        const data = await requestFirstMatch<unknown>(["/ai/options/voices", "/ai/voices", "/voices"], { timeoutMs: 12_000 });
+        return z.array(RawVoiceSchema).parse(data).map(normalizeVoice);
     }
 
     // Preview a voice with sample audio
     async previewVoice(request: VoicePreviewRequest): Promise<VoicePreviewResponse> {
-        const data = await requestPath<unknown>("/ai-options/voices/preview", {
+        const data = await requestFirstMatch<unknown>(["/ai/options/voices/preview", "/ai/voices/preview", "/ai/voice/preview"], {
             method: "POST",
             body: request,
             timeoutMs: 30_000,
@@ -382,36 +363,19 @@ class AIOptionsApi {
 
     // Get current configuration
     async getConfig(): Promise<AIProviderConfig> {
-        const data = await requestPath<unknown>("/ai-options/config", { timeoutMs: 12_000 });
+        const data = await requestFirstMatch<unknown>(["/ai/options/config", "/ai/config"], { timeoutMs: 12_000 });
         return normalizeConfig(RawConfigSchema.parse(data));
     }
 
     // Save configuration
-    async saveConfig(config: AIProviderConfig): Promise<{ config: AIProviderConfig; latency_warnings: string[] }> {
-        const data = await requestPath<unknown>("/ai-options/config", {
-            method: "POST",
-            body: config,
-            timeoutMs: 12_000,
-        });
-        // Backend returns AIProviderConfigWithWarnings: { config: {...}, latency_warnings: [...] }
-        if (data && typeof data === "object" && "config" in data) {
-            const envelope = data as { config: unknown; latency_warnings?: string[] };
-            return {
-                config: normalizeConfig(RawConfigSchema.parse(envelope.config)),
-                latency_warnings: envelope.latency_warnings ?? [],
-            };
-        }
-        // Fallback: bare config (legacy / test environments)
-        return { config: normalizeConfig(RawConfigSchema.parse(data)), latency_warnings: [] };
+    async saveConfig(config: AIProviderConfig): Promise<AIProviderConfig> {
+        const data = await requestFirstMatch<unknown>(["/ai/options/config", "/ai/config"], { method: "POST", body: config, timeoutMs: 12_000 });
+        return normalizeConfig(RawConfigSchema.parse(data));
     }
 
     // Test LLM with message
     async testLLM(request: LLMTestRequest): Promise<LLMTestResponse> {
-        const data = await requestPath<unknown>("/ai-options/test/llm", {
-            method: "POST",
-            body: request,
-            timeoutMs: 30_000,
-        });
+        const data = await requestFirstMatch<unknown>(["/ai/options/test/llm", "/ai/test/llm", "/ai/llm/test"], { method: "POST", body: request, timeoutMs: 30_000 });
         const parsed = RawLLMTestResponseSchema.parse(data);
         return {
             response: parsed.response,
@@ -424,11 +388,7 @@ class AIOptionsApi {
 
     // Test TTS with text
     async testTTS(request: TTSTestRequest): Promise<TTSTestResponse> {
-        const data = await requestPath<unknown>("/ai-options/test/tts", {
-            method: "POST",
-            body: request,
-            timeoutMs: 30_000,
-        });
+        const data = await requestFirstMatch<unknown>(["/ai/options/test/tts", "/ai/test/tts", "/ai/tts/test"], { method: "POST", body: request, timeoutMs: 30_000 });
         const parsed = RawTTSTestResponseSchema.parse(data);
         return {
             audio_base64: parsed.audio_base64 ?? parsed.audioBase64 ?? "",
@@ -440,28 +400,9 @@ class AIOptionsApi {
         };
     }
 
-    // Pre-download and cache all voice samples on the server
-    async prefetchAllSamples(): Promise<{ cached: number; skipped_already_cached: number; failed: number; failures: Array<{ voice_id: string; error: string }> }> {
-        const data = await requestPath<unknown>("/ai-options/voices/prefetch", {
-            method: "POST",
-            timeoutMs: 300_000, // up to 5 min for large voice libraries
-        });
-        return data as ReturnType<AIOptionsApi["prefetchAllSamples"]> extends Promise<infer R> ? R : never;
-    }
-
-    // Get prefetch cache status
-    async getPrefetchStatus(): Promise<{ cartesia_key_configured: boolean; deepgram_key_configured: boolean; elevenlabs_key_configured: boolean; preview_samples_cached: number; elevenlabs_mp3_samples_cached: number }> {
-        const data = await requestPath<unknown>("/ai-options/voices/prefetch-status");
-        return data as ReturnType<AIOptionsApi["getPrefetchStatus"]> extends Promise<infer R> ? R : never;
-    }
-
     // Run full benchmark
     async runBenchmark(_config: AIProviderConfig): Promise<LatencyBenchmarkResponse> {
-        const data = await requestPath<unknown>("/ai-options/benchmark", {
-            method: "POST",
-            body: _config,
-            timeoutMs: 60_000,
-        });
+        const data = await requestFirstMatch<unknown>(["/ai/options/benchmark", "/ai/benchmark"], { method: "POST", body: _config, timeoutMs: 60_000 });
         const parsed = RawLatencyBenchmarkResponseSchema.parse(data);
         return {
             llm_first_token_ms: parsed.llm_first_token_ms ?? parsed.llmFirstTokenMs ?? 0,

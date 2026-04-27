@@ -1,16 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Sidebar } from "./sidebar";
 import { usePathname, useRouter } from "next/navigation";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { useSidebarActions, useSidebarState } from "@/lib/sidebar-client";
 import { Breadcrumbs } from "@/components/layout/breadcrumbs";
 import { HealthIndicator } from "@/components/ui/health-indicator";
-import { useAuth } from "@/lib/auth-context";
+import { useAuth } from "@/hooks/useAuth";
+import { SuspensionBanner, useSuspensionState } from "@/components/admin/suspension-state-provider";
+import { cn } from "@/lib/utils";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { FloatingAssistant } from "@/components/assistant/floating-assistant";
 
 interface DashboardLayoutProps {
     children: React.ReactNode;
@@ -22,42 +23,54 @@ interface DashboardLayoutProps {
 export function DashboardLayout({ children, title, description, requireAuth = true }: DashboardLayoutProps) {
     const pathname = usePathname();
     const router = useRouter();
-    const { user, loading: authLoading, refreshUser } = useAuth();
+    const { user, isLoading: authLoading } = useAuth();
+    const { state: suspensionState } = useSuspensionState();
     const { collapsed, mobileOpen } = useSidebarState();
     const { setMobileOpen } = useSidebarActions();
     const [isDesktop, setIsDesktop] = useState(false);
-    const [attemptedRefresh, setAttemptedRefresh] = useState(false);
+    const mainContentRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
         if (!requireAuth) return;
         if (authLoading) return;
         if (user) return;
-        if (!attemptedRefresh) {
-            setAttemptedRefresh(true);
-            void refreshUser();
-            return;
-        }
         const next = pathname ?? "/dashboard";
         try {
             router.replace(`/auth/login?next=${encodeURIComponent(next)}`);
         } catch {
             window.location.href = `/auth/login?next=${encodeURIComponent(next)}`;
         }
-    }, [attemptedRefresh, authLoading, pathname, refreshUser, requireAuth, router, user]);
+    }, [authLoading, pathname, requireAuth, router, user]);
 
     useEffect(() => {
         if (typeof window === "undefined") return;
         const mql = window.matchMedia("(min-width: 1024px)");
         const update = () => setIsDesktop(mql.matches);
         update();
-        mql.addEventListener("change", update);
-        return () => mql.removeEventListener("change", update);
+        if (typeof mql.addEventListener === "function") {
+            mql.addEventListener("change", update);
+            return () => mql.removeEventListener("change", update);
+        }
+        (mql as unknown as { addListener?: (cb: () => void) => void }).addListener?.(update);
+        return () => (mql as unknown as { removeListener?: (cb: () => void) => void }).removeListener?.(update);
     }, []);
 
     const desktopPaddingLeft = useMemo(() => {
         if (!isDesktop) return undefined;
         return collapsed ? "var(--sidebar-collapsed-width)" : "var(--sidebar-expanded-width)";
     }, [collapsed, isDesktop]);
+
+    useEffect(() => {
+        const el = mainContentRef.current;
+        if (!el) return;
+        if (suspensionState.suspended) {
+            el.setAttribute("inert", "");
+            el.setAttribute("aria-disabled", "true");
+            return;
+        }
+        el.removeAttribute("inert");
+        el.removeAttribute("aria-disabled");
+    }, [suspensionState.suspended]);
 
     if (requireAuth) {
         if (authLoading) {
@@ -72,7 +85,7 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
             return (
                 <div className="flex min-h-screen items-center justify-center bg-background text-foreground" role="status" aria-live="polite" aria-busy="true">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-foreground/60" aria-hidden />
-                    <span className="sr-only">{attemptedRefresh ? "Redirecting to sign in…" : "Loading…"}</span>
+                    <span className="sr-only">Loading…</span>
                 </div>
             );
         }
@@ -144,12 +157,25 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
 
                 {/* Main Content */}
                 <main className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth p-4 md:p-8 transition-colors duration-300">
-                    {children}
+                    <div className="mx-auto flex w-full max-w-7xl flex-col gap-4">
+                        <SuspensionBanner />
+                        <div className="relative">
+                            {suspensionState.suspended ? (
+                                <div className="absolute inset-0 z-20 rounded-2xl border border-red-500/20 bg-background/55 backdrop-blur-[1px]" aria-hidden />
+                            ) : null}
+                            <div
+                                ref={mainContentRef}
+                                className={cn(
+                                    "transition-opacity duration-200",
+                                    suspensionState.suspended ? "pointer-events-none select-none opacity-55" : undefined
+                                )}
+                            >
+                                {children}
+                            </div>
+                        </div>
+                    </div>
                 </main>
             </div>
-
-            {/* Floating AI Assistant Chat Widget */}
-            <FloatingAssistant />
         </div>
     );
 }

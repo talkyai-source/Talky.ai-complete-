@@ -15,8 +15,12 @@ export function GlobalSidebarToggle({ className }: { className?: string }) {
         const mql = window.matchMedia("(min-width: 1024px)");
         const update = () => setIsDesktop(mql.matches);
         update();
-        mql.addEventListener("change", update);
-        return () => mql.removeEventListener("change", update);
+        if (typeof mql.addEventListener === "function") {
+            mql.addEventListener("change", update);
+            return () => mql.removeEventListener("change", update);
+        }
+        (mql as unknown as { addListener?: (cb: () => void) => void }).addListener?.(update);
+        return () => (mql as unknown as { removeListener?: (cb: () => void) => void }).removeListener?.(update);
     }, []);
 
     const expanded = isDesktop ? !collapsed : mobileOpen;
@@ -43,4 +47,3 @@ export function GlobalSidebarToggle({ className }: { className?: string }) {
         </button>
     );
 }
-

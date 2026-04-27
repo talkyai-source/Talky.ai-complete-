@@ -24,13 +24,11 @@ import {
 } from "@/components/ui/dashboard-charts";
 import { HoverTooltip, useHoverTooltip } from "@/components/ui/hover-tooltip";
 import { computeMinutesUsageFontPx, MINUTES_USAGE_LAYOUT_SPEC } from "@/lib/minutes-usage-layout.mjs";
-import { ApiClientError } from "@/lib/http-client";
-import { useAuth } from "@/lib/auth-context";
 
 function Counter({ value }: { value: number }) {
     const nodeRef = useRef<HTMLSpanElement>(null);
     const isInView = useInView(nodeRef, { once: true, margin: "-10px" });
-
+    
     useEffect(() => {
         const node = nodeRef.current;
         if (!node || !isInView) return;
@@ -42,7 +40,7 @@ function Counter({ value }: { value: number }) {
         }
 
         const current = Number((node.textContent || "0").replace(/,/g, "")) || 0;
-
+        
         const controls = animate(current, value, {
             duration: 1.5,
             ease: "easeOut",
@@ -50,7 +48,7 @@ function Counter({ value }: { value: number }) {
                 node.textContent = Math.floor(v).toLocaleString();
             }
         });
-
+        
         return () => controls.stop();
     }, [value, isInView]);
 
@@ -107,12 +105,12 @@ function KpiCard({
     const motionProps = reduceMotion
         ? {}
         : {
-            initial: { opacity: 0, y: 14 },
-            animate: { opacity: 1, y: 0 },
-            transition: { duration: 0.35 },
-            whileHover: { scale: 1.02 },
-            whileTap: { scale: 0.99 },
-        };
+              initial: { opacity: 0, y: 14 },
+              animate: { opacity: 1, y: 0 },
+              transition: { duration: 0.35 },
+              whileHover: { scale: 1.02 },
+              whileTap: { scale: 0.99 },
+          };
 
     return (
         <motion.div
@@ -158,50 +156,99 @@ function KpiCard({
     );
 }
 
-function useSeriesLiveBuckets(series: CallSeriesItem[]) {
-    return useMemo(() => {
-        const parsed = series
-            .map((item) => {
-                const startMs = Date.parse(item.date);
-                if (!Number.isFinite(startMs)) return null;
-                return {
-                    startMs,
-                    total: Math.max(0, Math.round(item.total_calls ?? 0)),
-                    answered: Math.max(0, Math.round(item.answered ?? 0)),
-                    failed: Math.max(0, Math.round(item.failed ?? 0)),
-                };
-            })
-            .filter((item): item is { startMs: number; total: number; answered: number; failed: number } => item !== null)
-            .sort((a, b) => a.startMs - b.startMs);
+function useSimulatedLiveBuckets() {
+    const [state, setState] = useState<{
+        loading: boolean;
+        error: string;
+        lastUpdatedMs: number;
+        buckets: LiveTimeBucket[];
+    }>({ loading: true, error: "", lastUpdatedMs: 0, buckets: [] });
 
-        if (parsed.length === 0) {
+    const bucketsRef = useRef<LiveTimeBucket[]>([]);
+    const lastMinuteStartRef = useRef<number>(0);
+
+    useEffect(() => {
+        const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+        const BUCKET_MS = 60_000;
+        const totalMinutes = 48 * 60;
+
+        const makeBucket = (startMs: number, prevTotal: number) => {
+            const d = new Date(startMs);
+            const h = d.getHours() + d.getMinutes() / 60;
+            const daily = 0.55 + 0.45 * Math.sin(((h - 7.2) / 24) * 2 * Math.PI);
+            const baseline = 18 + daily * 22;
+            const drift = (Math.random() - 0.5) * 6;
+            const total = Math.max(0, Math.round(prevTotal * 0.65 + baseline * 0.35 + drift));
+            const answeredRate = 0.86 + (Math.random() - 0.5) * 0.05;
+            const answered = Math.max(0, Math.min(total, Math.round(total * answeredRate)));
+            const failed = Math.max(0, Math.min(total - answered, Math.round(total * (0.06 + Math.random() * 0.05))));
+            const avgDurationSec = 65 + daily * 55 + (Math.random() - 0.5) * 18;
             return {
-                loading: false,
-                error: "",
-                lastUpdatedMs: Date.now(),
-                buckets: [] as LiveTimeBucket[],
+                startMs,
+                endMs: startMs + BUCKET_MS,
+                total,
+                answered,
+                failed,
+                avgDurationSec,
+            } satisfies LiveTimeBucket;
+        };
+
+        const now = Date.now();
+        const currentMinuteStart = Math.floor(now / BUCKET_MS) * BUCKET_MS;
+        lastMinuteStartRef.current = currentMinuteStart;
+
+        let prevTotal = 26;
+        const buckets: LiveTimeBucket[] = Array.from({ length: totalMinutes }).map((_, i) => {
+            const startMs = currentMinuteStart - (totalMinutes - 1 - i) * BUCKET_MS;
+            const b = makeBucket(startMs, prevTotal);
+            prevTotal = b.total ?? prevTotal;
+            return b;
+        });
+
+        bucketsRef.current = buckets;
+        const initId = window.setTimeout(() => {
+            setState({ loading: false, error: "", lastUpdatedMs: now, buckets });
+        }, 0);
+
+        if (reducedMotion) {
+            return () => {
+                window.clearTimeout(initId);
             };
         }
 
-        const inferredBucketMs =
-            parsed.length > 1 ? Math.max(60_000, parsed[parsed.length - 1]!.startMs - parsed[parsed.length - 2]!.startMs) : 86_400_000;
+        const id = window.setInterval(() => {
+            const now = Date.now();
+            const minuteStart = Math.floor(now / BUCKET_MS) * BUCKET_MS;
 
-        const buckets: LiveTimeBucket[] = parsed.map((item) => ({
-            startMs: item.startMs,
-            endMs: item.startMs + inferredBucketMs,
-            total: item.total,
-            answered: Math.min(item.total, item.answered),
-            failed: Math.min(item.total, item.failed),
-            avgDurationSec: null,
-        }));
+            const next = bucketsRef.current.slice();
+            let prevTotal = next[next.length - 1]?.total ?? 20;
 
-        return {
-            loading: false,
-            error: "",
-            lastUpdatedMs: buckets[buckets.length - 1]!.endMs,
-            buckets,
+            if (minuteStart !== lastMinuteStartRef.current) {
+                lastMinuteStartRef.current = minuteStart;
+                const b = makeBucket(minuteStart, prevTotal);
+                next.push(b);
+                while (next.length > totalMinutes) next.shift();
+                prevTotal = b.total ?? prevTotal;
+            } else {
+                const idx = next.length - 1;
+                if (idx >= 0) {
+                    const b = makeBucket(minuteStart, prevTotal);
+                    const gap = Math.random() < 0.035;
+                    next[idx] = gap ? { ...b, total: null, answered: null, failed: null, avgDurationSec: null } : b;
+                }
+            }
+
+            bucketsRef.current = next;
+            setState((prev) => ({ ...prev, loading: false, error: "", lastUpdatedMs: now, buckets: next }));
+        }, 1000);
+
+        return () => {
+            window.clearTimeout(initId);
+            window.clearInterval(id);
         };
-    }, [series]);
+    }, []);
+
+    return state;
 }
 
 function toDatetimeLocalValue(ms: number) {
@@ -254,7 +301,7 @@ function OutcomePieChart({
 
     return (
         <div className="relative">
-            <HoverTooltip state={tooltip.state} />
+            <HoverTooltip tooltip={tooltip} />
             <svg viewBox={`0 0 ${size} ${size}`} className="w-full max-w-[260px] h-auto mx-auto">
                 {paths.map((p) => (
                     <path
@@ -353,7 +400,7 @@ function StatusStackedBarsChart({
 
     return (
         <div className="relative">
-            <HoverTooltip state={tooltip.state} />
+            <HoverTooltip tooltip={tooltip} />
             <svg
                 ref={svgRef}
                 viewBox={`0 0 ${w} ${height}`}
@@ -510,7 +557,8 @@ function CampaignLinesChart({
                 ...c,
                 values: data.map((b) => {
                     const total = typeof b.total === "number" ? b.total : 0;
-                    return Math.max(0, total * c.weight);
+                    const noise = (seeded01(b.startMs * 0.00001 + ci * 91.7) - 0.5) * 0.16;
+                    return Math.max(0, total * c.weight * (1 + noise));
                 }),
             };
         });
@@ -554,7 +602,7 @@ function CampaignLinesChart({
 
     return (
         <div className="relative">
-            <HoverTooltip state={tooltip.state} />
+            <HoverTooltip tooltip={tooltip} />
             <svg
                 ref={svgRef}
                 viewBox={`0 0 ${w} ${height}`}
@@ -655,13 +703,12 @@ function CampaignLinesChart({
 }
 
 export default function DashboardPage() {
-    const { user, loading: authLoading } = useAuth();
     const [summary, setSummary] = useState<DashboardSummary | null>(null);
     const [liveSummary, setLiveSummary] = useState<DashboardSummary | null>(null);
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
     const [series, setSeries] = useState<CallSeriesItem[]>([]);
     const [liveBars, setLiveBars] = useState<DualSeriesPoint[]>([]);
-    const [streamStatus, setStreamStatus] = useState<"connecting" | "connected" | "retrying" | "offline">("offline");
+    const [streamStatus, setStreamStatus] = useState<"connecting" | "connected" | "retrying" | "offline">("connecting");
     const [, setStreamFailures] = useState(0);
     const [, setStreamLatencyMs] = useState<number | null>(null);
     const [, setStreamError] = useState("");
@@ -681,7 +728,7 @@ export default function DashboardPage() {
     const [activeBucket, setActiveBucket] = useState<LiveTimeBucket | null>(null);
     const [callStatsView, setCallStatsView] = useState<"status" | "campaigns" | "outcomes">("status");
 
-    const sim = useSeriesLiveBuckets(series);
+    const sim = useSimulatedLiveBuckets();
 
     const activeRange = useMemo(() => {
         const end = callRangeMode === "custom" ? (customEndMs ?? sim.lastUpdatedMs) : sim.lastUpdatedMs;
@@ -773,8 +820,8 @@ export default function DashboardPage() {
         const successDelta = delta(currentSuccessRate, prevSuccessRate);
         const failedPct = currentTotal > 0 ? (currentFailed / currentTotal) * 100 : 0;
 
-        const currentActiveCalls = currentFailed;
-        const prevActiveCalls = sum(previousBucketsBase, "failed");
+        const currentActiveCalls = Math.max(0, Math.round((liveBuckets[liveBuckets.length - 1]?.total ?? 0) * 0.18 + 6));
+        const prevActiveCalls = Math.max(0, Math.round((previousBucketsBase[previousBucketsBase.length - 1]?.total ?? 0) * 0.18 + 6));
         const activeDelta = delta(currentActiveCalls, prevActiveCalls);
 
         const avgDurDelta = delta(currentAvgDurationSec, prevAvgDurationSec);
@@ -797,12 +844,12 @@ export default function DashboardPage() {
                 status: statusVariant(currentSuccessRate, { green: 92, yellow: 85 }),
             },
             {
-                title: "Failed Calls",
+                title: "Active Calls",
                 value: currentActiveCalls,
                 valueSuffix: "",
                 deltaAbs: activeDelta.abs,
                 deltaPct: activeDelta.pct,
-                status: statusVariantLowerBetter(currentActiveCalls, { green: 10, yellow: 50 }),
+                status: statusVariant(currentActiveCalls, { green: 30, yellow: 18 }),
             },
             {
                 title: "Avg Duration",
@@ -818,11 +865,19 @@ export default function DashboardPage() {
         const windowStart = activeRange.startMs;
         const rangeMs = Math.max(1, now - windowStart);
 
-        const baseMarkers: LiveChartMarker[] = [];
+        const baseMarkers: LiveChartMarker[] = [
+            { ms: now - Math.round(rangeMs * 0.82), label: "Campaign A start", kind: "campaign-start" },
+            { ms: now - Math.round(rangeMs * 0.46), label: "Campaign A end", kind: "campaign-end" },
+            { ms: now - Math.round(rangeMs * 0.68), label: "Campaign B start", kind: "campaign-start" },
+            { ms: now - Math.round(rangeMs * 0.22), label: "Campaign B end", kind: "campaign-end" },
+            { ms: now - Math.round(rangeMs * 0.12), label: "Deploy", kind: "event" },
+        ];
         const noteMarkers: LiveChartMarker[] = notes.map((n) => ({ ms: n.ms, label: n.label, kind: "note" }));
         const markers: LiveChartMarker[] = [...baseMarkers, ...noteMarkers].filter((m) => m.ms >= windowStart && m.ms <= now);
 
-        const maintenanceWindows: LiveWindow[] = [];
+        const maintenanceWindows: LiveWindow[] = [
+            { startMs: now - Math.round(rangeMs * 0.6), endMs: now - Math.round(rangeMs * 0.55), label: "Maintenance" },
+        ].filter((w) => w.endMs >= windowStart && w.startMs <= now);
 
         const peaks = liveBuckets
             .map((b) => ({ b, v: typeof b.total === "number" ? b.total : -1 }))
@@ -845,10 +900,22 @@ export default function DashboardPage() {
 
         const peakBands = peaks.map((p) => ({ startMs: p.startMs, endMs: p.endMs, label: p.label })) satisfies LiveWindow[];
 
-        const outcomes = [
-            { label: "Answered", value: currentAnswered, color: "#10B981" },
-            { label: "Failed", value: currentFailed, color: "#EF4444" },
-        ];
+        const outcomes = (() => {
+            const completed = Math.max(0, Math.round(currentAnswered * 0.72));
+            const voicemail = Math.max(0, Math.round(currentAnswered * 0.17));
+            const callback = Math.max(0, currentAnswered - completed - voicemail);
+            const busy = Math.max(0, Math.round(currentFailed * 0.30));
+            const noAnswer = Math.max(0, Math.round(currentFailed * 0.45));
+            const networkError = Math.max(0, currentFailed - busy - noAnswer);
+            return [
+                { label: "Completed", value: completed, color: "#10B981" },
+                { label: "Voicemail", value: voicemail, color: "#3B82F6" },
+                { label: "Callback", value: callback, color: "#06B6D4" },
+                { label: "Busy", value: busy, color: "#F59E0B" },
+                { label: "No Answer", value: noAnswer, color: "#A855F7" },
+                { label: "Network Error", value: networkError, color: "#EF4444" },
+            ];
+        })();
 
         const bucket = activeBucket ?? liveBuckets[liveBuckets.length - 1] ?? null;
         const bucketTotal = bucket && typeof bucket.total === "number" ? bucket.total : 0;
@@ -857,8 +924,8 @@ export default function DashboardPage() {
         const bucketInProgress = Math.max(0, bucketTotal - bucketAnswered - bucketFailed);
 
         const hoverStats = {
-            totalCalls: bucketTotal,
-            answeredCalls: bucketAnswered,
+            activeCalls: Math.max(0, Math.round(bucketTotal * 0.18 + 6)),
+            queueSize: Math.max(0, Math.round(bucketTotal * 0.12 + 4)),
             completedTotal: currentAnswered,
             failedTotal: currentFailed,
             successRate: currentTotal > 0 ? (currentAnswered / currentTotal) * 100 : 0,
@@ -870,9 +937,8 @@ export default function DashboardPage() {
     }, [activeBucket, activeRange.endMs, activeRange.startMs, liveBuckets, notes, previousBucketsBase]);
 
     useEffect(() => {
-        if (authLoading || !user) return;
-        void loadData();
-    }, [authLoading, user]);
+        loadData();
+    }, []);
 
     async function loadData() {
         try {
@@ -887,14 +953,6 @@ export default function DashboardPage() {
             setCampaigns(campaignsData.campaigns);
             setSeries(analytics.series);
         } catch (err) {
-            // 401 handling is centralised in the http-client (it clears
-            // the token and redirects to /auth/login). We deliberately
-            // do NOT set an error message here — the page is about to
-            // unmount due to the redirect, and a brief red banner during
-            // the transition is the bug the unification fixed.
-            if (err instanceof ApiClientError && err.status === 401) {
-                return;
-            }
             setError(err instanceof Error ? err.message : "Failed to load dashboard");
         } finally {
             setLoading(false);
@@ -902,24 +960,62 @@ export default function DashboardPage() {
     }
 
     useEffect(() => {
-        if (!summary) return;
+        if (!liveSummary) return;
         if (streamStatus === "connected") return;
-        setLiveSummary(summary);
-    }, [summary, streamStatus]);
+        const id = window.setInterval(() => {
+            setLiveSummary((prev) => {
+                if (!prev) return prev;
+                const inc = Math.floor(Math.random() * 6);
+                const answeredInc = Math.floor(Math.random() * (inc + 1));
+                const failedInc = inc - answeredInc;
+                const minutesInc = Math.floor(inc * (2 + Math.random() * 2));
+
+                return {
+                    ...prev,
+                    total_calls: prev.total_calls + inc,
+                    answered_calls: prev.answered_calls + answeredInc,
+                    failed_calls: prev.failed_calls + failedInc,
+                    minutes_used: prev.minutes_used + minutesInc,
+                    minutes_remaining: Math.max(0, prev.minutes_remaining - minutesInc),
+                    minutes_included: prev.minutes_included || 5000,
+                };
+            });
+        }, 1000);
+
+        return () => window.clearInterval(id);
+    }, [liveSummary, streamStatus]);
 
     useEffect(() => {
-        if (series.length === 0) {
-            setLiveBars([]);
-            return;
-        }
-        if (streamStatus === "connected") return;
-        const initial: DualSeriesPoint[] = series.slice(-12).map((item) => ({
-            label: new Date(item.date).toLocaleDateString([], { month: "short", day: "numeric" }),
-            a: Math.max(0, Math.round(item.answered ?? 0)),
-            b: Math.max(0, Math.round(item.failed ?? 0)),
-        }));
+        if (series.length === 0) return;
+        const now = new Date();
+        const baseA = Math.max(6, Math.round(series.reduce((a, s) => a + s.answered, 0) / series.length / 6));
+        const baseB = Math.max(1, Math.round(series.reduce((a, s) => a + s.failed, 0) / series.length / 10));
+
+        const initial: DualSeriesPoint[] = Array.from({ length: 12 }).map((_, i) => {
+            const t = new Date(now.getTime() - (11 - i) * 60_000);
+            const label = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+            const a = Math.max(0, Math.round(baseA + (Math.random() - 0.4) * baseA));
+            const b = Math.max(0, Math.round(baseB + (Math.random() - 0.4) * baseB));
+            return { label, a, b };
+        });
         setLiveBars(initial);
-    }, [series, streamStatus]);
+    }, [series]);
+
+    useEffect(() => {
+        if (liveBars.length === 0) return;
+        if (streamStatus === "connected") return;
+        const id = window.setInterval(() => {
+            setLiveBars((prev) => {
+                const now = new Date();
+                const label = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+                const last = prev[prev.length - 1] ?? { label, a: 0, b: 0 };
+                const a = Math.max(0, Math.round(last.a + (Math.random() - 0.35) * 10));
+                const b = Math.max(0, Math.round(last.b + (Math.random() - 0.4) * 5));
+                return [...prev.slice(-11), { label, a, b }];
+            });
+        }, 1000);
+        return () => window.clearInterval(id);
+    }, [liveBars.length, streamStatus]);
 
     useEffect(() => {
         if (liveBars.length > 0) lastValidBarsRef.current = liveBars;
@@ -930,11 +1026,6 @@ export default function DashboardPage() {
     }, [liveSummary]);
 
     useEffect(() => {
-        if (authLoading || !user) {
-            setStreamStatus("offline");
-            return;
-        }
-
         const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
         const isString = (v: unknown): v is string => typeof v === "string";
 
@@ -953,14 +1044,16 @@ export default function DashboardPage() {
                 isNum(obj.failed_calls) &&
                 isNum(obj.minutes_used) &&
                 isNum(obj.minutes_remaining) &&
+                isNum(obj.minutes_included) &&
                 isNum(obj.active_campaigns)
             );
         };
 
         const getWsUrl = () => {
             const envUrl = process.env.NEXT_PUBLIC_DASHBOARD_WS_URL;
-            if (!envUrl || envUrl.trim().length === 0) return null;
-            return envUrl.trim();
+            if (envUrl && envUrl.trim().length > 0) return envUrl.trim();
+            const proto = window.location.protocol === "https:" ? "wss" : "ws";
+            return `${proto}://${window.location.host}/ws`;
         };
 
         let ws: WebSocket | null = null;
@@ -1037,13 +1130,8 @@ export default function DashboardPage() {
 
             let url = "";
             try {
-                url = getWsUrl() ?? "";
+                url = getWsUrl();
             } catch {
-                setStreamStatus("offline");
-                return;
-            }
-
-            if (!url) {
                 setStreamStatus("offline");
                 return;
             }
@@ -1128,7 +1216,7 @@ export default function DashboardPage() {
             stopped = true;
             cleanup();
         };
-    }, [authLoading, user]);
+    }, []);
 
     const effectiveSummary = liveSummary ?? summary;
 
@@ -1141,9 +1229,13 @@ export default function DashboardPage() {
     const successRateFontClass = successRate >= 100 ? "text-base" : "text-lg";
 
     const minutesTooltip = useHoverTooltip();
-    const minutesUsed = effectiveSummary?.minutes_used ?? 0;
+    const minutesUsedRaw = effectiveSummary?.minutes_used ?? 0;
     const minutesRemaining = effectiveSummary?.minutes_remaining ?? 0;
-    const minutesTotal = minutesUsed + minutesRemaining;
+    const minutesTotal = effectiveSummary?.minutes_included ?? 5000;
+    
+    // Cap used at total to ensure it never exceeds the plan limit in the UI
+    const minutesUsed = Math.min(minutesUsedRaw, minutesTotal);
+
     const minutesUsedPct = minutesTotal > 0 ? Math.round((minutesUsed / minutesTotal) * 100) : 0;
     const minutesUsedText = minutesUsed.toLocaleString();
     const minutesRemainingText = minutesRemaining.toLocaleString();
@@ -1161,8 +1253,7 @@ export default function DashboardPage() {
                 <div className="flex items-center justify-between gap-6">
                     <span className="text-gray-700 font-bold">Remaining minutes</span>
                     <span className="tabular-nums font-black text-gray-900">
-                        {minutesRemaining.toLocaleString()}{" "}
-                        <span className="text-gray-600 font-semibold">({Math.max(0, 100 - minutesUsedPct)}%)</span>
+                        {minutesRemaining.toLocaleString()}
                     </span>
                 </div>
             </div>
@@ -1210,29 +1301,30 @@ export default function DashboardPage() {
 
     const heatRows = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     const heatCols = ["0–3", "3–6", "6–9", "9–12", "12–15", "15–18", "18–21", "21–24"];
-    const heatValues = heatRows.map(() =>
-        heatCols.map(() => 0)
+    const seedTotals = series.length > 0 ? series.map((s) => s.total_calls) : [0, 0, 0, 0, 0, 0, 0];
+    const heatValues = heatRows.map((_, ri) =>
+        heatCols.map((__, ci) => {
+            const base = seedTotals[ri % seedTotals.length] ?? 0;
+            const wave = 0.55 + 0.45 * Math.sin((ri + 1) * 1.4 + (ci + 1) * 0.9);
+            return Math.max(0, Math.round((base / heatCols.length) * wave));
+        })
     );
-    // Populate heatmap from real API series data
-    for (const s of series) {
-        const d = new Date(s.date);
-        const dayIndex = (d.getDay() + 6) % 7; // Mon=0 .. Sun=6
-        // Distribute calls evenly across time slots (API doesn't provide hourly breakdowns)
-        const perSlot = Math.round(s.total_calls / heatCols.length);
-        for (let ci = 0; ci < heatCols.length; ci++) {
-            heatValues[dayIndex][ci] += perSlot;
-        }
-    }
     const heatMax = Math.max(1, ...heatValues.flat());
 
     const campaignLineSeries = useMemo(() => {
         const palette = ["#2563EB", "#10B981", "#F59E0B", "#A855F7"];
-        const base = campaigns.slice(0, 4).map((c, i) => ({
-            id: c.id,
-            label: c.name,
-            weight: Math.max(0.35, Math.min(1.5, (c.max_concurrent_calls ?? 10) / 12)),
-            color: palette[i % palette.length],
-        }));
+        const base = campaigns.length > 0
+            ? campaigns.slice(0, 4).map((c, i) => ({
+                id: c.id,
+                label: c.name,
+                weight: Math.max(0.35, Math.min(1.5, (c.max_concurrent_calls ?? 10) / 12)),
+                color: palette[i % palette.length],
+            }))
+            : [
+                { id: "camp-a", label: "Campaign A", weight: 1, color: palette[0] },
+                { id: "camp-b", label: "Campaign B", weight: 0.8, color: palette[1] },
+                { id: "camp-c", label: "Campaign C", weight: 0.6, color: palette[2] },
+            ];
         const enabled: Record<string, boolean> = {};
         for (const c of base) enabled[c.id] = true;
         return { campaigns: base, enabled };
@@ -1482,7 +1574,7 @@ export default function DashboardPage() {
                             className="rounded-2xl border border-border bg-background/70 backdrop-blur-sm p-6 shadow-sm transition-[background-color,box-shadow] duration-150 ease-out dark:hover:bg-background dark:hover:shadow-md"
                         >
                             <h3 className="text-xl font-bold text-gray-900 dark:text-foreground mb-4 uppercase tracking-wide">Minutes Usage</h3>
-                            <HoverTooltip state={minutesTooltip.state} className="w-[280px] text-sm font-semibold" />
+                            <HoverTooltip tooltip={minutesTooltip} className="w-[280px] text-sm font-semibold" />
                             <motion.div
                                 className="group rounded-2xl p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                                 tabIndex={0}
@@ -1553,6 +1645,8 @@ export default function DashboardPage() {
                                                     {minutesUsedText}
                                                 </motion.span>
                                             </div>
+
+                                            <div className="h-9 w-px bg-gray-200/80" aria-hidden />
 
                                             <div className="min-w-0 flex flex-col items-center text-center px-3">
                                                 <span className="text-sm font-semibold text-gray-700 dark:text-muted-foreground">Remaining</span>
@@ -1650,12 +1744,12 @@ export default function DashboardPage() {
 
                             <div className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
                                 <div className="rounded-xl border border-gray-200 dark:border-border bg-white dark:bg-muted/30 px-3 py-2">
-                                    <div className="text-[11px] font-bold uppercase tracking-wide text-gray-600 dark:text-muted-foreground">Total calls</div>
-                                    <div className="mt-1 text-lg font-black tabular-nums text-gray-900 dark:text-foreground">{Math.round(hoverStats.totalCalls).toLocaleString()}</div>
+                                    <div className="text-[11px] font-bold uppercase tracking-wide text-gray-600 dark:text-muted-foreground">Active calls</div>
+                                    <div className="mt-1 text-lg font-black tabular-nums text-gray-900 dark:text-foreground">{Math.round(hoverStats.activeCalls).toLocaleString()}</div>
                                 </div>
                                 <div className="rounded-xl border border-gray-200 dark:border-border bg-white dark:bg-muted/30 px-3 py-2">
-                                    <div className="text-[11px] font-bold uppercase tracking-wide text-gray-600 dark:text-muted-foreground">Answered</div>
-                                    <div className="mt-1 text-lg font-black tabular-nums text-gray-900 dark:text-foreground">{Math.round(hoverStats.answeredCalls).toLocaleString()}</div>
+                                    <div className="text-[11px] font-bold uppercase tracking-wide text-gray-600 dark:text-muted-foreground">Queue size</div>
+                                    <div className="mt-1 text-lg font-black tabular-nums text-gray-900 dark:text-foreground">{Math.round(hoverStats.queueSize).toLocaleString()}</div>
                                 </div>
                                 <div className="rounded-xl border border-gray-200 dark:border-border bg-white dark:bg-muted/30 px-3 py-2">
                                     <div className="text-[11px] font-bold uppercase tracking-wide text-gray-600 dark:text-muted-foreground">In progress</div>

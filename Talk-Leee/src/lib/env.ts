@@ -17,6 +17,18 @@ const EnvSchema = z.object({
     NEXT_PUBLIC_SENTRY_ENABLED: z.coerce.boolean().optional(),
 });
 
+const PUBLIC_ENV_KEYS = [
+    "NEXT_PUBLIC_APP_ENV",
+    "NEXT_PUBLIC_API_BASE_URL",
+    "NEXT_PUBLIC_COMMIT_SHA",
+    "NEXT_PUBLIC_SENTRY_DSN",
+    "NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE",
+    "NEXT_PUBLIC_SENTRY_PROFILES_SAMPLE_RATE",
+    "NEXT_PUBLIC_SENTRY_ENABLED",
+] as const;
+
+export type PublicEnvKey = (typeof PUBLIC_ENV_KEYS)[number];
+
 function parseEnv() {
     const raw = {
         NODE_ENV: process.env.NODE_ENV,
@@ -82,4 +94,23 @@ export function sentryTracesSampleRate(): number {
 export function sentryProfilesSampleRate(): number {
     if (typeof env.NEXT_PUBLIC_SENTRY_PROFILES_SAMPLE_RATE === "number") return env.NEXT_PUBLIC_SENTRY_PROFILES_SAMPLE_RATE;
     return appEnvironment() === "production" ? 0.05 : 0.1;
+}
+
+export function isPublicEnvKey(key: string): key is PublicEnvKey {
+    return (PUBLIC_ENV_KEYS as readonly string[]).includes(key);
+}
+
+export function publicAppConfig() {
+    return {
+        appEnvironment: appEnvironment(),
+        apiBaseUrl: apiBaseUrl(),
+        commitSha: commitSha(),
+        sentry: {
+            enabled: sentryEnabled(),
+            dsnConfigured: Boolean(env.NEXT_PUBLIC_SENTRY_DSN),
+            tracesSampleRate: sentryTracesSampleRate(),
+            profilesSampleRate: sentryProfilesSampleRate(),
+        },
+        publicEnvKeys: [...PUBLIC_ENV_KEYS],
+    } as const;
 }

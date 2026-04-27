@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
-import { useAuth } from "@/lib/auth-context";
+import { useAuth } from "@/hooks/useAuth";
 import { type AssistantRunsQuery, useAssistantActions, useAssistantExecute, useAssistantPlan, useAssistantRunRetry, useAssistantRuns } from "@/lib/api-hooks";
 import { ApiClientError, isApiClientError } from "@/lib/http-client";
 import { captureException, captureMessage } from "@/lib/monitoring";
@@ -645,7 +645,7 @@ export default function AssistantActionsPage() {
 
     const canExecute = Boolean(execActionType.trim()) && Boolean(execLeadId) && !executeM.isPending;
     const canPlan = Boolean(execActionType.trim()) && Boolean(execLeadId) && !planM.isPending;
-    const forbidden = user && user.role !== "admin";
+    const forbidden = user && user.role !== "platform_admin" && user.role !== "tenant_admin";
 
     return (
         <DashboardLayout title="Assistant Actions" description="Audit, plan, and execute assistant actions.">

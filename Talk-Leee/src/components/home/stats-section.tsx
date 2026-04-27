@@ -5,9 +5,9 @@ import type { Variants } from "framer-motion";
 import { Clock, PhoneCall, Smile } from "lucide-react";
 
 const stats = [
-  { label: "Uptime", value: "99.9%", icon: Clock },
-  { label: "Calls Handled", value: "10M+", icon: PhoneCall },
-  { label: "Customer Satisfaction", value: "95%", icon: Smile },
+  { label: "Higher Contact Rate", value: "55%", icon: PhoneCall },
+  { label: "Lower Avg. Handle Time", value: "40%", icon: Clock },
+  { label: "Faster First-Call Resolution", value: "25%", icon: Smile },
 ];
 
 export function StatsSection() {
@@ -41,8 +41,13 @@ export function StatsSection() {
     <section className="py-12 px-4 md:px-6 lg:px-8 bg-cyan-100 dark:bg-background">
       <div className="max-w-6xl mx-auto">
         <h2 className="text-center text-2xl md:text-3xl font-semibold text-primary dark:text-foreground mb-8">
-          Stats
+          Why 5,000+ Businesses Worldwide Choose Us
         </h2>
+        <p className="mx-auto max-w-4xl text-center text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed mb-10">
+          Our AI voice agent platform delivers more than just automated phone calls AI. We help enterprises and call centers transform every
+          customer interaction into a win. From global teams to specialized call centers, our AI customer support platform scales effortlessly —
+          driving efficiency, engagement, and measurable business growth.
+        </p>
 
         <motion.div
           variants={gridVariants}
@@ -74,8 +79,8 @@ export function StatsSection() {
               }}
             >
               <div className="mb-5 flex items-center justify-center">
-                <div className="h-10 w-10 rounded-full bg-white dark:bg-white/10 flex items-center justify-center">
-                  <stat.icon className="h-5 w-5 text-primary dark:text-foreground" aria-hidden />
+                <div className="h-10 w-10 rounded-full bg-white dark:bg-white flex items-center justify-center">
+                  <stat.icon className="h-5 w-5 text-black" aria-hidden />
                 </div>
               </div>
               <div className="text-4xl md:text-5xl font-bold text-primary dark:text-foreground mb-2">

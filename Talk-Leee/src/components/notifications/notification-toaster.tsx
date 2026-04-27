@@ -107,7 +107,7 @@ function Toast({ n, onClose }: { n: AppNotification; onClose: () => void }) {
                         <button
                             type="button"
                             onClick={onClose}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-xl text-muted-foreground hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20"
                             aria-label="Dismiss notification"
                         >
                             <X className="h-4 w-4" />

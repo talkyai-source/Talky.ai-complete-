@@ -15,7 +15,7 @@ const nextConfig: NextConfig = {
         minimumCacheTTL: 86400,
     },
     experimental: {
-        optimizePackageImports: ["lucide-react"],
+        optimizePackageImports: ["lucide-react", "framer-motion"],
     },
     async headers() {
         return [
@@ -43,38 +43,37 @@ const nextConfig: NextConfig = {
                 source: "/site.webmanifest",
                 headers: [{ key: "Cache-Control", value: "public, max-age=3600, stale-while-revalidate=86400" }],
             },
+            {
+                source: "/_next/static/:path*",
+                headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
+            },
         ];
     },
     webpack: (config, { dev }) => {
         if (dev) {
-            const systemRootIgnored = /^[A-Z]:\\(?:DumpStack\.log\.tmp|hiberfil\.sys|pagefile\.sys|swapfile\.sys|System Volume Information)(?:\\.*)?$/i;
-            const extraIgnoredGlobs = [
+            // Only include valid glob patterns that Webpack accepts
+            // Webpack schema requires watchOptions.ignored to be an array of non-empty strings
+            const ignoredPatterns = [
+                "**/node_modules/**",
+                "**/.next/**",
                 "**/DumpStack.log.tmp",
                 "**/hiberfil.sys",
                 "**/pagefile.sys",
                 "**/swapfile.sys",
                 "**/System Volume Information",
-                "**/System Volume Information/**",
+                "**/test-results/**",
+                "**/test-artifacts/**",
+                "**/playwright-report/**",
             ];
 
-            const existingIgnored = config.watchOptions?.ignored;
-            const mergedIgnored =
-                existingIgnored instanceof RegExp
-                    ? new RegExp(
-                          `${existingIgnored.source}|${systemRootIgnored.source}`,
-                          Array.from(new Set(`${existingIgnored.flags}${systemRootIgnored.flags}`.split(""))).join("")
-                      )
-                    : Array.isArray(existingIgnored)
-                      ? [...existingIgnored, ...extraIgnoredGlobs]
-                      : typeof existingIgnored === "string"
-                        ? [existingIgnored, ...extraIgnoredGlobs]
-                        : systemRootIgnored;
-
-            config.watchOptions = { ...(config.watchOptions ?? {}), ignored: mergedIgnored };
+            config.watchOptions = {
+                ...(config.watchOptions ?? {}),
+                ignored: ignoredPatterns,
+            };
         }
         return config;
     },
-    // allowedDevOrigins: ["http://127.0.0.1:3100"],
+    allowedDevOrigins: ["http://127.0.0.1:3100", "http://localhost:3100"],
 };
 
 const authToken = process.env.SENTRY_AUTH_TOKEN;

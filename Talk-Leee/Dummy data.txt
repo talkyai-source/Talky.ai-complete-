@@ -1,0 +1,493 @@
+================================================================================
+FRONTEND CODEBASE - MOCK & DUMMY DATA INVENTORY
+================================================================================
+Generated: 2026-04-14
+Project: Talk-Leee Frontend
+
+This document contains a complete reference of all mock/dummy data, hardcoded
+API responses, and placeholder content found in the frontend codebase.
+
+================================================================================
+1. TEST FILES WITH MOCKED FETCH RESPONSES
+================================================================================
+
+File Path: src/app/ai-voices/page.test.tsx
+Line Range: 29-48
+Description: Mock voice data containing 2 voice objects (Sarah, Michael) with
+properties like id, name, description, initial, color, bg, and previewUrl.
+Used to test voice list rendering after API fetch.
+
+File Path: src/app/ai-voices/page.test.tsx
+Line Range: 90-100
+Description: Single mock voice object (Sarah) used to test play state toggling
+functionality in voice preview component.
+
+File Path: src/components/connectors/connector-card.test.ts
+Line Range: 75-76
+Description: Mock API response with hardcoded authorization URL
+"https://provider.example/auth" for testing connector authorization flow.
+
+File Path: src/components/home/contact-section.test.tsx
+Line Range: 27-28
+Description: Hardcoded dummy contact information including email
+"contact@talk-lee.com" and phone "+1 (555) 123-4567" for testing contact form.
+
+File Path: src/lib/campaign-performance.test.ts
+Line Range: 15-30
+Description: Helper function makeCampaign() creates mock Campaign objects with
+default values (camp-x, voice, etc.) for test data generation.
+
+File Path: src/lib/campaign-performance.test.ts
+Line Range: 55-59
+Description: Array of 3 mock Campaign objects used to test filtering functionality.
+Includes campaigns with ids: a, b, c with different statuses and completion rates.
+
+File Path: src/lib/campaign-performance.test.ts
+Line Range: 72-76
+Description: Array of 3 mock Campaign objects for testing sorting functionality
+with duplicate names to verify stable sort with tiebreak.
+
+File Path: src/lib/campaign-performance.test.ts
+Line Range: 86-87
+Description: Mock array of 143 numeric items used to test pagination logic.
+
+File Path: src/lib/http-client.test.ts
+Line Range: 10-11
+Description: Mock API response with JSON structure { ok: true } for status 200
+responses in HTTP client testing.
+
+File Path: src/lib/http-client.test.ts
+Line Range: 29-32
+Description: Mock 429 rate limit response with "Too many requests" message and
+retry-after header set to "2" seconds.
+
+File Path: src/lib/backend-api.assistant.test.ts
+Line Range: 9-10
+Description: Mock API response returning empty items array { items: [] } for
+assistant actions list endpoint test.
+
+File Path: src/lib/backend-api.assistant.test.ts
+Line Range: 30-31
+Description: Mock API response with pagination structure returning empty items,
+total: 0, page: 1, page_size: 50 for assistant runs list.
+
+File Path: src/lib/backend-api.assistant.test.ts
+Line Range: 66-70
+Description: Mock assistant plan response with planId: "plan-1", summary: "ok",
+steps array, and estimatedImpact object for plan endpoint test.
+
+File Path: src/lib/backend-api.assistant.test.ts
+Line Range: 98-111
+Description: Mock assistant run response with id: "run-1", action_type: "notes:add",
+status: "in_progress", and other run properties for execute endpoint test.
+
+File Path: src/lib/backend-api.assistant.test.ts
+Line Range: 144-152
+Description: Mock retry response with id: "run-2", action_type: "demo:fail",
+status: "pending" for testing assistant run retry functionality.
+
+File Path: src/lib/notifications.test.ts
+Line Range: 14-26
+Description: Mock localStorage storage implementation using Map data structure
+for testing notification persistence.
+
+File Path: src/lib/notifications.test.ts
+Line Range: 34, 52, 75, 94
+Description: Mock notification creation with type: "success"/"info"/"warning"/"error",
+title and message for testing notification store functionality.
+
+File Path: src/app/meetings/meeting-row.test.tsx
+Line Range: 13-22
+Description: Mock CalendarEvent object with id: "m1", title: "Demo", containing
+3 participants (Ada, Bob, Cara) for meeting row testing.
+
+File Path: src/app/meetings/meeting-row.test.tsx
+Line Range: 28
+Description: Mock CalendarEvent with id: "m2", title: "Demo" with empty
+participants array for empty participant summary test.
+
+File Path: src/components/states/page-states.test.ts
+Line Range: 18-24
+Description: Mock error state component props with title: "Oops", message: "Failed"
+for ErrorState component testing.
+
+File Path: src/components/states/page-states.test.ts
+Line Range: 40, 53-62, 73-84
+Description: Mock empty state component configurations with different action
+labels and handlers for EmptyState component testing.
+
+File Path: src/lib/email-utils.test.ts
+Line Range: 6-7, 19-20, 24, 32, 37
+Description: Test data strings including email addresses (a@x.com, b@x.com),
+HTML fragments, and viewport meta tags for email utility testing.
+
+File Path: src/lib/email-audit.test.ts
+Line Range: 14-27
+Description: Mock localStorage storage implementation using Map for email audit
+store testing.
+
+File Path: src/lib/email-audit.test.ts
+Line Range: 36, 63, 86, 104
+Description: Mock email audit attempts with hardcoded data (to: ["a@x.com"],
+templateId: "tpl-1", subject: "Hello") for audit store testing.
+
+File Path: src/lib/reminders-utils.test.ts
+Line Range: 6-25
+Description: Mock Reminder object factory function "rem()" providing default
+values for all reminder properties used throughout reminder utility tests.
+
+File Path: src/lib/reminders-utils.test.ts
+Line Range: 36-40
+Description: Array of 3 mock Reminder objects with different meetings and
+contacts (m1, c1) for testing reminder grouping functionality.
+
+File Path: src/lib/reminders-utils.test.ts
+Line Range: 48-50
+Description: Array of 2 mock Reminder objects with different scheduledAt
+timestamps for testing reminder sorting.
+
+File Path: src/lib/reminders-utils.test.ts
+Line Range: 59, 63, 68-76, 81-90
+Description: Mock Reminder objects for testing retry guidance with various
+retry counts and nextRetryAt values.
+
+File Path: src/lib/connectors-utils.test.ts
+Line Range: 26-28
+Description: Mock authorization URLs including "https://example.com/auth",
+"https://example.com/a", "https://example.com/b" for URL extraction testing.
+
+File Path: src/lib/connectors-utils.test.ts
+Line Range: 33-34, 38-39
+Description: Mock connector callback parameters with status: "success"/"error",
+type: "calendar"/"email"/"drive" for callback parsing tests.
+
+File Path: src/lib/connectors-utils.test.ts
+Line Range: 54
+Description: Mock last sync date "2025-01-01T00:00:00Z" for testing sync
+timestamp formatting.
+
+File Path: src/lib/meetings-utils.test.ts
+Line Range: 15-19
+Description: Array of 4 mock CalendarEvent objects with various titles (A, B, C, D)
+and times for testing meeting sorting and splitting.
+
+File Path: src/lib/meetings-utils.test.ts
+Line Range: 28-40
+Description: Mock CalendarEvent objects with leadName and participant information
+for testing lead label extraction logic.
+
+File Path: src/lib/meetings-utils.test.ts
+Line Range: 50-53, 62-71
+Description: Mock CalendarEvent objects with various status values ("cancelled",
+"completed", "scheduled") and participant lists for status/summary testing.
+
+File Path: src/lib/meetings-utils.test.ts
+Line Range: 79-82
+Description: Mock CalendarEvent objects with title: "Bravo", "alpha", "Charlie"
+and invalid startTime: "not-a-date" for sorting stability tests.
+
+File Path: src/lib/meetings-utils.test.ts
+Line Range: 100
+Description: Mock HTML with dangerous content (onclick, script tags, onerror handlers)
+for testing HTML sanitization.
+
+File Path: src/lib/routes.test.ts
+Line Range: 14-27
+Description: File path strings read from source files (app/settings/connectors/page.tsx,
+etc.) used to verify layout component imports.
+
+File Path: src/lib/backend-api.email.test.ts
+Line Range: 12-19
+Description: Mock email template response with id: "tpl-1", name: "Welcome",
+html_content: "<p>Hello</p>" for email template list test.
+
+File Path: src/lib/backend-api.email.test.ts
+Line Range: 50, 60-64
+Description: Mock email send response with message_id: "msg-1", status: "queued"
+and send parameters including to addresses and template id.
+
+File Path: src/lib/backend-api.calendar-events.test.ts
+Line Range: 9
+Description: Mock empty calendar events response { items: [] } for list endpoint test.
+
+File Path: src/lib/backend-api.calendar-events.test.ts
+Line Range: 30
+Description: Mock paginated calendar events response with items: [], total: 0,
+page: 2, page_size: 10 for pagination testing.
+
+File Path: src/lib/backend-api.calendar-events.test.ts
+Line Range: 57-68
+Description: Mock calendar event creation response with id: "evt-1", title: "Demo",
+timestamps, and participant data (Ada Lovelace, ada@example.test).
+
+File Path: src/lib/backend-api.calendar-events.test.ts
+Line Range: 116-127
+Description: Mock event update response with title: "Updated", status: "confirmed"
+and other updated event properties.
+
+File Path: src/lib/backend-api.calendar-events.test.ts
+Line Range: 164
+Description: Mock empty response (status 200) for calendar event deletion/cancel test.
+
+File Path: src/lib/backend-api.connectors.test.ts
+Line Range: 9
+Description: Mock connector authorize response with authorization_url:
+"https://provider.example/authorize".
+
+File Path: src/lib/backend-api.connectors.test.ts
+Line Range: 56-59
+Description: Mock connector status response with 2 items: calendar (connected),
+email (error) with hardcoded status and error messages.
+
+================================================================================
+2. STORYBOOK STORY FILES WITH MOCK DATA
+================================================================================
+
+File Path: src/components/campaigns/campaign-performance-table.stories.tsx
+Line Range: 5-62
+Description: Array of 4 mock Campaign objects (demo) with IDs camp-001 to camp-004.
+Includes campaigns with statuses: running, paused, draft, completed with various
+call metrics and dates from 2025-12-10 to 2025-12-28.
+
+File Path: src/components/campaigns/event-stream.stories.tsx
+Line Range: 5-20
+Description: Single mock Campaign object (camp-001) with Holiday Sales Outreach
+campaign details including calls_completed: 342, calls_failed: 45.
+
+File Path: src/components/campaigns/alert-timeline.stories.tsx
+Line Range: 5-20
+Description: Single mock Campaign object (camp-001) identical to event-stream
+story for displaying campaign timeline alerts.
+
+File Path: src/components/campaigns/command-bar.stories.tsx
+Line Range: 5-34
+Description: Array of 2 mock Campaign objects (camp-001, camp-002) for command
+bar demo with different statuses and call completion metrics.
+
+File Path: src/components/ui/dashboard-charts.stories.tsx
+Line Range: 30-38
+Description: Mock TimeSeriesPoint array (timeSeries) with 7 days of data. Values:
+Mon=120, Tue=180, Wed=240, Thu=210, Fri=320, Sat=280, Sun=360.
+
+File Path: src/components/ui/dashboard-charts.stories.tsx
+Line Range: 40-44
+Description: Mock DualSeriesPoint array (dualSeries) with hourly data from 09:00
+to 11:00 with two series (a and b) for dual-axis charts.
+
+File Path: src/components/ui/dashboard-charts.stories.tsx
+Line Range: 46-50
+Description: Mock FeedItem array with 3 activity feed items: "Campaign started",
+"Queue spike", "Connector synced" with different tones (good, warn, neutral).
+
+File Path: src/components/ui/dashboard-charts.stories.tsx
+Line Range: 52-56
+Description: Mock TimelineItem array with 3 alert timeline items: "High failure rate",
+"Outage detected", "Recovered" with severities (warn, error, info) and dates.
+
+File Path: src/components/ui/dashboard-charts.stories.tsx
+Line Range: 62-95
+Description: Mock LiveTimeBucket array (buckets) containing 120 time buckets with
+dynamic call metrics using sine waves and random values for live call visualization.
+
+File Path: src/components/ui/dashboard-charts.stories.tsx
+Line Range: 78-81, 83-86, 88-90, 92-94
+Description: Mock arrays for LiveChartMarker, LiveAnomaly, MaintenanceWindow, and
+PeakBand objects used in live calls time series chart story.
+
+File Path: src/components/reminders/reminder-row.stories.tsx
+Line Range: 58-81
+Description: Mock demoReminder() function creating Reminder objects with different
+statuses (scheduled, sent, failed, canceled) and associated metadata like meetingId,
+contactId, retry counts.
+
+File Path: src/components/ui/health-stat-card.stories.tsx
+Line Range: 15-24
+Description: Mock stats array with 3 health metrics: Healthy (92%), Degraded (6%),
+Down (2%) with change percentages and graph data with colors and descriptions.
+
+================================================================================
+3. TEST DATA IN UTILITY/TEST SUPPORT FILES
+================================================================================
+
+File Path: src/components/home/contact-section.test.tsx
+Line Range: 27-28
+Description: Dummy contact details in assertion including email "contact@talk-lee.com"
+and phone "+1 (555) 123-4567" expected to be rendered in component.
+
+File Path: src/components/ui/input.test.tsx
+Line Range: 14-20
+Description: Mock input change event testing with hardcoded value "hello" used
+to verify Input component's onChange handler.
+
+================================================================================
+4. MOCKS AND MOCK SETUP
+================================================================================
+
+File Path: src/app/ai-voices/page.test.tsx
+Line Range: 17-20
+Description: Global fetch mock setup returning { ok: true, json: async () => [] }
+for default empty voices array response.
+
+File Path: src/app/ai-voices/page.test.tsx
+Line Range: 50-53
+Description: Global fetch mock override returning mockVoices array in test case
+for voice rendering test.
+
+File Path: src/app/ai-voices/page.test.tsx
+Line Range: 102-105
+Description: Global fetch mock returning single mockVoices array for play state
+toggle test.
+
+File Path: src/app/ai-voices/page.test.tsx
+Line Range: 72-74
+Description: Global fetch mock throwing "API Error" for error handling test case.
+
+File Path: src/lib/http-client.test.ts
+Line Range: 8-11
+Description: Global fetch mock implementation logging calls and returning success
+response with content-type application/json header.
+
+File Path: src/lib/http-client.test.ts
+Line Range: 28-33
+Description: Global fetch mock returning 429 status with "Too many requests" error
+and retry-after header for rate limit testing.
+
+File Path: src/lib/backend-api.assistant.test.ts
+Line Range: 7-10, 28-31, 64-70, 95-111, 141-152
+Description: Multiple global fetch mock implementations throughout test file for
+mocking different assistant API endpoints and responses.
+
+File Path: src/lib/notifications.test.ts
+Line Range: 29-31
+Description: Mock localStorage and window object setup in notification store tests
+using resetStorage() helper function.
+
+File Path: src/lib/email-audit.test.ts
+Line Range: 13-27, 30-32
+Description: Mock localStorage setup using Map-based storage implementation and
+mock window object for email audit store tests.
+
+File Path: src/components/connectors/connector-card.test.ts
+Line Range: 68-71
+Description: Mock window.open() implementation for testing connector authorization
+flow with URL capture.
+
+================================================================================
+5. HARDCODED VALUES AND MOCK IDS
+================================================================================
+
+Mock IDs Found Across Tests:
+- Campaign IDs: camp-001, camp-002, camp-003, camp-004, camp-x
+- Voice IDs: voice-001, voice-002, voice-003, voice, sarah, michael
+- Email Template IDs: tpl-1, tpl-x
+- Message IDs: msg-1
+- Event IDs: evt-1, evt-9
+- Run IDs: run-1, run-2, run-x
+- Reminder IDs: rem-*, rem-scheduled, rem-failed
+- Meeting IDs: m1, m2, mtg-1
+- Contact IDs: lead-1, c1, contact-*, lead-x
+- User Identifiers: Ada, Bob, Cara, Alex, Alex Lovelace
+
+Mock Email Addresses:
+- a@x.com, b@x.com, c@x.com
+- contact@talk-lee.com
+- alex@example.com
+- ada@example.test
+- c@example.test
+
+Mock URLs:
+- https://provider.example/auth
+- https://provider.example/authorize
+- https://example.test/join
+- https://example.test/cal
+- http://example.test
+- http://localhost:8000/api/v1
+- http://localhost:3000/connectors/callback
+- /audio/sarah.mp3, /audio/michael.mp3
+- /support
+
+Mock Timestamps:
+- 2025-12-15, 2025-12-20, 2025-12-28 (December 2025 dates)
+- 2026-01-01, 2026-01-09, 2026-01-14 (January 2026 dates)
+
+================================================================================
+6. SUMMARY STATISTICS
+================================================================================
+
+Total Test Files Scanned: 24 files
+Total Story Files Scanned: 7 files
+Total Mock Objects Found: 60+ mock data objects/arrays
+Total Hardcoded API Responses: 20+ mock responses
+Total Test Data Helper Functions: 3 (makeCampaign, rem, demoReminder)
+Total Mock Arrays with Test Data: 25+ arrays
+
+Files with Heaviest Mock Data Usage:
+1. src/lib/backend-api.*.test.ts (6 test files) - Mock API responses
+2. src/components/ui/dashboard-charts.stories.tsx - Mock chart data (120+ data points)
+3. src/components/campaigns/campaign-performance-table.stories.tsx - Campaign objects
+4. src/lib/reminders-utils.test.ts - Reminder test objects
+
+================================================================================
+7. NOTES FOR CLEANUP
+================================================================================
+
+Recommended Cleanup Strategy:
+1. Replace all mock Campaign data with API-driven data fetches
+2. Convert hardcoded mock voice data to dynamic voice list from API
+3. Remove mock localStorage implementations and use real localStorage in tests
+4. Replace mock fetch implementations with MSW (Mock Service Worker) for consistency
+5. Extract common mock data factories to shared test utilities
+6. Use data builders/factories for complex objects (Campaign, Reminder, etc.)
+7. Consider environment-based API mocking for e2e test scenarios
+
+Priority Areas:
+- HIGH: API response mocks in backend-api.*.test.ts (currently duplicated across tests)
+- MEDIUM: Campaign and Reminder mock data (used across multiple files)
+- MEDIUM: Chart/dashboard mock data (large dataset generation, can be optimized)
+- LOW: Simple utility test data (keep as-is, low maintenance burden)
+
+================================================================================
+8. SOURCE CODE PROTOTYPE MOCK DATA (dashboard-api.ts & extended-api.ts)
+================================================================================
+
+File Path: src/lib/dashboard-api.ts
+Description: Dummy data used when in PROTOTYPE mode for Dashboard UI.
+- DUMMY_SUMMARY: DashboardSummary object with total_calls: 1247, answered_calls: 1089, failed_calls: 158, minutes_used: 3420, etc.
+- DUMMY_CAMPAIGNS: Array of 4 Campaign objects (camp-001 to camp-004) with varied statuses (running, paused, draft, completed).
+- DUMMY_CALLS: Array of 8 Call objects with different statuses (completed, no_answer, failed, in_progress).
+- DUMMY_CONTACTS: Array of 3 Contact objects with names and statuses.
+
+File Path: src/lib/extended-api.ts
+Description: Dummy data used for Analytics and Recordings in PROTOTYPE mode.
+- DUMMY_ANALYTICS: Array of 7 CallSeriesItem objects representing calls over a week (2024-12-24 to 2024-12-30).
+- DUMMY_RECORDINGS: Array of 5 Recording objects with ids (rec-001 to rec-005) and durations.
+
+================================================================================
+9. ADDITIONAL MOCK DATA (billing-mock-data.ts)
+================================================================================
+
+File Path: src/lib/billing-mock-data.ts
+Description: Mock data for frontend billing layer development.
+- PLANS: Array of 4 BillingPlan objects (Starter, Professional, Business, Enterprise).
+- CURRENT_TENANT_PLAN: Current tenant plan details (Professional).
+- CURRENT_USAGE: Current billing period usage metrics.
+- DAILY_USAGE: Array of 14 UsageSummary objects for daily breakdown.
+- ADJUSTMENTS: Array of 4 BillingAdjustment objects (credit, promo, debit, refund).
+- INVOICES: Array of 3 Invoice objects (INV-2026-0001 to INV-2026-0003).
+- PARTNER_BILLING: Array of 4 PartnerBillingSummary objects.
+- TENANT_BILLING: Array of 6 TenantBillingSummary objects.
+- AUDIT_LOGS: Array of 12 AuditLogEntry objects.
+- API_KEYS: Array of 5 ApiKey objects (active and revoked).
+- WEBHOOK_ENDPOINTS: Array of 4 WebhookEndpoint objects.
+- WEBHOOK_DELIVERIES: Array of 8 WebhookDelivery objects.
+- RATE_LIMIT_RULES: Array of 7 RateLimitRule objects.
+- CALL_GUARD_RULES: Array of 7 CallGuardRule objects.
+- TENANT_LIMITS: Array of 6 TenantLimit objects.
+- PARTNER_LIMITS: Array of 4 PartnerLimit objects.
+- ABUSE_EVENTS: Array of 8 AbuseEvent objects.
+- BLOCKED_ENTITIES: Array of 6 BlockedEntity objects.
+- SECRETS: Array of 12 SecretEntry objects (production and staging secrets).
+
+================================================================================
+END OF DUMMY DATA INVENTORY
+================================================================================

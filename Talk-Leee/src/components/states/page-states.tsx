@@ -179,7 +179,7 @@ export function ErrorState({
         <Card className={className}>
             <CardHeader>
                 <div className="flex items-start gap-3">
-                    <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl border border-destructive/20 bg-destructive/10 text-destructive shrink-0">
+                    <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-full border border-destructive/20 bg-destructive/10 text-destructive shrink-0">
                         <CircleAlert className="h-5 w-5" aria-hidden />
                     </div>
                     <div className="min-w-0">
@@ -296,7 +296,7 @@ export function EmptyState({
         <Card className={className}>
             <CardHeader>
                 <div className="flex items-start gap-3">
-                    <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-muted text-muted-foreground shrink-0">
+                    <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-muted text-muted-foreground shrink-0">
                         <Icon className="h-5 w-5" aria-hidden />
                     </div>
                     <div className="min-w-0">

@@ -90,7 +90,7 @@ export function TimeSeriesLineChart({
 
   return (
     <div className="relative text-foreground">
-      <HoverTooltip state={tooltip.state} />
+      <HoverTooltip tooltip={tooltip} />
       <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-40">
         <path d={areaD} fill={fill} />
         <path d={d} fill="none" stroke={stroke} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
@@ -268,7 +268,7 @@ export function RealTimeBarChart({
 
   return (
     <div className="relative">
-      <HoverTooltip state={tooltip.state} />
+      <HoverTooltip tooltip={tooltip} />
       <svg viewBox={`0 0 ${chart.w} ${chart.h}`} className="w-full" style={{ height }}>
         <text
           x={chart.w / 2}
@@ -601,7 +601,7 @@ export function RealTimeCallLineChart({
 
   return (
     <div className="relative">
-      <HoverTooltip state={tooltip.state} />
+      <HoverTooltip tooltip={tooltip} />
       <svg
         ref={svgRef}
         viewBox={`0 0 ${chart.w} ${chart.h}`}
@@ -998,7 +998,7 @@ export function DonutChart({
       }}
       onBlur={() => tooltip.hide()}
     >
-      <HoverTooltip state={tooltip.state} />
+      <HoverTooltip tooltip={tooltip} />
       <svg
         width={renderSize}
         height={renderSize}
@@ -1115,7 +1115,7 @@ export function Heatmap({
   const tooltip = useHoverTooltip();
   return (
     <div className="relative overflow-x-auto">
-      <HoverTooltip state={tooltip.state} />
+      <HoverTooltip tooltip={tooltip} />
       <div className="min-w-[520px]">
         <div className="grid" style={{ gridTemplateColumns: `120px repeat(${cols.length}, minmax(0, 1fr))` }}>
           <div />
@@ -1284,7 +1284,7 @@ export function StackedAreaChart({
 
   return (
     <div className="relative">
-      <HoverTooltip state={tooltip.state} className="w-[260px] text-sm font-semibold" />
+      <HoverTooltip tooltip={tooltip} className="w-[260px] text-sm font-semibold" />
       <svg
         viewBox={`0 0 ${width} ${height}`}
         className="w-full h-40"
@@ -1371,7 +1371,7 @@ export function ActivityFeed({ items }: { items: FeedItem[] }) {
   const [activeId, setActiveId] = useState<string>("");
   return (
     <div className="relative space-y-2">
-      <HoverTooltip state={tooltip.state} className="w-[320px] text-sm font-semibold p-4" />
+      <HoverTooltip tooltip={tooltip} className="w-[320px] text-sm font-semibold p-4" />
       {items.map((item) => (
         <div
           key={item.id}
@@ -1480,7 +1480,7 @@ export function AlertTimeline({ items }: { items: TimelineItem[] }) {
   const [activeId, setActiveId] = useState<string>("");
   return (
     <div className="relative space-y-2">
-      <HoverTooltip state={tooltip.state} className="w-[340px] text-sm font-semibold p-4" />
+      <HoverTooltip tooltip={tooltip} className="w-[340px] text-sm font-semibold p-4" />
       {items.map((item) => (
         <div
           key={item.id}
@@ -1878,7 +1878,7 @@ export function LiveCallsTimeSeriesChart({
 
   return (
     <div className="relative">
-      <HoverTooltip state={tooltip.state} />
+      <HoverTooltip tooltip={tooltip} />
       <svg
         ref={svgRef}
         viewBox={`0 0 ${chart.w} ${chart.h}`}
@@ -2013,11 +2013,11 @@ export function LiveCallsTimeSeriesChart({
           />
         ))}
 
-        {scale.ticks.map((t, i) => {
+        {scale.ticks.map((t) => {
           const y = scale.yFor(t);
           return (
             <line
-              key={`yg-${i}-${t}`}
+              key={`yg-${t}`}
               x1={chart.left}
               x2={chart.left + chart.plotW}
               y1={y}
@@ -2095,9 +2095,9 @@ export function LiveCallsTimeSeriesChart({
           })()
         ) : null}
 
-        {scale.ticks.map((t, i) => (
+        {scale.ticks.map((t) => (
           <text
-            key={`yl-${i}-${t}`}
+            key={`yl-${t}`}
             x={chart.left - 10}
             y={scale.yFor(t) + 4}
             textAnchor="end"
