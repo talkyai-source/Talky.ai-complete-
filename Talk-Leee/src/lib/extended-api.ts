@@ -107,4 +107,57 @@ class ExtendedApi {
     }
 }
 
-export const extendedApi = new ExtendedApi();
+// ──────────────────────────────────────────────────────────────────────────
+// Campaign call transcripts (used by ScriptCard on campaign detail page).
+// Calls the backend /campaigns/{id}/calls route added by the
+// production-readiness sprint.
+// ──────────────────────────────────────────────────────────────────────────
+
+export interface TranscriptTurn {
+    role: "user" | "assistant" | string;
+    content: string;
+    timestamp: string;
+}
+
+export interface CampaignCallWithTranscript {
+    // The backend returns `call_id`; ScriptCard uses `call.call_id` as the
+    // React key. `id` is kept as an optional alias for older callers.
+    call_id: string;
+    id?: string;
+    to_number: string | null;
+    started_at: string | null;
+    duration_seconds: number | null;
+    outcome: string | null;
+    turns: TranscriptTurn[];
+}
+
+// Singleton with the transcript method attached. Defined after the class so
+// the bolt-on stays in one file (matches the pattern of the rest of the
+// extended-api dummy fixtures).
+import { createHttpClient as _createHttpClientForTranscripts } from "@/lib/http-client";
+import { apiBaseUrl as _apiBaseUrlForTranscripts } from "@/lib/env";
+
+class ExtendedApiWithTranscripts extends ExtendedApi {
+    private _transcriptClient = _createHttpClientForTranscripts({
+        baseUrl: _apiBaseUrlForTranscripts(),
+    });
+
+    async getCampaignCallsWithTranscripts(
+        campaignId: string,
+        page: number,
+        pageSize: number,
+    ): Promise<{
+        items: CampaignCallWithTranscript[];
+        total: number;
+        page: number;
+        page_size: number;
+    }> {
+        return this._transcriptClient.request({
+            path: `/campaigns/${campaignId}/calls`,
+            method: "GET",
+            params: { page: String(page), page_size: String(pageSize) },
+        });
+    }
+}
+
+export const extendedApi = new ExtendedApiWithTranscripts();

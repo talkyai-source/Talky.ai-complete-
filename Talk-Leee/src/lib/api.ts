@@ -39,6 +39,17 @@ export type LoginResponse = z.infer<typeof LoginResponseSchema>;
 export const RegisterResponseSchema = LoginResponseSchema;
 export type RegisterResponse = LoginResponse;
 
+export const VerifyOtpResponseSchema = z
+    .object({
+        access_token: z.string(),
+        refresh_token: z.string(),
+        user_id: z.string(),
+        email: z.string().email(),
+        message: z.string().optional(),
+    })
+    .passthrough();
+export type VerifyOtpResponse = z.infer<typeof VerifyOtpResponseSchema>;
+
 export const MeResponseSchema = z
     .object({
         id: z.string(),
@@ -47,12 +58,30 @@ export const MeResponseSchema = z
         business_name: z.string().optional().nullable(),
         role: z.string(),
         minutes_remaining: z.number(),
+        // Admin / suspension fields populated when the user has elevated
+        // permissions or the tenant/partner is in a non-active state.
+        // All optional — missing fields just mean "not suspended" /
+        // "no admin scope". Used by SuspensionStateProvider.
+        partner_id: z.string().optional().nullable(),
+        tenant_id: z.string().optional().nullable(),
+        partner_status: z.string().optional().nullable(),
+        tenant_status: z.string().optional().nullable(),
+        suspended_scope: z.string().optional().nullable(),
+        suspension_reason: z.string().optional().nullable(),
+        suspended_at: z.string().optional().nullable(),
     })
     .passthrough()
     .transform((v) => ({
         ...v,
         name: v.name ?? undefined,
         business_name: v.business_name ?? undefined,
+        partner_id: v.partner_id ?? undefined,
+        tenant_id: v.tenant_id ?? undefined,
+        partner_status: v.partner_status ?? undefined,
+        tenant_status: v.tenant_status ?? undefined,
+        suspended_scope: v.suspended_scope ?? undefined,
+        suspension_reason: v.suspension_reason ?? undefined,
+        suspended_at: v.suspended_at ?? undefined,
     }));
 
 export type MeResponse = z.infer<typeof MeResponseSchema>;
@@ -108,16 +137,48 @@ class ApiClient {
 
     /* ---------- Auth ---------- */
 
-    async login(email: string, password: string): Promise<LoginResponse> {
+    /**
+     * Login.
+     *
+     * Two-mode signature to satisfy both flows:
+     *  - `login(email, password)` — classic password auth (auth-context).
+     *  - `login(email)`           — passwordless / OTP-trigger used by the
+     *                                registration flow's "resend code" path.
+     *
+     * The backend decides which path it serves based on whether
+     * `password` is in the body.
+     */
+    async login(email: string, password?: string): Promise<LoginResponse> {
         const path = "/auth/login";
+        const method = "POST" as const;
+        const body: Record<string, string> = { email };
+        if (password !== undefined) {
+            body.password = password;
+        }
+        const data = await this.client().request({
+            path,
+            method,
+            body,
+            timeoutMs: 12_000,
+        });
+        return this.parseOrThrow(LoginResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
+    }
+
+    /**
+     * Email OTP verification — used by the registration flow's
+     * "Enter the 6-digit code we sent" step. Returns access/refresh
+     * tokens on success.
+     */
+    async verifyOtp(email: string, token: string): Promise<VerifyOtpResponse> {
+        const path = "/auth/verify-otp";
         const method = "POST" as const;
         const data = await this.client().request({
             path,
             method,
-            body: { email, password },
+            body: { email, token },
             timeoutMs: 12_000,
         });
-        return this.parseOrThrow(LoginResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
+        return this.parseOrThrow(VerifyOtpResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
     }
 
     async register(
