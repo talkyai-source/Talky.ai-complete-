@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -m py_compile backend/app/domain/services/notification_service.py)",
+      "Bash(python:*)",
+      "Bash(curl -s http://localhost:8000/)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(curl -s http://localhost:8000/docs)",
+      "Bash(curl -s -w \"Status: %{http_code}\\\\n\" http://localhost:8000/redoc)",
+      "Bash(curl -s -w \"Status: %{http_code}\\\\n\" http://localhost:8000/metrics)",
+      "Bash(curl -s http://localhost:8000/openapi.json)",
+      "Bash(curl -s http://localhost:8000/swagger -w \"\\\\nStatus: %{http_code}\\\\n\")",
+      "Bash(pkill -9 -f \"python\\\\|uvicorn\")",
+      "Bash(uvicorn app.main:app --port 8000 --no-reload)"
+    ]
+  }
+}

@@ -798,15 +798,42 @@ async def send_email_alert(
     recipients: List[str]
 ) -> bool:
     """
-    Send email alert notification.
-    
-    TODO: Implement with SendGrid, AWS SES, or similar service.
+    Send email alert notification via configured email provider.
+
+    Day 8: Implemented with SendGrid, AWS SES, or SMTP support.
+
+    Args:
+        subject: Email subject
+        body: Email body (HTML)
+        recipients: List of email addresses
+
+    Returns:
+        True if all emails sent successfully, False otherwise
     """
-    # Placeholder for future implementation
-    # import sendgrid
-    # sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
-    # ...
-    return False
+    if not recipients:
+        return False
+
+    try:
+        from app.domain.services.notification_service import get_notification_service
+
+        notification_service = get_notification_service()
+        all_success = True
+
+        for recipient in recipients:
+            result = await notification_service.send_email(
+                to_email=recipient,
+                subject=subject,
+                html_body=body,
+                text_body=subject,  # Fallback to subject as plain text
+            )
+            if result.get("status") != "success":
+                all_success = False
+
+        return all_success
+    except Exception as e:
+        logger = __import__("logging").getLogger(__name__)
+        logger.error(f"Failed to send email alert: {e}")
+        return False
 
 
 async def send_slack_alert(
@@ -815,24 +842,56 @@ async def send_slack_alert(
     severity: str = "warning"
 ) -> bool:
     """
-    Send Slack alert notification.
-    
-    TODO: Implement with Slack Incoming Webhooks.
+    Send Slack alert notification via webhook.
+
+    Day 8: Implemented with Slack Incoming Webhooks.
+
+    Args:
+        message: Alert message
+        webhook_url: Slack webhook URL
+        severity: Alert severity (info, warning, critical)
+
+    Returns:
+        True if sent successfully, False otherwise
     """
-    # Placeholder for future implementation
-    # import httpx
-    # color = "#ff0000" if severity == "critical" else "#ffa500"
-    # payload = {
-    #     "attachments": [{
-    #         "color": color,
-    #         "text": message,
-    #         "footer": "Talky.ai Admin Dashboard"
-    #     }]
-    # }
-    # async with httpx.AsyncClient() as client:
-    #     response = await client.post(webhook_url, json=payload)
-    #     return response.status_code == 200
-    return False
+    if not webhook_url:
+        return False
+
+    try:
+        import aiohttp
+
+        # Color coding based on severity
+        color_map = {
+            "info": "#439FE0",
+            "warning": "#FF9500",
+            "critical": "#FF3B30",
+        }
+        color = color_map.get(severity, "#439FE0")
+
+        payload = {
+            "attachments": [
+                {
+                    "color": color,
+                    "title": f"🚨 {severity.upper()} Alert",
+                    "text": message,
+                    "footer": "Talky.ai Admin Dashboard",
+                    "ts": int(datetime.utcnow().timestamp()),
+                }
+            ]
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(webhook_url, json=payload) as response:
+                result = await response.text()
+                return response.status == 200 and result == "ok"
+    except ImportError:
+        logger = __import__("logging").getLogger(__name__)
+        logger.error("aiohttp package not installed for Slack alerts")
+        return False
+    except Exception as e:
+        logger = __import__("logging").getLogger(__name__)
+        logger.error(f"Failed to send Slack alert: {e}")
+        return False
 
 
 async def trigger_alert(

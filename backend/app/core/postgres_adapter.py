@@ -202,6 +202,22 @@ class QueryBuilder:
         conn = None
         try:
             conn = await asyncpg.connect(_DATABASE_URL)
+            
+            # Set RLS context for the session
+            from app.core.security.tenant_isolation import get_current_tenant_id, get_bypass_rls
+            tenant_id = get_current_tenant_id()
+            bypass_rls = get_bypass_rls()
+            
+            if bypass_rls:
+                await conn.execute("SET LOCAL app.bypass_rls = 'true'")
+                await conn.execute("SET LOCAL app.current_tenant_id = ''")
+            elif tenant_id:
+                await conn.execute(f"SET LOCAL app.current_tenant_id = '{tenant_id}'")
+                await conn.execute("SET LOCAL app.bypass_rls = 'false'")
+            else:
+                await conn.execute("SET LOCAL app.current_tenant_id = ''")
+                await conn.execute("SET LOCAL app.bypass_rls = 'false'")
+
             return await self._execute_with_conn(conn)
         except Exception as e:
             logger.error("PostgresAdapter query error: %s", e, exc_info=True)
@@ -748,6 +764,22 @@ class RpcBuilder:
         conn = None
         try:
             conn = await asyncpg.connect(_DATABASE_URL)
+            
+            # Set RLS context for the session
+            from app.core.security.tenant_isolation import get_current_tenant_id, get_bypass_rls
+            tenant_id = get_current_tenant_id()
+            bypass_rls = get_bypass_rls()
+            
+            if bypass_rls:
+                await conn.execute("SET LOCAL app.bypass_rls = 'true'")
+                await conn.execute("SET LOCAL app.current_tenant_id = ''")
+            elif tenant_id:
+                await conn.execute(f"SET LOCAL app.current_tenant_id = '{tenant_id}'")
+                await conn.execute("SET LOCAL app.bypass_rls = 'false'")
+            else:
+                await conn.execute("SET LOCAL app.current_tenant_id = ''")
+                await conn.execute("SET LOCAL app.bypass_rls = 'false'")
+
             return await self._execute_with_conn(conn)
         except Exception as e:
             logger.error("PostgresAdapter RPC error (%s): %s", self.name, e, exc_info=True)

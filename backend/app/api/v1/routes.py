@@ -96,3 +96,9 @@ api_router.include_router(security_events_router)
 api_router.include_router(suspensions_router)
 api_router.include_router(secrets_router)
 api_router.include_router(emergency_access_router)
+
+# Day 7: Call Guard + Abuse Monitoring
+from app.api.v1.endpoints.call_limits import router as call_limits_router
+from app.api.v1.endpoints.abuse_monitoring import router as abuse_monitoring_router
+api_router.include_router(call_limits_router)
+api_router.include_router(abuse_monitoring_router)

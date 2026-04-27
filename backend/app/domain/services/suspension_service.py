@@ -269,7 +269,21 @@ class SuspensionService:
                     datetime.utcnow(), suspended_until, admin_uuid, True
                 )
 
-                # Update tenant status
+                # Update tenant status (Day 8: New columns)
+                await conn.execute(
+                    """
+                    UPDATE tenants 
+                    SET status = 'suspended',
+                        suspended_at = $1,
+                        suspended_by = $2,
+                        suspension_reason = $3,
+                        updated_at = NOW()
+                    WHERE id = $4
+                    """,
+                    datetime.utcnow(), admin_uuid, reason_description, tenant_uuid
+                )
+
+                # Maintain legacy status update for compatibility
                 await conn.execute(
                     "UPDATE tenant_users SET status = 'suspended', updated_at = NOW() WHERE tenant_id = $1",
                     tenant_uuid
@@ -366,15 +380,43 @@ class SuspensionService:
                     datetime.utcnow(), suspended_until, admin_uuid, True
                 )
 
+                # Update partner status (Day 8: New columns)
+                await conn.execute(
+                    """
+                    UPDATE white_label_partners 
+                    SET status = 'suspended',
+                        suspended_at = $1,
+                        suspended_by = $2,
+                        suspension_reason = $3,
+                        updated_at = NOW()
+                    WHERE id = $4
+                    """,
+                    datetime.utcnow(), admin_uuid, reason_description, partner_uuid
+                )
+
                 # Get all partner tenants
                 tenant_rows = await conn.fetch(
-                    "SELECT id FROM tenants WHERE partner_id = $1",
+                    "SELECT id FROM tenants WHERE white_label_partner_id = $1",
                     partner_uuid
                 )
                 tenant_ids = [row["id"] for row in tenant_rows]
 
                 # Suspend all partner tenants
                 for tid in tenant_ids:
+                    # Update tenant status (Day 8: New columns)
+                    await conn.execute(
+                        """
+                        UPDATE tenants 
+                        SET status = 'suspended',
+                            suspended_at = $1,
+                            suspended_by = $2,
+                            suspension_reason = $3,
+                            updated_at = NOW()
+                        WHERE id = $4
+                        """,
+                        datetime.utcnow(), admin_uuid, f"Partner suspended: {reason_description}", tid
+                    )
+
                     await conn.execute(
                         "UPDATE tenant_users SET status = 'suspended' WHERE tenant_id = $1",
                         tid
@@ -527,6 +569,20 @@ class SuspensionService:
                     datetime.utcnow(), admin_uuid, reason, suspension_id
                 )
 
+                # Restore tenant (Day 8: New columns)
+                await conn.execute(
+                    """
+                    UPDATE tenants 
+                    SET status = 'active', 
+                        suspended_at = NULL, 
+                        suspended_by = NULL, 
+                        suspension_reason = NULL,
+                        updated_at = NOW()
+                    WHERE id = $1
+                    """,
+                    tenant_uuid
+                )
+
                 # Restore tenant users
                 await conn.execute(
                     "UPDATE tenant_users SET status = 'active', updated_at = NOW() WHERE tenant_id = $1",
@@ -628,6 +684,113 @@ class SuspensionService:
             is_suspended=is_suspended,
             active_suspension=active_suspension,
             suspension_history=history
+        )
+
+    async def restore_partner(
+        self,
+        partner_id: UUID | str,
+        restored_by: UUID | str,
+        reason: str,
+    ) -> SuspensionResult:
+        """Restore a suspended partner and its tenants"""
+        partner_uuid = UUID(partner_id) if isinstance(partner_id, str) else partner_id
+        admin_uuid = UUID(restored_by) if isinstance(restored_by, str) else restored_by
+
+        async with self.db_pool.acquire() as conn:
+            async with conn.transaction():
+                # Get active suspension
+                suspension = await conn.fetchrow(
+                    """
+                    SELECT suspension_id FROM suspension_events
+                    WHERE target_type = $1 AND target_id = $2 AND is_active = TRUE
+                    ORDER BY suspended_at DESC LIMIT 1
+                    """,
+                    TargetType.PARTNER.value, partner_uuid
+                )
+
+                if not suspension:
+                    raise ValueError("No active suspension found for partner")
+
+                suspension_id = suspension["suspension_id"]
+
+                # Update suspension event
+                await conn.execute(
+                    """
+                    UPDATE suspension_events
+                    SET is_active = FALSE, restored_at = $1, restored_by = $2, restore_reason = $3
+                    WHERE suspension_id = $4
+                    """,
+                    datetime.utcnow(), admin_uuid, reason, suspension_id
+                )
+
+                # Restore partner (Day 8: New columns)
+                await conn.execute(
+                    """
+                    UPDATE white_label_partners 
+                    SET status = 'active', 
+                        suspended_at = NULL, 
+                        suspended_by = NULL, 
+                        suspension_reason = NULL,
+                        updated_at = NOW()
+                    WHERE id = $1
+                    """,
+                    partner_uuid
+                )
+
+                # Get all partner tenants
+                tenant_rows = await conn.fetch(
+                    "SELECT id FROM tenants WHERE white_label_partner_id = $1",
+                    partner_uuid
+                )
+                
+                # Restore each tenant
+                for row in tenant_rows:
+                    tid = row["id"]
+                    # Restore tenant
+                    await conn.execute(
+                        """
+                        UPDATE tenants 
+                        SET status = 'active', 
+                            suspended_at = NULL, 
+                            suspended_by = NULL, 
+                            suspension_reason = NULL,
+                            updated_at = NOW()
+                        WHERE id = $1
+                        """,
+                        tid
+                    )
+                    # Restore tenant users
+                    await conn.execute(
+                        "UPDATE tenant_users SET status = 'active', updated_at = NOW() WHERE tenant_id = $1",
+                        tid
+                    )
+
+        # Propagate restoration
+        propagation_result = await self._propagate_to_services(
+            suspension_id=suspension_id,
+            target_type=TargetType.PARTNER,
+            target_id=partner_uuid,
+            action="restore"
+        )
+
+        # Publish event
+        if self.redis:
+            await self.redis.publish(
+                "suspension:events",
+                json.dumps({
+                    "type": "partner_restored",
+                    "suspension_id": str(suspension_id),
+                    "partner_id": str(partner_uuid)
+                })
+            )
+
+        return SuspensionResult(
+            suspension_id=suspension_id,
+            target_type=TargetType.PARTNER,
+            target_id=partner_uuid,
+            status="restored",
+            propagated_to=propagation_result["success"],
+            propagation_failed=propagation_result["failed"]
         )
 
     async def submit_appeal(

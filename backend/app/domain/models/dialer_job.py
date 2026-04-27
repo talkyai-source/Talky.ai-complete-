@@ -16,6 +16,7 @@ class JobStatus(str, Enum):
     FAILED = "failed"
     RETRY_SCHEDULED = "retry_scheduled"
     SKIPPED = "skipped"              # Time window, limit reached
+    BLOCKED = "blocked"              # Call Guard blocked (Day 7)
     GOAL_ACHIEVED = "goal_achieved"
     NON_RETRYABLE = "non_retryable"  # Spam, invalid, etc.
 

@@ -80,14 +80,37 @@ class Settings(BaseSettings):
     # Redis/Queue
     redis_url: str = "redis://localhost:6379"
 
-    # Authentication
+    # Secrets Management
+    master_key: str | None = None
+    kms_provider: str = "local"
     jwt_secret: str | None = None
     secret_key: str | None = None
-    jwt_algorithm: str = "HS256"
-    jwt_expiry_hours: int = 24
-    jwt_issuer: str | None = None
-    jwt_audience: str | None = None
-    jwt_leeway_seconds: int = 30
+    
+    # Provider API Keys (Centralized)
+    deepgram_api_key: str | None = None
+    groq_api_key: str | None = None
+    google_tts_api_key: str | None = None
+    cartesia_api_key: str | None = None
+    elevenlabs_api_key: str | None = None
+    
+    # Telephony
+    vonage_application_id: str | None = None
+    vonage_private_key_path: str | None = None
+    vonage_from_number: str | None = None
+    
+    # Database (Migration from os.getenv)
+    database_url: str | None = None
+
+    # Email Service (Microsoft 365 SMTP via GoDaddy)
+    email_user: str | None = None  # noreply@talkleeai.com
+    email_pass: str | None = None  # App Password or M365 password
+
+    # JWT Configuration
+    jwt_expiry_hours: int = 24  # Default 24-hour token expiry
+    jwt_algorithm: str = "HS256"  # HMAC SHA-256 (OWASP recommended)
+    jwt_issuer: str | None = None  # Optional issuer claim (iss)
+    jwt_audience: str | None = None  # Optional audience claim (aud)
+    jwt_leeway_seconds: int = 60  # Clock skew tolerance (60 seconds)
 
     @field_validator("jwt_secret", "secret_key", mode="before")
     @classmethod
