@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { setBrowserAuthToken } from "@/lib/auth-token";
-import { createHttpClient, ApiClientError } from "@/lib/http-client";
+import { createHttpClient, ApiClientError, resetSessionExpiredLatch } from "@/lib/http-client";
 import { apiBaseUrl } from "@/lib/env";
 
 /* ------------------------------------------------------------------ */
@@ -96,6 +96,10 @@ class ApiClient {
 
     setToken(token: string) {
         setBrowserAuthToken(token);
+        // A fresh token re-arms the http-client's session-expired
+        // latch.  Without this, login → expire → login → expire only
+        // bounces to /auth/login on the FIRST expiry of the process.
+        resetSessionExpiredLatch();
     }
 
     clearToken() {

@@ -803,10 +803,19 @@ class CallGuard:
     async def _check_business_hours(
         self,
         tenant_id: str,
+        phone_number: str = "",
         tenant_limits: Optional[TenantCallLimits] = None,
         **kwargs
     ) -> CheckResult:
-        """Check business hours restriction."""
+        """Check business hours restriction.
+
+        T1.5 — uses the CALLEE's timezone (resolved from the
+        destination E.164) rather than the tenant's. TCPA measures
+        business hours at the caller-receiving end, not the
+        caller-placing end. The tenant's configured timezone is kept
+        as a last-resort fallback when the callee's tz can't be
+        determined (unknown country, short code, lookup failure).
+        """
         if not tenant_limits or not tenant_limits.respect_business_hours:
             return CheckResult(
                 check=GuardCheck.BUSINESS_HOURS,
@@ -814,14 +823,29 @@ class CallGuard:
                 reason="business_hours_not_enforced",
             )
 
-        # Get current time in tenant's timezone
-        from datetime import datetime
+        # `datetime` is imported at module level (line 41); re-importing
+        # locally would shadow test patches on the module namespace.
         import pytz
+        from app.domain.services.phone_timezone import resolve_timezone
 
+        tenant_tz = tenant_limits.business_hours_timezone or "UTC"
+        # Resolve callee's tz; falls back to tenant's if unknown so the
+        # check never accidentally skips because of a lookup failure.
+        callee_tz_name = await resolve_timezone(
+            phone_number,
+            redis_client=self._redis,
+            tenant_fallback_tz=tenant_tz,
+        )
         try:
-            tz = pytz.timezone(tenant_limits.business_hours_timezone)
+            tz = pytz.timezone(callee_tz_name)
+            tz_used = callee_tz_name
         except pytz.UnknownTimeZoneError:
-            tz = pytz.UTC
+            try:
+                tz = pytz.timezone(tenant_tz)
+                tz_used = tenant_tz
+            except pytz.UnknownTimeZoneError:
+                tz = pytz.UTC
+                tz_used = "UTC"
 
         now = datetime.now(tz)
         current_time = now.time()
@@ -845,13 +869,27 @@ class CallGuard:
                     details={
                         "current_time": current_time.isoformat(),
                         "business_hours": f"{start.isoformat()}-{end.isoformat()}",
-                        "timezone": tenant_limits.business_hours_timezone,
+                        "timezone": tz_used,
+                        "tz_source": (
+                            "callee" if tz_used == callee_tz_name
+                            and callee_tz_name != tenant_tz
+                            else "tenant_fallback"
+                        ),
+                        "phone_number": phone_number,
                     },
                 )
 
         return CheckResult(
             check=GuardCheck.BUSINESS_HOURS,
             passed=True,
+            details={
+                "timezone": tz_used,
+                "tz_source": (
+                    "callee" if tz_used == callee_tz_name
+                    and callee_tz_name != tenant_tz
+                    else "tenant_fallback"
+                ),
+            },
         )
 
     async def _check_velocity(

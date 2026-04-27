@@ -26,6 +26,17 @@ from app.services.scripts.call_state_tracker import (
 from app.services.scripts.prompt_builder import (
     compose_system_prompt,
 )
+from app.services.scripts.interruption_filter import (
+    is_backchannel,
+)
+from app.services.scripts.prompts import (
+    MAX_POOL_SIZE as AGENT_NAME_POOL_MAX,
+    PERSONAS,
+    PromptCompositionError,
+    compose_prompt,
+    pick_agent_name,
+    validate_pool,
+)
 
 __all__ = [
     "CallBinding",
@@ -38,4 +49,11 @@ __all__ = [
     "CallState",
     "update_state_from_user_turn",
     "compose_system_prompt",
+    "is_backchannel",
+    "compose_prompt",
+    "pick_agent_name",
+    "validate_pool",
+    "PromptCompositionError",
+    "PERSONAS",
+    "AGENT_NAME_POOL_MAX",
 ]

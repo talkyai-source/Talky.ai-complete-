@@ -27,6 +27,7 @@ from app.domain.services.conversation_engine import ConversationEngine
 from app.domain.services.prompt_manager import PromptManager
 from app.domain.services.transcript_service import TranscriptService
 from app.domain.services.llm_guardrails import LLMGuardrails, LLMGuardrailsConfig, get_guardrails
+from app.services.scripts.interruption_filter import is_backchannel as _is_backchannel
 from app.domain.services.latency_tracker import get_latency_tracker
 from app.domain.services.global_ai_config import get_global_config
 from app.domain.services.ask_ai_constants import TALKY_PRODUCT_INFO as _ASK_AI_PRODUCT_INFO, PRODUCT_KEYWORDS as _ASK_AI_PRODUCT_KEYWORDS
@@ -607,6 +608,24 @@ class VoicePipelineService:
                 "Repetitive STT transcript likely hallucination, skipping turn",
                 extra={"call_id": call_id, "transcript": full_transcript[:80]},
             )
+            return
+
+        # Backchannel suppression — short listening sounds ("hmm",
+        # "yeah", "uh huh", "mm") are NOT real turns. Without this, the
+        # LLM generates a full response to a non-event and loses the
+        # conversation's thread. The persona prompts also instruct the
+        # model on this at the language level — belt AND braces.
+        if _is_backchannel(full_transcript):
+            logger.info(
+                "backchannel_suppressed transcript=%r call=%s",
+                full_transcript, call_id[:12],
+            )
+            # Clear the session's pending input so the old transcript
+            # doesn't carry into the next real turn.
+            try:
+                session.current_user_input = ""
+            except AttributeError:
+                pass
             return
 
         # Clear any barge-in event that was set by the user's own StartOfTurn that

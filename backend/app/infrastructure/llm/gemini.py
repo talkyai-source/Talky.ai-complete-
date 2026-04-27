@@ -321,6 +321,88 @@ class GeminiLLMProvider(LLMProvider):
                     logger.error("Gemini LLM streaming failed after retries: %s", e)
                     raise RuntimeError(f"Gemini LLM streaming failed: {e}")
 
+    async def stream_chat_with_timeout(
+        self,
+        messages: List[Message],
+        timeout_seconds: float = DEFAULT_LLM_TIMEOUT,
+        **kwargs,
+    ) -> AsyncIterator[str]:
+        """
+        Stream with a hard wall-clock deadline and inter-token stall detection.
+
+        Mirrors GroqLLMProvider.stream_chat_with_timeout so the voice pipeline
+        can call either provider through the same interface. Logic is
+        provider-agnostic — wraps `stream_chat` in per-token asyncio timeouts.
+
+        Raises:
+            LLMTimeoutError: no token arrived before the TTFT deadline.
+        """
+        _INTERTOKEN_TIMEOUT = 2.0
+
+        t_start = asyncio.get_event_loop().time()
+        tokens_received = 0
+        gen = self.stream_chat(messages, **kwargs)
+        try:
+            while True:
+                remaining = timeout_seconds - (asyncio.get_event_loop().time() - t_start)
+                if remaining <= 0:
+                    if tokens_received > 0:
+                        logger.warning(
+                            "Gemini wall-clock expired mid-stream "
+                            "(limit=%.1fs, tokens=%d) — treating as stream end",
+                            timeout_seconds, tokens_received,
+                        )
+                        break
+                    logger.error(
+                        "Gemini deadline exceeded before first token (limit=%.1fs)",
+                        timeout_seconds,
+                    )
+                    raise LLMTimeoutError(
+                        f"LLM response timed out after {timeout_seconds}s"
+                    )
+                token_timeout = (
+                    remaining if tokens_received == 0
+                    else min(remaining, _INTERTOKEN_TIMEOUT)
+                )
+                try:
+                    token = await asyncio.wait_for(gen.__anext__(), timeout=token_timeout)
+                    if tokens_received == 0:
+                        ttft_ms = (asyncio.get_event_loop().time() - t_start) * 1000
+                        if ttft_ms > 800:
+                            logger.warning(
+                                "High Gemini TTFT: %.0fms — may indicate cold start "
+                                "or rate limiting.", ttft_ms,
+                            )
+                    tokens_received += 1
+                    yield token
+                except StopAsyncIteration:
+                    break
+                except asyncio.TimeoutError:
+                    elapsed = asyncio.get_event_loop().time() - t_start
+                    if tokens_received > 0:
+                        logger.warning(
+                            "Gemini inter-token stall after %.2fs (tokens=%d) — "
+                            "treating as stream end",
+                            elapsed, tokens_received,
+                        )
+                        break
+                    logger.error(
+                        "Gemini timeout waiting for first token after %.2fs (limit=%.1fs)",
+                        elapsed, timeout_seconds,
+                    )
+                    raise LLMTimeoutError(
+                        f"LLM response timed out after {timeout_seconds}s"
+                    )
+        finally:
+            # Ensure the underlying stream generator is closed so the HTTP
+            # connection is released even if the caller stops iterating early.
+            aclose = getattr(gen, "aclose", None)
+            if aclose is not None:
+                try:
+                    await aclose()
+                except Exception:  # noqa: BLE001
+                    pass
+
     # ------------------------------------------------------------------
     # Identity
     # ------------------------------------------------------------------

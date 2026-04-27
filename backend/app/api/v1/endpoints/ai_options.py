@@ -48,6 +48,7 @@ from app.domain.models.ai_config import (
     DEEPGRAM_AURA2_VOICES,
 )
 from app.infrastructure.llm.groq import GroqLLMProvider
+from app.infrastructure.llm.gemini import GeminiLLMProvider
 from app.infrastructure.tts.cartesia import CartesiaTTSProvider
 from app.infrastructure.tts.google_tts_streaming import GoogleTTSStreamingProvider
 from app.infrastructure.tts.deepgram_tts import DeepgramTTSProvider
@@ -880,15 +881,26 @@ async def test_llm(request: LLMTestRequest):
     Returns:
         LLMTestResponse with response text and latency metrics
     """
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Groq API key not configured"
-        )
-    
+    gemini_model_ids = {m.id for m in GEMINI_MODELS}
+    is_gemini = request.model in gemini_model_ids
+
+    if is_gemini:
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Gemini API key not configured. Set GEMINI_API_KEY in .env."
+            )
+    else:
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Groq API key not configured"
+            )
+
     try:
-        llm = GroqLLMProvider()
+        llm = GeminiLLMProvider() if is_gemini else GroqLLMProvider()
         await llm.initialize({
             "api_key": api_key,
             "model": request.model,
@@ -1380,23 +1392,32 @@ async def run_benchmark(config: AIProviderConfig):
         LatencyBenchmarkResponse with detailed latency metrics
     """
     import os as _os
-    
-    groq_key = os.getenv("GROQ_API_KEY")
-    
-    if not groq_key:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Groq API key not configured"
-        )
-    
+
+    is_gemini = config.llm_provider == "gemini" or config.llm_model in {m.id for m in GEMINI_MODELS}
+
+    if is_gemini:
+        llm_key = os.getenv("GEMINI_API_KEY")
+        if not llm_key:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Gemini API key not configured. Set GEMINI_API_KEY in .env."
+            )
+    else:
+        llm_key = os.getenv("GROQ_API_KEY")
+        if not llm_key:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Groq API key not configured"
+            )
+
     voice_id = config.tts_voice_id
     sample_rate = config.tts_sample_rate
 
     try:
         # Initialize providers
-        llm = GroqLLMProvider()
+        llm = GeminiLLMProvider() if is_gemini else GroqLLMProvider()
         await llm.initialize({
-            "api_key": groq_key,
+            "api_key": llm_key,
             "model": config.llm_model,
             "temperature": config.llm_temperature,
             "max_tokens": config.llm_max_tokens

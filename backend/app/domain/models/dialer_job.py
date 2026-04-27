@@ -3,7 +3,7 @@ Dialer Job Model
 Represents a single call job in the dialer queue
 """
 from pydantic import BaseModel, Field
-from typing import Optional, ClassVar, Set
+from typing import Literal, Optional, ClassVar, Set
 from datetime import datetime
 from enum import Enum
 
@@ -90,6 +90,20 @@ class DialerJob(BaseModel):
     last_outcome: Optional[CallOutcome] = None
     last_error: Optional[str] = None
     call_id: Optional[str] = None  # Reference to calls table
+
+    # Who speaks first when the callee answers. Per-Start choice from the UI.
+    first_speaker: Literal["agent", "user"] = Field(
+        default="agent",
+        description="Who speaks first on answer: 'agent' (pre-synthesized greeting) or 'user' (wait for callee).",
+    )
+
+    # Agent name picked from the campaign's name-pool at job-creation time.
+    # Stable for the whole call. None = let session config fall back to its
+    # own default pool (legacy campaigns with no configured names).
+    agent_name: Optional[str] = Field(
+        default=None,
+        description="Agent name used by the AI on this call. Picked from the campaign's 1-3 name pool.",
+    )
     
     # Pydantic V2 configuration
     model_config = {"use_enum_values": True}
@@ -153,7 +167,9 @@ class DialerJob(BaseModel):
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "last_outcome": self.last_outcome if isinstance(self.last_outcome, str) else (self.last_outcome.value if self.last_outcome else None),
             "last_error": self.last_error,
-            "call_id": self.call_id
+            "call_id": self.call_id,
+            "first_speaker": self.first_speaker,
+            "agent_name": self.agent_name,
         }
     
     @classmethod

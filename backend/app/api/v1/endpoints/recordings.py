@@ -133,6 +133,72 @@ async def get_recording_url(
     )
 
 
+@router.delete("/{recording_id}", status_code=204)
+async def delete_recording(
+    recording_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """Delete a recording (GDPR Article 17 DSAR — right to erasure).
+
+    Wipes both the S3 object AND the `recordings_s3` metadata row.
+    Scoped by tenant_id so a tenant can only purge their own data.
+
+    Idempotent: re-calling on an already-deleted recording returns 204
+    so front-end retries / client replays are safe.
+    """
+    from fastapi import Response
+    import uuid
+
+    tenant_id = str(current_user.tenant_id)
+
+    # Fetch the S3 key before deleting the metadata row so the object
+    # removal runs against the correct key. If the row is already gone
+    # we treat this as idempotent success.
+    async with db_client.pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, s3_key, s3_bucket, status
+            FROM recordings_s3
+            WHERE id = $1 AND tenant_id = $2
+            """,
+            uuid.UUID(recording_id),
+            uuid.UUID(tenant_id),
+        )
+
+    if not row:
+        return Response(status_code=204)
+
+    service = make_recording_service(db_client.pool)
+    try:
+        # Only call S3 delete for actual S3 objects — local/dev
+        # recordings have s3_bucket='local' and a filesystem path.
+        if row["s3_bucket"] != "local" and row["s3_key"]:
+            service._s3.delete(row["s3_key"])
+        elif row["s3_bucket"] == "local" and row["s3_key"]:
+            try:
+                os.remove(row["s3_key"])
+            except FileNotFoundError:
+                pass  # already gone — fine
+    except Exception as exc:
+        # Don't hide a real failure — GDPR compliance needs proof the
+        # data was actually removed. Bubble up so callers get a 5xx and
+        # can retry / escalate.
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete underlying recording object: {exc}",
+        ) from exc
+
+    async with db_client.pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM recordings_s3 WHERE id = $1 AND tenant_id = $2",
+            uuid.UUID(recording_id),
+            uuid.UUID(tenant_id),
+        )
+
+    return Response(status_code=204)
+
+
 @router.get("/{recording_id}/stream")
 async def stream_recording(
     recording_id: str,

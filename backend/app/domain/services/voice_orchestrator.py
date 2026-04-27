@@ -39,6 +39,32 @@ from app.domain.repositories.call_event_repository import CallEventRepository
 logger = logging.getLogger(__name__)
 
 
+def _failover_enabled(env_var: str) -> bool:
+    """Truthy parse for opt-in failover env flags. T1.3."""
+    raw = (os.getenv(env_var) or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _parse_voice_map(raw: str) -> dict[str, str]:
+    """Parse `TTS_SECONDARY_VOICE_MAP` into {primary_voice: secondary_voice}.
+
+    Format: "primary1=secondary1,primary2=secondary2". Whitespace and
+    bad entries are tolerated — empty dict on garbage input rather than
+    raising at startup.
+    """
+    out: dict[str, str] = {}
+    if not raw:
+        return out
+    for part in raw.split(","):
+        if "=" not in part:
+            continue
+        k, v = part.split("=", 1)
+        k, v = k.strip(), v.strip()
+        if k and v:
+            out[k] = v
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Configuration dataclass — passed by each endpoint
 # ---------------------------------------------------------------------------
@@ -100,6 +126,11 @@ class VoiceSessionConfig:
     system_prompt: str = ""
     campaign_id: str = "ask-ai"
     lead_id: str = "demo-user"
+    # Tenant context for per-tenant credential resolution (T1.1 follow-up).
+    # When set, provider creation looks up the tenant's encrypted API key
+    # in `tenant_ai_credentials` first, falling back to env vars when no
+    # row exists. None = legacy behaviour (env vars only).
+    tenant_id: Optional[str] = None
     # Only enable this when the session is backed by a real row in `calls`.
     # Browser demos generate ephemeral call_ids that do not satisfy the FK.
     event_logging_enabled: bool = False
@@ -661,28 +692,84 @@ class VoiceOrchestrator:
     # ------------------------------------------------------------------
 
     async def _create_stt_provider(self, config: VoiceSessionConfig):
-        """Initialise and return the STT provider."""
-        from app.infrastructure.stt.deepgram_flux import DeepgramFluxSTTProvider
+        """Initialise and return the STT provider.
 
-        provider = DeepgramFluxSTTProvider()
-        await provider.initialize(
-            {
-                "api_key": os.getenv("DEEPGRAM_API_KEY"),
-                "model": config.stt_model,
-                "sample_rate": config.stt_sample_rate,
-                "encoding": config.stt_encoding,
-                "eot_threshold": config.stt_eot_threshold,
-                "eager_eot_threshold": config.stt_eager_eot_threshold,
-                "eot_timeout_ms": config.stt_eot_timeout_ms,
-            }
+        T1.1 — Deepgram key resolved via CredentialResolver so a
+        per-tenant key wins over the process env var when the
+        session has a tenant_id.
+
+        T1.3 — when `STT_FAILOVER_ENABLED=true`, the primary STT is
+        wrapped in `ResilientSTTProvider` together with a secondary.
+        The secondary today is `DeepgramFluxSTTProvider` with the
+        Nova-3 model — same vendor + auth, different model. Operators
+        can override the secondary model via `STT_SECONDARY_MODEL`.
+        """
+        from app.infrastructure.stt.deepgram_flux import DeepgramFluxSTTProvider
+        from app.domain.services.credential_resolver import (
+            get_credential_resolver,
         )
-        return provider
+
+        api_key = await get_credential_resolver().resolve(
+            "deepgram", tenant_id=config.tenant_id,
+        )
+        primary = DeepgramFluxSTTProvider()
+        primary_init = {
+            "api_key": api_key,
+            "model": config.stt_model,
+            "sample_rate": config.stt_sample_rate,
+            "encoding": config.stt_encoding,
+            "eot_threshold": config.stt_eot_threshold,
+            "eager_eot_threshold": config.stt_eager_eot_threshold,
+            "eot_timeout_ms": config.stt_eot_timeout_ms,
+        }
+        await primary.initialize(primary_init)
+
+        if not _failover_enabled("STT_FAILOVER_ENABLED"):
+            return primary
+
+        # Secondary — same vendor, different model. Cheap to set up
+        # because the auth + WS shape are identical.
+        secondary = DeepgramFluxSTTProvider()
+        secondary_init = dict(primary_init)
+        secondary_init["model"] = os.getenv("STT_SECONDARY_MODEL") or "flux-general-en"
+        try:
+            await secondary.initialize(secondary_init)
+        except Exception as exc:
+            logger.warning(
+                "stt_secondary_init_failed err=%s — falling back to primary-only",
+                exc,
+            )
+            return primary
+
+        from app.domain.services.resilient_stt import (
+            ReconnectPolicy,
+            ResilientSTTProvider,
+        )
+        wrapper = ResilientSTTProvider(
+            primary=primary,
+            secondary=secondary,
+            policy=ReconnectPolicy(),
+        )
+        logger.info(
+            "stt_resilient_wrapper_active primary=flux-%s secondary=flux-%s",
+            config.stt_model, secondary_init["model"],
+        )
+        return wrapper
 
     # Map provider type → env var holding its API key. Keep this small and
     # explicit; if it grows past ~5 entries, move it to a config object.
     _LLM_API_KEY_ENV = {
         "groq": "GROQ_API_KEY",
         "gemini": "GEMINI_API_KEY",
+    }
+
+    # Map TTS primary provider name → secondary provider config tuple
+    # (provider_name, env_var). Used by T1.3 failover wiring. Keep small
+    # and explicit; operators override per-deploy via env.
+    _TTS_DEFAULT_SECONDARY = {
+        "cartesia": ("elevenlabs", "ELEVENLABS_API_KEY"),
+        "elevenlabs": ("cartesia", "CARTESIA_API_KEY"),
+        "deepgram": ("cartesia", "CARTESIA_API_KEY"),
     }
 
     async def _create_llm_provider(self, config: VoiceSessionConfig):
@@ -693,12 +780,24 @@ class VoiceOrchestrator:
         options UI). To add a new provider, register it in
         `app/infrastructure/llm/factory.py` and add its env-var mapping to
         `_LLM_API_KEY_ENV` above.
+
+        T1.1 — when `config.tenant_id` is set, the per-tenant
+        encrypted credential in `tenant_ai_credentials` wins over the
+        env var. When no row exists, falls back to env so single-
+        tenant deploys keep working.
         """
         from app.infrastructure.llm.factory import LLMFactory
+        from app.domain.services.credential_resolver import (
+            get_credential_resolver,
+        )
 
         provider_type = config.llm_provider_type or "groq"
         api_key_env = self._LLM_API_KEY_ENV.get(provider_type)
-        api_key = os.getenv(api_key_env) if api_key_env else None
+        api_key = await get_credential_resolver().resolve(
+            provider_type,
+            tenant_id=config.tenant_id,
+            env_var=api_key_env,
+        )
 
         provider = LLMFactory.create(provider_type, config={})
         init_config: dict = {
@@ -714,14 +813,25 @@ class VoiceOrchestrator:
         return provider
 
     async def _create_tts_provider(self, config: VoiceSessionConfig):
-        """Initialise and return the TTS provider."""
+        """Initialise and return the TTS provider.
+
+        T1.1 — provider API keys come from CredentialResolver, which
+        prefers a per-tenant encrypted row when `config.tenant_id` is
+        set and falls back to the process env var otherwise.
+        """
+        from app.domain.services.credential_resolver import (
+            get_credential_resolver,
+        )
+        resolver = get_credential_resolver()
+
         if config.tts_provider_type == "cartesia":
             from app.infrastructure.tts.cartesia import CartesiaTTSProvider
 
+            api_key = await resolver.resolve("cartesia", tenant_id=config.tenant_id)
             provider = CartesiaTTSProvider()
             await provider.initialize(
                 {
-                    "api_key": os.getenv("CARTESIA_API_KEY"),
+                    "api_key": api_key,
                     "voice_id": config.voice_id,
                     "model_id": config.tts_model or "sonic-3",
                     "sample_rate": config.tts_sample_rate,
@@ -730,10 +840,11 @@ class VoiceOrchestrator:
         elif config.tts_provider_type == "deepgram":
             from app.infrastructure.tts.deepgram_tts import DeepgramTTSProvider
 
+            api_key = await resolver.resolve("deepgram", tenant_id=config.tenant_id)
             provider = DeepgramTTSProvider()
             await provider.initialize(
                 {
-                    "api_key": os.getenv("DEEPGRAM_API_KEY"),
+                    "api_key": api_key,
                     "voice_id": config.voice_id,
                     "sample_rate": config.tts_sample_rate,
                 }
@@ -741,24 +852,13 @@ class VoiceOrchestrator:
         elif config.tts_provider_type == "elevenlabs":
             from app.infrastructure.tts.elevenlabs_tts import ElevenLabsTTSProvider
 
+            api_key = await resolver.resolve("elevenlabs", tenant_id=config.tenant_id)
             provider = ElevenLabsTTSProvider()
             await provider.initialize(
                 {
-                    "api_key": os.getenv("ELEVENLABS_API_KEY"),
+                    "api_key": api_key,
                     "voice_id": config.voice_id,
                     "model_id": config.tts_model or "eleven_flash_v2_5",
-                    "sample_rate": config.tts_sample_rate,
-                }
-            )
-        elif config.tts_provider_type == "cartesia":
-            from app.infrastructure.tts.cartesia import CartesiaTTSProvider
-
-            provider = CartesiaTTSProvider()
-            await provider.initialize(
-                {
-                    "api_key": os.getenv("CARTESIA_API_KEY"),
-                    "voice_id": config.voice_id,
-                    "model_id": config.tts_model or "sonic-3",
                     "sample_rate": config.tts_sample_rate,
                 }
             )
@@ -775,6 +875,96 @@ class VoiceOrchestrator:
                     "sample_rate": config.tts_sample_rate,
                 }
             )
+
+        # T1.3 — optional resilient wrapper. Same pattern as STT:
+        # primary stays the picked provider; secondary is the
+        # configured cross-vendor fallback. Failure to init secondary
+        # leaves us with the primary alone (still degrades better than
+        # nothing).
+        if _failover_enabled("TTS_FAILOVER_ENABLED"):
+            secondary = await self._create_tts_secondary(config)
+            if secondary is not None:
+                from app.domain.services.resilient_tts import (
+                    ResilientTTSProvider,
+                    TTSFailoverPolicy,
+                )
+                voice_map_raw = os.getenv("TTS_SECONDARY_VOICE_MAP", "")
+                voice_id_map = _parse_voice_map(voice_map_raw)
+                wrapper = ResilientTTSProvider(
+                    primary=provider,
+                    secondary=secondary,
+                    policy=TTSFailoverPolicy(voice_id_map=voice_id_map or None),
+                )
+                logger.info(
+                    "tts_resilient_wrapper_active primary=%s secondary=%s",
+                    provider.name, secondary.name,
+                )
+                return wrapper
+
+        return provider
+
+    async def _create_tts_secondary(
+        self, config: VoiceSessionConfig,
+    ):
+        """Build the secondary TTS for failover. Returns None when no
+        secondary is configured or its init fails — safe to ignore."""
+        from app.domain.services.credential_resolver import (
+            get_credential_resolver,
+        )
+
+        primary_name = config.tts_provider_type
+        secondary_provider_name = (
+            os.getenv("TTS_SECONDARY_PROVIDER")
+            or self._TTS_DEFAULT_SECONDARY.get(primary_name, (None, None))[0]
+        )
+        if not secondary_provider_name or secondary_provider_name == primary_name:
+            return None
+
+        resolver = get_credential_resolver()
+        api_key = await resolver.resolve(
+            secondary_provider_name, tenant_id=config.tenant_id,
+        )
+
+        try:
+            if secondary_provider_name == "cartesia":
+                from app.infrastructure.tts.cartesia import CartesiaTTSProvider
+                provider = CartesiaTTSProvider()
+                await provider.initialize({
+                    "api_key": api_key,
+                    "voice_id": config.voice_id,
+                    "model_id": "sonic-3",
+                    "sample_rate": config.tts_sample_rate,
+                })
+            elif secondary_provider_name == "elevenlabs":
+                from app.infrastructure.tts.elevenlabs_tts import (
+                    ElevenLabsTTSProvider,
+                )
+                provider = ElevenLabsTTSProvider()
+                await provider.initialize({
+                    "api_key": api_key,
+                    "voice_id": config.voice_id,
+                    "model_id": "eleven_flash_v2_5",
+                    "sample_rate": config.tts_sample_rate,
+                })
+            elif secondary_provider_name == "deepgram":
+                from app.infrastructure.tts.deepgram_tts import DeepgramTTSProvider
+                provider = DeepgramTTSProvider()
+                await provider.initialize({
+                    "api_key": api_key,
+                    "voice_id": config.voice_id,
+                    "sample_rate": config.tts_sample_rate,
+                })
+            else:
+                logger.warning(
+                    "tts_secondary_unknown provider=%s", secondary_provider_name,
+                )
+                return None
+        except Exception as exc:
+            logger.warning(
+                "tts_secondary_init_failed provider=%s err=%s",
+                secondary_provider_name, exc,
+            )
+            return None
         return provider
 
     async def _create_media_gateway(self, config: VoiceSessionConfig):

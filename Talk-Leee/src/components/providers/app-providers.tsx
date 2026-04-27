@@ -2,10 +2,27 @@
 
 import { QueryCache, QueryClient, QueryClientProvider, MutationCache } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { isApiClientError } from "@/lib/http-client";
+import { useEffect, useState } from "react";
+import { isApiClientError, setSessionExpiredHandler } from "@/lib/http-client";
 import { notificationsStore } from "@/lib/notifications";
 import { captureException } from "@/lib/monitoring";
+
+// Auth-flow paths must NOT bounce to login when they themselves get a 401
+// (the login endpoint can legitimately reject bad credentials). Add new
+// auth screens here if/when they're introduced.
+const AUTH_FLOW_PATHS = [
+    "/auth/login",
+    "/auth/signup",
+    "/auth/register",
+    "/auth/reset-password",
+    "/auth/forgot-password",
+];
+
+function isOnAuthFlowPath() {
+    if (typeof window === "undefined") return false;
+    const p = window.location.pathname;
+    return AUTH_FLOW_PATHS.some((auth) => p === auth || p.startsWith(auth + "/"));
+}
 
 function isHealthQuery(query: { queryKey?: unknown } | undefined) {
     const key = query?.queryKey;
@@ -17,6 +34,11 @@ function createAppQueryClient(onUnauthorized: () => void) {
         if (isHealthQuery(query)) return;
         if (isApiClientError(error)) {
             if (error.code === "unauthorized") {
+                // The redirect itself is now driven by the http-client's
+                // session-expired handler (see setSessionExpiredHandler
+                // wired below). Here we just surface the toast.  Calling
+                // onUnauthorized again is a defensive no-op — the latch
+                // in the http-client makes it idempotent.
                 notificationsStore.create({ type: "error", title: "Session expired", message: "Please log in again." });
                 onUnauthorized();
                 return;
@@ -76,15 +98,51 @@ import { ThemeProvider } from "./theme-provider";
 
 export function AppProviders({ children }: { children: React.ReactNode }) {
     const router = useRouter();
-    const [client] = useState(() =>
-        createAppQueryClient(() => {
-            try {
-                router.push("/auth/login");
-            } catch {
-                window.location.href = "/auth/login";
-            }
-        })
-    );
+
+    // Single source of truth for redirecting on token expiry. Used by:
+    //   1. The http-client's setSessionExpiredHandler hook — fires for
+    //      any caller that gets a 401, including pages that bypass
+    //      react-query and use try/catch directly (dashboard, ai-options,
+    //      campaign detail, etc).
+    //   2. React-Query's onError — keeps showing the "Session expired"
+    //      toast.  The redirect itself is driven by the http-client now,
+    //      but this stays as a defensive belt-and-braces call.
+    const redirectToLogin = () => {
+        if (isOnAuthFlowPath()) {
+            // Already on login — don't loop.  The login form's own
+            // 401 handling (bad credentials) shows its inline error.
+            return;
+        }
+        // Toast for the case where the http-client fired the handler
+        // before any react-query error reached us.
+        try {
+            notificationsStore.create({
+                type: "error",
+                title: "Session expired",
+                message: "Please log in again.",
+            });
+        } catch {
+            // notifications store can be unavailable during very early
+            // boot — never block the redirect on a UI side-effect.
+        }
+        try {
+            router.push("/auth/login");
+        } catch {
+            window.location.href = "/auth/login";
+        }
+    };
+
+    const [client] = useState(() => createAppQueryClient(redirectToLogin));
+
+    // Register the http-client-level handler exactly once per provider
+    // mount.  Because the http-client uses a fired-latch the handler
+    // only runs on the FIRST 401 of the session — re-registering on
+    // re-renders won't multiply notifications.
+    useEffect(() => {
+        setSessionExpiredHandler(redirectToLogin);
+        return () => setSessionExpiredHandler(null);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     return (
         <QueryClientProvider client={client}>
