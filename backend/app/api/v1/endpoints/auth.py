@@ -51,10 +51,16 @@ from pydantic import BaseModel, EmailStr
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
-from app.core.config import get_settings
+from app.api.v1.dependencies import (
+    CurrentUser,
+    get_audit_logger,
+    get_current_user,
+    get_db_client,
+)
+from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.core.jwt_security import encode_access_token
 from app.core.postgres_adapter import Client
+from app.core.config import get_settings
 from app.core.security.lockout import (
     check_account_locked,
     record_login_attempt,
@@ -75,6 +81,13 @@ from app.core.security.sessions import (
     revoke_all_user_sessions,
     revoke_session_by_token,
 )
+from app.core.security.verification_tokens import (
+    generate_verification_token,
+    get_verification_token_expiry,
+    hash_verification_token,
+    verify_token_expiry,
+)
+from app.domain.services.email_service import get_email_service
 
 # MFA challenge helper — imported lazily to avoid circular imports
 # (mfa.py imports from auth helpers too)
@@ -153,6 +166,15 @@ class UpdateMeRequest(BaseModel):
 class ChangePasswordRequest(BaseModel):
     old_password: str
     new_password: str
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+
+class VerifyEmailResponse(BaseModel):
+    message: str
+    email: str
 
 
 # ===========================================================================
@@ -261,6 +283,7 @@ async def register(
     response: Response,
     body: RegisterRequest,
     db_client: Client = Depends(get_db_client),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ) -> AuthTokenResponse:
     """
     Register a new user.
@@ -323,17 +346,24 @@ async def register(
         pw_hash = hash_password(body.password)
         user_id = str(uuid.uuid4())
 
+        # --- generate email verification token -----------------------------------
+        verification_token = generate_verification_token()
+        verification_token_hash = hash_verification_token(verification_token)
+        verification_token_expires = get_verification_token_expiry()
+
         await conn.execute(
             """
             INSERT INTO user_profiles
-                (id, email, name, tenant_id, role, password_hash)
-            VALUES ($1, $2, $3, $4, 'owner', $5)
+                (id, email, name, tenant_id, role, password_hash, verification_token, verification_token_expires_at)
+            VALUES ($1, $2, $3, $4, 'owner', $5, $6, $7)
             """,
             user_id,
             body.email.lower(),
             body.name,
             tenant["id"],
             pw_hash,
+            verification_token_hash,
+            verification_token_expires,
         )
 
         # --- create server-side session ----------------------------------------
@@ -351,9 +381,39 @@ async def register(
             return_session_id=True,
         )
 
+    # --- send verification email -----------------------------------------------
+    # Build verification link - adjust domain based on your setup
+    settings = get_settings()
+    verification_link = f"{settings.api_base_url}/api/v1/auth/verify-email?token={verification_token}"
+    email_service = get_email_service()
+    email_sent = await email_service.send_verification_email(
+        recipient_email=body.email,
+        recipient_name=body.name,
+        verification_link=verification_link,
+    )
+
+    if not email_sent:
+        logger.warning(
+            f"Failed to send verification email to {body.email} after registration"
+        )
+        # Don't fail the registration if email send fails, but log it
+
     # --- issue JWT + set cookie ------------------------------------------------
     token = _create_jwt(user_id, body.email, "owner", str(tenant["id"]), session_id)
     _set_session_cookie(response, raw_session_token)
+
+    # --- log registration event (Day 8) ----------------------------------------
+    await audit_logger.log(
+        event_type=AuditEvent.USER_CREATED,
+        actor_id=user_id,
+        actor_type="user",
+        tenant_id=str(tenant["id"]),
+        action="user_registered",
+        description=f"New user registered: {body.email}",
+        metadata={"plan_id": body.plan_id, "business_name": body.business_name},
+        ip_address=ip,
+        user_agent=ua,
+    )
 
     return AuthTokenResponse(
         access_token=token,
@@ -362,7 +422,7 @@ async def register(
         role="owner",
         business_name=body.business_name,
         minutes_remaining=plan["minutes"],
-        message="Registration successful.",
+        message="Registration successful. Please verify your email to enable full access.",
     )
 
 
@@ -373,6 +433,7 @@ async def login(
     response: Response,
     body: LoginRequest,
     db_client: Client = Depends(get_db_client),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ) -> AuthTokenResponse:
     """
     Login with email + password.
@@ -395,6 +456,16 @@ async def login(
         # --- per-account lockout check -----------------------------------------
         locked_until = await check_account_locked(conn, normalised_email)
         if locked_until is not None:
+            # Day 8: Log lockout security event
+            await audit_logger.log_security_event(
+                event_type="account_lockout",
+                severity="HIGH",
+                description=f"Blocked login attempt for locked account: {normalised_email}",
+                metadata={"email": normalised_email},
+                ip_address=ip,
+                user_agent=ua,
+            )
+            
             retry_after = await seconds_until_unlocked(conn, normalised_email)
             # Record the blocked attempt
             await record_login_attempt(
@@ -435,6 +506,16 @@ async def login(
 
         # --- user-not-found branch ---------------------------------------------
         if not row or not row["password_hash"]:
+            # Day 8: Log suspicious attempt (user enumeration protection)
+            await audit_logger.log_security_event(
+                event_type="failed_login_user_not_found",
+                severity="LOW",
+                description=f"Login attempt for non-existent user: {normalised_email}",
+                metadata={"email": normalised_email},
+                ip_address=ip,
+                user_agent=ua,
+            )
+            
             await record_login_attempt(
                 conn,
                 email=normalised_email,
@@ -465,10 +546,37 @@ async def login(
                 detail=_GENERIC_AUTH_ERROR,
             )
 
+        # --- email verification check ------------------------------------------
+        # Day 1: Block login if email not verified
+        if not row.get("is_verified", False):
+            await record_login_attempt(
+                conn,
+                email=normalised_email,
+                user_id=user_id,
+                ip_address=ip,
+                success=False,
+                failure_reason="email_not_verified",  # internal only
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Please verify your email before logging in.",
+            )
+
         # --- password verification (constant-time via argon2-cffi / bcrypt) ----
         password_ok = verify_password(body.password, row["password_hash"])
 
         if not password_ok:
+            # Day 8: Log failed login security event
+            await audit_logger.log_security_event(
+                event_type="failed_login_wrong_password",
+                severity="MEDIUM",
+                description=f"Failed login (wrong password) for user: {normalised_email}",
+                user_id=uuid.UUID(user_id),
+                tenant_id=row["tenant_id"],
+                ip_address=ip,
+                user_agent=ua,
+            )
+            
             await record_login_attempt(
                 conn,
                 email=normalised_email,
@@ -562,6 +670,18 @@ async def login(
     token = _create_jwt(user_id, row["email"], row["role"], tenant_id, session_id)
 
     _set_session_cookie(response, raw_session_token)
+
+    # --- log login event (Day 8) -----------------------------------------------
+    await audit_logger.log(
+        event_type=AuditEvent.LOGIN_SUCCESS,
+        actor_id=user_id,
+        actor_type="user",
+        tenant_id=tenant_id,
+        action="user_logged_in",
+        description=f"User logged in: {row['email']}",
+        ip_address=ip,
+        user_agent=ua,
+    )
 
     return AuthTokenResponse(
         access_token=token,
@@ -755,10 +875,12 @@ async def passkey_check(
 
 @router.post("/change-password")
 async def change_password(
+    request: Request,
     body: ChangePasswordRequest,
     response: Response,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
     talky_sid: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, str]:
     """
@@ -839,6 +961,106 @@ async def change_password(
                 exclude_token_hash=current_token_hash,
             )
 
+    # --- log password change event (Day 8) -------------------------------------
+    await audit_logger.log(
+        event_type=AuditEvent.USER_UPDATED,
+        actor_id=current_user.id,
+        actor_type="user",
+        tenant_id=current_user.tenant_id,
+        action="password_changed",
+        description="User changed their password",
+        ip_address=_get_client_ip(request),
+        user_agent=_get_user_agent(request),
+    )
+
     return {
         "detail": "Password changed successfully. All other sessions have been revoked."
     }
+
+
+@router.get("/verify-email", response_model=VerifyEmailResponse)
+async def verify_email(
+    token: str,
+    db_client: Client = Depends(get_db_client),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
+) -> VerifyEmailResponse:
+    """
+    Verify user's email address.
+
+    Accepts a verification token from email link and marks the user as verified.
+    Token must be valid and not expired.
+
+    Args:
+        token: The verification token from the email link
+
+    Returns:
+        Confirmation message with the verified email address
+    """
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification token is required.",
+        )
+
+    # Hash the token for database lookup
+    token_hash = hash_verification_token(token)
+
+    async with db_client.pool.acquire() as conn:
+        # --- lookup user by token ----------------------------------------------
+        row = await conn.fetchrow(
+            """
+            SELECT id, email, verification_token, verification_token_expires_at, is_verified
+            FROM user_profiles
+            WHERE verification_token = $1
+            """,
+            token_hash,
+        )
+
+        # --- token not found or user not found ---------------------------------
+        if not row:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Invalid or expired verification token.",
+            )
+
+        # --- already verified --------------------------------------------------
+        if row["is_verified"]:
+            return VerifyEmailResponse(
+                message="Email is already verified.",
+                email=row["email"],
+            )
+
+        # --- token expired check -----------------------------------------------
+        if not verify_token_expiry(row["verification_token_expires_at"]):
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail="Verification token has expired. Please request a new one.",
+            )
+
+        # --- mark email as verified --------------------------------------------
+        user_id = row["id"]
+        await conn.execute(
+            """
+            UPDATE user_profiles
+            SET is_verified = TRUE,
+                verification_token = NULL,
+                verification_token_expires_at = NULL,
+                email_verified_at = NOW()
+            WHERE id = $1
+            """,
+            user_id,
+        )
+
+        # --- log email verification event (Day 8) --------------------------------
+        await audit_logger.log(
+            event_type=AuditEvent.USER_UPDATED,
+            actor_id=user_id,
+            actor_type="user",
+            action="email_verified",
+            description=f"User verified their email: {row['email']}",
+        )
+
+    return VerifyEmailResponse(
+        message="Email verified successfully! You can now log in.",
+        email=row["email"],
+    )

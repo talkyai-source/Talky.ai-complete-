@@ -42,6 +42,7 @@ from pydantic import BaseModel, Field
 
 from app.api.v1.dependencies import (
     CurrentUser,
+    get_audit_logger,
     get_current_user,
     require_role,
     require_tenant_member,
@@ -52,6 +53,7 @@ from app.api.v1.dependencies import (
     get_user_tenants,
     get_db_client,
 )
+from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.core.postgres_adapter import Client
 from app.core.security.rbac import (
     normalize_role,
@@ -641,6 +643,7 @@ async def update_tenant_user(
     request: UpdateTenantUserRequest,
     current_user: CurrentUser = Depends(require_role(UserRole.TENANT_ADMIN)),
     db_client: Client = Depends(get_db_client),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ) -> TenantUserResponse:
     """
     Update a user's role or status in a tenant.
@@ -727,6 +730,20 @@ async def update_tenant_user(
         role_details = await conn.fetchrow(
             "SELECT id, name, description, level, is_system_role, tenant_scoped FROM roles WHERE id = $1",
             result["role_id"],
+        )
+
+    # --- log role change event (Day 8) -----------------------------------------
+    if request.role_name:
+        await audit_logger.log(
+            event_type=AuditEvent.USER_UPDATED,
+            actor_id=current_user.id,
+            actor_type="user",
+            tenant_id=current_user.tenant_id,
+            resource_type="user",
+            resource_id=str(result["user_id"]),
+            action="role_updated",
+            description=f"User role updated to {request.role_name}",
+            metadata={"tenant_user_id": tenant_user_id, "new_role": request.role_name},
         )
 
     return TenantUserResponse(

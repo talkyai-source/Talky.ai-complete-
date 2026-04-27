@@ -39,6 +39,14 @@ def _get_campaign_service(db_client: Client) -> CampaignService:
     queue_service = container.queue_service if container.is_initialized else None
     return CampaignService(db_client, queue_service=queue_service)
 
+from app.core.security.api_security import rate_limit_dependency
+from app.core.security.idempotency import (
+    idempotency_dependency, 
+    store_idempotent_response, 
+    release_idempotency_lock
+)
+import json
+
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
 
@@ -129,11 +137,12 @@ async def list_campaigns(
         raise HTTPException(status_code=500, detail="Failed to list campaigns")
 
 
-@router.post("/")
+@router.post("/", dependencies=[Depends(rate_limit_dependency)])
 async def create_campaign(
     campaign_data: CampaignCreateRequest,
     request: Request,
     current_user: CurrentUser = Depends(get_current_user),
+    idempotency_key: Optional[str] = Depends(idempotency_dependency),
     db_client: Client = Depends(get_db_client)
 ):
     """Create a new campaign"""
@@ -209,10 +218,19 @@ async def create_campaign(
         if not response.data:
             logger.error("Campaign insert returned no rows for tenant=%s name=%s", current_user.tenant_id, insert_payload["name"])
             raise HTTPException(status_code=500, detail="Failed to create campaign")
-        return {"campaign": response.data[0]}
+        result = {"campaign": response.data[0]}
+
+        # Store for idempotency (Hisham's billing layer — replays return the
+        # cached response instead of double-creating).
+        if idempotency_key:
+            await store_idempotent_response(request, 200, json.dumps(result))
+
+        return result
     except HTTPException:
         raise
     except Exception as e:
+        if idempotency_key:
+            await release_idempotency_lock(request)
         logger.error(f"Error creating campaign: {e}")
         raise HTTPException(status_code=500, detail="Failed to create campaign")
 
@@ -279,11 +297,12 @@ async def list_campaign_calls_with_transcripts(
     return result
 
 
-@router.post("/{campaign_id}/start")
+@router.post("/{campaign_id}/start", dependencies=[Depends(rate_limit_dependency)])
 async def start_campaign(
     campaign_id: str,
     request: Request,
     start_request: Optional[CampaignStartRequest] = None,
+    idempotency_key: Optional[str] = Depends(idempotency_dependency),
     db_client: Client = Depends(get_db_client)
 ):
     """
@@ -305,20 +324,34 @@ async def start_campaign(
             first_speaker=first_speaker,
         )
         
-        return {
+        response_data = {
             "message": result.message,
             "jobs_enqueued": result.jobs_enqueued,
             "queue_stats": result.queue_stats,
             "campaign": {"id": result.campaign_id, "status": "running"}
         }
+
+        # Store for idempotency
+        if idempotency_key:
+            await store_idempotent_response(request, 200, json.dumps(response_data))
+
+        return response_data
     except CampaignNotFoundError:
+        if idempotency_key:
+            await release_idempotency_lock(request)
         raise HTTPException(status_code=404, detail="Campaign not found")
     except CampaignStateError as e:
+        if idempotency_key:
+            await release_idempotency_lock(request)
         raise HTTPException(status_code=400, detail=e.message)
     except CampaignError as e:
+        if idempotency_key:
+            await release_idempotency_lock(request)
         logger.error(f"Campaign service error for {campaign_id}: {e}")
         raise HTTPException(status_code=e.status_code, detail="Failed to start campaign")
     except Exception as e:
+        if idempotency_key:
+            await release_idempotency_lock(request)
         logger.error(f"Unexpected error starting campaign {campaign_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 

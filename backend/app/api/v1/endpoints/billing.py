@@ -9,8 +9,9 @@ from pydantic import BaseModel
 from typing import Optional
 from app.core.postgres_adapter import Client
 
-from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
+from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser, get_audit_logger
 from app.domain.services.billing_service import BillingService
+from app.domain.services.audit_logger import AuditEvent, AuditLogger
 
 logger = logging.getLogger(__name__)
 
@@ -105,15 +106,11 @@ async def create_checkout_session(
     body: CreateCheckoutRequest,
     request: Request,
     current_user: CurrentUser = Depends(get_current_user),
-    billing: BillingService = Depends(get_billing_service)
+    billing: BillingService = Depends(get_billing_service),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """
     Create a Stripe Checkout Session for subscribing to a plan.
-    
-    Returns a URL to redirect the user to Stripe's hosted checkout page.
-    After successful payment, user is redirected to success_url.
-    
-    In mock mode (no Stripe key configured), returns a mock session.
     """
     try:
         # Get default URLs if not provided
@@ -129,6 +126,19 @@ async def create_checkout_session(
             success_url=success_url,
             cancel_url=cancel_url,
             business_name=current_user.business_name
+        )
+
+        # Log event (Day 8)
+        await audit_logger.log(
+            event_type=AuditEvent.BILLING_UPDATED,
+            actor_id=current_user.id,
+            actor_type="user",
+            tenant_id=current_user.tenant_id,
+            action="checkout_session_created",
+            description=f"User initiated checkout for plan: {body.plan_id}",
+            metadata={"plan_id": body.plan_id, "mock_mode": result.get("mock_mode", False)},
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
         )
         
         return CreateCheckoutResponse(**result)
@@ -149,23 +159,13 @@ async def create_checkout_session(
 @router.post("/webhooks")
 async def stripe_webhook(
     request: Request,
-    db_client: Client = Depends(get_db_client)
+    db_client: Client = Depends(get_db_client),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """
     Handle Stripe webhook events.
-    
-    This endpoint should be configured in Stripe Dashboard:
-    https://dashboard.stripe.com/webhooks
-    
-    Events handled:
-    - checkout.session.completed
-    - customer.subscription.created
-    - customer.subscription.updated
-    - customer.subscription.deleted
-    - invoice.paid
-    - invoice.payment_failed
     """
-    billing = BillingService(db_client)
+    billing = BillingService(db_client, audit_logger=audit_logger)
     
     # Get raw body and signature
     payload = await request.body()
@@ -246,16 +246,11 @@ async def create_portal_session(
     body: PortalRequest,
     request: Request,
     current_user: CurrentUser = Depends(get_current_user),
-    billing: BillingService = Depends(get_billing_service)
+    billing: BillingService = Depends(get_billing_service),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """
     Create a Stripe Customer Portal session.
-    
-    The Customer Portal allows users to:
-    - View and download invoices
-    - Update payment methods
-    - Cancel or modify subscription
-    - View billing history
     """
     try:
         default_urls = get_default_urls(request)
@@ -264,6 +259,18 @@ async def create_portal_session(
         result = await billing.create_portal_session(
             tenant_id=current_user.tenant_id,
             return_url=return_url
+        )
+
+        # Log event (Day 8)
+        await audit_logger.log(
+            event_type=AuditEvent.BILLING_UPDATED,
+            actor_id=current_user.id,
+            actor_type="user",
+            tenant_id=current_user.tenant_id,
+            action="portal_session_created",
+            description="User accessed billing portal",
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
         )
         
         return PortalResponse(**result)
@@ -283,19 +290,31 @@ async def create_portal_session(
 
 @router.post("/cancel", response_model=CancelResponse)
 async def cancel_subscription(
+    request: Request,
     current_user: CurrentUser = Depends(get_current_user),
-    billing: BillingService = Depends(get_billing_service)
+    billing: BillingService = Depends(get_billing_service),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """
     Cancel the current subscription.
-    
-    By default, cancels at the end of the current billing period.
-    The subscription remains active until the period ends.
     """
     try:
         result = await billing.cancel_subscription(
             tenant_id=current_user.tenant_id,
             cancel_at_period_end=True
+        )
+
+        # Log event (Day 8)
+        await audit_logger.log(
+            event_type=AuditEvent.BILLING_UPDATED,
+            actor_id=current_user.id,
+            actor_type="user",
+            tenant_id=current_user.tenant_id,
+            action="subscription_cancelled",
+            description="User cancelled their subscription",
+            metadata={"tenant_id": current_user.tenant_id},
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
         )
         
         return CancelResponse(**result)

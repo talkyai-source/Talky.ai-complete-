@@ -478,6 +478,68 @@ class AuditLogger:
             compliance_tags=["soc2"],
         )
 
+    async def log_security_event(
+        self,
+        event_type: str,
+        severity: str,
+        description: str,
+        user_id: Optional[UUID | str] = None,
+        tenant_id: Optional[UUID | str] = None,
+        session_id: Optional[UUID | str] = None,
+        detection_source: str = "manual",
+        metadata: Optional[dict] = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+        evidence: Optional[dict] = None,
+    ) -> UUID:
+        """
+        Log a high-priority security event.
+
+        Args:
+            event_type: Type of security event (e.g., "failed_login")
+            severity: Severity level (CRITICAL, HIGH, MEDIUM, LOW, INFO)
+            description: Detailed description
+            user_id: Associated user
+            tenant_id: Associated tenant
+            session_id: Associated session
+            detection_source: Source of detection
+            metadata: Additional structured data
+            ip_address: Client IP address
+            user_agent: Client user agent
+            evidence: Evidence of the security event
+
+        Returns:
+            event_id: UUID of created security event entry
+        """
+        event_id = uuid4()
+        user_uuid = UUID(user_id) if isinstance(user_id, str) else user_id
+        tenant_uuid = UUID(tenant_id) if isinstance(tenant_id, str) else tenant_id
+        session_uuid = UUID(session_id) if isinstance(session_id, str) else session_id
+
+        async with self.db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO security_events (
+                    event_id, event_type, severity, description, 
+                    user_id, tenant_id, session_id, detection_source,
+                    evidence, title, status
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                """,
+                event_id,
+                event_type,
+                severity,
+                description,
+                user_uuid,
+                tenant_uuid,
+                session_uuid,
+                detection_source,
+                json.dumps(evidence) if evidence else None,
+                event_type.replace("_", " ").title(),
+                "open"
+            )
+
+        return event_id
+
     async def flush(self) -> None:
         """Flush batched entries to database"""
         if not self._batch:

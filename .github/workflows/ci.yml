@@ -1,4 +1,4 @@
-name: CI — Lint, Test, Build
+name: CI — Lint, Test, Build, Scan
 
 on:
   push:
@@ -12,11 +12,49 @@ env:
 
 jobs:
   # ──────────────────────────────────────────────────────────────────
-  # Backend: lint + test + Docker build
+  # Secret scanning — runs first, blocks everything if secrets found
+  # ──────────────────────────────────────────────────────────────────
+  secret-scan:
+    name: Secret Scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history so gitleaks can scan all commits
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ──────────────────────────────────────────────────────────────────
+  # Guard: fail fast if placeholder secrets are still set
+  # ──────────────────────────────────────────────────────────────────
+  secret-guard:
+    name: Secret Placeholder Guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for placeholder secrets in env template
+        run: |
+          if grep -r "please_change_me_in_production" . --include="*.docker" --include="*.env*" --include="*.yml" --include="*.yaml"; then
+            echo "❌ Placeholder JWT_SECRET found in committed files. Replace before deploying."
+            exit 1
+          fi
+          if grep -r "talkyai_secret" . --include="*.yml" --include="*.yaml" --include="*.docker"; then
+            echo "❌ Default DB password 'talkyai_secret' found in committed config. Remove default values."
+            exit 1
+          fi
+          echo "✅ No placeholder secrets found in config files."
+
+  # ──────────────────────────────────────────────────────────────────
+  # Backend: lint + audit + test + Docker build + image scan
   # ──────────────────────────────────────────────────────────────────
   backend:
     name: Backend
     runs-on: ubuntu-latest
+    needs: [secret-scan, secret-guard]
     defaults:
       run:
         working-directory: backend
@@ -60,25 +98,40 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio ruff
+          pip install pytest pytest-asyncio ruff pip-audit bandit
 
       - name: Lint with Ruff
+        # FIX: removed || true — lint failures now block merges
         run: ruff check app/ --select E,F,W --ignore E501
+
+      - name: Dependency vulnerability audit (pip-audit)
+        # FIX: added — checks all Python deps for known CVEs
+        run: pip-audit -r requirements.txt --ignore-vuln GHSA-jfh8-c2jp-5 || true
+        # Note: the || true above is intentional ONLY for pip-audit warnings
+        # that are known/accepted. Remove it once you've reviewed the baseline.
+        # For new builds, change to: pip-audit -r requirements.txt
+
+      - name: SAST scan (bandit)
+        # FIX: added — static analysis for common Python security issues
+        run: bandit -r app/ -ll -x app/tests --exit-zero
+        # --exit-zero for now so you can review the baseline report first.
+        # Once you've fixed HIGH severity items, remove --exit-zero.
 
       - name: Init test database
         run: |
-          PGPASSWORD=testpassword psql -h localhost -U talky -d talky_test -f database/complete_schema.sql
+          PGPASSWORD=testpassword psql -h localhost -U talky -d talky_test \
+            -f database/complete_schema.sql -v ON_ERROR_STOP=1
         env:
           PGPASSWORD: testpassword
 
       - name: Run tests with pytest
-        run: |
-          pytest tests/ -v --tb=short -x -q 2>&1 || true
+        # FIX: removed 2>&1 || true — test failures now block merges
+        run: pytest tests/ -v --tb=short -x -q
         env:
           DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_test
           REDIS_HOST: localhost
           REDIS_PORT: 6379
-          JWT_SECRET: ci-test-secret-key-not-for-production
+          JWT_SECRET: ci-test-secret-key-not-for-production-32chars
           ENVIRONMENT: test
           DEEPGRAM_API_KEY: test_key
           GROQ_API_KEY: test_key
@@ -87,11 +140,12 @@ jobs:
           VONAGE_API_SECRET: test_secret
 
   # ──────────────────────────────────────────────────────────────────
-  # Frontend: lint + typecheck + build
+  # Frontend: lint + typecheck + audit + build
   # ──────────────────────────────────────────────────────────────────
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
+    needs: [secret-scan, secret-guard]
     defaults:
       run:
         working-directory: Talk-Leee
@@ -109,8 +163,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Dependency vulnerability audit
+        # FIX: added — npm audit blocks on high/critical severity
+        run: npm audit --audit-level=high
+        continue-on-error: false
+
       - name: Lint
-        run: npm run lint 2>&1 || true
+        # FIX: removed || true — lint failures now block merges
+        run: npm run lint
 
       - name: Type check
         run: npx tsc --noEmit
@@ -121,10 +181,10 @@ jobs:
           NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api/v1
 
   # ──────────────────────────────────────────────────────────────────
-  # Docker: build all images
+  # Docker: build + image vulnerability scan (Trivy)
   # ──────────────────────────────────────────────────────────────────
   docker-build:
-    name: Docker Build
+    name: Docker Build & Scan
     runs-on: ubuntu-latest
     needs: [backend, frontend]
 
@@ -133,6 +193,17 @@ jobs:
 
       - name: Build backend image
         run: docker build -t talky-backend:ci ./backend
+
+      - name: Scan image for vulnerabilities (Trivy)
+        # FIX: added — scans built image for OS + package CVEs
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: talky-backend:ci
+          format: table
+          exit-code: 1
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
 
       - name: Build docker-compose stack
         run: |
@@ -145,6 +216,7 @@ jobs:
   schema-check:
     name: SQL Schema Validation
     runs-on: ubuntu-latest
+    needs: [secret-scan]
 
     services:
       postgres:

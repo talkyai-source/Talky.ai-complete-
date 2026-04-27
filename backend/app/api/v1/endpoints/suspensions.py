@@ -323,7 +323,12 @@ async def restore_partner(
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """Restore a suspended partner"""
-    # Implementation would restore partner
+    result = await suspension_service.restore_partner(
+        partner_id=partner_id,
+        restored_by=current_user["id"],
+        reason=data.reason,
+    )
+
     await audit_logger.log(
         event_type=AuditEvent.TENANT_RESTORED,
         action="partner_restored",
@@ -333,7 +338,7 @@ async def restore_partner(
         metadata={"restore_reason": data.reason},
     )
 
-    return {"restored": True}
+    return {"restored": True, "suspension_id": result.suspension_id}
 
 
 # Appeal Endpoints

@@ -66,12 +66,22 @@ CREATE TABLE IF NOT EXISTS tenants (
     stripe_customer_id VARCHAR(100),
     stripe_subscription_id VARCHAR(100),
     subscription_status VARCHAR(50) DEFAULT 'inactive',
+    
+    -- Day 8: Suspension and White Label support
+    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'pending_deletion')),
+    suspended_at TIMESTAMPTZ,
+    suspended_by UUID REFERENCES user_profiles(id),
+    suspension_reason TEXT,
+    white_label_partner_id UUID, -- Will add foreign key after table creation
+    
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_tenants_plan_id ON tenants(plan_id);
 CREATE INDEX IF NOT EXISTS idx_tenants_subscription_status ON tenants(subscription_status);
+CREATE INDEX IF NOT EXISTS idx_tenants_status ON tenants(status);
+CREATE INDEX IF NOT EXISTS idx_tenants_white_label_partner_id ON tenants(white_label_partner_id);
 
 -- 1.3 USER_PROFILES
 -- NOTE: No longer references auth.users. Uses its own UUID primary key.
@@ -81,14 +91,242 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     email VARCHAR(255) NOT NULL UNIQUE,
     name VARCHAR(255),
     tenant_id UUID REFERENCES tenants(id),
-    role VARCHAR(50) NOT NULL DEFAULT 'user',
+    role VARCHAR(50) NOT NULL DEFAULT 'user' CHECK (role IN ('platform_admin', 'partner_admin', 'tenant_admin', 'user', 'readonly')),
     password_hash TEXT,                          -- bcrypt hash (nullable for OAuth future)
+    
+    -- Security hardening columns
+    account_locked_until TIMESTAMPTZ,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    password_changed_at TIMESTAMPTZ,
+    failed_login_count INTEGER NOT NULL DEFAULT 0,
+    last_login_at TIMESTAMPTZ,
+    mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+
+    -- Day 3: Passkey denormalized count
+    passkey_count INTEGER NOT NULL DEFAULT 0 CHECK (passkey_count >= 0),
+    
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_profiles_tenant_id ON user_profiles(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_user_profiles_email ON user_profiles(email);
+CREATE INDEX IF NOT EXISTS idx_user_profiles_has_passkey ON user_profiles(passkey_count) WHERE passkey_count > 0;
+CREATE INDEX IF NOT EXISTS idx_user_profiles_is_active ON user_profiles (is_active) WHERE is_active = FALSE;
+CREATE INDEX IF NOT EXISTS idx_user_profiles_mfa_enabled ON user_profiles (mfa_enabled) WHERE mfa_enabled = TRUE;
+
+-- 1.4 SECURITY_SESSIONS
+-- Stores server-side session records for instant revocation.
+CREATE TABLE IF NOT EXISTS security_sessions (
+    id                  UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id             UUID        NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
+    session_token_hash  TEXT        NOT NULL UNIQUE,
+    ip_address          TEXT,
+    user_agent          TEXT,
+    
+    -- Day 5: Session security enhancements
+    device_fingerprint  TEXT,
+    device_name         TEXT,
+    device_type         TEXT        CHECK (device_type IN ('mobile', 'tablet', 'desktop', 'unknown')),
+    browser             TEXT,
+    os                  TEXT,
+    bound_ip            TEXT,
+    ip_binding_enforced BOOLEAN     NOT NULL DEFAULT FALSE,
+    fingerprint_binding_enforced BOOLEAN NOT NULL DEFAULT FALSE,
+    is_suspicious       BOOLEAN     NOT NULL DEFAULT FALSE,
+    suspicious_reason   TEXT,
+    suspicious_detected_at TIMESTAMPTZ,
+    requires_verification BOOLEAN   NOT NULL DEFAULT FALSE,
+    verified_at         TIMESTAMPTZ,
+    session_number      INTEGER,
+    mfa_verified        BOOLEAN     NOT NULL DEFAULT FALSE,
+    
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_active_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at          TIMESTAMPTZ NOT NULL,
+    revoked             BOOLEAN     NOT NULL DEFAULT FALSE,
+    revoked_at          TIMESTAMPTZ,
+    revoke_reason       TEXT,
+    CONSTRAINT chk_revoked_at_consistency CHECK ((revoked = FALSE AND revoked_at IS NULL) OR (revoked = TRUE AND revoked_at IS NOT NULL)),
+    CONSTRAINT chk_expires_after_created CHECK (expires_at > created_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ss_token_lookup ON security_sessions (session_token_hash) WHERE revoked = FALSE;
+CREATE INDEX IF NOT EXISTS idx_ss_user_active ON security_sessions (user_id, last_active_at DESC) WHERE revoked = FALSE;
+CREATE INDEX IF NOT EXISTS idx_ss_mfa_verified ON security_sessions (user_id, mfa_verified) WHERE mfa_verified = TRUE;
+
+-- 1.5 LOGIN_ATTEMPTS
+-- Per-account lockout tracking.
+CREATE TABLE IF NOT EXISTS login_attempts (
+    id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    email           TEXT        NOT NULL,
+    user_id         UUID        REFERENCES user_profiles(id) ON DELETE SET NULL,
+    ip_address      TEXT        NOT NULL,
+    user_agent      TEXT,
+    success         BOOLEAN     NOT NULL,
+    failure_reason  TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_la_email_failures ON login_attempts (email, created_at DESC) WHERE success = FALSE;
+CREATE INDEX IF NOT EXISTS idx_la_user_time ON login_attempts (user_id, created_at DESC) WHERE user_id IS NOT NULL;
+
+-- 1.6 USER_MFA
+-- Encrypted TOTP secrets.
+CREATE TABLE IF NOT EXISTS user_mfa (
+    id                  UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id             UUID        NOT NULL UNIQUE REFERENCES user_profiles(id) ON DELETE CASCADE,
+    totp_secret_enc     TEXT        NOT NULL,
+    enabled             BOOLEAN     NOT NULL DEFAULT FALSE,
+    verified_at         TIMESTAMPTZ,
+    last_used_at        TIMESTAMPTZ,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_user_mfa_verified_before_enabled CHECK ((enabled = FALSE) OR (enabled = TRUE AND verified_at IS NOT NULL))
+);
+
+-- 1.7 RECOVERY_CODES
+-- Single-use backup codes.
+CREATE TABLE IF NOT EXISTS recovery_codes (
+    id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id         UUID        NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
+    code_hash       TEXT        NOT NULL UNIQUE,
+    batch_id        UUID        NOT NULL,
+    used            BOOLEAN     NOT NULL DEFAULT FALSE,
+    used_at         TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_recovery_codes_used_at CHECK ((used = FALSE AND used_at IS NULL) OR (used = TRUE AND used_at IS NOT NULL))
+);
+
+-- 1.8 MFA_CHALLENGES
+-- Ephemeral two-step login tokens.
+CREATE TABLE IF NOT EXISTS mfa_challenges (
+    id                  UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id             UUID        NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
+    challenge_hash      TEXT        NOT NULL UNIQUE,
+    ip_address          TEXT,
+    user_agent          TEXT,
+    expires_at          TIMESTAMPTZ NOT NULL,
+    used                BOOLEAN     NOT NULL DEFAULT FALSE,
+    used_at             TIMESTAMPTZ,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_mfa_challenge_used_at CHECK ((used = FALSE AND used_at IS NULL) OR (used = TRUE AND used_at IS NOT NULL)),
+    CONSTRAINT chk_mfa_challenge_expires_after_created CHECK (expires_at > created_at)
+);
+
+-- 1.9 USER_PASSKEYS
+-- Registered FIDO2 / WebAuthn credentials (passkeys) per user.
+CREATE TABLE IF NOT EXISTS user_passkeys (
+    id                      UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id                 UUID        NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
+    credential_id           TEXT        NOT NULL UNIQUE,
+    credential_public_key   TEXT        NOT NULL,
+    sign_count              BIGINT      NOT NULL DEFAULT 0 CHECK (sign_count >= 0),
+    aaguid                  TEXT,
+    device_type             TEXT        CHECK (device_type IN ('singleDevice', 'multiDevice')),
+    backed_up               BOOLEAN     NOT NULL DEFAULT FALSE,
+    transports              TEXT[],
+    display_name            TEXT,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_used_at            TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_up_credential_id ON user_passkeys (credential_id);
+CREATE INDEX IF NOT EXISTS idx_up_user_id ON user_passkeys (user_id, created_at DESC);
+
+-- 1.10 WEBAUTHN_CHALLENGES
+-- Ephemeral challenges for WebAuthn registration and authentication ceremonies.
+CREATE TABLE IF NOT EXISTS webauthn_challenges (
+    id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    challenge       TEXT        NOT NULL,
+    ceremony        TEXT        NOT NULL CHECK (ceremony IN ('registration', 'authentication')),
+    user_id         UUID        REFERENCES user_profiles(id) ON DELETE CASCADE,
+    ip_address      TEXT,
+    user_agent      TEXT,
+    expires_at      TIMESTAMPTZ NOT NULL,
+    used            BOOLEAN     NOT NULL DEFAULT FALSE,
+    used_at         TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_wc_used_at CHECK ((used = FALSE AND used_at IS NULL) OR (used = TRUE AND used_at IS NOT NULL)),
+    CONSTRAINT chk_wc_expires_after_created CHECK (expires_at > created_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_wc_id_active ON webauthn_challenges (id) WHERE used = FALSE;
+CREATE INDEX IF NOT EXISTS idx_wc_cleanup ON webauthn_challenges (expires_at) WHERE used = FALSE;
+CREATE INDEX IF NOT EXISTS idx_wc_user_time ON webauthn_challenges (user_id, created_at DESC) WHERE user_id IS NOT NULL;
+
+-- 1.11 ROLES
+-- RBAC role definitions.
+CREATE TABLE IF NOT EXISTS roles (
+    id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name            VARCHAR(50) NOT NULL UNIQUE,
+    description     TEXT,
+    level           INTEGER     NOT NULL CHECK (level > 0),
+    is_system_role  BOOLEAN     NOT NULL DEFAULT FALSE,
+    tenant_scoped   BOOLEAN     NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_roles_level ON roles (level DESC);
+
+-- 1.12 PERMISSIONS
+-- Granular permissions.
+CREATE TABLE IF NOT EXISTS permissions (
+    id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name            VARCHAR(100) NOT NULL UNIQUE,
+    description     TEXT,
+    resource        VARCHAR(50) NOT NULL,
+    action          VARCHAR(50) NOT NULL,
+    is_system       BOOLEAN     NOT NULL DEFAULT FALSE,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (resource, action)
+);
+
+-- 1.13 ROLE_PERMISSIONS
+-- Junction table for role-permission assignment.
+CREATE TABLE IF NOT EXISTS role_permissions (
+    id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    role_id         UUID        NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    permission_id   UUID        NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
+    granted_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (role_id, permission_id)
+);
+
+-- 1.14 TENANT_USERS
+-- Junction table for tenant membership with role assignment.
+CREATE TABLE IF NOT EXISTS tenant_users (
+    id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id         UUID        NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
+    tenant_id       UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    role_id         UUID        NOT NULL REFERENCES roles(id) ON DELETE RESTRICT,
+    is_primary      BOOLEAN     NOT NULL DEFAULT FALSE,
+    status          VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('pending', 'active', 'suspended', 'removed')),
+    invited_by      UUID        REFERENCES user_profiles(id) ON DELETE SET NULL,
+    invited_at      TIMESTAMPTZ,
+    joined_at       TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (user_id, tenant_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tu_user_id ON tenant_users (user_id);
+CREATE INDEX IF NOT EXISTS idx_tu_tenant_id ON tenant_users (tenant_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tu_user_primary ON tenant_users (user_id) WHERE is_primary = TRUE;
+
+-- 1.15 USER_PERMISSIONS
+-- Direct permission grants to users.
+CREATE TABLE IF NOT EXISTS user_permissions (
+    id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id         UUID        NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
+    permission_id   UUID        NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
+    tenant_id       UUID        REFERENCES tenants(id) ON DELETE CASCADE,
+    expires_at      TIMESTAMPTZ,
+    reason          TEXT,
+    granted_by      UUID        REFERENCES user_profiles(id) ON DELETE SET NULL,
+    granted_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (user_id, permission_id, tenant_id)
+);
 
 -- =============================================================================
 -- SECTION 2: DIALER PIPELINE
@@ -1324,6 +1562,580 @@ CREATE INDEX IF NOT EXISTS idx_dialer_jobs_priority ON dialer_jobs(priority DESC
 CREATE INDEX IF NOT EXISTS idx_dialer_jobs_queue ON dialer_jobs(tenant_id, status, priority DESC, scheduled_at);
 
 -- =============================================================================
+-- SECTION 6.5: VOICE SECURITY & CALL GUARD (Day 7)
+-- =============================================================================
+-- Pre-call validation, rate limiting, concurrency enforcement, abuse detection.
+-- Unified security gate for all outbound calls (REST + Dialer Worker).
+-- =============================================================================
+
+-- =============================================================================
+-- TENANT CALL LIMITS
+-- =============================================================================
+-- Comprehensive per-tenant limits for voice operations including rate limits,
+-- concurrency, spend caps, and geographic restrictions.
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS tenant_call_limits (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+
+    -- Rate limits (rolling window)
+    calls_per_minute INTEGER NOT NULL DEFAULT 60,
+    calls_per_hour INTEGER NOT NULL DEFAULT 1000,
+    calls_per_day INTEGER NOT NULL DEFAULT 10000,
+
+    -- Concurrency
+    max_concurrent_calls INTEGER NOT NULL DEFAULT 10,
+    max_queue_size INTEGER NOT NULL DEFAULT 50,
+
+    -- Usage limits
+    monthly_minutes_allocated INTEGER NOT NULL DEFAULT 0,
+    monthly_minutes_used INTEGER NOT NULL DEFAULT 0,
+    monthly_spend_cap DECIMAL(12,2),
+    monthly_spend_used DECIMAL(12,2) DEFAULT 0.00,
+
+    -- Call restrictions
+    max_call_duration_seconds INTEGER DEFAULT 3600, -- 1 hour
+    min_call_interval_seconds INTEGER DEFAULT 300,  -- 5 min between calls to same number
+
+    -- Geographic controls (ISO 3166-1 alpha-2 country codes)
+    allowed_country_codes TEXT[] DEFAULT '{}',
+    blocked_country_codes TEXT[] DEFAULT '{}',
+    blocked_prefixes TEXT[] DEFAULT '{}',
+
+    -- Feature flags (override plan features)
+    features_enabled JSONB DEFAULT '{}',
+    features_disabled JSONB DEFAULT '{}',
+
+    -- Business hours (optional, format: '09:00' - '17:00')
+    business_hours_start TIME,
+    business_hours_end TIME,
+    business_hours_timezone TEXT DEFAULT 'UTC',
+    respect_business_hours BOOLEAN DEFAULT FALSE,
+
+    -- Status
+    is_active BOOLEAN DEFAULT TRUE,
+    effective_from TIMESTAMPTZ DEFAULT NOW(),
+    effective_until TIMESTAMPTZ,
+
+    -- Metadata
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    created_by UUID,
+    updated_by UUID,
+
+    UNIQUE(tenant_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tenant_call_limits_tenant ON tenant_call_limits(tenant_id) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_tenant_call_limits_effective ON tenant_call_limits(tenant_id, effective_from, effective_until);
+
+-- =============================================================================
+-- PARTNER AGGREGATE LIMITS (Multi-tenant Reseller Controls)
+-- =============================================================================
+-- For partners/resellers managing multiple sub-tenants.
+-- Enforces aggregate limits across all child tenants.
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS partner_limits (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    partner_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Partner is also a tenant
+
+    -- Tenant management
+    max_tenants INTEGER NOT NULL DEFAULT 10,
+    current_tenant_count INTEGER DEFAULT 0,
+
+    -- Aggregate rate limits across all child tenants
+    aggregate_calls_per_minute INTEGER NOT NULL DEFAULT 600,
+    aggregate_calls_per_hour INTEGER NOT NULL DEFAULT 10000,
+    aggregate_calls_per_day INTEGER NOT NULL DEFAULT 100000,
+    aggregate_concurrent_calls INTEGER NOT NULL DEFAULT 100,
+
+    -- Financial controls
+    revenue_share_percent DECIMAL(5,2) DEFAULT 20.00,
+    min_billing_amount DECIMAL(10,2) DEFAULT 100.00,
+    max_billing_amount DECIMAL(12,2),
+
+    -- Feature governance
+    feature_whitelist JSONB DEFAULT '[]', -- If set, only these features allowed
+    feature_blacklist JSONB DEFAULT '[]', -- These features never allowed
+
+    -- Abuse detection sensitivity (0-100, higher = more sensitive)
+    fraud_detection_sensitivity INTEGER DEFAULT 50 CHECK (fraud_detection_sensitivity BETWEEN 0 AND 100),
+
+    -- Status
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    created_by UUID,
+    updated_by UUID,
+
+    UNIQUE(partner_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_partner_limits_partner ON partner_limits(partner_id) WHERE is_active = TRUE;
+
+-- =============================================================================
+-- TENANT-PARTNER RELATIONSHIP (ALTER)
+-- =============================================================================
+-- Links child tenants to their partner for aggregate limit enforcement
+-- =============================================================================
+
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS partner_id UUID REFERENCES tenants(id);
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS is_partner BOOLEAN DEFAULT FALSE;
+
+CREATE INDEX IF NOT EXISTS idx_tenants_partner ON tenants(partner_id) WHERE partner_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_tenants_is_partner ON tenants(is_partner) WHERE is_partner = TRUE;
+
+-- =============================================================================
+-- ABUSE DETECTION RULES
+-- =============================================================================
+-- Configurable rules for real-time fraud and abuse detection.
+-- Rules can be global (tenant_id = NULL) or tenant-specific.
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS abuse_detection_rules (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE, -- NULL = global rule
+
+    rule_name TEXT NOT NULL,
+    rule_type TEXT NOT NULL CHECK (rule_type IN (
+        'velocity_spike',           -- Sudden volume increase
+        'short_duration_pattern',   -- Many short calls
+        'repeat_number',            -- Calling same number repeatedly
+        'sequential_dialing',       -- War dialing
+        'premium_rate',             -- Premium number abuse
+        'international_spike',      -- Sudden international increase
+        'after_hours',              -- Off-hours calling
+        'geographic_impossibility', -- Physics-defying geography
+        'account_hopping',          -- Rapid tenant switching
+        'toll_fraud',               -- Known fraud patterns
+        'wangiri',                  -- Missed call fraud pattern
+        'irs_fraud'                 -- International Revenue Share Fraud
+    )),
+
+    -- Detection parameters (JSON for flexibility)
+    parameters JSONB NOT NULL DEFAULT '{}',
+
+    -- Thresholds
+    warn_threshold INTEGER,
+    block_threshold INTEGER,
+
+    -- Actions
+    action_on_trigger TEXT NOT NULL DEFAULT 'flag' CHECK (action_on_trigger IN (
+        'flag',     -- Log for review
+        'warn',     -- Alert but allow
+        'throttle', -- Slow down
+        'block',    -- Block calls
+        'suspend'   -- Suspend tenant
+    )),
+
+    -- Time window for analysis (minutes)
+    analysis_window_minutes INTEGER DEFAULT 60,
+
+    -- Rule status
+    is_active BOOLEAN DEFAULT TRUE,
+    priority INTEGER DEFAULT 100, -- Lower = higher priority
+
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    created_by UUID,
+    updated_by UUID
+);
+
+CREATE INDEX IF NOT EXISTS idx_abuse_rules_tenant ON abuse_detection_rules(tenant_id) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_abuse_rules_type ON abuse_detection_rules(rule_type, is_active);
+
+-- =============================================================================
+-- ABUSE EVENTS (AUDIT TRAIL)
+-- =============================================================================
+-- Records of detected abuse patterns and actions taken.
+-- Used for fraud investigation and compliance reporting.
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS abuse_events (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    partner_id UUID REFERENCES tenants(id), -- If applicable
+
+    event_type TEXT NOT NULL, -- References abuse_detection_rules.rule_type
+    severity TEXT NOT NULL CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+
+    -- Detection details
+    rule_id UUID REFERENCES abuse_detection_rules(id),
+    trigger_value NUMERIC, -- The value that triggered (e.g., 150 calls when limit is 100)
+    threshold_value NUMERIC, -- The threshold that was exceeded
+
+    -- Context
+    source_ip INET,
+    phone_number_called VARCHAR(50),
+    campaign_id UUID,
+    call_id UUID,
+    user_id UUID,
+
+    -- Geographic info
+    destination_country TEXT,
+    destination_prefix TEXT,
+
+    -- Financial impact (if applicable)
+    estimated_cost_impact DECIMAL(12,2),
+
+    -- Action taken
+    action_taken TEXT NOT NULL CHECK (action_taken IN (
+        'flagged',     -- Logged for review
+        'warned',      -- Alert sent
+        'throttled',   -- Rate limited
+        'blocked',     -- Call blocked
+        'suspended'    -- Tenant suspended
+    )),
+    action_details JSONB DEFAULT '{}',
+
+    -- Auto-escalation
+    auto_escalate_at TIMESTAMPTZ,
+    escalation_level INTEGER DEFAULT 0,
+
+    -- Resolution
+    resolved_at TIMESTAMPTZ,
+    resolved_by UUID,
+    resolution_notes TEXT,
+    false_positive BOOLEAN, -- Was this a false positive?
+
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_abuse_events_tenant ON abuse_events(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_abuse_events_type ON abuse_events(event_type, severity, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_abuse_events_unresolved ON abuse_events(tenant_id) WHERE resolved_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_abuse_events_phone ON abuse_events(phone_number_called) WHERE phone_number_called IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_abuse_events_partner ON abuse_events(partner_id, created_at DESC) WHERE partner_id IS NOT NULL;
+
+-- =============================================================================
+-- CALL GUARD DECISIONS (AUDIT LOG)
+-- =============================================================================
+-- Records every call guard decision for compliance and debugging.
+-- Critical for troubleshooting blocked calls and proving compliance.
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS call_guard_decisions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    partner_id UUID REFERENCES tenants(id),
+
+    -- Request details
+    call_id UUID,
+    phone_number VARCHAR(50) NOT NULL,
+    campaign_id UUID,
+    user_id UUID,
+    call_type TEXT DEFAULT 'outbound' CHECK (call_type IN ('outbound', 'inbound', 'transfer')),
+
+    -- Decision
+    decision TEXT NOT NULL CHECK (decision IN ('allow', 'block', 'queue', 'throttle')),
+
+    -- Check results (JSON array of all checks performed)
+    checks_performed JSONB NOT NULL DEFAULT '[]',
+
+    -- Failed checks (if blocked)
+    failed_checks JSONB DEFAULT '[]',
+
+    -- Queue info (if queued)
+    queue_position INTEGER,
+    queue_wait_seconds INTEGER,
+
+    -- Throttle info (if throttled)
+    retry_after_seconds INTEGER,
+
+    -- Timing
+    total_latency_ms INTEGER,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_call_guard_decisions_tenant ON call_guard_decisions(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_call_guard_decisions_blocked ON call_guard_decisions(tenant_id, decision) WHERE decision != 'allow';
+CREATE INDEX IF NOT EXISTS idx_call_guard_decisions_call ON call_guard_decisions(call_id) WHERE call_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_call_guard_decisions_phone ON call_guard_decisions(phone_number);
+
+-- =============================================================================
+-- DO-NOT-CALL (DNC) LIST
+-- =============================================================================
+-- Per-tenant and global DNC lists for compliance.
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS dnc_entries (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE, -- NULL = global DNC
+
+    phone_number VARCHAR(50) NOT NULL,
+    normalized_number VARCHAR(50) NOT NULL, -- E.164 format
+
+    -- DNC source/reason
+    source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN (
+        'manual',           -- Added by admin
+        'customer_request', -- Customer asked not to be called
+        'internal_list',    -- Company policy
+        'government_list',  -- National DNC registry
+        'litigation',       -- Legal hold
+        'abuse_prevention'  -- Auto-added due to abuse
+    )),
+
+    -- Reason for DNC
+    reason TEXT,
+
+    -- Expiration (optional)
+    expires_at TIMESTAMPTZ,
+
+    -- Metadata
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    created_by UUID,
+
+    UNIQUE(tenant_id, normalized_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dnc_entries_tenant ON dnc_entries(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_dnc_entries_number ON dnc_entries(normalized_number);
+CREATE INDEX IF NOT EXISTS idx_dnc_entries_global ON dnc_entries(normalized_number) WHERE tenant_id IS NULL;
+
+-- =============================================================================
+-- SECTION 6.6: AUDIT LOGGING, SECURITY & SUSPENSION (Day 8)
+-- =============================================================================
+
+-- 1. WHITE_LABEL_PARTNERS
+CREATE TABLE IF NOT EXISTS white_label_partners (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID NOT NULL UNIQUE REFERENCES tenants(id) ON DELETE CASCADE, -- partner's own tenant
+    company_name VARCHAR(255) NOT NULL,
+    contact_email VARCHAR(255),
+    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'pending_deletion')),
+    suspended_at TIMESTAMPTZ,
+    suspended_by UUID REFERENCES user_profiles(id),
+    suspension_reason TEXT,
+    custom_domain VARCHAR(255),
+    branding_config JSONB DEFAULT '{}',
+    billing_config JSONB DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_white_label_partners_status ON white_label_partners(status);
+
+-- Add foreign key to tenants (already has the column from earlier Day 8 edit)
+ALTER TABLE tenants 
+    ADD CONSTRAINT fk_tenants_white_label_partner 
+    FOREIGN KEY (white_label_partner_id) 
+    REFERENCES white_label_partners(id) ON DELETE SET NULL;
+
+-- 2. AUDIT_LOGS (Immutable security event log)
+CREATE TABLE IF NOT EXISTS audit_logs (
+    event_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    event_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    event_type VARCHAR(50) NOT NULL,
+    event_category VARCHAR(30) NOT NULL,
+    severity VARCHAR(10) NOT NULL DEFAULT 'INFO',
+
+    -- Actor
+    actor_id UUID REFERENCES user_profiles(id),
+    actor_type VARCHAR(20) NOT NULL DEFAULT 'user',
+    actor_role VARCHAR(50),
+
+    -- Target
+    tenant_id UUID REFERENCES tenants(id),
+    resource_type VARCHAR(50),
+    resource_id UUID,
+
+    -- Location/Device
+    ip_address INET,
+    user_agent TEXT,
+    session_id UUID,
+    device_fingerprint VARCHAR(64),
+    country_code CHAR(2),
+
+    -- Content
+    action VARCHAR(100) NOT NULL,
+    description TEXT,
+    before_state JSONB,
+    after_state JSONB,
+    metadata JSONB,
+
+    -- Integrity (tamper-evident)
+    previous_hash VARCHAR(64),
+    entry_hash VARCHAR(64),
+    signature VARCHAR(128),
+
+    -- Compliance
+    compliance_tags VARCHAR(50)[],
+    retention_until DATE NOT NULL DEFAULT (CURRENT_DATE + INTERVAL '365 days'),
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_logs_event_time ON audit_logs(event_time DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_event_type ON audit_logs(event_type);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_id ON audit_logs(actor_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_id ON audit_logs(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_resource ON audit_logs(resource_type, resource_id);
+
+-- 3. SECURITY_EVENTS (High-priority alerts)
+CREATE TABLE IF NOT EXISTS security_events (
+    event_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- Classification
+    event_type VARCHAR(50) NOT NULL,
+    severity VARCHAR(10) NOT NULL CHECK (severity IN ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO')),
+    status VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'investigating', 'resolved', 'false_positive', 'escalated')),
+
+    -- Scope
+    tenant_id UUID REFERENCES tenants(id),
+    user_id UUID REFERENCES user_profiles(id),
+    session_id UUID,
+
+    -- Detection
+    detection_source VARCHAR(50) NOT NULL, 
+    rule_id UUID, -- References abuse_detection_rules(id) if exists
+
+    -- Details
+    title VARCHAR(200) NOT NULL,
+    description TEXT,
+    evidence JSONB,
+
+    -- Response
+    assigned_to UUID REFERENCES user_profiles(id),
+    resolved_at TIMESTAMPTZ,
+    resolved_by UUID REFERENCES user_profiles(id),
+    resolution_notes TEXT,
+
+    -- Automated response
+    auto_action_taken VARCHAR(50),
+    auto_action_success BOOLEAN,
+
+    -- SLA tracking
+    sla_deadline TIMESTAMPTZ,
+    first_response_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_security_events_status ON security_events(status);
+CREATE INDEX IF NOT EXISTS idx_security_events_severity ON security_events(severity);
+CREATE INDEX IF NOT EXISTS idx_security_events_tenant ON security_events(tenant_id);
+
+-- 4. SUSPENSION_EVENTS (Formal suspension history)
+CREATE TABLE IF NOT EXISTS suspension_events (
+    suspension_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- Target
+    target_type VARCHAR(20) NOT NULL CHECK (target_type IN ('user', 'tenant', 'partner')),
+    target_id UUID NOT NULL,
+
+    -- Suspension details
+    suspension_type VARCHAR(30) NOT NULL, -- TEMPORARY, ADMIN, BILLING, ABUSE, COMPLIANCE, EMERGENCY
+    reason_category VARCHAR(50) NOT NULL,
+    reason_description TEXT NOT NULL,
+    evidence JSONB,
+
+    -- Timing
+    suspended_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    suspended_until TIMESTAMPTZ, -- NULL = indefinite
+    restored_at TIMESTAMPTZ,
+
+    -- Actors
+    suspended_by UUID REFERENCES user_profiles(id),
+    restored_by UUID REFERENCES user_profiles(id),
+    restore_reason TEXT,
+
+    -- State tracking
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    propagated_services VARCHAR(50)[],
+    propagation_confirmed_at TIMESTAMPTZ,
+
+    -- Appeal workflow
+    appeal_submitted_at TIMESTAMPTZ,
+    appeal_reason TEXT,
+    appeal_reviewed_by UUID REFERENCES user_profiles(id),
+    appeal_decision VARCHAR(20), -- granted, denied, pending
+    appeal_response TEXT,
+
+    -- Audit reference
+    audit_log_id UUID REFERENCES audit_logs(event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_suspension_events_target ON suspension_events(target_type, target_id);
+CREATE INDEX IF NOT EXISTS idx_suspension_events_active ON suspension_events(target_id, is_active) WHERE is_active = TRUE;
+
+-- =============================================================================
+-- CALL VELOCITY TRACKING (FOR PATTERN DETECTION)
+-- =============================================================================
+-- Lightweight table for tracking call velocity per tenant/number.
+-- Used by abuse detection for real-time pattern analysis.
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS call_velocity_snapshots (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+
+    -- Time window (5-minute buckets for efficient aggregation)
+    window_start TIMESTAMPTZ NOT NULL,
+    window_end TIMESTAMPTZ NOT NULL,
+
+    -- Metrics
+    total_calls INTEGER DEFAULT 0,
+    unique_numbers INTEGER DEFAULT 0,
+    international_calls INTEGER DEFAULT 0,
+    premium_calls INTEGER DEFAULT 0,
+    short_duration_calls INTEGER DEFAULT 0, -- < 10 seconds
+
+    -- Top destinations (for pattern detection)
+    top_destinations JSONB DEFAULT '[]', -- [{"country": "PK", "count": 50}, ...]
+
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+
+    UNIQUE(tenant_id, window_start)
+);
+
+CREATE INDEX IF NOT EXISTS idx_call_velocity_tenant ON call_velocity_snapshots(tenant_id, window_start DESC);
+
+-- =============================================================================
+-- DEFAULT ABUSE DETECTION RULES (GLOBAL)
+-- =============================================================================
+-- Pre-populate with industry-standard rules based on CTIA/FCA guidance.
+-- =============================================================================
+
+INSERT INTO abuse_detection_rules (
+    tenant_id,
+    rule_name,
+    rule_type,
+    parameters,
+    warn_threshold,
+    block_threshold,
+    action_on_trigger,
+    analysis_window_minutes,
+    priority
+) VALUES
+(NULL, 'Global Velocity Spike Detection', 'velocity_spike',
+ '{"comparison_window_hours": 24, "spike_multiplier": 3.0, "min_baseline_calls": 10}'::jsonb,
+ 2, 5, 'throttle', 60, 10),
+(NULL, 'Global Short Duration Pattern', 'short_duration_pattern',
+ '{"duration_threshold_seconds": 10, "min_calls_in_window": 10, "window_minutes": 60}'::jsonb,
+ 5, 10, 'block', 60, 20),
+(NULL, 'Global Repeat Number Detection', 'repeat_number',
+ '{"max_calls_per_number": 3, "window_minutes": 60}'::jsonb,
+ 2, 3, 'block', 60, 30),
+(NULL, 'Global Sequential Dialing Detection', 'sequential_dialing',
+ '{"sequence_length": 5, "window_minutes": 30, "digit_variance_threshold": 2}'::jsonb,
+ 1, 2, 'block', 30, 40),
+(NULL, 'Global Premium Rate Protection', 'premium_rate',
+ '{"blocked_prefixes": ["+1900", "+4487", "+339", "+809"], "alert_on_first": true}'::jsonb,
+ 1, 3, 'block', 1440, 50),
+(NULL, 'Global International Spike', 'international_spike',
+ '{"comparison_window_hours": 24, "spike_multiplier": 5.0, "high_risk_countries": ["PK", "BD", "NG", "VN", "ID"]}'::jsonb,
+ 3, 5, 'throttle', 60, 60),
+(NULL, 'Global After Hours Detection', 'after_hours',
+ '{"allow_emergency": true}'::jsonb,
+ 10, 20, 'warn', 1440, 100),
+(NULL, 'Global Toll Fraud Protection', 'toll_fraud',
+ '{"known_fraud_patterns": ["wangiri", "irs_fraud"], "block_high_risk_destinations": true}'::jsonb,
+ 1, 2, 'block', 60, 5)
+ON CONFLICT DO NOTHING;
+
+-- =============================================================================
 -- SECTION 7: FUNCTIONS & PROCEDURES
 -- =============================================================================
 
@@ -1433,6 +2245,112 @@ INSERT INTO plans (id, name, price, description, minutes, agents, concurrent_cal
  '["5000 minutes/month", "10 AI agents", "Full analytics", "24/7 support", "API access", "White-label"]'::jsonb,
  '[]'::jsonb, false)
 ON CONFLICT (id) DO NOTHING;
+
+-- Insert system roles
+INSERT INTO roles (name, description, level, is_system_role, tenant_scoped) VALUES
+    ('platform_admin', 'Full system access across all tenants.', 100, TRUE, FALSE),
+    ('partner_admin', 'Access to multiple tenants within partner scope.', 80, TRUE, TRUE),
+    ('tenant_admin', 'Full administrative access within a single tenant.', 60, TRUE, TRUE),
+    ('user', 'Standard user within a tenant.', 40, TRUE, TRUE),
+    ('readonly', 'View-only access within a tenant.', 20, TRUE, TRUE)
+ON CONFLICT (name) DO NOTHING;
+
+-- Insert system permissions
+INSERT INTO permissions (name, description, resource, action, is_system) VALUES
+    ('campaigns:create', 'Create new campaigns', 'campaigns', 'create', TRUE),
+    ('campaigns:read', 'View campaigns and their data', 'campaigns', 'read', TRUE),
+    ('campaigns:update', 'Modify existing campaigns', 'campaigns', 'update', TRUE),
+    ('campaigns:delete', 'Delete campaigns', 'campaigns', 'delete', TRUE),
+    ('campaigns:admin', 'Full administrative control over all campaigns', 'campaigns', 'admin', TRUE),
+    ('users:create', 'Create new users within tenant', 'users', 'create', TRUE),
+    ('users:read', 'View user profiles', 'users', 'read', TRUE),
+    ('users:update', 'Update user profiles', 'users', 'update', TRUE),
+    ('users:delete', 'Deactivate/delete users', 'users', 'delete', TRUE),
+    ('users:manage', 'Manage user roles and permissions', 'users', 'manage', TRUE),
+    ('tenants:read', 'View tenant information', 'tenants', 'read', TRUE),
+    ('tenants:update', 'Update tenant settings', 'tenants', 'update', TRUE),
+    ('tenants:admin', 'Full tenant administration', 'tenants', 'admin', TRUE),
+    ('billing:read', 'View billing and usage information', 'billing', 'read', TRUE),
+    ('billing:update', 'Modify billing settings', 'billing', 'update', TRUE),
+    ('billing:admin', 'Full billing administration', 'billing', 'admin', TRUE),
+    ('calls:create', 'Initiate calls', 'calls', 'create', TRUE),
+    ('calls:read', 'View call history and recordings', 'calls', 'read', TRUE),
+    ('calls:delete', 'Delete call records', 'calls', 'delete', TRUE),
+    ('connectors:create', 'Add new connectors', 'connectors', 'create', TRUE),
+    ('connectors:read', 'View connector configurations', 'connectors', 'read', TRUE),
+    ('connectors:update', 'Modify connector settings', 'connectors', 'update', TRUE),
+    ('connectors:delete', 'Remove connectors', 'connectors', 'delete', TRUE),
+    ('analytics:read', 'View analytics and reports', 'analytics', 'read', TRUE),
+    ('analytics:export', 'Export analytics data', 'analytics', 'export', TRUE),
+    ('platform:admin', 'Full platform administration', 'platform', 'admin', TRUE),
+    ('platform:tenants:manage', 'Manage all tenants', 'platform:tenants', 'manage', TRUE),
+    ('platform:users:manage', 'Manage all users across tenants', 'platform:users', 'manage', TRUE),
+    ('platform:settings:manage', 'Manage global platform settings', 'platform:settings', 'manage', TRUE)
+ON CONFLICT (name) DO NOTHING;
+
+-- Populate role_permissions
+WITH role_ids AS (SELECT id, name FROM roles),
+perm_ids AS (SELECT id, name, resource, action FROM permissions)
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id FROM role_ids r CROSS JOIN perm_ids p
+WHERE
+    (r.name = 'readonly' AND (p.action = 'read' OR p.name = 'analytics:export')) OR
+    (r.name = 'user' AND (p.action IN ('read', 'create', 'update') OR (p.resource = 'calls' AND p.action IN ('create', 'read')) OR p.name = 'analytics:export')) OR
+    (r.name = 'tenant_admin' AND p.resource NOT LIKE 'platform:%') OR
+    (r.name = 'partner_admin' AND (p.resource NOT LIKE 'platform:%' OR p.name = 'platform:tenants:read')) OR
+    (r.name = 'platform_admin')
+ON CONFLICT DO NOTHING;
+
+-- =============================================================================
+-- SECTION 10: VIEWS
+-- =============================================================================
+
+CREATE OR REPLACE VIEW user_effective_permissions AS
+SELECT DISTINCT
+    up.id AS user_id,
+    p.id AS permission_id,
+    p.name AS permission_name,
+    p.resource,
+    p.action,
+    tu.tenant_id,
+    r.name AS role_name,
+    'role' AS grant_type
+FROM user_profiles up
+JOIN tenant_users tu ON tu.user_id = up.id AND tu.status = 'active'
+JOIN roles r ON r.id = tu.role_id
+JOIN role_permissions rp ON rp.role_id = r.id
+JOIN permissions p ON p.id = rp.permission_id
+UNION
+SELECT
+    up.id AS user_id,
+    p.id AS permission_id,
+    p.name AS permission_name,
+    p.resource,
+    p.action,
+    up_perm.tenant_id,
+    NULL AS role_name,
+    'direct' AS grant_type
+FROM user_profiles up
+JOIN user_permissions up_perm ON up_perm.user_id = up.id
+JOIN permissions p ON p.id = up_perm.permission_id
+WHERE up_perm.expires_at IS NULL OR up_perm.expires_at > NOW();
+
+CREATE OR REPLACE VIEW user_tenant_roles AS
+SELECT
+    up.id AS user_id,
+    up.email,
+    tu.tenant_id,
+    t.business_name AS tenant_name,
+    r.id AS role_id,
+    r.name AS role_name,
+    r.level AS role_level,
+    tu.status,
+    tu.is_primary
+FROM user_profiles up
+JOIN tenant_users tu ON tu.user_id = up.id
+JOIN tenants t ON t.id = tu.tenant_id
+JOIN roles r ON r.id = tu.role_id
+WHERE tu.status IN ('active', 'pending');
 
 -- =============================================================================
 -- SECTION 10: CALLGUARD TABLES
