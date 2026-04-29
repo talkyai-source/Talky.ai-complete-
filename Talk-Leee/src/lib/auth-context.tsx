@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode, useCallback } from "react";
 import { api } from "@/lib/api";
 import { resetSessionExpiredLatch } from "@/lib/http-client";
+import { getBrowserAuthToken } from "@/lib/auth-token";
 interface MeResponse {
     id: string;
     email: string;
@@ -40,8 +41,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [user, setUser] = useState<MeResponse | null>(null);
     const [loading, setLoading] = useState(true);
 
-    // On mount, check for existing token and fetch user profile
+    // On mount, check for existing token and fetch user profile.
+    // Skip the call entirely when there's no token — otherwise the 401 would
+    // trip the http-client's session-expired handler, which redirects to
+    // /auth/login. That made every cold visit (and every just-completed
+    // login round-trip) appear to "ask for login again".
     useEffect(() => {
+        const token = getBrowserAuthToken();
+        if (!token) {
+            setLoading(false);
+            return;
+        }
         api.getMe()
             .then((me) => setUser(me))
             .catch(() => {

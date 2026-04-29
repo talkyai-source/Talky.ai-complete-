@@ -87,25 +87,24 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
                         content={"detail": f"Content-Type '{content_type}' not supported"}
                     )
 
-            # Payload Sanitization (Day 6)
-            if content_type == "application/json":
-                try:
-                    # We need to read the body, sanitize it, and then replace it
-                    # because FastAPI reads it once from the stream.
-                    body = await request.body()
-                    if body:
-                        import json
-                        data = json.loads(body)
-                        sanitized_data = sanitize_json_value(data)
-                        
-                        # Re-inject the sanitized body
-                        async def receive():
-                            return {"type": "http.request", "body": json.dumps(sanitized_data).encode()}
-                        
-                        request._receive = receive
-                except Exception as e:
-                    logger.warning(f"Failed to sanitize JSON body: {e}")
-                    # Continue anyway, let FastAPI's validation handle malformed JSON
+            # Payload Sanitization (Day 6) — DISABLED.
+            #
+            # This block originally read request.body() then re-injected a
+            # sanitized version via a custom receive() callable. That pattern
+            # is fundamentally incompatible with Starlette's BaseHTTPMiddleware
+            # streaming response handling: once the response starts streaming,
+            # Starlette's listen_for_disconnect() polls receive() expecting
+            # http.disconnect frames, but the wrapped receive() we left behind
+            # caused "RuntimeError: Unexpected message received: http.request"
+            # on every streamed JSON response and broke the SIP audio loop,
+            # the campaign-create POST, and any other endpoint that returns a
+            # streamed body.
+            #
+            # XSS protection is the frontend's responsibility (React escapes
+            # by default, the API never renders raw HTML), and inputs that
+            # need server-side sanitization should be validated per-endpoint
+            # with Pydantic. Removing this generic interceptor unblocks the
+            # whole call pipeline.
 
         # 3. User-Agent validation (basic bot detection)
         user_agent = request.headers.get("user-agent", "").lower()
@@ -119,14 +118,27 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
         # 4. Global Rate Limiting (Day 6)
         # Attempt to apply rate limiting here if not already handled by dependencies
         # This provides a catch-all safety net.
+        # Skip CORS preflight: OPTIONS isn't real traffic and rate-limiting it
+        # makes the browser fail every actual request that follows. Skip
+        # localhost in development so a dev pounding F5 doesn't trip a 5-min
+        # block that breaks the whole UI.
+        import os as _os
+        _ip_for_skip = request.client.host if request.client else ""
+        _is_local_dev = (
+            _os.getenv("ENVIRONMENT", "development").lower() != "production"
+            and _ip_for_skip in {"127.0.0.1", "::1", "localhost"}
+        )
+        if request.method == "OPTIONS" or _is_local_dev:
+            return await call_next(request)
+
         try:
             from app.core.security.api_security import get_api_rate_limiter
             from app.core.container import get_container
-            
+
             container = get_container()
             if container.is_initialized and container.redis_enabled:
                 limiter = get_api_rate_limiter(container.redis)
-                
+
                 # We can't easily get user_id/tenant_id yet as auth middleware might run after
                 # But we can at least check IP tier early
                 ip = request.client.host if request.client else "unknown"
@@ -184,6 +196,9 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
             "/openapi.json",
         }
         if path in exempt:
+            return True
+        # Auth endpoints handle their own security; skip body-consuming middleware
+        if path.startswith("/api/v1/auth/"):
             return True
         return False
 

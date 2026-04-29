@@ -243,10 +243,27 @@ async def get_current_user(
         (row["minutes_allocated"] or 0) - (row["minutes_used"] or 0)
     )
 
+    resolved_tenant_id = str(row["tenant_id"]) if row["tenant_id"] else None
+
+    # Defensively set the RLS contextvar from the user profile we just fetched.
+    # TenantMiddleware also sets this from the JWT payload, but if the JWT was
+    # issued before tenant_id was added to the claim — or if BaseHTTPMiddleware
+    # task isolation strips contextvar updates from inner middleware — the
+    # postgres_adapter would otherwise see no tenant and set
+    # app.current_tenant_id to a sentinel UUID, making every INSERT/UPDATE
+    # against tenant-scoped tables fail the RLS WITH-CHECK clause.
+    if resolved_tenant_id:
+        try:
+            from app.core.security.tenant_isolation import set_current_tenant_id
+            set_current_tenant_id(resolved_tenant_id)
+        except Exception:
+            # Never block the request on a context-setting hiccup.
+            pass
+
     return CurrentUser(
         id=str(row["id"]),
         email=row["email"] or "",
-        tenant_id=str(row["tenant_id"]) if row["tenant_id"] else None,
+        tenant_id=resolved_tenant_id,
         role=row["role"] or "user",
         name=row["name"],
         business_name=row["business_name"],

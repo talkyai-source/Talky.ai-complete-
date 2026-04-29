@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextvars
 from datetime import date, datetime, timezone
 import json
 import logging
@@ -194,7 +195,13 @@ class QueryBuilder:
 
         try:
             asyncio.get_running_loop()
-            return _SYNC_EXECUTOR.submit(_runner).result()
+            # Copy the current context so contextvars set by middleware /
+            # dependencies (most importantly _tenant_context) propagate into
+            # the worker thread. Without this, ThreadPoolExecutor workers
+            # start with empty contextvars and _execute_async sees no tenant,
+            # which makes RLS deny every tenant-scoped INSERT/UPDATE.
+            ctx = contextvars.copy_context()
+            return _SYNC_EXECUTOR.submit(ctx.run, _runner).result()
         except RuntimeError:
             return _runner()
 
@@ -202,23 +209,41 @@ class QueryBuilder:
         conn = None
         try:
             conn = await asyncpg.connect(_DATABASE_URL)
-            
+
             # Set RLS context for the session
             from app.core.security.tenant_isolation import get_current_tenant_id, get_bypass_rls
             tenant_id = get_current_tenant_id()
             bypass_rls = get_bypass_rls()
-            
-            if bypass_rls:
-                await conn.execute("SET LOCAL app.bypass_rls = 'true'")
-                await conn.execute("SET LOCAL app.current_tenant_id = ''")
-            elif tenant_id:
-                await conn.execute(f"SET LOCAL app.current_tenant_id = '{tenant_id}'")
-                await conn.execute("SET LOCAL app.bypass_rls = 'false'")
-            else:
-                await conn.execute("SET LOCAL app.current_tenant_id = ''")
-                await conn.execute("SET LOCAL app.bypass_rls = 'false'")
 
-            return await self._execute_with_conn(conn)
+            # RLS policies cast current_setting('app.current_tenant_id') to
+            # UUID. An empty string raises "invalid input syntax for type uuid"
+            # before the policy's OR-clause can short-circuit on bypass_rls.
+            # Use the nil UUID as a sentinel — it parses cleanly, never matches
+            # a real tenant_id, and lets bypass_rls control visibility on its
+            # own when set.
+            _NIL_UUID = "00000000-0000-0000-0000-000000000000"
+
+            # CRITICAL: SET LOCAL only persists within an open transaction.
+            # asyncpg's default autocommit mode wraps each `execute()` in its
+            # own implicit transaction — so SET LOCAL would be committed and
+            # *discarded* before the next query runs, leaving
+            # current_setting('app.current_tenant_id') as empty string. The RLS
+            # policy then evaluates `''::UUID` and throws
+            # "invalid input syntax for type uuid". Wrapping the SET LOCALs
+            # AND the query in a single transaction keeps the GUCs alive for
+            # the duration of the operation.
+            async with conn.transaction():
+                if bypass_rls:
+                    await conn.execute("SET LOCAL app.bypass_rls = 'true'")
+                    await conn.execute(f"SET LOCAL app.current_tenant_id = '{_NIL_UUID}'")
+                elif tenant_id:
+                    await conn.execute(f"SET LOCAL app.current_tenant_id = '{tenant_id}'")
+                    await conn.execute("SET LOCAL app.bypass_rls = 'false'")
+                else:
+                    await conn.execute(f"SET LOCAL app.current_tenant_id = '{_NIL_UUID}'")
+                    await conn.execute("SET LOCAL app.bypass_rls = 'false'")
+
+                return await self._execute_with_conn(conn)
         except Exception as e:
             logger.error("PostgresAdapter query error: %s", e, exc_info=True)
             return PostgrestResponse(error=str(e))
@@ -756,7 +781,13 @@ class RpcBuilder:
 
         try:
             asyncio.get_running_loop()
-            return _SYNC_EXECUTOR.submit(_runner).result()
+            # Copy the current context so contextvars set by middleware /
+            # dependencies (most importantly _tenant_context) propagate into
+            # the worker thread. Without this, ThreadPoolExecutor workers
+            # start with empty contextvars and _execute_async sees no tenant,
+            # which makes RLS deny every tenant-scoped INSERT/UPDATE.
+            ctx = contextvars.copy_context()
+            return _SYNC_EXECUTOR.submit(ctx.run, _runner).result()
         except RuntimeError:
             return _runner()
 
@@ -770,17 +801,28 @@ class RpcBuilder:
             tenant_id = get_current_tenant_id()
             bypass_rls = get_bypass_rls()
             
-            if bypass_rls:
-                await conn.execute("SET LOCAL app.bypass_rls = 'true'")
-                await conn.execute("SET LOCAL app.current_tenant_id = ''")
-            elif tenant_id:
-                await conn.execute(f"SET LOCAL app.current_tenant_id = '{tenant_id}'")
-                await conn.execute("SET LOCAL app.bypass_rls = 'false'")
-            else:
-                await conn.execute("SET LOCAL app.current_tenant_id = ''")
-                await conn.execute("SET LOCAL app.bypass_rls = 'false'")
+            # RLS policies cast current_setting('app.current_tenant_id') to
+            # UUID. An empty string raises "invalid input syntax for type uuid"
+            # before the policy's OR-clause can short-circuit on bypass_rls.
+            # Use the nil UUID as a sentinel — it parses cleanly, never matches
+            # a real tenant_id, and lets bypass_rls control visibility on its
+            # own when set.
+            _NIL_UUID = "00000000-0000-0000-0000-000000000000"
 
-            return await self._execute_with_conn(conn)
+            # See _execute_async on the QueryBuilder above for why a transaction
+            # is mandatory: SET LOCAL only persists inside an open transaction.
+            async with conn.transaction():
+                if bypass_rls:
+                    await conn.execute("SET LOCAL app.bypass_rls = 'true'")
+                    await conn.execute(f"SET LOCAL app.current_tenant_id = '{_NIL_UUID}'")
+                elif tenant_id:
+                    await conn.execute(f"SET LOCAL app.current_tenant_id = '{tenant_id}'")
+                    await conn.execute("SET LOCAL app.bypass_rls = 'false'")
+                else:
+                    await conn.execute(f"SET LOCAL app.current_tenant_id = '{_NIL_UUID}'")
+                    await conn.execute("SET LOCAL app.bypass_rls = 'false'")
+
+                return await self._execute_with_conn(conn)
         except Exception as e:
             logger.error("PostgresAdapter RPC error (%s): %s", self.name, e, exc_info=True)
             return PostgrestResponse(error=str(e))

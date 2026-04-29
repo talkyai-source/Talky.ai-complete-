@@ -22,7 +22,7 @@ function formatTimestamp(iso: string): string {
     return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-function formatStartedAt(iso: string | null): string {
+function formatStartedAt(iso: string): string {
     if (!iso) return "";
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return iso;

@@ -47,6 +47,7 @@ import uuid
 from typing import Any, Optional
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -426,15 +427,14 @@ async def register(
     )
 
 
-@router.post("/login", response_model=AuthTokenResponse)
+@router.post("/login")
 @limiter.limit("10/minute")
 async def login(
     request: Request,
-    response: Response,
     body: LoginRequest,
     db_client: Client = Depends(get_db_client),
     audit_logger: AuditLogger = Depends(get_audit_logger),
-) -> AuthTokenResponse:
+):
     """
     Login with email + password.
 
@@ -493,6 +493,7 @@ async def login(
                    up.password_hash,
                    up.tenant_id,
                    up.is_active,
+                   up.is_verified,
                    up.mfa_enabled,
                    t.business_name,
                    t.minutes_allocated,
@@ -635,18 +636,18 @@ async def login(
             )
 
             # Return early — no JWT, no session cookie.
-            # access_token is empty string so the schema stays valid.
-            return AuthTokenResponse(
-                access_token="",
-                user_id=user_id,
-                email=row["email"],
-                role=row["role"],
-                business_name=row["business_name"],
-                minutes_remaining=0,
-                mfa_required=True,
-                mfa_challenge_token=mfa_challenge_token,
-                message="MFA verification required. Use mfa_challenge_token with POST /auth/mfa/verify.",
-            )
+            return JSONResponse(content={
+                "access_token": "",
+                "token_type": "bearer",
+                "user_id": user_id,
+                "email": row["email"],
+                "role": row["role"],
+                "business_name": row["business_name"],
+                "minutes_remaining": 0,
+                "mfa_required": True,
+                "mfa_challenge_token": mfa_challenge_token,
+                "message": "MFA verification required. Use mfa_challenge_token with POST /auth/mfa/verify.",
+            })
 
         # --- create new server-side session (OWASP: rotate on login) ----------
         # Day 5: Pass request for device fingerprinting
@@ -669,8 +670,6 @@ async def login(
     tenant_id = str(row["tenant_id"]) if row["tenant_id"] else None
     token = _create_jwt(user_id, row["email"], row["role"], tenant_id, session_id)
 
-    _set_session_cookie(response, raw_session_token)
-
     # --- log login event (Day 8) -----------------------------------------------
     await audit_logger.log(
         event_type=AuditEvent.LOGIN_SUCCESS,
@@ -683,15 +682,27 @@ async def login(
         user_agent=ua,
     )
 
-    return AuthTokenResponse(
-        access_token=token,
-        user_id=user_id,
-        email=row["email"],
-        role=row["role"],
-        business_name=row["business_name"],
-        minutes_remaining=minutes_remaining,
-        message="Login successful.",
+    resp = JSONResponse(content={
+        "access_token": token,
+        "token_type": "bearer",
+        "user_id": user_id,
+        "email": row["email"],
+        "role": row["role"],
+        "business_name": row["business_name"],
+        "minutes_remaining": minutes_remaining,
+        "message": "Login successful.",
+        "mfa_required": False,
+    })
+    resp.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=raw_session_token,
+        httponly=True,
+        secure=_session_cookie_secure(),
+        samesite="strict",
+        max_age=_COOKIE_MAX_AGE,
+        path="/",
     )
+    return resp
 
 
 @router.get("/me", response_model=MeResponse)

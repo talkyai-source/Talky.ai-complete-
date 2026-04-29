@@ -2,10 +2,9 @@
 Ask AI WebSocket - Simplified Voice Assistant Demo
 
 One-click voice interaction without voice selection.
-Uses Deepgram Aura-2 TTS (Google Chirp3-HD commented out for future switching).
+Uses Cartesia Tessa (sonic-3) TTS + Gemini 2.5 Flash (no thinking).
 
-Voice: Andromeda (aura-2-andromeda-en) - Customer service optimized
-Sample Rate: 24000 Hz (Deepgram recommended for streaming TTS)
+Sample Rate: 24000 Hz (Cartesia recommended for streaming TTS)
 
 Day 41: Refactored to use VoiceOrchestrator for lifecycle management.
 """
@@ -17,8 +16,13 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi.responses import Response
 
-from app.domain.services.ask_ai_session_config import build_ask_ai_session_config, ASK_AI_GREETING
+from app.domain.services.ask_ai_session_config import (
+    build_ask_ai_session_config,
+    ASK_AI_GREETING,
+    ASK_AI_CONFIG,
+)
 from app.domain.models.conversation import Message, MessageRole
 
 logger = logging.getLogger(__name__)
@@ -38,6 +42,78 @@ def _get_semaphore() -> asyncio.Semaphore:
     if _ask_ai_semaphore is None:
         _ask_ai_semaphore = asyncio.Semaphore(_MAX_CONCURRENT_ASK_AI)
     return _ask_ai_semaphore
+
+
+# Cache synthesized greeting bytes in memory — the text is static so there is
+# no reason to hit Cartesia on every button press.
+_greeting_audio_cache: Optional[bytes] = None
+_greeting_cache_lock = asyncio.Lock()
+
+
+@router.get("/ask-ai/greeting")
+async def get_greeting_audio():
+    """
+    Synthesize the Ask AI greeting and return raw float32 PCM at 24 kHz.
+
+    The frontend fetches this before opening the WebSocket and plays it
+    immediately so the caller hears a greeting with no perceptible delay.
+    The backend seeds the LLM conversation history with the same greeting
+    text so the model never re-greets.
+    """
+    global _greeting_audio_cache
+
+    async with _greeting_cache_lock:
+        if _greeting_audio_cache is not None:
+            return Response(
+                content=_greeting_audio_cache,
+                media_type="application/octet-stream",
+                headers={
+                    "X-Audio-Sample-Rate": str(ASK_AI_CONFIG["sample_rate"]),
+                    "X-Audio-Encoding": "float32",
+                    "X-Audio-Channels": "1",
+                    "Cache-Control": "public, max-age=3600",
+                },
+            )
+
+        from app.domain.services.credential_resolver import get_credential_resolver
+        from app.infrastructure.tts.cartesia import CartesiaTTSProvider
+
+        resolver = get_credential_resolver()
+        api_key = await resolver.resolve("cartesia", tenant_id=None)
+
+        tts = CartesiaTTSProvider()
+        await tts.initialize(
+            {
+                "api_key": api_key,
+                "voice_id": ASK_AI_CONFIG["voice_id"],
+                "model_id": ASK_AI_CONFIG["model_id"],
+                "sample_rate": ASK_AI_CONFIG["sample_rate"],
+            }
+        )
+
+        try:
+            chunks: list[bytes] = []
+            async for chunk in tts.stream_synthesize(
+                text=ASK_AI_GREETING,
+                voice_id=ASK_AI_CONFIG["voice_id"],
+                sample_rate=ASK_AI_CONFIG["sample_rate"],
+            ):
+                chunks.append(chunk.data)
+        finally:
+            await tts.cleanup()
+
+        _greeting_audio_cache = b"".join(chunks)
+
+    return Response(
+        content=_greeting_audio_cache,
+        media_type="application/octet-stream",
+        headers={
+            "X-Audio-Sample-Rate": str(ASK_AI_CONFIG["sample_rate"]),
+            "X-Audio-Encoding": "float32",
+            "X-Audio-Channels": "1",
+            "Cache-Control": "public, max-age=3600",
+        },
+    )
 
 
 @router.websocket("/ws/ask-ai/{session_id}")

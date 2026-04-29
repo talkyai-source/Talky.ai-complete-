@@ -206,6 +206,11 @@ async def _send_outbound_greeting(voice_session) -> None:
         presynth_chunks = getattr(voice_session, "_presynth_greeting_audio", None)
         presynth_text = getattr(voice_session, "_presynth_greeting_text", None)
 
+        # Defaults visible to the history-append block below regardless of
+        # which playback path runs.
+        was_interrupted = False
+        chunks_sent = 0
+
         if presynth_chunks and presynth_text:
             _t0 = _time.monotonic()
             greeting = presynth_text
@@ -216,7 +221,6 @@ async def _send_outbound_greeting(voice_session) -> None:
 
             session.tts_active = True
             barge_in_event = getattr(session, "barge_in_event", None)
-            was_interrupted = False
 
             for chunk in presynth_chunks:
                 # Check barge-in before each chunk
@@ -231,6 +235,7 @@ async def _send_outbound_greeting(voice_session) -> None:
                     break
 
                 await voice_session.media_gateway.send_audio(call_id, chunk)
+                chunks_sent += 1
 
                 # Check barge-in after send
                 if barge_in_event and barge_in_event.is_set():
@@ -280,13 +285,195 @@ async def _send_outbound_greeting(voice_session) -> None:
         # Persist the greeting so the LLM sees it as conversation history on the
         # first real turn.  Without this the next turn sees an empty history and
         # the LLM re-reads "OPENING THE CALL" instructions, generating a duplicate.
+        #
+        # If the callee barged in mid-greeting, only persist the portion that
+        # actually played. Recording the full text would make the LLM think the
+        # callee already heard the question ("Do you have a minute to talk?")
+        # when in reality they cut us off after just the intro — and the LLM
+        # would then respond as if the question was answered, producing a
+        # confused follow-up that sounds like a second greeting.
+        try:
+            _spoken_text = greeting
+            if was_interrupted and presynth_chunks and chunks_sent > 0:
+                _frac = chunks_sent / len(presynth_chunks)
+                _words = greeting.split()
+                _keep = max(1, int(len(_words) * _frac))
+                _spoken_text = " ".join(_words[:_keep])
+                if _keep < len(_words):
+                    _spoken_text = _spoken_text.rstrip(".,!?") + "…"
+        except Exception:
+            _spoken_text = greeting
         session.conversation_history.append(
-            Message(role=MessageRole.ASSISTANT, content=greeting)
+            Message(role=MessageRole.ASSISTANT, content=_spoken_text)
         )
     except Exception as exc:
         logger.warning(f"Outbound greeting failed for {call_id[:12]}: {exc}")
     finally:
         session.llm_active = False
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# User-first silence handler
+#
+# When `first_speaker == "user"` we ring the bell, register STT (Flux is
+# already pre-connected and ready to listen) and stay silent. If the callee
+# never speaks, traditional voice agents deadlock — caller waiting for AI,
+# AI waiting for caller. This helper runs a graduated state machine that
+# matches the patterns documented in April 2026 by:
+#
+#   - Microsoft Copilot Studio (silence detection → reprompt → fallback)
+#     https://learn.microsoft.com/en-us/microsoft-copilot-studio/voice-configuration
+#   - ElevenLabs Conversation Flow (turn timeouts: 5–10s casual, 10–30s
+#     thinking; LLM-generated openings, not scripted)
+#     https://elevenlabs.io/docs/eleven-agents/customization/conversation-flow
+#   - NVIDIA PersonaPlex / Deepgram (200–600ms human conversation gap;
+#     barge-in-first design; LLM produces backchannels naturally)
+#
+# Phases (defaults in seconds — env-overridable):
+#   1.  open_s          (2.0): pickup-to-AI-greeting natural beat
+#   2.  reprompt_s      (8.0): wait after greeting for callee to speak
+#   3.  reprompt_s      (8.0): second reprompt
+#   4.  farewell_s      (6.0): final wait, then graceful hangup
+#
+# Cancellation is symmetric: if the callee speaks at *any* point (real user
+# message lands in conversation_history), the task exits and normal turn
+# flow resumes. The agent-first flow is unchanged.
+# ──────────────────────────────────────────────────────────────────────────
+
+# Internal-cue prefix used to differentiate synthetic silence-handler
+# instructions from real callee speech in conversation_history. Real
+# user messages will never start with this token.
+_USER_FIRST_CUE_PREFIX = "[CALLEE_"
+
+
+async def _handle_user_first_silence(voice_session, pbx_call_id: str) -> None:
+    """Run the graduated silence flow for a user-first outbound call."""
+    from app.domain.models.conversation import Message, MessageRole
+
+    session = voice_session.call_session
+    call_id = voice_session.call_id
+
+    open_s = float(os.getenv("TELEPHONY_USER_FIRST_OPEN_S", "2.0"))
+    reprompt_s = float(os.getenv("TELEPHONY_USER_FIRST_REPROMPT_S", "8.0"))
+    farewell_s = float(os.getenv("TELEPHONY_USER_FIRST_FAREWELL_S", "6.0"))
+    max_reprompts = int(os.getenv("TELEPHONY_USER_FIRST_MAX_REPROMPTS", "2"))
+
+    def _real_user_count() -> int:
+        return sum(
+            1
+            for m in session.conversation_history
+            if m.role == MessageRole.USER
+            and not (m.content or "").startswith(_USER_FIRST_CUE_PREFIX)
+        )
+
+    initial_user_msgs = _real_user_count()
+
+    async def _wait_or_speech(timeout: float) -> bool:
+        """Sleep up to `timeout`s. Return True if the callee spoke (a real
+        user message arrived) so the caller can bail out of the state
+        machine. Polls every 100ms — cheap and avoids hooking new events
+        into the pipeline."""
+        deadline = asyncio.get_event_loop().time() + timeout
+        while asyncio.get_event_loop().time() < deadline:
+            if _real_user_count() > initial_user_msgs:
+                return True
+            await asyncio.sleep(0.1)
+        return _real_user_count() > initial_user_msgs
+
+    async def _drive_llm_with_cue(cue: str, phase: str) -> None:
+        """Inject the cue as a synthetic user input and run one normal
+        pipeline turn so the LLM produces audio using its existing system
+        prompt (campaign company, agent name, persona)."""
+        if session.tts_active or session.llm_active:
+            logger.debug(
+                "user_first_skip_phase phase=%s call=%s reason=busy",
+                phase, call_id[:12],
+            )
+            return
+        try:
+            session.current_user_input = cue
+            logger.info(
+                "user_first_phase phase=%s call=%s",
+                phase, call_id[:12],
+            )
+            await voice_session.pipeline.handle_turn_end(
+                session, websocket=None, source=f"user_first_{phase}"
+            )
+        except Exception as exc:
+            logger.warning(
+                "user_first_phase_failed phase=%s call=%s err=%s",
+                phase, call_id[:12], exc,
+            )
+        finally:
+            try:
+                session.current_user_input = ""
+            except AttributeError:
+                pass
+
+    try:
+        # Phase 1 — initial listen window. The natural beat between
+        # phone-to-ear and first speech. ~2s matches outbound pickup
+        # behavior; shorter than ElevenLabs' casual 5–10s because the
+        # callee wasn't expecting a phone call and won't volunteer "hello"
+        # if we wait too long.
+        if await _wait_or_speech(open_s):
+            return
+
+        # Phase 2 — natural opening. The LLM uses the system prompt's
+        # campaign context to greet (company, agent name, persona). The
+        # bracketed cue is an internal instruction the model reads as a
+        # situation hint, not as something to repeat verbatim.
+        await _drive_llm_with_cue(
+            "[CALLEE_SILENT_AT_PICKUP — The callee answered but has not "
+            "spoken yet. Open the call naturally in one short sentence "
+            "using your campaign context (company name, your agent name, "
+            "persona). Do NOT repeat this cue.]",
+            "open",
+        )
+
+        # Phases 3..N — reprompts (default 2 attempts).
+        for i in range(max_reprompts):
+            if await _wait_or_speech(reprompt_s):
+                return
+            await _drive_llm_with_cue(
+                f"[CALLEE_NO_RESPONSE_REPROMPT_{i + 1} — The callee still "
+                f"has not spoken. Briefly, warmly check if they're still "
+                f"there. No more than 6 words. Do NOT repeat this cue.]",
+                f"reprompt_{i + 1}",
+            )
+
+        # Phase final — graceful farewell + hangup.
+        if await _wait_or_speech(farewell_s):
+            return
+        await _drive_llm_with_cue(
+            "[CALLEE_UNRESPONSIVE — Multiple reprompts unanswered. Say "
+            "one short polite goodbye and end the call. Do NOT repeat "
+            "this cue.]",
+            "farewell",
+        )
+        # Allow the farewell TTS to play out before tearing down.
+        await asyncio.sleep(2.0)
+        if _adapter is not None:
+            try:
+                await _adapter.hangup(pbx_call_id)
+                logger.info(
+                    "user_first_hangup_after_farewell call=%s",
+                    call_id[:12],
+                )
+            except Exception as exc:
+                logger.warning(
+                    "user_first_hangup_failed call=%s err=%s",
+                    call_id[:12], exc,
+                )
+
+    except asyncio.CancelledError:
+        logger.info("user_first_silence_cancelled call=%s", call_id[:12])
+        raise
+    except Exception as exc:
+        logger.warning(
+            "user_first_silence_handler_failed call=%s err=%s",
+            call_id[:12], exc,
+        )
 
 
 _SESSION_INACTIVITY_TIMEOUT_S = int(os.getenv("TELEPHONY_INACTIVITY_TIMEOUT_S", "300"))  # 5 min
@@ -815,8 +1002,18 @@ async def _on_new_call(call_id: str) -> None:
                 asyncio.create_task(_send_outbound_greeting(voice_session))
             else:
                 logger.info(
-                    "outbound_greeting_suppressed call_id=%s first_speaker=user",
+                    "outbound_greeting_suppressed call_id=%s first_speaker=user — "
+                    "scheduling silence-handler",
                     call_id[:12],
+                )
+                # Graduated silence handling for user-first calls:
+                # listen → natural opening → reprompt → reprompt → graceful hangup.
+                # Each phrase is LLM-generated from the campaign's existing system
+                # prompt (company, agent name, persona) — nothing hardcoded except
+                # internal cues the LLM reads as instructions.
+                # See docstring of _handle_user_first_silence for sources.
+                voice_session._user_first_silence_task = asyncio.create_task(
+                    _handle_user_first_silence(voice_session, call_id)
                 )
 
         # Tell the adapter to start streaming audio.
@@ -902,6 +1099,13 @@ async def _on_call_ended(call_id: str) -> None:
 
     voice_session = _telephony_sessions.pop(call_id, None)
     if voice_session:
+        # Cancel the user-first silence handler if it's still running.
+        # Hanging up while a reprompt phase is sleeping would leak the task
+        # and waste log noise on a closed gateway.
+        _silence_task = getattr(voice_session, "_user_first_silence_task", None)
+        if _silence_task is not None and not _silence_task.done():
+            _silence_task.cancel()
+
         # --- Persist transcript to dialer's calls row BEFORE teardown ----
         # Reads the in-memory TranscriptService buffer (keyed on the
         # session's original call_id) and writes to the dialer's calls.id
@@ -1564,10 +1768,16 @@ async def make_call(
                 )
             )
         if warmup_coros:
+            # Strict gate: every STT/TTS WebSocket handshake MUST succeed before
+            # we ring the bell. A failure here means the pipeline isn't ready —
+            # if we let originate fire anyway, the callee picks up to either
+            # silence (TTS dead) or a deaf agent (STT dead). Hard-fail instead.
             results = await asyncio.gather(*warmup_coros, return_exceptions=True)
-            for i, r in enumerate(results):
-                if isinstance(r, Exception):
-                    logger.warning("pre_originate_warmup[%d] failed: %s", i, r)
+            failed = [r for r in results if isinstance(r, Exception)]
+            if failed:
+                raise RuntimeError(
+                    f"pre_originate_warmup_handshake_failed: {failed[0]!r}"
+                )
 
         # LLM pool warm (fire-and-forget)
         llm_warm = getattr(pre_warm_session.llm_provider, "warm_up", None)
@@ -1579,37 +1789,44 @@ async def make_call(
         # latency on the first AI response is identical — we just don't burn
         # a TTS round-trip on audio that will never be played.
         if effective_first_speaker == "agent":
+            # Strict gate: in agent-first mode we ring only when the greeting
+            # is fully synthesized and buffered. If TTS fails or returns no
+            # audio, abort — letting originate fire would mean the callee
+            # answers to silence while we synthesize on the fly, which is the
+            # exact "delay before greeting" symptom we are fixing.
             greeting_text = _build_outbound_greeting(pre_warm_session.call_session)
             chunks: list[bytes] = []
-            try:
-                tts_config = pre_warm_session.config
-                async for audio_chunk in pre_warm_session.tts_provider.stream_synthesize(
-                    text=greeting_text,
-                    voice_id=tts_config.voice_id if tts_config else "default",
-                    sample_rate=(
-                        tts_config.tts_sample_rate if tts_config else 8000
-                    ),
-                    call_id=pre_warm_session.call_id,
-                ):
-                    raw = (
-                        audio_chunk.data
-                        if hasattr(audio_chunk, "data")
-                        else audio_chunk
-                    )
-                    if raw:
-                        if len(raw) % 2 != 0:
-                            raw = raw[:-1]
-                        if raw:
-                            chunks.append(raw)
-
-                pre_warm_session._presynth_greeting_audio = chunks
-                pre_warm_session._presynth_greeting_text = greeting_text
-                logger.info(
-                    "pre_originate_greeting_ready chunks=%d bytes=%d text=%r",
-                    len(chunks), sum(len(c) for c in chunks), greeting_text[:60],
+            tts_config = pre_warm_session.config
+            async for audio_chunk in pre_warm_session.tts_provider.stream_synthesize(
+                text=greeting_text,
+                voice_id=tts_config.voice_id if tts_config else "default",
+                sample_rate=(
+                    tts_config.tts_sample_rate if tts_config else 8000
+                ),
+                call_id=pre_warm_session.call_id,
+            ):
+                raw = (
+                    audio_chunk.data
+                    if hasattr(audio_chunk, "data")
+                    else audio_chunk
                 )
-            except Exception as synth_exc:
-                logger.warning("pre_originate_greeting_synth_failed: %s", synth_exc)
+                if raw:
+                    if len(raw) % 2 != 0:
+                        raw = raw[:-1]
+                    if raw:
+                        chunks.append(raw)
+
+            if not chunks:
+                raise RuntimeError(
+                    "pre_originate_greeting_empty: TTS returned 0 audio chunks"
+                )
+
+            pre_warm_session._presynth_greeting_audio = chunks
+            pre_warm_session._presynth_greeting_text = greeting_text
+            logger.info(
+                "pre_originate_greeting_ready chunks=%d bytes=%d text=%r",
+                len(chunks), sum(len(c) for c in chunks), greeting_text[:60],
+            )
         else:
             logger.info(
                 "pre_originate_greeting_skipped first_speaker=user call_id=%s",
@@ -1617,13 +1834,28 @@ async def make_call(
             )
 
     except Exception as warm_exc:
-        logger.warning("pre_originate_warmup_failed: %s — will use answer-path warmup", warm_exc)
+        logger.error(
+            "pre_originate_warmup_failed: %s — refusing to ring with cold pipeline",
+            warm_exc,
+        )
         if pre_warm_session is not None:
             try:
                 await _get_orchestrator().end_session(pre_warm_session)
             except Exception:
                 pass
             pre_warm_session = None
+
+    # Strict gate: do not ring the bell unless the pipeline is fully ready.
+    # Agent-first mode: greeting buffered. User-first mode: STT + TTS WS open
+    # so Flux is ready to listen the instant the callee picks up.
+    if pre_warm_session is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Voice pipeline is not ready. Refusing to originate the call "
+                "to avoid silence on pickup. Check TTS/STT provider health."
+            ),
+        )
 
     try:
         call_id = await _adapter.originate_call(

@@ -1,4 +1,5 @@
-// PROTOTYPE MODE - All APIs return dummy data
+import { createHttpClient } from "@/lib/http-client";
+import { apiBaseUrl } from "@/lib/env";
 
 // CSV Upload Response
 export interface BulkImportResponse {
@@ -25,6 +26,7 @@ export interface CallAnalyticsResponse {
 export interface Recording {
     id: string;
     call_id: string;
+    phone_number?: string;
     created_at: string;
     duration_seconds?: number;
 }
@@ -36,128 +38,131 @@ export interface RecordingListResponse {
     total: number;
 }
 
-// Dummy Analytics Data
-const DUMMY_ANALYTICS: CallSeriesItem[] = [
-    { date: "2024-12-24", total_calls: 145, answered: 128, failed: 17 },
-    { date: "2024-12-25", total_calls: 52, answered: 45, failed: 7 },
-    { date: "2024-12-26", total_calls: 189, answered: 165, failed: 24 },
-    { date: "2024-12-27", total_calls: 210, answered: 184, failed: 26 },
-    { date: "2024-12-28", total_calls: 178, answered: 156, failed: 22 },
-    { date: "2024-12-29", total_calls: 234, answered: 205, failed: 29 },
-    { date: "2024-12-30", total_calls: 239, answered: 206, failed: 33 },
-];
-
-// Dummy Recordings
-const DUMMY_RECORDINGS: Recording[] = [
-    { id: "rec-001", call_id: "call-001", created_at: "2024-12-30T10:19:10Z", duration_seconds: 245 },
-    { id: "rec-002", call_id: "call-002", created_at: "2024-12-30T10:23:03Z", duration_seconds: 180 },
-    { id: "rec-003", call_id: "call-004", created_at: "2024-12-30T09:50:22Z", duration_seconds: 320 },
-    { id: "rec-004", call_id: "call-006", created_at: "2024-12-30T10:36:39Z", duration_seconds: 95 },
-    { id: "rec-005", call_id: "call-008", created_at: "2024-12-30T10:46:03Z", duration_seconds: 60 },
-];
-
-class ExtendedApi {
-    // CSV Upload
-    async uploadCSV(_campaignId: string, _file: File, _skipDuplicates: boolean = true): Promise<BulkImportResponse> {
-        void _campaignId;
-        void _file;
-        void _skipDuplicates;
-        // Simulate successful upload
-        return {
-            total_rows: 150,
-            imported: 142,
-            failed: 3,
-            duplicates_skipped: 5,
-            errors: [
-                { row: 23, error: "Invalid phone number format", phone: "invalid-phone" },
-                { row: 67, error: "Missing required field", phone: "+1555000000" },
-                { row: 98, error: "Invalid email format", phone: "+15551234567" },
-            ],
-        };
-    }
-
-    // Analytics
-    async getCallAnalytics(
-        _fromDate?: string,
-        _toDate?: string,
-        _groupBy: "day" | "week" | "month" = "day"
-    ): Promise<CallAnalyticsResponse> {
-        void _fromDate;
-        void _toDate;
-        void _groupBy;
-        return { series: DUMMY_ANALYTICS };
-    }
-
-    // Recordings
-    async listRecordings(
-        _callId?: string,
-        page: number = 1,
-        pageSize: number = 20
-    ): Promise<RecordingListResponse> {
-        return {
-            items: DUMMY_RECORDINGS,
-            page,
-            page_size: pageSize,
-            total: DUMMY_RECORDINGS.length,
-        };
-    }
-
-    getRecordingStreamUrl(recordingId: string): string {
-        return `#recording-${recordingId}-prototype`;
-    }
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// Campaign call transcripts (used by ScriptCard on campaign detail page).
-// Calls the backend /campaigns/{id}/calls route added by the
-// production-readiness sprint.
-// ──────────────────────────────────────────────────────────────────────────
-
+// Campaign Transcripts (Script Card)
 export interface TranscriptTurn {
-    role: "user" | "assistant" | string;
+    role: "user" | "assistant";
     content: string;
     timestamp: string;
 }
 
 export interface CampaignCallWithTranscript {
-    // The backend returns `call_id`; ScriptCard uses `call.call_id` as the
-    // React key. `id` is kept as an optional alias for older callers.
     call_id: string;
-    id?: string;
-    to_number: string | null;
-    started_at: string | null;
+    to_number: string;
+    started_at: string;
     duration_seconds: number | null;
     outcome: string | null;
     turns: TranscriptTurn[];
 }
 
-// Singleton with the transcript method attached. Defined after the class so
-// the bolt-on stays in one file (matches the pattern of the rest of the
-// extended-api dummy fixtures).
-import { createHttpClient as _createHttpClientForTranscripts } from "@/lib/http-client";
-import { apiBaseUrl as _apiBaseUrlForTranscripts } from "@/lib/env";
+export interface CampaignCallsResponse {
+    items: CampaignCallWithTranscript[];
+    page: number;
+    page_size: number;
+    total: number;
+}
 
-class ExtendedApiWithTranscripts extends ExtendedApi {
-    private _transcriptClient = _createHttpClientForTranscripts({
-        baseUrl: _apiBaseUrlForTranscripts(),
-    });
+// Extended API - Real backend integration
+class ExtendedApi {
+    private client = createHttpClient({ baseUrl: apiBaseUrl() });
 
+    // CSV Upload
+    async uploadCSV(campaignId: string, file: File, skipDuplicates: boolean = true): Promise<BulkImportResponse> {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        // Get auth token from storage
+        const token = this.client.getToken();
+        const headers: Record<string, string> = {};
+        if (token) {
+            headers.Authorization = `Bearer ${token}`;
+        }
+
+        const response = await fetch(`${apiBaseUrl()}/contacts/campaigns/${campaignId}/upload?skip_duplicates=${skipDuplicates}`, {
+            method: "POST",
+            body: formData,
+            headers,
+            credentials: "include",
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.detail || `Upload failed: ${response.statusText}`);
+        }
+
+        return response.json();
+    }
+
+    // Analytics
+    async getCallAnalytics(
+        fromDate?: string,
+        toDate?: string,
+        groupBy: "day" | "week" | "month" = "day"
+    ): Promise<CallAnalyticsResponse> {
+        const params: Record<string, string> = { group_by: groupBy };
+        if (fromDate) params.from = fromDate;
+        if (toDate) params.to = toDate;
+
+        return this.client.request({
+            path: "/analytics/calls",
+            method: "GET",
+            params,
+        });
+    }
+
+    // Recordings
+    async listRecordings(
+        callId?: string,
+        page: number = 1,
+        pageSize: number = 20
+    ): Promise<RecordingListResponse> {
+        const params: Record<string, string> = {
+            page: String(page),
+            page_size: String(pageSize),
+        };
+        if (callId) params.call_id = callId;
+
+        return this.client.request({
+            path: "/recordings",
+            method: "GET",
+            params,
+        });
+    }
+
+    async fetchRecordingBlob(recordingId: string): Promise<string> {
+        const token = this.client.getToken();
+        const headers: Record<string, string> = {};
+        if (token) {
+            headers.Authorization = `Bearer ${token}`;
+        }
+
+        const response = await fetch(`${apiBaseUrl()}/recordings/${recordingId}/stream`, {
+            headers,
+            credentials: "include",
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to fetch recording: ${response.statusText}`);
+        }
+
+        const blob = await response.blob();
+        return URL.createObjectURL(blob);
+    }
+
+    // Campaign call transcripts (Script Card)
     async getCampaignCallsWithTranscripts(
         campaignId: string,
-        page: number,
-        pageSize: number,
-    ): Promise<{
-        items: CampaignCallWithTranscript[];
-        total: number;
-        page: number;
-        page_size: number;
-    }> {
-        return this._transcriptClient.request({
+        page: number = 1,
+        pageSize: number = 20
+    ): Promise<CampaignCallsResponse> {
+        return this.client.request({
             path: `/campaigns/${campaignId}/calls`,
             method: "GET",
-            params: { page: String(page), page_size: String(pageSize) },
+            params: {
+                page: String(page),
+                page_size: String(pageSize),
+            },
         });
     }
 }
 
-export const extendedApi = new ExtendedApiWithTranscripts();
+export const extendedApi = new ExtendedApi();

@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useState, useRef } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useState, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { dashboardApi, DashboardSummary, Campaign } from "@/lib/dashboard-api";
 import { extendedApi, CallSeriesItem } from "@/lib/extended-api";
-import { Clock, Megaphone, ArrowUpRight, Activity, AlertTriangle } from "lucide-react";
+import { Clock, Megaphone, ArrowUpRight, Activity, AlertTriangle, PhoneCall, TrendingUp, Bot } from "lucide-react";
 import Link from "next/link";
 import { motion, animate, useInView, useReducedMotion } from "framer-motion";
 import {
@@ -85,6 +85,7 @@ function KpiCard({
     deltaPct,
     lastUpdatedMs,
     status,
+    icon: Icon,
 }: {
     title: string;
     value: number;
@@ -93,6 +94,7 @@ function KpiCard({
     deltaPct: number;
     lastUpdatedMs: number;
     status: "green" | "yellow" | "red";
+    icon?: React.ComponentType<{ className?: string }>;
 }) {
     const reduceMotion = useReducedMotion();
     const up = deltaAbs >= 0;
@@ -129,9 +131,16 @@ function KpiCard({
                             {valueSuffix ? <span className="ml-1 text-xl sm:text-2xl font-black text-card-foreground">{valueSuffix}</span> : null}
                         </p>
                     </div>
-                    <div className="min-w-0 text-right">
-                        <div className="text-xs font-bold text-muted-foreground leading-none truncate">Last updated</div>
-                        <div className="mt-1 text-xs font-black tabular-nums text-card-foreground leading-none truncate">{formatHhMmSs(lastUpdatedMs)}</div>
+                    <div className="min-w-0 text-right flex flex-col items-end gap-2">
+                        {Icon && (
+                            <div className="p-2 rounded-lg bg-foreground/5">
+                                <Icon className="w-4 h-4 text-muted-foreground" />
+                            </div>
+                        )}
+                        <div>
+                            <div className="text-xs font-bold text-muted-foreground leading-none truncate">Last updated</div>
+                            <div className="mt-1 text-xs font-black tabular-nums text-card-foreground leading-none truncate">{formatHhMmSs(lastUpdatedMs)}</div>
+                        </div>
                     </div>
                 </div>
 
@@ -834,6 +843,7 @@ export default function DashboardPage() {
                 deltaAbs: totalDelta.abs,
                 deltaPct: totalDelta.pct,
                 status: statusVariant(currentTotal, { green: 500, yellow: 250 }),
+                icon: PhoneCall,
             },
             {
                 title: "Success Rate",
@@ -842,6 +852,7 @@ export default function DashboardPage() {
                 deltaAbs: successDelta.abs,
                 deltaPct: successDelta.pct,
                 status: statusVariant(currentSuccessRate, { green: 92, yellow: 85 }),
+                icon: TrendingUp,
             },
             {
                 title: "Active Calls",
@@ -850,6 +861,7 @@ export default function DashboardPage() {
                 deltaAbs: activeDelta.abs,
                 deltaPct: activeDelta.pct,
                 status: statusVariant(currentActiveCalls, { green: 30, yellow: 18 }),
+                icon: Bot,
             },
             {
                 title: "Avg Duration",
@@ -858,8 +870,9 @@ export default function DashboardPage() {
                 deltaAbs: avgDurDelta.abs,
                 deltaPct: avgDurDelta.pct,
                 status: statusVariantLowerBetter(currentAvgDurationSec, { green: 70, yellow: 95 }),
+                icon: Clock,
             },
-        ] as const;
+        ];
 
         const now = activeRange.endMs;
         const windowStart = activeRange.startMs;
@@ -950,8 +963,8 @@ export default function DashboardPage() {
             ]);
             setSummary(summaryData);
             setLiveSummary(summaryData);
-            setCampaigns(campaignsData.campaigns);
-            setSeries(analytics.series);
+            setCampaigns(campaignsData.campaigns ?? []);
+            setSeries(analytics.series ?? []);
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to load dashboard");
         } finally {
@@ -986,10 +999,11 @@ export default function DashboardPage() {
     }, [liveSummary, streamStatus]);
 
     useEffect(() => {
-        if (series.length === 0) return;
+        if ((series ?? []).length === 0) return;
         const now = new Date();
-        const baseA = Math.max(6, Math.round(series.reduce((a, s) => a + s.answered, 0) / series.length / 6));
-        const baseB = Math.max(1, Math.round(series.reduce((a, s) => a + s.failed, 0) / series.length / 10));
+        const _series = series ?? [];
+        const baseA = Math.max(6, Math.round(_series.reduce((a, s) => a + s.answered, 0) / _series.length / 6));
+        const baseB = Math.max(1, Math.round(_series.reduce((a, s) => a + s.failed, 0) / _series.length / 10));
 
         const initial: DualSeriesPoint[] = Array.from({ length: 12 }).map((_, i) => {
             const t = new Date(now.getTime() - (11 - i) * 60_000);
@@ -1293,7 +1307,8 @@ export default function DashboardPage() {
         return () => ro.disconnect();
     }, [minutesRemainingText, minutesUsedText]);
 
-    const stackedPoints: DualSeriesPoint[] = series.map((s) => ({
+    const safeSeries = series ?? [];
+    const stackedPoints: DualSeriesPoint[] = safeSeries.map((s) => ({
         label: new Date(s.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
         a: s.answered,
         b: s.failed,
@@ -1301,7 +1316,7 @@ export default function DashboardPage() {
 
     const heatRows = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     const heatCols = ["0–3", "3–6", "6–9", "9–12", "12–15", "15–18", "18–21", "21–24"];
-    const seedTotals = series.length > 0 ? series.map((s) => s.total_calls) : [0, 0, 0, 0, 0, 0, 0];
+    const seedTotals = safeSeries.length > 0 ? safeSeries.map((s) => s.total_calls) : [0, 0, 0, 0, 0, 0, 0];
     const heatValues = heatRows.map((_, ri) =>
         heatCols.map((__, ci) => {
             const base = seedTotals[ri % seedTotals.length] ?? 0;
@@ -1312,9 +1327,10 @@ export default function DashboardPage() {
     const heatMax = Math.max(1, ...heatValues.flat());
 
     const campaignLineSeries = useMemo(() => {
+        const safeCampaigns = campaigns ?? [];
         const palette = ["#2563EB", "#10B981", "#F59E0B", "#A855F7"];
-        const base = campaigns.length > 0
-            ? campaigns.slice(0, 4).map((c, i) => ({
+        const base = safeCampaigns.length > 0
+            ? safeCampaigns.slice(0, 4).map((c, i) => ({
                 id: c.id,
                 label: c.name,
                 weight: Math.max(0.35, Math.min(1.5, (c.max_concurrent_calls ?? 10) / 12)),
@@ -1345,7 +1361,7 @@ export default function DashboardPage() {
         });
     }, [campaignLineSeries.campaigns]);
 
-    const feedItems: FeedItem[] = campaigns
+    const feedItems: FeedItem[] = (campaigns ?? [])
         .slice(0, 6)
         .map((c) => {
             const tone: FeedItem["tone"] = c.status === "running" ? "good" : c.status === "paused" ? "warn" : "neutral";
@@ -1373,7 +1389,7 @@ export default function DashboardPage() {
         )
         .slice(0, 7);
 
-    const timelineItems: TimelineItem[] = series
+    const timelineItems: TimelineItem[] = (series ?? [])
         .slice(-5)
         .map((s) => {
             const rate = s.total_calls > 0 ? s.failed / s.total_calls : 0;
@@ -1413,6 +1429,7 @@ export default function DashboardPage() {
                                 deltaPct={k.deltaPct}
                                 lastUpdatedMs={sim.lastUpdatedMs}
                                 status={k.status}
+                                icon={k.icon}
                             />
                         ))}
                     </div>
@@ -1884,7 +1901,7 @@ export default function DashboardPage() {
                                 View all
                             </Link>
                         </div>
-                        {campaigns.length === 0 ? (
+                        {(campaigns ?? []).length === 0 ? (
                             <div className="text-center py-8 text-gray-600 dark:text-muted-foreground">
                                 <Megaphone className="w-12 h-12 mx-auto mb-4 opacity-50 text-gray-500 dark:text-muted-foreground" />
                                 <p className="font-medium">No campaigns yet</p>
@@ -1897,7 +1914,7 @@ export default function DashboardPage() {
                             </div>
                         ) : (
                             <div className="space-y-3">
-                                {campaigns.slice(0, 5).map((campaign, index) => (
+                                {(campaigns ?? []).slice(0, 5).map((campaign, index) => (
                                     <motion.div
                                         key={campaign.id}
                                         initial={{ opacity: 0, x: -20 }}

@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Phone, Clock, FileText, Play } from "lucide-react";
+import { ArrowLeft, Phone, Clock, FileText, Play, Download, Pause, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useCall, useCallTranscript } from "@/lib/api-hooks";
+import { extendedApi } from "@/lib/extended-api";
 
 function getStatusStyle(status: string) {
     switch (status) {
@@ -52,6 +53,63 @@ export default function CallDetailPage() {
     const transcript = useMemo(() => (transcriptQuery.data?.turns ?? []) as TranscriptTurn[], [transcriptQuery.data?.turns]);
     const error = callQuery.isError ? (callQuery.error instanceof Error ? callQuery.error.message : "Failed to load call details") : "";
 
+    const [recordingBlobUrl, setRecordingBlobUrl] = useState<string | null>(null);
+    const [recordingLoading, setRecordingLoading] = useState(false);
+    const [recordingError, setRecordingError] = useState<string | null>(null);
+    const [isPlaying, setIsPlaying] = useState(false);
+    const audioRef = useRef<HTMLAudioElement | null>(null);
+
+    const loadRecording = useCallback(async (recordingId: string): Promise<string> => {
+        if (recordingBlobUrl) return recordingBlobUrl;
+        setRecordingLoading(true);
+        setRecordingError(null);
+        try {
+            const url = await extendedApi.fetchRecordingBlob(recordingId);
+            setRecordingBlobUrl(url);
+            return url;
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : "Failed to load recording";
+            setRecordingError(msg);
+            throw e;
+        } finally {
+            setRecordingLoading(false);
+        }
+    }, [recordingBlobUrl]);
+
+    const handlePlay = useCallback(async () => {
+        if (!call?.recording_id) return;
+        try {
+            const url = await loadRecording(call.recording_id);
+            if (!audioRef.current) {
+                audioRef.current = new Audio(url);
+                audioRef.current.onended = () => setIsPlaying(false);
+                audioRef.current.onpause = () => setIsPlaying(false);
+                audioRef.current.onplay = () => setIsPlaying(true);
+            }
+            if (isPlaying) {
+                audioRef.current.pause();
+            } else {
+                audioRef.current.src = url;
+                await audioRef.current.play();
+            }
+        } catch {
+            // error already set in state
+        }
+    }, [call?.recording_id, isPlaying, loadRecording]);
+
+    const handleDownload = useCallback(async () => {
+        if (!call?.recording_id) return;
+        try {
+            const url = await loadRecording(call.recording_id);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `recording-${call.recording_id}.wav`;
+            a.click();
+        } catch {
+            // error already set in state
+        }
+    }, [call?.recording_id, loadRecording]);
+
     return (
         <DashboardLayout title="Call Details" description="Transcript, recording, and metadata for this call.">
             <motion.div
@@ -91,7 +149,7 @@ export default function CallDetailPage() {
 
                             <div className="space-y-3">
                                 <div className="group flex items-center gap-3 rounded-2xl border border-border bg-muted/60 p-3 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:bg-background hover:shadow-md">
-                                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-background/60 text-foreground transition-colors group-hover:bg-background">
+                                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-background/60 text-foreground transition-colors group-hover:bg-background">
                                         <Phone className="h-5 w-5" />
                                     </div>
                                     <div className="min-w-0 flex-1">
@@ -101,7 +159,7 @@ export default function CallDetailPage() {
                                 </div>
 
                                 <div className="group flex items-center gap-3 rounded-2xl border border-border bg-muted/60 p-3 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:bg-background hover:shadow-md">
-                                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-background/60 text-foreground transition-colors group-hover:bg-background">
+                                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-background/60 text-foreground transition-colors group-hover:bg-background">
                                         <Clock className="h-5 w-5" />
                                     </div>
                                     <div className="min-w-0 flex-1">
@@ -150,11 +208,40 @@ export default function CallDetailPage() {
                                 className="content-card"
                             >
                                 <h2 className="text-sm font-semibold text-foreground mb-4">Recording</h2>
-                                <div className="rounded-2xl border border-border bg-muted/60 p-4 shadow-sm transition-[transform,background-color,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:bg-background hover:shadow-md">
-                                    <Button variant="outline" className="w-full hover:scale-[1.02] hover:shadow-md active:scale-[0.99]">
-                                        <Play className="w-4 h-4" />
-                                        Play Recording
-                                    </Button>
+                                <div className="rounded-2xl border border-border bg-muted/60 p-4 shadow-sm space-y-2">
+                                    {recordingError && (
+                                        <p className="text-xs text-destructive mb-2">{recordingError}</p>
+                                    )}
+                                    <div className="flex gap-2">
+                                        <Button
+                                            variant="outline"
+                                            className="flex-1 hover:scale-[1.02] hover:shadow-md active:scale-[0.99]"
+                                            onClick={handlePlay}
+                                            disabled={recordingLoading}
+                                        >
+                                            {recordingLoading ? (
+                                                <Loader2 className="w-4 h-4 animate-spin" />
+                                            ) : isPlaying ? (
+                                                <Pause className="w-4 h-4" />
+                                            ) : (
+                                                <Play className="w-4 h-4" />
+                                            )}
+                                            {isPlaying ? "Pause" : "Play"}
+                                        </Button>
+                                        <Button
+                                            variant="outline"
+                                            className="flex-1 hover:scale-[1.02] hover:shadow-md active:scale-[0.99]"
+                                            onClick={handleDownload}
+                                            disabled={recordingLoading}
+                                        >
+                                            {recordingLoading ? (
+                                                <Loader2 className="w-4 h-4 animate-spin" />
+                                            ) : (
+                                                <Download className="w-4 h-4" />
+                                            )}
+                                            Download
+                                        </Button>
+                                    </div>
                                 </div>
                             </motion.div>
                         )}

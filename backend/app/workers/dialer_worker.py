@@ -14,6 +14,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
+from contextlib import asynccontextmanager
+
 from app.core.dotenv_compat import load_dotenv
 
 # Load environment variables
@@ -418,10 +420,36 @@ class DialerWorker:
             # Fail-closed: errors in guard = block call
             return "block"
 
+    @asynccontextmanager
+    async def _acquire_db(self):
+        """
+        Acquire a connection from the pool with backend-service RLS context.
+
+        The dialer worker is a backend service with no per-request user
+        context, but it needs to read campaigns / leads / tenants across
+        every tenant to drive jobs. RLS policies on those tables would
+        otherwise either filter every row out (returning None / empty
+        result, surfacing as 'campaign is missing') or throw an
+        invalid-UUID error when the GUC is unset.
+
+        Setting bypass_rls = on (without LOCAL, no transaction needed)
+        keeps the value alive for the connection's lifetime, including
+        after it's returned to the pool and reused. The nil-UUID sentinel
+        on app.current_tenant_id ensures the policy's UUID cast doesn't
+        throw even if some path evaluates the left side of the OR.
+        """
+        pool = self._db_pool
+        async with pool.acquire() as conn:
+            await conn.execute("SET app.bypass_rls = 'on'")
+            await conn.execute(
+                "SET app.current_tenant_id = '00000000-0000-0000-0000-000000000000'"
+            )
+            yield conn
+
     async def _get_active_tenant_ids(self) -> List[str]:
         """Get list of tenants with active/running campaigns."""
         try:
-            async with self._db_pool.acquire() as conn:
+            async with self._acquire_db() as conn:
                 rows = await conn.fetch(
                     "SELECT DISTINCT tenant_id FROM campaigns WHERE status IN ('running', 'active')"
                 )
@@ -434,7 +462,7 @@ class DialerWorker:
     async def _get_campaign_status(self, campaign_id: str) -> Optional[str]:
         """Return campaign status so dequeued jobs can be revalidated before originate."""
         try:
-            async with self._db_pool.acquire() as conn:
+            async with self._acquire_db() as conn:
                 return await conn.fetchval(
                     "SELECT status FROM campaigns WHERE id = $1",
                     campaign_id,
@@ -446,7 +474,7 @@ class DialerWorker:
     async def _get_tenant_rules(self, tenant_id: str) -> CallingRules:
         """Get calling rules for a tenant."""
         try:
-            async with self._db_pool.acquire() as conn:
+            async with self._acquire_db() as conn:
                 row = await conn.fetchrow(
                     "SELECT calling_rules FROM tenants WHERE id = $1",
                     tenant_id
@@ -467,7 +495,7 @@ class DialerWorker:
     async def _get_lead_last_called(self, lead_id: str) -> Optional[datetime]:
         """Get the last time a lead was called."""
         try:
-            async with self._db_pool.acquire() as conn:
+            async with self._acquire_db() as conn:
                 val = await conn.fetchval(
                     "SELECT last_called_at FROM leads WHERE id = $1",
                     lead_id
@@ -490,7 +518,7 @@ class DialerWorker:
         internal_call_id = str(uuid.uuid4())
 
         try:
-            async with self._db_pool.acquire() as conn:
+            async with self._acquire_db() as conn:
                 await conn.execute(
                     """
                     INSERT INTO calls (
@@ -567,7 +595,7 @@ class DialerWorker:
     async def _update_lead_status(self, lead_id: str, status: str) -> None:
         """Update lead status in database."""
         try:
-            async with self._db_pool.acquire() as conn:
+            async with self._acquire_db() as conn:
                 if status in ("pending", "calling"):
                     # "pending"  — resetting for retry, keep last_called_at unchanged
                     # "calling"  — origination only, call not yet answered; setting
@@ -595,7 +623,7 @@ class DialerWorker:
     async def _clear_lead_last_called(self, lead_id: str) -> None:
         """Clear last_called_at so a stale origination-time timestamp cannot block retries."""
         try:
-            async with self._db_pool.acquire() as conn:
+            async with self._acquire_db() as conn:
                 await conn.execute(
                     "UPDATE leads SET last_called_at = NULL WHERE id = $1",
                     lead_id
@@ -616,7 +644,7 @@ class DialerWorker:
             # Build update query dynamically or use simple execution
             status_val = status.value if hasattr(status, 'value') else status
             
-            async with self._db_pool.acquire() as conn:
+            async with self._acquire_db() as conn:
                 db = Database(conn)
                 data = {
                     "status": status_val,
