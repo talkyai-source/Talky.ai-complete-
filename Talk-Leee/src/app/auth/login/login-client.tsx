@@ -32,7 +32,7 @@ import PasskeyLogin from "@/components/auth/passkey-login";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type Step = "email" | "password" | "mfa" | "passkey";
-type LoginTokens = { access_token: string; refresh_token: string };
+type LoginTokens = { access_token: string; refresh_token: string; role?: string };
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 const emailSchema = z.string().email("Please enter a valid email address");
@@ -192,13 +192,14 @@ export default function LoginClientPage() {
                     ? rawNext
                     : null;
 
-            let role: string | null = null;
-            try {
-                const me = await api.getMe();
-                role = me.role;
-            } catch {
-                role = null;
-            }
+            // Use the role straight from the login response. Calling
+            // /auth/me here used to be the source of a "after login,
+            // redirected back to login" bug: any 401 from that round-trip
+            // (clock skew on a freshly-issued token, transient backend
+            // hiccup, etc.) would trip the http-client's session-expired
+            // handler, clear the token we just stored, and bounce the user
+            // to /auth/login — making it look like the login never worked.
+            const role = tokens.role ?? null;
 
             router.push(
                 role === "white_label_admin"
@@ -252,36 +253,15 @@ export default function LoginClientPage() {
         setError("");
 
         try {
-            const res = await fetch("/api/v1/auth/login/password", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    email,
-                    password,
-                    remember_me: rememberMe,
-                    ...(turnstileToken ? { turnstile_token: turnstileToken } : {}),
-                }),
-            });
+            void turnstileToken;
+            const response = await api.login(email, password);
 
-            if (!res.ok) {
-                const body = await res.json().catch(() => null);
-                const detail = body?.detail || body?.message || "";
-                if (res.status === 429 || detail.toLowerCase().includes("locked")) {
-                    throw new Error(
-                        "Your account has been temporarily locked due to too many failed attempts. Please try again in 15 minutes or reset your password.",
-                    );
-                }
-                throw new Error(detail || "Invalid email or password");
-            }
-
-            const response = (await res.json()) as LoginTokens & { mfa_required?: boolean };
-
-            if (response.mfa_required) {
+            if ((response as unknown as { mfa_required?: boolean }).mfa_required) {
                 goToStep("mfa");
                 return;
             }
 
-            await handleLoginSuccess(response);
+            await handleLoginSuccess(response as unknown as LoginTokens);
         } catch (err) {
             setError(parseApiError(err));
         } finally {

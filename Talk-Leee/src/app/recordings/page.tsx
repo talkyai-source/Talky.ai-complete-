@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { extendedApi, Recording } from "@/lib/extended-api";
-import { Play, Pause, Clock, Volume2 } from "lucide-react";
+import { Play, Pause, Clock, Volume2, Download } from "lucide-react";
 import { motion } from "framer-motion";
 
 function formatDuration(seconds?: number) {
@@ -18,8 +18,22 @@ function AudioPlayer({ recordingId }: { recordingId: string }) {
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
+    const [blobUrl, setBlobUrl] = useState<string | null>(null);
+    const [loadError, setLoadError] = useState("");
+    const [downloading, setDownloading] = useState(false);
 
-    const streamUrl = extendedApi.getRecordingStreamUrl(recordingId);
+    useEffect(() => {
+        let revoke = "";
+        extendedApi.fetchRecordingBlob(recordingId)
+            .then((url) => {
+                revoke = url;
+                setBlobUrl(url);
+            })
+            .catch((err) => setLoadError(err.message));
+        return () => {
+            if (revoke) URL.revokeObjectURL(revoke);
+        };
+    }, [recordingId]);
 
     function togglePlay() {
         if (audioRef.current) {
@@ -57,11 +71,34 @@ function AudioPlayer({ recordingId }: { recordingId: string }) {
         }
     }
 
+    async function handleDownload() {
+        setDownloading(true);
+        try {
+            const url = blobUrl ?? await extendedApi.fetchRecordingBlob(recordingId);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `recording-${recordingId}.wav`;
+            a.click();
+        } catch {
+            // ignore — blob fetch errors are already shown via loadError
+        } finally {
+            setDownloading(false);
+        }
+    }
+
+    if (loadError) {
+        return <div className="text-xs text-red-400">Failed to load audio</div>;
+    }
+
+    if (!blobUrl) {
+        return <div className="text-xs text-foreground/50">Loading audio...</div>;
+    }
+
     return (
         <div className="flex items-center gap-3">
             <audio
                 ref={audioRef}
-                src={streamUrl}
+                src={blobUrl ?? undefined}
                 onTimeUpdate={handleTimeUpdate}
                 onLoadedMetadata={handleLoadedMetadata}
                 onEnded={handleEnded}
@@ -88,6 +125,14 @@ function AudioPlayer({ recordingId }: { recordingId: string }) {
                     {formatDuration(Math.floor(duration))}
                 </span>
             </div>
+            <button
+                onClick={handleDownload}
+                disabled={downloading}
+                title="Download recording"
+                className="p-2 rounded-full bg-foreground/5 text-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-foreground/10 hover:scale-[1.06] active:scale-[0.98] disabled:opacity-50"
+            >
+                <Download className="w-4 h-4" />
+            </button>
         </div>
     );
 }
@@ -164,7 +209,7 @@ export default function RecordingsPage() {
                                 <div className="flex items-center justify-between mb-3">
                                     <div className="flex items-center gap-4">
                                         <span className="text-sm font-semibold text-foreground">
-                                            Call {recording.call_id.slice(0, 8)}...
+                                            {recording.phone_number || `Call ${recording.call_id.slice(0, 8)}…`}
                                         </span>
                                         <span className="text-sm text-foreground/70 flex items-center gap-1">
                                             <Clock className="w-4 h-4" />

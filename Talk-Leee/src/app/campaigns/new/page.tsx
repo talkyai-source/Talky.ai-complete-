@@ -88,17 +88,17 @@ export default function NewCampaignPage() {
         async function fetchVoices() {
             try {
                 setLoadingVoices(true);
-                const [voiceList, config] = await Promise.all([
+                const [voicesResult, config] = await Promise.all([
                     aiOptionsApi.getVoices(),
                     aiOptionsApi.getConfig(),
                 ]);
-                // Hisham's API returns VoiceInfo[] directly (no wrapper).
-                const providerVoices = voiceList.filter((voice: VoiceInfo) => voice.provider === config.tts_provider);
+                const voiceList = voicesResult.voices;
+                const providerVoices = voiceList.filter((voice) => voice.provider === config.tts_provider);
                 setVoices(voiceList);
                 setGlobalAiConfig(config);
                 if (providerVoices.length > 0) {
                     setFormData((prev) => (
-                        prev.voice_id && providerVoices.some((voice: VoiceInfo) => voice.id === prev.voice_id)
+                        prev.voice_id && providerVoices.some((voice) => voice.id === prev.voice_id)
                             ? prev
                             : { ...prev, voice_id: providerVoices[0].id }
                     ));
@@ -134,8 +134,25 @@ export default function NewCampaignPage() {
                 previewAudioRef.current = null;
             }
 
-            // Hisham's VoiceInfo doesn't carry a `preview_url`; previews
-            // always go through the backend's previewVoice endpoint.
+            if (voice?.preview_url) {
+                const audio = new Audio(voice.preview_url);
+                previewAudioRef.current = audio;
+                audio.onended = () => {
+                    if (previewAudioRef.current === audio) {
+                        previewAudioRef.current = null;
+                    }
+                    setPreviewingVoiceId(null);
+                };
+                audio.onerror = () => {
+                    if (previewAudioRef.current === audio) {
+                        previewAudioRef.current = null;
+                    }
+                    setPreviewingVoiceId(null);
+                };
+                await audio.play();
+                return;
+            }
+
             const response = await aiOptionsApi.previewVoice({
                 voice_id: voiceId,
                 text: "Hello, I am your AI voice assistant. How can I help you today?",

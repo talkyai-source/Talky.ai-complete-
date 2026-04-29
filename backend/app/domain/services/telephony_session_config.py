@@ -384,20 +384,41 @@ def build_telephony_session_config(
     #     fixed at PCMU 8 kHz on the wire, so TelephonyMediaGateway upsamples
     #     8 -> 16 on ingress and downsamples 16 -> 8 on egress. Flux still
     #     sees 16 kHz; the carrier hop stays G.711-compatible.
+    # Use the LLM provider that's actually saved in tenant_ai_configs.
+    # Hardcoding "groq" here while letting `llm_model` come from the saved
+    # config produced a fatal mismatch: when the saved config was
+    # provider=gemini / model=gemini-2.5-flash, this routed the request
+    # through the Groq client with a model name Groq doesn't have, so every
+    # turn 404'd ("model `gemini-2.5-flash` does not exist") and the agent
+    # never replied. Read the provider from the saved config too.
+    _llm_provider_type = (
+        getattr(global_config.llm_provider, "value", None)
+        or str(global_config.llm_provider)
+        or "groq"
+    )
     return VoiceSessionConfig(
         gateway_type=gateway_type,
         stt_provider_type="deepgram_flux",
-        llm_provider_type="groq",
+        llm_provider_type=_llm_provider_type,
         tts_provider_type=tts_provider_type,
         stt_model="flux-general-en",
         stt_sample_rate=16000,
         stt_encoding="linear16",
         stt_eot_threshold=0.85,
         stt_eot_timeout_ms=500,
-        stt_eager_eot_threshold=0.4,
+        # Eager-EOT was 0.4 — too low: Flux fired turn_end on every transcript
+        # update during a single user utterance, allocating a fresh voice.turn id
+        # for each partial transcript. Each id launched its own LLM+TTS call;
+        # `TurnResumed` cancellation arrived after the request was in flight, so
+        # multiple responses overlapped and sounded like the agent re-greeting.
+        # 0.7 keeps speculative starts rare enough that the cancel signal lands
+        # before the LLM stream commits, while still beating the full 0.85 EOT
+        # for snappy replies on confident turns.
+        stt_eager_eot_threshold=0.7,
         llm_model=global_config.llm_model,
         llm_temperature=global_config.llm_temperature,
         llm_max_tokens=global_config.llm_max_tokens,
+        llm_thinking_budget=0,
         voice_id=tts_voice_id,
         tts_model=global_config.tts_model,
         tts_sample_rate=16000,

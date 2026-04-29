@@ -148,9 +148,15 @@ async def set_tenant_context_in_db(
         tenant_id: The tenant ID to set
         bypass_rls: Whether to bypass RLS (platform admin)
     """
+    # RLS policies cast current_setting('app.current_tenant_id') to UUID;
+    # an empty string would raise "invalid input syntax for type uuid" before
+    # the policy's OR-clause can short-circuit on bypass_rls. Use the nil UUID
+    # as a sentinel so the cast always succeeds.
+    _NIL_UUID = "00000000-0000-0000-0000-000000000000"
+
     if bypass_rls:
         await conn.execute("SET LOCAL app.bypass_rls = 'true'")
-        await conn.execute("SET LOCAL app.current_tenant_id = ''")
+        await conn.execute(f"SET LOCAL app.current_tenant_id = '{_NIL_UUID}'")
     elif tenant_id:
         # Validate UUID format
         try:
@@ -165,7 +171,7 @@ async def set_tenant_context_in_db(
             )
     else:
         # No tenant context - RLS will block all access
-        await conn.execute("SET LOCAL app.current_tenant_id = ''")
+        await conn.execute(f"SET LOCAL app.current_tenant_id = '{_NIL_UUID}'")
         await conn.execute("SET LOCAL app.bypass_rls = 'false'")
 
 

@@ -1,19 +1,15 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import {
     aiOptionsApi,
     AIProviderConfig,
     ProviderListResponse,
-    VoiceInfo,
-    DEFAULT_CONFIG
+    VoiceInfo
 } from "@/lib/ai-options-api";
-import { apiBaseUrl } from "@/lib/env";
-import { captureException } from "@/lib/monitoring";
 import {
     Cpu,
-    Mic,
     Volume2,
     Zap,
     Play,
@@ -22,11 +18,7 @@ import {
     Check,
     AlertCircle,
     MessageSquare,
-    Save,
-    Phone,
-    PhoneOff,
-    User,
-    Bot
+    Save
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -38,34 +30,58 @@ interface LatencyMetrics {
     total_pipeline_ms?: number;
 }
 
-interface DummyCallMessage {
-    role: "user" | "assistant" | "system";
-    content: string;
-    timestamp: number;
+const GOOGLE_TTS_MODEL = "Chirp3-HD";
+const DEEPGRAM_TTS_MODEL = "aura-2";
+const ELEVENLABS_TTS_MODEL = "eleven_flash_v2_5";
+const CARTESIA_TTS_MODEL = "sonic-3";
+
+function getFallbackDefaultTtsModel(provider: string): string {
+    if (provider === "cartesia") return CARTESIA_TTS_MODEL;
+    if (provider === "deepgram") return DEEPGRAM_TTS_MODEL;
+    if (provider === "elevenlabs") return ELEVENLABS_TTS_MODEL;
+    if (provider === "google") return GOOGLE_TTS_MODEL;
+    return GOOGLE_TTS_MODEL;
 }
 
-interface DummyCallState {
-    isActive: boolean;
-    sessionId: string | null;
-    callId: string | null;
-    conversationState: string;
-    agentName: string;
-    companyName: string;
-    messages: DummyCallMessage[];
-    latency: {
-        llm_ms?: number;
-        tts_ms?: number;
-    };
+function getProviderTtsModels(provider: string, providers: ProviderListResponse | null): Array<ProviderListResponse["tts"]["models"][number]> {
+    return (providers?.tts.models ?? []).filter((model) => {
+        if (!model.provider) return true;
+        return model.provider === provider;
+    });
+}
+
+function getDefaultTtsModel(provider: string, providers: ProviderListResponse | null): string {
+    const providerModels = getProviderTtsModels(provider, providers);
+    if (providerModels.length > 0) {
+        const stableModel = providerModels.find((model) => !model.is_preview);
+        return (stableModel ?? providerModels[0]).id;
+    }
+    return getFallbackDefaultTtsModel(provider);
+}
+
+function getDefaultTtsSampleRate(provider: string): number {
+    if (provider === "cartesia" || provider === "google" || provider === "deepgram" || provider === "elevenlabs") return 24000;
+    return 16000;
+}
+
+function dedupeVoicesById(input: VoiceInfo[]): VoiceInfo[] {
+    const map = new Map<string, VoiceInfo>();
+    for (const voice of input) {
+        if (!map.has(voice.id)) map.set(voice.id, voice);
+    }
+    return Array.from(map.values());
 }
 
 export default function AIOptionsPage() {
     // State
     const [providers, setProviders] = useState<ProviderListResponse | null>(null);
     const [voices, setVoices] = useState<VoiceInfo[]>([]);
-    const [config, setConfig] = useState<AIProviderConfig>(DEFAULT_CONFIG);
+    const [config, setConfig] = useState<AIProviderConfig | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [saveSuccess, setSaveSuccess] = useState(false);
+    const [latencyWarnings, setLatencyWarnings] = useState<string[]>([]);
+    const [elevenLabsError, setElevenLabsError] = useState<string | null>(null);
 
     // Testing state
     const [testMessage, setTestMessage] = useState("");
@@ -77,59 +93,51 @@ export default function AIOptionsPage() {
     const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null);
 
     // TTS Provider filter state
-    const [ttsProvider, setTtsProvider] = useState<"cartesia" | "google">("cartesia");
+    const [ttsProvider, setTtsProvider] = useState<string>("");
 
-    // Dummy Call state
-    const [dummyCall, setDummyCall] = useState<DummyCallState>({
-        isActive: false,
-        sessionId: null,
-        callId: null,
-        conversationState: "greeting",
-        agentName: "Alex",
-        companyName: "Your Company",
-        messages: [],
-        latency: {}
-    });
-
-    const [dummyCallConnecting, setDummyCallConnecting] = useState(false);
-
-    // WebSocket ref
-    const wsRef = useRef<WebSocket | null>(null);
-    const audioContextRef = useRef<AudioContext | null>(null);
-    const audioQueueRef = useRef<ArrayBuffer[]>([]);
-    const isPlayingRef = useRef(false);
-
-    // Microphone capture refs
-    const micStreamRef = useRef<MediaStream | null>(null);
-    const micAudioContextRef = useRef<AudioContext | null>(null);
-    const processorRef = useRef<ScriptProcessorNode | null>(null);
+    const voicePreviewAudioRef = useRef<HTMLAudioElement | null>(null);
 
     useEffect(() => {
         loadData();
     }, []);
-
-    useEffect(() => {
-        const models = providers?.llm.models ?? [];
-        if (models.length === 0) return;
-        const selected = config.llm_model;
-        if (typeof selected === "string" && models.some((m) => m.id === selected)) return;
-        setConfig((prev) => ({ ...prev, llm_model: models[0]!.id }));
-    }, [config.llm_model, providers?.llm.models]);
 
     async function loadData() {
         try {
             setLoading(true);
             setError("");
 
-            const [providersData, voicesData, configData] = await Promise.all([
+            const [providersData, voicesResult, configData] = await Promise.all([
                 aiOptionsApi.getProviders(),
-                aiOptionsApi.getVoices().catch(() => []), // Voices may fail if no API key
-                aiOptionsApi.getConfig().catch(() => DEFAULT_CONFIG),
+                aiOptionsApi.getVoices(),
+                aiOptionsApi.getConfig(),
             ]);
 
+            setElevenLabsError(voicesResult.elevenlabs_error ?? null);
+            const uniqueVoices = dedupeVoicesById(voicesResult.voices);
+            const providerVoices = uniqueVoices.filter((voice) => voice.provider === configData.tts_provider);
+            const providerModels = getProviderTtsModels(configData.tts_provider, providersData);
+            const normalizedConfig: AIProviderConfig = {
+                ...configData,
+                tts_model: providerModels.some((model) => model.id === configData.tts_model)
+                    ? configData.tts_model
+                    : getDefaultTtsModel(configData.tts_provider, providersData),
+                tts_sample_rate: getDefaultTtsSampleRate(configData.tts_provider),
+                tts_voice_id: providerVoices.some((voice) => voice.id === configData.tts_voice_id)
+                    ? configData.tts_voice_id
+                    : (providerVoices[0]?.id ?? configData.tts_voice_id),
+            };
+
             setProviders(providersData);
-            setVoices(voicesData);
-            setConfig(configData);
+            setVoices(uniqueVoices);
+            setConfig(normalizedConfig);
+            const providerOptions = new Set([
+                ...providersData.tts.providers,
+                ...uniqueVoices.map((voice) => voice.provider),
+            ]);
+            const initialProvider = providerOptions.has(normalizedConfig.tts_provider)
+                ? normalizedConfig.tts_provider
+                : (uniqueVoices[0]?.provider ?? normalizedConfig.tts_provider);
+            setTtsProvider(initialProvider);
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to load AI options");
         } finally {
@@ -138,16 +146,34 @@ export default function AIOptionsPage() {
     }
 
     async function handleSaveConfig() {
+        if (!config) return;
+        setLatencyWarnings([]);
         try {
-            await aiOptionsApi.saveConfig(config);
+            const normalizedConfig: AIProviderConfig = {
+                ...config,
+                tts_model: config.tts_model || getDefaultTtsModel(config.tts_provider, providers),
+                tts_sample_rate: getDefaultTtsSampleRate(config.tts_provider),
+            };
+            const { config: saved, latency_warnings } = await aiOptionsApi.saveConfig(normalizedConfig);
+            setConfig({
+                ...saved,
+                tts_model: saved.tts_model || getDefaultTtsModel(saved.tts_provider, providers),
+                tts_sample_rate: getDefaultTtsSampleRate(saved.tts_provider),
+            });
+            setTtsProvider(saved.tts_provider);
             setSaveSuccess(true);
+            setLatencyWarnings(latency_warnings);
             setTimeout(() => setSaveSuccess(false), 3000);
+            if (latency_warnings.length > 0) {
+                setTimeout(() => setLatencyWarnings([]), 8000);
+            }
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to save configuration");
         }
     }
 
     async function handleTestLLM() {
+        if (!config) return;
         if (!testMessage.trim()) return;
 
         try {
@@ -176,9 +202,35 @@ export default function AIOptionsPage() {
 
     // Preview a specific voice by ID (for individual voice cards)
     async function handlePreviewVoiceById(voiceId: string) {
+        const selectedVoice = voices.find((voice) => voice.id === voiceId);
         try {
             setPreviewingVoiceId(voiceId);
             setError("");
+
+            if (voicePreviewAudioRef.current) {
+                voicePreviewAudioRef.current.pause();
+                voicePreviewAudioRef.current.currentTime = 0;
+                voicePreviewAudioRef.current = null;
+            }
+
+            if (selectedVoice?.preview_url) {
+                const audio = new Audio(selectedVoice.preview_url);
+                voicePreviewAudioRef.current = audio;
+                audio.onended = () => {
+                    if (voicePreviewAudioRef.current === audio) {
+                        voicePreviewAudioRef.current = null;
+                    }
+                    setPreviewingVoiceId(null);
+                };
+                audio.onerror = () => {
+                    if (voicePreviewAudioRef.current === audio) {
+                        voicePreviewAudioRef.current = null;
+                    }
+                    setPreviewingVoiceId(null);
+                };
+                await audio.play();
+                return;
+            }
 
             const response = await aiOptionsApi.previewVoice({
                 voice_id: voiceId,
@@ -196,9 +248,19 @@ export default function AIOptionsPage() {
                 audioArray[i] = dataView.getFloat32(i * 4, true);
             }
 
-            // Determine sample rate based on voice ID (Google Chirp 3 HD uses 24kHz, Cartesia uses 16kHz)
-            const isGoogleVoice = voiceId.includes("Chirp3-HD");
-            const sampleRate = isGoogleVoice ? 24000 : 16000;
+            // Guard: createBuffer throws if frame count is 0 (empty audio from provider).
+            if (audioArray.length === 0) {
+                throw new Error("This voice returned no audio — it may be deprecated or unavailable.");
+            }
+
+            // Keep playback sample-rate aligned with provider output to avoid speed/pitch artifacts.
+            const sampleRate =
+                selectedVoice?.provider === "cartesia"
+                || selectedVoice?.provider === "google"
+                || selectedVoice?.provider === "deepgram"
+                || selectedVoice?.provider === "elevenlabs"
+                    ? 24000
+                    : 16000;
 
             const audioContext = new AudioContext({ sampleRate });
             const audioBuffer = audioContext.createBuffer(1, audioArray.length, sampleRate);
@@ -219,6 +281,7 @@ export default function AIOptionsPage() {
         }
     }
     async function handleRunBenchmark() {
+        if (!config) return;
         try {
             setBenchmarking(true);
             setError("");
@@ -232,318 +295,56 @@ export default function AIOptionsPage() {
         }
     }
 
-    // Dummy Call - WebSocket connection and handlers
-    function startDummyCall() {
-        if (wsRef.current) return;
-
-        setDummyCallConnecting(true);
-        setError("");
-
-        const sessionId = `session-${Date.now()}`;
-        const apiUrl = apiBaseUrl();
-        const u = new URL(apiUrl);
-        u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
-        u.pathname = `${u.pathname.replace(/\/$/, "")}/ws/ai-test/${sessionId}`;
-        const wsUrl = u.toString();
-
-        try {
-            const ws = new WebSocket(wsUrl);
-            wsRef.current = ws;
-
-            ws.onopen = () => {
-                // Send config message to start session
-                ws.send(JSON.stringify({
-                    type: "config",
-                    config: config
-                }));
-            };
-
-            ws.onmessage = async (event) => {
-                if (event.data instanceof Blob) {
-                    // Binary audio data - queue for playback
-                    const arrayBuffer = await event.data.arrayBuffer();
-                    audioQueueRef.current.push(arrayBuffer);
-                    playNextAudioChunk();
-                } else {
-                    // JSON message
-                    const data = JSON.parse(event.data);
-                    handleDummyCallMessage(data);
-                }
-            };
-
-            ws.onerror = (err) => {
-                captureException(err, { area: "ai-options", kind: "websocket" });
-                setError("Connection error");
-                endDummyCall();
-            };
-
-            ws.onclose = () => {
-                endDummyCall();
-            };
-        } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to connect");
-            setDummyCallConnecting(false);
-        }
-    }
-
-    const handleDummyCallMessage = (data: unknown) => {
-        if (!data || typeof data !== "object") return;
-        const payload = data as Record<string, unknown>;
-        const type = typeof payload.type === "string" ? payload.type : "";
-        switch (type) {
-            case "ready":
-                setDummyCall(prev => ({
-                    ...prev,
-                    isActive: true,
-                    sessionId: typeof payload.session_id === "string" ? payload.session_id : prev.sessionId,
-                    callId: typeof payload.call_id === "string" ? payload.call_id : prev.callId,
-                    conversationState: typeof payload.state === "string" ? payload.state : "greeting",
-                    agentName: typeof payload.agent_name === "string" ? payload.agent_name : "Alex",
-                    companyName: typeof payload.company_name === "string" ? payload.company_name : "Your Company"
-                }));
-                setDummyCallConnecting(false);
-                // Auto-start microphone capture when call connects (like real phone call)
-                startMicrophone();
-                break;
-
-            case "transcript":
-                // User speech transcribed (voice mode) - add user message when final
-                if (payload.is_final === true && typeof payload.text === "string" && payload.text.trim()) {
-                    setDummyCall(prev => ({
-                        ...prev,
-                        messages: [...prev.messages, {
-                            role: "user",
-                            content: payload.text as string,
-                            timestamp: Date.now()
-                        }]
-                    }));
-                }
-                break;
-
-            case "llm_response":
-                {
-                const text = typeof payload.text === "string" ? payload.text : "";
-                const latencyMs = typeof payload.latency_ms === "number" ? payload.latency_ms : undefined;
-                setDummyCall(prev => ({
-                    ...prev,
-                    messages: text
-                        ? [...prev.messages, { role: "assistant", content: text, timestamp: Date.now() }]
-                        : prev.messages,
-                    latency: {
-                        ...prev.latency,
-                        llm_ms: latencyMs ?? prev.latency.llm_ms
-                    }
-                }));
-                }
-                break;
-
-            case "state_change":
-                setDummyCall(prev => ({
-                    ...prev,
-                    conversationState: typeof payload.state === "string" ? payload.state : prev.conversationState
-                }));
-                break;
-
-            case "turn_complete":
-                setDummyCall(prev => ({
-                    ...prev,
-                    latency: {
-                        llm_ms: typeof payload.llm_latency_ms === "number" ? payload.llm_latency_ms : prev.latency.llm_ms,
-                        tts_ms: typeof payload.tts_latency_ms === "number" ? payload.tts_latency_ms : prev.latency.tts_ms
-                    }
-                }));
-                break;
-
-            case "barge_in":
-                // User started speaking - stop TTS playback immediately
-                // Clear audio queue to stop any pending audio
-                audioQueueRef.current = [];
-                isPlayingRef.current = false;
-                // Close and recreate audio context to stop current playback
-                if (audioContextRef.current) {
-                    audioContextRef.current.close();
-                    audioContextRef.current = null;
-                }
-                break;
-
-            case "tts_interrupted":
-                // TTS was interrupted due to barge-in
-                // Clear audio queue
-                audioQueueRef.current = [];
-                isPlayingRef.current = false;
-                break;
-
-            case "error":
-                setError(typeof payload.message === "string" ? payload.message : "Unknown error");
-                break;
-        }
-    };
-
-    const playNextAudioChunk = async () => {
-        if (isPlayingRef.current || audioQueueRef.current.length === 0) return;
-
-        isPlayingRef.current = true;
-
-        try {
-            const sampleRate = config.tts_sample_rate || 16000;
-
-            if (!audioContextRef.current) {
-                audioContextRef.current = new AudioContext({ sampleRate });
-            }
-
-            const ctx = audioContextRef.current;
-            const buffer = audioQueueRef.current.shift();
-
-            if (buffer) {
-                // Convert PCM Float32 to AudioBuffer
-                const float32Data = new Float32Array(buffer.byteLength / 4);
-                const view = new DataView(buffer);
-                for (let i = 0; i < float32Data.length; i++) {
-                    float32Data[i] = view.getFloat32(i * 4, true);
-                }
-
-                const audioBuffer = ctx.createBuffer(1, float32Data.length, sampleRate);
-                audioBuffer.getChannelData(0).set(float32Data);
-
-                const source = ctx.createBufferSource();
-                source.buffer = audioBuffer;
-                source.connect(ctx.destination);
-                source.start();
-
-                source.onended = () => {
-                    isPlayingRef.current = false;
-                    playNextAudioChunk();
-                };
-            } else {
-                isPlayingRef.current = false;
-            }
-        } catch (err) {
-            captureException(err, { area: "ai-options", kind: "audio-playback" });
-            isPlayingRef.current = false;
-        }
-    };
-
-
-
-    // Start microphone capture - auto-starts when call connects
-    const startMicrophone = async () => {
-        try {
-            // Request microphone access
-            const stream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    sampleRate: 16000,
-                    channelCount: 1,
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true
-                }
-            });
-
-            micStreamRef.current = stream;
-
-            // Create audio context at 16kHz for Deepgram
-            const audioContext = new AudioContext({ sampleRate: 16000 });
-            micAudioContextRef.current = audioContext;
-
-            // Create source from microphone
-            const source = audioContext.createMediaStreamSource(stream);
-
-            // Create script processor to capture raw audio (4096 buffer size)
-            const processor = audioContext.createScriptProcessor(4096, 1, 1);
-            processorRef.current = processor;
-
-            processor.onaudioprocess = (event) => {
-                if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-
-                // Get PCM data from input buffer
-                const inputData = event.inputBuffer.getChannelData(0);
-
-                // Convert Float32 to Int16 (PCM 16-bit) for Deepgram
-                const pcmData = new Int16Array(inputData.length);
-                for (let i = 0; i < inputData.length; i++) {
-                    const s = Math.max(-1, Math.min(1, inputData[i]));
-                    pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-                }
-
-                // Send binary audio to WebSocket
-                wsRef.current.send(pcmData.buffer);
-            };
-
-            // Connect the audio graph
-            source.connect(processor);
-            processor.connect(audioContext.destination);
-        } catch (err) {
-            captureException(err, { area: "ai-options", kind: "microphone" });
-            setError("Microphone access denied or unavailable");
-        }
-    };
-
-    // Stop microphone capture
-    const stopMicrophone = () => {
-        if (processorRef.current) {
-            processorRef.current.disconnect();
-            processorRef.current = null;
-        }
-
-        if (micAudioContextRef.current) {
-            micAudioContextRef.current.close();
-            micAudioContextRef.current = null;
-        }
-
-        if (micStreamRef.current) {
-            micStreamRef.current.getTracks().forEach(track => track.stop());
-            micStreamRef.current = null;
-        }
-    };
-
-    const endDummyCall = useCallback(() => {
-        // Stop microphone capture
-        stopMicrophone();
-
-        if (wsRef.current) {
-            wsRef.current.send(JSON.stringify({ type: "end_call" }));
-            wsRef.current.close();
-            wsRef.current = null;
-        }
-
-        if (audioContextRef.current) {
-            audioContextRef.current.close();
-            audioContextRef.current = null;
-        }
-
-        audioQueueRef.current = [];
-        isPlayingRef.current = false;
-
-        setDummyCall({
-            isActive: false,
-            sessionId: null,
-            callId: null,
-            conversationState: "greeting",
-            agentName: "Alex",
-            companyName: "Your Company",
-            messages: [],
-            latency: {}
-        });
-        setDummyCallConnecting(false);
-    }, []);
-
-    // Cleanup on unmount
     useEffect(() => {
         return () => {
-            if (wsRef.current) {
-                wsRef.current.close();
-            }
-            if (audioContextRef.current) {
-                audioContextRef.current.close();
+            if (voicePreviewAudioRef.current) {
+                voicePreviewAudioRef.current.pause();
+                voicePreviewAudioRef.current = null;
             }
         };
     }, []);
+
+    const availableTtsProviders = Array.from(
+        new Set([...(providers?.tts.providers ?? []), ...voices.map((voice) => voice.provider)])
+    );
+    const voiceNameCounts = useMemo(() => {
+        const counts = new Map<string, number>();
+        for (const voice of voices) {
+            counts.set(voice.name, (counts.get(voice.name) ?? 0) + 1);
+        }
+        return counts;
+    }, [voices]);
+
+    const getDisplayVoiceName = useCallback((voice: VoiceInfo): string => {
+        const duplicateCount = voiceNameCounts.get(voice.name) ?? 0;
+        if (duplicateCount <= 1) return voice.name;
+        const language = (voice.language || "unknown").toUpperCase();
+        return `${voice.name} (${language})`;
+    }, [voiceNameCounts]);
+    const voicesForSelectedProvider = voices.filter((voice) => voice.provider === ttsProvider);
+    const ttsModelsForSelectedProvider = getProviderTtsModels(ttsProvider, providers);
 
     return (
         <DashboardLayout title="AI Options" description="Configure LLM, STT, and TTS providers">
             {loading ? (
                 <div className="flex items-center justify-center h-64">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white" />
+                </div>
+            ) : !providers || !config ? (
+                <div className="space-y-4">
+                    <div className="content-card border-red-500/30 bg-red-500/10">
+                        <div className="flex items-center gap-3 text-red-400">
+                            <AlertCircle className="w-5 h-5" />
+                            <span>{error || "AI options failed to load from the backend."}</span>
+                        </div>
+                    </div>
+                    <button
+                        onClick={loadData}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-200 border border-purple-500/30"
+                    >
+                        <RefreshCw className="w-4 h-4" />
+                        Retry
+                    </button>
                 </div>
             ) : (
                 <div className="space-y-8">
@@ -581,161 +382,27 @@ export default function AIOptionsPage() {
                         )}
                     </AnimatePresence>
 
-                    {/* Dummy Call - Test Full Pipeline */}
-                    <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="content-card group border-2 border-orange-500/30 bg-gradient-to-br from-orange-500/5 to-transparent"
-                    >
-                        <div className="flex items-center justify-between mb-6">
-                            <div className="flex items-center gap-3">
-                                <div className="p-3 bg-emerald-500/25 dark:bg-white/10 rounded-lg">
-                                    <Phone className="w-6 h-6 text-gray-900 dark:text-white" />
-                                </div>
-                                <div>
-                                    <h3 className="text-xl font-bold text-gray-900 dark:text-white group-hover:text-gray-900 dark:group-hover:text-white">Dummy Call</h3>
-                                    <p className="text-sm text-gray-700 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-400">
-                                        Test the <span className="font-medium">exact same pipeline</span> used for real calls
-                                    </p>
-                                </div>
-                            </div>
-
-                            {!dummyCall.isActive ? (
-                                <button
-                                    onClick={startDummyCall}
-                                    disabled={dummyCallConnecting}
-                                    className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 rounded-lg text-white font-medium transition-all shadow-lg shadow-teal-500/25 hover:scale-[1.02] active:scale-[0.99] disabled:opacity-50"
-                                >
-                                    {dummyCallConnecting ? (
-                                        <RefreshCw className="w-5 h-5 animate-spin" />
-                                    ) : (
-                                        <Phone className="w-5 h-5" />
-                                    )}
-                                    <span>{dummyCallConnecting ? "Connecting..." : "Start Dummy Call"}</span>
-                                </button>
-                            ) : (
-                                <button
-                                    onClick={endDummyCall}
-                                    className="flex items-center gap-2 px-6 py-3 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded-lg text-red-400 hover:text-white font-medium transition-all hover:scale-[1.02] active:scale-[0.99]"
-                                >
-                                    <PhoneOff className="w-5 h-5" />
-                                    <span>End Call</span>
-                                </button>
-                            )}
-                        </div>
-
-                        {dummyCall.isActive && (
-                            <div className="space-y-4">
-                                {/* Network Latency Bar - Always visible above the call */}
-                                <div className="flex items-center justify-center gap-6 p-3 bg-gradient-to-r from-purple-500/10 via-emerald-500/10 to-blue-500/10 rounded-lg border border-white/10 group-hover:border-black/10 dark:group-hover:border-white/10">
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-2 h-2 bg-purple-500 rounded-full" />
-                                        <span className="text-xs text-gray-700 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-400">LLM:</span>
-                                        <span className="text-sm font-mono font-bold text-purple-400">
-                                            {dummyCall.latency.llm_ms ? `${dummyCall.latency.llm_ms.toFixed(0)}ms` : '--'}
-                                        </span>
+                    {/* Latency Advisory Warnings */}
+                    <AnimatePresence>
+                        {latencyWarnings.length > 0 && (
+                            <motion.div
+                                initial={{ opacity: 0, y: -10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -10 }}
+                                className="space-y-2"
+                            >
+                                {latencyWarnings.map((w, i) => (
+                                    <div
+                                        key={i}
+                                        className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-300"
+                                    >
+                                        <span className="shrink-0 mt-0.5">⚠</span>
+                                        <span>{w}</span>
                                     </div>
-                                    <div className="h-4 w-px bg-white/20 group-hover:bg-black/10 dark:group-hover:bg-white/20" />
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-2 h-2 bg-emerald-500 rounded-full" />
-                                        <span className="text-xs text-gray-700 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-400">TTS:</span>
-                                        <span className="text-sm font-mono font-bold text-emerald-400">
-                                            {dummyCall.latency.tts_ms ? `${dummyCall.latency.tts_ms.toFixed(0)}ms` : '--'}
-                                        </span>
-                                    </div>
-                                    <div className="h-4 w-px bg-white/20 group-hover:bg-black/10 dark:group-hover:bg-white/20" />
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-2 h-2 bg-yellow-500 rounded-full" />
-                                        <span className="text-xs text-gray-700 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-400">Total:</span>
-                                        <span className="text-sm font-mono font-bold text-yellow-400">
-                                            {(dummyCall.latency.llm_ms && dummyCall.latency.tts_ms)
-                                                ? `${(dummyCall.latency.llm_ms + dummyCall.latency.tts_ms).toFixed(0)}ms`
-                                                : '--'}
-                                        </span>
-                                    </div>
-                                </div>
-
-                                {/* Call Info Bar */}
-                                <div className="flex items-center justify-between p-3 bg-orange-500/10 rounded-lg border border-orange-500/20">
-                                    <div className="flex items-center gap-4">
-                                        <div className="flex items-center gap-2">
-                                            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                                            <span className="text-sm text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-300">
-                                                <span className="text-orange-400">{dummyCall.agentName}</span> from{" "}
-                                                <span className="text-orange-400">{dummyCall.companyName}</span>
-                                            </span>
-                                        </div>
-                                        <div className="h-4 w-px bg-white/20 group-hover:bg-black/10 dark:group-hover:bg-white/20" />
-                                        <span className="text-xs px-2 py-1 bg-orange-500/20 rounded text-orange-400 uppercase font-medium">
-                                            {dummyCall.conversationState}
-                                        </span>
-                                    </div>
-                                    <div className="flex items-center gap-2 text-xs">
-                                        <span className="px-2 py-1 bg-blue-500/20 rounded text-blue-400">
-                                            Provider: {config.tts_provider || 'cartesia'}
-                                        </span>
-                                        <span className="px-2 py-1 bg-purple-500/20 rounded text-purple-400">
-                                            {config.tts_sample_rate / 1000}kHz
-                                        </span>
-                                    </div>
-                                </div>
-
-
-                                {/* Microphone Status Indicator */}
-                                <div className="flex items-center justify-center gap-3 p-4 bg-green-500/10 rounded-lg border border-green-500/20">
-                                    <div className="relative">
-                                        <Mic className="w-6 h-6 text-green-400" />
-                                        <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full animate-pulse" />
-                                    </div>
-                                    <span className="text-green-400 font-medium">Microphone Active - Speak to Respond</span>
-                                </div>
-
-                                {/* Chat Messages */}
-                                <div className="h-64 overflow-y-auto p-4 bg-black/20 group-hover:bg-black/5 dark:group-hover:bg-white/5 rounded-lg border border-white/5 group-hover:border-black/10 dark:group-hover:border-white/5 space-y-3">
-                                    {dummyCall.messages.length === 0 ? (
-                                        <div className="flex flex-col items-center justify-center h-full text-gray-700 dark:text-gray-500 group-hover:text-gray-800 dark:group-hover:text-gray-500 gap-2">
-                                            <Mic className="w-8 h-8 text-gray-700 dark:text-gray-500 group-hover:text-gray-800 dark:group-hover:text-gray-500" />
-                                            <p>Listening... Speak into your microphone</p>
-                                            <p className="text-xs text-gray-700 dark:text-gray-600 group-hover:text-gray-800 dark:group-hover:text-gray-600">Your speech will be transcribed automatically</p>
-                                        </div>
-                                    ) : (
-                                        dummyCall.messages.map((msg, idx) => (
-                                            <div
-                                                key={idx}
-                                                className={`flex items-start gap-3 ${msg.role === "user" ? "justify-end" : ""}`}
-                                            >
-                                                {msg.role === "assistant" && (
-                                                    <div className="p-2 bg-orange-500/20 rounded-lg shrink-0">
-                                                        <Bot className="w-4 h-4 text-orange-400" />
-                                                    </div>
-                                                )}
-                                                <div
-                                                    className={`max-w-[75%] p-3 rounded-lg ${msg.role === "user"
-                                                        ? "bg-blue-500/20 border border-blue-500/30 text-blue-900 dark:text-blue-100 group-hover:bg-blue-500/10 group-hover:border-blue-500/20 group-hover:text-blue-900 dark:group-hover:text-blue-100"
-                                                        : "bg-white/5 border border-white/10 text-gray-900 dark:text-gray-200 group-hover:bg-black/5 group-hover:border-black/10 group-hover:text-gray-800 dark:group-hover:bg-white/5 dark:group-hover:border-white/10 dark:group-hover:text-gray-200 dark:group-hover:hover:bg-white/10"
-                                                        }`}
-                                                >
-                                                    <p className="text-sm">{msg.content}</p>
-                                                </div>
-                                                {msg.role === "user" && (
-                                                    <div className="p-2 bg-blue-500/20 rounded-lg shrink-0">
-                                                        <User className="w-4 h-4 text-blue-400" />
-                                                    </div>
-                                                )}
-                                            </div>
-                                        ))
-                                    )}
-                                </div>
-
-                                <p className="text-xs text-gray-700 dark:text-gray-500 group-hover:text-gray-800 dark:group-hover:text-gray-500 text-center">
-                                    🎤 <span className="text-green-400">Voice-only mode</span> - Uses the{" "}
-                                    <span className="text-orange-400">exact same VoicePipelineService</span>,{" "}
-                                    <span className="text-purple-400">PromptManager</span>, and{" "}
-                                    <span className="text-blue-400">ConversationEngine</span> as real phone calls.
-                                </p>
-                            </div>
+                                ))}
+                            </motion.div>
                         )}
-                    </motion.div>
+                    </AnimatePresence>
 
                     {/* Provider Selection Grid */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -747,53 +414,44 @@ export default function AIOptionsPage() {
                             className="content-card group"
                         >
                             <div className="flex items-center gap-3 mb-6">
-                                <div className="p-2 bg-emerald-500/25 dark:bg-white/10 rounded-lg">
-                                    <Cpu className="w-5 h-5 text-gray-900 dark:text-white" />
+                                <div className="p-2 bg-purple-500/20 rounded-lg">
+                                    <Cpu className="w-5 h-5 text-purple-400" />
                                 </div>
                                 <div>
-                                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white group-hover:text-gray-900 dark:group-hover:text-white">LLM Model</h3>
-                                    <p className="text-sm text-gray-700 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-400">Groq AI</p>
+                                    <h3 className="text-lg font-semibold text-white group-hover:text-gray-900 dark:group-hover:text-white">LLM Model</h3>
+                                    <p className="text-sm text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-400">
+                                        {providers?.llm.providers?.join(' / ') || 'Groq'}
+                                    </p>
                                 </div>
                             </div>
 
                             <div className="space-y-4">
                                 <div>
-                                    {(() => {
-                                        const llmModels = providers?.llm.models ?? [];
-                                        const hasModels = llmModels.length > 0;
-                                        return (
-                                            <>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-400 mb-2">Model</label>
+                                    <label className="block text-sm font-medium text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-400 mb-2">Model</label>
                                     <select
-                                        value={hasModels ? config.llm_model : ""}
-                                        onChange={(e) => setConfig({ ...config, llm_model: e.target.value })}
-                                        disabled={!hasModels}
-                                        className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-gray-900 dark:text-white group-hover:text-gray-900 group-hover:bg-black/5 group-hover:border-black/10 dark:group-hover:text-white dark:group-hover:bg-white/5 dark:group-hover:border-white/10 focus:outline-none focus:border-purple-500/50"
+                                        value={config.llm_model}
+                                        onChange={(e) => {
+                                            // Auto-set llm_provider from the selected model so a Gemini model
+                                            // never gets saved with llm_provider="groq" (or vice-versa).
+                                            const picked = providers?.llm.models.find(m => m.id === e.target.value);
+                                            setConfig({
+                                                ...config,
+                                                llm_model: e.target.value,
+                                                llm_provider: (picked?.provider as typeof config.llm_provider) || config.llm_provider,
+                                            });
+                                        }}
+                                        className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white group-hover:text-gray-900 group-hover:bg-black/5 group-hover:border-black/10 dark:group-hover:text-white dark:group-hover:bg-white/5 dark:group-hover:border-white/10 focus:outline-none focus:border-purple-500/50"
                                     >
-                                        {hasModels ? (
-                                            llmModels.map((model) => (
-                                                <option key={model.id} value={model.id}>
-                                                    {model.name}
-                                                </option>
-                                            ))
-                                        ) : (
-                                            <option value="" disabled>
-                                                No models available
+                                        {providers?.llm.models.map((model) => (
+                                            <option key={model.id} value={model.id} className="bg-gray-900">
+                                                {model.provider ? `[${model.provider}] ${model.name}` : model.name}
                                             </option>
-                                        )}
+                                        ))}
                                     </select>
-                                    {!hasModels ? (
-                                        <p className="mt-2 text-xs text-gray-700 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-400">
-                                            No LLM models were returned from the API.
-                                        </p>
-                                    ) : null}
-                                            </>
-                                        );
-                                    })()}
                                 </div>
 
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-400 mb-2">
+                                    <label className="block text-sm font-medium text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-400 mb-2">
                                         Temperature: {config.llm_temperature}
                                     </label>
                                     <input
@@ -808,7 +466,7 @@ export default function AIOptionsPage() {
                                 </div>
 
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-400 mb-2">
+                                    <label className="block text-sm font-medium text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-400 mb-2">
                                         Max Tokens: {config.llm_max_tokens}
                                     </label>
                                     <input
@@ -845,44 +503,104 @@ export default function AIOptionsPage() {
                         >
                             <div className="flex items-center justify-between mb-6">
                                 <div className="flex items-center gap-3">
-                                    <div className="p-2 bg-emerald-500/25 dark:bg-white/10 rounded-lg">
-                                        <Volume2 className="w-5 h-5 text-gray-900 dark:text-white" />
+                                    <div className="p-2 bg-emerald-500/20 rounded-lg">
+                                        <Volume2 className="w-5 h-5 text-emerald-400" />
                                     </div>
                                     <div>
-                                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white group-hover:text-gray-900 dark:group-hover:text-white">TTS Voice ({voices.filter(v => v.provider === ttsProvider).length} available)</h3>
-                                        <p className="text-sm text-gray-700 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-400">Select a voice for your AI agent</p>
+                                        <h3 className="text-lg font-semibold text-white group-hover:text-gray-900 dark:group-hover:text-white">TTS Voice ({voicesForSelectedProvider.length} available)</h3>
+                                        <p className="text-sm text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-400">Select a voice for your AI agent</p>
                                     </div>
                                 </div>
 
                                 {/* Provider Selector */}
                                 <div className="flex gap-2 p-1 bg-white/5 group-hover:bg-black/5 dark:group-hover:bg-white/5 rounded-lg border border-white/10 group-hover:border-black/10 dark:group-hover:border-white/10">
-                                    <button
-                                        onClick={() => setTtsProvider("cartesia")}
-                                        className="px-4 py-2 rounded-md text-sm font-medium transition-all bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-white shadow-lg shadow-teal-500/25 hover:scale-[1.02] active:scale-[0.99]"
-                                    >
-                                        Cartesia ({voices.filter(v => v.provider === "cartesia").length})
-                                    </button>
-                                    <button
-                                        onClick={() => setTtsProvider("google")}
-                                        className="px-4 py-2 rounded-md text-sm font-medium transition-all bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-white shadow-lg shadow-teal-500/25 hover:scale-[1.02] active:scale-[0.99]"
-                                    >
-                                        Google ({voices.filter(v => v.provider === "google").length})
-                                    </button>
+                                    {availableTtsProviders.map((providerName) => {
+                                        const isActive = ttsProvider === providerName;
+                                        return (
+                                            <button
+                                                key={providerName}
+                                                onClick={() => {
+                                                    setTtsProvider(providerName);
+                                                    setConfig((prev) => {
+                                                        if (!prev) return prev;
+                                                        const providerVoices = voices.filter((voice) => voice.provider === providerName);
+                                                        const nextVoiceId = providerVoices.some((voice) => voice.id === prev.tts_voice_id)
+                                                            ? prev.tts_voice_id
+                                                            : (providerVoices[0]?.id ?? prev.tts_voice_id);
+                                                        return {
+                                                            ...prev,
+                                                            tts_provider: providerName,
+                                                            tts_model: getDefaultTtsModel(providerName, providers),
+                                                            tts_voice_id: nextVoiceId,
+                                                            tts_sample_rate: getDefaultTtsSampleRate(providerName),
+                                                        };
+                                                    });
+                                                }}
+                                                className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                                                    isActive
+                                                        ? "bg-gradient-to-r from-purple-500 to-blue-500 text-white shadow-lg shadow-purple-500/25"
+                                                        : "bg-transparent text-gray-300 hover:bg-white/10"
+                                                }`}
+                                            >
+                                                {providerName} ({voices.filter((v) => v.provider === providerName).length})
+                                            </button>
+                                        );
+                                    })}
                                 </div>
+                            </div>
+
+                            <div className="mb-4">
+                                <label className="block text-sm font-medium text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-400 mb-2">
+                                    TTS Model
+                                </label>
+                                <select
+                                    value={config.tts_model}
+                                    onChange={(e) => setConfig({ ...config, tts_model: e.target.value })}
+                                    className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white group-hover:text-gray-900 group-hover:bg-black/5 group-hover:border-black/10 dark:group-hover:text-white dark:group-hover:bg-white/5 dark:group-hover:border-white/10 focus:outline-none focus:border-emerald-500/50"
+                                >
+                                    {ttsModelsForSelectedProvider.map((model) => (
+                                        <option key={model.id} value={model.id} className="bg-gray-900">
+                                            {model.name}
+                                        </option>
+                                    ))}
+                                </select>
+                                {ttsModelsForSelectedProvider.find((model) => model.id === config.tts_model) && (
+                                    <div className="mt-3 p-3 bg-emerald-500/10 rounded-lg border border-emerald-500/20">
+                                        <p className="text-sm text-emerald-300">
+                                            {ttsModelsForSelectedProvider.find((model) => model.id === config.tts_model)?.description}
+                                        </p>
+                                        <p className="text-xs text-emerald-400 mt-1">
+                                            Speed: {ttsModelsForSelectedProvider.find((model) => model.id === config.tts_model)?.speed || "n/a"}
+                                        </p>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Voice Cards Grid - Filtered by Provider */}
                             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
-                                {voices
-                                    .filter(voice => voice.provider === ttsProvider)
-                                    .map((voice) => (
+                                {voicesForSelectedProvider.length === 0 && (
+                                    <div className="col-span-full rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
+                                        {ttsProvider === "elevenlabs" && elevenLabsError
+                                            ? <>
+                                                <span className="font-semibold">ElevenLabs API error:</span>{" "}
+                                                {elevenLabsError.includes("401")
+                                                    ? "API key is invalid or expired. Update ELEVENLABS_API_KEY in your .env file and restart the server."
+                                                    : elevenLabsError}
+                                              </>
+                                            : `No voices are available for "${ttsProvider}". Check that the provider key is configured and reload this page.`}
+                                    </div>
+                                )}
+                                {voicesForSelectedProvider.map((voice) => (
                                         <div
                                             key={voice.id}
                                             onClick={() => setConfig({
                                                 ...config,
                                                 tts_voice_id: voice.id,
-                                                tts_provider: voice.provider === 'google' ? 'google' : 'cartesia',
-                                                tts_sample_rate: voice.provider === 'google' ? 24000 : 16000
+                                                tts_provider: voice.provider,
+                                                tts_model: ttsModelsForSelectedProvider.some((model) => model.id === config.tts_model)
+                                                    ? config.tts_model
+                                                    : getDefaultTtsModel(voice.provider, providers),
+                                                tts_sample_rate: getDefaultTtsSampleRate(voice.provider),
                                             })}
                                             className={`relative p-3 rounded-lg border cursor-pointer transition-all hover:scale-[1.02] ${config.tts_voice_id === voice.id
                                                 ? "border-emerald-500 bg-emerald-500/20"
@@ -916,9 +634,9 @@ export default function AIOptionsPage() {
                                                     >
                                                         <Volume2 className="w-3 h-3" style={{ color: voice.accent_color || "#10B981" }} />
                                                     </div>
-                                                    <p className="font-medium text-sm text-gray-900 dark:text-white group-hover:text-gray-900 dark:group-hover:text-white">{voice.name}</p>
+                                                    <p className="font-medium text-sm text-white group-hover:text-gray-900 dark:group-hover:text-white">{getDisplayVoiceName(voice)}</p>
                                                 </div>
-                                                <p className="text-xs text-gray-700 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-400 mt-1 line-clamp-2">
+                                                <p className="text-xs text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-400 mt-1 line-clamp-2">
                                                     {voice.description}
                                                 </p>
 
@@ -932,6 +650,9 @@ export default function AIOptionsPage() {
                                                             {voice.gender}
                                                         </span>
                                                     )}
+                                                    <span className="text-xs px-1.5 py-0.5 rounded bg-white/10 text-gray-300">
+                                                        {(voice.language || "unknown").toUpperCase()}
+                                                    </span>
                                                 </div>
                                             </div>
 
@@ -948,7 +669,7 @@ export default function AIOptionsPage() {
                             {/* Selected Voice Preview */}
                             {(() => {
                                 const selectedVoice = voices.find(v => v.id === config.tts_voice_id);
-                                if (!selectedVoice) return null;
+                                if (!selectedVoice || selectedVoice.provider !== ttsProvider) return null;
                                 return (
                                     <div className="p-4 bg-emerald-500/10 rounded-lg border border-emerald-500/30">
                                         <div className="flex items-center gap-3">
@@ -959,8 +680,8 @@ export default function AIOptionsPage() {
                                                 <Volume2 className="w-5 h-5" style={{ color: selectedVoice.accent_color || "#10B981" }} />
                                             </div>
                                             <div className="flex-1">
-                                            <p className="text-sm font-medium text-gray-900 dark:text-white group-hover:text-gray-900 dark:group-hover:text-white">{selectedVoice.name}</p>
-                                            <p className="text-xs text-gray-700 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-400">{selectedVoice.description}</p>
+                                            <p className="text-sm font-medium text-white group-hover:text-gray-900 dark:group-hover:text-white">{getDisplayVoiceName(selectedVoice)}</p>
+                                            <p className="text-xs text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-400">{selectedVoice.description}</p>
                                             </div>
                                             <button
                                                 onClick={() => handlePreviewVoiceById(selectedVoice.id)}
@@ -990,18 +711,18 @@ export default function AIOptionsPage() {
                     >
                         <div className="flex items-center justify-between mb-6">
                             <div className="flex items-center gap-3">
-                                <div className="p-2 bg-emerald-500/25 dark:bg-white/10 rounded-lg">
-                                    <Zap className="w-5 h-5 text-gray-900 dark:text-white" />
+                                <div className="p-2 bg-yellow-500/20 rounded-lg">
+                                    <Zap className="w-5 h-5 text-yellow-400" />
                                 </div>
                                 <div>
-                                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white group-hover:text-gray-900 dark:group-hover:text-white">Latency Metrics</h3>
-                                    <p className="text-sm text-gray-700 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-400">Real-time performance tracking</p>
+                                    <h3 className="text-lg font-semibold text-white group-hover:text-gray-900 dark:group-hover:text-white">Latency Metrics</h3>
+                                    <p className="text-sm text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-400">Real-time performance tracking</p>
                                 </div>
                             </div>
                             <button
                                 onClick={handleRunBenchmark}
                                 disabled={benchmarking}
-                                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 rounded-lg text-white font-medium transition-all shadow-lg shadow-teal-500/25 hover:scale-[1.02] active:scale-[0.99] disabled:opacity-50"
+                                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 rounded-lg text-white font-medium transition-all shadow-lg shadow-purple-500/25 hover:scale-[1.02] active:scale-[0.99] disabled:opacity-50"
                             >
                                 {benchmarking ? (
                                     <RefreshCw className="w-4 h-4 animate-spin" />
@@ -1017,31 +738,31 @@ export default function AIOptionsPage() {
                                 <p className="text-2xl font-bold text-purple-400">
                                     {latencyMetrics.llm_first_token_ms?.toFixed(0) || "—"}
                                 </p>
-                                <p className="text-xs text-gray-700 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-400 mt-1">LLM First Token (ms)</p>
+                                <p className="text-xs text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-400 mt-1">LLM First Token (ms)</p>
                             </div>
                             <div className="p-4 bg-white/5 group-hover:bg-black/5 dark:group-hover:bg-white/5 rounded-lg text-center transition-[transform,background-color,box-shadow] duration-150 ease-out hover:bg-white/10 group-hover:hover:bg-black/10 dark:group-hover:hover:bg-white/10 hover:scale-[1.02] hover:shadow-md">
                                 <p className="text-2xl font-bold text-purple-400">
                                     {latencyMetrics.llm_total_ms?.toFixed(0) || "—"}
                                 </p>
-                                <p className="text-xs text-gray-700 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-400 mt-1">LLM Total (ms)</p>
+                                <p className="text-xs text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-400 mt-1">LLM Total (ms)</p>
                             </div>
                             <div className="p-4 bg-white/5 group-hover:bg-black/5 dark:group-hover:bg-white/5 rounded-lg text-center transition-[transform,background-color,box-shadow] duration-150 ease-out hover:bg-white/10 group-hover:hover:bg-black/10 dark:group-hover:hover:bg-white/10 hover:scale-[1.02] hover:shadow-md">
                                 <p className="text-2xl font-bold text-emerald-400">
                                     {latencyMetrics.tts_first_audio_ms?.toFixed(0) || "—"}
                                 </p>
-                                <p className="text-xs text-gray-700 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-400 mt-1">TTS First Audio (ms)</p>
+                                <p className="text-xs text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-400 mt-1">TTS First Audio (ms)</p>
                             </div>
                             <div className="p-4 bg-white/5 group-hover:bg-black/5 dark:group-hover:bg-white/5 rounded-lg text-center transition-[transform,background-color,box-shadow] duration-150 ease-out hover:bg-white/10 group-hover:hover:bg-black/10 dark:group-hover:hover:bg-white/10 hover:scale-[1.02] hover:shadow-md">
                                 <p className="text-2xl font-bold text-emerald-400">
                                     {latencyMetrics.tts_total_ms?.toFixed(0) || "—"}
                                 </p>
-                                <p className="text-xs text-gray-700 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-400 mt-1">TTS Total (ms)</p>
+                                <p className="text-xs text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-400 mt-1">TTS Total (ms)</p>
                             </div>
                             <div className="p-4 bg-white/5 group-hover:bg-black/5 dark:group-hover:bg-white/5 rounded-lg text-center transition-[transform,background-color,box-shadow] duration-150 ease-out hover:bg-white/10 group-hover:hover:bg-black/10 dark:group-hover:hover:bg-white/10 hover:scale-[1.02] hover:shadow-md">
                                 <p className="text-2xl font-bold text-yellow-400">
                                     {latencyMetrics.total_pipeline_ms?.toFixed(0) || "—"}
                                 </p>
-                                <p className="text-xs text-gray-700 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-400 mt-1">Total Pipeline (ms)</p>
+                                <p className="text-xs text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-400 mt-1">Total Pipeline (ms)</p>
                             </div>
                         </div>
                     </motion.div>
@@ -1054,12 +775,12 @@ export default function AIOptionsPage() {
                         className="content-card group"
                     >
                         <div className="flex items-center gap-3 mb-6">
-                            <div className="p-2 bg-emerald-500/25 dark:bg-white/10 rounded-lg">
-                                <MessageSquare className="w-5 h-5 text-gray-900 dark:text-white group-hover:text-gray-900 dark:group-hover:text-white" />
+                            <div className="p-2 bg-white/10 rounded-lg">
+                                <MessageSquare className="w-5 h-5 text-white group-hover:text-gray-900 dark:group-hover:text-white" />
                             </div>
                             <div>
-                                <h3 className="text-lg font-semibold text-gray-900 dark:text-white group-hover:text-gray-900 dark:group-hover:text-white">Test LLM</h3>
-                                <p className="text-sm text-gray-700 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-gray-400">Send a message to test the selected model</p>
+                                <h3 className="text-lg font-semibold text-white group-hover:text-gray-900 dark:group-hover:text-white">Test LLM</h3>
+                                <p className="text-sm text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-400">Send a message to test the selected model</p>
                             </div>
                         </div>
 
@@ -1071,12 +792,12 @@ export default function AIOptionsPage() {
                                     onChange={(e) => setTestMessage(e.target.value)}
                                     onKeyDown={(e) => e.key === "Enter" && handleTestLLM()}
                                     placeholder="Type a message to test the LLM..."
-                                    className="flex-1 bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-gray-900 dark:text-white group-hover:text-gray-900 group-hover:bg-black/5 group-hover:border-black/10 dark:group-hover:text-white dark:group-hover:bg-white/5 dark:group-hover:border-white/10 placeholder-gray-500 transition-[background-color,border-color,color] duration-150 ease-out hover:bg-white/10 group-hover:hover:bg-black/10 dark:group-hover:hover:bg-white/10 hover:border-white/20 focus:outline-none focus:border-purple-500/50"
+                                    className="flex-1 bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-white group-hover:text-gray-900 group-hover:bg-black/5 group-hover:border-black/10 dark:group-hover:text-white dark:group-hover:bg-white/5 dark:group-hover:border-white/10 placeholder-gray-500 transition-[background-color,border-color,color] duration-150 ease-out hover:bg-white/10 group-hover:hover:bg-black/10 dark:group-hover:hover:bg-white/10 hover:border-white/20 focus:outline-none focus:border-purple-500/50"
                                 />
                                 <button
                                     onClick={handleTestLLM}
                                     disabled={testing || !testMessage.trim()}
-                                    className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 rounded-lg text-white font-medium transition-all shadow-lg shadow-teal-500/25 hover:scale-[1.02] active:scale-[0.99]"
+                                    className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 rounded-lg text-white font-medium transition-all shadow-lg shadow-purple-500/25 hover:scale-[1.02] active:scale-[0.99]"
                                 >
                                     {testing ? (
                                         <RefreshCw className="w-4 h-4 animate-spin" />
@@ -1089,7 +810,7 @@ export default function AIOptionsPage() {
 
                             {testResponse && (
                                 <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-lg">
-                                    <p className="text-sm text-gray-900 dark:text-gray-300 whitespace-pre-wrap">{testResponse}</p>
+                                    <p className="text-sm text-gray-300 whitespace-pre-wrap">{testResponse}</p>
                                 </div>
                             )}
                         </div>
@@ -1104,7 +825,7 @@ export default function AIOptionsPage() {
                     >
                         <button
                             onClick={handleSaveConfig}
-                            className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 rounded-lg text-white font-medium transition-all shadow-lg shadow-teal-500/25 hover:scale-[1.02] active:scale-[0.99]"
+                            className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 rounded-lg text-white font-medium transition-all shadow-lg shadow-purple-500/25 hover:scale-[1.02] active:scale-[0.99]"
                         >
                             <Save className="w-5 h-5" />
                             <span>Save Configuration</span>

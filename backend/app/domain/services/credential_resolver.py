@@ -71,6 +71,15 @@ class CredentialResolver:
     env second. Safe to construct per-request; the underlying DB pool
     handles pooling."""
 
+    # Process-lifetime cache so we don't pay a DB roundtrip on every
+    # voice-session creation. Most deploys have an empty
+    # tenant_ai_credentials table, so the first resolve per (tenant,
+    # provider) writes a sentinel here and every subsequent resolve is
+    # an in-memory dict hit — restoring the demo-ready latency profile
+    # where keys came from os.getenv() directly.
+    _SENTINEL_USE_ENV = object()
+    _CACHE: dict[tuple[str, str, str], Any] = {}
+
     def __init__(
         self,
         db_pool: Any = None,
@@ -94,15 +103,45 @@ class CredentialResolver:
         returns the env fallback.
         """
         if tenant_id:
+            cache_key = (tenant_id, provider.strip().lower(), credential_kind)
+            cached = CredentialResolver._CACHE.get(cache_key)
+            if cached is CredentialResolver._SENTINEL_USE_ENV:
+                return resolve_sync_env_only(provider, env_var=env_var)
+            if cached is not None:
+                return cached  # type: ignore[return-value]
+
             tenant_value = await self._resolve_tenant(
                 provider=provider,
                 tenant_id=tenant_id,
                 credential_kind=credential_kind,
             )
             if tenant_value:
+                CredentialResolver._CACHE[cache_key] = tenant_value
                 return tenant_value
+            CredentialResolver._CACHE[cache_key] = CredentialResolver._SENTINEL_USE_ENV
 
         return resolve_sync_env_only(provider, env_var=env_var)
+
+    @classmethod
+    def invalidate_cache(
+        cls,
+        *,
+        tenant_id: Optional[str] = None,
+        provider: Optional[str] = None,
+    ) -> None:
+        """Drop cached entries. Call when a tenant rotates a key via
+        the AI Options UI so the next resolve picks up the new value
+        instead of serving the stale cached one."""
+        if tenant_id is None and provider is None:
+            cls._CACHE.clear()
+            return
+        prov = provider.strip().lower() if provider else None
+        for key in list(cls._CACHE.keys()):
+            t_id, p, _ = key
+            if (tenant_id is None or t_id == tenant_id) and (
+                prov is None or p == prov
+            ):
+                cls._CACHE.pop(key, None)
 
     # ──────────────────────────────────────────────────────────────────
 
