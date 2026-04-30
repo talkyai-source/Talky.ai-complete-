@@ -126,11 +126,31 @@ class ContactListResponse(BaseModel):
 @router.get("/")
 async def list_campaigns(
     request: Request,
-    db_client: Client = Depends(get_db_client)
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
 ):
-    """List all campaigns"""
+    """List all campaigns belonging to the current user's tenant.
+
+    The `get_current_user` dependency MUST be present here. Without it
+    the request never establishes a tenant context, RLS treats the
+    connection as anonymous, and the campaigns table returns 0 rows —
+    visible to the frontend as an empty list / "no campaigns found"
+    even when the tenant has many. This was the root cause of the
+    'frontend shows no campaigns' bug. Defense-in-depth: also apply an
+    explicit tenant filter so a future RLS misconfiguration can't leak
+    other tenants' data through this endpoint.
+    """
+    if not current_user.tenant_id:
+        # Authenticated but unattached user — return empty list rather
+        # than 500 so the dashboard renders cleanly.
+        return {"campaigns": []}
+
     try:
-        response = db_client.table("campaigns").select("*").order("created_at", desc=True).execute()
+        from app.utils.tenant_filter import apply_tenant_filter
+        query = db_client.table("campaigns").select("*")
+        query = apply_tenant_filter(query, current_user.tenant_id)
+        query = query.order("created_at", desc=True)
+        response = query.execute()
         return {"campaigns": response.data}
     except Exception as e:
         logger.error(f"Error listing campaigns: {e}")

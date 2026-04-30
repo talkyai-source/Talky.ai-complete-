@@ -155,6 +155,18 @@ class ResilientSTTProvider(STTProvider):
             except Exception as exc:
                 logger.debug("resilient_stt_cleanup_error provider=%s err=%s", p.name, exc)
 
+    async def pre_connect(self, call_id: str) -> None:
+        """Forward pre-warm to the primary so flipping
+        ``STT_FAILOVER_ENABLED=true`` does not silently regress the
+        ringing-phase WebSocket pre-handshake (~300ms saved per call).
+        Secondary stays cold until failover actually fires — opening
+        two Deepgram sockets per call would double quota burn for no
+        latency benefit.
+        """
+        primary_pre = getattr(self._primary, "pre_connect", None)
+        if primary_pre is not None:
+            await primary_pre(call_id)
+
     async def stream_transcribe(
         self,
         audio_stream: AsyncIterator[AudioChunk],

@@ -44,6 +44,17 @@ def _make_session() -> CallSession:
     return session
 
 
+def test_find_sentence_end_accepts_terminal_punctuation_without_space():
+    assert VoicePipelineService._find_sentence_end("Hello there.") == len("Hello there.") - 1
+    assert VoicePipelineService._find_sentence_end("Can you hear me?") == len("Can you hear me?") - 1
+    assert VoicePipelineService._find_sentence_end("Great!") == len("Great!") - 1
+
+
+def test_find_sentence_end_does_not_split_terminal_abbreviation():
+    assert VoicePipelineService._find_sentence_end("Please ask Dr.") == -1
+    assert VoicePipelineService._find_sentence_end("Please ask A.") == -1
+
+
 @pytest.mark.asyncio
 async def test_process_audio_stream_does_not_start_turn_before_user_speech():
     media_gateway = MagicMock()

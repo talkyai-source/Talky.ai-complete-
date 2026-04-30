@@ -420,6 +420,12 @@ class DeepgramFluxSTTProvider(STTProvider):
                         if not _first_audio_sent:
                             _first_audio_sent = True
                             elapsed_ms = (asyncio.get_event_loop().time() - _ws_open_time) * 1000
+                            logger.info(
+                                "flux_first_audio_sent call_id=%s elapsed_ms=%.0f — "
+                                "caller audio now flowing to Deepgram STT",
+                                call_id, elapsed_ms,
+                                extra={"call_id": call_id, "flux_startup_ms": round(elapsed_ms)},
+                            )
                             if elapsed_ms > 8000:
                                 logger.warning(
                                     "deepgram_flux_slow_start call_id=%s elapsed_ms=%.0f — "
