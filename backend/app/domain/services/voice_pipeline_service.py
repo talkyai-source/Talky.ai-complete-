@@ -153,13 +153,44 @@ class VoicePipelineService:
     # Only these trigger early TTS flush — avoids splitting at list commas
     # ("apples, oranges, and pears") by requiring a coordinating conjunction.
     _CLAUSE_CONJUNCTIONS = ("and ", "but ", "so ", "or ", "yet ", "nor ")
+    _COMMON_ABBREVIATIONS = {
+        "mr",
+        "mrs",
+        "ms",
+        "dr",
+        "prof",
+        "sr",
+        "jr",
+        "st",
+        "vs",
+        "etc",
+        "e.g",
+        "i.e",
+    }
+
+    @staticmethod
+    def _is_terminal_period_boundary(text: str, index: int) -> bool:
+        """Return False for common abbreviation/initial periods at buffer end."""
+        prefix = text[:index].rstrip()
+        if not prefix:
+            return True
+        token = prefix.rsplit(maxsplit=1)[-1].strip("\"'([{")
+        token_lower = token.lower()
+        if token_lower in VoicePipelineService._COMMON_ABBREVIATIONS:
+            return False
+        if len(token) == 1 and token.isalpha() and token.isupper():
+            return False
+        return True
 
     @staticmethod
     def _find_sentence_end(text: str, allow_clause: bool = False) -> int:
         """
-        Return the index of the first sentence-ending character followed by a
-        space (clearly end-of-sentence, not mid-abbreviation).  Returns -1 if
-        no boundary is found.
+        Return the index of the first sentence-ending character.
+
+        Streaming LLM chunks often end exactly at punctuation ("Hello.")
+        before a following space token arrives. Treat that terminal punctuation
+        as a boundary so TTS can start immediately instead of waiting for the
+        Groq inter-token stall guard to expire.
 
         Skips ellipsis (...) to avoid splitting mid-thought pauses.
 
@@ -178,7 +209,7 @@ class VoicePipelineService:
         while i < len(text):
             ch = text[i]
             if ch in "!?":
-                if i + 1 < len(text) and text[i + 1] == " ":
+                if i + 1 == len(text) or (i + 1 < len(text) and text[i + 1] == " "):
                     return i
             elif ch == ".":
                 # Skip ellipsis: advance past ALL consecutive dots so the last
@@ -188,6 +219,8 @@ class VoicePipelineService:
                         i += 1
                     # After the ellipsis just continue scanning — don't return.
                 elif i + 1 < len(text) and text[i + 1] == " ":
+                    return i
+                elif i + 1 == len(text) and VoicePipelineService._is_terminal_period_boundary(text, i):
                     return i
             elif (
                 allow_clause
@@ -276,17 +309,77 @@ class VoicePipelineService:
         async def audio_stream() -> AsyncIterator[AudioChunk]:
             queue = self.media_gateway.get_audio_queue(call_id)
             if queue is None:
+                logger.error(
+                    "audio_stream_no_queue call_id=%s — media gateway has no "
+                    "session registered; ALL caller audio will be lost!",
+                    call_id,
+                )
                 return
+            logger.info(
+                "audio_stream_started call_id=%s queue_size=%d stt_active=%s",
+                call_id, queue.qsize(), session.stt_active,
+            )
+            _first_chunk_logged = False
+            _chunks_yielded = 0
+            # Diagnostic: track audio level to distinguish silence from speech
+            # in cases where Deepgram never fires StartOfTurn. Logged every
+            # ~1s so we can see whether real voice is on the wire.
+            import struct as _struct
+            _level_bucket_t0 = asyncio.get_event_loop().time()
+            _level_max = 0
+            _level_sum_sq = 0.0
+            _level_samples = 0
             while session.stt_active:
                 try:
                     chunk = await asyncio.wait_for(queue.get(), timeout=0.02)
                     if chunk:
-                        yield AudioChunk(data=chunk) if isinstance(chunk, bytes) else chunk
+                        _chunks_yielded += 1
+                        raw_bytes = chunk if isinstance(chunk, bytes) else getattr(chunk, "data", b"")
+                        if not _first_chunk_logged:
+                            _first_chunk_logged = True
+                            logger.info(
+                                "audio_stream_first_chunk call_id=%s "
+                                "chunk_len=%d — audio now flowing to STT",
+                                call_id, len(raw_bytes),
+                            )
+                        # Accumulate audio-level stats on 16-bit mono PCM frames
+                        if raw_bytes and len(raw_bytes) >= 2 and len(raw_bytes) % 2 == 0:
+                            try:
+                                samples = _struct.unpack(f"<{len(raw_bytes)//2}h", raw_bytes)
+                                for s in samples:
+                                    if abs(s) > _level_max:
+                                        _level_max = abs(s)
+                                    _level_sum_sq += s * s
+                                _level_samples += len(samples)
+                            except Exception:
+                                pass
+                        # Emit a level log roughly once per second
+                        _now = asyncio.get_event_loop().time()
+                        if _now - _level_bucket_t0 >= 1.0 and _level_samples > 0:
+                            import math as _math
+                            rms = _math.sqrt(_level_sum_sq / _level_samples)
+                            # Speech ~ rms > 500; quiet room ~ rms < 100; pure silence ~ 0
+                            logger.info(
+                                "audio_level call_id=%s window_s=%.1f chunks=%d "
+                                "rms=%.0f peak=%d samples=%d "
+                                "(>500=speech-likely, <100=silence-likely)",
+                                call_id, _now - _level_bucket_t0,
+                                _chunks_yielded, rms, _level_max, _level_samples,
+                            )
+                            _level_bucket_t0 = _now
+                            _level_max = 0
+                            _level_sum_sq = 0.0
+                            _level_samples = 0
+                        yield AudioChunk(data=raw_bytes) if isinstance(chunk, bytes) else chunk
                 except asyncio.TimeoutError:
                     continue
                 except Exception as e:
                     logger.error(f"Audio stream error: {e}", extra={"call_id": call_id})
                     break
+            logger.info(
+                "audio_stream_ended call_id=%s chunks_yielded=%d stt_active=%s",
+                call_id, _chunks_yielded, session.stt_active,
+            )
 
         # STT span wraps the full transcription stream
         with pipeline_span("stt", call_id=call_id, provider="deepgram",
@@ -615,7 +708,20 @@ class VoicePipelineService:
         # LLM generates a full response to a non-event and loses the
         # conversation's thread. The persona prompts also instruct the
         # model on this at the language level — belt AND braces.
-        if _is_backchannel(full_transcript):
+        #
+        # Exception: never suppress the callee's FIRST utterance of the
+        # call. In user-first mode that utterance IS the conversation
+        # opener (a "Hello?" that the STT may briefly mis-hear as "No.")
+        # — suppressing it leaves the agent silent, the callee repeats
+        # themselves, and 5–6 seconds of perceived dead air pile up
+        # before Flux finally lands a clean transcript. In agent-first
+        # mode the first user utterance is their reply to the greeting
+        # ("yeah", "sure", "uh-huh") and must reach the LLM as a real
+        # affirmative, not be filtered out as noise.
+        _has_prior_user_turn = any(
+            m.role == MessageRole.USER for m in session.conversation_history
+        )
+        if _is_backchannel(full_transcript) and _has_prior_user_turn:
             logger.info(
                 "backchannel_suppressed transcript=%r call=%s",
                 full_transcript, call_id[:12],
@@ -627,6 +733,12 @@ class VoicePipelineService:
             except AttributeError:
                 pass
             return
+        elif _is_backchannel(full_transcript):
+            logger.info(
+                "backchannel_allowed_turn0 transcript=%r call=%s — "
+                "first user utterance, never suppressed",
+                full_transcript, call_id[:12],
+            )
 
         # Clear any barge-in event that was set by the user's own StartOfTurn that
         # triggered this turn.  Deepgram Flux fires StartOfTurn for ALL speech —
@@ -647,7 +759,11 @@ class VoicePipelineService:
             pending_task = None
 
         if pending_task and pending_task is not current_task:
-            logger.debug(
+            # Elevated to INFO from DEBUG — when this guard fires, a turn
+            # is silently dropped, which has historically masked "the
+            # agent went silent" mysteries during latency triage. INFO
+            # keeps it visible without polluting hot-path logs.
+            logger.info(
                 "turn_skipped_pending_task",
                 extra={
                     "call_id": call_id,
@@ -662,7 +778,11 @@ class VoicePipelineService:
         # session.llm_active is set True in _send_outbound_greeting and in this
         # function; it is reset to False in the finally block below.
         if session.llm_active and pending_task is not current_task:
-            logger.debug(
+            # Elevated to INFO from DEBUG — same reason as above. If this
+            # ever fires on turn 0 of a real call, it indicates llm_active
+            # leaked True from a previous flow (e.g. a greeting that
+            # raised before its finally-reset ran).
+            logger.info(
                 "turn_skipped_llm_busy",
                 extra={
                     "call_id": call_id,
@@ -769,6 +889,33 @@ class VoicePipelineService:
                         "total_latency_ms": round(total_wall, 1),
                     },
                 )
+
+                # Slow-turn marker. Per Hamming.ai's 2026 production benchmarks
+                # (P50 1.4s, P95 4.3s, P99 8.4s) and Twilio's mouth-to-ear
+                # upper limit of 1400ms, anything past 1500ms response_start
+                # is what callees feel as "this call sounds different". Tag
+                # the span and emit a structured log so outliers can be
+                # grepped from the firehose without averaging variance away.
+                _response_start = (
+                    tracked.response_start_latency_ms if tracked else None
+                )
+                if _response_start is not None and _response_start > 1500:
+                    turn_span.set_attribute("voice.turn.slow", True)
+                    logger.warning(
+                        "voice_slow_turn call_id=%s turn_id=%d "
+                        "response_start_ms=%.1f stt_first_ms=%s "
+                        "llm_first_token_ms=%s tts_first_chunk_ms=%s "
+                        "llm_total_ms=%.1f tts_total_ms=%.1f transcript=%r",
+                        call_id[:12],
+                        session.turn_id,
+                        _response_start,
+                        round(tracked.stt_first_transcript_ms, 1) if tracked.stt_first_transcript_ms else "n/a",
+                        round(tracked.llm_first_token_ms, 1) if tracked.llm_first_token_ms else "n/a",
+                        round(tracked.tts_first_chunk_ms, 1) if tracked.tts_first_chunk_ms else "n/a",
+                        round(llm_latency, 1),
+                        round(tts_latency, 1),
+                        full_transcript[:80],
+                    )
 
                 if websocket:
                     try:
@@ -1260,12 +1407,41 @@ class VoicePipelineService:
                 # AI to start speaking again right after being interrupted.
                 return interrupted
 
-            async for audio_chunk in self.tts_provider.stream_synthesize(
+            # TTS hard inter-chunk timeout — protects against silent WS hangs
+            # mid-sentence. Pattern adapted from Pipecat
+            # (https://github.com/pipecat-ai/pipecat) — same shape they use for
+            # Deepgram STT reconnect: convert `async for` into manual
+            # `__anext__()` with a per-step deadline so a stuck provider socket
+            # ends the turn cleanly instead of freezing the call.
+            #
+            # 5s is intentionally larger than typical first-chunk latency
+            # (~250ms for Cartesia/Chirp/ElevenLabs streaming) so it never
+            # fires on healthy traffic. It only catches the rare case where
+            # the upstream WS dies without notifying the SDK.
+            _TTS_INTER_CHUNK_TIMEOUT_S = 5.0
+            _tts_iter = self.tts_provider.stream_synthesize(
                 text,
                 voice_id=session.voice_id,
                 sample_rate=self.tts_sample_rate,
                 call_id=call_id,
-            ):
+            ).__aiter__()
+            provider_exhausted = False
+            while True:
+                try:
+                    audio_chunk = await asyncio.wait_for(
+                        _tts_iter.__anext__(),
+                        timeout=_TTS_INTER_CHUNK_TIMEOUT_S,
+                    )
+                except StopAsyncIteration:
+                    provider_exhausted = True
+                    break
+                except asyncio.TimeoutError:
+                    logger.error(
+                        "tts_inter_chunk_timeout call_id=%s timeout_s=%.1f "
+                        "text=%r — ending turn cleanly to avoid pipeline freeze",
+                        call_id[:12], _TTS_INTER_CHUNK_TIMEOUT_S, text[:60],
+                    )
+                    break
                 if barge_in_event and barge_in_event.is_set():
                     logger.info(f"Barge-in interrupted TTS for call {call_id}")
                     interrupted = True
@@ -1321,7 +1497,7 @@ class VoicePipelineService:
                         except Exception as _exc:
                             logger.debug("tts_interrupted post-send WS send failed: %s", _exc)
                     break
-            else:
+            if provider_exhausted and not interrupted:
                 # Normal completion (not interrupted by barge-in) — flush any
                 # remaining bytes in the gateway output buffer so the last
                 # portion of audio is not silently dropped.

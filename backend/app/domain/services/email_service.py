@@ -102,11 +102,15 @@ class EmailService:
             # Attach HTML body
             msg.attach(MIMEText(html_body, "html"))
 
-            # Send via SMTP
+            # Send via SMTP. Microsoft 365 on port 587 uses STARTTLS:
+            # the connection opens plaintext, then upgrades to TLS after
+            # EHLO. aiosmtplib's `use_tls=True` is for implicit TLS on
+            # port 465 (SMTPS) and produces "SSL: WRONG_VERSION_NUMBER"
+            # against 587. Correct flag is `start_tls=True`.
             async with aiosmtplib.SMTP(
                 hostname=self.SMTP_HOST,
                 port=self.SMTP_PORT,
-                use_tls=self.SMTP_USE_TLS,
+                start_tls=self.SMTP_USE_TLS,
             ) as smtp:
                 await smtp.login(self.sender_email, self.sender_password)
                 await smtp.send_message(msg)
@@ -189,6 +193,74 @@ Talky.ai Team
         If you did not create this account, please ignore this email.
       </p>
 
+      <hr style="margin: 40px 0; border: none; border-top: 1px solid #ddd;">
+      <p style="font-size: 12px; color: #666;">
+        © 2026 Talky.ai. All rights reserved.
+      </p>
+    </div>
+  </body>
+</html>
+        """.strip()
+
+        return await self.send_email(
+            recipient_email=recipient_email,
+            subject=subject,
+            html_body=html_body,
+            text_body=text_body,
+        )
+
+    async def send_signup_code_email(
+        self,
+        recipient_email: str,
+        recipient_name: Optional[str],
+        code: str,
+        expires_in_minutes: int = 15,
+    ) -> bool:
+        """
+        Send a 6-digit signup verification code.
+
+        Used by the two-step signup flow where the code is verified BEFORE
+        the user_profiles row is created (unlike send_verification_email
+        which sends a click-to-verify link AFTER account creation).
+        """
+        name_greeting = (
+            f"Hi {recipient_name}," if recipient_name else "Hi,"
+        )
+
+        subject = f"Your Talky.ai verification code: {code}"
+
+        text_body = f"""
+{name_greeting}
+
+Your Talky.ai verification code is: {code}
+
+Enter this code on the signup page to continue. The code expires in
+{expires_in_minutes} minutes.
+
+If you did not request this code, please ignore this email.
+
+— Talky.ai
+        """.strip()
+
+        html_body = f"""
+<html>
+  <body style="font-family: Arial, sans-serif; color: #333;">
+    <div style="max-width: 600px; margin: 0 auto;">
+      <h2>Your verification code</h2>
+      <p>{name_greeting}</p>
+      <p>Enter this code on the signup page to continue:</p>
+      <div style="margin: 30px 0; text-align: center;">
+        <div style="display: inline-block; background:#f5f5f5;
+                    padding: 16px 32px; font-size: 32px;
+                    letter-spacing: 8px; font-weight: bold;
+                    font-family: monospace; border-radius: 8px;">
+          {code}
+        </div>
+      </div>
+      <p style="font-size: 13px; color: #666;">
+        The code expires in {expires_in_minutes} minutes. If you did not
+        request this code, you can safely ignore this email.
+      </p>
       <hr style="margin: 40px 0; border: none; border-top: 1px solid #ddd;">
       <p style="font-size: 12px; color: #666;">
         © 2026 Talky.ai. All rights reserved.
