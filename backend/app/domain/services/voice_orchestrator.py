@@ -100,18 +100,15 @@ class VoiceSessionConfig:
     # TTS settings
     voice_id: str = "en-US-Chirp3-HD-Leda"
     tts_model: str = ""
-    # 16 kHz is the Flux-native rate and the new telephony default. Browser
-    # demos previously used 24 kHz; they still work at 16 kHz (no audible
-    # difference on a phone-grade pipeline) and skip a resample step.
     tts_sample_rate: int = 16000
 
     # Gateway
     gateway_type: str = "browser"  # "browser" | "telephony"
-    gateway_sample_rate: int = 16000
+    gateway_sample_rate: int = 24000
     gateway_input_sample_rate: Optional[int] = None
     gateway_channels: int = 1
     gateway_bit_depth: int = 16
-    gateway_target_buffer_ms: int = 40   # Output buffer coalescing threshold (40ms for faster barge-in)
+    gateway_target_buffer_ms: int = 100
     mute_during_tts: bool = True
 
     # Session metadata
@@ -211,8 +208,8 @@ class VoiceOrchestrator:
         Called once by the container so that the first user who clicks
         "Ask AI" pays zero provider-init cost.  STT, LLM, and media_gateway
         are stateless per call (keyed by call_id internally) — safe to share.
-        TTS is NOT pre-warmed here; it is created fresh per session to avoid
-        sharing the synthesis lock across concurrent sessions.
+        TTS is warmed and immediately discarded; active sessions still create
+        fresh TTS instances to avoid sharing the synthesis lock across calls.
         """
         from app.domain.services.ask_ai_session_config import (
             build_ask_ai_session_config,
@@ -220,11 +217,18 @@ class VoiceOrchestrator:
 
         config = build_ask_ai_session_config()
         try:
-            stt, llm, gateway = await asyncio.gather(
+            stt, llm, tts, gateway = await asyncio.gather(
                 self._create_stt_provider(config),
                 self._create_llm_provider(config),
+                self._create_tts_provider(config),
                 self._create_media_gateway(config),
             )
+            try:
+                cleanup = getattr(tts, "cleanup", None)
+                if cleanup:
+                    await cleanup()
+            except Exception:
+                logger.debug("Ask AI throwaway TTS cleanup failed", exc_info=True)
             self._ask_ai_providers = (stt, llm, None, gateway)
             logger.info("Ask AI providers pre-warmed and ready (TTS is per-session)")
         except Exception as e:

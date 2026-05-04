@@ -209,6 +209,7 @@ class RecordingService:
 
     def __init__(self, db_pool: Any, s3_client: Optional[S3Client] = None) -> None:
         self._db = db_pool
+        self.supabase = db_pool
         self._s3 = s3_client or S3Client()
 
     # ── Key generation ────────────────────────────────────────────
@@ -223,6 +224,34 @@ class RecordingService:
         def safe(s: str) -> str:
             return s.replace("/", "-").replace("\\", "-").replace("..", "-") if s else "unknown"
         return f"{safe(tenant_id)}/{safe(campaign_id)}/{safe(call_id)}.wav"
+
+    def _generate_storage_path(self, call_id: str, tenant_id: str, campaign_id: str) -> str:
+        """Backward-compatible storage path helper used by legacy tests/callers."""
+        return self._s3_key(tenant_id, campaign_id, call_id)
+
+    async def save_recording(
+        self,
+        call_id: str,
+        buffer: RecordingBuffer,
+        tenant_id: str,
+        campaign_id: str,
+    ) -> Optional[str]:
+        """Backward-compatible Supabase-storage wrapper."""
+        if not buffer or buffer.total_bytes == 0:
+            return None
+
+        if hasattr(self.supabase, "storage"):
+            path = self._generate_storage_path(call_id, tenant_id, campaign_id)
+            bucket = self.supabase.storage.from_("recordings")
+            bucket.upload(path, buffer.get_wav_bytes())
+            return path
+
+        return await self.save_and_link(
+            call_id=call_id,
+            buffer=buffer,
+            tenant_id=tenant_id,
+            campaign_id=campaign_id,
+        )
 
     # ── Main workflow ─────────────────────────────────────────────
 

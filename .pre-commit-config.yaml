@@ -1,0 +1,51 @@
+# Pre-commit hooks. Install once with:  pre-commit install
+# Run manually with: pre-commit run --all-files
+#
+# These run on every `git commit` against staged files only.
+# Formatters auto-fix in-place; lint/scan hooks block the commit on issues.
+
+repos:
+  # Generic hygiene
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=500"]
+      - id: detect-private-key
+
+  # Secret scanning — same tool the CI pipeline runs
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  # Python: ruff (lint + import sort) — must match backend/pyproject.toml
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+        files: ^backend/
+      - id: ruff-format
+        files: ^backend/
+
+  # Python: black (formatter)
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+        files: ^backend/
+
+  # Python: bandit (SAST)
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.10
+    hooks:
+      - id: bandit
+        args: ["-c", "backend/pyproject.toml", "-r"]
+        files: ^backend/app/
+        additional_dependencies: ["bandit[toml]"]

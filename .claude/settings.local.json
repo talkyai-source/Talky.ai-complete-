@@ -11,7 +11,8 @@
       "Bash(curl -s http://localhost:8000/openapi.json)",
       "Bash(curl -s http://localhost:8000/swagger -w \"\\\\nStatus: %{http_code}\\\\n\")",
       "Bash(pkill -9 -f \"python\\\\|uvicorn\")",
-      "Bash(uvicorn app.main:app --port 8000 --no-reload)"
+      "Bash(uvicorn app.main:app --port 8000 --no-reload)",
+      "Bash(grep -E \"\\\\.py$\")"
     ]
   }
 }

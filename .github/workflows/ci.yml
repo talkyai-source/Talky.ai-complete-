@@ -98,24 +98,22 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio ruff pip-audit bandit
+          pip install pytest pytest-asyncio pytest-cov ruff pip-audit bandit
 
       - name: Lint with Ruff
         # FIX: removed || true — lint failures now block merges
         run: ruff check app/ --select E,F,W --ignore E501
 
       - name: Dependency vulnerability audit (pip-audit)
-        # FIX: added — checks all Python deps for known CVEs
-        run: pip-audit -r requirements.txt --ignore-vuln GHSA-jfh8-c2jp-5 || true
-        # Note: the || true above is intentional ONLY for pip-audit warnings
-        # that are known/accepted. Remove it once you've reviewed the baseline.
-        # For new builds, change to: pip-audit -r requirements.txt
+        # Fails the build on any unaccepted CVE in production deps.
+        # Add new IDs to --ignore-vuln only after reviewing & documenting why.
+        run: pip-audit -r requirements.txt --ignore-vuln GHSA-jfh8-c2jp-5
 
       - name: SAST scan (bandit)
-        # FIX: added — static analysis for common Python security issues
-        run: bandit -r app/ -ll -x app/tests --exit-zero
-        # --exit-zero for now so you can review the baseline report first.
-        # Once you've fixed HIGH severity items, remove --exit-zero.
+        # -ll = report MEDIUM and HIGH severity. Build fails on any finding.
+        # If a finding is a false positive, suppress it inline with `# nosec`
+        # plus a comment explaining why — never broaden this command.
+        run: bandit -r app/ -ll -x app/tests
 
       - name: Init test database
         run: |
@@ -124,9 +122,32 @@ jobs:
         env:
           PGPASSWORD: testpassword
 
-      - name: Run tests with pytest
-        # FIX: removed 2>&1 || true — test failures now block merges
-        run: pytest tests/ -v --tb=short -x -q
+      - name: Alembic round-trip (upgrade → downgrade → upgrade)
+        # Catches migrations that have no working downgrade path. A failed
+        # downgrade in production = unrecoverable rollback, so we test it here.
+        # Uses a separate DB so the test fixtures aren't disturbed.
+        run: |
+          PGPASSWORD=testpassword psql -h localhost -U talky -d postgres \
+            -c "CREATE DATABASE talky_alembic_test;"
+          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_alembic_test \
+            alembic upgrade head
+          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_alembic_test \
+            alembic downgrade base
+          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_alembic_test \
+            alembic upgrade head
+        env:
+          PGPASSWORD: testpassword
+
+      - name: Run tests with pytest (with coverage)
+        # Coverage threshold starts intentionally LOW so it lands without
+        # breaking the build. Ratchet it upward in follow-up PRs as test
+        # coverage grows. Never lower it.
+        run: |
+          pytest tests/ -v --tb=short -q \
+            --cov=app \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            --cov-fail-under=20
         env:
           DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_test
           REDIS_HOST: localhost
@@ -138,6 +159,50 @@ jobs:
           CARTESIA_API_KEY: test_key
           VONAGE_API_KEY: test_key
           VONAGE_API_SECRET: test_secret
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage.xml
+          retention-days: 14
+
+      - name: Export OpenAPI schema
+        # Boots the app just long enough to dump /openapi.json, then validates
+        # it. Catches accidental schema breakage (missing fields, type drift)
+        # before clients see it.
+        run: |
+          python -c "
+          from app.main import app
+          import json, sys
+          schema = app.openapi()
+          with open('openapi.json', 'w') as f:
+              json.dump(schema, f, indent=2)
+          # Sanity: must parse & contain expected top-level keys.
+          assert schema.get('openapi'), 'missing openapi version'
+          assert schema.get('paths'), 'no paths in schema'
+          print(f'OpenAPI schema OK — {len(schema[\"paths\"])} paths')
+          "
+        env:
+          DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_test
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          JWT_SECRET: ci-test-secret-key-not-for-production-32chars
+          ENVIRONMENT: test
+          DEEPGRAM_API_KEY: test_key
+          GROQ_API_KEY: test_key
+          CARTESIA_API_KEY: test_key
+          VONAGE_API_KEY: test_key
+          VONAGE_API_SECRET: test_secret
+
+      - name: Upload OpenAPI schema
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-schema
+          path: backend/openapi.json
+          retention-days: 30
 
   # ──────────────────────────────────────────────────────────────────
   # Frontend: lint + typecheck + audit + build

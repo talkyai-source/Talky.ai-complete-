@@ -108,6 +108,7 @@ class PromptManager:
                          if k not in ("system_prompt", "prompt_type", "client_description")},
             )
             prompt = self._engine.compile(req)
+            prompt = self._append_legacy_guidance(prompt, agent_config)
             logger.debug(f"Compiled core prompt type={ctx['prompt_type']} for {agent_config.company_name}")
             return prompt
         except Exception as exc:
@@ -135,6 +136,7 @@ class PromptManager:
                          if k not in ("system_prompt", "prompt_type", "client_description")},
             )
             prompt = self._engine.compile(req)
+            prompt = self._append_legacy_guidance(prompt, agent_config)
             logger.debug(f"Auto-compiled core prompt type={prompt_type} for {agent_config.company_name}")
             return prompt
         except Exception as exc:
@@ -158,6 +160,18 @@ class PromptManager:
     def _fallback_prompt(self) -> str:
         return "You are a professional voice assistant. Be concise, helpful, and natural. Maximum 2 sentences per reply."
 
+    def _append_legacy_guidance(self, prompt: str, agent_config: AgentConfig) -> str:
+        """Preserve legacy tone/rule visibility when using CorePromptEngine."""
+        additions: list[str] = []
+        if agent_config.tone and agent_config.tone not in prompt:
+            additions.append(f"Tone: {agent_config.tone}")
+        for rule in agent_config.rules.do_not_say_rules or []:
+            if rule and rule not in prompt:
+                additions.append(f"- {rule}")
+        if not additions:
+            return prompt
+        return f"{prompt}\n\nLegacy campaign guidance:\n" + "\n".join(additions)
+
     # ── State-specific rendering (unchanged from original) ─────────────────
 
     def render_system_prompt(
@@ -168,6 +182,8 @@ class PromptManager:
     ) -> str:
         """Render complete system prompt for current state."""
         base_prompt = self.get_system_prompt(agent_config)
+        kwargs.setdefault("agent_name", agent_config.agent_name)
+        kwargs.setdefault("company_name", agent_config.company_name)
         state_template_name = f"{state.value}_state"
         if state_template_name in self.templates:
             state_prompt = self.templates[state_template_name].render(**kwargs)

@@ -194,3 +194,54 @@ class TestBuildTelephonySessionConfig:
                 for _ in range(50)
             }
         assert len(names) > 1
+
+    def test_persona_campaign_missing_required_slots_fails_closed_by_default(self, monkeypatch):
+        from app.domain.services.telephony_session_config import build_telephony_session_config
+        from app.services.scripts.prompts import PromptCompositionError
+
+        campaign = {
+            "id": "bad-campaign",
+            "script_config": {
+                "persona_type": "lead_gen",
+                "company_name": "Acme",
+                "agent_names": ["Alex"],
+                "campaign_slots": {
+                    "industry": "roofing",
+                    # pricing_info intentionally missing
+                },
+            },
+        }
+
+        monkeypatch.delenv("TELEPHONY_PROMPT_STRICT_MODE", raising=False)
+        with patch(
+            "app.domain.services.telephony_session_config.get_global_config",
+            return_value=self._mock_global_config(),
+        ):
+            with pytest.raises(PromptCompositionError):
+                build_telephony_session_config(campaign=campaign)
+
+    def test_persona_campaign_can_opt_into_legacy_fallback_for_migration(self, monkeypatch):
+        from app.domain.services.telephony_session_config import build_telephony_session_config
+
+        campaign = {
+            "id": "legacy-migration-campaign",
+            "script_config": {
+                "persona_type": "lead_gen",
+                "company_name": "Acme",
+                "agent_names": ["Alex"],
+                "campaign_slots": {
+                    "industry": "roofing",
+                    # pricing_info intentionally missing
+                },
+            },
+        }
+
+        monkeypatch.setenv("TELEPHONY_PROMPT_STRICT_MODE", "0")
+        with patch(
+            "app.domain.services.telephony_session_config.get_global_config",
+            return_value=self._mock_global_config(),
+        ):
+            config = build_telephony_session_config(campaign=campaign)
+
+        assert "ROLE — LEAD GENERATION" not in config.system_prompt
+        assert "GREETING RESPONSE" in config.system_prompt

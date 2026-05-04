@@ -51,6 +51,7 @@ class EmailService:
             template_manager: Optional template manager (uses singleton if not provided)
         """
         self.db_pool = db_pool
+        self.supabase = db_pool
         self.encryption = get_encryption_service()
         self.template_manager = template_manager or get_email_template_manager()
     
@@ -67,6 +68,40 @@ class EmailService:
         Raises:
             EmailNotConnectedError: If no active email connector found
         """
+        if hasattr(self.supabase, "table"):
+            response = self.supabase.table("connectors").select(
+                "id, provider, status"
+            ).eq("tenant_id", tenant_id).eq(
+                "type", "email"
+            ).eq("status", "active").execute()
+            if not response.data:
+                logger.warning(f"No active email connector for tenant {tenant_id[:8]}...")
+                raise EmailNotConnectedError()
+
+            connector_data = response.data[0]
+            connector_id = str(connector_data["id"])
+            provider = connector_data["provider"]
+
+            account_response = self.supabase.table("connector_accounts").select(
+                "access_token_encrypted, refresh_token_encrypted, token_expires_at, account_email"
+            ).eq("connector_id", connector_id).eq("status", "active").single().execute()
+            if not account_response.data:
+                raise EmailNotConnectedError("Email connection expired. Please reconnect from Settings > Integrations.")
+
+            try:
+                access_token = self.encryption.decrypt(account_response.data["access_token_encrypted"])
+            except Exception as e:
+                logger.error(f"Failed to decrypt email token: {e}")
+                raise EmailNotConnectedError("Email connection error. Please reconnect.")
+
+            connector = ConnectorFactory.create(
+                provider=provider,
+                tenant_id=tenant_id,
+                connector_id=connector_id,
+            )
+            await connector.set_access_token(access_token)
+            return connector, connector_id, provider
+
         async with self.db_pool.acquire() as conn:
             # Query for active email connectors
             rows = await conn.fetch(
@@ -333,6 +368,22 @@ class EmailService:
         lead_id = lead_ids[0] if lead_ids and len(lead_ids) > 0 else None
         
         try:
+            if hasattr(self.supabase, "table"):
+                response = self.supabase.table("assistant_actions").insert({
+                    "id": action_id,
+                    "tenant_id": tenant_id,
+                    "type": "send_email",
+                    "status": "pending",
+                    "triggered_by": triggered_by,
+                    "conversation_id": conversation_id,
+                    "call_id": call_id,
+                    "lead_id": lead_id,
+                    "input_data": input_data,
+                }).execute()
+                if getattr(response, "data", None):
+                    return str(response.data[0].get("id", action_id))
+                return action_id
+
             async with self.db_pool.acquire() as conn:
                 await conn.execute(
                     """
@@ -366,6 +417,15 @@ class EmailService:
             return
         
         try:
+            if hasattr(self.supabase, "table"):
+                payload: Dict[str, Any] = {"status": status}
+                if output_data:
+                    payload["output_data"] = output_data
+                if error:
+                    payload["error"] = error
+                self.supabase.table("assistant_actions").update(payload).eq("id", action_id).execute()
+                return
+
             async with self.db_pool.acquire() as conn:
                 query = "UPDATE assistant_actions SET status = $1, completed_at = NOW()"
                 params = [status]

@@ -99,6 +99,7 @@ class AsteriskAdapter(CallControlAdapter):
         # routing decision in StasisStart so we don't depend on Asterisk
         # reliably passing appArgs through PJSIP trunks.
         self._originated_channels: set[str] = set()
+        self._originated_channel_order: list[str] = []
 
         # Global event callbacks
         self._call_arrived_callbacks: Dict[str, Callable] = {}
@@ -112,6 +113,7 @@ class AsteriskAdapter(CallControlAdapter):
         # during the 2–10 s of otherwise idle ring time, so that first-turn
         # latency after answer matches subsequent turns.
         self._on_ringing: Optional[Callable] = None
+        self._on_outbound_channel_alias: Optional[Callable] = None
 
         # RTP port allocator (32000–32999, matching Day 5 defaults)
         self._rtp_port_start = int(os.getenv("ASTERISK_RTP_PORT_START", "32000"))
@@ -128,6 +130,53 @@ class AsteriskAdapter(CallControlAdapter):
         # Per-call TTS error counters (suppresses log spam when Gateway session
         # is not running — logs first error and every 50th thereafter).
         self._tts_error_counts: Dict[str, int] = {}
+
+    def _track_originated_channel(self, channel_id: str) -> None:
+        if not channel_id:
+            return
+        if channel_id not in self._originated_channels:
+            self._originated_channel_order.append(channel_id)
+        self._originated_channels.add(channel_id)
+
+    def _discard_originated_channel(self, channel_id: str) -> None:
+        self._originated_channels.discard(channel_id)
+        try:
+            self._originated_channel_order.remove(channel_id)
+        except ValueError:
+            pass
+
+    def _consume_oldest_originated_channel(self) -> Optional[str]:
+        while self._originated_channel_order:
+            channel_id = self._originated_channel_order.pop(0)
+            if channel_id in self._originated_channels:
+                self._originated_channels.discard(channel_id)
+                return channel_id
+        if not self._originated_channels:
+            return None
+        channel_id = next(iter(self._originated_channels))
+        self._originated_channels.discard(channel_id)
+        return channel_id
+
+    def _emit_outbound_channel_alias(self, original_call_id: str, actual_call_id: str) -> None:
+        if (
+            not self._on_outbound_channel_alias
+            or not original_call_id
+            or not actual_call_id
+            or original_call_id == actual_call_id
+        ):
+            return
+        try:
+            result = self._on_outbound_channel_alias(original_call_id, actual_call_id)
+            if asyncio.iscoroutine(result):
+                asyncio.create_task(result)
+        except Exception as exc:
+            logger.warning(
+                "AsteriskAdapter: outbound channel alias callback failed "
+                "original=%s actual=%s error=%s",
+                original_call_id[:12],
+                actual_call_id[:12],
+                exc,
+            )
 
     # ------------------------------------------------------------------
     # CallControlAdapter interface — identity
@@ -545,15 +594,23 @@ class AsteriskAdapter(CallControlAdapter):
 
             if is_our_originated or arg0 == "outbound" or is_trunk_leg:
                 if is_trunk_leg:
-                    # Consume the pending originated ID since this is its trunk leg
-                    stale_id = next(iter(self._originated_channels))
-                    self._originated_channels.discard(stale_id)
+                    # Consume the oldest pending originated ID since this is
+                    # its trunk leg. The queue keeps concurrent outbound calls
+                    # deterministic instead of relying on set iteration order.
+                    stale_id = self._consume_oldest_originated_channel()
+                    if stale_id is None:
+                        return
+                    self._emit_outbound_channel_alias(stale_id, channel_id)
                     logger.info(
                         f"AsteriskAdapter: matched trunk-created channel "
                         f"{channel_id[:12]} to originated {stale_id[:12]}"
                     )
+                elif not is_our_originated and arg0 == "outbound" and len(self._originated_channels) == 1:
+                    stale_id = self._consume_oldest_originated_channel()
+                    if stale_id is not None:
+                        self._emit_outbound_channel_alias(stale_id, channel_id)
                 else:
-                    self._originated_channels.discard(channel_id)
+                    self._discard_originated_channel(channel_id)
                 asyncio.create_task(self._on_outbound_stasis_start(channel_id))
             else:
                 # Any other StasisStart (including inbound or unknown args)
@@ -580,7 +637,7 @@ class AsteriskAdapter(CallControlAdapter):
         elif event_type in ("StasisEnd", "ChannelDestroyed", "ChannelHangupRequest"):
             # Drop any preemptive Up record for channels that are now gone.
             self._preemptive_up_channels.discard(channel_id)
-            self._originated_channels.discard(channel_id)
+            self._discard_originated_channel(channel_id)
             # Clean up pending outbound channels that were never answered.
             if channel_id in self._pending_outbound:
                 asyncio.create_task(self._cleanup_pending_outbound(channel_id))
@@ -1043,6 +1100,14 @@ class AsteriskAdapter(CallControlAdapter):
         """
         self._on_ringing = callback
 
+    def set_outbound_channel_alias_callback(self, callback: Callable) -> None:
+        """
+        Optional callback invoked when ARI reports a different outbound channel
+        ID than the one passed to originate_call(channel_id=...).
+        Signature: `def callback(original_call_id: str, actual_call_id: str)`.
+        """
+        self._on_outbound_channel_alias = callback
+
     def register_call_event_handlers(
         self,
         on_new_call: Callable,
@@ -1131,7 +1196,12 @@ class AsteriskAdapter(CallControlAdapter):
     # CallControlAdapter — call control
     # ------------------------------------------------------------------
 
-    async def originate_call(self, destination: str, caller_id: str) -> str:
+    async def originate_call(
+        self,
+        destination: str,
+        caller_id: str,
+        channel_id: Optional[str] = None,
+    ) -> str:
         """
         Originate an outbound call via ARI that rings the destination phone.
 
@@ -1153,8 +1223,8 @@ class AsteriskAdapter(CallControlAdapter):
             # arrives before the HTTP response — at that point the channel
             # would NOT be in _originated_channels and would be mis-routed
             # to the inbound handler.
-            pre_id = f"talky-out-{uuid.uuid4()}"
-            self._originated_channels.add(pre_id)
+            pre_id = channel_id or f"talky-out-{uuid.uuid4()}"
+            self._track_originated_channel(pre_id)
             try:
                 data = await self._ari(
                     "POST",
@@ -1168,14 +1238,14 @@ class AsteriskAdapter(CallControlAdapter):
                     },
                 )
             except Exception:
-                self._originated_channels.discard(pre_id)
+                self._discard_originated_channel(pre_id)
                 raise
             channel_id = data.get("id", pre_id)
             # ARI should use our pre_id, but if it returns something else,
             # update the tracking set.
             if channel_id != pre_id:
-                self._originated_channels.discard(pre_id)
-                self._originated_channels.add(channel_id)
+                self._discard_originated_channel(pre_id)
+                self._track_originated_channel(channel_id)
             logger.info(f"AsteriskAdapter: originated test call to {destination} channel={channel_id[:12]}")
             return channel_id
 
@@ -1198,8 +1268,8 @@ class AsteriskAdapter(CallControlAdapter):
 
         # Pre-generate channel ID and register BEFORE ARI POST to prevent
         # the StasisStart WS event from arriving before the HTTP response.
-        pre_id = f"talky-out-{uuid.uuid4()}"
-        self._originated_channels.add(pre_id)
+        pre_id = channel_id or f"talky-out-{uuid.uuid4()}"
+        self._track_originated_channel(pre_id)
 
         try:
             data = await self._ari(
@@ -1214,15 +1284,15 @@ class AsteriskAdapter(CallControlAdapter):
                 },
             )
         except Exception:
-            self._originated_channels.discard(pre_id)
+            self._discard_originated_channel(pre_id)
             raise
 
         channel_id = data.get("id", pre_id)
         # ARI should use our pre_id, but if it returns something else,
         # update the tracking set.
         if channel_id != pre_id:
-            self._originated_channels.discard(pre_id)
-            self._originated_channels.add(channel_id)
+            self._discard_originated_channel(pre_id)
+            self._track_originated_channel(channel_id)
 
         logger.info(f"AsteriskAdapter: originated call to {destination} via {endpoint} channel={channel_id[:12]}")
 
@@ -1234,7 +1304,7 @@ class AsteriskAdapter(CallControlAdapter):
         async def _expire_originated(cid: str) -> None:
             await asyncio.sleep(30)
             if cid in self._originated_channels:
-                self._originated_channels.discard(cid)
+                self._discard_originated_channel(cid)
                 logger.debug(f"AsteriskAdapter: expired stale originated channel {cid[:12]}")
 
         asyncio.create_task(_expire_originated(channel_id))

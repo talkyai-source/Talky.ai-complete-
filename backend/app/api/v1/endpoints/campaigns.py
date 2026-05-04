@@ -11,12 +11,10 @@ Refactored: Business logic delegates to CampaignService.
 import logging
 import os
 import uuid
-import re
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Depends, Query
-from pydantic import BaseModel, Field, field_validator
 from app.core.postgres_adapter import Client
 from app.core.dotenv_compat import load_dotenv
 
@@ -25,7 +23,15 @@ from app.domain.services.queue_service import DialerQueueService
 from app.domain.services.campaign_service import (
     CampaignService, CampaignError, CampaignNotFoundError, CampaignStateError
 )
+from app.domain.services.phone_number_normalizer import normalize_phone_number
 from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
+from app.api.v1.schemas.campaigns import (
+    CampaignCreateRequest,
+    CampaignStartRequest,
+    CampaignUpdateRequest,
+    ContactCreate,
+    ContactListResponse,
+)
 
 load_dotenv()
 
@@ -50,77 +56,30 @@ import json
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
 
-class CampaignStartRequest(BaseModel):
-    """Request body for starting a campaign"""
-    priority_override: Optional[int] = None  # Override priority for all jobs (1-10)
-    tenant_id: Optional[str] = None  # For multi-tenant support
-    first_speaker: Literal["agent", "user"] = "agent"  # Who speaks first on answer
+def _build_validated_script_config(
+    *,
+    persona_type: str,
+    company_name: str,
+    agent_names: List[str],
+    campaign_slots: dict,
+    additional_instructions: str,
+) -> dict[str, Any]:
+    """HTTP wrapper around the domain prompt validation service."""
+    from app.domain.services.campaign_prompt_service import (
+        CampaignPromptValidationError,
+        build_validated_script_config as _build_script_config,
+    )
 
-
-class CampaignCreateRequest(BaseModel):
-    """Request body for creating a campaign.
-
-    Persona fields (persona_type, agent_names, company_name,
-    campaign_slots) are optional for backwards compatibility — when
-    absent, the campaign falls back to the legacy estimation prompt
-    path. When present, they drive the layered prompt composer at
-    call-time. The freeform `system_prompt` is kept as an escape hatch:
-    it becomes the "additional instructions" layer appended after the
-    persona block.
-    """
-    name: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str] = None
-    system_prompt: str = Field(..., min_length=1)
-    voice_id: str = Field(..., min_length=1, max_length=100)
-    goal: Optional[str] = None
-
-    # New fields — persist into campaigns.script_config JSONB.
-    persona_type: Optional[Literal["lead_gen", "customer_support", "receptionist"]] = None
-    agent_names: Optional[List[str]] = None
-    company_name: Optional[str] = None
-    campaign_slots: Optional[dict] = None
-
-    @field_validator("agent_names")
-    @classmethod
-    def _validate_agent_names(cls, v: Optional[List[str]]) -> Optional[List[str]]:
-        if v is None:
-            return None
-        # Local import — avoid circular import with app.services.scripts.
-        from app.services.scripts.prompts import validate_pool
-        return validate_pool(v)
-
-
-class ContactCreate(BaseModel):
-    """
-    Request body for adding a single contact to a campaign.
-    Day 9: POST /campaigns/{id}/contacts
-    """
-    phone_number: str = Field(..., description="Phone number in any format (will be normalized)")
-    first_name: Optional[str] = Field(None, max_length=100)
-    last_name: Optional[str] = Field(None, max_length=100)
-    email: Optional[str] = Field(None, max_length=255)
-    custom_fields: Optional[dict] = Field(default_factory=dict)
-    
-    @field_validator('phone_number')
-    @classmethod
-    def validate_phone(cls, v: str) -> str:
-        """Basic phone validation - more robust validation in endpoint"""
-        # Remove common formatting characters
-        cleaned = re.sub(r'[\s\-\(\)\.]', '', v)
-        if not cleaned:
-            raise ValueError('Phone number cannot be empty')
-        # Allow SIP extensions (3-6 digits) and standard phone numbers (7+ digits)
-        if len(cleaned) < 3:
-            raise ValueError('Phone number too short (minimum 3 digits for SIP extensions)')
-        return v
-
-
-class ContactListResponse(BaseModel):
-    """Response for listing contacts"""
-    items: List[dict]
-    page: int
-    page_size: int
-    total: int
+    try:
+        return _build_script_config(
+            persona_type=persona_type,
+            company_name=company_name,
+            agent_names=agent_names,
+            campaign_slots=campaign_slots,
+            additional_instructions=additional_instructions,
+        )
+    except CampaignPromptValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/")
@@ -206,19 +165,13 @@ async def create_campaign(
                 ),
             )
 
-        # Persona + campaign-slot config lives in the JSONB
-        # `script_config` column. When present, telephony_session_config
-        # uses the layered composer; when absent, the legacy prompt path
-        # fires so pre-existing campaigns keep working.
-        script_config: Optional[dict] = None
-        if campaign_data.persona_type:
-            script_config = {
-                "persona_type": campaign_data.persona_type,
-                "company_name": (campaign_data.company_name or "").strip() or None,
-                "agent_names": campaign_data.agent_names or [],
-                "campaign_slots": campaign_data.campaign_slots or {},
-                "additional_instructions": campaign_data.system_prompt.strip(),
-            }
+        script_config = _build_validated_script_config(
+            persona_type=campaign_data.persona_type,
+            company_name=campaign_data.company_name,
+            agent_names=campaign_data.agent_names,
+            campaign_slots=campaign_data.campaign_slots,
+            additional_instructions=campaign_data.system_prompt,
+        )
 
         insert_payload = {
             "tenant_id": current_user.tenant_id,
@@ -227,9 +180,8 @@ async def create_campaign(
             "system_prompt": campaign_data.system_prompt.strip(),
             "voice_id": selected_voice_id,
             "goal": campaign_data.goal.strip() if campaign_data.goal else None,
+            "script_config": script_config,
         }
-        if script_config is not None:
-            insert_payload["script_config"] = script_config
 
         response = db_client.table("campaigns").insert(insert_payload).execute()
         if response.error:
@@ -271,6 +223,57 @@ async def get_campaign(
     except Exception as e:
         logger.error(f"Error fetching campaign {campaign_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to get campaign")
+
+
+@router.put("/{campaign_id}", dependencies=[Depends(rate_limit_dependency)])
+async def update_campaign(
+    campaign_id: str,
+    campaign_data: CampaignUpdateRequest,
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """Edit a campaign without allowing prompt-composer bypass."""
+    try:
+        if not current_user.tenant_id:
+            raise HTTPException(status_code=400, detail="Current user is not associated with a tenant")
+
+        script_config = _build_validated_script_config(
+            persona_type=campaign_data.persona_type,
+            company_name=campaign_data.company_name,
+            agent_names=campaign_data.agent_names,
+            campaign_slots=campaign_data.campaign_slots,
+            additional_instructions=campaign_data.system_prompt,
+        )
+
+        update_payload = {
+            "name": campaign_data.name.strip(),
+            "description": campaign_data.description.strip() if campaign_data.description else None,
+            "system_prompt": campaign_data.system_prompt.strip(),
+            "voice_id": campaign_data.voice_id.strip(),
+            "goal": campaign_data.goal.strip() if campaign_data.goal else None,
+            "script_config": script_config,
+        }
+
+        response = (
+            db_client.table("campaigns")
+            .update(update_payload)
+            .eq("id", campaign_id)
+            .eq("tenant_id", current_user.tenant_id)
+            .execute()
+        )
+        if response.error:
+            logger.error(f"Error updating campaign {campaign_id}: {response.error}")
+            raise HTTPException(status_code=500, detail=f"Failed to update campaign: {response.error}")
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+
+        return {"campaign": response.data[0]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating campaign {campaign_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update campaign")
 
 
 @router.get("/{campaign_id}/calls")
@@ -504,75 +507,12 @@ async def get_campaign_stats(
 # Day 9: Contact Management Endpoints
 # =============================================================================
 
-def normalize_phone_number(phone: str, default_country: str = "US") -> str:
-    """
-    Normalize phone number to E.164 format.
-
-    T2.5 — uses libphonenumber when available so non-US numbers
-    normalise correctly. The `default_country` argument supplies the
-    ISO-3166 alpha-2 code for numbers that lack a leading +; callers
-    that know the campaign's region should pass it. Falls back to the
-    old US-centric heuristic when libphonenumber is unavailable or
-    rejects the number (keeps dev + test stable).
-
-    Handles common formats:
-    - (555) 123-4567       -> +15551234567   (US-default)
-    - 555.123.4567         -> +15551234567   (US-default)
-    - 020 7946 0958 + GB   -> +442079460958  (libphonenumber-aware)
-    - +44 20 7946 0958     -> +442079460958  (explicit international)
-    """
-    # Short SIP extensions never see E.164.
-    has_plus = phone.strip().startswith('+')
-    cleaned = re.sub(r'[^\d]', '', phone)
-
-    if not cleaned:
-        raise ValueError("Invalid phone number")
-
-    if len(cleaned) <= 6:
-        if len(cleaned) < 3:
-            raise ValueError("Phone number too short (minimum 3 digits for SIP extensions)")
-        return cleaned  # SIP extension — pass through.
-
-    if len(cleaned) > 15:
-        raise ValueError("Phone number too long (maximum 15 digits)")
-
-    # Preferred path — libphonenumber. Installed as a T1.5 dep. Gives
-    # us correct region detection, handles leading-0 trunk prefixes
-    # (common in EU), and validates length per country.
-    try:
-        import phonenumbers
-        region = None if has_plus else (default_country or "US").upper()
-        parsed = phonenumbers.parse(phone, region)
-        if phonenumbers.is_valid_number(parsed):
-            return phonenumbers.format_number(
-                parsed, phonenumbers.PhoneNumberFormat.E164,
-            )
-    except Exception:
-        # libphonenumber not installed or parse failed — fall through
-        # to the legacy heuristic. Keeps dev/test stable even on a
-        # machine where phonenumbers hasn't been pip-installed.
-        pass
-
-    # Legacy US-centric fallback (pre-T2.5 behaviour).
-    if has_plus:
-        return f"+{cleaned}"
-
-    if len(cleaned) == 10:
-        return f"+1{cleaned}"
-
-    if len(cleaned) == 11 and cleaned.startswith('1'):
-        return f"+{cleaned}"
-
-    # Otherwise, return with + prefix
-    return f"+{cleaned}"
-
-
 @router.post("/{campaign_id}/contacts")
 async def add_contact_to_campaign(
     campaign_id: str,
     contact: ContactCreate,
     current_user: CurrentUser = Depends(get_current_user),
-    db_client: Client = Depends(get_db_client)
+    supabase: Client = Depends(get_db_client)
 ):
     """
     Add a single contact (lead) to a campaign.
@@ -588,6 +528,7 @@ async def add_contact_to_campaign(
     Returns:
         Created lead object
     """
+    db_client = supabase
     try:
         # 1. Validate campaign exists and belongs to the current tenant
         campaign_query = db_client.table("campaigns").select("id, name, status, tenant_id").eq("id", campaign_id)

@@ -1,0 +1,33 @@
+# ============================================================
+# Talky.ai Backend — DIRECT dev/test dependencies (the spec).
+#
+# Regenerate the lock with:
+#
+#     make lock-dev    # from backend/, refreshes requirements-dev.txt
+# ============================================================
+
+-r requirements.in
+
+# --- Testing ---
+pytest==7.4.4
+pytest-asyncio==0.23.3
+pytest-cov==4.1.0
+
+# --- Lint / Format / Type-check ---
+ruff==0.6.9
+black==24.10.0
+mypy==1.11.2
+
+# --- Security scanning ---
+bandit==1.7.10
+pip-audit==2.7.3
+
+# --- Pre-commit hook runner ---
+pre-commit==3.8.0
+
+# --- Dependency lock generation ---
+pip-tools==7.4.1
+
+# --- Dev Server Extras ---
+httptools==0.7.1
+watchfiles==1.1.1

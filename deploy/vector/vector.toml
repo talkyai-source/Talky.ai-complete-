@@ -1,0 +1,90 @@
+# Vector log shipper — collects backend container logs and ships them
+# to a sink of your choice (Loki, Elasticsearch, Datadog, S3 archive...).
+#
+# Run alongside the stack:
+#     docker run -d --name vector \
+#       -v /var/run/docker.sock:/var/run/docker.sock:ro \
+#       -v $(pwd)/deploy/vector/vector.toml:/etc/vector/vector.toml:ro \
+#       timberio/vector:latest-alpine
+#
+# Reference: https://vector.dev/docs/
+
+# ── Sources ──────────────────────────────────────────────────────────
+[sources.docker]
+type = "docker_logs"
+include_containers = ["talky-backend", "talky-postgres", "talky-redis"]
+
+# ── Transforms ───────────────────────────────────────────────────────
+# Parse the backend's log format: "HH:MM:SS LEVEL [logger] [req=<uuid>] message"
+# Promotes request_id to a top-level field so downstream queries are fast.
+[transforms.parse_backend]
+type = "remap"
+inputs = ["docker"]
+source = '''
+.service = .container_name
+
+# Pull request_id out of the message body for indexing.
+matches = parse_regex(.message, r'\[req=(?P<request_id>[a-f0-9-]+)\]') ?? {}
+if matches.request_id != null {
+  .request_id = matches.request_id
+}
+
+# Pull severity.
+sev = parse_regex(.message, r'(?P<level>DEBUG|INFO|WARNING|ERROR|CRITICAL)') ?? {}
+if sev.level != null {
+  .level = sev.level
+}
+'''
+
+# Drop noisy debug lines before they leave the host (keep them in stdout
+# for live tailing, but don't pay to ship them).
+[transforms.filter]
+type = "filter"
+inputs = ["parse_backend"]
+condition = '.level != "DEBUG"'
+
+# ── Sinks ────────────────────────────────────────────────────────────
+# Pick ONE (or more) of the sinks below. Console is enabled by default
+# so this config "just works" out of the box; swap when you wire a real
+# log backend.
+
+[sinks.console]
+type = "console"
+inputs = ["filter"]
+encoding.codec = "json"
+
+# --- Grafana Loki (recommended self-hosted) ---
+# [sinks.loki]
+# type = "loki"
+# inputs = ["filter"]
+# endpoint = "http://loki:3100"
+# labels.service = "{{ service }}"
+# labels.level = "{{ level }}"
+# encoding.codec = "json"
+
+# --- Elasticsearch ---
+# [sinks.es]
+# type = "elasticsearch"
+# inputs = ["filter"]
+# endpoints = ["https://elastic:9200"]
+# auth.strategy = "basic"
+# auth.user = "vector"
+# auth.password = "${ES_PASSWORD}"
+# bulk.index = "talky-logs-%Y.%m.%d"
+
+# --- Datadog ---
+# [sinks.dd]
+# type = "datadog_logs"
+# inputs = ["filter"]
+# default_api_key = "${DATADOG_API_KEY}"
+# site = "datadoghq.com"
+
+# --- S3 archive (cold storage, compliance) ---
+# [sinks.s3]
+# type = "aws_s3"
+# inputs = ["filter"]
+# bucket = "talky-log-archive"
+# region = "us-east-1"
+# compression = "gzip"
+# encoding.codec = "json"
+# batch.timeout_secs = 300

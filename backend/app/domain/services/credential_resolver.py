@@ -78,7 +78,7 @@ class CredentialResolver:
     # an in-memory dict hit — restoring the demo-ready latency profile
     # where keys came from os.getenv() directly.
     _SENTINEL_USE_ENV = object()
-    _CACHE: dict[tuple[str, str, str], Any] = {}
+    _CACHE: dict[tuple[int, str, str, str], Any] = {}
 
     def __init__(
         self,
@@ -87,6 +87,7 @@ class CredentialResolver:
     ):
         self._db_pool = db_pool
         self._encryption = encryption_service
+        self._cache_scope = id(db_pool)
 
     async def resolve(
         self,
@@ -103,7 +104,12 @@ class CredentialResolver:
         returns the env fallback.
         """
         if tenant_id:
-            cache_key = (tenant_id, provider.strip().lower(), credential_kind)
+            cache_key = (
+                self._cache_scope,
+                tenant_id,
+                provider.strip().lower(),
+                credential_kind,
+            )
             cached = CredentialResolver._CACHE.get(cache_key)
             if cached is CredentialResolver._SENTINEL_USE_ENV:
                 return resolve_sync_env_only(provider, env_var=env_var)
@@ -137,7 +143,7 @@ class CredentialResolver:
             return
         prov = provider.strip().lower() if provider else None
         for key in list(cls._CACHE.keys()):
-            t_id, p, _ = key
+            _, t_id, p, _ = key
             if (tenant_id is None or t_id == tenant_id) and (
                 prov is None or p == prov
             ):

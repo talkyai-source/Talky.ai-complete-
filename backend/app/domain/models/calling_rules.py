@@ -17,15 +17,12 @@ class CallingRules(BaseModel):
     """
     
     # Time Window Configuration
-    # Defaults are deliberately permissive (UTC, 24h, all days) so the
-    # system works out-of-the-box in any timezone.  Tenants can tighten
-    # these via the calling_rules column in the tenants table.
     time_window_start: str = Field(
-        default="00:00",
+        default="09:00",
         description="Start time for calling (HH:MM format)"
     )
     time_window_end: str = Field(
-        default="23:59",
+        default="19:00",
         description="End time for calling (HH:MM format)"
     )
     timezone: str = Field(
@@ -33,7 +30,7 @@ class CallingRules(BaseModel):
         description="Timezone for time window (e.g., 'America/New_York', 'UTC')"
     )
     allowed_days: List[int] = Field(
-        default=[0, 1, 2, 3, 4, 5, 6],
+        default=[0, 1, 2, 3, 4],
         description="Days when calling is allowed (0=Monday, 6=Sunday)"
     )
     

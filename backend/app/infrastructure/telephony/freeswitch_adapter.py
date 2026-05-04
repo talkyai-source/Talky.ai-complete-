@@ -175,7 +175,13 @@ class FreeSwitchAdapter(CallControlAdapter):
     # Call control
     # ------------------------------------------------------------------
 
-    async def originate_call(self, destination: str, caller_id: str) -> str:
+    async def originate_call(
+        self,
+        destination: str,
+        caller_id: str,
+        channel_id: Optional[str] = None,
+    ) -> str:
+        del channel_id  # FreeSWITCH allocates the UUID in ESL originate.
         uuid = await self._esl.originate_call(
             destination=destination,
             caller_id=caller_id,

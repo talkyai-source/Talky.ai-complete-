@@ -1,0 +1,142 @@
+# ============================================================
+# Talky.ai — production-style stack.
+#
+# Spins up: postgres + redis + backend in one command.
+#
+#     docker compose up -d --build       # start everything
+#     docker compose logs -f backend     # tail backend logs
+#     docker compose down                # stop & remove containers
+#     docker compose down -v             # ALSO drops the data volumes
+#
+# This file is suitable for staging / single-host VPS deploys.
+# For multi-node prod, migrate these services to Kubernetes (see
+# DEPLOYMENT.md). Telephony media plane (FreeSWITCH/Asterisk/RTPengine)
+# lives in its own compose file: backend/docker-compose-freeswitch.yml.
+# ============================================================
+
+name: talky
+
+x-restart-policy: &restart_policy
+  restart: unless-stopped
+
+x-logging: &default_logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+services:
+  # ── PostgreSQL ────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    <<: [*restart_policy, *default_logging]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-talky}
+      POSTGRES_USER: ${POSTGRES_USER:-talky}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      # Tuning hints — override in production via env or postgresql.conf
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/database/complete_schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    ports:
+      # Bound to 127.0.0.1 only — DB must not be reachable from the public internet.
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-talky} -d ${POSTGRES_DB:-talky}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - talky_internal
+
+  # ── Redis ─────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    <<: [*restart_policy, *default_logging]
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"                        # AOF persistence (matches redis_durability probe)
+      - --appendfsync
+      - everysec
+      - --maxmemory-policy
+      - allkeys-lru
+      - --requirepass
+      - ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - talky_internal
+
+  # ── Backend API (FastAPI) ─────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: talky-backend:local
+    <<: [*restart_policy, *default_logging]
+    env_file:
+      - ./backend/.env
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Service URLs override .env values so the container talks to siblings,
+      # not localhost (which would resolve to the container itself).
+      DATABASE_URL: postgresql://${POSTGRES_USER:-talky}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-talky}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - talky_internal
+
+  # ── Frontend (optional — enable once a Dockerfile exists) ─────────
+  # Run with:  docker compose --profile frontend up -d
+  # frontend:
+  #   build:
+  #     context: ./Talk-Leee
+  #     dockerfile: Dockerfile
+  #   image: talky-frontend:local
+  #   <<: [*restart_policy, *default_logging]
+  #   profiles: ["frontend"]
+  #   environment:
+  #     NEXT_PUBLIC_API_URL: http://backend:8000
+  #   depends_on:
+  #     backend:
+  #       condition: service_healthy
+  #   ports:
+  #     - "3000:3000"
+  #   networks:
+  #     - talky_internal
+
+volumes:
+  postgres_data:
+    name: talky_postgres_data
+  redis_data:
+    name: talky_redis_data
+
+networks:
+  talky_internal:
+    name: talky_internal
+    driver: bridge
