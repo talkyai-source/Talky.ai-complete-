@@ -1,0 +1,71 @@
+[project]
+name = "talky-backend"
+version = "1.0.0"
+description = "Talky.ai — AI Voice Dialer backend"
+requires-python = ">=3.11"
+
+# ── Ruff (lint + import sort) ─────────────────────────────────────────
+# Aligned with CI: ruff check app/ --select E,F,W --ignore E501
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["Alembic/versions", "tests/fixtures"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+ignore = [
+    "E501",  # line length — handled by black
+    "B008",  # FastAPI Depends() in defaults is idiomatic
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["B", "SIM"]
+"Alembic/**/*.py" = ["E", "F", "W"]
+
+# ── Black (formatter) ─────────────────────────────────────────────────
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+extend-exclude = '''
+/(
+    Alembic/versions
+  | \.venv
+)/
+'''
+
+# ── Mypy (type checking — start lenient, tighten over time) ───────────
+[tool.mypy]
+python_version = "3.11"
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+ignore_missing_imports = true
+check_untyped_defs = true
+exclude = ["Alembic/versions/", "tests/"]
+
+# ── Bandit (SAST) ─────────────────────────────────────────────────────
+[tool.bandit]
+exclude_dirs = ["tests", "Alembic"]
+skips = ["B101"]  # assert_used — fine for non-test asserts in this codebase
+
+# ── Coverage (pytest-cov) ─────────────────────────────────────────────
+[tool.coverage.run]
+branch = true
+source = ["app"]
+omit = [
+    "app/__init__.py",
+    "app/*/migrations/*",
+    "Alembic/*",
+    "tests/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+precision = 2
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]

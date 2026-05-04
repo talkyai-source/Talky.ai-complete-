@@ -69,6 +69,7 @@ class DriveSyncService:
             db_client: PostgreSQL client for database operations
         """
         self.db_client = db_client
+        self.supabase = db_client
         self._connector_cache: Dict[str, Any] = {}
     
     async def sync_call_files(

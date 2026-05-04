@@ -10,6 +10,7 @@ import asyncio
 import logging
 import os
 import time
+from dataclasses import is_dataclass
 from typing import Optional, AsyncIterator
 from datetime import datetime
 
@@ -82,6 +83,7 @@ class VoicePipelineService:
         *,
         stt_sample_rate: int = 16000,
         tts_sample_rate: int = 24000,
+        mute_during_tts: bool = True,
     ):
         self.stt_provider = stt_provider
         self.llm_provider = llm_provider
@@ -89,6 +91,7 @@ class VoicePipelineService:
         self.media_gateway = media_gateway
         self.stt_sample_rate = stt_sample_rate
         self.tts_sample_rate = tts_sample_rate
+        self.mute_during_tts = mute_during_tts
 
         self.prompt_manager = PromptManager()
         self.transcript_service = TranscriptService()
@@ -131,9 +134,44 @@ class VoicePipelineService:
             extra={"call_id": call_id, "turn_silent_reason": reason},
         )
 
-    def _response_max_sentences_for_turn(self, turn_id: int) -> Optional[int]:
-        """First turn: limit to 2 sentences for faster response start."""
-        return 2 if turn_id == 0 else None
+    def _response_max_sentences_for_turn(
+        self,
+        turn_or_session,
+        user_input: str = "",
+        *,
+        has_custom_prompt: bool = False,
+    ) -> Optional[int]:
+        """Return the sentence budget for a turn.
+
+        Supports the legacy `(session, user_input, has_custom_prompt=...)`
+        call shape and the newer internal `(turn_id)` shape.
+        """
+        if isinstance(turn_or_session, int):
+            return 2 if turn_or_session == 0 else None
+
+        session = turn_or_session
+        default_limit = getattr(getattr(session, "agent_config", None), "response_max_sentences", 2) or 2
+        text = (user_input or "").lower()
+        asks_pricing = any(term in text for term in ("pricing", "price", "plan", "plans", "package", "packages"))
+        if has_custom_prompt and asks_pricing:
+            return max(default_limit, 4)
+        return default_limit
+
+    def _barge_in_event_for(self, session: CallSession) -> asyncio.Event:
+        event = self._barge_in_events.get(session.call_id)
+        if event is None:
+            event = getattr(session, "barge_in_event", None)
+        if event is None:
+            event = asyncio.Event()
+            try:
+                session.barge_in_event = event
+            except Exception:
+                pass
+        self._barge_in_events[session.call_id] = event
+        return event
+
+    def _register_active_turn_task(self, call_id: str, task: asyncio.Task) -> None:
+        self._pending_llm_tasks[call_id] = task
 
     @staticmethod
     def _is_repetitive_transcript(text: str) -> bool:
@@ -1110,7 +1148,15 @@ class VoicePipelineService:
         if session.captured_slots is not None:
             system_prompt = compose_system_prompt(system_prompt, session.captured_slots)
 
-        max_sentences = self._response_max_sentences_for_turn(session.turn_id)
+        last_user_text_for_limit = next(
+            (m.content for m in reversed(messages) if m.role == MessageRole.USER),
+            "",
+        )
+        max_sentences = self._response_max_sentences_for_turn(
+            session,
+            last_user_text_for_limit,
+            has_custom_prompt=bool(session.system_prompt),
+        )
 
         all_tokens: list[str] = []
         buf = ""
@@ -1269,7 +1315,8 @@ class VoicePipelineService:
             Message(role=MessageRole.USER, content=full_transcript)
         )
 
-        if session.captured_slots is None:
+        captured_slots = getattr(session, "captured_slots", None)
+        if captured_slots is None or not is_dataclass(captured_slots):
             session.captured_slots = CapturedSlotsState()
         session.captured_slots = update_state_from_user_turn(
             session.captured_slots, full_transcript
@@ -1327,7 +1374,11 @@ class VoicePipelineService:
             if session.captured_slots is not None:
                 system_prompt = compose_system_prompt(system_prompt, session.captured_slots)
 
-            max_sentences = self._response_max_sentences_for_turn(session.turn_id)
+            max_sentences = self._response_max_sentences_for_turn(
+                session,
+                user_input,
+                has_custom_prompt=bool(session.system_prompt),
+            )
 
             tokens: list[str] = []
             first_token = True
@@ -1341,12 +1392,11 @@ class VoicePipelineService:
                 tokens.append(token)
             response = "".join(tokens)
 
-            if max_sentences and response:
-                import re as _re
-                parts = _re.split(r'(?<=[.!?])\s+', response.strip())
-                response = " ".join(parts[:max_sentences])
-
             sanitized = guardrails.clean_response(response)
+            if max_sentences and sanitized:
+                import re as _re
+                parts = _re.split(r'(?<=[.!?])\s+', sanitized.strip())
+                sanitized = " ".join(parts[:max_sentences])
             return sanitized
 
         except LLMTimeoutError:
@@ -1371,7 +1421,7 @@ class VoicePipelineService:
         Returns True if TTS was interrupted by barge-in, False on normal completion.
         """
         call_id = session.call_id
-        barge_in_event = self._barge_in_events.get(call_id)
+        barge_in_event = self._barge_in_event_for(session)
         # Mark TTS as active here so handle_turn_end skips if a greeting
         # or a previous turn is already speaking.
         session.tts_active = True

@@ -1,0 +1,135 @@
+"""Shared helpers for the /auth endpoint package.
+
+Anything used by more than one auth flow lives here:
+  - the IP-keyed slowapi `limiter`
+  - cookie helpers (set / clear, secure-flag resolution)
+  - JWT minting wrapper (translates internal failures to a clean 503)
+  - small request-scoped helpers (client IP, user agent, text normalisation)
+
+NOTE: keep this file narrow. New functionality goes in the flow-specific
+file (login.py / registration.py / etc.), not here.
+"""
+from __future__ import annotations
+
+import logging
+import os
+from typing import Optional
+
+from fastapi import HTTPException, Request, Response, status
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+from app.core.config import get_settings
+from app.core.jwt_security import encode_access_token
+from app.core.security.sessions import SESSION_COOKIE_NAME, SESSION_LIFETIME_HOURS
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Rate limiter — keyed by client IP (first line of defence; per-account
+# lockout via login_attempts is the second line — see lockout.py)
+# ---------------------------------------------------------------------------
+limiter = Limiter(key_func=get_remote_address)
+
+# ---------------------------------------------------------------------------
+# OWASP: generic error message — never reveal which field was wrong
+# ---------------------------------------------------------------------------
+GENERIC_AUTH_ERROR = "Invalid email or password."
+
+# ---------------------------------------------------------------------------
+# Cookie settings (OWASP Session Management Cheat Sheet)
+#   httponly  = True   — prevents JavaScript access (XSS protection)
+#   secure    = True   — HTTPS only (set False only in local dev via env)
+#   samesite  = "strict" — blocks cross-site request forgery
+#   max_age   — matches absolute session lifetime (seconds)
+# ---------------------------------------------------------------------------
+COOKIE_MAX_AGE = SESSION_LIFETIME_HOURS * 3600  # 86 400 s for 24-hour sessions
+
+
+def get_client_ip(request: Request) -> str:
+    """
+    Extract the real client IP from the request.
+    Respects X-Forwarded-For when behind a trusted reverse proxy.
+    Falls back to the direct connection IP.
+    """
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        # X-Forwarded-For: client, proxy1, proxy2 — take the leftmost
+        return forwarded_for.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def get_user_agent(request: Request) -> Optional[str]:
+    return request.headers.get("User-Agent")
+
+
+def create_jwt(
+    user_id: str,
+    email: str,
+    role: str,
+    tenant_id: Optional[str],
+    session_id: Optional[str] = None,
+) -> str:
+    """Create a signed JWT access token."""
+    try:
+        return encode_access_token(
+            user_id=user_id,
+            email=email,
+            role=role,
+            tenant_id=tenant_id,
+            session_id=session_id,
+        )
+    except Exception as exc:
+        logger.error("JWT creation failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Server authentication is not configured.",
+        ) from exc
+
+
+def session_cookie_secure() -> bool:
+    override = normalize_optional_text(os.environ.get("SESSION_COOKIE_SECURE"))
+    if override is not None:
+        return override.lower() in {"1", "true", "yes", "on"}
+    return get_settings().environment.lower() == "production"
+
+
+def set_session_cookie(response: Response, raw_token: str) -> None:
+    """
+    Write the session token into an httpOnly Secure SameSite=Strict cookie.
+
+    OWASP Session Management Cheat Sheet:
+      "Set the Secure attribute to prevent the cookie from being sent over
+       unencrypted connections."
+      "Set the HttpOnly attribute to prevent client-side script from reading
+       the session ID."
+      "Set SameSite=Strict to prevent the cookie from being sent in
+       cross-site requests."
+    """
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=raw_token,
+        httponly=True,
+        secure=session_cookie_secure(),
+        samesite="strict",
+        max_age=COOKIE_MAX_AGE,
+        path="/",
+    )
+
+
+def clear_session_cookie(response: Response) -> None:
+    """Delete the session cookie from the browser."""
+    response.delete_cookie(
+        key=SESSION_COOKIE_NAME,
+        httponly=True,
+        secure=session_cookie_secure(),
+        samesite="strict",
+        path="/",
+    )
+
+
+def normalize_optional_text(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned if cleaned else None

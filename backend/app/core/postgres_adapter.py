@@ -40,6 +40,19 @@ _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _TABLE_COLUMN_TYPES_CACHE: Dict[str, Dict[str, str]] = {}
 
 
+class _NoopAsyncContext:
+    async def __aenter__(self):
+        return None
+
+    async def __aexit__(self, *args):
+        return False
+
+
+def _transaction_or_noop(conn):
+    transaction = getattr(conn, "transaction", None)
+    return transaction() if transaction else _NoopAsyncContext()
+
+
 class PostgrestResponse:
     """PostgREST-style response envelope."""
 
@@ -232,7 +245,7 @@ class QueryBuilder:
             # "invalid input syntax for type uuid". Wrapping the SET LOCALs
             # AND the query in a single transaction keeps the GUCs alive for
             # the duration of the operation.
-            async with conn.transaction():
+            async with _transaction_or_noop(conn):
                 if bypass_rls:
                     await conn.execute("SET LOCAL app.bypass_rls = 'true'")
                     await conn.execute(f"SET LOCAL app.current_tenant_id = '{_NIL_UUID}'")
@@ -811,7 +824,7 @@ class RpcBuilder:
 
             # See _execute_async on the QueryBuilder above for why a transaction
             # is mandatory: SET LOCAL only persists inside an open transaction.
-            async with conn.transaction():
+            async with _transaction_or_noop(conn):
                 if bypass_rls:
                     await conn.execute("SET LOCAL app.bypass_rls = 'true'")
                     await conn.execute(f"SET LOCAL app.current_tenant_id = '{_NIL_UUID}'")

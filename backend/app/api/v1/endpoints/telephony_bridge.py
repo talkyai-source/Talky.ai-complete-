@@ -27,17 +27,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from uuid import UUID
+from uuid import UUID, uuid4
 from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, WebSocket
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
 
 from app.domain.interfaces.call_control_adapter import CallControlAdapter
 from app.infrastructure.telephony.adapter_factory import CallControlAdapterFactory
 from app.domain.services.call_guard import CallGuard, GuardDecision, GuardResult
 from app.domain.services.abuse_detection import AbuseDetectionService
+from app.api.v1.schemas.telephony_bridge import TransferPayload
 from app.services.scripts import (
     bind_telephony_call,
     save_call_transcript_on_hangup,
@@ -63,10 +63,21 @@ from app.domain.services.telephony.modes.agent_first import (  # noqa: E402
     warm_tts_inference_path,
     warm_llm_stream,
 )
+from app.domain.services.telephony.modes.caller_first import (  # noqa: E402
+    apply_caller_first_inbound_prompt,
+)
+from app.domain.services.telephony.ringing_alias import (  # noqa: E402
+    alias_ringing_call_id,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sip/telephony", tags=["Telephony Bridge (generic)"])
+
+
+def _apply_caller_first_inbound_prompt(voice_session) -> None:
+    """Backward-compatible wrapper for caller-first prompt shaping."""
+    apply_caller_first_inbound_prompt(voice_session)
 
 # ---------------------------------------------------------------------------
 # Module-level adapter instance (one per process)
@@ -126,6 +137,30 @@ _RINGING_MAX_AGE_S: int = 180
 # answer path (7ms ARI setup) finishes long before the warmup (~1s for
 # create_voice_session + provider init).
 _ringing_events: dict[str, asyncio.Event] = {}
+
+
+def _alias_ringing_call_id(original_call_id: str, actual_call_id: str) -> None:
+    """
+    Move pre-originate warmup state when Asterisk replaces our planned channel
+    ID with a trunk-created channel ID.
+
+    This keeps caller-speaks-first isolated from the default ringing warmup:
+    the first real PBX channel consumes the exact prewarmed session whose
+    prompt and _first_speaker were prepared before dialing.
+    """
+    moved = alias_ringing_call_id(
+        original_call_id=original_call_id,
+        actual_call_id=actual_call_id,
+        ringing_warmups=_ringing_warmups,
+        ringing_warmup_created_at=_ringing_warmup_created_at,
+        ringing_events=_ringing_events,
+    )
+    if moved:
+        logger.info(
+            "ringing_warmup_alias_moved original_call_id=%s actual_call_id=%s",
+            original_call_id[:12],
+            actual_call_id[:12],
+        )
 
 
 
@@ -197,6 +232,8 @@ async def start_telephony(
         # first-turn latency matched to subsequent turns (~<500 ms).
         if hasattr(_adapter, "set_ringing_callback"):
             _adapter.set_ringing_callback(_on_ringing)
+        if hasattr(_adapter, "set_outbound_channel_alias_callback"):
+            _adapter.set_outbound_channel_alias_callback(_alias_ringing_call_id)
 
         await _adapter.connect()
 
@@ -568,6 +605,8 @@ async def make_call(
         pre_warm_session = await orchestrator.create_voice_session(config)
         pre_warm_session._first_speaker = effective_first_speaker
         if effective_first_speaker == "user":
+            _apply_caller_first_inbound_prompt(pre_warm_session)
+        if effective_first_speaker == "user":
             logger.info(
                 "stt_eot_timeout_user_first_relaxed call_id=%s timeout_ms=1000",
                 pre_warm_session.call_id[:12],
@@ -671,27 +710,64 @@ async def make_call(
             ),
         )
 
-    try:
-        call_id = await _adapter.originate_call(
-            destination=destination,
-            caller_id=caller_id,
-        )
+    planned_call_id = (
+        f"talky-out-{uuid4()}"
+        if getattr(_adapter, "name", "") == "asterisk"
+        else None
+    )
+    stored_call_id: Optional[str] = None
 
-        # Store the pre-warmed session so _on_new_call (or _on_ringing) can
-        # consume it.  The key is the PBX channel ID returned by originate.
-        if pre_warm_session is not None:
-            # Mark the combined task as already-done so _on_new_call's
-            # await connect_task completes instantly.
+    try:
+        # Store the pre-warmed session BEFORE dialing when the adapter supports
+        # caller-supplied channel IDs. Asterisk fires _on_ringing from ARI
+        # StasisStart, which can happen before originate_call() returns. If the
+        # store happens after dialing, _on_ringing creates a second default
+        # agent-first session and caller-first turn 0 can overlap with greeting.
+        if pre_warm_session is not None and planned_call_id is not None:
+            done_future: asyncio.Future = asyncio.get_event_loop().create_future()
+            done_future.set_result(None)
+            _ringing_warmups[planned_call_id] = (pre_warm_session, done_future)
+            _ringing_warmup_created_at[planned_call_id] = asyncio.get_event_loop().time()
+            evt = asyncio.Event()
+            evt.set()
+            _ringing_events[planned_call_id] = evt
+            stored_call_id = planned_call_id
+            logger.info(
+                "pre_originate_session_prestored call_id=%s first_speaker=%s",
+                planned_call_id[:12], effective_first_speaker,
+            )
+
+        if planned_call_id is not None:
+            call_id = await _adapter.originate_call(
+                destination=destination,
+                caller_id=caller_id,
+                channel_id=planned_call_id,
+            )
+        else:
+            call_id = await _adapter.originate_call(
+                destination=destination,
+                caller_id=caller_id,
+            )
+
+        # Non-Asterisk adapters do not expose a pre-generated channel ID, so we
+        # keep the legacy post-originate store. Also reconcile defensively if an
+        # adapter returns a different ID despite accepting planned_call_id.
+        if pre_warm_session is not None and stored_call_id != call_id:
             done_future: asyncio.Future = asyncio.get_event_loop().create_future()
             done_future.set_result(None)
             _ringing_warmups[call_id] = (pre_warm_session, done_future)
             _ringing_warmup_created_at[call_id] = asyncio.get_event_loop().time()
-            # Also set the ringing event so _on_new_call doesn't wait.
             evt = asyncio.Event()
             evt.set()
             _ringing_events[call_id] = evt
+            if stored_call_id is not None:
+                _ringing_warmups.pop(stored_call_id, None)
+                _ringing_warmup_created_at.pop(stored_call_id, None)
+                _ringing_events.pop(stored_call_id, None)
+            stored_call_id = call_id
             logger.info(
-                "pre_originate_session_stored call_id=%s", call_id[:12],
+                "pre_originate_session_stored call_id=%s first_speaker=%s",
+                call_id[:12], effective_first_speaker,
             )
 
         # Trigger post-call abuse detection (async)
@@ -715,6 +791,10 @@ async def make_call(
 
     except Exception as exc:
         logger.error(f"Failed to originate call: {exc}")
+        if stored_call_id is not None:
+            _ringing_warmups.pop(stored_call_id, None)
+            _ringing_warmup_created_at.pop(stored_call_id, None)
+            _ringing_events.pop(stored_call_id, None)
         # Clean up the pre-warmed session on originate failure
         if pre_warm_session is not None:
             try:
@@ -736,12 +816,6 @@ async def hangup_call(call_id: str):
 # ---------------------------------------------------------------------------
 # Transfer endpoints
 # ---------------------------------------------------------------------------
-
-class TransferPayload(BaseModel):
-    call_id: str = Field(..., description="PBX call / channel UUID")
-    destination: str = Field(..., description="Transfer destination")
-    mode: Literal["blind", "attended", "deflect"] = Field(default="blind")
-
 
 @router.post("/transfer/blind")
 async def transfer_blind(payload: TransferPayload):

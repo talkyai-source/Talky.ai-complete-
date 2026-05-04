@@ -18,6 +18,7 @@ Day 4 RBAC Additions:
 - Cross-tenant access logging
 """
 import logging
+import os
 from typing import Optional, Set
 from dataclasses import dataclass, field
 
@@ -80,6 +81,18 @@ def get_db_pool() -> asyncpg.Pool:
 
 from app.core.postgres_adapter import Client
 
+
+def _assert_db_env_configured() -> None:
+    """Keep legacy direct calls explicit when DB env configuration is absent."""
+    missing = [
+        name
+        for name in ("SUPABASE_URL", "SUPABASE_SERVICE_KEY")
+        if not os.getenv(name)
+    ]
+    if missing:
+        raise RuntimeError(f"Missing database configuration: {', '.join(missing)}")
+
+
 # Backward-compat alias
 def get_db_client(pool: asyncpg.Pool = Depends(get_db_pool)) -> Client:
     """
@@ -89,7 +102,11 @@ def get_db_client(pool: asyncpg.Pool = Depends(get_db_pool)) -> Client:
     # When called outside FastAPI dependency injection, `pool` can be a
     # Depends marker instead of an asyncpg pool. Resolve from container.
     if not hasattr(pool, "acquire"):
-        pool = get_db_pool()
+        try:
+            pool = get_db_pool()
+        except RuntimeError:
+            _assert_db_env_configured()
+            raise
     return Client(pool)
 
 
@@ -127,7 +144,6 @@ async def get_current_user(
     request: Request,
     authorization: Optional[str] = Header(None, alias="Authorization"),
     session_cookie: Optional[str] = Cookie(None, alias=SESSION_COOKIE_NAME),
-    db_client: Client = Depends(get_db_client),
 ) -> CurrentUser:
     """
     Extract and validate JWT token from Authorization header.
@@ -136,6 +152,13 @@ async def get_current_user(
     JWT is signed with JWT_SECRET (HS256).
     """
     user_id: Optional[str] = None
+    db_client: Optional[Client] = None
+
+    def resolve_db_client() -> Client:
+        nonlocal db_client
+        if db_client is None:
+            db_client = get_db_client()
+        return db_client
 
     if authorization:
         parts = authorization.split()
@@ -182,7 +205,7 @@ async def get_current_user(
                         detail="Session mismatch",
                     )
             else:
-                async with db_client.pool.acquire() as conn:
+                async with resolve_db_client().pool.acquire() as conn:
                     session = await get_session_by_id(conn, token_session_id, user_id=user_id)
                 if not session:
                     raise HTTPException(
@@ -190,7 +213,7 @@ async def get_current_user(
                         detail="Invalid or expired token",
                     )
         elif session_cookie:
-            session = await _resolve_cookie_session(request, session_cookie, db_client)
+            session = await _resolve_cookie_session(request, session_cookie, resolve_db_client())
             if not session or str(session.get("user_id")) != user_id:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -202,7 +225,7 @@ async def get_current_user(
                 detail="Session-bound token required",
             )
     elif session_cookie:
-        session = await _resolve_cookie_session(request, session_cookie, db_client)
+        session = await _resolve_cookie_session(request, session_cookie, resolve_db_client())
         if not session:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -212,12 +235,12 @@ async def get_current_user(
     else:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required",
+            detail="Authorization required",
         )
 
     # Fetch user profile with tenant info from PostgreSQL
     try:
-        async with db_client.pool.acquire() as conn:
+        async with resolve_db_client().pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
                 SELECT up.id, up.email, up.name, up.role, up.tenant_id,
@@ -287,7 +310,6 @@ async def get_optional_user(
     request: Request,
     authorization: Optional[str] = Header(None, alias="Authorization"),
     session_cookie: Optional[str] = Cookie(None, alias=SESSION_COOKIE_NAME),
-    db_client: Client = Depends(get_db_client),
 ) -> Optional[CurrentUser]:
     """
     Get current user if authenticated, otherwise return None.
@@ -301,7 +323,6 @@ async def get_optional_user(
             request=request,
             authorization=authorization,
             session_cookie=session_cookie,
-            db_client=db_client,
         )
     except HTTPException:
         return None

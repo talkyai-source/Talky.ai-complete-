@@ -220,8 +220,12 @@ async def _on_ringing(call_id: str) -> None:
     """
     if _bridge()._adapter is None or getattr(_bridge()._adapter, "name", "") != "asterisk":
         return
-    if call_id in _bridge()._ringing_warmups or call_id in _bridge()._telephony_sessions:
-        return  # idempotent — StasisStart should fire _on_ringing at most once
+    if (
+        call_id in _bridge()._ringing_warmups
+        or call_id in _bridge()._ringing_events
+        or call_id in _bridge()._telephony_sessions
+    ):
+        return  # idempotent/reserved — never create a second warmup for a call
     if len(_bridge()._telephony_sessions) + len(_bridge()._ringing_warmups) >= _bridge()._MAX_TELEPHONY_SESSIONS:
         logger.warning(
             "ringing_warmup_skipped_at_capacity call_id=%s", call_id[:12],

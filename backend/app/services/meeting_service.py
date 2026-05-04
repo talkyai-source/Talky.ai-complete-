@@ -41,6 +41,7 @@ class MeetingService:
     
     def __init__(self, db_client: Client):
         self.db_client = db_client
+        self.supabase = db_client
         self._encryption = get_encryption_service()
     
     async def _get_active_calendar_connector(

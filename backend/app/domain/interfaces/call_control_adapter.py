@@ -88,9 +88,16 @@ class CallControlAdapter(ABC):
     # ------------------------------------------------------------------
 
     @abstractmethod
-    async def originate_call(self, destination: str, caller_id: str) -> str:
+    async def originate_call(
+        self,
+        destination: str,
+        caller_id: str,
+        channel_id: Optional[str] = None,
+    ) -> str:
         """
         Originate an outbound call to *destination* with the given *caller_id*.
+        Implementations that support caller-supplied UUIDs may use
+        *channel_id* to make pre-call warmup state addressable before dialing.
         Returns the PBX-assigned call UUID string.
         """
 

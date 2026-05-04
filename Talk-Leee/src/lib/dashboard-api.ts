@@ -29,6 +29,13 @@ export interface Campaign {
     created_at: string;
     started_at?: string;
     completed_at?: string;
+    script_config?: {
+        persona_type?: PersonaType;
+        company_name?: string;
+        agent_names?: string[];
+        campaign_slots?: Record<string, unknown>;
+        additional_instructions?: string;
+    };
 }
 
 export type PersonaType = "lead_gen" | "customer_support" | "receptionist";
@@ -36,18 +43,18 @@ export type PersonaType = "lead_gen" | "customer_support" | "receptionist";
 export interface CampaignCreate {
     name: string;
     description?: string;
-    // Freeform extra instructions. Appended after the persona block when
-    // persona_type is set; used as the full prompt on legacy campaigns.
+    // Freeform extra instructions. Backend always keeps this below the
+    // production guardrails/persona prompt; it is never the full prompt.
     system_prompt: string;
     voice_id: string;
     goal?: string;
 
-    // Persona + campaign-slot config. Optional for back-compat — omit
-    // and the call falls back to the legacy estimation prompt path.
-    persona_type?: PersonaType;
-    company_name?: string;
-    agent_names?: string[];      // 1..3 names — rotated per call
-    campaign_slots?: Record<string, unknown>;
+    // Required production prompt path. New/edited campaigns must use one
+    // of the backend personas; custom text is only additional instructions.
+    persona_type: PersonaType;
+    company_name: string;
+    agent_names: string[];      // 1..3 names — rotated per call
+    campaign_slots: Record<string, unknown>;
 }
 
 // Call Types
@@ -133,6 +140,18 @@ class DashboardApi {
         });
         if (!response.campaign?.id) {
             throw new Error("Campaign creation failed. The backend did not return a created campaign.");
+        }
+        return { campaign: response.campaign };
+    }
+
+    async updateCampaign(id: string, data: CampaignCreate): Promise<{ campaign: Campaign }> {
+        const response = await this.client.request<{ campaign: Campaign | null }>({
+            path: `/campaigns/${id}`,
+            method: "PUT",
+            body: data,
+        });
+        if (!response.campaign?.id) {
+            throw new Error("Campaign update failed. The backend did not return an updated campaign.");
         }
         return { campaign: response.campaign };
     }

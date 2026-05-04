@@ -17,6 +17,7 @@ import {
     Square,
     Plus,
     Upload,
+    Pencil,
     Users,
     Phone,
     CheckCircle,
@@ -233,6 +234,10 @@ export default function CampaignDetailPage() {
                         </div>
 
                         <div className="flex gap-2">
+                            <Button variant="outline" onClick={() => router.push(`/campaigns/${campaignId}/edit`)} disabled={actionLoading}>
+                                <Pencil className="w-4 h-4" />
+                                Edit
+                            </Button>
                             {campaign.status === "draft" || campaign.status === "paused" || campaign.status === "stopped" ? (
                                 <Button onClick={handleStartClick} disabled={actionLoading}>
                                     <Play className="w-4 h-4" />

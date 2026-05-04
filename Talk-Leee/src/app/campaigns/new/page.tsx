@@ -155,7 +155,7 @@ export default function NewCampaignPage() {
 
             const response = await aiOptionsApi.previewVoice({
                 voice_id: voiceId,
-                text: "Hello, I am your AI voice assistant. How can I help you today?",
+                text: "Hello, this is your phone representative. How can I help you today?",
             });
 
             // Play audio

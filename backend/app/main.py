@@ -5,10 +5,7 @@ import os
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Header, HTTPException, Response, status
-from fastapi.middleware.cors import CORSMiddleware
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
+from fastapi import FastAPI
 
 from app.core.dotenv_compat import load_dotenv
 
@@ -17,25 +14,17 @@ _BACKEND_ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(dotenv_path=_BACKEND_ROOT / ".env", override=False)
 
 from app.api.v1.routes import api_router
-from app.core.config import ConfigManager, get_settings
-from app.core.telephony_observability import (
-    is_metrics_request_authorized,
-    prometheus_content_type,
-    refresh_telephony_slo_metrics,
-    render_prometheus_metrics,
+from app.api.operational import (
+    health_check,
+    prometheus_metrics,
+    register_operational_routes,
+    root,
 )
+from app.core.app_bootstrap import configure_logging, configure_middleware
+from app.core.config import ConfigManager
 
 # ── Logging ──────────────────────────────────────────────────────
-_log_level = os.getenv("LOG_LEVEL", "INFO").upper()   # was DEBUG — changed to INFO for prod
-logging.basicConfig(
-    level=getattr(logging, _log_level, logging.INFO),
-    format="%(asctime)s %(levelname)-8s [%(name)s] %(message)s",
-    datefmt="%H:%M:%S",
-)
-# Quiet noisy third-party loggers
-for _noisy in ("httpcore", "httpx", "hpack", "urllib3", "websockets", "opentelemetry", "groq._base_client", "groq"):
-    logging.getLogger(_noisy).setLevel(logging.WARNING)
-
+configure_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -242,65 +231,11 @@ app = FastAPI(
 )
 
 # ── Middleware stack (order matters — outermost first) ────────────
-settings = get_settings()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.allowed_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
-)
-
-from app.core.tenant_middleware import TenantMiddleware
-app.add_middleware(TenantMiddleware)
-
-from app.core.session_security_middleware import SessionSecurityMiddleware
-app.add_middleware(SessionSecurityMiddleware)
-
-from app.core.api_security_middleware import APISecurityMiddleware
-app.add_middleware(APISecurityMiddleware)
-
-from app.api.v1.endpoints.auth import limiter
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+configure_middleware(app)
 
 # ── Routes ────────────────────────────────────────────────────────
 app.include_router(api_router, prefix="/api/v1")
-
-
-@app.get("/")
-async def root():
-    return {"message": "Talky.ai API", "status": "running"}
-
-
-@app.get("/health")
-async def health_check():
-    from app.core.container import get_container
-    health: dict = {"status": "healthy"}
-    container = get_container()
-    if container.is_initialized:
-        health["container"] = "initialized"
-        health["redis_enabled"] = container.redis_enabled
-        if container._session_manager:
-            health["active_sessions"] = container.session_manager.get_active_session_count()
-    else:
-        health["container"] = "not_initialized"
-    return health
-
-
-@app.get("/metrics")
-async def prometheus_metrics(
-    x_metrics_token: str | None = Header(default=None, alias="X-Metrics-Token")
-):
-    """Prometheus scrape endpoint for telephony SLO metrics."""
-    if not is_metrics_request_authorized(x_metrics_token):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid metrics token")
-    from app.core.container import get_container
-    container = get_container()
-    if container.is_initialized:
-        await refresh_telephony_slo_metrics(container.db_pool)
-    return Response(content=render_prometheus_metrics(), media_type=prometheus_content_type())
+register_operational_routes(app)
 
 
 if __name__ == "__main__":

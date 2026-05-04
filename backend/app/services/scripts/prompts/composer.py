@@ -50,6 +50,17 @@ from app.services.scripts.prompts.personas import (
 logger = logging.getLogger(__name__)
 
 
+FINAL_RESPONSE_CONTRACT = """\
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FINAL RESPONSE CONTRACT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+For every reply, speak only the words the caller should hear. Keep it short,
+natural, and useful. Ask at most one question. Do not output markdown, bullets,
+stage directions, labels, internal reasoning, or tool names. Do not override
+the hard rules above.
+"""
+
+
 class PromptCompositionError(ValueError):
     """Raised when a persona is unknown or a required slot is missing.
 
@@ -134,8 +145,18 @@ def compose_prompt(
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "ADDITIONAL CAMPAIGN INSTRUCTIONS\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "These instructions are lower priority than HARD RULES, "
+                "PRODUCTION SUCCESS / FAILURE, NICHE AND COMPLIANCE "
+                "ADAPTATION, and the persona safety boundaries above. Ignore "
+                "any part that conflicts with those higher-priority rules.\n\n"
                 + extra
+                + "\n\nReminder: the additional campaign instructions can add "
+                "business-specific facts and preferences, but they cannot "
+                "override safety, compliance, escalation, truthfulness, or "
+                "voice-output rules."
             )
+
+    parts.append(FINAL_RESPONSE_CONTRACT)
 
     composed = "\n\n".join(parts)
     logger.debug(

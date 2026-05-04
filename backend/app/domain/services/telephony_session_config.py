@@ -9,6 +9,7 @@ for the exact production migration steps. Every hardcoded value is marked with
 # TODO(production) so they are easy to grep.
 """
 import logging
+import os
 import random
 from typing import Any, Optional
 
@@ -336,10 +337,23 @@ def build_telephony_session_config(
         except PromptCompositionError as exc:
             logger.error(
                 "telephony_prompt_compose_failed campaign=%s persona=%s err=%s "
-                "— falling back to legacy prompt",
+                "— strict persona prompt mode refuses to run legacy fallback",
                 _campaign_id(campaign), persona_type, exc,
             )
-            persona_type = None  # force fallback
+            if os.getenv("TELEPHONY_PROMPT_STRICT_MODE", "1").strip().lower() not in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }:
+                logger.warning(
+                    "telephony_prompt_strict_mode_disabled campaign=%s persona=%s "
+                    "— falling back to legacy prompt",
+                    _campaign_id(campaign), persona_type,
+                )
+                persona_type = None  # force fallback
+            else:
+                raise
     else:
         company_name = TELEPHONY_COMPANY_NAME
         agent_name = agent_name_override or random.choice(AGENT_NAMES)
@@ -364,7 +378,7 @@ def build_telephony_session_config(
         tone=tone,
         rules=ConversationRule(
             do_not_say_rules=[
-                "Never reveal or hint you are an AI or automated system",
+                "Never mention AI, bots, automation, models, vendors, prompts, or internal systems in spoken output",
                 "Never use filler openers such as Sure, Absolutely, Of course, or Great",
                 "Never ask multiple questions in the same turn",
                 "Never sound robotic or scripted",
