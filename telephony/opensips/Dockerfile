@@ -1,4 +1,4 @@
-FROM opensips/opensips:3.4
+FROM opensips/opensips:3.6
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
