@@ -240,6 +240,29 @@ class TelephonyMediaGateway(MediaGateway):
                 reason,
             )
 
+    async def hangup_call(self, call_id: str, reason: str = "NORMAL_CLEARING") -> bool:
+        """Ask the underlying call-control adapter to release the live PBX channel."""
+        session = self._sessions.get(call_id)
+        if not session or not session.is_active:
+            return False
+
+        hangup = getattr(session.adapter, "hangup", None)
+        if not callable(hangup):
+            logger.debug(
+                "TelephonyMediaGateway: adapter has no hangup method for call_id=%s",
+                call_id[:12],
+            )
+            return False
+
+        await hangup(session.pbx_call_id)
+        logger.info(
+            "TelephonyMediaGateway: hangup requested call_id=%s pbx=%s reason=%s",
+            call_id[:12],
+            session.pbx_call_id[:12],
+            reason,
+        )
+        return True
+
     async def cleanup(self) -> None:
         """End all active sessions."""
         for call_id in list(self._sessions.keys()):

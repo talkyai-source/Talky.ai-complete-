@@ -17,6 +17,8 @@ import aiohttp
 
 from app.domain.interfaces.tts_provider import TTSProvider
 from app.domain.models.conversation import AudioChunk
+from app.infrastructure.providers.key_pool import KeyPool, parse_keys_csv
+from app.infrastructure.providers.provider_concurrency import get_provider_guard
 from app.infrastructure.tts.elevenlabs_catalog import (
     get_elevenlabs_voices_for_current_key,
 )
@@ -27,6 +29,25 @@ logger = logging.getLogger(__name__)
 # Retry configuration — mirrors Groq LLM retry pattern
 _EL_MAX_RETRIES = 2
 _EL_RETRY_BASE_DELAY = 0.3  # 300ms base, exponential with jitter
+
+
+class _SingleKeyLease:
+    """Drop-in replacement for KeyPool.acquire() when only one key is configured."""
+
+    def __init__(self, key: str) -> None:
+        self.key = key
+
+    async def __aenter__(self) -> "_SingleKeyLease":
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        return None
+
+    def report_failure(self, retryable: bool = True) -> None:
+        return None
+
+    def report_success(self) -> None:
+        return None
 
 
 class ElevenLabsTTSProvider(TTSProvider):
@@ -44,9 +65,21 @@ class ElevenLabsTTSProvider(TTSProvider):
         # sentence.  TCPConnector limit=10 is generous for a voice pipeline that
         # makes one request at a time.
         self._session: Optional[aiohttp.ClientSession] = None
+        self._pool: Optional[KeyPool] = None
+        self._guard = get_provider_guard("elevenlabs")
 
     async def initialize(self, config: dict) -> None:
-        self._api_key = config.get("api_key") or os.getenv("ELEVENLABS_API_KEY")
+        # Multi-key pool from ELEVENLABS_API_KEYS overrides the single-key path.
+        # Tenant-scoped keys (config["api_key"]) still take precedence — the pool
+        # is the platform-level fallback.
+        pool_keys = parse_keys_csv(os.getenv("ELEVENLABS_API_KEYS"))
+        single_key = config.get("api_key") or os.getenv("ELEVENLABS_API_KEY")
+        if pool_keys and not config.get("api_key"):
+            self._pool = KeyPool("elevenlabs", pool_keys)
+            self._api_key = pool_keys[0]  # first key for warmup / catalog only
+        else:
+            self._api_key = single_key
+            self._pool = None
         if not self._api_key:
             raise ValueError("ElevenLabs API key not found in config or environment")
 
@@ -97,69 +130,82 @@ class ElevenLabsTTSProvider(TTSProvider):
             "text": text,
             "model_id": model_id,
         }
-        headers = {
-            "xi-api-key": self._api_key,
-            "Content-Type": "application/json",
-        }
         url = f"{self.API_BASE_URL}/v1/text-to-speech/{selected_voice_id}/stream"
 
-        # Retry loop — mirrors Groq LLM retry pattern.
-        # Transient 429/5xx errors get retried with exponential backoff + jitter.
-        # Client errors (4xx except 429) are re-raised immediately.
-        last_err: Optional[Exception] = None
-        for attempt in range(_EL_MAX_RETRIES + 1):
-            try:
-                async with self._session.post(
-                    url,
-                    headers=headers,
-                    params=params,
-                    json=payload,
-                ) as response:
-                    if response.status not in (200, 206):
-                        error_text = await response.text()
-                        is_retryable = response.status in (429, 500, 502, 503, 504)
-                        err = RuntimeError(
-                            f"ElevenLabs API error: {response.status} {error_text[:240]}"
-                        )
-                        if is_retryable and attempt < _EL_MAX_RETRIES:
-                            last_err = err
+        # Concurrency guard wraps the entire call (incl. retries) so 50
+        # callers can't fan out to 50 simultaneous in-flight requests.
+        async with self._guard.acquire():
+            last_err: Optional[Exception] = None
+            for attempt in range(_EL_MAX_RETRIES + 1):
+                key_ctx = (
+                    self._pool.acquire() if self._pool is not None
+                    else _SingleKeyLease(self._api_key)
+                )
+                async with key_ctx as lease:
+                    headers = {
+                        "xi-api-key": lease.key,
+                        "Content-Type": "application/json",
+                    }
+                    try:
+                        async with self._session.post(
+                            url, headers=headers, params=params, json=payload,
+                        ) as response:
+                            if response.status not in (200, 206):
+                                error_text = await response.text()
+                                is_retryable = response.status in (429, 500, 502, 503, 504)
+                                err = RuntimeError(
+                                    f"ElevenLabs API error: {response.status} {error_text[:240]}"
+                                )
+                                if is_retryable:
+                                    lease.report_failure(retryable=True)
+                                if is_retryable and attempt < _EL_MAX_RETRIES:
+                                    last_err = err
+                                    delay = min(
+                                        _EL_RETRY_BASE_DELAY * (2 ** attempt), 5.0
+                                    ) * (0.5 + random.random())
+                                    logger.warning(
+                                        "[ElevenLabs] %s — retry %d/%d in %.2fs",
+                                        response.status, attempt + 1, _EL_MAX_RETRIES, delay,
+                                    )
+                                    await asyncio.sleep(delay)
+                                    continue
+                                raise err
+
+                            # Stream in small fixed-size frames so the first
+                            # audio reaches the gateway quickly. 2048 ≈ 42ms @ 24k.
+                            async for chunk in response.content.iter_chunked(2048):
+                                if not chunk:
+                                    continue
+                                yield AudioChunk(
+                                    data=chunk,
+                                    sample_rate=selected_sample_rate,
+                                    channels=1,
+                                )
+                            lease.report_success()
+                            return  # success — exit retry loop
+
+                    except asyncio.TimeoutError as exc:
+                        lease.report_failure(retryable=True)
+                        last_err = exc
+                        if attempt < _EL_MAX_RETRIES:
                             delay = min(
                                 _EL_RETRY_BASE_DELAY * (2 ** attempt), 5.0
                             ) * (0.5 + random.random())
                             logger.warning(
-                                "[ElevenLabs] %s — retry %d/%d in %.2fs",
-                                response.status, attempt + 1, _EL_MAX_RETRIES, delay,
+                                "[ElevenLabs] timeout — retry %d/%d in %.2fs",
+                                attempt + 1, _EL_MAX_RETRIES, delay,
                             )
                             await asyncio.sleep(delay)
                             continue
-                        raise err
+                        raise RuntimeError("ElevenLabs TTS request timeout") from exc
+                    except aiohttp.ClientError as exc:
+                        lease.report_failure(retryable=True)
+                        raise RuntimeError(f"ElevenLabs TTS error: {exc}") from exc
 
-                    # Stream in small fixed-size frames so the first audio
-                    # reaches the gateway quickly rather than waiting for a
-                    # large chunk to accumulate.  2048 bytes ≈ 42ms at 24kHz.
-                    async for chunk in response.content.iter_chunked(2048):
-                        if not chunk:
-                            continue
-                        yield AudioChunk(
-                            data=chunk,
-                            sample_rate=selected_sample_rate,
-                            channels=1,
-                        )
-                    return  # success — exit retry loop
-
-            except asyncio.TimeoutError as exc:
-                last_err = exc
-                if attempt < _EL_MAX_RETRIES:
-                    delay = min(_EL_RETRY_BASE_DELAY * (2 ** attempt), 5.0) * (0.5 + random.random())
-                    logger.warning("[ElevenLabs] timeout — retry %d/%d in %.2fs", attempt + 1, _EL_MAX_RETRIES, delay)
-                    await asyncio.sleep(delay)
-                    continue
-                raise RuntimeError("ElevenLabs TTS request timeout") from exc
-            except aiohttp.ClientError as exc:
-                raise RuntimeError(f"ElevenLabs TTS error: {exc}") from exc
-
-        if last_err:
-            raise RuntimeError(f"ElevenLabs TTS failed after {_EL_MAX_RETRIES} retries: {last_err}")
+            if last_err:
+                raise RuntimeError(
+                    f"ElevenLabs TTS failed after {_EL_MAX_RETRIES} retries: {last_err}"
+                )
 
     async def connect_for_call(self, call_id: str) -> None:
         """

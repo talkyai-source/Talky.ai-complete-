@@ -242,6 +242,15 @@ async def start_telephony(
             _watchdog_task = asyncio.create_task(_session_watchdog())
             logger.info("telephony_watchdog: started (inactivity=%ds)", _SESSION_INACTIVITY_TIMEOUT_S)
 
+        # Phase 1.4 — wire pod capacity into the readiness probe so the
+        # k8s/LB readiness gate can drain a saturated pod without
+        # touching telephony internals.
+        from app.core import readiness as _readiness
+        _readiness.set_capacity_providers(
+            active_count=lambda: len(_telephony_sessions),
+            max_capacity=lambda: _MAX_TELEPHONY_SESSIONS,
+        )
+
         return JSONResponse({
             "status": "connected",
             "adapter": _adapter.name,
@@ -368,6 +377,32 @@ async def make_call(
     """
     if not _adapter or not _adapter.connected:
         raise HTTPException(status_code=400, detail="Telephony adapter not connected")
+
+    # Phase 1.4 — refuse new calls EARLY when the pod is full or draining.
+    # 503 + Retry-After is the contract the LB / dialer worker reads to
+    # bounce the request to another pod. We do this before invoking
+    # CallGuard so a saturated pod doesn't burn DB / Redis cycles.
+    from app.core import readiness as _readiness
+    if _readiness.is_draining():
+        raise HTTPException(
+            status_code=503,
+            headers={"Retry-After": str(_readiness.retry_after_seconds_for_capacity())},
+            detail={"error": "pod_draining"},
+        )
+    if _readiness.is_pod_at_capacity():
+        logger.warning(
+            "make_call_pod_at_capacity active=%d cap=%d dest=%s",
+            len(_telephony_sessions), _MAX_TELEPHONY_SESSIONS, destination,
+        )
+        raise HTTPException(
+            status_code=503,
+            headers={"Retry-After": str(_readiness.retry_after_seconds_for_capacity())},
+            detail={
+                "error": "pod_at_capacity",
+                "active_sessions": len(_telephony_sessions),
+                "max_sessions": _MAX_TELEPHONY_SESSIONS,
+            },
+        )
 
     # Get tenant from request context or query param
     # In production, get from auth/JWT token

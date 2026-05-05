@@ -211,12 +211,25 @@ async def create_campaign(
 async def get_campaign(
     campaign_id: str,
     request: Request,
-    db_client: Client = Depends(get_db_client)
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
 ):
-    """Get campaign details — delegates to CampaignService."""
+    """Get campaign details — delegates to CampaignService.
+
+    `get_current_user` is required so the per-request RLS tenant context
+    (`app.current_tenant_id`) is set; without it the SELECT returns zero
+    rows and the edit page sees "Campaign not found".
+    """
     try:
         service = _get_campaign_service(db_client)
         campaign = await service.get_campaign(campaign_id)
+        # asyncpg returns uuid columns as `uuid.UUID`, but current_user.tenant_id
+        # is a string. Compare as strings so the tenant check doesn't reject
+        # rows the user actually owns.
+        row_tenant = campaign.get("tenant_id")
+        row_tenant_str = str(row_tenant) if row_tenant is not None else None
+        if current_user.tenant_id and row_tenant_str not in (None, current_user.tenant_id):
+            raise CampaignNotFoundError(campaign_id)
         return {"campaign": campaign}
     except CampaignNotFoundError:
         raise HTTPException(status_code=404, detail="Campaign not found")

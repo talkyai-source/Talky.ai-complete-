@@ -75,9 +75,11 @@ async def query_audit_logs(
 
     Requires: audit:read permission
     """
-    # Non-platform admins can only see their tenant's logs
+    # Non-platform admins can only see their tenant's logs.
+    # Compare as strings — `tenant_id` is parsed as UUID, while
+    # current_user.tenant_id comes from the JWT as a string.
     user_tenant_id = current_user.get("tenant_id")
-    if user_tenant_id and tenant_id and tenant_id != user_tenant_id:
+    if user_tenant_id and tenant_id and str(tenant_id) != str(user_tenant_id):
         raise HTTPException(status_code=403, detail="Cannot access other tenant logs")
 
     if user_tenant_id:
@@ -150,9 +152,9 @@ async def get_audit_log(
     if not log:
         raise HTTPException(status_code=404, detail="Audit log not found")
 
-    # Check tenant access
+    # Check tenant access. log.tenant_id is a UUID; user_tenant_id is a string.
     user_tenant_id = current_user.get("tenant_id")
-    if user_tenant_id and log.tenant_id and log.tenant_id != user_tenant_id:
+    if user_tenant_id and log.tenant_id and str(log.tenant_id) != str(user_tenant_id):
         raise HTTPException(status_code=403, detail="Cannot access this audit log")
 
     return AuditLogResponse(
@@ -193,9 +195,9 @@ async def export_audit_logs(
 
     Requires: audit:export permission
     """
-    # Check tenant access
+    # Check tenant access. `tenant_id` is UUID; user_tenant_id is a string.
     user_tenant_id = current_user.get("tenant_id")
-    if user_tenant_id and tenant_id and tenant_id != user_tenant_id:
+    if user_tenant_id and tenant_id and str(tenant_id) != str(user_tenant_id):
         raise HTTPException(status_code=403, detail="Cannot export other tenant logs")
 
     if user_tenant_id:

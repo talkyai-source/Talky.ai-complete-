@@ -32,6 +32,10 @@ from app.services.scripts.interruption_filter import is_backchannel as _is_backc
 from app.domain.services.latency_tracker import get_latency_tracker
 from app.domain.services.global_ai_config import get_global_config
 from app.domain.services.ask_ai_constants import TALKY_PRODUCT_INFO as _ASK_AI_PRODUCT_INFO, PRODUCT_KEYWORDS as _ASK_AI_PRODUCT_KEYWORDS
+from app.domain.services.end_session_action import (
+    build_end_session_tool_instructions,
+    parse_end_session_action,
+)
 from app.core.container import get_container
 from app.core.postgres_adapter import Client as PostgresAdapterClient
 from app.core.telemetry import get_tracer, pipeline_span, record_latency, voice_span
@@ -50,6 +54,8 @@ logger = logging.getLogger(__name__)
 # but without truncation the NEXT turn hits 400 again → infinite apology loop.
 # 20 pairs ≈ 2,500 tokens worst-case, leaving ample room for system prompt + reply.
 _MAX_HISTORY_PAIRS = int(os.getenv("VOICE_MAX_HISTORY_PAIRS", "20"))
+
+_END_SESSION_TOOL_INSTRUCTIONS = build_end_session_tool_instructions()
 
 
 def _truncate_history(history: list, max_pairs: int = _MAX_HISTORY_PAIRS) -> list:
@@ -186,6 +192,94 @@ class VoicePipelineService:
         from collections import Counter
         top_count = Counter(words).most_common(1)[0][1]
         return (top_count / len(words)) > 0.5
+
+    @staticmethod
+    def _is_ask_ai_session(session: CallSession) -> bool:
+        return getattr(session, "campaign_id", None) == "ask-ai"
+
+    @staticmethod
+    def _supports_llm_end_session_action(session: CallSession) -> bool:
+        return getattr(session, "campaign_id", None) != "voice-demo"
+
+    @staticmethod
+    def _parse_ask_ai_end_session_action(text: str) -> Optional[dict[str, str]]:
+        return parse_end_session_action(text)
+
+    async def _shutdown_session_for_end_action(
+        self,
+        session: CallSession,
+        websocket: Optional[WebSocket],
+        reason: str,
+        farewell: str,
+    ) -> None:
+        call_id = session.call_id
+        is_ask_ai = self._is_ask_ai_session(session)
+        logger.info(
+            "llm_end_session_action call_id=%s reason=%s session_type=%s",
+            call_id[:12],
+            reason,
+            "ask_ai" if is_ask_ai else "telephony",
+        )
+        session.current_user_input = ""
+        session.llm_active = False
+        session.tts_active = False
+        session.state = CallState.ENDING
+
+        if farewell:
+            try:
+                if hasattr(self.media_gateway, "start_playback_tracking"):
+                    maybe_awaitable = self.media_gateway.start_playback_tracking(call_id)
+                    if hasattr(maybe_awaitable, "__await__"):
+                        await maybe_awaitable
+
+                interrupted = await self.synthesize_and_send_audio(
+                    session,
+                    farewell,
+                    websocket,
+                    track_latency=False,
+                )
+                if (
+                    not interrupted
+                    and websocket
+                    and hasattr(self.media_gateway, "wait_for_playback_complete")
+                ):
+                    await websocket.send_json({"type": "tts_audio_complete"})
+                    await self.media_gateway.wait_for_playback_complete(call_id)
+                elif not interrupted and not is_ask_ai:
+                    await asyncio.sleep(0.8)
+            except Exception as exc:
+                logger.debug("End-session farewell playback failed before close: %s", exc)
+
+        hangup = getattr(self.media_gateway, "hangup_call", None)
+        if callable(hangup):
+            try:
+                await hangup(call_id, reason)
+            except Exception as exc:
+                logger.debug("End-session telephony hangup failed: %s", exc)
+
+        try:
+            await self.media_gateway.on_call_ended(call_id, reason)
+        except Exception as exc:
+            logger.debug("End-session gateway shutdown failed: %s", exc)
+
+        if websocket:
+            try:
+                await websocket.send_json(
+                    {
+                        "type": "session_ending",
+                        "reason": reason,
+                    }
+                )
+            except Exception as exc:
+                logger.debug("End-session notification failed: %s", exc)
+
+            if is_ask_ai:
+                try:
+                    await websocket.close(code=1000, reason=reason)
+                except Exception as exc:
+                    logger.debug("Ask AI end-session websocket close failed: %s", exc)
+
+        session.state = CallState.ENDED
 
     # Conjunctions that signal a natural clause break after a comma.
     # Only these trigger early TTS flush — avoids splitting at list commas
@@ -1145,6 +1239,9 @@ class VoicePipelineService:
             if any(kw in last_user_text for kw in _ASK_AI_PRODUCT_KEYWORDS):
                 system_prompt = system_prompt + "\n\n" + _ASK_AI_PRODUCT_INFO
 
+        if self._supports_llm_end_session_action(session):
+            system_prompt = system_prompt + "\n\n" + _END_SESSION_TOOL_INSTRUCTIONS
+
         if session.captured_slots is not None:
             system_prompt = compose_system_prompt(system_prompt, session.captured_slots)
 
@@ -1257,9 +1354,18 @@ class VoicePipelineService:
         t_llm_done = time.monotonic()
         self.latency_tracker.mark_llm_end(call_id)
 
+        raw_response_text = "".join(all_tokens)
+        ask_ai_end_action = (
+            parse_end_session_action(raw_response_text)
+            if self._supports_llm_end_session_action(session)
+            else None
+        )
+        if ask_ai_end_action:
+            buf = ""
+
         # TTS any trailing buffer (final sentence without terminal punctuation,
         # or a one-sentence response with no terminating punctuation at all).
-        if not tts_was_interrupted and buf.strip():
+        if not ask_ai_end_action and not tts_was_interrupted and buf.strip():
             if not (barge_in_event and barge_in_event.is_set()):
                 if not max_sentences or sentences_done < max_sentences:
                     sentence = guardrails.clean_response(buf.strip())
@@ -1284,8 +1390,12 @@ class VoicePipelineService:
         # Build the full response for history / logging.
         # Apply guardrails to the assembled text (strips markdown, fillers, etc.)
         # and enforce the per-turn sentence cap.
-        full_text = guardrails.clean_response("".join(all_tokens))
-        if max_sentences and full_text:
+        if ask_ai_end_action:
+            full_text = raw_response_text.strip()
+        else:
+            full_text = guardrails.clean_response(raw_response_text)
+
+        if not ask_ai_end_action and max_sentences and full_text:
             import re as _re
             parts = _re.split(r'(?<=[.!?])\s+', full_text.strip())
             full_text = " ".join(parts[:max_sentences])
@@ -1330,6 +1440,20 @@ class VoicePipelineService:
             response_text, llm_latency_ms, tts_latency_ms = await self._stream_llm_and_tts(
                 session, websocket
             )
+
+            ask_ai_end_action = (
+                parse_end_session_action(response_text)
+                if self._supports_llm_end_session_action(session)
+                else None
+            )
+            if ask_ai_end_action:
+                await self._shutdown_session_for_end_action(
+                    session,
+                    websocket,
+                    ask_ai_end_action["reason"],
+                    ask_ai_end_action["farewell"],
+                )
+                return "", llm_latency_ms, tts_latency_ms
 
             if response_text and response_text.strip():
                 session.conversation_history.append(

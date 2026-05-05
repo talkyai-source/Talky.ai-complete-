@@ -67,9 +67,11 @@ async def create_secret(
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """Create a new encrypted secret"""
-    # Check tenant access
+    # Check tenant access. Path `tenant_id` is parsed by FastAPI as `uuid.UUID`,
+    # while current_user.tenant_id is a string from the JWT — compare as strings
+    # so the check doesn't 403 the legitimate owner.
     user_tenant_id = current_user.get("tenant_id")
-    if user_tenant_id and tenant_id != user_tenant_id:
+    if user_tenant_id and str(tenant_id) != str(user_tenant_id):
         raise HTTPException(status_code=403, detail="Cannot create secrets for other tenant")
 
     secret_id, api_key = await secrets_manager.create(
@@ -116,7 +118,7 @@ async def list_secrets(
 ):
     """List secrets (metadata only - no values)"""
     user_tenant_id = current_user.get("tenant_id")
-    if user_tenant_id and tenant_id != user_tenant_id:
+    if user_tenant_id and str(tenant_id) != str(user_tenant_id):
         raise HTTPException(status_code=403, detail="Cannot access other tenant secrets")
 
     secrets = await secrets_manager.list_secrets(
@@ -137,12 +139,12 @@ async def get_secret(
 ):
     """Get secret metadata"""
     user_tenant_id = current_user.get("tenant_id")
-    if user_tenant_id and tenant_id != user_tenant_id:
+    if user_tenant_id and str(tenant_id) != str(user_tenant_id):
         raise HTTPException(status_code=403, detail="Cannot access other tenant secrets")
 
     metadata = await secrets_manager.get_metadata(secret_id)
 
-    if not metadata or metadata.tenant_id != tenant_id:
+    if not metadata or str(metadata.tenant_id) != str(tenant_id):
         raise HTTPException(status_code=404, detail="Secret not found")
 
     return metadata
@@ -159,7 +161,7 @@ async def rotate_secret(
 ):
     """Rotate a secret to a new value"""
     user_tenant_id = current_user.get("tenant_id")
-    if user_tenant_id and tenant_id != user_tenant_id:
+    if user_tenant_id and str(tenant_id) != str(user_tenant_id):
         raise HTTPException(status_code=403, detail="Cannot rotate other tenant secrets")
 
     new_secret_id = await secrets_manager.rotate(
@@ -197,7 +199,7 @@ async def revoke_secret(
 ):
     """Revoke a secret immediately"""
     user_tenant_id = current_user.get("tenant_id")
-    if user_tenant_id and tenant_id != user_tenant_id:
+    if user_tenant_id and str(tenant_id) != str(user_tenant_id):
         raise HTTPException(status_code=403, detail="Cannot revoke other tenant secrets")
 
     result = await secrets_manager.revoke(
@@ -233,7 +235,7 @@ async def mark_secret_compromised(
 ):
     """Mark a secret as compromised and revoke immediately"""
     user_tenant_id = current_user.get("tenant_id")
-    if user_tenant_id and tenant_id != user_tenant_id:
+    if user_tenant_id and str(tenant_id) != str(user_tenant_id):
         raise HTTPException(status_code=403, detail="Cannot modify other tenant secrets")
 
     result = await secrets_manager.mark_compromised(

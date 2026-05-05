@@ -1,10 +1,9 @@
 """POST /auth/login — credential verification with OWASP-aligned controls."""
-from __future__ import annotations
 
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
 from app.api.v1.dependencies import get_audit_logger, get_db_client
@@ -38,7 +37,7 @@ router = APIRouter(tags=["auth"])
 @limiter.limit("10/minute")
 async def login(
     request: Request,
-    body: LoginRequest,
+    body: LoginRequest = Body(...),
     db_client: Client = Depends(get_db_client),
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ):

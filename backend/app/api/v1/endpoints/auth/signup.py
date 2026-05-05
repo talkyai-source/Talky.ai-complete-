@@ -11,7 +11,6 @@ Step 2: POST /auth/signup/complete {email, code, password, confirm_password}
 plan_id is never accepted from the frontend — every new account lands
 on the `free` tier and upgrades happen later from the dashboard.
 """
-from __future__ import annotations
 
 import hashlib
 import json
@@ -19,7 +18,7 @@ import logging
 import secrets
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 
 from app.api.v1.dependencies import get_audit_logger, get_db_client
 from app.core.postgres_adapter import Client
@@ -44,6 +43,8 @@ from .schemas import (
     SignupCompleteRequest,
     SignupStartRequest,
     SignupStartResponse,
+    SignupVerifyCodeRequest,
+    SignupVerifyCodeResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -82,7 +83,7 @@ def _get_redis_or_503():
 @limiter.limit("3/minute")
 async def signup_start(
     request: Request,
-    body: SignupStartRequest,
+    body: SignupStartRequest = Body(...),
     db_client: Client = Depends(get_db_client),
 ) -> SignupStartResponse:
     """Step 1 of signup. Generate a 6-digit code, email it, store
@@ -147,12 +148,60 @@ async def signup_start(
     )
 
 
+@router.post("/signup/verify-code", response_model=SignupVerifyCodeResponse)
+@limiter.limit("10/minute")
+async def signup_verify_code(
+    request: Request,
+    body: SignupVerifyCodeRequest = Body(...),
+) -> SignupVerifyCodeResponse:
+    """Check-only verification of the 6-digit code stored in Redis.
+
+    Lets the frontend gate the password screen behind a correct code
+    without consuming the pending record — /signup/complete still needs
+    to find it. Returns 400 on invalid/expired."""
+
+    email = body.email.strip().lower()
+    redis = _get_redis_or_503()
+    raw = await redis.get(_signup_redis_key(email))
+    if not raw:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification code expired or not found. "
+                   "Please request a new code.",
+        )
+
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8")
+    try:
+        pending = json.loads(raw)
+    except json.JSONDecodeError:
+        await redis.delete(_signup_redis_key(email))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Signup record corrupted. Please request a new code.",
+        )
+
+    if not secrets.compare_digest(
+        _hash_signup_code(body.code.strip()),
+        pending["code_hash"],
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid verification code.",
+        )
+
+    return SignupVerifyCodeResponse(
+        message="Code verified.",
+        email=email,
+    )
+
+
 @router.post("/signup/complete", response_model=AuthTokenResponse)
 @limiter.limit("5/minute")
 async def signup_complete(
     request: Request,
     response: Response,
-    body: SignupCompleteRequest,
+    body: SignupCompleteRequest = Body(...),
     db_client: Client = Depends(get_db_client),
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ) -> AuthTokenResponse:

@@ -156,7 +156,11 @@ async def get_security_event(
         )
     if not row:
         raise HTTPException(status_code=404, detail="Event not found")
-    if current_user.get("tenant_id") and row["tenant_id"] != current_user.get("tenant_id"):
+    # Compare as strings — asyncpg returns uuid columns as `uuid.UUID` while
+    # current_user.tenant_id is a string from the JWT, so a direct `!=` would
+    # always trip and 403 the legitimate owner.
+    user_tenant_id = current_user.get("tenant_id")
+    if user_tenant_id and str(row["tenant_id"]) != str(user_tenant_id):
         raise HTTPException(status_code=403, detail="Cannot access other tenant events")
     return _row_to_response(row)
 
