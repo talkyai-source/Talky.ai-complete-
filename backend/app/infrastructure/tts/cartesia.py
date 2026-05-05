@@ -16,6 +16,9 @@ import numpy as np
 
 from app.domain.interfaces.tts_provider import TTSProvider
 from app.domain.models.conversation import AudioChunk
+from app.infrastructure.providers.key_pool import KeyPool, parse_keys_csv
+from app.infrastructure.providers.provider_concurrency import get_provider_guard
+from app.infrastructure.tts.elevenlabs_tts import _SingleKeyLease
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +45,25 @@ class CartesiaTTSProvider(TTSProvider):
         # Ref: https://docs.cartesia.ai/api-reference/tts/websocket
         self._call_ws: Dict[str, aiohttp.ClientWebSocketResponse] = {}
         self._call_ws_locks: Dict[str, asyncio.Lock] = {}
-    
+        # Per-call key pinning: each call's WS handshake selects a key from the
+        # pool and that key is reused for every sentence on that WS until the
+        # call ends. This avoids cross-key WS multiplexing (Cartesia ties the WS
+        # to the api_key in the URL).
+        self._call_keys: Dict[str, str] = {}
+        self._pool: Optional[KeyPool] = None
+        self._guard = get_provider_guard("cartesia")
+
     async def initialize(self, config: dict) -> None:
         """Initialize Cartesia client with configuration"""
-        self._api_key = config.get("api_key") or os.getenv("CARTESIA_API_KEY")
-        
+        pool_keys = parse_keys_csv(os.getenv("CARTESIA_API_KEYS"))
+        single_key = config.get("api_key") or os.getenv("CARTESIA_API_KEY")
+        if pool_keys and not config.get("api_key"):
+            self._pool = KeyPool("cartesia", pool_keys)
+            self._api_key = pool_keys[0]
+        else:
+            self._pool = None
+            self._api_key = single_key
+
         if not self._api_key:
             raise ValueError("Cartesia API key not found in config or environment")
         
@@ -62,10 +79,11 @@ class CartesiaTTSProvider(TTSProvider):
         
         logger.info(f"[Cartesia] Initialized: model={self._model_id}, voice={self._voice_id}, sample_rate={self._sample_rate}")
     
-    def _ws_url(self) -> str:
+    def _ws_url(self, api_key: Optional[str] = None) -> str:
+        key = api_key or self._api_key
         return (
             f"wss://api.cartesia.ai/tts/websocket"
-            f"?api_key={self._api_key}"
+            f"?api_key={key}"
             f"&cartesia_version={self.API_VERSION}"
         )
 
@@ -115,10 +133,27 @@ class CartesiaTTSProvider(TTSProvider):
         existing = self._call_ws.get(call_id)
         if existing is not None and not existing.closed:
             return
+
+        # Pick a key for this call. Once chosen, every sentence on this WS uses it.
+        if self._pool is not None and call_id not in self._call_keys:
+            try:
+                # Acquire a one-shot lease just to choose a key. We immediately
+                # release it (we don't hold pool inflight for the entire call —
+                # the concurrency guard does that). Failures will be reported by
+                # the WS-error path via report_external_failure.
+                async with self._pool.acquire() as lease:
+                    self._call_keys[call_id] = lease.key
+                    lease.report_success()
+            except Exception as exc:
+                logger.warning("cartesia_pool_select_failed call_id=%s: %s", call_id, exc)
+                self._call_keys[call_id] = self._api_key  # fallback
+        elif call_id not in self._call_keys:
+            self._call_keys[call_id] = self._api_key
+
         _t0 = asyncio.get_event_loop().time()
         try:
             ws = await self._session.ws_connect(
-                self._ws_url(),
+                self._ws_url(self._call_keys.get(call_id)),
                 timeout=aiohttp.ClientTimeout(connect=3.0, sock_read=30.0),
                 heartbeat=20.0,
             )
@@ -138,6 +173,7 @@ class CartesiaTTSProvider(TTSProvider):
         """Close the persistent WS for `call_id` (called from call-end path)."""
         ws = self._call_ws.pop(call_id, None)
         self._call_ws_locks.pop(call_id, None)
+        self._call_keys.pop(call_id, None)
         if ws is not None and not ws.closed:
             try:
                 await ws.close()
@@ -197,7 +233,7 @@ class CartesiaTTSProvider(TTSProvider):
         if call_id:
             # Persistent per-call WebSocket path — single handshake per call.
             lock = self._call_ws_locks.setdefault(call_id, asyncio.Lock())
-            async with lock:
+            async with lock, self._guard.acquire():
                 ws = await self._get_or_open_ws(call_id)
                 if ws is None:
                     # Fallback to transient WS if connect failed
@@ -237,23 +273,33 @@ class CartesiaTTSProvider(TTSProvider):
                     return
 
         # No call_id → legacy transient WS (one handshake per synthesis).
-        async for chunk in self._stream_transient(payload, sample_rate):
-            yield chunk
+        async with self._guard.acquire():
+            async for chunk in self._stream_transient(payload, sample_rate):
+                yield chunk
 
     async def _stream_transient(
         self, payload: Dict[str, Any], sample_rate: int
     ) -> AsyncIterator[AudioChunk]:
         """Open a short-lived WS, stream one generation, close.  Legacy path."""
-        try:
+        # Pool selection for the ad-hoc path; falls back to single key.
+        key_ctx = (
+            self._pool.acquire() if self._pool is not None
+            else _SingleKeyLease(self._api_key)
+        )
+        async with key_ctx as lease:
+          try:
             async with self._session.ws_connect(
-                self._ws_url(),
+                self._ws_url(lease.key),
                 timeout=aiohttp.ClientTimeout(connect=3.0, sock_read=10.0),
             ) as ws:
                 async for chunk in self._stream_over_ws(ws, payload, sample_rate):
                     yield chunk
-        except asyncio.TimeoutError:
+            lease.report_success()
+          except asyncio.TimeoutError:
+            lease.report_failure(retryable=True)
             raise RuntimeError("Cartesia TTS WebSocket timeout")
-        except aiohttp.ClientError as exc:
+          except aiohttp.ClientError as exc:
+            lease.report_failure(retryable=True)
             raise RuntimeError(f"Cartesia TTS WebSocket error: {exc}")
 
     async def _stream_over_ws(

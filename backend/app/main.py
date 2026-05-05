@@ -1,6 +1,7 @@
 """
 FastAPI Application Entry Point
 """
+import asyncio
 import os
 import logging
 from pathlib import Path
@@ -67,6 +68,22 @@ async def lifespan(app: FastAPI):
     # Must be set up BEFORE the container so that asyncpg and Redis
     # auto-instrumentation patches are in place before first use.
     setup_telemetry(app)
+
+    # ── 1.5 Phase 1.5 — blocking I/O detector ────────────────────
+    # When ASYNCIO_DEBUG=1 the event loop logs any callback that
+    # runs longer than ASYNCIO_SLOW_CALLBACK_S (default 0.1s).
+    # In a voice pipeline, anything blocking the loop for >100ms
+    # means audio frames are being dropped — surface it loudly so
+    # CI/staging catches it before production. Off by default in
+    # production for cost; staging operators set the env var.
+    if os.getenv("ASYNCIO_DEBUG", "").lower() in ("1", "true", "yes"):
+        loop = asyncio.get_event_loop()
+        loop.set_debug(True)
+        slow_threshold = float(os.getenv("ASYNCIO_SLOW_CALLBACK_S", "0.1"))
+        loop.slow_callback_duration = slow_threshold
+        logger.warning(
+            "asyncio_debug_enabled slow_callback_threshold_s=%.2f", slow_threshold,
+        )
 
     # ── 2. Service container ──────────────────────────────────────
     logger.info("Starting Talky.ai AI Voice Dialer...")
@@ -186,13 +203,35 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    # Phase 1.4 — flip readiness to NOT_READY immediately so the load
+    # balancer stops sending new calls. Existing calls finish; the loop
+    # below waits up to DRAIN_TIMEOUT_S for natural completion before
+    # forcing teardown.
+    from app.core import readiness as _readiness
+    _readiness.begin_drain()
+    logger.info(
+        "lifespan_drain_begin active=%d timeout_s=%d",
+        len(_tb._telephony_sessions), _readiness.DRAIN_TIMEOUT_S,
+    )
+    drain_deadline = asyncio.get_event_loop().time() + _readiness.DRAIN_TIMEOUT_S
+    while (
+        _tb._telephony_sessions
+        and asyncio.get_event_loop().time() < drain_deadline
+    ):
+        await asyncio.sleep(2.0)
+        logger.info(
+            "lifespan_drain_wait active=%d elapsed_s=%.1f",
+            len(_tb._telephony_sessions),
+            _readiness.drain_seconds_elapsed(),
+        )
+
     # Disconnect telephony bridge on shutdown.
     # FIX 5 — End active voice sessions first so recordings are saved and the PBX
     # receives a hangup signal.  Without this, callers hear abrupt disconnect and
     # the PBX holds channels open until its own ringing/idle timeout.
     if _tb._telephony_sessions:
         logger.info(
-            "Shutdown: ending %d active telephony session(s) gracefully",
+            "Shutdown: ending %d active telephony session(s) (drain expired)",
             len(_tb._telephony_sessions),
         )
         for call_id in list(_tb._telephony_sessions.keys()):

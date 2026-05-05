@@ -3,14 +3,14 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Building2, KeyRound, Loader2, Mail, User } from "lucide-react";
+import { ArrowLeft, ArrowRight, Building2, KeyRound, Loader2, Lock, Mail, User } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-type Step = "form" | "otp";
+type Step = "form" | "otp" | "password";
 
 export default function RegisterClientPage() {
     const router = useRouter();
@@ -22,13 +22,14 @@ export default function RegisterClientPage() {
         name: "",
     });
     const [otpCode, setOtpCode] = useState("");
+    const [password, setPassword] = useState("");
+    const [confirmPassword, setConfirmPassword] = useState("");
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
     const nameInputRef = useRef<HTMLInputElement | null>(null);
-    const businessInputRef = useRef<HTMLInputElement | null>(null);
-    const emailInputRef = useRef<HTMLInputElement | null>(null);
     const otpInputRef = useRef<HTMLInputElement | null>(null);
+    const passwordInputRef = useRef<HTMLInputElement | null>(null);
     const errorId = useId();
     const messageId = useId();
     const otpHelpId = useId();
@@ -37,6 +38,7 @@ export default function RegisterClientPage() {
         const t = window.setTimeout(() => {
             if (step === "form") nameInputRef.current?.focus();
             if (step === "otp") otpInputRef.current?.focus();
+            if (step === "password") passwordInputRef.current?.focus();
         }, 0);
         return () => window.clearTimeout(t);
     }, [step]);
@@ -48,6 +50,14 @@ export default function RegisterClientPage() {
         }));
     }
 
+    function extractError(err: unknown, fallback: string): string {
+        if (err instanceof Error) return err.message;
+        if (typeof err === "object" && err !== null) {
+            return (err as { detail?: string }).detail || fallback;
+        }
+        return fallback;
+    }
+
     async function handleFormSubmit(e: React.FormEvent) {
         e.preventDefault();
         setLoading(true);
@@ -55,18 +65,15 @@ export default function RegisterClientPage() {
         setMessage("");
 
         try {
-            const response = await api.register(formData.email, formData.businessName, "basic", formData.name || undefined);
-            const msg = typeof response === "string" ? response : response?.message || "Verification code sent! Check your email.";
-            setMessage(msg);
+            const response = await api.signupStart(
+                formData.name.trim(),
+                formData.businessName.trim(),
+                formData.email.trim(),
+            );
+            setMessage(response.message || "Verification code sent! Check your email.");
             setStep("otp");
         } catch (err) {
-            if (err instanceof Error) {
-                setError(err.message);
-            } else if (typeof err === "object" && err !== null) {
-                setError((err as { detail?: string }).detail || "Registration failed");
-            } else {
-                setError("Registration failed. Please try again.");
-            }
+            setError(extractError(err, "Registration failed. Please try again."));
         } finally {
             setLoading(false);
         }
@@ -76,40 +83,69 @@ export default function RegisterClientPage() {
         e.preventDefault();
         setLoading(true);
         setError("");
+        setMessage("");
 
         try {
-            const response = await api.verifyOtp(formData.email, otpCode);
-            api.setToken(response.access_token);
-            localStorage.setItem("refresh_token", response.refresh_token);
-
-            const rawNext = searchParams.get("next");
-            const safeNext = rawNext && rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : null;
-
-            let role: string | null = null;
-            try {
-                const me = await api.getMe();
-                role = me.role;
-            } catch {
-                role = null;
-            }
-
-            router.push(role === "white_label_admin" ? "/white-label/dashboard" : safeNext ?? "/dashboard");
+            await api.signupVerifyCode(formData.email.trim(), otpCode);
+            setStep("password");
         } catch (err) {
-            if (err instanceof Error) {
-                setError(err.message);
-            } else if (typeof err === "object" && err !== null) {
-                setError((err as { detail?: string }).detail || "Verification failed");
-            } else {
-                setError("Verification failed. Please try again.");
-            }
+            setError(extractError(err, "Invalid or expired verification code."));
         } finally {
             setLoading(false);
         }
     }
 
-    function handleBack() {
+    async function handlePasswordSubmit(e: React.FormEvent) {
+        e.preventDefault();
+        setError("");
+        setMessage("");
+
+        if (password !== confirmPassword) {
+            setError("Passwords do not match.");
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const response = await api.signupComplete(
+                formData.email.trim(),
+                otpCode,
+                password,
+                confirmPassword,
+            );
+            api.setToken(response.access_token);
+
+            const rawNext = searchParams.get("next");
+            const safeNext = rawNext && rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : null;
+
+            // Use the role straight from the signup response. Calling
+            // /auth/me here triggered the same "back to /auth/login" bug
+            // that the login flow already documented: a transient 401 on
+            // that round-trip trips the http-client's session-expired
+            // handler, which clears the just-stored token and redirects.
+            const role = (response as { role?: string | null }).role ?? null;
+
+            router.push(role === "white_label_admin" ? "/white-label/dashboard" : safeNext ?? "/dashboard");
+        } catch (err) {
+            setError(extractError(err, "Could not create account. Please try again."));
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    function handleBackToForm() {
         setStep("form");
         setOtpCode("");
+        setPassword("");
+        setConfirmPassword("");
+        setError("");
+        setMessage("");
+    }
+
+    function handleBackToOtp() {
+        setStep("otp");
+        setPassword("");
+        setConfirmPassword("");
         setError("");
         setMessage("");
     }
@@ -120,16 +156,33 @@ export default function RegisterClientPage() {
         setMessage("");
 
         try {
-            const response = await api.login(formData.email);
-            const msg = typeof response === "string" ? response : response?.message || "New verification code sent!";
-            setMessage(msg);
+            const response = await api.signupStart(
+                formData.name.trim(),
+                formData.businessName.trim(),
+                formData.email.trim(),
+            );
+            setMessage(response.message || "New verification code sent!");
         } catch (err) {
-            if (err instanceof Error) setError(err.message);
-            else setError("Failed to resend code. Please try again.");
+            setError(extractError(err, "Failed to resend code. Please try again."));
         } finally {
             setLoading(false);
         }
     }
+
+    const headerCopy: Record<Step, { title: string; description: string }> = {
+        form: {
+            title: "Create your account",
+            description: "Start automating your voice campaigns today",
+        },
+        otp: {
+            title: "Verify your email",
+            description: `Enter the verification code sent to ${formData.email}`,
+        },
+        password: {
+            title: "Set your password",
+            description: "Choose a strong password to secure your account",
+        },
+    };
 
     return (
         <div className="relative min-h-screen bg-transparent flex items-center justify-center p-4 overflow-hidden">
@@ -151,11 +204,9 @@ export default function RegisterClientPage() {
                 <Card>
                     <CardHeader className="text-center">
                         <CardTitle asChild>
-                            <h1>{step === "form" ? "Create your account" : "Verify your email"}</h1>
+                            <h1>{headerCopy[step].title}</h1>
                         </CardTitle>
-                        <CardDescription>
-                            {step === "form" ? "Start automating your voice campaigns today" : `Enter the verification code sent to ${formData.email}`}
-                        </CardDescription>
+                        <CardDescription>{headerCopy[step].description}</CardDescription>
                     </CardHeader>
 
                     {step === "form" ? (
@@ -173,6 +224,7 @@ export default function RegisterClientPage() {
                                             value={formData.name}
                                             onChange={handleChange}
                                             className="pl-10"
+                                            required
                                             disabled={loading}
                                             ref={nameInputRef}
                                             aria-invalid={error ? true : undefined}
@@ -195,7 +247,6 @@ export default function RegisterClientPage() {
                                             className="pl-10"
                                             required
                                             disabled={loading}
-                                            ref={businessInputRef}
                                         />
                                     </div>
                                 </div>
@@ -214,7 +265,6 @@ export default function RegisterClientPage() {
                                             className="pl-10"
                                             required
                                             disabled={loading}
-                                            ref={emailInputRef}
                                         />
                                     </div>
                                 </div>
@@ -231,7 +281,7 @@ export default function RegisterClientPage() {
                                     {loading ? (
                                         <>
                                             <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                                            Creating account...
+                                            Sending code...
                                         </>
                                     ) : (
                                         <>
@@ -249,7 +299,9 @@ export default function RegisterClientPage() {
                                 </p>
                             </CardFooter>
                         </form>
-                    ) : (
+                    ) : null}
+
+                    {step === "otp" ? (
                         <form
                             onSubmit={handleOtpSubmit}
                             aria-busy={loading}
@@ -305,7 +357,7 @@ export default function RegisterClientPage() {
                                         </>
                                     ) : (
                                         <>
-                                            Verify & Complete Registration
+                                            Next
                                             <ArrowRight className="h-4 w-4" aria-hidden />
                                         </>
                                     )}
@@ -314,7 +366,7 @@ export default function RegisterClientPage() {
                                 <div className="flex items-center justify-between w-full">
                                     <button
                                         type="button"
-                                        onClick={handleBack}
+                                        onClick={handleBackToForm}
                                         className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1"
                                         disabled={loading}
                                     >
@@ -327,12 +379,101 @@ export default function RegisterClientPage() {
                                         className="text-sm text-foreground font-medium hover:underline"
                                         disabled={loading}
                                     >
-                                        Resend code
+                                        Didn&apos;t receive it? Resend
                                     </button>
                                 </div>
                             </CardFooter>
                         </form>
-                    )}
+                    ) : null}
+
+                    {step === "password" ? (
+                        <form
+                            onSubmit={handlePasswordSubmit}
+                            aria-busy={loading}
+                            aria-describedby={error ? errorId : undefined}
+                        >
+                            <CardContent className="space-y-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="password">Password</Label>
+                                    <div className="relative">
+                                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" aria-hidden />
+                                        <Input
+                                            id="password"
+                                            type="password"
+                                            placeholder="At least 8 characters"
+                                            value={password}
+                                            onChange={(e) => setPassword(e.target.value)}
+                                            className="pl-10"
+                                            required
+                                            minLength={8}
+                                            disabled={loading}
+                                            autoComplete="new-password"
+                                            ref={passwordInputRef}
+                                            aria-invalid={error ? true : undefined}
+                                            aria-describedby={error ? errorId : undefined}
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label htmlFor="confirmPassword">Confirm Password</Label>
+                                    <div className="relative">
+                                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" aria-hidden />
+                                        <Input
+                                            id="confirmPassword"
+                                            type="password"
+                                            placeholder="Re-enter your password"
+                                            value={confirmPassword}
+                                            onChange={(e) => setConfirmPassword(e.target.value)}
+                                            className="pl-10"
+                                            required
+                                            minLength={8}
+                                            disabled={loading}
+                                            autoComplete="new-password"
+                                        />
+                                    </div>
+                                </div>
+
+                                {error ? (
+                                    <div id={errorId} role="alert" aria-live="assertive" className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-md p-3">
+                                        {error}
+                                    </div>
+                                ) : null}
+                            </CardContent>
+
+                            <CardFooter className="flex flex-col gap-4">
+                                <Button
+                                    type="submit"
+                                    className="w-full"
+                                    disabled={loading || password.length < 8 || confirmPassword.length < 8}
+                                >
+                                    {loading ? (
+                                        <>
+                                            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                                            Creating account...
+                                        </>
+                                    ) : (
+                                        <>
+                                            Create Account
+                                            <ArrowRight className="h-4 w-4" aria-hidden />
+                                        </>
+                                    )}
+                                </Button>
+
+                                <div className="flex items-center justify-start w-full">
+                                    <button
+                                        type="button"
+                                        onClick={handleBackToOtp}
+                                        className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1"
+                                        disabled={loading}
+                                    >
+                                        <ArrowLeft className="h-3 w-3" aria-hidden />
+                                        Back
+                                    </button>
+                                </div>
+                            </CardFooter>
+                        </form>
+                    ) : null}
                 </Card>
 
                 <p className="text-xs text-muted-foreground text-center mt-8">
@@ -343,4 +484,3 @@ export default function RegisterClientPage() {
         </div>
     );
 }
-

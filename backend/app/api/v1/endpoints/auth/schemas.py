@@ -83,6 +83,17 @@ class SignupStartResponse(BaseModel):
     email: EmailStr
 
 
+class SignupVerifyCodeRequest(BaseModel):
+    email: EmailStr
+    code: str
+    model_config = {"extra": "forbid"}
+
+
+class SignupVerifyCodeResponse(BaseModel):
+    message: str
+    email: EmailStr
+
+
 class SignupCompleteRequest(BaseModel):
     email: EmailStr
     code: str

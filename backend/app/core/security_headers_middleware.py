@@ -58,8 +58,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = _PERMISSIONS_POLICY
         response.headers["X-XSS-Protection"] = "0"
-        response.headers.pop("Server", None)
-        response.headers.pop("X-Powered-By", None)
+
+        if "Server" in response.headers:
+            del response.headers["Server"]
+        if "X-Powered-By" in response.headers:
+            del response.headers["X-Powered-By"]
 
         if self._is_production:
             response.headers["Strict-Transport-Security"] = (

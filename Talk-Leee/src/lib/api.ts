@@ -39,6 +39,26 @@ export type LoginResponse = z.infer<typeof LoginResponseSchema>;
 export const RegisterResponseSchema = LoginResponseSchema;
 export type RegisterResponse = LoginResponse;
 
+export const SignupStartResponseSchema = z
+    .object({
+        message: z.string(),
+        expires_in_minutes: z.number(),
+        email: z.string().email(),
+    })
+    .passthrough();
+export type SignupStartResponse = z.infer<typeof SignupStartResponseSchema>;
+
+export const SignupVerifyCodeResponseSchema = z
+    .object({
+        message: z.string(),
+        email: z.string().email(),
+    })
+    .passthrough();
+export type SignupVerifyCodeResponse = z.infer<typeof SignupVerifyCodeResponseSchema>;
+
+export const SignupCompleteResponseSchema = LoginResponseSchema;
+export type SignupCompleteResponse = LoginResponse;
+
 export const VerifyOtpResponseSchema = z
     .object({
         access_token: z.string(),
@@ -179,6 +199,59 @@ class ApiClient {
             timeoutMs: 12_000,
         });
         return this.parseOrThrow(VerifyOtpResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
+    }
+
+    /**
+     * Two-step signup, step 1: send name/business/email; backend emails a 6-digit code.
+     * No password, no plan_id — plan is hardcoded to "free" server-side.
+     */
+    async signupStart(name: string, businessName: string, email: string): Promise<SignupStartResponse> {
+        const path = "/auth/signup/start";
+        const method = "POST" as const;
+        const data = await this.client().request({
+            path,
+            method,
+            body: { name, business_name: businessName, email },
+            timeoutMs: 12_000,
+        });
+        return this.parseOrThrow(SignupStartResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
+    }
+
+    /**
+     * Two-step signup, step 1.5: check the code without consuming it.
+     * Used to gate the password screen behind a correct code.
+     */
+    async signupVerifyCode(email: string, code: string): Promise<SignupVerifyCodeResponse> {
+        const path = "/auth/signup/verify-code";
+        const method = "POST" as const;
+        const data = await this.client().request({
+            path,
+            method,
+            body: { email, code },
+            timeoutMs: 12_000,
+        });
+        return this.parseOrThrow(SignupVerifyCodeResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
+    }
+
+    /**
+     * Two-step signup, step 2: send code + password + confirm_password.
+     * Backend creates the account on plan_id="free", returns an auth token.
+     */
+    async signupComplete(
+        email: string,
+        code: string,
+        password: string,
+        confirmPassword: string,
+    ): Promise<SignupCompleteResponse> {
+        const path = "/auth/signup/complete";
+        const method = "POST" as const;
+        const data = await this.client().request({
+            path,
+            method,
+            body: { email, code, password, confirm_password: confirmPassword },
+            timeoutMs: 12_000,
+        });
+        return this.parseOrThrow(SignupCompleteResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
     }
 
     async register(

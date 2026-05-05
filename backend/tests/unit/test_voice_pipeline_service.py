@@ -68,6 +68,27 @@ def test_non_pricing_questions_keep_default_sentence_budget():
     assert limit == 2
 
 
+def test_ask_ai_end_session_action_parser():
+    assert (
+        VoicePipelineService._parse_ask_ai_end_session_action(
+            '{"action":"end_session","reason":"user_goodbye","farewell":"See you soon."}'
+        )
+        == {"reason": "user_goodbye", "farewell": "See you soon."}
+    )
+    assert (
+        VoicePipelineService._parse_ask_ai_end_session_action(
+            'Here is the action: {"action":"end_ask_ai_session","reason":"user_done"}'
+        )
+        == {"reason": "user_done", "farewell": "Goodbye, take care."}
+    )
+    assert VoicePipelineService._parse_ask_ai_end_session_action(
+        '{"action":"continue"}'
+    ) is None
+    assert VoicePipelineService._parse_ask_ai_end_session_action(
+        "Can you explain how goodbye handling works?"
+    ) is None
+
+
 class _StreamingLLMProvider:
     def __init__(self, chunks):
         self._chunks = chunks
@@ -183,6 +204,83 @@ async def test_synthesize_and_send_audio_skips_stale_reply_when_barge_in_is_pend
     media_gateway.flush_audio_buffer.assert_not_awaited()
     websocket.send_json.assert_awaited_with({"type": "tts_interrupted", "reason": "barge_in"})
     assert session.barge_in_event.is_set() is False
+
+
+@pytest.mark.asyncio
+async def test_ask_ai_llm_end_session_action_says_farewell_then_closes():
+    media_gateway = AsyncMock()
+    media_gateway.start_playback_tracking = MagicMock()
+    media_gateway.wait_for_playback_complete = AsyncMock(return_value=True)
+    tts_provider = MagicMock()
+
+    async def _farewell_audio_stream(*args, **kwargs):
+        yield MagicMock(data=b"\x00" * 320)
+
+    tts_provider.stream_synthesize = MagicMock(side_effect=_farewell_audio_stream)
+    service = VoicePipelineService(
+        stt_provider=AsyncMock(),
+        llm_provider=_StreamingLLMProvider([
+            '{"action":"end_ask_ai_session","reason":"user_goodbye","farewell":"See you soon."}'
+        ]),
+        tts_provider=tts_provider,
+        media_gateway=media_gateway,
+        mute_during_tts=False,
+    )
+    service.latency_tracker = MagicMock()
+    service.latency_tracker.get_metrics.return_value = None
+
+    session = _make_session()
+    session.campaign_id = "ask-ai"
+    session.current_user_input = "good bye"
+    websocket = AsyncMock()
+
+    await service.handle_turn_end(session, websocket)
+
+    tts_provider.stream_synthesize.assert_called_once()
+    assert tts_provider.stream_synthesize.call_args.args[0] == "See you soon."
+    media_gateway.start_playback_tracking.assert_called_once_with(session.call_id)
+    websocket.send_json.assert_any_await({"type": "tts_audio_complete"})
+    media_gateway.wait_for_playback_complete.assert_awaited_once_with(session.call_id)
+    media_gateway.on_call_ended.assert_awaited_once_with(session.call_id, "user_goodbye")
+    websocket.send_json.assert_any_await(
+        {"type": "session_ending", "reason": "user_goodbye"}
+    )
+    websocket.close.assert_awaited_once_with(code=1000, reason="user_goodbye")
+    assert session.state == CallState.ENDED
+    assert [message.role for message in session.conversation_history] == [MessageRole.USER]
+
+
+@pytest.mark.asyncio
+async def test_telephony_llm_end_session_action_says_farewell_then_hangs_up():
+    media_gateway = AsyncMock()
+    tts_provider = MagicMock()
+
+    async def _farewell_audio_stream(*args, **kwargs):
+        yield MagicMock(data=b"\x00" * 320)
+
+    tts_provider.stream_synthesize = MagicMock(side_effect=_farewell_audio_stream)
+    service = VoicePipelineService(
+        stt_provider=AsyncMock(),
+        llm_provider=_StreamingLLMProvider([
+            '{"action":"end_session","reason":"user_goodbye","farewell":"Goodbye, have a good one."}'
+        ]),
+        tts_provider=tts_provider,
+        media_gateway=media_gateway,
+        mute_during_tts=False,
+    )
+    service.latency_tracker = MagicMock()
+    service.latency_tracker.get_metrics.return_value = None
+
+    session = _make_session()
+    session.campaign_id = "campaign-123"
+    session.current_user_input = "bye for now"
+
+    await service.handle_turn_end(session, None)
+
+    assert tts_provider.stream_synthesize.call_args.args[0] == "Goodbye, have a good one."
+    media_gateway.hangup_call.assert_awaited_once_with(session.call_id, "user_goodbye")
+    media_gateway.on_call_ended.assert_awaited_once_with(session.call_id, "user_goodbye")
+    assert session.state == CallState.ENDED
 
 
 @pytest.mark.asyncio

@@ -16,11 +16,13 @@ Day 17: Added timeout handling and deterministic mode for QA.
 import os
 import asyncio
 import logging
-from typing import AsyncIterator, List, Optional
+from typing import AsyncIterator, Dict, List, Optional
 import httpx
 from groq import AsyncGroq, APITimeoutError as GroqAPITimeoutError, RateLimitError as GroqRateLimitError
 from app.domain.interfaces.llm_provider import LLMProvider
 from app.domain.models.conversation import Message, MessageRole
+from app.infrastructure.providers.key_pool import KeyPool, parse_keys_csv
+from app.infrastructure.providers.provider_concurrency import get_provider_guard
 from app.utils.resilience import CircuitBreaker, CircuitOpenError
 
 logger = logging.getLogger(__name__)
@@ -139,6 +141,12 @@ class GroqLLMProvider(LLMProvider):
     
     def __init__(self):
         self._client: Optional[AsyncGroq] = None
+        # Per-key client cache: AsyncGroq is keyed by api_key at construction
+        # time, so multi-key routing builds one client per key on demand.
+        self._clients_by_key: Dict[str, AsyncGroq] = {}
+        self._pool: Optional[KeyPool] = None
+        self._guard = get_provider_guard("groq")
+        self._http_timeout: Optional[httpx.Timeout] = None
         self._config: dict = {}
         self._model: str = "llama-3.3-70b-versatile"  # Best balance for voice AI
         self._temperature: float = 0.6  # Slightly lower for more consistent responses
@@ -161,29 +169,45 @@ class GroqLLMProvider(LLMProvider):
     async def initialize(self, config: dict) -> None:
         """Initialize Groq client with configuration"""
         self._config = config
-        api_key = config.get("api_key") or os.getenv("GROQ_API_KEY")
-        
-        if not api_key:
+
+        # Multi-key pool path overrides single-key when GROQ_API_KEYS is set
+        # *and* no tenant-scoped api_key was supplied.
+        pool_keys = parse_keys_csv(os.getenv("GROQ_API_KEYS"))
+        single_key = config.get("api_key") or os.getenv("GROQ_API_KEY")
+        if pool_keys and not config.get("api_key"):
+            self._pool = KeyPool("groq", pool_keys)
+            primary_key = pool_keys[0]
+        else:
+            self._pool = None
+            primary_key = single_key
+
+        if not primary_key:
             raise ValueError("Groq API key not found in config or environment")
-        
-        # Initialize async client with httpx-level timeouts (Groq SDK recommendation).
-        # read=timeout bounds TTFT — if Groq takes longer than this to produce the
-        # first token, httpx raises ReadTimeout → GroqAPITimeoutError before any
-        # token is yielded.  connect=2s fails fast on network issues.
-        self._client = AsyncGroq(
-            api_key=api_key,
-            timeout=httpx.Timeout(
-                connect=2.0,
-                read=DEFAULT_LLM_TIMEOUT,
-                write=10.0,
-                pool=5.0,
-            ),
+
+        # httpx timeout shared by every per-key client.
+        # read=timeout bounds TTFT — if Groq takes longer than this to produce
+        # the first token, httpx raises ReadTimeout → GroqAPITimeoutError
+        # before any token is yielded. connect=2s fails fast on network issues.
+        self._http_timeout = httpx.Timeout(
+            connect=2.0,
+            read=DEFAULT_LLM_TIMEOUT,
+            write=10.0,
+            pool=5.0,
         )
-        
+        self._client = self._client_for(primary_key)
+
         # Configuration with voice-optimized defaults
         self._model = config.get("model", "llama-3.3-70b-versatile")
         self._temperature = config.get("temperature", 0.6)
         self._max_tokens = config.get("max_tokens", 150)
+
+    def _client_for(self, api_key: str) -> AsyncGroq:
+        """Return (and cache) an AsyncGroq client bound to the given key."""
+        client = self._clients_by_key.get(api_key)
+        if client is None:
+            client = AsyncGroq(api_key=api_key, timeout=self._http_timeout)
+            self._clients_by_key[api_key] = client
+        return client
 
     async def warm_up(self) -> None:
         """
@@ -488,72 +512,89 @@ class GroqLLMProvider(LLMProvider):
                     request_kwargs["reasoning_effort"] = reasoning_effort
 
             # Stream completion using Groq's ultra-fast LPU
-            # Wrapped with circuit breaker + retry for transient failures
+            # Wrapped with circuit breaker + retry for transient failures.
+            # Concurrency guard caps in-flight requests at the contracted plan limit.
             import random as _rand
+            from app.infrastructure.tts.elevenlabs_tts import _SingleKeyLease
 
             last_err = None
             tokens_yielded = 0  # Track across all attempts
-            for _attempt in range(_LLM_MAX_RETRIES + 1):
-                try:
-                    async with self._circuit:
-                        stream = await self._client.chat.completions.create(**request_kwargs)
 
-                        # Yield tokens as they arrive
-                        token_count = 0
-                        async for chunk in stream:
-                            if chunk.choices:
-                                delta = chunk.choices[0].delta
-                                if delta.content:
-                                    token_count += 1
-                                    tokens_yielded += 1
-                                    yield delta.content
-
-                        logger.debug(f"Stream completed, yielded {token_count} tokens")
-
-                        if token_count == 0:
-                            logger.warning("Zero tokens received from Groq")
-                    # Success — break out of retry loop
-                    break
-
-                except CircuitOpenError:
-                    raise  # Don't retry when circuit is open
-
-                except GroqRateLimitError as e:
-                    # HTTP 429 — token or request bucket exhausted.
-                    # Retrying immediately won't help; log clearly so the operator
-                    # knows to upgrade the Groq plan or reduce request frequency.
-                    logger.warning(
-                        "Groq rate limit hit (HTTP 429) — TTFT spikes are likely "
-                        "rate-limit-induced. Consider upgrading to a paid Groq plan "
-                        "or reducing concurrent requests. Error: %s", e
+            async with self._guard.acquire():
+                for _attempt in range(_LLM_MAX_RETRIES + 1):
+                    key_ctx = (
+                        self._pool.acquire() if self._pool is not None
+                        else _SingleKeyLease("")
                     )
-                    raise RuntimeError(f"Groq rate limit exceeded: {e}")
+                    async with key_ctx as _lease:
+                        # Use the per-key client when a pool is in play; else
+                        # the configured single-key client (preserves existing
+                        # behaviour and test mockability).
+                        chosen_client = (
+                            self._client_for(_lease.key)
+                            if self._pool is not None and _lease.key
+                            else self._client
+                        )
+                        try:
+                            async with self._circuit:
+                                stream = await chosen_client.chat.completions.create(
+                                    **request_kwargs
+                                )
 
-                except Exception as e:
-                    last_err = e
-                    # CRITICAL: Never retry after partial output — the caller has
-                    # already received some tokens.  Retrying would yield tokens
-                    # from a new request appended to the partial first response,
-                    # producing garbled/doubled output visible to the user.
-                    if tokens_yielded > 0:
-                        logger.error(
-                            f"Groq stream error after {tokens_yielded} tokens yielded — "
-                            f"cannot retry mid-stream: {e}"
-                        )
-                        raise RuntimeError(f"Groq LLM streaming failed: {e}")
-                    if _attempt < _LLM_MAX_RETRIES:
-                        _delay = min(
-                            _LLM_RETRY_BASE_DELAY * (2 ** _attempt),
-                            5.0,
-                        ) * (0.5 + _rand.random())
-                        logger.warning(
-                            f"Groq retry {_attempt + 1}/{_LLM_MAX_RETRIES} "
-                            f"after {_delay:.2f}s — {e}"
-                        )
-                        await asyncio.sleep(_delay)
-                    else:
-                        logger.error(f"Groq LLM streaming failed after retries: {e}")
-                        raise RuntimeError(f"Groq LLM streaming failed: {e}")
+                                # Yield tokens as they arrive
+                                token_count = 0
+                                async for chunk in stream:
+                                    if chunk.choices:
+                                        delta = chunk.choices[0].delta
+                                        if delta.content:
+                                            token_count += 1
+                                            tokens_yielded += 1
+                                            yield delta.content
+
+                                logger.debug(
+                                    f"Stream completed, yielded {token_count} tokens"
+                                )
+                                if token_count == 0:
+                                    logger.warning("Zero tokens received from Groq")
+                            _lease.report_success()
+                            return  # success — exit retry loop AND generator
+
+                        except CircuitOpenError:
+                            raise  # Don't retry when circuit is open
+
+                        except GroqRateLimitError as e:
+                            _lease.report_failure(retryable=True)
+                            logger.warning(
+                                "Groq rate limit hit (HTTP 429) — TTFT spikes are "
+                                "likely rate-limit-induced. Error: %s", e
+                            )
+                            raise RuntimeError(f"Groq rate limit exceeded: {e}")
+
+                        except Exception as e:
+                            _lease.report_failure(retryable=True)
+                            last_err = e
+                            # CRITICAL: never retry after partial output — would
+                            # yield duplicated tokens to the user.
+                            if tokens_yielded > 0:
+                                logger.error(
+                                    f"Groq stream error after {tokens_yielded} "
+                                    f"tokens — cannot retry mid-stream: {e}"
+                                )
+                                raise RuntimeError(f"Groq LLM streaming failed: {e}")
+                            if _attempt < _LLM_MAX_RETRIES:
+                                _delay = min(
+                                    _LLM_RETRY_BASE_DELAY * (2 ** _attempt), 5.0
+                                ) * (0.5 + _rand.random())
+                                logger.warning(
+                                    f"Groq retry {_attempt + 1}/{_LLM_MAX_RETRIES} "
+                                    f"after {_delay:.2f}s — {e}"
+                                )
+                                await asyncio.sleep(_delay)
+                            else:
+                                logger.error(
+                                    f"Groq LLM streaming failed after retries: {e}"
+                                )
+                                raise RuntimeError(f"Groq LLM streaming failed: {e}")
 
         except CircuitOpenError as co:
             logger.error(f"Groq circuit breaker open: {co}")

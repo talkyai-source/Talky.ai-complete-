@@ -157,6 +157,75 @@ async def _session_watchdog() -> None:
             for cid in stale_events:
                 _bridge()._ringing_events.pop(cid, None)
 
+            # ----- Phase 1.3: orphan sweep across remaining session-keyed maps
+            # Anything keyed by gateway_session_id whose call_id is no longer
+            # an active or ringing-warming session is leakage from a crashed
+            # call path that never called _on_call_ended. Drop on the same age
+            # policy as ringing warmups.
+            active_call_ids = set(_bridge()._telephony_sessions.keys()) | set(
+                _bridge()._ringing_warmup_created_at.keys()
+            )
+            orphan_gw = [
+                gw_id for gw_id, cid in list(_bridge()._gateway_session_to_call_id.items())
+                if cid not in active_call_ids
+            ]
+            for gw_id in orphan_gw:
+                _bridge()._gateway_session_to_call_id.pop(gw_id, None)
+                buf = _bridge()._early_audio_buffers.pop(gw_id, None)
+                if buf:
+                    logger.warning(
+                        "telephony_watchdog: dropping orphan early_audio_buffer "
+                        "gateway_session_id=%s chunks=%d",
+                        gw_id, len(buf),
+                    )
+
+            # Buffers that exist without any gateway-session mapping at all are
+            # dead audio from calls that never registered. Cap their age too.
+            for gw_id in list(_bridge()._early_audio_buffers.keys()):
+                if gw_id not in _bridge()._gateway_session_to_call_id:
+                    _bridge()._early_audio_buffers.pop(gw_id, None)
+
+            # ----- Cartesia per-call WS sweep -----
+            # cartesia.py keeps a per-call WS in _call_ws / _call_ws_locks /
+            # _call_keys. The on-end path (_on_call_ended → end_session →
+            # tts_provider.disconnect_for_call) handles the happy case, but a
+            # crashed call path can leave entries behind. Reconcile against the
+            # active session list every cycle.
+            try:
+                from app.core.container import get_container as _gc
+                _c = _gc()
+                if _c.is_initialized:
+                    # The Cartesia provider is held inside live VoiceSessions, so
+                    # iterate every still-live one and ask it to evict any
+                    # internal call_id state that no longer matches an active
+                    # session. This is a no-op when state is already clean.
+                    cartesia_singletons = set()
+                    for vs in list(_bridge()._telephony_sessions.values()):
+                        tts = getattr(vs, "tts_provider", None)
+                        if tts is None or getattr(tts, "name", None) != "cartesia":
+                            continue
+                        cartesia_singletons.add(id(tts))
+                        live_ids = {
+                            getattr(v, "call_id", None)
+                            for v in _bridge()._telephony_sessions.values()
+                        }
+                        live_ids.discard(None)
+                        for cid in list(getattr(tts, "_call_ws", {}).keys()):
+                            if cid not in live_ids:
+                                logger.warning(
+                                    "telephony_watchdog: evicting orphan cartesia WS "
+                                    "call_id=%s", str(cid)[:12],
+                                )
+                                try:
+                                    await tts.disconnect_for_call(cid)
+                                except Exception as exc:
+                                    logger.debug(
+                                        "cartesia evict failed call_id=%s: %s",
+                                        str(cid)[:12], exc,
+                                    )
+            except Exception as exc:
+                logger.debug("cartesia_orphan_sweep_failed err=%s", exc)
+
             # ----- T1.2 global-concurrency maintenance -----
             # Refresh a lease for every live call on this pod, then
             # reconcile the cluster-wide set to drop orphans from
