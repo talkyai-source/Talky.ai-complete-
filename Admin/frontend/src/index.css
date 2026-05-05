@@ -100,11 +100,13 @@ body {
 .sidebar-logo-icon {
   width: 32px;
   height: 32px;
-  background: #ffffff;
-  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.sidebar-logo-icon img {
+  filter: brightness(0) invert(1);
 }
 
 .sidebar-logo-icon svg {

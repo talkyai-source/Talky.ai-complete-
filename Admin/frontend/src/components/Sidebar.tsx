@@ -8,7 +8,6 @@ import {
     DollarSign,
     AlertTriangle,
     Activity,
-    Zap
 } from 'lucide-react';
 
 interface NavItem {
@@ -43,7 +42,7 @@ export function Sidebar() {
         <aside className="sidebar">
             <div className="sidebar-logo">
                 <div className="sidebar-logo-icon">
-                    <Zap size={18} />
+                    <img src="/logo.svg" alt="Talk-Lee" style={{ width: 20, height: 20 }} />
                 </div>
                 <span className="sidebar-logo-text">Talk-lee</span>
             </div>
