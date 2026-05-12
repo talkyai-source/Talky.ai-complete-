@@ -69,7 +69,16 @@ class DialerQueueService:
             return
         
         try:
-            redis_url = self._config.get("redis_url", "redis://localhost:6379")
+            # Env var wins — systemd's EnvironmentFile puts authenticated
+            # REDIS_URL on the process, and the YAML's flat "redis_url" key
+            # never existed (config nests it as redis.url), so the old
+            # `self._config.get("redis_url", ...)` always fell back to the
+            # unauthenticated localhost default.
+            import os
+            redis_url = os.getenv("REDIS_URL") or self._config.get(
+                "redis.url",
+                self._config.get("redis_url", "redis://localhost:6379"),
+            )
             self._redis = await redis.from_url(
                 redis_url,
                 encoding="utf-8",
