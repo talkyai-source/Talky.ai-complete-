@@ -12,6 +12,14 @@ import { SuspensionBanner, useSuspensionState } from "@/components/admin/suspens
 import { cn } from "@/lib/utils";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
+// Text-based floating assistant — same agent backend as the rest of the
+// app, mounted globally on every authenticated dashboard route. The
+// component is `"use client"`, every browser-only API it touches
+// (WebSocket, localStorage, matchMedia) is gated by `typeof window`
+// checks or `useEffect`, so a regular import is safe and avoids the
+// Next 15 + Webpack `dynamic({ ssr: false })` chunk-graph quirk that
+// produced "Cannot read properties of undefined (reading 'call')".
+import { FloatingAssistant } from "@/components/assistant/floating-assistant";
 
 interface DashboardLayoutProps {
     children: React.ReactNode;
@@ -59,6 +67,9 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
         if (!isDesktop) return undefined;
         return collapsed ? "var(--sidebar-collapsed-width)" : "var(--sidebar-expanded-width)";
     }, [collapsed, isDesktop]);
+
+    // (Floating-assistant is now bottom-right anchored; no sidebar
+    // offset is needed.)
 
     useEffect(() => {
         const el = mainContentRef.current;
@@ -176,6 +187,9 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
                     </div>
                 </main>
             </div>
+
+            {/* Floating text assistant — bottom-right across the app. */}
+            <FloatingAssistant />
         </div>
     );
 }

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
     ArrowLeft,
     ArrowRight,
@@ -27,12 +28,22 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
+import { markFreshLogin } from "@/lib/http-client";
 import MFAVerification from "@/components/auth/mfa-verification";
 import PasskeyLogin from "@/components/auth/passkey-login";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type Step = "email" | "password" | "mfa" | "passkey";
-type LoginTokens = { access_token: string; refresh_token: string; role?: string };
+type LoginTokens = {
+    access_token: string;
+    refresh_token: string;
+    role?: string;
+    user_id?: string;
+    email?: string;
+    business_name?: string | null;
+    minutes_remaining?: number;
+};
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 const emailSchema = z.string().email("Please enter a valid email address");
@@ -168,6 +179,7 @@ export default function LoginClientPage() {
     const [checkingBreach, setCheckingBreach] = useState(false);
     const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
 
+    const { applyLoginResult } = useAuth();
     const emailInputRef = useRef<HTMLInputElement | null>(null);
     const errorId = useId();
 
@@ -186,11 +198,45 @@ export default function LoginClientPage() {
             localStorage.setItem("refresh_token", tokens.refresh_token);
             if (rememberMe) localStorage.setItem("remember_me", "true");
 
+            // Seed AuthContext.user from the login response BEFORE the
+            // navigation to /dashboard. React 18 batches state updates,
+            // so a bare setUser call wouldn't commit before router.push
+            // triggers the soft navigation — the dashboard layout would
+            // render with user=null and redirect right back to login.
+            // flushSync forces React to commit the update synchronously
+            // so by the time router.push runs, AuthContext.user is set.
+            if (tokens.user_id && tokens.email && tokens.role) {
+                flushSync(() => {
+                    applyLoginResult({
+                        user_id: tokens.user_id!,
+                        email: tokens.email!,
+                        role: tokens.role!,
+                        business_name: tokens.business_name,
+                        minutes_remaining: tokens.minutes_remaining,
+                    });
+                });
+            }
+
+            // Open a short grace window so the dashboard's first /me
+            // call cannot trip the session-expired handler back to
+            // /auth/login on a freshly-minted token (clock skew /
+            // cookie propagation race).
+            markFreshLogin();
+
             const rawNext = searchParams.get("next");
             const safeNext =
                 rawNext && rawNext.startsWith("/") && !rawNext.startsWith("//")
                     ? rawNext
                     : null;
+
+            // Source-aware redirect. When the login was triggered by the
+            // floating Ask-AI assistant (or any non-dashboard surface), we
+            // pass `from=assistant` and return the user to the hero / where
+            // they were chatting — NOT the dashboard. A direct visit to
+            // /auth/login still lands on /dashboard as the canonical
+            // post-login destination.
+            const from = searchParams.get("from");
+            const cameFromAssistant = from === "assistant";
 
             // Use the role straight from the login response. Calling
             // /auth/me here used to be the source of a "after login,
@@ -201,13 +247,14 @@ export default function LoginClientPage() {
             // to /auth/login — making it look like the login never worked.
             const role = tokens.role ?? null;
 
-            router.push(
+            const destination =
                 role === "white_label_admin"
                     ? "/white-label/dashboard"
-                    : safeNext ?? "/dashboard",
-            );
+                    : safeNext ?? (cameFromAssistant ? "/" : "/dashboard");
+
+            router.push(destination);
         },
-        [router, searchParams, rememberMe],
+        [router, searchParams, rememberMe, applyLoginResult],
     );
 
     // ─── Step navigation ─────────────────────────────────────────────

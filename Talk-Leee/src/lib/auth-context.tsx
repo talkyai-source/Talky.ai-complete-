@@ -33,6 +33,13 @@ interface AuthContextType {
     logout: () => Promise<void>;
     setToken: (token: string) => void;
     refreshUser: () => Promise<void>;
+    applyLoginResult: (res: {
+        user_id: string;
+        email: string;
+        role: string;
+        business_name?: string | null;
+        minutes_remaining?: number;
+    }) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -135,9 +142,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
     }, []);
 
+    // Synchronous user-state population from a login response. The login
+    // POST returns enough fields to render the dashboard shell; we use
+    // them directly so the redirect to /dashboard finds `user` already
+    // populated and doesn't bounce back to /auth/login. /auth/me will
+    // still run on next reload to refresh any drifted fields.
+    const applyLoginResult = useCallback((res: {
+        user_id: string;
+        email: string;
+        role: string;
+        business_name?: string | null;
+        minutes_remaining?: number;
+    }) => {
+        setUser({
+            id: res.user_id,
+            email: res.email,
+            role: res.role,
+            business_name: res.business_name ?? undefined,
+            minutes_remaining: res.minutes_remaining ?? 0,
+        });
+        setLoading(false);
+    }, []);
+
     const value = useMemo(
-        () => ({ user, loading, login, register, logout, setToken, refreshUser }),
-        [loading, user, login, register, logout, setToken, refreshUser],
+        () => ({ user, loading, login, register, logout, setToken, refreshUser, applyLoginResult }),
+        [loading, user, login, register, logout, setToken, refreshUser, applyLoginResult],
     );
 
     return (
@@ -169,6 +198,9 @@ const SSR_FALLBACK_AUTH_CONTEXT: AuthContextType = {
         throw new Error("useAuth used outside AuthProvider on client");
     },
     refreshUser: async () => {
+        throw new Error("useAuth used outside AuthProvider on client");
+    },
+    applyLoginResult: () => {
         throw new Error("useAuth used outside AuthProvider on client");
     },
 };
