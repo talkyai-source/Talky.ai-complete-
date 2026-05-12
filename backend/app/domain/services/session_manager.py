@@ -65,9 +65,16 @@ class SessionManager:
             allow_fallback = False
         
         try:
-            # Get Redis URL from config
-            redis_url = self._config.get("redis_url", "redis://localhost:6379")
-            
+            # Get Redis URL — env var wins so production credentials in
+            # systemd's EnvironmentFile take precedence over the YAML
+            # default which is unauthenticated. Fall back to the YAML
+            # value, then to a localhost default for dev.
+            import os
+            redis_url = os.getenv("REDIS_URL") or self._config.get(
+                "redis.url",
+                self._config.get("redis_url", "redis://localhost:6379"),
+            )
+
             # Create async Redis client
             self._redis_client = await redis.from_url(
                 redis_url,
