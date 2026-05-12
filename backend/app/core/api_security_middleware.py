@@ -120,15 +120,15 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
         # This provides a catch-all safety net.
         # Skip CORS preflight: OPTIONS isn't real traffic and rate-limiting it
         # makes the browser fail every actual request that follows. Skip
-        # localhost in development so a dev pounding F5 doesn't trip a 5-min
-        # block that breaks the whole UI.
-        import os as _os
+        # loopback traffic in ALL environments — 127.0.0.1 can only originate
+        # from same-host processes (C++ voice gateway POSTing audio frames,
+        # workers, healthchecks), and those are by definition trusted
+        # internal services. In production this matters even more: without
+        # the exemption the gateway's per-frame audio POSTs (~50/sec/call)
+        # trip the limiter within seconds and Asterisk hangs up the call.
         _ip_for_skip = request.client.host if request.client else ""
-        _is_local_dev = (
-            _os.getenv("ENVIRONMENT", "development").lower() != "production"
-            and _ip_for_skip in {"127.0.0.1", "::1", "localhost"}
-        )
-        if request.method == "OPTIONS" or _is_local_dev:
+        _is_loopback = _ip_for_skip in {"127.0.0.1", "::1", "localhost"}
+        if request.method == "OPTIONS" or _is_loopback:
             return await call_next(request)
 
         try:
