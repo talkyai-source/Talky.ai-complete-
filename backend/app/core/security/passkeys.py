@@ -39,8 +39,13 @@ from typing import Any, Optional
 
 from webauthn import (
     base64url_to_bytes,
-    generate_authentication_options,
-    generate_registration_options,
+    # NOTE: we re-export local async wrappers with the same names as the
+    # py_webauthn entry points. Without these underscore aliases the local
+    # wrappers shadow the imports and end up recursing into themselves
+    # with the kwargs of the lower-level lib call (challenge=...), which
+    # 500s the entire passkey flow with TypeError.
+    generate_authentication_options as _webauthn_generate_authentication_options,
+    generate_registration_options as _webauthn_generate_registration_options,
     options_to_json,
     verify_authentication_response,
     verify_registration_response,
@@ -360,7 +365,7 @@ async def generate_registration_options(
     user_id_bytes = user_id.encode("utf-8")  # User handle for the authenticator
 
     # Generate options using py_webauthn
-    options = generate_registration_options(
+    options = _webauthn_generate_registration_options(
         rp_id=rp_id or RP_ID,
         rp_name=rp_name or RP_NAME,
         user_id=user_id_bytes,
@@ -517,7 +522,7 @@ async def generate_authentication_options(
         ]
 
     # Generate options
-    options = generate_authentication_options(
+    options = _webauthn_generate_authentication_options(
         rp_id=rp_id or RP_ID,
         challenge=challenge_bytes,
         allow_credentials=allow_credentials,
