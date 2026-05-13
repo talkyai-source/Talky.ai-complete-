@@ -99,6 +99,17 @@ export async function isPlatformAuthenticatorAvailable(): Promise<boolean> {
  * standard base64, so we normalise first.
  */
 export function base64toArrayBuffer(base64: string): ArrayBuffer {
+  // Defensive: surface the real type so future bad callers get a useful
+  // message instead of the cryptic `base64.replace is not a function`.
+  if (typeof base64 !== "string") {
+    throw new TypeError(
+      `base64toArrayBuffer expected a string, got ${
+        base64 === null ? "null" :
+        base64 === undefined ? "undefined" :
+        (base64 as object).constructor?.name ?? typeof base64
+      }`,
+    );
+  }
   // Normalise base64url -> standard base64 + restore padding
   const padded = base64.replace(/-/g, "+").replace(/_/g, "/");
   const pad = padded.length % 4 === 0 ? "" : "=".repeat(4 - (padded.length % 4));
