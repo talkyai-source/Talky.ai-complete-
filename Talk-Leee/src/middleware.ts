@@ -221,7 +221,13 @@ export async function middleware(req: NextRequest) {
         "img-src 'self' data: blob:",
         "font-src 'self' data:",
         "connect-src " + connectSrc,
-        "media-src 'self' data: blob:",
+        // media-src needs the backend origin so <audio src> can load the
+        // ElevenLabs preview MP3s from api.talkleeai.com. Reuse the same
+        // origin list as connect-src so anything we can fetch we can also
+        // load as media. Without this the browser silently blocks audio
+        // playback with a CSP violation, no network request fires, and
+        // the UI sees no error.
+        "media-src " + connectSrc,
         "worker-src 'self' blob:",
         "object-src 'none'",
         "base-uri 'self'",
