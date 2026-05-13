@@ -283,56 +283,65 @@ async def signup_complete(
                 detail="Registration failed. Please check your details.",
             )
 
-        tenant = await conn.fetchrow(
-            """
-            INSERT INTO tenants (business_name, plan_id, minutes_allocated, minutes_used)
-            VALUES ($1, $2, $3, 0)
-            RETURNING id, business_name, minutes_allocated
-            """,
-            pending["business_name"],
-            forced_plan_id,
-            plan["minutes"],
-        )
+        # Wrap tenant + user_profile + session in a single transaction so a
+        # failed user INSERT (e.g. constraint violation) rolls back the
+        # tenant we just created. Without this, a 500 mid-flow leaves an
+        # orphan tenant row behind and the user has to use a new email.
+        async with conn.transaction():
+            tenant = await conn.fetchrow(
+                """
+                INSERT INTO tenants (business_name, plan_id, minutes_allocated, minutes_used)
+                VALUES ($1, $2, $3, 0)
+                RETURNING id, business_name, minutes_allocated
+                """,
+                pending["business_name"],
+                forced_plan_id,
+                plan["minutes"],
+            )
 
-        pw_hash = hash_password(body.password)
-        user_id = str(uuid.uuid4())
+            pw_hash = hash_password(body.password)
+            user_id = str(uuid.uuid4())
 
-        # Email is already verified at this point because the code matched.
-        # No verification_token row required. user_profiles.is_verified is
-        # set TRUE and email_verified_at is timestamped — the CHECK
-        # constraint chk_email_verification_consistency requires both
-        # together when is_verified is TRUE.
-        await conn.execute(
-            """
-            INSERT INTO user_profiles
-                (id, email, name, tenant_id, role, password_hash,
-                 is_verified, email_verified_at)
-            VALUES ($1, $2, $3, $4, 'owner', $5, TRUE, NOW())
-            """,
-            user_id,
-            email,
-            pending["name"],
-            tenant["id"],
-            pw_hash,
-        )
+            # Email is already verified at this point because the code matched.
+            # No verification_token row required. user_profiles.is_verified is
+            # set TRUE and email_verified_at is timestamped — the CHECK
+            # constraint chk_email_verification_consistency requires both
+            # together when is_verified is TRUE.
+            # role 'tenant_admin' is the canonical name post-day4 RBAC migration
+            # (day4_rbac_tenant_isolation.sql renamed the legacy 'owner' role
+            # and added chk_user_profiles_role_valid restricting role to
+            # {platform_admin, partner_admin, tenant_admin, user, readonly}).
+            await conn.execute(
+                """
+                INSERT INTO user_profiles
+                    (id, email, name, tenant_id, role, password_hash,
+                     is_verified, email_verified_at)
+                VALUES ($1, $2, $3, $4, 'tenant_admin', $5, TRUE, NOW())
+                """,
+                user_id,
+                email,
+                pending["name"],
+                tenant["id"],
+                pw_hash,
+            )
 
-        ip = get_client_ip(request)
-        ua = get_user_agent(request)
-        raw_session_token, session_id = await create_session(
-            conn,
-            user_id=user_id,
-            ip_address=ip,
-            user_agent=ua,
-            request=request,
-            bind_to_ip=True,
-            bind_to_fingerprint=True,
-            return_session_id=True,
-        )
+            ip = get_client_ip(request)
+            ua = get_user_agent(request)
+            raw_session_token, session_id = await create_session(
+                conn,
+                user_id=user_id,
+                ip_address=ip,
+                user_agent=ua,
+                request=request,
+                bind_to_ip=True,
+                bind_to_fingerprint=True,
+                return_session_id=True,
+            )
 
     # Pending record served its purpose — drop it from Redis.
     await redis.delete(_signup_redis_key(email))
 
-    token = create_jwt(user_id, email, "owner", str(tenant["id"]), session_id)
+    token = create_jwt(user_id, email, "tenant_admin", str(tenant["id"]), session_id)
     set_session_cookie(response, raw_session_token)
 
     await audit_logger.log(
