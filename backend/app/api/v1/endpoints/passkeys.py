@@ -566,10 +566,14 @@ async def login_complete(
     # Set session cookie
     _set_session_cookie(response, raw_session_token)
 
+    # Use the already-injected db_client instead of trying to import a
+    # non-existent resolve_db_client helper (the original
+    #   from app.api.v1.dependencies import resolve_db_client
+    # was a typo for get_db_client AND unnecessary anyway since db_client
+    # is already a Depends parameter on this endpoint).
     from app.services.scripts.tenant_minutes import compute_tenant_minutes_remaining
-    from app.api.v1.dependencies import resolve_db_client as _resolve_db_client
     minutes_remaining = await compute_tenant_minutes_remaining(
-        _resolve_db_client().pool,
+        db_client.pool,
         tenant_id=str(user_row["tenant_id"]) if user_row["tenant_id"] else None,
         minutes_allocated=user_row["minutes_allocated"],
     )
