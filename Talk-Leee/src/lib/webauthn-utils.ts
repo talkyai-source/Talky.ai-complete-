@@ -1,7 +1,25 @@
 /**
- * WebAuthn/FIDO2 Utilities for Passkey Management
- * Handles passkey registration and authentication flows
+ * WebAuthn / Passkey utilities — talks directly to the backend's
+ * /api/v1/auth/passkeys/* routes (the previous version called
+ * /api/auth/passkey/* on the Next.js host, which doesn't exist and was
+ * returning 404).
+ *
+ * Backend route map:
+ *   POST  /api/v1/auth/passkeys/register/begin     (authenticated)
+ *   POST  /api/v1/auth/passkeys/register/complete  (authenticated)
+ *   POST  /api/v1/auth/passkeys/login/begin
+ *   POST  /api/v1/auth/passkeys/login/complete
+ *   GET   /api/v1/auth/passkeys                    (authenticated)
+ *   PATCH /api/v1/auth/passkeys/{id}               (authenticated, rename)
+ *   DELETE /api/v1/auth/passkeys/{id}              (authenticated)
+ *
+ * Backend register/login `begin` returns `{ ceremony_id, options[, has_passkeys] }`.
+ * The frontend needs that `ceremony_id` to call `complete`, so we flatten
+ * `options` onto the return value alongside `ceremony_id` so callers can
+ * read `.challenge` / `.rp` / etc. directly.
  */
+
+import { apiBaseUrl } from "@/lib/env";
 
 export interface PasskeyCredential {
   id: string;
@@ -12,6 +30,7 @@ export interface PasskeyCredential {
 }
 
 export interface WebAuthnStartResponse {
+  ceremony_id: string;
   challenge: string;
   rp: {
     name: string;
@@ -31,6 +50,12 @@ export interface WebAuthnStartResponse {
     residentKey?: string;
     userVerification?: string;
   };
+  allowCredentials?: Array<{
+    type: string;
+    id: string;
+    transports?: string[];
+  }>;
+  has_passkeys?: boolean;
 }
 
 export interface WebAuthnCompleteResponse {
@@ -94,19 +119,24 @@ export function arrayBufferToBase64(buffer: ArrayBuffer): string {
  * Starts passkey registration process
  */
 export async function startPasskeyRegistration(token: string): Promise<WebAuthnStartResponse> {
-  const response = await fetch("/api/auth/passkey/register/start", {
+  const response = await fetch(`${apiBaseUrl()}/auth/passkeys/register/begin`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
     },
+    body: JSON.stringify({ authenticator_type: "any" }),
   });
 
   if (!response.ok) {
-    throw new Error("Failed to start passkey registration");
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.detail || "Failed to start passkey registration");
   }
 
-  return response.json();
+  const data = await response.json();
+  // Flatten options onto the return so callers can read .challenge directly,
+  // and keep ceremony_id so the caller can pass it to complete().
+  return { ceremony_id: data.ceremony_id, ...data.options };
 }
 
 /**
@@ -114,65 +144,86 @@ export async function startPasskeyRegistration(token: string): Promise<WebAuthnS
  */
 export async function completePasskeyRegistration(
   token: string,
+  ceremonyId: string,
   credentialName: string,
   credentialData: Record<string, unknown>
 ): Promise<WebAuthnCompleteResponse> {
-  const response = await fetch("/api/auth/passkey/register/complete", {
+  const response = await fetch(`${apiBaseUrl()}/auth/passkeys/register/complete`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
-      credentialName,
-      credential: credentialData,
+      ceremony_id: ceremonyId,
+      credential_response: credentialData,
+      display_name: credentialName,
     }),
   });
 
   if (!response.ok) {
-    throw new Error("Failed to complete passkey registration");
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.detail || "Failed to complete passkey registration");
   }
 
-  return response.json();
+  const data = await response.json();
+  return {
+    success: true,
+    credentialId: data.credential_id ?? data.passkey_id,
+    message: data.message,
+  };
 }
 
 /**
  * Starts passkey authentication process
  */
-export async function startPasskeyAuth(): Promise<WebAuthnStartResponse> {
-  const response = await fetch("/api/auth/passkey/authenticate/start", {
+export async function startPasskeyAuth(email?: string): Promise<WebAuthnStartResponse> {
+  const response = await fetch(`${apiBaseUrl()}/auth/passkeys/login/begin`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(email ? { email } : {}),
   });
 
   if (!response.ok) {
-    throw new Error("Failed to start passkey authentication");
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.detail || "Failed to start passkey authentication");
   }
 
-  return response.json();
+  const data = await response.json();
+  return {
+    ceremony_id: data.ceremony_id,
+    has_passkeys: data.has_passkeys,
+    ...data.options,
+  };
 }
 
 /**
  * Completes passkey authentication
  */
-export async function completePasskeyAuth(credentialData: Record<string, unknown>): Promise<{
+export async function completePasskeyAuth(
+  ceremonyId: string,
+  credentialData: Record<string, unknown>
+): Promise<{
   access_token: string;
   refresh_token: string;
+  role?: string;
+  user_id?: string;
+  email?: string;
+  business_name?: string | null;
+  minutes_remaining?: number;
 }> {
-  const response = await fetch("/api/auth/passkey/authenticate/complete", {
+  const response = await fetch(`${apiBaseUrl()}/auth/passkeys/login/complete`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      credential: credentialData,
+      ceremony_id: ceremonyId,
+      credential_response: credentialData,
     }),
   });
 
   if (!response.ok) {
-    throw new Error("Failed to authenticate with passkey");
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.detail || "Failed to authenticate with passkey");
   }
 
   return response.json();
@@ -182,36 +233,47 @@ export async function completePasskeyAuth(credentialData: Record<string, unknown
  * Gets list of registered passkeys
  */
 export async function getPasskeys(token: string): Promise<PasskeyCredential[]> {
-  const response = await fetch("/api/auth/passkeys", {
+  const response = await fetch(`${apiBaseUrl()}/auth/passkeys`, {
     method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
   });
 
   if (!response.ok) {
     throw new Error("Failed to fetch passkeys");
   }
 
-  return response.json();
+  const data = await response.json();
+  // Backend returns {passkeys: [...], count: N}; surface just the list with
+  // the fields the existing UI expects.
+  return (data.passkeys ?? []).map((p: {
+    id: string;
+    display_name?: string;
+    created_at: string;
+    last_used_at?: string;
+    transports?: string[];
+  }) => ({
+    id: p.id,
+    name: p.display_name ?? "Passkey",
+    createdAt: p.created_at,
+    lastUsedAt: p.last_used_at,
+    transports: p.transports,
+  }));
 }
 
 /**
  * Deletes a passkey
  */
 export async function deletePasskey(token: string, credentialId: string): Promise<{ success: boolean }> {
-  const response = await fetch(`/api/auth/passkeys/${credentialId}`, {
+  const response = await fetch(`${apiBaseUrl()}/auth/passkeys/${credentialId}`, {
     method: "DELETE",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
   });
 
   if (!response.ok) {
     throw new Error("Failed to delete passkey");
   }
 
-  return response.json();
+  return { success: true };
 }
 
 /**
@@ -222,20 +284,21 @@ export async function renamePasskey(
   credentialId: string,
   newName: string
 ): Promise<{ success: boolean }> {
-  const response = await fetch(`/api/auth/passkeys/${credentialId}/rename`, {
-    method: "PUT",
+  // Backend uses PATCH (not PUT) and accepts {display_name} (not {name}).
+  const response = await fetch(`${apiBaseUrl()}/auth/passkeys/${credentialId}`, {
+    method: "PATCH",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ name: newName }),
+    body: JSON.stringify({ display_name: newName }),
   });
 
   if (!response.ok) {
     throw new Error("Failed to rename passkey");
   }
 
-  return response.json();
+  return { success: true };
 }
 
 /**

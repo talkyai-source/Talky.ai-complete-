@@ -39,7 +39,14 @@ Two-step login flow with fallback:
   4. If user has both, UI shows "Sign in with passkey" + "Sign in with password"
 """
 
-from __future__ import annotations
+# NOTE: do NOT use `from __future__ import annotations` here. It makes
+# all type annotations strings (PEP 563), which means FastAPI/Pydantic
+# cannot resolve the request-body model classes when building the
+# TypeAdapter — every route 500s with
+#   PydanticUserError: TypeAdapter[...ForwardRef('LoginBeginRequest')...]
+#     is not fully defined
+# Python 3.12 supports `Optional[str]`, `dict[str, Any]`, `list[str]`
+# natively, so the future import isn't needed for syntax anyway.
 
 import logging
 from typing import Any, Optional
@@ -437,12 +444,14 @@ async def login_complete(
 
         user_id = str(credential["user_id"])
 
-        # Load user details
+        # Load user details. minutes_used intentionally omitted — see
+        # auth.py / dependencies.py for the rationale; we compute live
+        # from the calls table via compute_tenant_minutes_remaining.
         user_row = await conn.fetchrow(
             """
             SELECT up.id, up.email, up.name, up.role, up.tenant_id,
                    up.is_active, up.mfa_enabled,
-                   t.business_name, t.minutes_allocated, t.minutes_used
+                   t.business_name, t.minutes_allocated
             FROM   user_profiles up
             LEFT   JOIN tenants t ON t.id = up.tenant_id
             WHERE  up.id = $1
@@ -557,9 +566,12 @@ async def login_complete(
     # Set session cookie
     _set_session_cookie(response, raw_session_token)
 
-    minutes_remaining = max(
-        0,
-        (user_row["minutes_allocated"] or 0) - (user_row["minutes_used"] or 0),
+    from app.services.scripts.tenant_minutes import compute_tenant_minutes_remaining
+    from app.api.v1.dependencies import resolve_db_client as _resolve_db_client
+    minutes_remaining = await compute_tenant_minutes_remaining(
+        _resolve_db_client().pool,
+        tenant_id=str(user_row["tenant_id"]) if user_row["tenant_id"] else None,
+        minutes_allocated=user_row["minutes_allocated"],
     )
 
     logger.info(
