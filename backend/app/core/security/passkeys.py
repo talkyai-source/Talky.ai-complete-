@@ -73,8 +73,17 @@ WEBAUTHN_CHALLENGE_TTL_MINUTES: int = 5
 # Relying Party (RP) configuration
 # These should be overridden from environment in production
 RP_NAME: str = "Talky.ai"
-RP_ID: str = "talky.ai"  # Must match domain (no scheme, no port)
-RP_ORIGIN: str = "https://talky.ai"  # Full origin for verification
+# WebAuthn requires the rpId to be a registrable suffix of the browser
+# page's effective domain. So the right value depends on which domain
+# the frontend lives at:
+#   - production:  rpId="talkleeai.com",  origin="https://talkleeai.com"
+#   - localhost:   rpId="localhost",      origin="http://localhost:3000"
+# Sourced from PASSKEY_RP_ID / PASSKEY_RP_ORIGIN env vars; the historic
+# hardcoded "talky.ai" stays as a (broken) fallback only so unit tests
+# that don't set env don't crash on import.
+import os as _os
+RP_ID: str = _os.getenv("PASSKEY_RP_ID", "talkleeai.com")
+RP_ORIGIN: str = _os.getenv("PASSKEY_RP_ORIGIN", "https://talkleeai.com")
 
 # Allow local development origins
 DEV_ORIGINS: list[str] = [
