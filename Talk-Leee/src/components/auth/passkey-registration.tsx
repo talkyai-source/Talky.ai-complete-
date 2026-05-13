@@ -118,7 +118,7 @@ export default function PasskeyRegistration({
       const credentialData = extractCredentialCreateData(credential);
 
       // Complete registration
-      const completeResponse = await completePasskeyRegistration(token, credentialName, credentialData);
+      const completeResponse = await completePasskeyRegistration(token, startResponse.ceremony_id, credentialName, credentialData);
 
       if (completeResponse.success) {
         onSuccess();

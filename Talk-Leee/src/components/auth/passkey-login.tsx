@@ -46,7 +46,7 @@ export default function PasskeyLogin({ onSuccess, onError, disabled = false }: P
       const assertionData = extractCredentialAssertionData(assertion);
 
       // Complete authentication
-      const tokens = await completePasskeyAuth(assertionData);
+      const tokens = await completePasskeyAuth(startResponse.ceremony_id, assertionData);
 
       onSuccess(tokens);
     } catch (err) {
