@@ -91,10 +91,18 @@ export async function isPlatformAuthenticatorAvailable(): Promise<boolean> {
 }
 
 /**
- * Converts base64 string to ArrayBuffer
+ * Converts a base64 OR base64url string to ArrayBuffer.
+ *
+ * WebAuthn (and py_webauthn specifically) emits challenges, credential
+ * IDs, and user IDs as base64url (RFC 4648 §5) — `-` and `_` instead of
+ * `+` and `/`, padding usually omitted. window.atob() only accepts
+ * standard base64, so we normalise first.
  */
 export function base64toArrayBuffer(base64: string): ArrayBuffer {
-  const binary_string = window.atob(base64);
+  // Normalise base64url -> standard base64 + restore padding
+  const padded = base64.replace(/-/g, "+").replace(/_/g, "/");
+  const pad = padded.length % 4 === 0 ? "" : "=".repeat(4 - (padded.length % 4));
+  const binary_string = window.atob(padded + pad);
   const len = binary_string.length;
   const bytes = new Uint8Array(len);
   for (let i = 0; i < len; i++) {
@@ -104,7 +112,9 @@ export function base64toArrayBuffer(base64: string): ArrayBuffer {
 }
 
 /**
- * Converts ArrayBuffer to base64 string
+ * Converts ArrayBuffer to base64url string (the WebAuthn wire format).
+ * Backend's verify_registration / verify_authentication expect base64url
+ * for clientDataJSON / attestationObject / authenticatorData / signature.
  */
 export function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
@@ -112,7 +122,12 @@ export function arrayBufferToBase64(buffer: ArrayBuffer): string {
   for (let i = 0; i < bytes.byteLength; i++) {
     binary += String.fromCharCode(bytes[i]);
   }
-  return window.btoa(binary);
+  // btoa produces standard base64; convert to base64url (no padding).
+  return window
+    .btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
 }
 
 /**
