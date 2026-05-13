@@ -654,11 +654,20 @@ async def verify_authentication(
         credential_id[:16], new_sign_count
     )
 
+    # py_webauthn's VerifiedAuthentication doesn't expose
+    # `authenticator_attachment` (only VerifiedRegistration does in some
+    # versions). Defensively read the attribute or fall back to None so
+    # the field doesn't 500 the entire login flow.
+    _attach = getattr(verification, "authenticator_attachment", None)
+    _attach_str = (
+        _attach.value if _attach is not None and hasattr(_attach, "value")
+        else (_attach if isinstance(_attach, str) else None)
+    )
     return AuthenticationResult(
         credential_id=credential_id,
         new_sign_count=new_sign_count,
-        user_verified=True,  # We require user verification
-        authenticator_attachment=verification.authenticator_attachment.value if verification.authenticator_attachment else None,
+        user_verified=True,
+        authenticator_attachment=_attach_str,
     )
 
 
