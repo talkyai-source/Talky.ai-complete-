@@ -709,9 +709,22 @@ function isPublicApiPath(method: string, path: string) {
     if (method === "GET" && path === "/health") return true;
     if (method === "POST" && path === "/auth/register") return true;
     if (method === "POST" && path === "/auth/login") return true;
+    if (method === "POST" && path === "/auth/signup/start") return true;
+    if (method === "POST" && path === "/auth/signup/complete") return true;
+    if (method === "POST" && path === "/auth/forgot-password") return true;
+    if (method === "POST" && path === "/auth/reset-password") return true;
+    if (method === "POST" && path === "/auth/passkey-check") return true;
+    if (method === "POST" && path === "/auth/passkeys/login/begin") return true;
+    if (method === "POST" && path === "/auth/passkeys/login/complete") return true;
     if (method === "POST" && path === "/auth/passkeys/login/options") return true;
     if (method === "POST" && path === "/auth/passkeys/login/verify") return true;
     if (method === "POST" && path === "/billing/webhooks/stripe") return true;
+    // Voice preview MP3s: browser plays them via <audio src="..."> which
+    // can't send Authorization headers. The samples themselves are
+    // already-public ElevenLabs preview URLs cached server-side, so
+    // gating them behind auth just breaks the UI without any security
+    // benefit.
+    if (method === "GET" && /^\/ai-options\/voices\/[^/]+\/sample$/.test(path)) return true;
     return false;
 }
 
