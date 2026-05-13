@@ -93,12 +93,16 @@ DEV_ORIGINS: list[str] = [
     "http://127.0.0.1:5173",
 ]
 
-# Supported public key algorithms (COSE identifiers)
-# Ordered by preference: ES256, Ed25519, RS256
-PUBKEY_CRED_PARAMS: list[dict[str, Any]] = [
-    {"type": "public-key", "alg": -7},    # ES256 (ECDSA w/ SHA-256)
-    {"type": "public-key", "alg": -8},    # Ed25519
-    {"type": "public-key", "alg": -257},  # RS256 (RSASSA-PKCS1-v1_5 w/ SHA-256)
+# Supported public-key algorithms, ordered by preference.
+# py_webauthn 2.x expects a list of COSEAlgorithmIdentifier enum members
+# passed via the `supported_pub_key_algs=` kwarg (NOT a list of dict
+# {type, alg} — that was the older / pre-2.0 shape and now 500s with
+# `TypeError: ... unexpected keyword argument 'pub_key_cred_params'`).
+from webauthn.helpers.cose import COSEAlgorithmIdentifier as _COSEAlg
+SUPPORTED_PUB_KEY_ALGS: list[_COSEAlg] = [
+    _COSEAlg.ECDSA_SHA_256,                # -7   ES256
+    _COSEAlg.EDDSA,                        # -8   Ed25519
+    _COSEAlg.RSASSA_PKCS1_v1_5_SHA_256,    # -257 RS256
 ]
 
 # Authenticator selection criteria for different flows
@@ -381,7 +385,7 @@ async def generate_registration_options(
         user_name=user_email,
         user_display_name=display_name,
         challenge=challenge_bytes,
-        pub_key_cred_params=PUBKEY_CRED_PARAMS,
+        supported_pub_key_algs=SUPPORTED_PUB_KEY_ALGS,
         authenticator_selection=authenticator_selection,
         attestation=AttestationConveyancePreference.NONE,  # Skip attestation for UX
         timeout=120000,  # 2 minutes in milliseconds
