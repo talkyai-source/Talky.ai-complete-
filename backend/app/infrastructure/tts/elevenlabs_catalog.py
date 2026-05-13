@@ -59,7 +59,24 @@ def elevenlabs_enabled() -> bool:
 
 
 def elevenlabs_preview_proxy_url(voice_id: str) -> str:
-    return f"/api/v1/ai-options/voices/{voice_id}/sample"
+    """
+    Public URL for the cached ElevenLabs preview MP3.
+
+    Prefers API_BASE_URL from settings (set in /opt/talky/backend/.env on
+    prod to e.g. https://api.talkleeai.com) so the browser fetches the
+    audio directly from the FastAPI backend instead of the page origin.
+
+    Earlier this returned just the relative path "/api/v1/ai-options/...",
+    which when used as the `src` of an <audio> element resolves against
+    whatever the current page origin is (http://localhost:3000 in dev
+    against a remote backend). That hits the Next.js api-proxy, which
+    doesn't have a generic forwarder for arbitrary backend paths, so
+    every voice-sample preview 404'd.
+    """
+    import os as _os
+    base = _os.getenv("API_BASE_URL", "").rstrip("/")
+    rel = f"/api/v1/ai-options/voices/{voice_id}/sample"
+    return f"{base}{rel}" if base else rel
 
 
 def _elevenlabs_headers() -> dict[str, str]:
