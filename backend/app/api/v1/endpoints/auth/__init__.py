@@ -19,6 +19,8 @@ Endpoints:
   POST /auth/logout-all        — revoke ALL sessions for the current user
   POST /auth/passkey-check     — does this email have a registered passkey?
   POST /auth/change-password   — change password + revoke other sessions
+  POST /auth/forgot-password   — email a 6-digit password-reset code
+  POST /auth/reset-password    — verify the code + set new password
   GET  /auth/verify-email      — consume email-verification token
 
 This package's public surface is intentionally identical to the previous
@@ -33,6 +35,7 @@ from . import (
     login as _login_mod,
     passkey as _passkey_mod,
     password as _password_mod,
+    password_reset as _password_reset_mod,
     profile as _profile_mod,
     registration as _registration_mod,
     sessions as _sessions_mod,
@@ -56,6 +59,7 @@ router.include_router(_profile_mod.router)
 router.include_router(_sessions_mod.router)
 router.include_router(_passkey_mod.router)
 router.include_router(_password_mod.router)
+router.include_router(_password_reset_mod.router)
 router.include_router(_verify_email_mod.router)
 
 
