@@ -11,7 +11,6 @@ import { Select } from "@/components/ui/select";
 import { useNotificationsActions, useNotificationsState } from "@/lib/notifications-client";
 import type { NotificationPriority, NotificationRouting, NotificationType } from "@/lib/notifications";
 import { Download, Trash2, Key, Lock } from "lucide-react";
-import Link from "next/link";
 import MFASetup from "@/components/auth/mfa-setup";
 import PasskeyRegistration from "@/components/auth/passkey-registration";
 import DeviceList from "@/components/auth/device-list";
@@ -46,10 +45,20 @@ export default function SettingsPage() {
     const [showPasskeySetup, setShowPasskeySetup] = useState(false);
     const [mfaEnabled, setMfaEnabled] = useState(false);
 
-    // Get token from localStorage
+    // Get JWT from the canonical auth-token storage. Earlier this hardcoded
+    // localStorage.getItem("access_token"), which is the WRONG key — the
+    // rest of the app stores the JWT under "talklee.auth.token" (via
+    // src/lib/auth-token.ts → setBrowserAuthToken). With the old key the
+    // settings page never saw a token, so the MFA / Passkey panels
+    // silently refused to render their setup flows.
     useEffect(() => {
-        const savedToken = localStorage.getItem("access_token") || "";
-        setToken(savedToken);
+        let cancelled = false;
+        (async () => {
+            const { getBrowserAuthToken } = await import("@/lib/auth-token");
+            const savedToken = getBrowserAuthToken() || "";
+            if (!cancelled) setToken(savedToken);
+        })();
+        return () => { cancelled = true; };
     }, []);
 
     const retentionDaysLabel = useMemo(() => {
@@ -62,22 +71,46 @@ export default function SettingsPage() {
     return (
         <DashboardLayout title="Settings" description="Configure notifications, privacy, integrations, and account.">
             <div className="mx-auto w-full max-w-5xl space-y-6">
-                <div className="rounded-2xl border border-border bg-background/70 backdrop-blur-sm p-4 transition-[transform,background-color,box-shadow,border-color] duration-150 ease-out hover:scale-[1.02] hover:bg-gray-50 hover:shadow-md dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10 dark:hover:shadow-[0_10px_30px_rgba(0,0,0,0.22)]">
+                {/*
+                 * Assistant tile — moved here from "AI Options". The
+                 * underlying agent backend (langgraph state machine + tool
+                 * calls) is feature-complete and the floating chat widget on
+                 * every dashboard route already talks to it; the
+                 * standalone /assistant management page (configurable
+                 * runs / saved actions / scheduled jobs) is queued for
+                 * v2 so we surface it here as "Coming soon" rather than
+                 * dead space in the sidebar.
+                 *
+                 * Connectors used to live in this same row as a Quick-link
+                 * tile and was promoted to a top-level sidebar item.
+                 */}
+                <div
+                    className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur-sm dark:border-white/10 dark:bg-white/5"
+                    aria-label="Assistant — Coming soon"
+                >
                     <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                         <div className="min-w-0">
-                            <div className="text-sm font-semibold text-foreground">Quick links</div>
-                            <div className="text-sm text-muted-foreground">Jump to related settings pages.</div>
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm font-semibold text-foreground">Assistant</span>
+                                <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300">
+                                    Coming soon · v2
+                                </span>
+                            </div>
+                            <div className="mt-1 text-sm text-muted-foreground">
+                                Configure assistant action plans, scheduled runs, and saved tool presets. The chat assistant in the bottom-left of every dashboard page already works today; the dedicated configuration screen ships with v2.
+                            </div>
                         </div>
-                        <div className="flex flex-wrap gap-2">
-                            <Link
-                                href="/settings/connectors"
-                                className="inline-flex items-center justify-center rounded-xl border border-teal-600 bg-teal-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition-[transform,background-color,color,border-color,box-shadow] duration-150 ease-out hover:bg-teal-700 hover:border-teal-700 hover:shadow-md hover:scale-[1.02] active:scale-[0.99]"
-                            >
-                                Connectors
-                            </Link>
-                        </div>
+                        <button
+                            type="button"
+                            disabled
+                            aria-disabled="true"
+                            className="inline-flex cursor-not-allowed items-center justify-center rounded-xl border border-border bg-muted px-3 py-2 text-sm font-semibold text-muted-foreground opacity-70"
+                        >
+                            Coming soon
+                        </button>
                     </div>
                 </div>
+
                 <Card className="dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10 dark:hover:shadow-[0_10px_30px_rgba(0,0,0,0.22)]">
                     <CardHeader>
                         <CardTitle className="dark:text-white">Display Preferences</CardTitle>
