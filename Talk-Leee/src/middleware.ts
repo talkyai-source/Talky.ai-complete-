@@ -123,7 +123,7 @@ function apiBaseUrlForRequest(req: NextRequest) {
     return `${req.nextUrl.origin}/api/v1`;
 }
 
-async function fetchUserContextFromBackend(input: { req: NextRequest; token: string }): Promise<{ role: string; partnerId: string | null } | null> {
+async function fetchUserContextFromBackend(input: { req: NextRequest; cookieHeader: string }): Promise<{ role: string; partnerId: string | null } | null> {
     const baseUrl = apiBaseUrlForRequest(input.req);
     const endpoints = [`${baseUrl}/auth/me`, `${baseUrl}/me`];
     for (const url of endpoints) {
@@ -131,7 +131,10 @@ async function fetchUserContextFromBackend(input: { req: NextRequest; token: str
             const res = await fetch(url, {
                 method: "GET",
                 headers: {
-                    cookie: `${authTokenCookieName()}=${encodeURIComponent(input.token)}`,
+                    // Forward the full incoming cookie header so the
+                    // backend sees BOTH the new httpOnly `talky_at`
+                    // access cookie (Phase A) and any legacy cookies.
+                    cookie: input.cookieHeader,
                     accept: "application/json",
                     [INTERNAL_BYPASS_HEADER]: "1",
                 },
@@ -241,8 +244,19 @@ export async function middleware(req: NextRequest) {
     requestHeaders.set("content-security-policy", csp);
     requestHeaders.set("x-nonce", nonce);
 
-    const token = readCookieFromHeader(req, authTokenCookieName());
-    if (token && token.trim().length > 0) {
+    // Auth signal: any of the cookies that indicate the user is logged
+    // in. Phase B adds `talky_at` (the new httpOnly access cookie) as
+    // the canonical signal alongside the legacy non-httpOnly mirror
+    // cookie and `talky_sid` legacy server-side session cookie.
+    const legacyToken = readCookieFromHeader(req, authTokenCookieName());
+    const accessCookie = readCookieFromHeader(req, "talky_at");
+    const legacySession = readCookieFromHeader(req, "talky_sid");
+    const hasAuthSignal =
+        (accessCookie && accessCookie.trim().length > 0) ||
+        (legacyToken && legacyToken.trim().length > 0) ||
+        (legacySession && legacySession.trim().length > 0);
+    const cookieHeader = req.headers.get("cookie") ?? "";
+    if (hasAuthSignal) {
         const shouldCheckRole =
             !isApiPath(pathname) &&
             !pathname.startsWith("/_next/") &&
@@ -250,7 +264,7 @@ export async function middleware(req: NextRequest) {
             !pathname.startsWith("/site.webmanifest");
 
         if (shouldCheckRole) {
-            const ctx = await fetchUserContextFromBackend({ req, token });
+            const ctx = await fetchUserContextFromBackend({ req, cookieHeader });
             const role = ctx?.role ?? null;
             const partnerId = ctx?.partnerId ?? null;
 

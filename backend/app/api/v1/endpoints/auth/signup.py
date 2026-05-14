@@ -36,6 +36,7 @@ from ._shared import (
     get_client_ip,
     get_user_agent,
     limiter,
+    issue_cookie_auth,
     set_session_cookie,
 )
 from .schemas import (
@@ -343,6 +344,19 @@ async def signup_complete(
 
     token = create_jwt(user_id, email, "tenant_admin", str(tenant["id"]), session_id)
     set_session_cookie(response, raw_session_token)
+
+    async with db_client.pool.acquire() as conn:
+        await issue_cookie_auth(
+            response,
+            conn,
+            user_id=user_id,
+            email=email,
+            role="tenant_admin",
+            tenant_id=str(tenant["id"]),
+            session_id=session_id,
+            ip=ip,
+            user_agent=ua,
+        )
 
     await audit_logger.log(
         event_type=AuditEvent.USER_CREATED,

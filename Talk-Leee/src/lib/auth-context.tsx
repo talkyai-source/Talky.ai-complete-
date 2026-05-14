@@ -3,7 +3,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode, useCallback } from "react";
 import { api } from "@/lib/api";
 import { resetSessionExpiredLatch } from "@/lib/http-client";
-import { getBrowserAuthToken } from "@/lib/auth-token";
 interface MeResponse {
     id: string;
     email: string;
@@ -48,24 +47,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [user, setUser] = useState<MeResponse | null>(null);
     const [loading, setLoading] = useState(true);
 
-    // On mount, check for existing token and fetch user profile.
-    // Skip the call entirely when there's no token — otherwise the 401 would
-    // trip the http-client's session-expired handler, which redirects to
-    // /auth/login. That made every cold visit (and every just-completed
-    // login round-trip) appear to "ask for login again".
+    // Bootstrap auth state from the server. Phase B: cookies are the
+    // source of truth (httpOnly `talky_at` access + `talky_rt` refresh),
+    // so we always probe `/auth/me`. If the access cookie is expired the
+    // http-client transparently refreshes via `/auth/refresh`; only if
+    // that also fails do we land on a 401 and clear local state. We keep
+    // the legacy localStorage token read so users mid-migration with an
+    // existing Bearer token still get a clean bootstrap.
     useEffect(() => {
-        const token = getBrowserAuthToken();
-        if (!token) {
-            setLoading(false);
-            return;
-        }
+        let cancelled = false;
+        // If the legacy token exists we still send it (the http-client
+        // attaches Authorization automatically); if not, the cookie does
+        // the work via `credentials: 'include'`.
         api.getMe()
-            .then((me) => setUser(me))
+            .then((me) => { if (!cancelled) setUser(me); })
             .catch(() => {
-                api.clearToken();
+                if (cancelled) return;
+                // Real 401 (after refresh-on-401 also failed) — drop any
+                // stale local token and present a clean logged-out shell.
+                try { api.clearToken(); } catch {}
                 setUser(null);
             })
-            .finally(() => setLoading(false));
+            .finally(() => { if (!cancelled) setLoading(false); });
+        return () => { cancelled = true; };
     }, []);
 
     const login = useCallback(async (email: string, password: string) => {

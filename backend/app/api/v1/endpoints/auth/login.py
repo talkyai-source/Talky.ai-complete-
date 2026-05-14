@@ -23,6 +23,7 @@ from ._shared import (
     create_jwt,
     get_client_ip,
     get_user_agent,
+    issue_cookie_auth,
     limiter,
     session_cookie_secure,
 )
@@ -308,4 +309,17 @@ async def login(
         max_age=COOKIE_MAX_AGE,
         path="/",
     )
+
+    async with db_client.pool.acquire() as conn:
+        await issue_cookie_auth(
+            resp,
+            conn,
+            user_id=user_id,
+            email=row["email"],
+            role=row["role"],
+            tenant_id=tenant_id,
+            session_id=session_id,
+            ip=ip,
+            user_agent=ua,
+        )
     return resp

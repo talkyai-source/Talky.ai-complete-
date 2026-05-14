@@ -7,6 +7,8 @@ from fastapi import APIRouter, Cookie, Depends, Request, Response
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
 from app.core.postgres_adapter import Client
+from app.core.security.cookies import REFRESH_COOKIE_NAME, clear_auth_cookies
+from app.core.security.refresh_tokens import revoke_family_by_token
 from app.core.security.sessions import (
     SESSION_COOKIE_NAME,
     revoke_all_user_sessions,
@@ -25,22 +27,23 @@ async def logout(
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
     talky_sid: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    talky_rt: Optional[str] = Cookie(default=None, alias=REFRESH_COOKIE_NAME),
 ) -> dict[str, str]:
     """
     Logout the current user.
 
-    1. Revoke the server-side session row (sets revoked=TRUE in security_sessions).
-    2. Clear the httpOnly session cookie from the browser.
-
-    OWASP: Logout must invalidate the server-side session, not just clear the
-    client-side cookie.  Clearing the cookie alone does not prevent an attacker
-    who has already captured the token from reusing it.
+    1. Revoke the legacy server-side session row (security_sessions).
+    2. Revoke the refresh token family so the cookie-auth chain stops.
+    3. Clear all auth cookies (legacy talky_sid + new talky_at/talky_rt).
     """
-    if talky_sid:
-        async with db_client.pool.acquire() as conn:
+    async with db_client.pool.acquire() as conn:
+        if talky_sid:
             await revoke_session_by_token(conn, talky_sid, reason="logout")
+        if talky_rt:
+            await revoke_family_by_token(conn, presented_token=talky_rt, reason="logout")
 
     clear_session_cookie(response)
+    clear_auth_cookies(response)
     return {"detail": "Logged out successfully."}
 
 
@@ -54,9 +57,8 @@ async def logout_all(
     Revoke ALL active sessions for the current user across all devices.
 
     Use case: account compromise response, "sign out everywhere" feature.
-
-    OWASP Session Management: Applications must provide a logout mechanism
-    that invalidates all active sessions.
+    Also revokes every refresh token row owned by the user so the cookie
+    auth path can't be used to continue from another browser either.
     """
     async with db_client.pool.acquire() as conn:
         count = await revoke_all_user_sessions(
@@ -64,8 +66,17 @@ async def logout_all(
             current_user.id,
             reason="logout_all",
         )
+        await conn.execute(
+            """
+            UPDATE refresh_tokens
+            SET revoked_at = NOW(), revoked_reason = 'logout'
+            WHERE user_id = $1 AND revoked_at IS NULL
+            """,
+            current_user.id,
+        )
 
     clear_session_cookie(response)
+    clear_auth_cookies(response)
     return {
         "detail": f"Logged out from {count} active session(s).",
         "sessions_revoked": count,

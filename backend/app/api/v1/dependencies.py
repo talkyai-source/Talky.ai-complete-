@@ -79,6 +79,20 @@ def get_db_pool() -> asyncpg.Pool:
     return get_db_pool_from_container()
 
 
+def get_db_read_pool() -> asyncpg.Pool:
+    """
+    Phase 3.3 — read-replica pool dependency. Falls back to the
+    primary pool when no replica is configured (so dev/staging keeps
+    working unchanged).
+    """
+    from app.core.db import get_read_pool
+    try:
+        return get_read_pool()
+    except RuntimeError:
+        # Pool isn't initialized in this context — fall back.
+        return get_db_pool_from_container()
+
+
 from app.core.postgres_adapter import Client
 
 
@@ -104,6 +118,31 @@ def get_db_client(pool: asyncpg.Pool = Depends(get_db_pool)) -> Client:
     if not hasattr(pool, "acquire"):
         try:
             pool = get_db_pool()
+        except RuntimeError:
+            _assert_db_env_configured()
+            raise
+    return Client(pool)
+
+
+def get_db_read_client(pool: asyncpg.Pool = Depends(get_db_read_pool)) -> Client:
+    """Phase 3.3 — Client wrapping the read-replica pool.
+
+    Use as a FastAPI dependency on read-only endpoints (campaign list,
+    contact search, transcripts list, etc.) so the primary's connection
+    budget stays available for writes / transactions:
+
+        @router.get("/")
+        async def list_campaigns(
+            db_client: Client = Depends(get_db_read_client),
+            ...
+        ):
+
+    When no read replica is configured (`READ_DATABASE_URL` unset),
+    this aliases the primary so existing single-DB deploys keep working.
+    """
+    if not hasattr(pool, "acquire"):
+        try:
+            pool = get_db_read_pool()
         except RuntimeError:
             _assert_db_env_configured()
             raise
@@ -144,11 +183,15 @@ async def get_current_user(
     request: Request,
     authorization: Optional[str] = Header(None, alias="Authorization"),
     session_cookie: Optional[str] = Cookie(None, alias=SESSION_COOKIE_NAME),
+    access_cookie: Optional[str] = Cookie(None, alias="talky_at"),
 ) -> CurrentUser:
     """
-    Extract and validate JWT token from Authorization header.
+    Resolve the authenticated user from (in priority order):
 
-    Returns CurrentUser with user info and tenant context.
+      1. ``talky_at`` httpOnly cookie     — new short-lived access JWT
+      2. ``talky_sid`` httpOnly cookie    — legacy server-side session token
+      3. ``Authorization: Bearer <jwt>``  — legacy header path
+
     JWT is signed with JWT_SECRET (HS256).
     """
     user_id: Optional[str] = None
@@ -160,7 +203,26 @@ async def get_current_user(
             db_client = get_db_client()
         return db_client
 
-    if authorization:
+    # ---- New cookie path: talky_at access JWT ---------------------------------
+    if access_cookie and not authorization:
+        try:
+            payload = decode_and_validate_token(access_cookie)
+        except JWTValidationError as e:
+            if e.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
+                logger.error(e.detail)
+                raise HTTPException(status_code=e.status_code, detail=e.detail)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=e.detail,
+            )
+
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token: missing subject",
+            )
+    elif authorization:
         parts = authorization.split()
         if len(parts) != 2 or parts[0].lower() != "bearer":
             raise HTTPException(
@@ -238,13 +300,19 @@ async def get_current_user(
             detail="Authorization required",
         )
 
-    # Fetch user profile with tenant info from PostgreSQL
+    # Fetch user profile with tenant info from PostgreSQL.
+    # NOTE: `t.minutes_used` is no longer read here — that column has
+    # historically been left at zero (no call-end hook wrote to it),
+    # which made `minutes_remaining` always equal full allocation. Live
+    # usage is now computed from the `calls` table via
+    # compute_tenant_minutes_used(), matching the dashboard endpoint.
     try:
-        async with resolve_db_client().pool.acquire() as conn:
+        client = resolve_db_client()
+        async with client.pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
                 SELECT up.id, up.email, up.name, up.role, up.tenant_id,
-                       t.business_name, t.minutes_allocated, t.minutes_used
+                       t.business_name, t.minutes_allocated
                 FROM user_profiles up
                 LEFT JOIN tenants t ON t.id = up.tenant_id
                 WHERE up.id = $1
@@ -261,9 +329,11 @@ async def get_current_user(
             detail="User profile not found",
         )
 
-    minutes_remaining = max(
-        0,
-        (row["minutes_allocated"] or 0) - (row["minutes_used"] or 0)
+    from app.services.scripts.tenant_minutes import compute_tenant_minutes_remaining
+    minutes_remaining = await compute_tenant_minutes_remaining(
+        client.pool,
+        tenant_id=str(row["tenant_id"]) if row["tenant_id"] else None,
+        minutes_allocated=row["minutes_allocated"],
     )
 
     resolved_tenant_id = str(row["tenant_id"]) if row["tenant_id"] else None
@@ -310,19 +380,20 @@ async def get_optional_user(
     request: Request,
     authorization: Optional[str] = Header(None, alias="Authorization"),
     session_cookie: Optional[str] = Cookie(None, alias=SESSION_COOKIE_NAME),
+    access_cookie: Optional[str] = Cookie(None, alias="talky_at"),
 ) -> Optional[CurrentUser]:
     """
     Get current user if authenticated, otherwise return None.
     Useful for endpoints that work both with and without auth.
     """
-    if not authorization:
-        if not session_cookie:
-            return None
+    if not authorization and not session_cookie and not access_cookie:
+        return None
     try:
         return await get_current_user(
             request=request,
             authorization=authorization,
             session_cookie=session_cookie,
+            access_cookie=access_cookie,
         )
     except HTTPException:
         return None

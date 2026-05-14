@@ -37,6 +37,7 @@ from . import (
     password as _password_mod,
     password_reset as _password_reset_mod,
     profile as _profile_mod,
+    refresh as _refresh_mod,
     registration as _registration_mod,
     sessions as _sessions_mod,
     signup as _signup_mod,
@@ -57,6 +58,7 @@ router.include_router(_registration_mod.router)
 router.include_router(_login_mod.router)
 router.include_router(_profile_mod.router)
 router.include_router(_sessions_mod.router)
+router.include_router(_refresh_mod.router)
 router.include_router(_passkey_mod.router)
 router.include_router(_password_mod.router)
 router.include_router(_password_reset_mod.router)
