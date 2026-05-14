@@ -44,12 +44,26 @@ import {
 } from "@/lib/models";
 import { extractAuthorizationUrl } from "@/lib/connectors-utils";
 import { apiBaseUrl } from "@/lib/env";
+import { getBrowserAuthToken, setBrowserAuthToken } from "@/lib/auth-token";
 
 let _httpClient: ReturnType<typeof createHttpClient> | undefined;
 
 function httpClient() {
     if (_httpClient) return _httpClient;
-    _httpClient = createHttpClient({ baseUrl: apiBaseUrl(), getToken: () => null, setToken: () => {} });
+    // CRITICAL: read/write the JWT from the same canonical storage the
+    // rest of the app uses (lib/auth-token.ts → "talklee.auth.token").
+    // Previously this hardcoded `getToken: () => null, setToken: () => {}`,
+    // which meant every request via backend-api.ts (including the
+    // connectors page's GET /connectors/status) went out with NO
+    // Authorization header, the backend correctly 401'd, the http-client's
+    // session-expired handler interpreted it as session expiry, and the
+    // user was thrown back to the login page the moment they opened
+    // /connectors.
+    _httpClient = createHttpClient({
+        baseUrl: apiBaseUrl(),
+        getToken: () => getBrowserAuthToken(),
+        setToken: (t) => setBrowserAuthToken(t),
+    });
     return _httpClient;
 }
 
