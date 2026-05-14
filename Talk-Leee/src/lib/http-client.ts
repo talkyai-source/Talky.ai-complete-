@@ -129,6 +129,18 @@ function defaultMessageForStatus(status?: number) {
 let _sessionExpiredHandler: (() => void) | null = null;
 let _sessionExpiredFired = false;
 
+// `markFreshLogin` previously opened a 4-second window after login to
+// swallow the FIRST 401, which masked the underlying race between the
+// freshly-issued JWT and the middleware/proxy's parallel session check.
+// Phase B introduced silent refresh-on-401 (see `tryRefresh` above), so
+// that race no longer surfaces — a transient 401 is automatically
+// rotated and retried. We keep the export as a no-op so existing call
+// sites compile during the migration; remove the call after Phase C
+// ships and downstream code is updated.
+export function markFreshLogin() {
+    _sessionExpiredFired = false;
+}
+
 export function setSessionExpiredHandler(fn: (() => void) | null) {
     _sessionExpiredHandler = fn;
     // Reset the fired latch so a logout → login round-trip can re-arm.
@@ -178,6 +190,37 @@ function defaultTokenStorage(): TokenStorage {
     };
 }
 
+// Shared, single-flight refresh-on-401. The cookie-auth backend
+// (Phase A) rotates the short-lived `talky_at` access cookie via
+// `POST /api/v1/auth/refresh` using the `talky_rt` refresh cookie. The
+// HTTP client retries any first-time 401 once, after a successful
+// refresh. Concurrent 401s share a single in-flight refresh promise so
+// a thundering herd doesn't trigger N rotations.
+let _refreshInFlight: Promise<boolean> | null = null;
+
+async function tryRefresh(refreshUrl: string): Promise<boolean> {
+    if (_refreshInFlight) return _refreshInFlight;
+    _refreshInFlight = (async () => {
+        try {
+            const res = await fetch(refreshUrl, {
+                method: "POST",
+                credentials: "include",
+            });
+            return res.ok;
+        } catch {
+            return false;
+        } finally {
+            setTimeout(() => { _refreshInFlight = null; }, 0);
+        }
+    })();
+    return _refreshInFlight;
+}
+
+/** Test-only: reset module-level refresh state between tests. */
+export function __resetRefreshStateForTests() {
+    _refreshInFlight = null;
+}
+
 export function createHttpClient(config: HttpClientConfig) {
     const baseUrl = normalizeBaseUrl(config.baseUrl);
     const storage = defaultTokenStorage();
@@ -186,6 +229,12 @@ export function createHttpClient(config: HttpClientConfig) {
 
     const requestInterceptors = config.requestInterceptors ?? [];
     const responseInterceptors = config.responseInterceptors ?? [];
+
+    // Refresh endpoint lives at the same baseUrl; the backend mounts it
+    // at /auth/refresh (after the /api/v1 prefix that baseUrl already
+    // includes for FastAPI clients, or under /api/v1/auth/refresh when
+    // routed through the Next.js proxy).
+    const refreshUrl = `${baseUrl}/auth/refresh`;
 
     async function raw<TBody = unknown>(opts: HttpRequestOptions<TBody>) {
         const method = opts.method ?? "GET";
@@ -277,9 +326,19 @@ export function createHttpClient(config: HttpClientConfig) {
         const queryParams = opts.query ?? opts.params; // Support both query and params
         const url = buildUrl(baseUrl, opts.path, queryParams);
 
+        // Don't try to refresh the refresh endpoint itself — that would
+        // recurse forever on a genuinely expired refresh token.
+        const isRefreshCall = opts.path === "/auth/refresh" || opts.path.endsWith("/auth/refresh");
+
         let res: Response;
         try {
             res = await raw(opts);
+            if (res.status === 401 && !isRefreshCall) {
+                const refreshed = await tryRefresh(refreshUrl);
+                if (refreshed) {
+                    res = await raw(opts);
+                }
+            }
         } catch (err) {
             if (err instanceof DOMException && err.name === "AbortError") {
                 throw new ApiClientError({ code: "aborted", message: "Request aborted", url, method });

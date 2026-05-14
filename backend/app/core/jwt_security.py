@@ -21,6 +21,8 @@ from app.core.config import get_settings
 ALLOWED_HMAC_ALGORITHMS = {"HS256", "HS384", "HS512"}
 REQUIRED_CLAIMS = ("sub", "iat", "exp")
 
+ACCESS_TOKEN_TTL_MINUTES = 15
+
 
 class JWTValidationError(Exception):
     def __init__(self, detail: str, status_code: int = 401):
@@ -53,9 +55,11 @@ def encode_access_token(
     role: str,
     tenant_id: Optional[str],
     session_id: Optional[str] = None,
+    ttl: Optional[timedelta] = None,
 ) -> str:
     settings = get_settings()
     now = datetime.now(timezone.utc)
+    effective_ttl = ttl if ttl is not None else timedelta(hours=settings.jwt_expiry_hours)
     payload: Dict[str, Any] = {
         "sub": user_id,
         "email": email,
@@ -63,7 +67,7 @@ def encode_access_token(
         "tenant_id": tenant_id,
         "iat": now,
         "nbf": now,
-        "exp": now + timedelta(hours=settings.jwt_expiry_hours),
+        "exp": now + effective_ttl,
     }
     if settings.jwt_issuer:
         payload["iss"] = settings.jwt_issuer

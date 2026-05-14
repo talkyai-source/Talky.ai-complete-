@@ -14,6 +14,7 @@ from app.core.error_handlers import register_error_handlers
 from app.core.request_id_middleware import RequestIdLogFilter, RequestIdMiddleware
 from app.core.security_headers_middleware import SecurityHeadersMiddleware
 from app.core.session_security_middleware import SessionSecurityMiddleware
+from app.core.security.csrf import CSRFMiddleware
 from app.core.tenant_middleware import TenantMiddleware
 
 
@@ -54,6 +55,7 @@ def configure_middleware(app: FastAPI) -> None:
         allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
     )
+    app.add_middleware(CSRFMiddleware, allowed_origins=settings.allowed_origins)
     app.add_middleware(TenantMiddleware)
     app.add_middleware(SessionSecurityMiddleware)
     app.add_middleware(APISecurityMiddleware)

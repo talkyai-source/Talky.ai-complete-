@@ -19,8 +19,17 @@ from fastapi import HTTPException, Request, Response, status
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
+from datetime import timedelta
+
 from app.core.config import get_settings
-from app.core.jwt_security import encode_access_token
+from app.core.jwt_security import ACCESS_TOKEN_TTL_MINUTES, encode_access_token
+from app.core.security.cookies import (
+    REFRESH_COOKIE_NAME,
+    clear_auth_cookies,
+    set_access_cookie,
+    set_refresh_cookie,
+)
+from app.core.security.refresh_tokens import issue_initial_refresh_token
 from app.core.security.sessions import SESSION_COOKIE_NAME, SESSION_LIFETIME_HOURS
 
 logger = logging.getLogger(__name__)
@@ -126,6 +135,43 @@ def clear_session_cookie(response: Response) -> None:
         samesite="strict",
         path="/",
     )
+
+
+async def issue_cookie_auth(
+    response: Response,
+    conn,
+    *,
+    user_id: str,
+    email: str,
+    role: str,
+    tenant_id: Optional[str],
+    session_id: Optional[str],
+    ip: Optional[str],
+    user_agent: Optional[str],
+) -> None:
+    """Set the new httpOnly access + refresh cookies on the response.
+
+    Called by every successful authentication path so the new cookie
+    pair is issued alongside the legacy session cookie + body JWT during
+    the migration window.
+    """
+    access_jwt = encode_access_token(
+        user_id=user_id,
+        email=email,
+        role=role,
+        tenant_id=tenant_id,
+        session_id=session_id,
+        ttl=timedelta(minutes=ACCESS_TOKEN_TTL_MINUTES),
+    )
+    raw_refresh, _token_id, _family_id = await issue_initial_refresh_token(
+        conn,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        ip=ip,
+        user_agent=user_agent,
+    )
+    set_access_cookie(response, access_jwt)
+    set_refresh_cookie(response, raw_refresh)
 
 
 def normalize_optional_text(value: Optional[str]) -> Optional[str]:

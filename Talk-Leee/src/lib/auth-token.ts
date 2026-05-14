@@ -1,3 +1,15 @@
+// DEPRECATED — kept only during the Phase A→C cookie migration.
+//
+// Phase A switched the backend to issue httpOnly `talky_at` (15min) +
+// `talky_rt` (7d) cookies on every successful auth. Phase B made the
+// HTTP client send `credentials: 'include'` and silently rotate via
+// `/auth/refresh`. The localStorage key and non-httpOnly mirror cookie
+// below predate that and are only read so users mid-migration with an
+// existing Bearer token still bootstrap cleanly.
+//
+// REMOVE AFTER SOAK: once Phase A+B have been in production long enough
+// for every active session (24h max) to have rotated, delete this file
+// plus every importer found via `grep authTokenCookieName`.
 const STORAGE_KEY = "talklee.auth.token";
 const COOKIE_NAME = "talklee_auth_token";
 
