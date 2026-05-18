@@ -300,15 +300,8 @@ async def login(
         "message": "Login successful.",
         "mfa_required": False,
     })
-    resp.set_cookie(
-        key=SESSION_COOKIE_NAME,
-        value=raw_session_token,
-        httponly=True,
-        secure=session_cookie_secure(),
-        samesite="strict",
-        max_age=COOKIE_MAX_AGE,
-        path="/",
-    )
+    from ._shared import set_session_cookie as _set_session_cookie
+    _set_session_cookie(resp, raw_session_token)
 
     async with db_client.pool.acquire() as conn:
         await issue_cookie_auth(
