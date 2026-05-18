@@ -103,24 +103,36 @@ def session_cookie_secure() -> bool:
     return get_settings().environment.lower() == "production"
 
 
+def _session_samesite() -> str:
+    """
+    Mirrors the talky_at/talky_rt SameSite logic so the legacy session
+    cookie also works on a cross-site Vercel-hosted frontend when
+    AUTH_COOKIE_SAMESITE=none is set.
+    """
+    val = (os.getenv("AUTH_COOKIE_SAMESITE", "strict") or "strict").strip().lower()
+    return val if val in ("strict", "lax", "none") else "strict"
+
+
+def _session_cookie_secure_or_none() -> bool:
+    # SameSite=None requires Secure (browser rejects otherwise).
+    return session_cookie_secure() or _session_samesite() == "none"
+
+
 def set_session_cookie(response: Response, raw_token: str) -> None:
     """
-    Write the session token into an httpOnly Secure SameSite=Strict cookie.
+    Write the session token into an httpOnly Secure cookie.
 
-    OWASP Session Management Cheat Sheet:
-      "Set the Secure attribute to prevent the cookie from being sent over
-       unencrypted connections."
-      "Set the HttpOnly attribute to prevent client-side script from reading
-       the session ID."
-      "Set SameSite=Strict to prevent the cookie from being sent in
-       cross-site requests."
+    SameSite is configurable via AUTH_COOKIE_SAMESITE (default 'strict').
+    Set 'none' when the frontend lives on a different eTLD+1 (e.g.
+    talkleeai.vercel.app + api.talkleeai.com). Secure flag is forced on
+    when SameSite=None, as browsers require.
     """
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=raw_token,
         httponly=True,
-        secure=session_cookie_secure(),
-        samesite="strict",
+        secure=_session_cookie_secure_or_none(),
+        samesite=_session_samesite(),  # type: ignore[arg-type]
         max_age=COOKIE_MAX_AGE,
         path="/",
     )
@@ -131,8 +143,8 @@ def clear_session_cookie(response: Response) -> None:
     response.delete_cookie(
         key=SESSION_COOKIE_NAME,
         httponly=True,
-        secure=session_cookie_secure(),
-        samesite="strict",
+        secure=_session_cookie_secure_or_none(),
+        samesite=_session_samesite(),  # type: ignore[arg-type]
         path="/",
     )
 
