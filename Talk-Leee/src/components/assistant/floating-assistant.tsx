@@ -375,7 +375,7 @@ export function FloatingAssistant() {
                         {!isAuthed && (
                             <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-3 text-[12px] text-foreground">
                                 <p className="mb-2">
-                                    Sign in to chat with the assistant. We'll bring you
+                                    Sign in to chat with the assistant. We&apos;ll bring you
                                     straight back here after you log in.
                                 </p>
                                 <button
