@@ -17,40 +17,148 @@ from contextlib import asynccontextmanager
 logger = logging.getLogger(__name__)
 
 _pool: Optional[asyncpg.Pool] = None
+# Phase 2.3 — optional read-replica pool. Populated when
+# READ_DATABASE_URL is set; falls back to the primary pool when unset
+# so single-DB deploys behave exactly as before.
+_read_pool: Optional[asyncpg.Pool] = None
+
+
+def _pool_kwargs() -> dict:
+    """Shared pool settings.
+
+    `statement_cache_size=0` is mandatory when the pool talks to
+    PgBouncer in transaction-pooling mode — server-side prepared
+    statements aren't allowed there. asyncpg silently breaks
+    otherwise. Off by default so direct-Postgres deploys (dev,
+    test) get full prepared-statement performance; flip via
+    `PG_STATEMENT_CACHE_SIZE=0` when DATABASE_URL points at PgBouncer.
+    """
+    cache = os.getenv("PG_STATEMENT_CACHE_SIZE")
+    extras: dict = {}
+    if cache is not None:
+        try:
+            extras["statement_cache_size"] = int(cache)
+        except ValueError:
+            logger.warning("invalid PG_STATEMENT_CACHE_SIZE=%r — ignoring", cache)
+    return extras
 
 
 async def init_db_pool() -> asyncpg.Pool:
-    """Create the asyncpg connection pool. Called once at startup."""
-    global _pool
+    """Create the asyncpg connection pool(s). Called once at startup.
+
+    Always creates the primary pool. When ``READ_DATABASE_URL`` is set,
+    also creates a separate pool for read-only queries; campaign list /
+    detail reads route there to keep the primary's connection budget for
+    write-heavy work. When unset, the read pool aliases the primary so
+    callers don't branch on availability.
+    """
+    global _pool, _read_pool
     dsn = os.getenv(
         "DATABASE_URL",
         "postgresql://talkyai:talkyai_secret@localhost:5432/talkyai"
     )
+    min_size = int(os.getenv("PG_POOL_MIN_SIZE", "5"))
+    max_size = int(os.getenv("PG_POOL_MAX_SIZE", "20"))
     _pool = await asyncpg.create_pool(
         dsn=dsn,
-        min_size=2,
-        max_size=20,
+        min_size=min_size,
+        max_size=max_size,
         command_timeout=60,
         server_settings={"application_name": "talkyai-backend"},
+        **_pool_kwargs(),
     )
-    logger.info("PostgreSQL connection pool initialized")
+    logger.info(
+        "PostgreSQL primary pool initialized min=%d max=%d", min_size, max_size,
+    )
+
+    read_dsn = os.getenv("READ_DATABASE_URL")
+    if read_dsn:
+        ro_min = int(os.getenv("PG_READ_POOL_MIN_SIZE", "2"))
+        ro_max = int(os.getenv("PG_READ_POOL_MAX_SIZE", "15"))
+        _read_pool = await asyncpg.create_pool(
+            dsn=read_dsn,
+            min_size=ro_min,
+            max_size=ro_max,
+            command_timeout=60,
+            server_settings={"application_name": "talkyai-backend-ro"},
+            **_pool_kwargs(),
+        )
+        logger.info(
+            "PostgreSQL read-replica pool initialized min=%d max=%d", ro_min, ro_max,
+        )
+    else:
+        # Aliasing the primary keeps `get_read_pool()` always-callable;
+        # callers never need a None-check.
+        _read_pool = _pool
+
     return _pool
 
 
 async def close_db_pool() -> None:
-    """Close the connection pool. Called at shutdown."""
-    global _pool
+    """Close the connection pool(s). Called at shutdown."""
+    global _pool, _read_pool
+    # Close the read pool first so anything pending on it drains while
+    # the primary is still up (avoids 'pool closed' surprises on a
+    # late-arriving read).
+    if _read_pool is not None and _read_pool is not _pool:
+        try:
+            await _read_pool.close()
+        except Exception as exc:
+            logger.warning("read pool close raised: %s", exc)
+    _read_pool = None
+
     if _pool:
         await _pool.close()
         _pool = None
-        logger.info("PostgreSQL connection pool closed")
+        logger.info("PostgreSQL connection pools closed")
 
 
 def get_pool() -> asyncpg.Pool:
-    """Return the active pool (raises if not initialized)."""
+    """Return the active primary pool (raises if not initialized)."""
     if _pool is None:
         raise RuntimeError("Database pool not initialized. Call init_db_pool() first.")
     return _pool
+
+
+def get_read_pool() -> asyncpg.Pool:
+    """Return the read-only pool. Aliases primary when no replica is configured."""
+    if _read_pool is None:
+        raise RuntimeError("Database pool not initialized. Call init_db_pool() first.")
+    return _read_pool
+
+
+@asynccontextmanager
+async def get_read_db():
+    """
+    Read-only context manager — same RLS handling as ``get_db()`` but
+    leases a connection from the read-replica pool. Use for stateless
+    list / detail endpoints (campaigns list, contacts search) so the
+    primary's connection budget stays available for transactional work.
+
+    Usage:
+        async with get_read_db() as conn:
+            rows = await conn.fetch("SELECT * FROM campaigns WHERE ...")
+    """
+    pool = get_read_pool()
+    async with pool.acquire() as conn:
+        from app.core.security.tenant_isolation import (
+            get_current_tenant_id, get_bypass_rls,
+        )
+
+        tenant_id = get_current_tenant_id()
+        bypass_rls = get_bypass_rls()
+
+        if bypass_rls:
+            await conn.execute("SET LOCAL app.bypass_rls = 'true'")
+            await conn.execute("SET LOCAL app.current_tenant_id = ''")
+        elif tenant_id:
+            await conn.execute(f"SET LOCAL app.current_tenant_id = '{tenant_id}'")
+            await conn.execute("SET LOCAL app.bypass_rls = 'false'")
+        else:
+            await conn.execute("SET LOCAL app.current_tenant_id = ''")
+            await conn.execute("SET LOCAL app.bypass_rls = 'false'")
+
+        yield conn
 
 
 @asynccontextmanager

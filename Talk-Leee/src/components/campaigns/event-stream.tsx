@@ -10,6 +10,7 @@ import {
     groupEventTime,
     StreamEvent,
 } from "@/lib/campaign-performance";
+import { useEventStream } from "@/lib/event-stream-api";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 
@@ -65,19 +66,29 @@ function group(events: StreamEvent[]) {
 
 export function EventStream({
     campaigns,
-    initialEvents,
+    initialEvents: _initialEvents,
 }: {
     campaigns: Campaign[];
     initialEvents?: StreamEvent[];
 }) {
     const TODAY_VISIBLE = 3;
     const todayFirstItemRef = useRef<HTMLButtonElement | null>(null);
-    const [events, setEvents] = useState<StreamEvent[]>(() => initialEvents || seedEvents(campaigns));
     const [quick, setQuick] = useState<EventQuickFilter>("All");
     const [sound, setSound] = useState(false);
     const [desktop, setDesktop] = useState(false);
     const [detailsId, setDetailsId] = useState<string | null>(null);
     const [todayMaxHeightPx, setTodayMaxHeightPx] = useState<number | null>(null);
+
+    // Real events polled from /api/v1/events every 10s (paused when tab is
+    // hidden). Replaces the prior client-side mock generator. The filter
+    // is sent to the backend so we don't over-fetch categories the user
+    // isn't viewing.
+    const eventsQuery = useEventStream(quick);
+    const events: StreamEvent[] = eventsQuery.data ?? [];
+
+    // Track previous events so we can play sound / desktop notification
+    // only on genuinely new entries (not on every refetch).
+    const prevEventIdsRef = useRef<Set<string>>(new Set());
 
     useEffect(() => {
         const saved = fromLocalStorage<{ sound: boolean; desktop: boolean; quick: EventQuickFilter }>("campaigns.performance.eventPrefs", {
@@ -104,19 +115,33 @@ export function EventStream({
         Notification.requestPermission().catch(() => { });
     }, [desktop]);
 
+    // Diff newly-arrived events against the previous render and fire the
+    // sound / desktop notification once per new event. The previous
+    // implementation fired on a 9s timer regardless of real activity.
     useEffect(() => {
-        const interval = window.setInterval(() => {
-            const next = generateEvent(campaigns);
-            setEvents((prev) => [next, ...prev].slice(0, 120));
-            if (sound) beep();
-            if (desktop && "Notification" in window && Notification.permission === "granted") {
+        const prev = prevEventIdsRef.current;
+        const fresh = events.filter((e) => !prev.has(e.id));
+        if (fresh.length === 0) {
+            prevEventIdsRef.current = new Set(events.map((e) => e.id));
+            return;
+        }
+        // On first load, populate the set without firing any notification.
+        if (prev.size === 0) {
+            prevEventIdsRef.current = new Set(events.map((e) => e.id));
+            return;
+        }
+        if (sound) beep();
+        if (desktop && "Notification" in window && Notification.permission === "granted") {
+            // Surface only the newest one to avoid notification spam.
+            const top = fresh[0];
+            if (top) {
                 try {
-                    new Notification(next.title, { body: next.description.slice(0, 140) });
+                    new Notification(top.title, { body: (top.description ?? "").slice(0, 140) });
                 } catch { }
             }
-        }, 9000);
-        return () => window.clearInterval(interval);
-    }, [campaigns, desktop, sound]);
+        }
+        prevEventIdsRef.current = new Set(events.map((e) => e.id));
+    }, [events, desktop, sound]);
 
     const filtered = useMemo(() => filterEvents(events, quick), [events, quick]);
     const grouped = useMemo(() => group(filtered), [filtered]);
@@ -307,110 +332,3 @@ export function EventStream({
     );
 }
 
-function seedEvents(campaigns: Campaign[]): StreamEvent[] {
-    const now = Date.now();
-    const pick = (idx: number) => campaigns[idx % Math.max(1, campaigns.length)]?.id;
-    return [
-        {
-            id: `evt-${now - 1000}`,
-            category: "Campaign",
-            title: "Campaign started",
-            description: "Holiday Sales Outreach began processing new leads.",
-            createdAt: new Date(now - 1000 * 60 * 12).toISOString(),
-            relatedCampaignIds: pick(0) ? [pick(0)!] : [],
-            metadata: { queueDepth: 42, operator: "scheduler" },
-        },
-        {
-            id: `evt-${now - 2000}`,
-            category: "System",
-            title: "Worker pool scaled",
-            description: "System scaled worker pool from 6 → 10 to handle traffic spike.",
-            createdAt: new Date(now - 1000 * 60 * 80).toISOString(),
-            metadata: { from: 6, to: 10 },
-        },
-        {
-            id: `evt-${now - 3000}`,
-            category: "Alerts",
-            title: "Retry rate elevated",
-            description: "Outbound retry rate exceeded threshold for 5 minutes.",
-            createdAt: new Date(now - 1000 * 60 * 60 * 2).toISOString(),
-            metadata: { rate: "7.2%", threshold: "5.0%" },
-        },
-        {
-            id: `evt-${now - 4000}`,
-            category: "User Actions",
-            title: "Campaign paused",
-            description: "Operator paused Customer Satisfaction Survey for script review.",
-            createdAt: new Date(now - 1000 * 60 * 60 * 26).toISOString(),
-            relatedCampaignIds: pick(1) ? [pick(1)!] : [],
-            metadata: { user: "Alex" },
-        },
-        {
-            id: `evt-${now - 5000}`,
-            category: "Milestones",
-            title: "Goal reached",
-            description: "Appointment Reminders hit 95% completion milestone.",
-            createdAt: new Date(now - 1000 * 60 * 60 * 24 * 9).toISOString(),
-            relatedCampaignIds: pick(2) ? [pick(2)!] : [],
-            metadata: { completion: "95%" },
-        },
-    ];
-}
-
-function generateEvent(campaigns: Campaign[]): StreamEvent {
-    const now = Date.now();
-    const roll = now % 5;
-    const c = campaigns.length > 0 ? campaigns[now % campaigns.length] : null;
-    if (roll === 0) {
-        return {
-            id: `evt-${now}`,
-            category: "Campaign",
-            title: "Campaign progress updated",
-            description: `${c?.name || "A campaign"} processed a new batch of calls.`,
-            createdAt: new Date(now).toISOString(),
-            relatedCampaignIds: c ? [c.id] : [],
-            metadata: { processed: 25, window: "5m" },
-        };
-    }
-    if (roll === 1) {
-        return {
-            id: `evt-${now}`,
-            category: "System",
-            title: "API latency normalizing",
-            description: "System observed latency returning to baseline after brief spike.",
-            createdAt: new Date(now).toISOString(),
-            metadata: { p95: "210ms", baseline: "160ms" },
-        };
-    }
-    if (roll === 2) {
-        return {
-            id: `evt-${now}`,
-            category: "Alerts",
-            title: "Carrier errors detected",
-            description: "Carrier error codes increased on outbound calls, retry policy engaged.",
-            createdAt: new Date(now).toISOString(),
-            relatedCampaignIds: c ? [c.id] : [],
-            metadata: { code: "486", retries: "enabled" },
-        };
-    }
-    if (roll === 3) {
-        return {
-            id: `evt-${now}`,
-            category: "User Actions",
-            title: "Settings updated",
-            description: "Operator updated campaign script and concurrency settings.",
-            createdAt: new Date(now).toISOString(),
-            relatedCampaignIds: c ? [c.id] : [],
-            metadata: { user: "Operator", field: "concurrency" },
-        };
-    }
-    return {
-        id: `evt-${now}`,
-        category: "Milestones",
-        title: "Completion milestone",
-        description: `${c?.name || "A campaign"} reached a progress milestone.`,
-        createdAt: new Date(now).toISOString(),
-        relatedCampaignIds: c ? [c.id] : [],
-        metadata: { milestone: "70%" },
-    };
-}

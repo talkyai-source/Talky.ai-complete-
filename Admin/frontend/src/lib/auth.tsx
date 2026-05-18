@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import type { AdminUser } from './api';
+import { api, type AdminUser } from './api';
 
-// Dummy admin user for development
+// Dummy admin user used only when VITE_USE_DUMMY_AUTH=true (dev / Storybook).
 const DUMMY_ADMIN_USER: AdminUser = {
     id: 'admin-001',
     email: 'admin@talky.ai',
@@ -9,8 +9,15 @@ const DUMMY_ADMIN_USER: AdminUser = {
     role: 'super_admin',
 };
 
-// Development mode - set to true to bypass real auth
-const USE_DUMMY_AUTH = true;
+// Dummy-auth gate is now env-driven instead of hardcoded.
+//
+// Production: leave VITE_USE_DUMMY_AUTH unset (or "false") so the real
+// /auth/login + /auth/verify endpoints back the AuthProvider.
+//
+// Dev: set VITE_USE_DUMMY_AUTH=true in `.env.local` to bypass auth and
+// always log in as DUMMY_ADMIN_USER.
+const USE_DUMMY_AUTH =
+    String(import.meta.env.VITE_USE_DUMMY_AUTH ?? '').toLowerCase() === 'true';
 
 interface AuthState {
     user: AdminUser | null;
@@ -27,6 +34,8 @@ interface AuthContextType extends AuthState {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const TOKEN_KEY = 'admin_token';
+
 export function AuthProvider({ children }: { children: ReactNode }) {
     const [state, setState] = useState<AuthState>({
         user: null,
@@ -36,10 +45,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     const checkAuth = async () => {
-        // Use dummy auth for development
         if (USE_DUMMY_AUTH) {
-            // Simulate a brief loading state
-            await new Promise(resolve => setTimeout(resolve, 300));
+            await new Promise((resolve) => setTimeout(resolve, 300));
             setState({
                 user: DUMMY_ADMIN_USER,
                 isLoading: false,
@@ -49,9 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return;
         }
 
-        // Real auth logic (disabled for now)
-        const token = localStorage.getItem('admin_token');
-
+        const token = localStorage.getItem(TOKEN_KEY);
         if (!token) {
             setState({
                 user: null,
@@ -62,24 +67,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return;
         }
 
-        // In production, verify token with API
-        setState({
-            user: null,
-            isLoading: false,
-            isAuthenticated: false,
-            error: null,
-        });
+        try {
+            const res = await api.verifyToken();
+            if (res.data?.valid && res.data.user) {
+                setState({
+                    user: res.data.user,
+                    isLoading: false,
+                    isAuthenticated: true,
+                    error: null,
+                });
+                return;
+            }
+            // Token rejected — clear it.
+            localStorage.removeItem(TOKEN_KEY);
+            setState({
+                user: null,
+                isLoading: false,
+                isAuthenticated: false,
+                error: null,
+            });
+        } catch (err) {
+            // Backend unreachable — keep the user out rather than silently
+            // logging them in.
+            setState({
+                user: null,
+                isLoading: false,
+                isAuthenticated: false,
+                error: err instanceof Error ? err.message : 'Auth check failed',
+            });
+        }
     };
 
     const login = async (email: string, password: string): Promise<boolean> => {
-        setState(prev => ({ ...prev, isLoading: true, error: null }));
+        setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
-        // Use dummy auth for development
         if (USE_DUMMY_AUTH) {
-            // Simulate API delay
-            await new Promise(resolve => setTimeout(resolve, 500));
-
-            // Accept any credentials for development
+            await new Promise((resolve) => setTimeout(resolve, 500));
             if (email && password) {
                 setState({
                     user: { ...DUMMY_ADMIN_USER, email },
@@ -88,28 +111,59 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     error: null,
                 });
                 return true;
-            } else {
-                setState(prev => ({
+            }
+            setState((prev) => ({
+                ...prev,
+                isLoading: false,
+                error: 'Please enter email and password',
+            }));
+            return false;
+        }
+
+        if (!email || !password) {
+            setState((prev) => ({
+                ...prev,
+                isLoading: false,
+                error: 'Please enter email and password',
+            }));
+            return false;
+        }
+
+        try {
+            const res = await api.login(email, password);
+            if (res.error || !res.data?.access_token) {
+                setState((prev) => ({
                     ...prev,
                     isLoading: false,
-                    error: 'Please enter email and password',
+                    error: res.error?.message || 'Login failed',
                 }));
                 return false;
             }
+            localStorage.setItem(TOKEN_KEY, res.data.access_token);
+            setState({
+                user: res.data.user,
+                isLoading: false,
+                isAuthenticated: true,
+                error: null,
+            });
+            return true;
+        } catch (err) {
+            setState((prev) => ({
+                ...prev,
+                isLoading: false,
+                error: err instanceof Error ? err.message : 'Login failed',
+            }));
+            return false;
         }
-
-        // Real login logic (disabled for now)
-        setState(prev => ({
-            ...prev,
-            isLoading: false,
-            error: 'Real authentication not configured',
-        }));
-        return false;
     };
 
     const logout = async () => {
-        // Clear auth state
-        localStorage.removeItem('admin_token');
+        try {
+            if (!USE_DUMMY_AUTH) await api.logout();
+        } catch {
+            // Token may already be invalidated server-side; clear locally regardless.
+        }
+        localStorage.removeItem(TOKEN_KEY);
         setState({
             user: null,
             isLoading: false,
@@ -119,7 +173,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     useEffect(() => {
-        checkAuth();
+        void checkAuth();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     return (

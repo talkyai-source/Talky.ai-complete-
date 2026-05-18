@@ -35,6 +35,88 @@ _LLM_MAX_RETRIES = 2
 _LLM_RETRY_BASE_DELAY = 0.3  # 300ms — fast first retry for voice latency budget
 
 
+def _coerce_int(value) -> int:
+    """Best-effort int coercion for SDK fields whose shape may vary by
+    version. Returns 0 on anything that can't be safely converted —
+    we'd rather log a 0 than crash the call with a TypeError."""
+    if value is None:
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _extract_cached_tokens(usage_obj) -> int:
+    """Pull the cached-prompt-tokens count out of Groq's usage object.
+
+    Groq nests the figure under ``prompt_tokens_details.cached_tokens``
+    on the OpenAI-compatible API surface (May 2026). Older SDK versions
+    expose it as a flat ``cached_tokens`` field. We check both shapes so
+    a future SDK upgrade doesn't silently drop the metric.
+    """
+    if usage_obj is None:
+        return 0
+    flat = getattr(usage_obj, "cached_tokens", None)
+    if flat is not None:
+        return _coerce_int(flat)
+    details = getattr(usage_obj, "prompt_tokens_details", None)
+    if details is not None:
+        return _coerce_int(getattr(details, "cached_tokens", 0))
+    # Some SDKs expose usage as a dict instead of a typed object.
+    if isinstance(usage_obj, dict):
+        if "cached_tokens" in usage_obj:
+            return _coerce_int(usage_obj.get("cached_tokens"))
+        details_d = usage_obj.get("prompt_tokens_details")
+        if isinstance(details_d, dict):
+            return _coerce_int(details_d.get("cached_tokens"))
+    return 0
+
+
+def _emit_usage_log(usage_obj, *, model: str) -> None:
+    """Surface Groq's per-request token usage so operators can see when
+    prompt caching is firing.
+
+    Emits a single structured log line at INFO with:
+    * ``prompt_tokens``  — total prompt size sent (system + history)
+    * ``cached_tokens``  — portion served from cache (system prompt
+                            stays stable across turns of the same call;
+                            once a call has 1k+ system-prompt tokens
+                            this value should be non-zero on turn 2+)
+    * ``cache_hit_ratio``— cached / prompt, 0.0–1.0
+    * ``completion_tokens`` — yield this turn
+
+    A consistently-zero ``cache_hit_ratio`` after turn 0 is the signal
+    that prompt caching is not engaging — typically because the system
+    prompt is changing across turns or sits below Groq's 1k-token
+    minimum cache threshold.
+    """
+    prompt_tokens = _coerce_int(getattr(usage_obj, "prompt_tokens", None)
+                                or (usage_obj.get("prompt_tokens") if isinstance(usage_obj, dict) else None))
+    completion_tokens = _coerce_int(getattr(usage_obj, "completion_tokens", None)
+                                    or (usage_obj.get("completion_tokens") if isinstance(usage_obj, dict) else None))
+    cached_tokens = _extract_cached_tokens(usage_obj)
+    ratio = (cached_tokens / prompt_tokens) if prompt_tokens else 0.0
+    logger.info(
+        "llm_usage model=%s prompt_tokens=%d cached_tokens=%d "
+        "cache_hit_ratio=%.2f completion_tokens=%d",
+        model, prompt_tokens, cached_tokens, ratio, completion_tokens,
+    )
+    # Mirror to Prometheus (T4-B2). The metric tracks the most-recent
+    # ratio per (mode, persona); operators read it with avg_over_time
+    # to spot caching regressions. mode/persona are unknown at this
+    # provider-level call site; "unknown"/"none" labels keep the
+    # metric callable without forcing the LLM provider to know about
+    # call mode (a layering violation we'd regret later).
+    try:
+        from app.infrastructure.metrics.voice_metrics import (
+            record_prompt_cache_hit_ratio,
+        )
+        record_prompt_cache_hit_ratio(ratio, mode="agent", persona=None)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("voice_metrics_cache_record_failed err=%s", exc)
+
+
 class LLMTimeoutError(Exception):
     """Raised when LLM response times out"""
     pass
@@ -468,6 +550,12 @@ class GroqLLMProvider(LLMProvider):
                 "stop": stop_sequences,
                 # Optional: seed for deterministic outputs (useful for testing)
                 "seed": kwargs.get("seed", None),
+                # NOTE: OpenAI's `stream_options={"include_usage": True}` is
+                # not accepted by groq-python 0.37.x — passing it raises
+                # `unexpected keyword argument 'stream_options'` and breaks
+                # the warmup gate, refusing every outbound call. Groq still
+                # returns `usage` on the final non-empty chunk for some
+                # models, which the loop below picks up via getattr().
             }
 
             reasoning_format = kwargs.get("reasoning_format")
@@ -541,8 +629,12 @@ class GroqLLMProvider(LLMProvider):
                                     **request_kwargs
                                 )
 
-                                # Yield tokens as they arrive
+                                # Yield tokens as they arrive. Groq sends a
+                                # final usage-only chunk (choices=[], usage
+                                # populated) when stream_options.include_usage
+                                # is enabled — record it and skip yielding.
                                 token_count = 0
+                                final_usage = None
                                 async for chunk in stream:
                                     if chunk.choices:
                                         delta = chunk.choices[0].delta
@@ -550,12 +642,17 @@ class GroqLLMProvider(LLMProvider):
                                             token_count += 1
                                             tokens_yielded += 1
                                             yield delta.content
+                                    chunk_usage = getattr(chunk, "usage", None)
+                                    if chunk_usage is not None:
+                                        final_usage = chunk_usage
 
                                 logger.debug(
                                     f"Stream completed, yielded {token_count} tokens"
                                 )
                                 if token_count == 0:
                                     logger.warning("Zero tokens received from Groq")
+                                if final_usage is not None:
+                                    _emit_usage_log(final_usage, model=model)
                             _lease.report_success()
                             return  # success — exit retry loop AND generator
 

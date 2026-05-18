@@ -192,6 +192,193 @@ async def list_connectors(
     return connectors
 
 
+# =============================================================================
+# Type-keyed shim endpoints (consumed by the dashboard ConnectorCard UI).
+# The dashboard treats one card per provider TYPE (calendar/email/crm/drive)
+# rather than per connector UUID. These endpoints translate type→default
+# provider and reuse the underlying connector machinery.
+# =============================================================================
+
+# Canonical provider per connector type. Multi-provider per type (e.g. Outlook
+# alongside Google Calendar) is intentionally out of scope for the dashboard
+# card UI — admins can still manage those rows directly via the typed
+# endpoints in this file.
+DEFAULT_PROVIDER_BY_TYPE = {
+    "calendar": "google_calendar",
+    "email": "gmail",
+    "crm": "hubspot",
+    "drive": "google_drive",
+}
+
+_KNOWN_TYPES = set(DEFAULT_PROVIDER_BY_TYPE.keys())
+
+
+def _ui_status(db_status: Optional[str]) -> str:
+    if db_status == "active":
+        return "connected"
+    if db_status == "expired":
+        return "expired"
+    if db_status in ("error", "revoked", "failed"):
+        return "error"
+    return "disconnected"
+
+
+class ConnectorTypeStatus(BaseModel):
+    type: str
+    status: str  # connected | disconnected | expired | error
+    provider: Optional[str] = None
+    last_sync: Optional[str] = None
+    error_message: Optional[str] = None
+
+
+class ConnectorStatusListResponse(BaseModel):
+    items: List[ConnectorTypeStatus]
+
+
+class TypeAuthorizeResponse(BaseModel):
+    authorization_url: str
+
+
+@router.get("/status", response_model=ConnectorStatusListResponse)
+async def list_connector_statuses(
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """One status row per known connector TYPE for this tenant.
+
+    The dashboard renders a fixed set of cards (calendar/email/crm/drive),
+    so we always return all four — types without a row resolve to
+    `disconnected`.
+    """
+    response = (
+        db_client.table("connectors")
+        .select("id, type, provider, status, created_at")
+        .eq("tenant_id", current_user.tenant_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+
+    latest_by_type: dict = {}
+    for conn in (response.data or []):
+        t = conn.get("type")
+        if t in _KNOWN_TYPES and t not in latest_by_type:
+            latest_by_type[t] = conn
+
+    items: List[ConnectorTypeStatus] = []
+    for type_name in DEFAULT_PROVIDER_BY_TYPE:
+        conn = latest_by_type.get(type_name)
+        if not conn:
+            items.append(ConnectorTypeStatus(type=type_name, status="disconnected", provider=None))
+            continue
+
+        last_sync: Optional[str] = None
+        if conn["status"] == "active":
+            acc = (
+                db_client.table("connector_accounts")
+                .select("last_refreshed_at")
+                .eq("connector_id", conn["id"])
+                .eq("status", "active")
+                .limit(1)
+                .execute()
+            )
+            if acc.data:
+                refreshed = acc.data[0].get("last_refreshed_at")
+                if refreshed:
+                    last_sync = refreshed if isinstance(refreshed, str) else refreshed.isoformat()
+
+        items.append(ConnectorTypeStatus(
+            type=type_name,
+            status=_ui_status(conn.get("status")),
+            provider=conn.get("provider"),
+            last_sync=last_sync,
+        ))
+
+    return ConnectorStatusListResponse(items=items)
+
+
+@router.get("/{type}/authorize", response_model=TypeAuthorizeResponse)
+async def authorize_connector_by_type(
+    type: str,
+    http_request: Request,
+    redirect_uri: str = Query(..., description="Frontend OAuth callback URL"),
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """Start OAuth for the default provider of this connector type."""
+    if type not in DEFAULT_PROVIDER_BY_TYPE:
+        raise HTTPException(status_code=400, detail=f"Unknown connector type: {type}")
+
+    provider = DEFAULT_PROVIDER_BY_TYPE[type]
+    if not ConnectorFactory.is_registered(provider):
+        raise HTTPException(status_code=503, detail=f"Provider not configured: {provider}")
+
+    # Reuse the same flow as /authorize but inline so we don't have to fake
+    # a CreateConnectorRequest with a duplicate code path.
+    connector_data = {
+        "tenant_id": current_user.tenant_id,
+        "type": type,
+        "provider": provider,
+        "name": PROVIDER_METADATA.get(provider, {}).get("name"),
+        "status": "pending",
+    }
+    conn_response = db_client.table("connectors").insert(connector_data).execute()
+    if not conn_response.data:
+        raise HTTPException(status_code=500, detail="Failed to create connector")
+    connector_id = conn_response.data[0]["id"]
+
+    base_url = os.getenv("API_BASE_URL", str(http_request.base_url).rstrip("/"))
+    backend_callback = f"{base_url}/api/v1/connectors/callback"
+
+    oauth_manager = get_oauth_state_manager()
+    state_data = await oauth_manager.create_state(
+        tenant_id=current_user.tenant_id,
+        user_id=current_user.id,
+        provider=provider,
+        redirect_uri=backend_callback,
+        extra_data={"connector_id": connector_id, "frontend_redirect_uri": redirect_uri},
+    )
+
+    connector = ConnectorFactory.create(
+        provider=provider,
+        tenant_id=current_user.tenant_id,
+        connector_id=connector_id,
+    )
+    auth_url = connector.get_oauth_url(
+        redirect_uri=backend_callback,
+        state=state_data["state"],
+        code_challenge=state_data["code_challenge"],
+    )
+    return TypeAuthorizeResponse(authorization_url=auth_url)
+
+
+@router.post("/{type}/disconnect")
+async def disconnect_connector_by_type(
+    type: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """Disconnect every connector of the given type for this tenant."""
+    if type not in DEFAULT_PROVIDER_BY_TYPE:
+        raise HTTPException(status_code=400, detail=f"Unknown connector type: {type}")
+
+    response = (
+        db_client.table("connectors")
+        .select("id")
+        .eq("tenant_id", current_user.tenant_id)
+        .eq("type", type)
+        .execute()
+    )
+    ids = [row["id"] for row in (response.data or [])]
+    if not ids:
+        return {"success": True, "message": "Nothing to disconnect", "removed": 0}
+
+    for connector_id in ids:
+        db_client.table("connector_accounts").delete().eq("connector_id", connector_id).execute()
+        db_client.table("connectors").delete().eq("id", connector_id).execute()
+
+    return {"success": True, "message": "Connector disconnected", "removed": len(ids)}
+
+
 @router.get("/{connector_id}", response_model=ConnectorResponse)
 async def get_connector(
     connector_id: str,

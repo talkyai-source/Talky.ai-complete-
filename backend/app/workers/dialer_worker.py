@@ -268,6 +268,21 @@ class DialerWorker:
                 # 5. Initiate the call via the provider/PBX.
                 provider_call_id = await self._make_call(job, rules)
 
+                # Voice pipeline temporarily unavailable (TTS/STT warmup
+                # failed). Reschedule with a short delay and DON'T consume
+                # the job's retry budget — this is an infra issue, not a
+                # bad lead. Without this guard, a 30-second outage burns
+                # every job's max_retries and marks them all FAILED.
+                if provider_call_id == self._PIPELINE_UNAVAILABLE:
+                    await self._update_lead_status(job.lead_id, "pending")
+                    await self.queue_service.schedule_retry(job, delay_seconds=60)
+                    await self._update_job_status(
+                        job.job_id,
+                        JobStatus.RETRY_SCHEDULED,
+                        reason="voice_pipeline_unavailable",
+                    )
+                    return
+
                 if provider_call_id:
                     # 6. Create tracked DB records using an internal UUID plus provider call ID.
                     internal_call_id, talklee_call_id, leg_id = await self._create_call_record(job, provider_call_id)
@@ -298,6 +313,7 @@ class DialerWorker:
                         provider_call_id,
                         job.job_id,
                     )
+                    await self._emit_progress_event_throttled(job)
                 else:
                     raise Exception("No call_id returned from telephony provider")
                     
@@ -327,6 +343,12 @@ class DialerWorker:
                 await self.queue_service.mark_failed(job.job_id, str(e))
                 await self._update_job_status(job.job_id, JobStatus.FAILED, error=str(e))
     
+    # Sentinel returned by _make_call when the bridge says the voice
+    # pipeline is not ready (HTTP 503). Distinct from None ("real failure")
+    # so process_job can apply infrastructure-aware backoff without
+    # consuming the job's retry budget.
+    _PIPELINE_UNAVAILABLE = "__pipeline_unavailable__"
+
     async def _make_call(self, job: DialerJob, rules: CallingRules) -> Optional[str]:
         """
         Initiate an outbound call through the telephony bridge HTTP endpoint.
@@ -361,6 +383,14 @@ class DialerWorker:
             headers = {"Content-Type": "application/json"}
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    if resp.status == 503:
+                        body = await resp.text()
+                        logger.warning(
+                            "Voice pipeline unavailable (503) — will retry "
+                            "without consuming attempt budget. dest=%s body=%s",
+                            job.phone_number, body[:300],
+                        )
+                        return self._PIPELINE_UNAVAILABLE
                     if resp.status not in (200, 202):
                         body = await resp.text()
                         logger.error(
@@ -421,6 +451,35 @@ class DialerWorker:
             return "block"
 
     @asynccontextmanager
+    async def _emit_progress_event_throttled(self, job) -> None:
+        """Emit a "Campaign progress updated" stream event, throttled.
+
+        Uses Redis SETNX with a 60-second TTL so each campaign emits at
+        most one event per minute regardless of call rate. Fire-and-forget
+        — emit failures must never fail a successful call origination.
+        """
+        try:
+            if not self._redis or not job.tenant_id or not job.campaign_id:
+                return
+            key = f"evt:throttle:progress:{job.campaign_id}"
+            # NX: only set if absent; EX: 60-second TTL.
+            acquired = await self._redis.set(key, "1", nx=True, ex=60)
+            if not acquired:
+                return  # within the same 60-second window — skip
+
+            from app.domain.services.event_emitter import emit_event_via_pool
+            await emit_event_via_pool(
+                self._db_pool,
+                tenant_id=str(job.tenant_id),
+                category="campaign",
+                title="Campaign progress updated",
+                description="Dialer processed a new batch of calls.",
+                related_campaign_id=str(job.campaign_id),
+                metadata={"window_seconds": 60},
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("emit_progress_event_throttled failed: %s", exc)
+
     async def _acquire_db(self):
         """
         Acquire a connection from the pool with backend-service RLS context.

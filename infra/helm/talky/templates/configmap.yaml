@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "talky.fullname" . }}-env
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "talky.labels" . | nindent 4 }}
+data:
+  # ── Telephony ──────────────────────────────────────────────
+  MAX_TELEPHONY_SESSIONS:        {{ .Values.telephony.maxSessionsPerPod | quote }}
+  DRAIN_TIMEOUT_S:               {{ .Values.telephony.drainTimeoutSeconds | quote }}
+  CAPACITY_RETRY_AFTER_S:        {{ .Values.telephony.capacityRetryAfterSeconds | quote }}
+  ASYNCIO_DEBUG:                 {{ .Values.telephony.asyncioDebug | quote }}
+
+  # ── Provider concurrency ───────────────────────────────────
+  GROQ_MAX_CONCURRENT:           {{ .Values.providers.groqMaxConcurrent | quote }}
+  ELEVENLABS_MAX_CONCURRENT:     {{ .Values.providers.elevenlabsMaxConcurrent | quote }}
+  DEEPGRAM_MAX_CONCURRENT:       {{ .Values.providers.deepgramMaxConcurrent | quote }}
+  CARTESIA_MAX_CONCURRENT:       {{ .Values.providers.cartesiaMaxConcurrent | quote }}
+
+  # ── Postgres (PgBouncer-aware) ─────────────────────────────
+  PG_POOL_MIN_SIZE:              {{ .Values.postgres.poolMinSize | quote }}
+  PG_POOL_MAX_SIZE:              {{ .Values.postgres.poolMaxSize | quote }}
+  PG_READ_POOL_MIN_SIZE:         {{ .Values.postgres.readPoolMinSize | quote }}
+  PG_READ_POOL_MAX_SIZE:         {{ .Values.postgres.readPoolMaxSize | quote }}
+  PG_STATEMENT_CACHE_SIZE:       {{ .Values.postgres.statementCacheSize | quote }}
+
+  # ── Redis HA mode ──────────────────────────────────────────
+  REDIS_MODE:                    {{ .Values.redis.mode | quote }}
+  {{- if eq .Values.redis.mode "sentinel" }}
+  REDIS_SENTINEL_SERVICE_NAME:   {{ .Values.redis.sentinel.serviceName | quote }}
+  REDIS_SENTINEL_ADDRESSES:      {{ join "," .Values.redis.sentinel.addresses | quote }}
+  {{- end }}
+  {{- if eq .Values.redis.mode "cluster" }}
+  REDIS_CLUSTER_NODES:           {{ join "," .Values.redis.cluster.nodes | quote }}
+  {{- end }}

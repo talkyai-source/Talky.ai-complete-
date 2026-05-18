@@ -395,8 +395,54 @@ class TelephonyRateLimiter:
                 details=details,
             )
             await self._publish_alert(tenant_id=tenant_id, decision=decision, request_id=request_id)
+            await self._emit_user_alert(conn, tenant_id=tenant_id, decision=decision)
 
         return decision
+
+    async def _emit_user_alert(
+        self,
+        conn: asyncpg.Connection,
+        *,
+        tenant_id: str,
+        decision: RateLimitDecision,
+    ) -> None:
+        """Surface the threshold breach on the user-facing Alert Timeline.
+
+        Writes to security_events with alert_type='API' so it appears
+        on the campaigns page. Severity Critical for THROTTLE/BLOCK,
+        Warning for the lighter WARN tier. Errors are swallowed —
+        rate-limit decision must not fail because of UI plumbing.
+        """
+        severity_map = {
+            RateLimitAction.WARN: "MEDIUM",
+            RateLimitAction.THROTTLE: "CRITICAL",
+            RateLimitAction.BLOCK: "CRITICAL",
+        }
+        try:
+            await conn.execute(
+                """
+                INSERT INTO security_events (
+                    event_type, severity, description, tenant_id,
+                    detection_source, evidence, title, status, alert_type
+                ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, 'open', 'API')
+                """,
+                f"telephony_rate_limit_{decision.action.value}",
+                severity_map.get(decision.action, "MEDIUM"),
+                decision.reason
+                    or f"Rate-limit threshold breached: {decision.policy.metric_key}",
+                tenant_id,
+                "telephony_rate_limiter",
+                json.dumps({
+                    "metric": decision.policy.metric_key,
+                    "counter": decision.counter_value,
+                    "threshold": decision.threshold_value,
+                    "action": decision.action.value,
+                }),
+                "API throttling warning" if decision.action == RateLimitAction.WARN
+                    else "API rate limit hit",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("rate_limiter.emit_user_alert failed: %s", exc)
 
     async def get_status(
         self,

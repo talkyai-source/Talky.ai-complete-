@@ -1250,21 +1250,16 @@ class AsteriskAdapter(CallControlAdapter):
             return channel_id
 
         # -------------------------------------------------------------------
-        # Real extensions: originate through the lan-pbx PJSIP trunk.
+        # Real extensions: originate through a PJSIP trunk.
         #
-        # PJSIP/{destination}@lan-pbx sends the SIP INVITE to the LAN PBX
-        # at 192.168.1.6, which forwards it to the softphone registered there.
-        #
-        # IMPORTANT: Asterisk must NOT be registered at 192.168.1.6 as the
-        # same extension being called.  If it were, the PBX would route the
-        # INVITE back to Asterisk (loop) instead of ringing the softphone.
-        # See pjsip.conf — [lan-pbx-registration] is intentionally absent.
-        #
-        # The channel enters Stasis immediately.  _on_outbound_stasis_start
-        # parks it; _on_outbound_answered completes the ExternalMedia + C++
-        # gateway setup once the callee picks up.
+        # Endpoint is configurable via TELEPHONY_PJSIP_OUTBOUND_ENDPOINT so
+        # production can route through the upstream carrier (default:
+        # blazedigitel-endpoint, registered in /etc/asterisk/pjsip.conf)
+        # while local dev can still target lan-pbx by setting the env var.
         # -------------------------------------------------------------------
-        endpoint = f"PJSIP/{destination}@lan-pbx"
+        import os as _os
+        trunk = _os.getenv("TELEPHONY_PJSIP_OUTBOUND_ENDPOINT", "blazedigitel-endpoint")
+        endpoint = f"PJSIP/{destination}@{trunk}"
 
         # Pre-generate channel ID and register BEFORE ARI POST to prevent
         # the StasisStart WS event from arriving before the HTTP response.

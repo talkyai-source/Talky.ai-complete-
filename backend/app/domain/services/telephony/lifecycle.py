@@ -29,15 +29,13 @@ from app.domain.services.telephony.config import (
 )
 from app.domain.services.telephony.modes import resolve_first_speaker
 from app.domain.services.telephony.modes.agent_first import _send_outbound_greeting
-from app.domain.services.telephony.modes.user_first import (
-    _handle_user_first_silence,
-    _user_first_fallback_enabled,
-)
 from app.domain.services.telephony.recording import _save_call_recording
 from app.services.scripts import (
     bind_telephony_call,
     save_call_transcript_on_hangup,
 )
+from app.domain.services.call_service import CallService
+from app.domain.services.telephony.outcome_resolver import resolve_call_outcome
 
 logger = logging.getLogger(__name__)
 
@@ -269,6 +267,15 @@ def _pipeline_done_cb(task: asyncio.Task, call_id: str) -> None:
             "pipeline_task crashed for %s — triggering session teardown: %s",
             call_id[:12], exc,
         )
+        # Flag the session so the outcome resolver classifies this as
+        # CallOutcome.FAILED (rather than the default ANSWERED) when
+        # _on_call_ended runs the call_service chain.
+        try:
+            vs = _bridge()._telephony_sessions.get(call_id)
+            if vs is not None:
+                vs._pipeline_failed = True
+        except Exception:
+            pass
         asyncio.create_task(_on_call_ended(call_id))
 
 
@@ -591,6 +598,57 @@ async def _on_new_call(call_id: str) -> None:
                 {"adapter": _bridge()._adapter, "pbx_call_id": call_id},
             )
 
+            # ── Caller-first 2-second greeting timer (parallel with setup) ──
+            # The pre-synthesized greeting audio was prepared during the
+            # ringing phase (prepare_pre_originate_greeting). The media
+            # gateway is now registered, which is the only thing the
+            # audio pump needs — pipeline_task / connect_task / etc. can
+            # start in parallel.
+            #
+            # Anchoring the sleep on `_new_call_t0` AND spawning the task
+            # here (instead of after pipeline_task creation) ensures the
+            # greeting fires at exactly t=2.0s from answer, regardless of
+            # any variance in downstream setup. The previous late-spawn
+            # gave 2s + setup_time perceived delay, with jitter equal to
+            # the variance in setup duration.
+            _early_first_speaker = resolve_first_speaker(voice_session)
+            if _early_first_speaker == "user":
+                async def _delayed_greeting_early(_vs=voice_session, _t0=_new_call_t0):
+                    sess = _vs.call_session
+                    sess.llm_active = True
+                    try:
+                        try:
+                            elapsed = asyncio.get_event_loop().time() - _t0
+                            remaining = max(0.0, 2.0 - elapsed)
+                            logger.info(
+                                "caller_first_greeting_armed call=%s elapsed_ms=%.0f sleep_ms=%.0f",
+                                _vs.call_id[:12], elapsed * 1000.0, remaining * 1000.0,
+                            )
+                            await asyncio.sleep(remaining)
+                        except asyncio.CancelledError:
+                            return
+                        try:
+                            sess.current_user_input = ""
+                        except AttributeError:
+                            pass
+                        barge_ev = getattr(sess, "barge_in_event", None)
+                        if barge_ev is not None:
+                            barge_ev.clear()
+                        elapsed_at_fire = (
+                            asyncio.get_event_loop().time() - _t0
+                        ) * 1000.0
+                        logger.info(
+                            "caller_first_greeting_fire call=%s elapsed_ms=%.0f",
+                            _vs.call_id[:12], elapsed_at_fire,
+                        )
+                    finally:
+                        sess.llm_active = False
+                    await _send_outbound_greeting(_vs)
+
+                voice_session._greeting_task = asyncio.create_task(
+                    _delayed_greeting_early()
+                )
+
             # ── Drain early audio buffer ────────────────────────────────
             # Audio from the C++ gateway arrives within ~40ms of callee
             # answering, but _on_new_call runs as create_task and hasn't
@@ -656,6 +714,14 @@ async def _on_new_call(call_id: str) -> None:
                         voice_session.call_session.call_id
                     )
                 )
+            # LLM pool prewarm: ringing skipped this branch, so without it
+            # the first user turn pays the cold-pool cost (~100-200ms TLS +
+            # first-token). Runs concurrently with STT/TTS connects so it
+            # adds zero wall-clock time on the slow path.
+            from app.domain.services.telephony.modes.user_first import (
+                prewarm_llm_pool,
+            )
+            warmup_coros.append(prewarm_llm_pool(voice_session))
 
             if warmup_coros:
                 results = await asyncio.gather(*warmup_coros, return_exceptions=True)
@@ -698,42 +764,25 @@ async def _on_new_call(call_id: str) -> None:
             # (set by make_call's `first_speaker` query param) so each Start button
             # click wins over the global TELEPHONY_FIRST_SPEAKER env default.
             first_speaker = resolve_first_speaker(voice_session)
+            # Track on the session so _on_call_ended can cancel the
+            # greeting task on hangup. Without this, hanging up
+            # mid-greeting leaves the task draining audio chunks into
+            # a gateway session that has been torn down — visible as
+            # "send_tts_audio: no gateway session" warning storms in
+            # the logs and a small CPU/log leak per dropped call.
+            #
+            # Both modes follow the SAME greeting path. The only
+            # difference: caller-first waits 2 seconds before speaking
+            # so the callee has a moment to compose themselves before
+            # the AI greets. Agent-first speaks immediately on pickup.
             if first_speaker == "agent":
-                # Track on the session so _on_call_ended can cancel the
-                # greeting task on hangup. Without this, hanging up
-                # mid-greeting leaves the task draining audio chunks into
-                # a gateway session that has been torn down — visible as
-                # "send_tts_audio: no gateway session" warning storms in
-                # the logs and a small CPU/log leak per dropped call.
                 voice_session._greeting_task = asyncio.create_task(
                     _send_outbound_greeting(voice_session)
                 )
-            else:
-                logger.info(
-                    "outbound_user_first call_id=%s — Flux listening, "
-                    "AI is SILENT, waiting for callee to speak",
-                    call_id[:12],
-                )
-                # User-speaks-first mode: the AI stays COMPLETELY SILENT.
-                # Flux is already connected and the pipeline is running
-                # (started above), so the STT is actively listening.
-                # When the callee says "Hello?", Flux emits EndOfTurn →
-                # handle_turn_end fires → LLM responds naturally.
-                #
-                # Caller-speaks-first means the AI must remain silent until
-                # Flux hears a real caller turn. The automatic opener is opt-in
-                # only; otherwise it races normal pickup speech and causes the
-                # exact first-interaction delay this mode is meant to avoid.
-                if _user_first_fallback_enabled():
-                    voice_session._user_first_silence_task = asyncio.create_task(
-                        _handle_user_first_silence(voice_session, call_id)
-                    )
-                else:
-                    logger.info(
-                        "user_first_fallback_disabled call_id=%s — AI remains "
-                        "silent until caller speech is transcribed",
-                        call_id[:12],
-                    )
+            # caller-first ("user") greeting task was already spawned
+            # right after media_gateway.on_call_started so its 2s timer
+            # runs in parallel with pipeline setup — see the
+            # `_delayed_greeting_early` block above.
 
         # Tell the adapter to start streaming audio.
         # For Asterisk this is a no-op (audio_callback_url handles it via C++ gateway).
@@ -825,24 +874,30 @@ async def _on_call_ended(call_id: str) -> None:
         # natural lifetime. Pattern follows Pipecat's session-cleanup
         # contract: hangup is authoritative, all per-session work cancels.
         for _attr in (
-            "_user_first_silence_task",
             "_greeting_task",
         ):
             _t = getattr(voice_session, _attr, None)
             if _t is not None and not _t.done():
                 _t.cancel()
 
-        # --- Persist transcript to dialer's calls row BEFORE teardown ----
-        # Reads the in-memory TranscriptService buffer (keyed on the
-        # session's original call_id) and writes to the dialer's calls.id
-        # resolved at _on_new_call. Never raises.
+        # --- Persist transcript + terminal metrics to dialer's calls row ---
+        # Two writes that have to happen before teardown:
+        #   1. Transcript text/json (read from in-memory buffer keyed on
+        #      voice_session.call_id; persisted by uuid).
+        #   2. Terminal metrics (status='completed', ended_at, duration_seconds).
+        #      Without #2 the dashboard's minutes-used SQL — which sums
+        #      `duration_seconds` for completed/answered calls in the current
+        #      month — returns zero forever and minutes_remaining never
+        #      decrements regardless of activity.
+        # Both run inside try/except blocks so a transient DB issue on one
+        # never blocks the other or torpedoes the rest of teardown.
         try:
             pipeline = getattr(voice_session, "pipeline", None)
             transcript_service = getattr(pipeline, "transcript_service", None)
+            from app.core.container import get_container as _gc
+            _c = _gc()
+            _pool = _c.db_pool if _c.is_initialized else None
             if transcript_service is not None:
-                from app.core.container import get_container as _gc
-                _c = _gc()
-                _pool = _c.db_pool if _c.is_initialized else None
                 await save_call_transcript_on_hangup(
                     voice_session=voice_session,
                     transcript_service=transcript_service,
@@ -850,6 +905,73 @@ async def _on_call_ended(call_id: str) -> None:
                 )
         except Exception as tx_err:
             logger.warning(f"Transcript persist failed for {call_id[:12]}: {tx_err}")
+
+        # ----- Resolve real outcome + drive call_service.handle_call_status -----
+        # The call_service chain does (atomically when the RPC is available):
+        #   * UPDATE calls SET status='completed', outcome=<enum>, ended_at, duration_seconds
+        #   * UPDATE leads SET status, last_call_result, last_called_at, call_attempts++
+        #   * RPC increment_campaign_counter(...) to bump calls_completed | calls_failed
+        #   * UPDATE dialer_jobs (retry vs. terminal)
+        # Previously this branch wrote outcome="completed" via the now-removed
+        # save_call_metrics_on_hangup helper, which silently bypassed the
+        # counter + lead + dialer-job updates and left the dashboard's
+        # progress_pct / success_rate_pct stuck at zero. resolve_call_outcome
+        # classifies the call from live voice_session state and the optional
+        # adapter cause code; handle_call_status owns the rest.
+        try:
+            dialer_call_id = getattr(voice_session, "_dialer_call_id", None)
+            if dialer_call_id:
+                from app.core.container import get_container as _gc2
+                _c2 = _gc2()
+                if _c2.is_initialized:
+                    outcome = resolve_call_outcome(
+                        voice_session,
+                        hangup_reason=getattr(voice_session, "_hangup_reason", None),
+                    )
+                    duration = int(
+                        getattr(
+                            getattr(voice_session, "call_session", None),
+                            "get_duration_seconds",
+                            lambda: 0,
+                        )()
+                    )
+                    # The hangup hook runs without a request-scoped JWT,
+                    # so the postgres adapter's tenant context is empty
+                    # and every RPC (update_call_status, increment_
+                    # campaign_counter, dialer_jobs UPDATE) would be
+                    # filtered to zero rows by the RLS policies. Set
+                    # bypass_rls for the duration of this teardown so
+                    # the writes actually land. The contextvar is
+                    # process-scoped to this asyncio task so we don't
+                    # leak the bypass to anyone else.
+                    from app.core.security.tenant_isolation import (
+                        set_bypass_rls,
+                        set_current_tenant_id,
+                    )
+                    set_bypass_rls(True)
+                    tenant_for_call = getattr(
+                        voice_session, "_dialer_tenant_id", None,
+                    )
+                    if tenant_for_call:
+                        set_current_tenant_id(tenant_for_call)
+
+                    call_service = CallService(
+                        db_client=_c2.db_client,
+                        queue_service=getattr(_c2, "_queue_service", None),
+                    )
+                    await call_service.handle_call_status(
+                        call_uuid=dialer_call_id,
+                        outcome=outcome,
+                        duration=duration,
+                    )
+                    logger.info(
+                        "call_outcome_persisted call_id=%s outcome=%s duration_s=%d",
+                        call_id[:12], outcome.value, duration,
+                    )
+        except Exception as m_err:
+            logger.warning(
+                "call_outcome_persist_failed call_id=%s err=%s", call_id[:12], m_err,
+            )
 
         # --- Save recording BEFORE session teardown ---
         try:

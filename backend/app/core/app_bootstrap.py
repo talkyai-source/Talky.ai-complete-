@@ -53,7 +53,15 @@ def configure_middleware(app: FastAPI) -> None:
         allow_origins=settings.allowed_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "X-Requested-With",
+            "Idempotency-Key",
+            "X-Request-ID",
+            "X-CSRF-Token",
+        ],
+        expose_headers=["X-Request-ID"],
     )
     app.add_middleware(CSRFMiddleware, allowed_origins=settings.allowed_origins)
     app.add_middleware(TenantMiddleware)

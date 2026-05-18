@@ -817,6 +817,13 @@ CREATE TABLE IF NOT EXISTS tenant_ai_configs (
     tts_model TEXT NOT NULL DEFAULT 'Chirp3-HD',
     tts_voice_id TEXT NOT NULL DEFAULT 'en-US-Chirp3-HD-Leda',
     tts_sample_rate INTEGER NOT NULL DEFAULT 24000,
+    -- Per-tenant voice-pipeline tuning (T4-C3). Partial dict matching
+    -- the VoiceTuning dataclass (app/domain/services/voice_tuning.py).
+    -- Empty JSONB means "use env / code defaults". Validation happens
+    -- in code via VoiceTuningResolver.coerce_user_partial — the column
+    -- itself stays permissive so future fields land without a schema
+    -- migration.
+    voice_tuning JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );

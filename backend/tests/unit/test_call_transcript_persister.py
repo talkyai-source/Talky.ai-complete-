@@ -32,37 +32,58 @@ def _voice_session(call_id: str = "voice-session-uuid") -> SimpleNamespace:
     return SimpleNamespace(call_id=call_id, call_session=call_session)
 
 
+class _AsyncCM:
+    """Minimal async-context-manager helper used by both pool.acquire()
+    and conn.transaction() fakes."""
+
+    def __init__(self, target):
+        self._target = target
+
+    async def __aenter__(self):
+        return self._target
+
+    async def __aexit__(self, *args):
+        return None
+
+
+def _make_fake_conn(fetchrow_value: Any = None, execute_side_effect=None) -> MagicMock:
+    conn = MagicMock()
+    conn.execute = AsyncMock(side_effect=execute_side_effect)
+    conn.fetchrow = AsyncMock(return_value=fetchrow_value)
+    # `async with conn.transaction(): ...` — wraps the SET LOCAL +
+    # UPDATE/INSERT statements that need RLS bypass scoped to one txn.
+    conn.transaction = MagicMock(return_value=_AsyncCM(None))
+    return conn
+
+
 def _db_client_with_row(
     internal_call_id: str = "00000000-0000-0000-0000-00000000000a",
     tenant_id: str = "00000000-0000-0000-0000-0000000000b1",
     campaign_id: str = "00000000-0000-0000-0000-0000000000c1",
 ) -> MagicMock:
-    response = MagicMock()
-    response.data = [{
-        "id": internal_call_id,
-        "tenant_id": tenant_id,
-        "campaign_id": campaign_id,
-    }]
-    chain = MagicMock()
-    chain.select.return_value = chain
-    chain.eq.return_value = chain
-    chain.limit.return_value = chain
-    chain.execute.return_value = response
+    """Fake postgres-adapter Client whose .pool.acquire() yields a
+    connection that returns the canned row from fetchrow() — matches the
+    asyncpg surface bind_telephony_call now uses (with RLS bypass)."""
+    conn = _make_fake_conn(
+        fetchrow_value={
+            "id": internal_call_id,
+            "tenant_id": tenant_id,
+            "campaign_id": campaign_id,
+        }
+    )
+    pool = MagicMock()
+    pool.acquire = MagicMock(return_value=_AsyncCM(conn))
     db = MagicMock()
-    db.table.return_value = chain
+    db.pool = pool
     return db
 
 
 def _db_client_empty() -> MagicMock:
-    response = MagicMock()
-    response.data = []
-    chain = MagicMock()
-    chain.select.return_value = chain
-    chain.eq.return_value = chain
-    chain.limit.return_value = chain
-    chain.execute.return_value = response
+    conn = _make_fake_conn(fetchrow_value=None)
+    pool = MagicMock()
+    pool.acquire = MagicMock(return_value=_AsyncCM(conn))
     db = MagicMock()
-    db.table.return_value = chain
+    db.pool = pool
     return db
 
 
@@ -110,8 +131,11 @@ async def test_bind_returns_none_when_no_dialer_row():
 @pytest.mark.asyncio
 async def test_bind_swallows_lookup_exception():
     vs = _voice_session()
+    # Pool.acquire raises — bind must swallow and return None.
     db = MagicMock()
-    db.table.side_effect = RuntimeError("connection refused")
+    pool = MagicMock()
+    pool.acquire = MagicMock(side_effect=RuntimeError("connection refused"))
+    db.pool = pool
 
     binding = await bind_telephony_call(
         voice_session=vs,
@@ -120,6 +144,46 @@ async def test_bind_swallows_lookup_exception():
     )
     assert binding is None
     assert not hasattr(vs, "_dialer_call_id")
+
+
+@pytest.mark.asyncio
+async def test_bind_returns_none_when_db_client_has_no_pool():
+    vs = _voice_session()
+    db = MagicMock(spec=[])  # no .pool attribute
+    binding = await bind_telephony_call(
+        voice_session=vs,
+        pbx_channel_id="x",
+        db_client=db,
+    )
+    assert binding is None
+    assert not hasattr(vs, "_dialer_call_id")
+
+
+@pytest.mark.asyncio
+async def test_bind_uses_rls_bypass():
+    """Regression: bind_telephony_call MUST set app.bypass_rls = 'true'
+    on the connection before the SELECT, otherwise the calls table's
+    RLS policy drops every row (no per-request tenant context exists at
+    bind time). This is the bug that broke transcript persistence."""
+    vs = _voice_session()
+    db = _db_client_with_row()
+
+    await bind_telephony_call(
+        voice_session=vs,
+        pbx_channel_id="asterisk-channel-123",
+        db_client=db,
+    )
+
+    conn = db.pool.acquire.return_value._target
+    executed_sql = [
+        call.args[0] for call in conn.execute.await_args_list
+        if call.args
+    ]
+    assert any("bypass_rls" in sql for sql in executed_sql), (
+        "bind_telephony_call must set app.bypass_rls before the SELECT — "
+        "without it the calls table's RLS policy hides the row and the "
+        "persister falls back to its 'non-campaign' branch."
+    )
 
 
 # --- save_call_transcript_on_hangup ------------------------------------------
@@ -163,8 +227,7 @@ async def test_save_persists_and_clears_buffer():
 
     svc = _make_transcript_service(turns=[{"role": "user", "content": "hi"}])
 
-    conn = AsyncMock()
-    conn.execute = AsyncMock()
+    conn = _make_fake_conn()
     pool = MagicMock()
     pool.acquire = MagicMock(return_value=_AsyncPoolCM(conn))
 
@@ -174,8 +237,13 @@ async def test_save_persists_and_clears_buffer():
         db_pool=pool,
     )
 
-    # Two execute calls: UPDATE calls, INSERT transcripts
-    assert conn.execute.await_count == 2
+    # Three execute calls inside the bypass transaction:
+    # 1. SET LOCAL app.bypass_rls = 'true'
+    # 2. UPDATE calls
+    # 3. INSERT INTO transcripts
+    assert conn.execute.await_count == 3
+    executed_sql = [c.args[0] for c in conn.execute.await_args_list if c.args]
+    assert any("bypass_rls" in sql for sql in executed_sql)
     svc.clear_buffer.assert_called_once_with("session-uuid")
 
 
@@ -222,8 +290,7 @@ async def test_save_clears_buffer_even_when_db_fails():
     vs._dialer_call_id = "00000000-0000-0000-0000-000000000001"
     svc = _make_transcript_service(turns=[{"role": "user", "content": "hi"}])
 
-    conn = AsyncMock()
-    conn.execute = AsyncMock(side_effect=RuntimeError("db down"))
+    conn = _make_fake_conn(execute_side_effect=RuntimeError("db down"))
     pool = MagicMock()
     pool.acquire = MagicMock(return_value=_AsyncPoolCM(conn))
 

@@ -97,8 +97,20 @@ class SIPTrunkResponse(BaseModel):
     auth_username: Optional[str]
     auth_configured: bool
     metadata: Dict[str, Any]
+    last_tested_at: Optional[datetime] = None
+    last_test_result: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
+
+
+class SIPTrunkTestResponse(BaseModel):
+    ok: bool
+    latency_ms: int
+    transport: SIPTransport
+    target: str
+    error: Optional[str] = None
+    detail: Optional[str] = None
+    tested_at: datetime
 
 
 class SIPRouteType(str, Enum):
@@ -454,6 +466,12 @@ async def _enforce_ws_i_quota(
 
 
 def _row_to_response(row: asyncpg.Record) -> SIPTrunkResponse:
+    raw_test = row["last_test_result"] if "last_test_result" in row.keys() else None
+    if isinstance(raw_test, str):
+        try:
+            raw_test = json.loads(raw_test)
+        except Exception:
+            raw_test = None
     return SIPTrunkResponse(
         id=row["id"],
         tenant_id=row["tenant_id"],
@@ -466,6 +484,8 @@ def _row_to_response(row: asyncpg.Record) -> SIPTrunkResponse:
         auth_username=row["auth_username"],
         auth_configured=bool(row["auth_password_encrypted"]),
         metadata=row["metadata"] or {},
+        last_tested_at=row["last_tested_at"] if "last_tested_at" in row.keys() else None,
+        last_test_result=raw_test,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -490,6 +510,8 @@ async def _get_tenant_trunk(
             auth_username,
             auth_password_encrypted,
             metadata,
+            last_tested_at,
+            last_test_result,
             created_at,
             updated_at
         FROM tenant_sip_trunks
@@ -625,6 +647,8 @@ async def list_sip_trunks(
                 auth_username,
                 auth_password_encrypted,
                 metadata,
+                last_tested_at,
+                last_test_result,
                 created_at,
                 updated_at
             FROM tenant_sip_trunks
@@ -1098,6 +1122,35 @@ async def _set_trunk_active_state(
                 )
                 return quota_problem
 
+            if active_state:
+                test_row = await conn.fetchrow(
+                    """
+                    SELECT last_tested_at, last_test_result
+                    FROM tenant_sip_trunks
+                    WHERE id = $1 AND tenant_id = $2
+                    """,
+                    trunk_id, current_user.tenant_id,
+                )
+                if test_row:
+                    raw = test_row["last_test_result"]
+                    if isinstance(raw, str):
+                        try:
+                            raw = json.loads(raw)
+                        except Exception:
+                            raw = None
+                    last_ok = bool(raw and raw.get("ok"))
+                    if not last_ok:
+                        return _problem(
+                            request=request,
+                            status_code=400,
+                            title="Activation Blocked",
+                            detail=(
+                                "Run a successful connectivity test before activating "
+                                "this trunk. POST /trunks/{id}/test."
+                            ),
+                            type_suffix="trunk-not-verified",
+                        )
+
             row = await conn.fetchrow(
                 """
                 UPDATE tenant_sip_trunks
@@ -1118,6 +1171,8 @@ async def _set_trunk_active_state(
                     auth_username,
                     auth_password_encrypted,
                     metadata,
+                    last_tested_at,
+                    last_test_result,
                     created_at,
                     updated_at
                 """,
@@ -1193,6 +1248,239 @@ async def deactivate_sip_trunk(
         request_id=x_request_id,
         current_user=current_user,
         db_pool=db_pool,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Connectivity probe — verifies the SIP host before activation
+# ---------------------------------------------------------------------------
+
+
+async def _probe_sip_endpoint(
+    *, host: str, port: int, transport: str, timeout: float = 5.0,
+) -> Dict[str, Any]:
+    """
+    Probe a SIP endpoint for reachability.
+
+    TCP / TLS: opens an actual TCP (or TLS-wrapped) socket to (host, port).
+    UDP:       sends one SIP OPTIONS request and listens up to ``timeout``
+               seconds for any reply. SIP servers respond with 200, 401,
+               481 or similar — any reply at all proves the host is
+               speaking SIP. Silence means firewall, NAT, or wrong host.
+    """
+    import asyncio
+    import socket
+    import ssl
+    import time
+    import uuid as _uuid
+
+    transport = transport.lower()
+    start = time.perf_counter()
+
+    if transport == "tcp" or transport == "tls":
+        try:
+            if transport == "tls":
+                ssl_ctx = ssl.create_default_context()
+                ssl_ctx.check_hostname = False
+                ssl_ctx.verify_mode = ssl.CERT_NONE  # SIP TLS is commonly self-signed
+                fut = asyncio.open_connection(host, port, ssl=ssl_ctx)
+            else:
+                fut = asyncio.open_connection(host, port)
+            reader, writer = await asyncio.wait_for(fut, timeout=timeout)
+            latency_ms = int((time.perf_counter() - start) * 1000)
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+            _ = reader
+            return {
+                "ok": True,
+                "latency_ms": latency_ms,
+                "transport": transport,
+                "target": f"{host}:{port}",
+                "detail": "TCP socket accepted",
+            }
+        except asyncio.TimeoutError:
+            return {
+                "ok": False,
+                "latency_ms": int(timeout * 1000),
+                "transport": transport,
+                "target": f"{host}:{port}",
+                "error": "timeout",
+                "detail": f"{transport.upper()} connect timed out after {timeout}s",
+            }
+        except OSError as exc:
+            return {
+                "ok": False,
+                "latency_ms": int((time.perf_counter() - start) * 1000),
+                "transport": transport,
+                "target": f"{host}:{port}",
+                "error": "connection_refused" if exc.errno in (61, 111) else "network_error",
+                "detail": str(exc),
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "latency_ms": int((time.perf_counter() - start) * 1000),
+                "transport": transport,
+                "target": f"{host}:{port}",
+                "error": "exception",
+                "detail": str(exc),
+            }
+
+    # UDP path: send a SIP OPTIONS, wait for any reply.
+    call_id = _uuid.uuid4().hex
+    branch = "z9hG4bK" + _uuid.uuid4().hex[:16]
+    tag = _uuid.uuid4().hex[:8]
+    options = (
+        f"OPTIONS sip:{host}:{port} SIP/2.0\r\n"
+        f"Via: SIP/2.0/UDP 0.0.0.0:5060;branch={branch};rport\r\n"
+        f"Max-Forwards: 70\r\n"
+        f"To: <sip:probe@{host}>\r\n"
+        f"From: <sip:probe@talky.ai>;tag={tag}\r\n"
+        f"Call-ID: {call_id}\r\n"
+        f"CSeq: 1 OPTIONS\r\n"
+        f"User-Agent: Talky-Probe/1.0\r\n"
+        f"Accept: application/sdp\r\n"
+        f"Content-Length: 0\r\n\r\n"
+    ).encode()
+
+    sock = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setblocking(False)
+        loop = asyncio.get_running_loop()
+
+        # Resolve first so DNS errors are caught here.
+        addr_info = await loop.run_in_executor(
+            None, lambda: socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_DGRAM),
+        )
+        if not addr_info:
+            return {
+                "ok": False, "latency_ms": 0, "transport": "udp",
+                "target": f"{host}:{port}", "error": "dns_failure",
+                "detail": "Could not resolve host",
+            }
+        sockaddr = addr_info[0][4]
+
+        await loop.sock_sendto(sock, options, sockaddr) if hasattr(loop, "sock_sendto") else \
+            await loop.run_in_executor(None, lambda: sock.sendto(options, sockaddr))
+
+        try:
+            data = await asyncio.wait_for(loop.sock_recv(sock, 4096), timeout=timeout)
+            latency_ms = int((time.perf_counter() - start) * 1000)
+            first_line = data.split(b"\r\n", 1)[0].decode("ascii", errors="replace") if data else ""
+            return {
+                "ok": True,
+                "latency_ms": latency_ms,
+                "transport": "udp",
+                "target": f"{host}:{port}",
+                "detail": f"Received SIP reply: {first_line[:80]}",
+            }
+        except asyncio.TimeoutError:
+            return {
+                "ok": False,
+                "latency_ms": int(timeout * 1000),
+                "transport": "udp",
+                "target": f"{host}:{port}",
+                "error": "timeout",
+                "detail": "No SIP reply within timeout (possible firewall / NAT / wrong host)",
+            }
+    except socket.gaierror as exc:
+        return {
+            "ok": False, "latency_ms": 0, "transport": "udp",
+            "target": f"{host}:{port}", "error": "dns_failure", "detail": str(exc),
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "latency_ms": int((time.perf_counter() - start) * 1000),
+            "transport": "udp",
+            "target": f"{host}:{port}",
+            "error": "exception",
+            "detail": str(exc),
+        }
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+
+@router.post("/trunks/{trunk_id}/test", response_model=SIPTrunkTestResponse)
+async def test_sip_trunk(
+    trunk_id: UUID,
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_pool: asyncpg.Pool = Depends(get_db_pool),
+):
+    """
+    Probe a tenant's SIP trunk for reachability and persist the result
+    on the row so the UI / activation gate can read it.
+
+    TCP / TLS: a real socket connect to (sip_domain, port).
+    UDP:       a single SIP OPTIONS packet — any reply means the host is
+               at least speaking SIP.
+    """
+    tenant_problem = _require_tenant(request, current_user)
+    if tenant_problem:
+        return tenant_problem
+
+    from datetime import datetime, timezone
+
+    async with db_pool.acquire() as conn:
+        await apply_tenant_rls_context(
+            conn, current_user.tenant_id, current_user.id,
+            request_id=request.headers.get("x-request-id"),
+        )
+        row = await conn.fetchrow(
+            "SELECT sip_domain, port, transport FROM tenant_sip_trunks "
+            "WHERE id = $1 AND tenant_id = $2",
+            trunk_id, current_user.tenant_id,
+        )
+    if not row:
+        return _problem(
+            request=request,
+            status_code=404,
+            title="Trunk Not Found",
+            detail=f"No SIP trunk {trunk_id} for this tenant.",
+            type_suffix="trunk-not-found",
+        )
+
+    result = await _probe_sip_endpoint(
+        host=row["sip_domain"], port=row["port"], transport=row["transport"],
+    )
+    tested_at = datetime.now(timezone.utc)
+
+    async with db_pool.acquire() as conn:
+        await apply_tenant_rls_context(
+            conn, current_user.tenant_id, current_user.id,
+            request_id=request.headers.get("x-request-id"),
+        )
+        await conn.execute(
+            """
+            UPDATE tenant_sip_trunks
+            SET last_tested_at = $1,
+                last_test_result = $2::jsonb,
+                updated_at = NOW()
+            WHERE id = $3 AND tenant_id = $4
+            """,
+            tested_at,
+            json.dumps(result),
+            trunk_id,
+            current_user.tenant_id,
+        )
+
+    return SIPTrunkTestResponse(
+        ok=bool(result.get("ok")),
+        latency_ms=int(result.get("latency_ms", 0) or 0),
+        transport=row["transport"],
+        target=f'{row["sip_domain"]}:{row["port"]}',
+        error=result.get("error"),
+        detail=result.get("detail"),
+        tested_at=tested_at,
     )
 
 

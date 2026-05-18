@@ -1,0 +1,57 @@
+{{- if .Values.networkPolicy.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "talky.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "talky.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "talky.selectorLabels" . | nindent 6 }}
+  policyTypes: ["Ingress", "Egress"]
+
+  ingress:
+    # Only NGINX (or any pod with the talky-frontdoor label) can
+    # reach the backend pods on the HTTP port.
+    - from:
+        - namespaceSelector:
+            matchLabels: { name: ingress-nginx }
+        - podSelector:
+            matchLabels: { app: talky-frontdoor }
+      ports:
+        - protocol: TCP
+          port: 8000
+
+  egress:
+    # DNS — required for service discovery + provider hostname lookup.
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Postgres (PgBouncer) + Redis — same namespace.
+    - to:
+        - namespaceSelector:
+            matchLabels: { name: {{ .Release.Namespace }} }
+      ports:
+        - protocol: TCP
+          port: 6432
+        - protocol: TCP
+          port: 6379
+        - protocol: TCP
+          port: 26379
+    # External provider APIs (Groq, ElevenLabs, Deepgram, Cartesia,
+    # Google TTS). NetworkPolicy can't restrict by hostname; we
+    # allow all egress on 443/TCP and rely on per-provider key
+    # rotation + the circuit-breaker as the security boundary.
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 443
+{{- end -}}

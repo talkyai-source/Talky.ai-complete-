@@ -12,6 +12,7 @@ import {
     isAlertSnoozed,
     severityBadgeClass,
 } from "@/lib/campaign-performance";
+import { useAckAlert, useAlerts, useResolveAlert } from "@/lib/alerts-api";
 import { cn } from "@/lib/utils";
 
 type AlertTab = "Impact Analysis" | "Root Cause" | "Timeline Visualization" | "Recommended Actions" | "Related Incidents";
@@ -60,58 +61,30 @@ function statusBadgeClass(status: AlertStatus) {
     }
 }
 
-function seedAlerts(campaigns: Campaign[]): AlertItem[] {
-    const now = Date.now();
-    const c = campaigns[0]?.id;
-    return [
-        {
-            id: `al-${now - 1}`,
-            title: "Carrier error spike",
-            description: "Increased carrier error codes detected on outbound calls, retries engaged.",
-            severity: "Critical",
-            type: "Network",
-            status: "Active",
-            createdAt: new Date(now - 1000 * 60 * 18).toISOString(),
-            updatedAt: new Date(now - 1000 * 60 * 6).toISOString(),
-            acknowledged: false,
-            relatedCampaignIds: c ? [c] : [],
-            metadata: { code: "486", p95_ms: 540 },
-        },
-        {
-            id: `al-${now - 2}`,
-            title: "API throttling warning",
-            description: "Upstream API returned 429 responses above threshold for 3 minutes.",
-            severity: "Warning",
-            type: "API",
-            status: "Investigating",
-            createdAt: new Date(now - 1000 * 60 * 55).toISOString(),
-            updatedAt: new Date(now - 1000 * 60 * 20).toISOString(),
-            acknowledged: true,
-            metadata: { route: "/calls", rate: "12/min" },
-        },
-        {
-            id: `al-${now - 3}`,
-            title: "Campaign completion delayed",
-            description: "Campaign completion ETA extended due to lead pacing settings.",
-            severity: "Info",
-            type: "Campaign",
-            status: "Resolved",
-            createdAt: new Date(now - 1000 * 60 * 60 * 28).toISOString(),
-            updatedAt: new Date(now - 1000 * 60 * 60 * 20).toISOString(),
-            acknowledged: true,
-            metadata: { eta: "2h" },
-        },
-    ];
-}
-
 export function AlertTimeline({ campaigns }: { campaigns: Campaign[] }) {
-    const [alerts, setAlerts] = useState<AlertItem[]>(() => seedAlerts(campaigns));
     const [sev, setSev] = useState<Set<AlertSeverity>>(new Set());
     const [type, setType] = useState<Set<AlertType>>(new Set());
     const [status, setStatus] = useState<Set<AlertStatus>>(new Set());
     const [detailsId, setDetailsId] = useState<string | null>(null);
     const [ruleOpen, setRuleOpen] = useState(false);
     const [tab, setTab] = useState<AlertTab>("Impact Analysis");
+
+    // Real alerts from /api/v1/alerts. Backend filters by the same sev/type/status
+    // we display, so we don't over-fetch. Polls every 10s.
+    const alertsQuery = useAlerts({ severity: sev, type, status });
+    const ackMutation = useAckAlert();
+    const resolveMutation = useResolveAlert();
+    const remoteAlerts: AlertItem[] = alertsQuery.data ?? [];
+
+    // Snooze is still local-only (no backend column for it). Track snooze
+    // overrides keyed by alert id; merge into the rendered list.
+    const [snoozeOverrides, setSnoozeOverrides] = useState<Record<string, string>>({});
+    const alerts: AlertItem[] = useMemo(
+        () => remoteAlerts.map((a) => (
+            snoozeOverrides[a.id] ? { ...a, snoozedUntil: snoozeOverrides[a.id] } : a
+        )),
+        [remoteAlerts, snoozeOverrides],
+    );
 
     useEffect(() => {
         const saved = fromLocalStorage<{ sev: AlertSeverity[]; type: AlertType[]; status: AlertStatus[] }>("campaigns.performance.alertPrefs", {
@@ -144,8 +117,21 @@ export function AlertTimeline({ campaigns }: { campaigns: Campaign[] }) {
 
     const details = useMemo(() => alerts.find((a) => a.id === detailsId) || null, [alerts, detailsId]);
 
-    const updateAlert = (id: string, updater: (prev: AlertItem) => AlertItem) => {
-        setAlerts((prev) => prev.map((a) => (a.id === id ? updater(a) : a)));
+    const mutationsBusy = ackMutation.isPending || resolveMutation.isPending;
+
+    const handleAck = (id: string) => {
+        ackMutation.mutate({ alertId: id });
+    };
+    const handleResolve = (id: string) => {
+        const notes = window.prompt("Resolution notes (required):", "Resolved by operator");
+        if (!notes || !notes.trim()) return;
+        resolveMutation.mutate({ alertId: id, resolution_notes: notes.trim() });
+    };
+    const handleSnooze = (id: string) => {
+        setSnoozeOverrides((prev) => ({
+            ...prev,
+            [id]: new Date(Date.now() + 1000 * 60 * 30).toISOString(),
+        }));
     };
 
     const footerButtons = details ? (
@@ -155,7 +141,8 @@ export function AlertTimeline({ campaigns }: { campaigns: Campaign[] }) {
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => updateAlert(details.id, (a) => ({ ...a, acknowledged: true, updatedAt: new Date().toISOString() }))}
+                    disabled={mutationsBusy || details.acknowledged || details.status === "Resolved"}
+                    onClick={() => handleAck(details.id)}
                 >
                     Acknowledge
                 </Button>
@@ -163,15 +150,8 @@ export function AlertTimeline({ campaigns }: { campaigns: Campaign[] }) {
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => updateAlert(details.id, (a) => ({ ...a, status: "Investigating", updatedAt: new Date().toISOString() }))}
-                >
-                    Investigate
-                </Button>
-                <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => updateAlert(details.id, (a) => ({ ...a, status: "Resolved", updatedAt: new Date().toISOString() }))}
+                    disabled={mutationsBusy || details.status === "Resolved"}
+                    onClick={() => handleResolve(details.id)}
                 >
                     Resolve
                 </Button>
@@ -179,27 +159,8 @@ export function AlertTimeline({ campaigns }: { campaigns: Campaign[] }) {
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() =>
-                        updateAlert(details.id, (a) => ({
-                            ...a,
-                            severity: a.severity === "Critical" ? "Critical" : a.severity === "Warning" ? "Critical" : "Warning",
-                            updatedAt: new Date().toISOString(),
-                        }))
-                    }
-                >
-                    Escalate
-                </Button>
-                <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                        updateAlert(details.id, (a) => ({
-                            ...a,
-                            snoozedUntil: new Date(Date.now() + 1000 * 60 * 30).toISOString(),
-                            updatedAt: new Date().toISOString(),
-                        }))
-                    }
+                    disabled={mutationsBusy || details.status === "Resolved"}
+                    onClick={() => handleSnooze(details.id)}
                 >
                     Snooze
                 </Button>

@@ -63,29 +63,31 @@ async def fetch_campaign_transcripts(
         raise ValueError(f"Invalid campaign_id: {campaign_id!r}") from exc
 
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT c.id,
-                   c.phone_number,
-                   c.created_at,
-                   c.duration_seconds,
-                   c.outcome,
-                   c.transcript_json
-            FROM calls c
-            WHERE c.tenant_id = $1
-              AND c.campaign_id = $2
-            ORDER BY c.created_at DESC
-            LIMIT $3 OFFSET $4
-            """,
-            tenant_uuid, campaign_uuid, page_size, offset,
-        )
-        total = await conn.fetchval(
-            """
-            SELECT COUNT(*) FROM calls c
-            WHERE c.tenant_id = $1 AND c.campaign_id = $2
-            """,
-            tenant_uuid, campaign_uuid,
-        )
+        async with conn.transaction():
+            await conn.execute("SET LOCAL app.bypass_rls = 'true'")
+            rows = await conn.fetch(
+                """
+                SELECT c.id,
+                       c.phone_number,
+                       c.created_at,
+                       c.duration_seconds,
+                       c.outcome,
+                       c.transcript_json
+                FROM calls c
+                WHERE c.tenant_id = $1
+                  AND c.campaign_id = $2
+                ORDER BY c.created_at DESC
+                LIMIT $3 OFFSET $4
+                """,
+                tenant_uuid, campaign_uuid, page_size, offset,
+            )
+            total = await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM calls c
+                WHERE c.tenant_id = $1 AND c.campaign_id = $2
+                """,
+                tenant_uuid, campaign_uuid,
+            )
 
     items: List[Dict[str, Any]] = []
     for row in rows:

@@ -1,0 +1,143 @@
+# Talky.ai backend Deployment — Phase 2 reference manifest.
+#
+# This is a thin slice that demonstrates how the Phase 1 + 2 pieces
+# (readiness probe, drain timeout, in-pod state, NGINX affinity)
+# wire into k8s. Phase 3 introduces the full helm chart at
+# infra/helm/talky/. Use this file as the authoritative reference for
+# the contract between the app and the orchestrator until then.
+#
+# Apply with:
+#   kubectl apply -f infra/k8s/backend-deployment.yaml
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: talky-backend
+  namespace: talky
+spec:
+  # Headless service — each pod resolves to its own DNS name so
+  # NGINX (talky.conf) can address them individually for the
+  # consistent-hash upstream pool.
+  clusterIP: None
+  selector:
+    app: talky-backend
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: talky-backend
+  namespace: talky
+  labels: { app: talky-backend }
+spec:
+  replicas: 3                      # Phase 2 = 3 pods × 50 calls = 150 cap
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0            # Never reduce below replicas during rollout
+      maxSurge: 1                  # One extra pod during rollout absorbs new calls
+  selector:
+    matchLabels: { app: talky-backend }
+  template:
+    metadata:
+      labels: { app: talky-backend }
+    spec:
+      # CRITICAL — must exceed DRAIN_TIMEOUT_S (default 300) by a
+      # margin so the pod has time to finish active calls before SIGKILL.
+      # 360 = 300s drain + 60s buffer for final session-end teardown.
+      terminationGracePeriodSeconds: 360
+
+      containers:
+        - name: backend
+          image: ghcr.io/talkyai/backend:VERSION_PINNED  # never :latest
+          ports:
+            - containerPort: 8000
+
+          # ─ Readiness — drives LB eviction ─────────────────────
+          # When the pod is full or draining, /healthz/ready returns
+          # 503 + Retry-After. k8s removes the pod from the Service
+          # endpoint list; NGINX upstream sees the change via the
+          # headless service DNS.
+          readinessProbe:
+            httpGet: { path: /api/v1/healthz/ready, port: 8000 }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 2     # 2 × 5s = ~10s to fully evict
+            successThreshold: 1
+
+          # ─ Liveness — restart only on a truly dead loop ───────
+          # /healthz/live always returns 200 if the event loop is up.
+          # Generous failure budget so a transient slow callback
+          # doesn't trigger a restart that drops 50 calls.
+          livenessProbe:
+            httpGet: { path: /api/v1/healthz/live, port: 8000 }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 4
+
+          # ─ preStop — soft drain hook ──────────────────────────
+          # Sends SIGTERM to uvicorn → triggers FastAPI lifespan
+          # shutdown → readiness.begin_drain() → /healthz/ready
+          # immediately returns 503. Phase 1.4 already implements
+          # the wait-for-empty loop. This sleep gives kube-proxy
+          # one full reconciliation pass to evict the pod from the
+          # Service before the lifespan loop starts forcing teardown.
+          lifecycle:
+            preStop:
+              exec: { command: ["sh", "-c", "sleep 5"] }
+
+          env:
+            - { name: MAX_TELEPHONY_SESSIONS, value: "50" }
+            - { name: DRAIN_TIMEOUT_S,        value: "300" }
+            - { name: CAPACITY_RETRY_AFTER_S, value: "30" }
+            # Phase 2.3 — point at PgBouncer, not Postgres directly.
+            - { name: DATABASE_URL,           valueFrom: { secretKeyRef: { name: talky-db, key: pgbouncer_url } } }
+            - { name: READ_DATABASE_URL,      valueFrom: { secretKeyRef: { name: talky-db, key: pgbouncer_ro_url } } }
+            - { name: PG_STATEMENT_CACHE_SIZE, value: "0" }
+            - { name: PG_POOL_MIN_SIZE,       value: "5" }
+            - { name: PG_POOL_MAX_SIZE,       value: "20" }
+            - { name: PG_READ_POOL_MIN_SIZE,  value: "2" }
+            - { name: PG_READ_POOL_MAX_SIZE,  value: "15" }
+
+          resources:
+            requests: { cpu: "1500m", memory: "1.5Gi" }
+            limits:   { cpu: "2000m", memory: "2Gi" }
+
+      # Phase 3 introduces a PodDisruptionBudget; for now the
+      # rolling-update strategy + readiness probe are sufficient to
+      # keep at least N-1 pods ready during voluntary disruptions.
+
+---
+# Optional autoscaler — wired in Phase 3 with a custom metric on
+# active_calls / capacity. Stubbed here as CPU-based so the manifest
+# is complete and lints clean.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: talky-backend
+  namespace: talky
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: talky-backend
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }
+  behavior:
+    scaleDown:
+      # Don't scale down while there's any draining work — gives the
+      # active-calls metric (Phase 3) a chance to finish before pods
+      # are reaped.
+      stabilizationWindowSeconds: 300

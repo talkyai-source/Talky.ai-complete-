@@ -382,7 +382,7 @@ function MeetingsContent() {
                         title="Failed to load meetings"
                         message={formatError(q.error)}
                         onRetry={() => void q.refetch()}
-                        actionHref="/settings/connectors?required=calendar"
+                        actionHref="/connectors?required=calendar"
                         actionLabel="Open connectors"
                     />
                 ) : events.length === 0 ? (

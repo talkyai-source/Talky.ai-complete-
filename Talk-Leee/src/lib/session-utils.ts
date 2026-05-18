@@ -1,7 +1,18 @@
 /**
  * Session and Device Management Utilities
  * Handles active sessions, device listing, and logout operations
+ *
+ * Backend wiring (verified against deployed api.talkleeai.com):
+ *   GET    /api/v1/sessions/active        → list (returns {sessions, total_count, current_session_id})
+ *   DELETE /api/v1/sessions/{id}          → revoke one (cannot revoke current)
+ *   POST   /api/v1/auth/logout            → log out current session
+ *   POST   /api/v1/auth/logout-all        → log out every session including current
+ *
+ * Prior versions of this file hit /api/auth/* paths that don't exist on
+ * this backend (returned 404), so the Devices tab never rendered.
  */
+
+import { apiBaseUrl } from "@/lib/env";
 
 export interface Device {
   id: string;
@@ -77,69 +88,115 @@ export function generateDeviceName(userAgent: string): string {
   return `${browser} on ${os}`;
 }
 
+interface SessionInfoApi {
+  id: string;
+  device_name?: string | null;
+  device_type?: string | null;
+  browser?: string | null;
+  os?: string | null;
+  ip_address?: string | null;
+  is_current: boolean;
+  created_at: string;
+  last_active_at: string;
+  expires_at: string;
+}
+
+function authHeaders(token: string): HeadersInit {
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function mapDevice(s: SessionInfoApi): Device {
+  const fallbackType: Device["type"] = "unknown";
+  const rawType = (s.device_type ?? "").toLowerCase();
+  const type: Device["type"] =
+    rawType === "mobile" || rawType === "desktop" || rawType === "browser"
+      ? (rawType as Device["type"])
+      : fallbackType;
+  const name = s.device_name || [s.browser, s.os].filter(Boolean).join(" on ") || "Unknown device";
+  return {
+    id: s.id,
+    name,
+    type,
+    os: s.os ?? undefined,
+    browser: s.browser ?? undefined,
+    lastActivity: s.last_active_at,
+    ipAddress: s.ip_address ?? undefined,
+    isCurrent: !!s.is_current,
+    createdAt: s.created_at,
+  };
+}
+
 /**
  * Gets list of all active devices/sessions
  */
 export async function getActiveSessions(token: string): Promise<Device[]> {
-  const response = await fetch("/api/auth/sessions", {
+  const base = apiBaseUrl();
+  const response = await fetch(`${base}/sessions/active`, {
     method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    credentials: "include",
+    headers: authHeaders(token),
   });
 
   if (!response.ok) {
     throw new Error("Failed to fetch active sessions");
   }
 
-  return response.json();
+  const payload = (await response.json()) as { sessions: SessionInfoApi[] };
+  return (payload.sessions ?? []).map(mapDevice);
 }
 
 /**
- * Logs out a specific session/device
+ * Logs out a specific session/device. Backend refuses if you try to
+ * revoke the current session — use logoutCurrentSession for that.
  */
 export async function logoutSession(token: string, sessionId: string): Promise<{ success: boolean }> {
-  const response = await fetch(`/api/auth/sessions/${sessionId}/logout`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+  const base = apiBaseUrl();
+  const response = await fetch(`${base}/sessions/${encodeURIComponent(sessionId)}`, {
+    method: "DELETE",
+    credentials: "include",
+    headers: authHeaders(token),
   });
 
   if (!response.ok) {
-    throw new Error("Failed to logout session");
+    let detail = "Failed to logout session";
+    try {
+      const j = await response.json();
+      detail = j?.detail || j?.error?.message || detail;
+    } catch {
+      // ignore
+    }
+    throw new Error(detail);
   }
 
-  return response.json();
+  return { success: true };
 }
 
 /**
- * Logs out all other sessions (keeping current session active)
+ * Logs out all sessions except the current one.
+ *
+ * Backend has POST /auth/logout-all which logs out EVERY session including
+ * current. To preserve the current session we list, then revoke each
+ * non-current row.
  */
 export async function logoutAllOtherSessions(token: string): Promise<{ success: boolean }> {
-  const response = await fetch("/api/auth/sessions/logout-all-others", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error("Failed to logout all other sessions");
-  }
-
-  return response.json();
+  const sessions = await getActiveSessions(token);
+  const others = sessions.filter((s) => !s.isCurrent);
+  // Fire revokes in parallel — backend will reject the current one anyway.
+  await Promise.all(others.map((s) => logoutSession(token, s.id).catch(() => undefined)));
+  return { success: true };
 }
 
 /**
  * Logs out the current session (user logout)
  */
 export async function logoutCurrentSession(token: string): Promise<{ success: boolean }> {
-  const response = await fetch("/api/auth/logout", {
+  const base = apiBaseUrl();
+  const response = await fetch(`${base}/auth/logout`, {
     method: "POST",
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
+      ...authHeaders(token),
     },
   });
 
@@ -147,27 +204,7 @@ export async function logoutCurrentSession(token: string): Promise<{ success: bo
     throw new Error("Failed to logout");
   }
 
-  return response.json();
-}
-
-/**
- * Renames a session/device
- */
-export async function renameSession(token: string, sessionId: string, newName: string): Promise<{ success: boolean }> {
-  const response = await fetch(`/api/auth/sessions/${sessionId}/rename`, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ name: newName }),
-  });
-
-  if (!response.ok) {
-    throw new Error("Failed to rename session");
-  }
-
-  return response.json();
+  return { success: true };
 }
 
 /**

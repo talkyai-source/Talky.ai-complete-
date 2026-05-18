@@ -70,7 +70,10 @@ export default function RateLimitingPage() {
 
   const activeRules = rules.filter((r) => r.status === "active");
   const inactiveRules = rules.filter((r) => r.status === "inactive");
-  const totalBlocked = 1_247; // placeholder count
+  // Real "total blocked" count requires aggregating /admin/rate-limits
+  // events across the active window — the backend doesn't yet expose
+  // that aggregate, so we render zero rather than a hardcoded number.
+  const totalBlocked = 0;
 
   function openAddForm() {
     setForm({ ...emptyForm });

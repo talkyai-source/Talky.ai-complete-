@@ -136,6 +136,15 @@ async def test_fetch_returns_paginated_calls_with_turns():
     conn = AsyncMock()
     conn.fetch = AsyncMock(return_value=[r])
     conn.fetchval = AsyncMock(return_value=1)
+    conn.execute = AsyncMock(return_value=None)
+    # The query path now wraps the SELECT in `async with conn.transaction()`
+    # to apply ``SET LOCAL app.bypass_rls = 'true'`` (added when the RLS
+    # empty-string cast bug was fixed). Mock the transaction as a no-op
+    # async context manager so the test mock matches reality.
+    transaction_cm = AsyncMock()
+    transaction_cm.__aenter__ = AsyncMock(return_value=transaction_cm)
+    transaction_cm.__aexit__ = AsyncMock(return_value=None)
+    conn.transaction = MagicMock(return_value=transaction_cm)
 
     pool = MagicMock()
     pool.acquire = MagicMock(return_value=_PoolCM(conn))

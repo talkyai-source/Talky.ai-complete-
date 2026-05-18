@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   startMfaSetup,
-  verifyMfaSetup,
+  confirmMfaSetup,
   validateTotpCode,
   downloadRecoveryCodes,
   copyToClipboard,
@@ -27,7 +27,6 @@ interface MFASetupProps {
 export default function MFASetup({ token, onSuccess, onError, onCancel }: MFASetupProps) {
   const [step, setStep] = useState<Step>("qr");
   const [qrCode, setQrCode] = useState("");
-  const [secret, setSecret] = useState("");
   const [manualKey, setManualKey] = useState("");
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
   const [totpCode, setTotpCode] = useState("");
@@ -46,7 +45,6 @@ export default function MFASetup({ token, onSuccess, onError, onCancel }: MFASet
         setLoading(true);
         const response = await startMfaSetup(token);
         setQrCode(response.qrCode);
-        setSecret(response.secret);
         setManualKey(response.manualEntryKey);
         setError("");
       } catch (err) {
@@ -84,22 +82,12 @@ export default function MFASetup({ token, onSuccess, onError, onCancel }: MFASet
     setVerifying(true);
 
     try {
-      const result = await verifyMfaSetup(token, totpCode, secret);
-      if (result.success) {
-        // In a real implementation, recovery codes would come from the backend
-        // For now, we'll generate them client-side as a placeholder
-        setRecoveryCodes([
-          "XXXX-XXXX-XXXX-XXXX",
-          "YYYY-YYYY-YYYY-YYYY",
-          "ZZZZ-ZZZZ-ZZZZ-ZZZZ",
-          "AAAA-AAAA-AAAA-AAAA",
-          "BBBB-BBBB-BBBB-BBBB",
-          "CCCC-CCCC-CCCC-CCCC",
-          "DDDD-DDDD-DDDD-DDDD",
-          "EEEE-EEEE-EEEE-EEEE",
-        ]);
-        setStep("recovery");
-      }
+      const result = await confirmMfaSetup(token, totpCode);
+      // Backend returns the real single-use recovery codes ONCE here.
+      // If we ever miss this response (network drop), the user has to
+      // disable + re-enrol — that's the standard secure pattern.
+      setRecoveryCodes(result.recoveryCodes);
+      setStep("recovery");
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Verification failed. Please try again.";
       setError(errorMsg);

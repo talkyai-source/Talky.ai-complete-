@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode, useCallback } from "react";
 import { api } from "@/lib/api";
 import { resetSessionExpiredLatch } from "@/lib/http-client";
+import { getBrowserAuthToken } from "@/lib/auth-token";
 interface MeResponse {
     id: string;
     email: string;
@@ -47,25 +48,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [user, setUser] = useState<MeResponse | null>(null);
     const [loading, setLoading] = useState(true);
 
-    // Bootstrap auth state from the server. Phase B: cookies are the
-    // source of truth (httpOnly `talky_at` access + `talky_rt` refresh),
-    // so we always probe `/auth/me`. If the access cookie is expired the
-    // http-client transparently refreshes via `/auth/refresh`; only if
-    // that also fails do we land on a 401 and clear local state. We keep
-    // the legacy localStorage token read so users mid-migration with an
-    // existing Bearer token still get a clean bootstrap.
+    // Bootstrap auth state from the server.
+    //
+    // Skip the call when there's no legacy Bearer token AND no plausible
+    // cookie auth signal — otherwise a cold visit fires /auth/me without
+    // credentials, the http-client treats the 401 as session expiry, wipes
+    // any in-flight localStorage write from a concurrent login, and tears
+    // down sibling API calls (the connectors page's 10-second poll, the
+    // dashboard query, etc.). The original gated behaviour is correct in
+    // hybrid mode where cookies don't cross from api.talkleeai.com to
+    // localhost. In pure cookie mode `document.cookie` reading won't see
+    // httpOnly `talky_at`, but `talklee_auth_token` (legacy mirror) or any
+    // first-party signal is enough to opt in.
     useEffect(() => {
         let cancelled = false;
-        // If the legacy token exists we still send it (the http-client
-        // attaches Authorization automatically); if not, the cookie does
-        // the work via `credentials: 'include'`.
+        const legacyToken = getBrowserAuthToken();
+        if (!legacyToken) {
+            // No auth signal — present a logged-out shell. Do NOT call
+            // /auth/me or clear anything; the user will log in explicitly.
+            setLoading(false);
+            return;
+        }
         api.getMe()
             .then((me) => { if (!cancelled) setUser(me); })
             .catch(() => {
                 if (cancelled) return;
-                // Real 401 (after refresh-on-401 also failed) — drop any
-                // stale local token and present a clean logged-out shell.
-                try { api.clearToken(); } catch {}
+                // The http-client already cleared the stored token via its
+                // 401 path; we just sync our user state.
                 setUser(null);
             })
             .finally(() => { if (!cancelled) setLoading(false); });

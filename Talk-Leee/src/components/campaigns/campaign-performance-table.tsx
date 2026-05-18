@@ -313,7 +313,6 @@ export function CampaignPerformanceTable({
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
     const [detailsId, setDetailsId] = useState<string | null>(null);
-    const [editId, setEditId] = useState<string | null>(null);
     const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
     const [exportOpen, setExportOpen] = useState(false);
     const [exportPreset, setExportPreset] = useState<ExportPreset>("All Time");
@@ -518,25 +517,12 @@ export function CampaignPerformanceTable({
     );
     const detailsCanPause = detailsStatus === "Active";
     const detailsCanResume = detailsStatus === "Paused" || detailsStatus === "Draft" || detailsStatus === "Failed";
-    const editCampaign = useMemo(() => campaigns.find((c) => c.id === editId) || null, [campaigns, editId]);
-
-    const [editDraft, setEditDraft] = useState<{ name: string; description: string; maxConcurrent: number; voiceId: string } | null>(null);
-
-    useEffect(() => {
-        const raf = window.requestAnimationFrame(() => {
-            if (!editCampaign) {
-                setEditDraft(null);
-                return;
-            }
-            setEditDraft({
-                name: editCampaign.name || "",
-                description: editCampaign.description || "",
-                maxConcurrent: editCampaign.max_concurrent_calls || 0,
-                voiceId: editCampaign.voice_id || "",
-            });
-        });
-        return () => window.cancelAnimationFrame(raf);
-    }, [editCampaign]);
+    // The in-row partial edit modal (name / description / voice_id /
+    // max_concurrent_calls only) was removed: it could not satisfy the
+    // backend's CampaignUpdateRequest, which requires persona_type,
+    // agent_names, company_name and the persona-specific campaign_slots.
+    // The "Edit Campaign" menu item now navigates to /campaigns/{id}/edit
+    // which has the full form shape.
 
     const useVirtual = rowsPerPage === "All" && expanded.size === 0 && paged.slice.length > 50;
     const rowHeight = 56;
@@ -1105,10 +1091,14 @@ export function CampaignPerformanceTable({
                                                                 className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-foreground transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground"
                                                                 onClick={() => {
                                                                     setMenuOpenFor(null);
-                                                                    setEditId(campaign.id);
+                                                                    // Route to the full edit page — the partial in-row
+                                                                    // modal can't satisfy CampaignUpdateRequest's
+                                                                    // required persona_type / agent_names /
+                                                                    // company_name / campaign_slots fields.
+                                                                    router.push(`/campaigns/${campaign.id}/edit`);
                                                                 }}
                                                             >
-                                                                Edit Settings
+                                                                Edit Campaign
                                                             </button>
                                                             <button
                                                                 type="button"
@@ -1383,10 +1373,10 @@ export function CampaignPerformanceTable({
                                 variant="outline"
                                 onClick={() => {
                                     setDetailsId(null);
-                                    setEditId(detailsCampaign.id);
+                                    router.push(`/campaigns/${detailsCampaign.id}/edit`);
                                 }}
                             >
-                                Edit Settings
+                                Edit Campaign
                             </Button>
                             <Button
                                 type="button"
@@ -1405,75 +1395,6 @@ export function CampaignPerformanceTable({
                             >
                                 Delete
                             </Button>
-                        </div>
-                    </div>
-                ) : null}
-            </Modal>
-
-            <Modal
-                open={editId !== null}
-                onOpenChange={(next) => setEditId(next ? editId : null)}
-                title={editCampaign ? `Edit: ${editCampaign.name}` : "Edit Campaign"}
-                size="lg"
-                footer={
-                    <div className="flex items-center justify-end gap-2">
-                        <Button type="button" variant="outline" onClick={() => setEditId(null)}>
-                            Cancel
-                        </Button>
-                        <Button
-                            type="button"
-                            onClick={async () => {
-                                if (!editCampaign || !editDraft) return;
-                                await onUpdate({
-                                    ...editCampaign,
-                                    name: editDraft.name,
-                                    description: editDraft.description,
-                                    max_concurrent_calls: Math.max(0, Math.floor(editDraft.maxConcurrent || 0)),
-                                    voice_id: editDraft.voiceId,
-                                });
-                                setEditId(null);
-                            }}
-                        >
-                            Save
-                        </Button>
-                    </div>
-                }
-            >
-                {editCampaign && editDraft ? (
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                        <div>
-                            <label className="text-xs font-semibold text-muted-foreground">Name</label>
-                            <Input
-                                value={editDraft.name}
-                                onChange={(e) => setEditDraft((p) => (p ? { ...p, name: e.target.value } : p))}
-                                className="mt-1"
-                            />
-                        </div>
-                        <div>
-                            <label className="text-xs font-semibold text-muted-foreground">Voice ID</label>
-                            <Input
-                                value={editDraft.voiceId}
-                                onChange={(e) => setEditDraft((p) => (p ? { ...p, voiceId: e.target.value } : p))}
-                                className="mt-1"
-                            />
-                        </div>
-                        <div className="md:col-span-2">
-                            <label className="text-xs font-semibold text-muted-foreground">Description</label>
-                            <textarea
-                                value={editDraft.description}
-                                onChange={(e) => setEditDraft((p) => (p ? { ...p, description: e.target.value } : p))}
-                                className="mt-1 h-24 w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            />
-                        </div>
-                        <div>
-                            <label className="text-xs font-semibold text-muted-foreground">Max concurrent calls</label>
-                            <Input
-                                type="number"
-                                min={0}
-                                value={editDraft.maxConcurrent}
-                                onChange={(e) => setEditDraft((p) => (p ? { ...p, maxConcurrent: Number(e.target.value) } : p))}
-                                className="mt-1"
-                            />
                         </div>
                     </div>
                 ) : null}

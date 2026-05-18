@@ -4,7 +4,7 @@ AI Provider Configuration Model
 Defines the configuration structure for LLM, STT, and TTS providers.
 This configuration is used in both the AI Options testing page and actual calls.
 """
-from typing import Optional, List, Dict
+from typing import Any, Optional, List, Dict
 from pydantic import BaseModel, Field
 from enum import Enum
 
@@ -124,7 +124,13 @@ class AIProviderConfig(BaseModel):
     tts_model: str = DeepgramTTSModel.AURA_2.value  # Deepgram Aura-2
     tts_voice_id: str = "aura-zeus-en"  # Zeus - professional male voice
     tts_sample_rate: int = 24000  # Deepgram Aura-2 sample rate
-    
+
+    # Per-tenant voice-pipeline tuning (T4-C3). Partial dict matching
+    # the VoiceTuning dataclass (app/domain/services/voice_tuning.py).
+    # Empty / missing means "use env+code defaults" — operators who
+    # don't opt in see zero behaviour change.
+    voice_tuning: Optional[Dict[str, Any]] = Field(default=None)
+
     class Config:
         use_enum_values = True
 

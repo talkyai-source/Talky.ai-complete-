@@ -326,6 +326,12 @@ async def signup_complete(
                 pw_hash,
             )
 
+            # Seed the platform-default SIP trunk so the new tenant can
+            # dial out immediately (Blaze Digitel by default — overridable
+            # by the tenant in Settings → Telephony).
+            from app.services.scripts.seed_platform_sip_trunk import seed_for_tenant
+            await seed_for_tenant(conn, str(tenant["id"]))
+
             ip = get_client_ip(request)
             ua = get_user_agent(request)
             raw_session_token, session_id = await create_session(

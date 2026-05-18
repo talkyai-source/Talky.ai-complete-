@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { HoverTooltip, useHoverTooltip } from "@/components/ui/hover-tooltip";
+import { apiBaseUrl } from "@/lib/env";
 
 type MinutesBySubTenant = {
     subTenant: string;
@@ -18,14 +19,6 @@ type DailyUsagePoint = {
     date: string;
     minutes: number;
 };
-
-function stableNumberFromString(input: string) {
-    let hash = 0;
-    for (let i = 0; i < input.length; i++) {
-        hash = (hash * 31 + input.charCodeAt(i)) >>> 0;
-    }
-    return hash;
-}
 
 function clamp(value: number, min: number, max: number) {
     return Math.min(max, Math.max(min, value));
@@ -63,69 +56,45 @@ function formatShortDate(isoDate: string) {
     return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function makeMockData(partnerId: string): {
+// Fetches partner analytics from GET /analytics/partners/{partnerId}.
+// Returns a normalised shape; on backend error / missing endpoint we
+// resolve to empty arrays so the UI shows an honest empty state rather
+// than synthesised numbers.
+type PartnerAnalytics = {
     minutesBySubTenant: MinutesBySubTenant[];
     concurrencyPeaks: ConcurrencyPoint[];
     dailyUsage: DailyUsagePoint[];
-} {
-    const key = partnerId.trim().toLowerCase();
+};
 
-    if (key === "acme") {
-        const today = new Date();
-        const dailyUsage = Array.from({ length: 14 }).map((_, i) => {
-            const d = new Date(today);
-            d.setDate(today.getDate() - (13 - i));
-            const base = [320, 410, 290, 530][i % 4] ?? 380;
-            const minutes = base + Math.round(((i % 5) - 2) * 18);
-            return { date: d.toISOString().slice(0, 10), minutes: Math.max(0, minutes) };
-        });
+const EMPTY_ANALYTICS: PartnerAnalytics = {
+    minutesBySubTenant: [],
+    concurrencyPeaks: [],
+    dailyUsage: [],
+};
 
+async function fetchPartnerAnalytics(partnerId: string): Promise<PartnerAnalytics> {
+    const baseUrl = apiBaseUrl();
+    if (!baseUrl) return EMPTY_ANALYTICS;
+    try {
+        const token = typeof window !== "undefined"
+            ? localStorage.getItem("access_token")
+            : null;
+        const res = await fetch(
+            `${baseUrl}/analytics/partners/${encodeURIComponent(partnerId)}`,
+            {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+            },
+        );
+        if (!res.ok) return EMPTY_ANALYTICS;
+        const data = (await res.json()) as Partial<PartnerAnalytics>;
         return {
-            minutesBySubTenant: [
-                { subTenant: "Salon Assistant", minutesUsed: 600 },
-                { subTenant: "Clinic Bot", minutesUsed: 1200 },
-                { subTenant: "Restaurant Bot", minutesUsed: 350 },
-            ],
-            concurrencyPeaks: [
-                { time: "10:00", concurrentCalls: 3 },
-                { time: "11:00", concurrentCalls: 6 },
-                { time: "12:00", concurrentCalls: 8 },
-                { time: "13:00", concurrentCalls: 4 },
-            ],
-            dailyUsage,
+            minutesBySubTenant: data.minutesBySubTenant ?? [],
+            concurrencyPeaks: data.concurrencyPeaks ?? [],
+            dailyUsage: data.dailyUsage ?? [],
         };
+    } catch {
+        return EMPTY_ANALYTICS;
     }
-
-    const seed = stableNumberFromString(key);
-    const tenantsCount = 4 + (seed % 6);
-    const minutesBySubTenant = Array.from({ length: tenantsCount }).map((_, i) => {
-        const minutesUsed = 180 + ((seed + i * 97) % 1700);
-        return { subTenant: `Sub-Tenant ${i + 1}`, minutesUsed };
-    });
-
-    const concurrencyPoints = 8 + (seed % 5);
-    const startHour = 9 + (seed % 3);
-    const concurrencyPeaks = Array.from({ length: concurrencyPoints }).map((_, i) => {
-        const hour = startHour + i;
-        const time = `${String(hour).padStart(2, "0")}:00`;
-        const wave = Math.sin((i / Math.max(1, concurrencyPoints - 1)) * Math.PI);
-        const noise = ((seed + i * 43) % 5) - 2;
-        const concurrentCalls = Math.max(0, Math.round(2 + wave * (6 + (seed % 5)) + noise));
-        return { time, concurrentCalls };
-    });
-
-    const today = new Date();
-    const days = 14;
-    const dailyUsage = Array.from({ length: days }).map((_, i) => {
-        const d = new Date(today);
-        d.setDate(today.getDate() - (days - 1 - i));
-        const base = 220 + ((seed + i * 41) % 560);
-        const drift = Math.round(((i - (days - 1) / 2) / days) * (seed % 180));
-        const minutes = Math.max(0, base + drift);
-        return { date: d.toISOString().slice(0, 10), minutes };
-    });
-
-    return { minutesBySubTenant, concurrencyPeaks, dailyUsage };
 }
 
 function BarChart({
@@ -461,7 +430,17 @@ function LineChart({
 }
 
 export function PartnerAnalyticsClient({ partnerId }: { partnerId: string }) {
-    const data = useMemo(() => makeMockData(partnerId), [partnerId]);
+    const [data, setData] = useState<PartnerAnalytics>(EMPTY_ANALYTICS);
+
+    useEffect(() => {
+        let cancelled = false;
+        void fetchPartnerAnalytics(partnerId).then((d) => {
+            if (!cancelled) setData(d);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [partnerId]);
 
     const minutesItems = useMemo(() => {
         return data.minutesBySubTenant.map((x) => ({ label: x.subTenant, value: x.minutesUsed }));

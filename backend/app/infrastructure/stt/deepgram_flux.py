@@ -12,8 +12,13 @@ Flux State Machine Events:
 
 Default Configuration (Simple EndOfTurn-only Mode):
 - eot_threshold=0.7: Confirm end of turn
-- eot_timeout_ms=5000: Natural pause timeout
-- eager_eot_threshold disabled unless explicitly configured
+- eot_timeout_ms=2000: Natural pause timeout (default; per-session config
+  in telephony_session_config.py overrides to 500ms for outbound calls)
+- eager_eot_threshold=0.5: Speculative LLM start enabled by default; can be
+  disabled by passing None in the session config.
+
+Both defaults are env-overridable for production tuning without redeploy:
+  TELEPHONY_FLUX_EOT_TIMEOUT_MS, TELEPHONY_FLUX_EAGER_EOT_THRESHOLD.
 
 Audio Streaming:
 - ~80ms chunks (2560 bytes at 16kHz linear16) for optimal Flux performance
@@ -48,6 +53,23 @@ FLUX_HEARTBEAT_SILENCE_MS = 100
 # WebSocket reconnection configuration
 FLUX_MAX_RECONNECTS = 3          # Maximum mid-call reconnect attempts
 FLUX_RECONNECT_BASE_DELAY = 0.5  # Initial backoff (seconds)
+
+
+def _env_timeout_default() -> int:
+    """Default eot_timeout_ms — reads from typed TelephonySettings
+    (T4-C5). Kept as a function (rather than inlined) so test code that
+    monkeypatches the env can call ``reset_telephony_settings()`` and
+    re-read this without restarting the import."""
+    from app.core.telephony_settings import get_telephony_settings
+    return get_telephony_settings().flux.eot_timeout_ms
+
+
+def _env_eager_default() -> Optional[float]:
+    """Default eager_eot_threshold — reads from typed TelephonySettings
+    (T4-C5). Returns ``None`` when the operator has explicitly disabled
+    eager mode via ``TELEPHONY_FLUX_EAGER_EOT_THRESHOLD=off``."""
+    from app.core.telephony_settings import get_telephony_settings
+    return get_telephony_settings().flux.eager_eot_threshold
 FLUX_RECONNECT_MAX_DELAY = 8.0   # Maximum backoff cap
 
 # Reconnect-replay buffer: keep the last N optimal-chunk frames so that on a
@@ -123,10 +145,14 @@ class DeepgramFluxSTTProvider(STTProvider):
         self._sample_rate: int = 16000
         self._encoding: str = "linear16"
         
-        # EOT configuration (Simple mode defaults per Deepgram docs)
+        # EOT configuration. Defaults are conservative for short utterances
+        # ("Hello?") so a caller never waits the full 5-second silence
+        # timeout for the LLM to start. Env-overridable for prod tuning.
+        # The per-session VoiceSessionConfig still wins when initialize()
+        # is called with explicit stt_eot_* values.
         self._eot_threshold: float = 0.7
-        self._eager_eot_threshold: Optional[float] = None
-        self._eot_timeout_ms: int = 5000
+        self._eager_eot_threshold: Optional[float] = _env_eager_default()
+        self._eot_timeout_ms: int = _env_timeout_default()
         
         # Echo suppression: mute microphone during TTS playback
         # This prevents the agent's voice from triggering StartOfTurn

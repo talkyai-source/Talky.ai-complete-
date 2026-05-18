@@ -1,21 +1,25 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  CURRENT_TENANT_PLAN, CURRENT_USAGE, DAILY_USAGE, INVOICES, PLANS,
-  ADJUSTMENTS, OVERAGE_ALERTS, PARTNER_BILLING, TENANT_BILLING,
-  API_KEYS, WEBHOOK_ENDPOINTS, WEBHOOK_DELIVERIES, RATE_LIMIT_RULES,
-  CALL_GUARD_RULES, TENANT_LIMITS, PARTNER_LIMITS, ABUSE_EVENTS,
-  BLOCKED_ENTITIES, SECRETS,
-} from "./billing-mock-data";
+import { apiBaseUrl } from "@/lib/env";
+import { getBrowserAuthToken } from "@/lib/auth-token";
 
 // ── Fetch helper ──
+//
+// Uses the canonical apiBaseUrl() from @/lib/env so this module reads the same
+// NEXT_PUBLIC_API_BASE_URL the rest of the app does. The previous
+// process.env.NEXT_PUBLIC_API_URL was a different (unset) variable, which is
+// why every hook silently fell back to mock data even when the backend was
+// running.
+//
+// On non-2xx responses or network errors, hooks now return null/[] instead of
+// fake constants so consuming pages render an honest empty state.
 
 async function billingFetch<T>(path: string, options?: RequestInit): Promise<T | null> {
-  const baseUrl = process.env.NEXT_PUBLIC_API_URL || "";
+  const baseUrl = apiBaseUrl();
   if (!baseUrl) return null;
   try {
-    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+    const token = getBrowserAuthToken();
     const res = await fetch(`${baseUrl}${path}`, {
       ...options,
       headers: {
@@ -62,8 +66,10 @@ export function useBillingPlan() {
   return useQuery({
     queryKey: billingKeys.plan(),
     queryFn: async () => {
-      const data = await billingFetch("/billing/plan");
-      return data ?? CURRENT_TENANT_PLAN;
+      // Backend exposes /billing/subscription (plan + status + period).
+      // Previously this fetched /billing/plan which doesn't exist → null.
+      const data = await billingFetch("/billing/subscription");
+      return data ?? null;
     },
   });
 }
@@ -72,8 +78,10 @@ export function useBillingUsage() {
   return useQuery({
     queryKey: billingKeys.usage(),
     queryFn: async () => {
-      const data = await billingFetch("/billing/usage/summary");
-      return data ?? CURRENT_USAGE;
+      // Backend exposes /billing/usage (summary for current period).
+      // Previously hit /billing/usage/summary which doesn't exist → null.
+      const data = await billingFetch("/billing/usage");
+      return data ?? null;
     },
   });
 }
@@ -83,7 +91,7 @@ export function useDailyUsage() {
     queryKey: billingKeys.dailyUsage(),
     queryFn: async () => {
       const data = await billingFetch("/billing/usage/daily");
-      return data ?? DAILY_USAGE;
+      return data ?? [];
     },
   });
 }
@@ -93,7 +101,7 @@ export function useBillingInvoices() {
     queryKey: billingKeys.invoices(),
     queryFn: async () => {
       const data = await billingFetch("/billing/invoices");
-      return data ?? INVOICES;
+      return data ?? [];
     },
   });
 }
@@ -103,7 +111,7 @@ export function useBillingInvoice(id: string) {
     queryKey: billingKeys.invoice(id),
     queryFn: async () => {
       const data = await billingFetch(`/billing/invoices/${encodeURIComponent(id)}`);
-      return data ?? INVOICES.find((inv) => inv.id === id) ?? null;
+      return data ?? null;
     },
     enabled: Boolean(id),
   });
@@ -114,7 +122,7 @@ export function useBillingPlans() {
     queryKey: billingKeys.plans(),
     queryFn: async () => {
       const data = await billingFetch("/billing/plans");
-      return data ?? PLANS;
+      return data ?? [];
     },
   });
 }
@@ -124,7 +132,7 @@ export function useBillingAdjustments() {
     queryKey: billingKeys.adjustments(),
     queryFn: async () => {
       const data = await billingFetch("/billing/adjustments");
-      return data ?? ADJUSTMENTS;
+      return data ?? [];
     },
   });
 }
@@ -134,7 +142,7 @@ export function useOverageAlerts() {
     queryKey: billingKeys.overageAlerts(),
     queryFn: async () => {
       const data = await billingFetch("/billing/overage-alerts");
-      return data ?? OVERAGE_ALERTS;
+      return data ?? [];
     },
   });
 }
@@ -144,7 +152,7 @@ export function usePartnerBilling() {
     queryKey: billingKeys.partnerBilling(),
     queryFn: async () => {
       const data = await billingFetch("/billing/partners");
-      return data ?? PARTNER_BILLING;
+      return data ?? [];
     },
   });
 }
@@ -154,7 +162,7 @@ export function useTenantBilling() {
     queryKey: billingKeys.tenantBilling(),
     queryFn: async () => {
       const data = await billingFetch("/billing/tenants");
-      return data ?? TENANT_BILLING;
+      return data ?? [];
     },
   });
 }
@@ -166,7 +174,7 @@ export function useApiKeys() {
     queryKey: billingKeys.apiKeys(),
     queryFn: async () => {
       const data = await billingFetch("/admin/api-keys");
-      return data ?? API_KEYS;
+      return data ?? [];
     },
   });
 }
@@ -176,7 +184,7 @@ export function useWebhookEndpoints() {
     queryKey: billingKeys.webhookEndpoints(),
     queryFn: async () => {
       const data = await billingFetch("/admin/webhooks");
-      return data ?? WEBHOOK_ENDPOINTS;
+      return data ?? [];
     },
   });
 }
@@ -186,7 +194,7 @@ export function useWebhookDeliveries() {
     queryKey: billingKeys.webhookDeliveries(),
     queryFn: async () => {
       const data = await billingFetch("/admin/webhooks/deliveries");
-      return data ?? WEBHOOK_DELIVERIES;
+      return data ?? [];
     },
   });
 }
@@ -196,7 +204,7 @@ export function useRateLimitRules() {
     queryKey: billingKeys.rateLimitRules(),
     queryFn: async () => {
       const data = await billingFetch("/admin/rate-limits");
-      return data ?? RATE_LIMIT_RULES;
+      return data ?? [];
     },
   });
 }
@@ -206,7 +214,7 @@ export function useCallGuardRules() {
     queryKey: billingKeys.callGuardRules(),
     queryFn: async () => {
       const data = await billingFetch("/admin/call-guards");
-      return data ?? CALL_GUARD_RULES;
+      return data ?? [];
     },
   });
 }
@@ -216,7 +224,7 @@ export function useTenantLimits() {
     queryKey: billingKeys.tenantLimits(),
     queryFn: async () => {
       const data = await billingFetch("/admin/tenant-limits");
-      return data ?? TENANT_LIMITS;
+      return data ?? [];
     },
   });
 }
@@ -226,7 +234,7 @@ export function usePartnerLimits() {
     queryKey: billingKeys.partnerLimits(),
     queryFn: async () => {
       const data = await billingFetch("/admin/partner-limits");
-      return data ?? PARTNER_LIMITS;
+      return data ?? [];
     },
   });
 }
@@ -236,7 +244,7 @@ export function useAbuseEvents() {
     queryKey: billingKeys.abuseEvents(),
     queryFn: async () => {
       const data = await billingFetch("/admin/abuse-events");
-      return data ?? ABUSE_EVENTS;
+      return data ?? [];
     },
   });
 }
@@ -246,7 +254,7 @@ export function useBlockedEntities() {
     queryKey: billingKeys.blockedEntities(),
     queryFn: async () => {
       const data = await billingFetch("/admin/blocked-entities");
-      return data ?? BLOCKED_ENTITIES;
+      return data ?? [];
     },
   });
 }
@@ -256,7 +264,7 @@ export function useSecrets() {
     queryKey: billingKeys.secrets(),
     queryFn: async () => {
       const data = await billingFetch("/admin/secrets");
-      return data ?? SECRETS;
+      return data ?? [];
     },
   });
 }

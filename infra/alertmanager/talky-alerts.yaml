@@ -1,0 +1,145 @@
+# Prometheus alert rules — Phase 3.4
+#
+# Apply with:
+#   kubectl apply -f infra/alertmanager/talky-alerts.yaml -n monitoring
+#
+# Each rule maps directly to a §Phase 3.4 alert in
+# `architecture_plan.md`. Every alert includes runbook link, owning
+# team, and severity so PagerDuty / Opsgenie can route correctly.
+groups:
+  - name: talky.capacity
+    interval: 30s
+    rules:
+      - alert: TalkyProviderInflightHigh
+        # Any provider's in-flight crosses 85 % of its contracted cap
+        # for >2 min — autoscaler isn't keeping up or upstream contract
+        # needs a bump.
+        expr: |
+          (talky_provider_inflight / talky_provider_max_concurrent) > 0.85
+        for: 2m
+        labels:
+          severity: warning
+          team: platform
+          service: talky
+        annotations:
+          summary: "{{ $labels.provider }} provider saturated >85% on pod {{ $labels.pod }}"
+          description: |
+            {{ $labels.provider }} in-flight = {{ $value | humanize }}× of cap on pod
+            {{ $labels.pod }} for >2m. Either traffic spiked or the contracted cap
+            needs to be raised. Check the per-provider keypool dashboard for cooling
+            keys before paging the provider.
+          runbook: "https://runbooks.talky.example.com/provider-saturation"
+
+      - alert: TalkyClusterSaturationHigh
+        # Sustained cluster saturation = autoscaler can't keep up.
+        expr: |
+          (sum(talky_active_calls) / sum(talky_pod_capacity)) > 0.80
+        for: 10m
+        labels:
+          severity: critical
+          team: platform
+          service: talky
+        annotations:
+          summary: "Cluster saturation >80% for 10m — HPA not keeping up"
+          description: |
+            sum(active_calls)/sum(pod_capacity) > 0.80 sustained for 10 minutes.
+            HPA is not provisioning new pods fast enough — check Prometheus
+            Adapter, custom-metric scrape lag, and scale-up stabilization
+            window in HPA spec.
+
+      - alert: TalkyKeyPoolAllKeysCooling
+        # Every key in a provider pool is in cooldown — provider down.
+        expr: talky_keypool_keys_cooling >= talky_keypool_keys_total
+        for: 30s
+        labels:
+          severity: critical
+          team: platform
+          service: talky
+        annotations:
+          summary: "All {{ $labels.provider }} keys in cooldown"
+          description: |
+            Every key in the {{ $labels.provider }} pool is cooling down. The
+            circuit breaker has tripped to fallback. Check provider status
+            page and account-level rate limit dashboards.
+
+  - name: talky.latency
+    interval: 30s
+    rules:
+      - alert: TalkyTurnLatencyHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(talky_turn_latency_seconds_bucket[5m])) by (le)
+          ) > 2.5
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          service: talky
+        annotations:
+          summary: "p95 turn latency >2.5s for 5m"
+          description: |
+            End-to-end turn p95 above 2.5s means callers are hearing dead air.
+            Drill into pipeline_latency dashboard for the offending stage
+            (STT / LLM / TTS first-token).
+
+      - alert: TalkyBargeInLatencyHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(talky_bargein_latency_seconds_bucket[5m])) by (le)
+          ) > 0.3
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          service: talky
+        annotations:
+          summary: "p95 barge-in latency >300ms for 5m"
+          description: |
+            Callers are talking over the AI for too long before the AI stops
+            speaking. Check Flux STT model, audio frame size, and
+            telephony_media_gateway barge-in_event firing time.
+
+  - name: talky.infra
+    interval: 30s
+    rules:
+      - alert: TalkyRedisReplicationLagHigh
+        expr: redis_master_repl_offset - redis_slave_repl_offset > 5_000_000
+        for: 2m
+        labels:
+          severity: warning
+          team: platform
+          service: talky
+        annotations:
+          summary: "Redis replication lag >5MB"
+          description: |
+            Lease set / queue writes on the master haven't propagated to the
+            replica. A failover during this window would lose call leases.
+
+      - alert: TalkyPostgresReplicationLagHigh
+        expr: pg_replication_lag_seconds > 5
+        for: 2m
+        labels:
+          severity: warning
+          team: platform
+          service: talky
+        annotations:
+          summary: "Postgres replication lag >5s"
+          description: |
+            Read-replica is behind primary by >5 seconds. Read endpoints
+            (campaign list, transcript query) may show stale data; the failover
+            blast radius is also growing.
+
+      - alert: TalkyPodNotReady
+        expr: |
+          kube_pod_status_ready{namespace="talky",condition="false"} == 1
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          service: talky
+        annotations:
+          summary: "Pod {{ $labels.pod }} not ready for 5m"
+          description: |
+            Pod has been NOT_READY (draining or at capacity) for 5 minutes.
+            Either drain is stuck or the pod is permanently saturated —
+            investigate before HPA cools off the scale-up policy.

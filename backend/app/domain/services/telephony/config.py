@@ -12,9 +12,12 @@ import os
 from typing import Optional
 
 from app.domain.services.telephony_session_config import (
+    build_persona_greeting,
     build_telephony_session_config,
     build_telephony_greeting,
+    build_telephony_inbound_greeting,
 )
+from app.domain.services.voice_orchestrator import Direction
 
 logger = logging.getLogger(__name__)
 
@@ -27,35 +30,42 @@ def _outbound_first_speaker() -> str:
     an immediate greeting so the callee never hears dead silence after picking up.
     Set TELEPHONY_FIRST_SPEAKER=user to wait for the callee to speak first
     (useful for inbound-style testing).
+
+    Reads through TelephonySettings (T4-C5) — central env-knob registry.
     """
-    val = (os.getenv("TELEPHONY_FIRST_SPEAKER") or "agent").strip().lower()
-    return "user" if val == "user" else "agent"
+    from app.core.telephony_settings import get_telephony_settings
+    return get_telephony_settings().first_speaker_default
 
 
 def _build_telephony_session_config(
     gateway_type: str = "telephony",
     campaign=None,
     agent_name: Optional[str] = None,
+    direction: Direction = Direction.OUTBOUND,
+    voice_tuning_override=None,
 ):
     """
     Thin shim kept for call-site compatibility.
     All config logic lives in telephony_session_config.build_telephony_session_config().
+
+    ``voice_tuning_override`` (T4-C3): pass an already-resolved
+    :class:`VoiceTuning` to skip the sync env-only resolver. The bridge
+    resolves it asynchronously (DB+env) before calling this.
     """
     return build_telephony_session_config(
         gateway_type=gateway_type,
         campaign=campaign,
         agent_name_override=agent_name,
+        direction=direction,
+        voice_tuning_override=voice_tuning_override,
     )
 
 
-def _build_outbound_greeting(session) -> str:
-    """
-    Build the estimation agent's opening line from the session's agent_config.
-
-    Delegates to telephony_session_config.build_telephony_greeting() so the
-    greeting and the system prompt always reference the same agent_name and
-    company_name — both set in build_telephony_session_config().
-    """
+def _resolve_greeting_context(session) -> tuple[str, str]:
+    """Pull (agent_name, company_name) off the session's agent_config with
+    sensible fallbacks. The fallbacks read naturally on the wire — a
+    misconfigured campaign without an agent_name still produces a
+    grammatical greeting rather than crashing the call."""
     agent_config = getattr(session, "agent_config", None)
     agent_name = (
         getattr(agent_config, "agent_name", None) if agent_config else None
@@ -63,4 +73,53 @@ def _build_outbound_greeting(session) -> str:
     company = (
         getattr(agent_config, "company_name", None) if agent_config else None
     ) or "All States Estimation"
-    return build_telephony_greeting(agent_name, company)
+    return agent_name, company
+
+
+def _build_call_greeting(session, *, first_speaker: str) -> str:
+    """Build the spoken greeting for the call's persona.
+
+    The telephony bridge endpoint only originates OUTBOUND calls — we
+    dialed them. So the greeting is ALWAYS the outbound persona greeting
+    (the AI introduces itself as a caller), regardless of whether
+    ``first_speaker`` is "agent" (speak immediately) or "user" (speak
+    after a 2-second pause). The previous direction = inbound mapping
+    on caller-first was wrong: it made the AI sound like a receptionist
+    asking "How can I help?" on a call WE initiated, which is jarring.
+
+    Falls back to the generic outbound opener when ``persona_type`` is
+    None (legacy estimation campaign) or missing from the dispatch
+    table — keeps historical behaviour intact for anything not migrated
+    to the persona system.
+
+    Both the persona-specific templates and the generic fallback
+    reference the same ``agent_name`` / ``company_name`` set up in
+    :func:`build_telephony_session_config`, so the spoken greeting and
+    the system prompt always refer to the same identity.
+    """
+    # `first_speaker` is intentionally accepted but unused for direction
+    # selection — it controls TIMING (immediate vs 2s pause) in the
+    # lifecycle layer, not greeting content.
+    del first_speaker
+    agent_name, company = _resolve_greeting_context(session)
+
+    # Persona is stored on the session's config when the campaign went
+    # through the persona-driven path. Older sessions / non-telephony
+    # contexts have no config or no persona_type — both produce None
+    # below, which build_persona_greeting handles by falling back.
+    config = getattr(session, "config", None)
+    persona_type = getattr(config, "persona_type", None) if config else None
+
+    return build_persona_greeting(
+        persona_type=persona_type,
+        agent_name=agent_name,
+        company_name=company,
+        direction="outbound",
+    )
+
+
+def _build_outbound_greeting(session) -> str:
+    """Backward-compatible alias used by the agent-first answer path.
+    New code should call :func:`_build_call_greeting` with an explicit
+    ``first_speaker`` so the direction is visible at the call site."""
+    return _build_call_greeting(session, first_speaker="agent")

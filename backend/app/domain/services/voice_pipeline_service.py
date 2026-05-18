@@ -65,6 +65,113 @@ def _truncate_history(history: list, max_pairs: int = _MAX_HISTORY_PAIRS) -> lis
     return history[-(max_pairs * 2):]
 
 
+def _first_speaker_label(session) -> str:
+    """Return ``"agent"`` or ``"user"`` for telemetry. The bridge stashes
+    the per-call first-speaker on call_session at session creation; this
+    helper just reads it with a safe default for legacy code paths that
+    haven't been updated yet."""
+    raw = getattr(session, "_first_speaker", None) or "agent"
+    value = str(raw).strip().lower()
+    return "user" if value == "user" else "agent"
+
+
+def _persona_label(session) -> Optional[str]:
+    """Return ``session.config.persona_type`` if set, else None.
+
+    Used for metric labelling — bounded to {lead_gen, customer_support,
+    receptionist, none} downstream so cardinality stays sane.
+    """
+    config = getattr(session, "config", None)
+    if config is None:
+        return None
+    raw = getattr(config, "persona_type", None)
+    return str(raw) if raw else None
+
+
+def _prompt_kind_label(session) -> str:
+    """Return ``"inbound"`` or ``"outbound"`` for telemetry.
+
+    Preferred source: ``session.config.direction`` — a typed
+    ``Direction`` enum set by ``build_telephony_session_config``. This
+    is the contract path and never lies about the call direction.
+
+    Fallback: substring search for the inbound directive sentinel in
+    the active system_prompt. This covers two edge cases:
+    1. Sessions created via the legacy code path that never set
+       ``direction`` on the config (older browser/ask_ai entry points).
+    2. Persona-composed prompts where the bridge applied a runtime
+       directive prepend without updating the config — a transitional
+       state we'll eliminate when persona templates gain direction
+       awareness in a future change.
+    """
+    config = getattr(session, "config", None)
+    if config is not None and getattr(config, "direction", None) is not None:
+        # Direction is a string-backed enum; comparing the value works
+        # for both the enum instance and the bare string form.
+        return str(config.direction.value).lower()
+
+    # Local import keeps the latency_tracker callable on its own without
+    # importing the telephony modes (used in non-telephony contexts too).
+    from app.domain.services.telephony.modes.caller_first import (
+        INBOUND_DIRECTIVE_SENTINEL,
+    )
+    prompt = getattr(session, "system_prompt", "") or ""
+    return "inbound" if INBOUND_DIRECTIVE_SENTINEL in prompt else "outbound"
+
+
+# Default turn-0 floor — used when the session.config doesn't carry an
+# explicit tuning value (legacy code paths, ask_ai sessions). Production
+# telephony reads its values from the per-tenant voice_tuning resolver
+# via VoiceSessionConfig at session-build time. See voice_tuning.py.
+_TURN_0_MIN_CONFIDENCE = 0.4
+_TURN_0_MIN_ALPHA_CHARS = 2
+
+
+def _alpha_char_count(text: str) -> int:
+    """Count letters in a string (ignores digits, whitespace, punctuation)."""
+    return sum(1 for ch in text if ch.isalpha())
+
+
+def _should_reject_turn_0(
+    transcript: str,
+    confidence: Optional[float],
+    *,
+    min_confidence: float = _TURN_0_MIN_CONFIDENCE,
+    min_alpha_chars: int = _TURN_0_MIN_ALPHA_CHARS,
+) -> Optional[str]:
+    """Return a short reason string if a turn-0 transcript should be
+    dropped, or ``None`` if it should pass.
+
+    Only applies when this is the first user turn — callers must check
+    that before invoking this function. Splitting the predicate out keeps
+    handle_turn_end readable and lets the rule be tested in isolation.
+
+    The floors are passed in (rather than read from the module constants)
+    so per-tenant tuning at T3.9 reaches this rule. Callers default the
+    kwargs to the module constants when running outside a configured
+    session.
+    """
+    if _alpha_char_count(transcript) < min_alpha_chars:
+        return "too_short"
+    if confidence is not None and confidence < min_confidence:
+        return "low_confidence"
+    return None
+
+
+def _resolve_turn_0_floors(session) -> tuple[float, int]:
+    """Return ``(min_confidence, min_alpha_chars)`` for the active session.
+
+    Reads the per-tenant tuning that landed on ``session.config`` when
+    the session was built; falls back to the module defaults when those
+    fields are missing (legacy or non-telephony sessions)."""
+    config = getattr(session, "config", None)
+    if config is None:
+        return _TURN_0_MIN_CONFIDENCE, _TURN_0_MIN_ALPHA_CHARS
+    min_conf = getattr(config, "turn_0_min_confidence", _TURN_0_MIN_CONFIDENCE)
+    min_chars = getattr(config, "turn_0_min_alpha_chars", _TURN_0_MIN_ALPHA_CHARS)
+    return float(min_conf), int(min_chars)
+
+
 class VoicePipelineService:
     """
     Orchestrates the full voice AI pipeline.
@@ -498,6 +605,17 @@ class VoicePipelineService:
                                 call_id, _now - _level_bucket_t0,
                                 _chunks_yielded, rms, _level_max, _level_samples,
                             )
+                            # Stash on the session so user-first's silence
+                            # handler can read pre-Flux audio activity. Without
+                            # this signal it fires the fallback greeting on
+                            # top of the caller's first "Hello?" because Flux
+                            # hadn't yet committed StartOfTurn.
+                            try:
+                                session.last_audio_rms = rms
+                                session.last_audio_peak = _level_max
+                                session.last_audio_rms_at = _now
+                            except Exception:
+                                pass
                             _level_bucket_t0 = _now
                             _level_max = 0
                             _level_sum_sq = 0.0
@@ -772,6 +890,10 @@ class VoicePipelineService:
         if metadata.get("eager") and transcript.text:
             if not session.llm_active and call_id not in self._pending_llm_tasks:
                 session.current_user_input = transcript.text
+                # Stash the transcript's confidence alongside the text so
+                # handle_turn_end can apply a turn-0 floor on garbled
+                # mishears without re-acquiring the transcript object.
+                session._last_transcript_confidence = transcript.confidence
                 # Snapshot history length so TurnResumed can roll back any
                 # messages the speculative task appends before cancellation.
                 session._speculative_history_len = len(session.conversation_history)
@@ -806,6 +928,7 @@ class VoicePipelineService:
             )
             self.latency_tracker.mark_stt_first_transcript(call_id)
             session.current_user_input = transcript.text
+            session._last_transcript_confidence = transcript.confidence
             session.update_activity()
 
     # ── Turn end — the full LLM + TTS cycle ───────────────────────
@@ -823,6 +946,49 @@ class VoicePipelineService:
         if not full_transcript:
             logger.debug(f"Empty transcript, skipping turn", extra={"call_id": call_id})
             return
+
+        # Turn-0 floor — protects the first AI reply (the one that "anchors"
+        # the conversation) from being driven by a misheard fragment. A bad
+        # turn 0 is uniquely costly: the LLM commits to a wrong topic and
+        # subsequent turns inherit that drift. A bad turn N+1 is a normal
+        # disfluency the model can recover from.
+        # Only the very first user utterance is gated; once the conversation
+        # is open we trust the existing repetitive/backchannel filters below.
+        _has_prior_user_turn_for_floor = any(
+            m.role == MessageRole.USER for m in session.conversation_history
+        )
+        if not _has_prior_user_turn_for_floor:
+            confidence = getattr(session, "_last_transcript_confidence", None)
+            min_conf, min_chars = _resolve_turn_0_floors(session)
+            reject_reason = _should_reject_turn_0(
+                full_transcript,
+                confidence,
+                min_confidence=min_conf,
+                min_alpha_chars=min_chars,
+            )
+            if reject_reason is not None:
+                logger.info(
+                    "turn_0_transcript_rejected reason=%s call=%s "
+                    "transcript=%r confidence=%s min_conf=%s min_chars=%d "
+                    "— letting Flux re-emit",
+                    reject_reason, call_id[:12], full_transcript[:40],
+                    confidence, min_conf, min_chars,
+                )
+                try:
+                    from app.infrastructure.metrics.voice_metrics import (
+                        record_turn_0_rejection,
+                    )
+                    record_turn_0_rejection(reject_reason)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "voice_metrics_rejection_record_failed err=%s", exc,
+                    )
+                # Clear so the next real transcript isn't merged with this one.
+                try:
+                    session.current_user_input = ""
+                except AttributeError:
+                    pass
+                return
 
         # Guard against the confirmed Deepgram Flux hallucination bug (GitHub #1524)
         # where the STT model outputs repetitive nonsense text ("blah blah blah…").
@@ -1010,6 +1176,39 @@ class VoicePipelineService:
                             session.add_latency_measurement(attr, val)
                             turn_span.set_attribute(f"voice.latency.{attr}_ms", round(val, 1))
                     self.latency_tracker.log_metrics(call_id)
+                    # First-turn telemetry — fires exactly once per call, on
+                    # the first turn that actually produced audio. Cold-start
+                    # costs land here and are otherwise invisible in the
+                    # per-turn aggregate.
+                    _mode = _first_speaker_label(session)
+                    _kind = _prompt_kind_label(session)
+                    _persona = _persona_label(session)
+                    self.latency_tracker.log_first_turn_if_applicable(
+                        call_id,
+                        mode=_mode,
+                        prompt_kind=_kind,
+                        persona=_persona,
+                    )
+                    # Per-turn Prometheus observation (T4-B2). Mirrors the
+                    # log_metrics structured log so dashboards and logs
+                    # never disagree on what happened. Local import keeps
+                    # the pipeline callable when prometheus_client isn't
+                    # available (tests, lightweight scripts).
+                    if tracked.total_latency_ms is not None:
+                        try:
+                            from app.infrastructure.metrics.voice_metrics import (
+                                observe_turn_latency_seconds,
+                            )
+                            observe_turn_latency_seconds(
+                                tracked.total_latency_ms / 1000.0,
+                                mode=_mode,
+                                prompt_kind=_kind,
+                                persona=_persona,
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            logger.debug(
+                                "voice_metrics_turn_observe_failed err=%s", exc,
+                            )
 
                 logger.info(
                     "turn_complete",

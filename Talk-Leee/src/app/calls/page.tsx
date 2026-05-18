@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
-import { Phone, PhoneOff, PhoneIncoming, Clock, ChevronRight } from "lucide-react";
+import { Phone, PhoneOff, PhoneIncoming, Clock, ChevronRight, ChevronDown, FileText, Megaphone, Loader2 } from "lucide-react";
 import Link from "next/link";
-import { motion } from "framer-motion";
-import { useCalls } from "@/lib/api-hooks";
+import { motion, AnimatePresence } from "framer-motion";
+import { useCalls, useCallTranscript } from "@/lib/api-hooks";
+import type { Call } from "@/lib/dashboard-api";
 
 function getStatusIcon(status: string) {
     switch (status) {
@@ -46,54 +47,227 @@ function formatDuration(seconds?: number) {
     return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
+function humanizeOutcome(outcome?: string) {
+    if (!outcome) return "--";
+    if (outcome === "goal_achieved") return "Qualified";
+    if (outcome === "goal_not_achieved") return "Disqualified";
+    return outcome.replace(/_/g, " ");
+}
+
+function CallRow({ call }: { call: Call }) {
+    const [expanded, setExpanded] = useState(false);
+    const transcriptQuery = useCallTranscript(expanded ? call.id : undefined, "json");
+
+    return (
+        <div className="rounded-xl border border-border bg-background">
+            <div className="grid min-w-0 grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1.1fr)_auto_auto] items-center gap-3 px-4 py-3">
+                <div className="flex min-w-0 items-center gap-3">
+                    {getStatusIcon(call.status)}
+                    <span className="truncate text-sm font-semibold text-foreground">{call.phone_number}</span>
+                </div>
+                <div className="min-w-0">
+                    <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${getStatusStyle(call.status)}`}>
+                        {call.status}
+                    </span>
+                </div>
+                <div className="min-w-0 truncate text-sm text-muted-foreground">{humanizeOutcome(call.outcome)}</div>
+                <div className="flex items-center gap-1 text-sm text-muted-foreground tabular-nums">
+                    <Clock className="h-4 w-4" />
+                    {formatDuration(call.duration_seconds)}
+                </div>
+                <div className="min-w-0 truncate text-sm text-muted-foreground">{new Date(call.created_at).toLocaleString()}</div>
+                <button
+                    type="button"
+                    onClick={() => setExpanded((v) => !v)}
+                    aria-expanded={expanded}
+                    aria-label={expanded ? "Hide transcript" : "Show transcript"}
+                    title={expanded ? "Hide transcript" : "Show transcript"}
+                    className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${expanded
+                        ? "border-ring/60 bg-accent text-accent-foreground"
+                        : "border-border bg-background text-muted-foreground hover:text-foreground hover:bg-accent"
+                        }`}
+                >
+                    <FileText className="h-4 w-4" />
+                </button>
+                <Link
+                    href={`/calls/${call.id}`}
+                    aria-label="Open call details"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                    <ChevronRight className="h-4 w-4" />
+                </Link>
+            </div>
+
+            <AnimatePresence initial={false}>
+                {expanded && (
+                    <motion.div
+                        key="transcript"
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.18 }}
+                        className="overflow-hidden border-t border-border bg-muted/40"
+                    >
+                        <div className="px-4 py-3">
+                            {transcriptQuery.isLoading ? (
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    Loading transcript…
+                                </div>
+                            ) : transcriptQuery.isError ? (
+                                <p className="text-sm text-destructive">
+                                    {transcriptQuery.error instanceof Error ? transcriptQuery.error.message : "Failed to load transcript."}
+                                </p>
+                            ) : transcriptQuery.data?.turns && transcriptQuery.data.turns.length > 0 ? (
+                                <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                                    {transcriptQuery.data.turns.map((turn, i) => {
+                                        const isAgent = turn.role === "assistant" || turn.role === "agent";
+                                        return (
+                                            <div key={i} className="flex gap-2">
+                                                <span className={`shrink-0 rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${isAgent
+                                                    ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300"
+                                                    : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                                                    }`}>
+                                                    {isAgent ? "Agent" : "Caller"}
+                                                </span>
+                                                <p className="text-sm text-foreground leading-relaxed">{turn.content}</p>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ) : transcriptQuery.data?.transcript ? (
+                                <pre className="max-h-72 overflow-auto whitespace-pre-wrap text-sm text-foreground">{transcriptQuery.data.transcript}</pre>
+                            ) : (
+                                <p className="text-sm text-muted-foreground">No transcript available for this call.</p>
+                            )}
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    );
+}
+
+type CampaignGroup = {
+    id: string;
+    name: string;
+    calls: Call[];
+    completed: number;
+    failed: number;
+    totalDuration: number;
+    latest: number; // ms
+};
+
+function groupByCampaign(calls: Call[]): CampaignGroup[] {
+    const map = new Map<string, CampaignGroup>();
+    for (const c of calls) {
+        const id = c.campaign_id || "__none__";
+        const name = c.campaign_name || "No campaign";
+        let g = map.get(id);
+        if (!g) {
+            g = { id, name, calls: [], completed: 0, failed: 0, totalDuration: 0, latest: 0 };
+            map.set(id, g);
+        }
+        g.calls.push(c);
+        if (c.status === "completed" || c.status === "answered") g.completed++;
+        if (c.status === "failed" || c.status === "no_answer" || c.status === "busy") g.failed++;
+        if (c.duration_seconds) g.totalDuration += c.duration_seconds;
+        const ts = new Date(c.created_at).getTime();
+        if (Number.isFinite(ts) && ts > g.latest) g.latest = ts;
+    }
+    for (const g of map.values()) {
+        g.calls.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    }
+    return Array.from(map.values()).sort((a, b) => b.latest - a.latest);
+}
+
+function CampaignSection({ group, defaultOpen }: { group: CampaignGroup; defaultOpen: boolean }) {
+    const [open, setOpen] = useState(defaultOpen);
+
+    return (
+        <motion.section
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="content-card overflow-hidden"
+        >
+            <button
+                type="button"
+                onClick={() => setOpen((v) => !v)}
+                aria-expanded={open}
+                className="flex w-full items-center justify-between gap-3 text-left"
+            >
+                <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-border bg-muted/60">
+                        <Megaphone className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <div className="min-w-0">
+                        <h3 className="truncate text-sm font-semibold text-foreground">{group.name}</h3>
+                        <p className="text-xs text-muted-foreground tabular-nums">
+                            {group.calls.length} call{group.calls.length === 1 ? "" : "s"} · {formatDuration(group.totalDuration)} total
+                        </p>
+                    </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                    <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300 tabular-nums">
+                        {group.completed} answered
+                    </span>
+                    <span className="rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-xs font-semibold text-red-700 dark:text-red-300 tabular-nums">
+                        {group.failed} failed
+                    </span>
+                    <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${open ? "rotate-0" : "-rotate-90"}`} />
+                </div>
+            </button>
+
+            <AnimatePresence initial={false}>
+                {open && (
+                    <motion.div
+                        key="rows"
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="overflow-hidden"
+                    >
+                        <div className="mt-4 hidden grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1.1fr)_auto_auto] gap-3 px-4 pb-2 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground md:grid">
+                            <div>Phone</div>
+                            <div>Status</div>
+                            <div>Outcome</div>
+                            <div>Duration</div>
+                            <div>Date</div>
+                            <div className="text-center">Script</div>
+                            <div />
+                        </div>
+                        <div className="space-y-2">
+                            {group.calls.map((call) => (
+                                <CallRow key={call.id} call={call} />
+                            ))}
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </motion.section>
+    );
+}
+
 export default function CallsPage() {
     const [page, setPage] = useState(1);
-    const pageSize = 20;
-    const ROWS_VISIBLE = 7;
-    const firstRowRef = useRef<HTMLAnchorElement | null>(null);
-    const [rowsMaxHeightPx, setRowsMaxHeightPx] = useState<number | null>(null);
+    const pageSize = 50;
 
     const q = useCalls(page, pageSize);
     const calls = useMemo(() => q.data?.calls ?? [], [q.data]);
     const total = q.data?.total ?? 0;
     const error = q.isError ? (q.error instanceof Error ? q.error.message : "Failed to load calls") : "";
-
+    const groups = useMemo(() => groupByCampaign(calls), [calls]);
     const totalPages = Math.ceil(total / pageSize);
 
-    useEffect(() => {
-        const gapPx = 8;
-
-        const measure = () => {
-            const el = firstRowRef.current;
-            if (!el) {
-                setRowsMaxHeightPx(null);
-                return;
-            }
-            const h = el.getBoundingClientRect().height;
-            if (!Number.isFinite(h) || h <= 0) return;
-            const visible = Math.max(1, ROWS_VISIBLE);
-            const maxHeight = Math.round(h * visible + gapPx * (visible - 1));
-            setRowsMaxHeightPx(maxHeight);
-        };
-
-        const raf = window.requestAnimationFrame(measure);
-        window.addEventListener("resize", measure, { passive: true });
-        return () => {
-            window.cancelAnimationFrame(raf);
-            window.removeEventListener("resize", measure);
-        };
-    }, [ROWS_VISIBLE, calls.length]);
-
     return (
-        <DashboardLayout title="Call History" description="View all calls and their transcripts">
+        <DashboardLayout title="Call History" description="Calls grouped by campaign — tap the script icon to view a transcript">
             {q.isLoading ? (
                 <div className="flex items-center justify-center h-64">
                     <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-foreground/60" />
                 </div>
             ) : error ? (
-                <div className="content-card border-destructive/30 text-destructive">
-                    {error}
-                </div>
+                <div className="content-card border-destructive/30 text-destructive">{error}</div>
             ) : calls.length === 0 ? (
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
@@ -104,85 +278,20 @@ export default function CallsPage() {
                         <Phone className="h-8 w-8 text-muted-foreground" />
                     </div>
                     <h3 className="mb-2 text-lg font-semibold text-foreground">No calls yet</h3>
-                    <p className="text-muted-foreground">
-                        Start a campaign to begin making calls.
-                    </p>
+                    <p className="text-muted-foreground">Start a campaign to begin making calls.</p>
                 </motion.div>
             ) : (
-                <>
-                    {/* Calls Table */}
-                    <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="content-card overflow-hidden"
-                    >
-                        <div className="flex items-center justify-between gap-3">
-                            <div className="text-sm font-semibold text-foreground">Calls</div>
-                            <div className="inline-flex items-center rounded-lg border border-border bg-background px-2 py-0.5 text-[11px] font-semibold text-muted-foreground tabular-nums">
-                                {total}
-                            </div>
-                        </div>
+                <div className="space-y-4">
+                    {groups.map((g, idx) => (
+                        <CampaignSection key={g.id} group={g} defaultOpen={idx === 0} />
+                    ))}
 
-                        <div className="mt-4 min-w-0 overflow-x-hidden">
-                            <div className="grid min-w-0 grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1fr)_minmax(0,1.1fr)_auto] gap-3 border-b border-border px-4 pb-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                                <div>Phone Number</div>
-                                <div>Status</div>
-                                <div>Outcome</div>
-                                <div>Duration</div>
-                                <div>Campaign</div>
-                                <div>Date</div>
-                                <div />
-                            </div>
-
-                            <div
-                                className="mt-3 space-y-2 overflow-x-hidden overflow-y-auto overscroll-contain px-1 pr-1 scrollbar-gutter-stable"
-                                style={rowsMaxHeightPx ? { maxHeight: rowsMaxHeightPx } : undefined}
-                            >
-                                {calls.map((call, index) => (
-                                    <motion.div
-                                        key={call.id}
-                                        initial={{ opacity: 0, x: -10 }}
-                                        animate={{ opacity: 1, x: 0 }}
-                                        transition={{ delay: index * 0.02 }}
-                                    >
-                                        <Link
-                                            href={`/calls/${call.id}`}
-                                            ref={index === 0 ? firstRowRef : undefined}
-                                            className="group grid min-w-0 grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1fr)_minmax(0,1.1fr)_auto] items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 text-left transition-transform duration-150 ease-out hover:scale-[1.01] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                        >
-                                            <div className="flex min-w-0 items-center gap-3">
-                                                {getStatusIcon(call.status)}
-                                                <span className="truncate text-sm font-semibold text-foreground">{call.phone_number}</span>
-                                            </div>
-                                            <div className="min-w-0">
-                                                <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${getStatusStyle(call.status)}`}>
-                                                    {call.status}
-                                                </span>
-                                            </div>
-                                            <div className="min-w-0 truncate text-sm text-muted-foreground">{call.outcome || "--"}</div>
-                                            <div className="flex items-center gap-1 text-sm text-muted-foreground tabular-nums">
-                                                <Clock className="h-4 w-4" />
-                                                {formatDuration(call.duration_seconds)}
-                                            </div>
-                                            <div className="min-w-0 truncate text-sm text-muted-foreground">{call.campaign_name || "--"}</div>
-                                            <div className="min-w-0 truncate text-sm text-muted-foreground">{new Date(call.created_at).toLocaleString()}</div>
-                                            <div className="flex items-center justify-end text-muted-foreground group-hover:text-foreground">
-                                                <ChevronRight className="h-5 w-5" />
-                                            </div>
-                                        </Link>
-                                    </motion.div>
-                                ))}
-                            </div>
-                        </div>
-                    </motion.div>
-
-                    {/* Pagination */}
                     {totalPages > 1 && (
                         <motion.div
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             transition={{ delay: 0.3 }}
-                            className="flex items-center justify-between mt-6"
+                            className="flex items-center justify-between"
                         >
                             <p className="text-sm text-muted-foreground">
                                 Showing {(page - 1) * pageSize + 1} to {Math.min(page * pageSize, total)} of {total} calls
@@ -205,7 +314,7 @@ export default function CallsPage() {
                             </div>
                         </motion.div>
                     )}
-                </>
+                </div>
             )}
         </DashboardLayout>
     );

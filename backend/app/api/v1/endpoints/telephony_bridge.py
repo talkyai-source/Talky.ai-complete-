@@ -52,11 +52,6 @@ from app.domain.services.telephony.config import (  # noqa: E402
     _build_outbound_greeting,
 )
 from app.domain.services.telephony.modes import resolve_first_speaker  # noqa: E402
-from app.domain.services.telephony.modes.user_first import (  # noqa: E402
-    _user_first_open_seconds,
-    _user_first_fallback_enabled,
-    _handle_user_first_silence,
-)
 from app.domain.services.telephony.modes.agent_first import (  # noqa: E402
     _send_outbound_greeting,
     prepare_pre_originate_greeting,
@@ -64,7 +59,7 @@ from app.domain.services.telephony.modes.agent_first import (  # noqa: E402
     warm_llm_stream,
 )
 from app.domain.services.telephony.modes.caller_first import (  # noqa: E402
-    apply_caller_first_inbound_prompt,
+    select_inbound_base_prompt,
 )
 from app.domain.services.telephony.ringing_alias import (  # noqa: E402
     alias_ringing_call_id,
@@ -76,8 +71,9 @@ router = APIRouter(prefix="/sip/telephony", tags=["Telephony Bridge (generic)"])
 
 
 def _apply_caller_first_inbound_prompt(voice_session) -> None:
-    """Backward-compatible wrapper for caller-first prompt shaping."""
-    apply_caller_first_inbound_prompt(voice_session)
+    """Wrapper kept for the existing call site. Swaps the system prompt
+    for the dedicated inbound base when in caller-speaks-first mode."""
+    select_inbound_base_prompt(voice_session)
 
 # ---------------------------------------------------------------------------
 # Module-level adapter instance (one per process)
@@ -617,12 +613,42 @@ async def make_call(
             )
 
     pre_warm_session = None
+    warmup_failure_reason: Optional[str] = None
     try:
         orchestrator = _get_orchestrator()
+        # Derive the call direction from per-call first_speaker so the
+        # session config picks the correct base prompt up front. With
+        # this in place, the runtime select_inbound_base_prompt() call
+        # below becomes idempotent (the inbound sentinel is already in
+        # the prompt for INBOUND calls); we keep that runtime call as
+        # defense-in-depth for persona-composed prompts.
+        from app.domain.services.voice_orchestrator import Direction
+        call_direction = Direction.from_first_speaker(effective_first_speaker)
+
+        # Resolve per-tenant voice tuning asynchronously (T4-C3): the
+        # production path consults the DB-backed override on
+        # tenant_ai_configs.voice_tuning, layered on top of env defaults
+        # and code defaults. The bridge is async, build_session_config
+        # is sync — so we resolve here and pass the result through.
+        from app.domain.services.voice_tuning import (
+            get_voice_tuning_resolver,
+        )
+        _campaign_tenant_id = None
+        if campaign_row is not None:
+            _campaign_tenant_id = (
+                campaign_row.get("tenant_id") if isinstance(campaign_row, dict)
+                else getattr(campaign_row, "tenant_id", None)
+            )
+        voice_tuning = await get_voice_tuning_resolver().for_tenant_async(
+            str(_campaign_tenant_id) if _campaign_tenant_id else None,
+        )
+
         config = _build_telephony_session_config(
             gateway_type="telephony",
             campaign=campaign_row,
             agent_name=agent_name,
+            direction=call_direction,
+            voice_tuning_override=voice_tuning,
         )
         # User-first only: relax the Flux end-of-turn timeout from 500ms
         # to 1000ms. The 500ms default is aggressive and was the cause of
@@ -639,6 +665,11 @@ async def make_call(
             config.stt_eot_timeout_ms = 1000
         pre_warm_session = await orchestrator.create_voice_session(config)
         pre_warm_session._first_speaker = effective_first_speaker
+        # Mirror onto call_session so downstream code (latency telemetry,
+        # turn handlers) can read it without holding a voice_session ref.
+        # The two stashes are kept in sync; nothing else writes either.
+        if pre_warm_session.call_session is not None:
+            pre_warm_session.call_session._first_speaker = effective_first_speaker
         if effective_first_speaker == "user":
             _apply_caller_first_inbound_prompt(pre_warm_session)
         if effective_first_speaker == "user":
@@ -722,6 +753,7 @@ async def make_call(
         await prepare_pre_originate_greeting(pre_warm_session, effective_first_speaker)
 
     except Exception as warm_exc:
+        warmup_failure_reason = repr(warm_exc)
         logger.error(
             "pre_originate_warmup_failed: %s — refusing to ring with cold pipeline",
             warm_exc,
@@ -737,13 +769,13 @@ async def make_call(
     # Agent-first mode: greeting buffered. User-first mode: STT + TTS WS open
     # so Flux is ready to listen the instant the callee picks up.
     if pre_warm_session is None:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Voice pipeline is not ready. Refusing to originate the call "
-                "to avoid silence on pickup. Check TTS/STT provider health."
-            ),
+        detail_msg = (
+            "Voice pipeline is not ready. Refusing to originate the call "
+            "to avoid silence on pickup. Check TTS/STT provider health."
         )
+        if warmup_failure_reason:
+            detail_msg = f"{detail_msg} (cause: {warmup_failure_reason})"
+        raise HTTPException(status_code=503, detail=detail_msg)
 
     planned_call_id = (
         f"talky-out-{uuid4()}"
@@ -846,6 +878,60 @@ async def hangup_call(call_id: str):
         raise HTTPException(status_code=400, detail="Telephony adapter not connected")
     await _adapter.hangup(call_id)
     return JSONResponse({"status": "ok", "call_id": call_id})
+
+
+async def hangup_calls_for_campaign(campaign_id: str) -> int:
+    """Best-effort hangup of every active call belonging to ``campaign_id``.
+
+    Used by the stop-campaign flow so that hitting Stop in the UI actually
+    drops in-progress calls instead of letting them complete on their own.
+    Reads the live ``calls`` table — survives even if a call's in-memory
+    session is on a different worker process — and asks the telephony
+    adapter to hang up each one. Failures per call_id are swallowed (the
+    adapter may already have ended the channel); we still attempt the rest.
+
+    Returns the number of hangup attempts dispatched.
+    """
+    if not _adapter:
+        return 0
+    try:
+        from app.core.container import get_container
+        pool = get_container().db_pool
+    except Exception:
+        return 0
+    if pool is None:
+        return 0
+    active = ("initiated", "ringing", "queued", "in_progress", "answered")
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute("SET LOCAL app.bypass_rls = 'on'")
+            rows = await conn.fetch(
+                "SELECT external_call_uuid FROM calls "
+                "WHERE campaign_id = $1::uuid AND status = ANY($2::text[])",
+                campaign_id, list(active),
+            )
+    except Exception as exc:
+        logger.error("hangup_calls_for_campaign db lookup failed: %s", exc)
+        return 0
+    attempts = 0
+    for row in rows:
+        call_id = row["external_call_uuid"]
+        if not call_id:
+            continue
+        try:
+            await _adapter.hangup(call_id)
+            attempts += 1
+        except Exception as exc:
+            logger.warning(
+                "hangup_calls_for_campaign hangup failed call_id=%s err=%s",
+                call_id, exc,
+            )
+    if attempts:
+        logger.info(
+            "hangup_calls_for_campaign campaign=%s hung_up=%d",
+            campaign_id, attempts,
+        )
+    return attempts
 
 
 # ---------------------------------------------------------------------------

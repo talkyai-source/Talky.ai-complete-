@@ -1,0 +1,137 @@
+# Voice-pipeline SLO alert rules (T4-B2).
+#
+# Drop into Prometheus rule_files as-is, or copy into your Grafana
+# alerting stack. Targets reflect May 2026 production benchmarks for
+# STT-LLM-TTS pipelines:
+#
+#   - First-turn p95 < 1.5 s   (the cold-start budget)
+#   - Steady-state p95 < 0.8 s (the conversational budget)
+#   - First-turn p99 < 2.5 s   (worst-case acceptable)
+#
+# Tighten these once Tier-4 B3 (semantic EOU) lands. Loosen them only
+# with explicit justification — voice agents that drift past 1500 ms
+# steady-state get rated "feels like an IVR" by callers.
+
+groups:
+
+  - name: voice_first_turn_latency
+    interval: 30s
+    rules:
+
+      - alert: VoiceFirstTurnLatencyP95High
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, mode, prompt_kind, persona) (
+              rate(voice_first_turn_latency_seconds_bucket[5m])
+            )
+          ) > 1.5
+        for: 10m
+        labels:
+          severity: warning
+          team: voice
+        annotations:
+          summary: "First-turn p95 latency > 1.5s ({{ $labels.mode }}/{{ $labels.persona }})"
+          description: |
+            First-turn latency p95 has been above 1.5 s for 10 minutes
+            on mode={{ $labels.mode }}, persona={{ $labels.persona }},
+            prompt_kind={{ $labels.prompt_kind }}.
+            Cold-start budget exceeded — investigate LLM warmup,
+            STT/TTS handshake timing, and prompt-cache hit ratio.
+          dashboard: voice/overview
+
+      - alert: VoiceFirstTurnLatencyP99Critical
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum by (le, mode, prompt_kind, persona) (
+              rate(voice_first_turn_latency_seconds_bucket[5m])
+            )
+          ) > 2.5
+        for: 5m
+        labels:
+          severity: critical
+          team: voice
+        annotations:
+          summary: "First-turn p99 latency > 2.5s ({{ $labels.mode }}/{{ $labels.persona }})"
+          description: |
+            Tail latency is in IVR territory. Likely causes: cold LLM
+            pool, semantic-EOU disabled, provider region mismatch,
+            persona prompt grew past cache-effective size.
+
+  - name: voice_steady_state_latency
+    interval: 30s
+    rules:
+
+      - alert: VoiceTurnLatencyP95High
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, mode, persona) (
+              rate(voice_turn_latency_seconds_bucket[5m])
+            )
+          ) > 0.8
+        for: 15m
+        labels:
+          severity: warning
+          team: voice
+        annotations:
+          summary: "Steady-state p95 latency > 800ms ({{ $labels.persona }})"
+          description: |
+            Per-turn p95 is above the conversational target. Check
+            voice_prompt_cache_hit_ratio — a caching regression is the
+            most common cause once first-turn is healthy.
+
+  - name: voice_quality_signals
+    interval: 1m
+    rules:
+
+      - alert: VoiceTurn0RejectionsSpiking
+        expr: |
+          sum(rate(voice_turn_0_rejection_total[5m])) > 0.3
+        for: 10m
+        labels:
+          severity: warning
+          team: voice
+        annotations:
+          summary: "Turn-0 rejection rate > 0.3/s — STT mishears or floor too tight"
+          description: |
+            The turn-0 floor is rejecting transcripts at >0.3/s for the
+            past 10 minutes. Either the STT is misclassifying real
+            short greetings as garbled, or the floor thresholds need
+            relaxing for this tenant. Check
+            voice_turn_0_rejection_total split by reason.
+
+      - alert: VoicePromptCacheNotFiring
+        expr: |
+          avg_over_time(voice_prompt_cache_hit_ratio[15m]) < 0.2
+        for: 30m
+        labels:
+          severity: info
+          team: voice
+        annotations:
+          summary: "Prompt cache hit ratio < 20% — caching may have regressed"
+          description: |
+            Average prompt-cache hit ratio is below 20% over 15 minutes.
+            Expected in the first 30s of a fresh deploy; persistent low
+            ratio means the system prompt is below Groq's 1k-token
+            cache threshold or is changing across turns of the same
+            call. Check llm_usage log lines for prompt_tokens and
+            cached_tokens.
+
+      - alert: VoiceRuntimeDirectiveInjectionsClimbing
+        expr: |
+          sum(rate(voice_inbound_directive_applied_total{source="runtime"}[15m]))
+            > sum(rate(voice_inbound_directive_applied_total{source="compose"}[15m]))
+        for: 30m
+        labels:
+          severity: info
+          team: voice
+        annotations:
+          summary: "Runtime inbound-directive injections exceed compose-time"
+          description: |
+            Runtime directive injections are out-pacing compose-time
+            ones. Some persona-driven path is missing direction
+            propagation and falling through to defense-in-depth
+            shaping. Check campaign-config flow for missing direction
+            parameter.

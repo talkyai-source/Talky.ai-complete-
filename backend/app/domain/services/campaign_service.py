@@ -330,11 +330,25 @@ class CampaignService:
             cleared_jobs = await queue_service.clear_campaign_jobs(campaign_id)
             await self._cleanup_queue_service()
 
+        # Always hang up live calls for the campaign, regardless of whether
+        # the operator chose to clear the pending queue. Stop = stop now,
+        # not "stop after the in-flight calls finish on their own."
+        # Best-effort: a hangup failure must not roll back the status update.
+        hung_up = 0
+        try:
+            from app.api.v1.endpoints.telephony_bridge import (
+                hangup_calls_for_campaign,
+            )
+            hung_up = await hangup_calls_for_campaign(campaign_id)
+        except Exception as exc:
+            logger.warning("stop_campaign hangup sweep failed: %s", exc)
+
         logger.info(
-            "Campaign %s stopped (clear_queue=%s, cleared_jobs=%s)",
+            "Campaign %s stopped (clear_queue=%s, cleared_jobs=%s, hung_up=%s)",
             campaign_id,
             clear_queue,
             cleared_jobs,
+            hung_up,
         )
         return response.data[0]
     

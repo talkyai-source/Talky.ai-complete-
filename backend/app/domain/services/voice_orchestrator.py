@@ -19,6 +19,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import enum
 import logging
 import os
 import time
@@ -66,6 +67,44 @@ def _parse_voice_map(raw: str) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# Call direction — first-class state, not a string sniff
+# ---------------------------------------------------------------------------
+
+
+class Direction(str, enum.Enum):
+    """Who initiated the call from the AI agent's perspective.
+
+    * ``OUTBOUND`` — the platform originated the call (campaign dialer).
+      The AI is the caller. Default for every existing code path.
+    * ``INBOUND``  — the carrier rang us OR the campaign owner explicitly
+      configured caller-speaks-first semantics. The AI behaves like the
+      receiver who picked up the phone.
+
+    Stored as a string-backed enum so it serialises cleanly into logs,
+    OpenTelemetry attributes, and the analytics pipeline without extra
+    conversion code. Callers can compare with either ``Direction.INBOUND``
+    or the string ``"inbound"`` — both work.
+    """
+
+    OUTBOUND = "outbound"
+    INBOUND = "inbound"
+
+    @classmethod
+    def from_first_speaker(cls, first_speaker: Optional[str]) -> "Direction":
+        """Map the legacy per-call ``first_speaker`` flag onto a Direction.
+
+        Pre-T3.10 the codebase carried ``first_speaker = "user"`` to mean
+        "treat this as inbound framing". The two concepts are actually
+        orthogonal (who speaks first vs. who initiated the call), but
+        until per-campaign direction lands in the UI, deriving direction
+        from first_speaker preserves the existing intent without needing
+        a schema change.
+        """
+        value = (first_speaker or "").strip().lower()
+        return cls.INBOUND if value == "user" else cls.OUTBOUND
+
+
+# ---------------------------------------------------------------------------
 # Configuration dataclass — passed by each endpoint
 # ---------------------------------------------------------------------------
 
@@ -86,6 +125,14 @@ class VoiceSessionConfig:
     stt_eot_threshold: float = 0.7
     stt_eager_eot_threshold: Optional[float] = None
     stt_eot_timeout_ms: int = 5000
+
+    # Turn-0 floor — see voice_pipeline_service._should_reject_turn_0.
+    # Per-tenant overrides come through the voice_tuning resolver at
+    # session-config build time. Defaults match the module-level
+    # constants the pipeline used before T3.9 lifted them onto the
+    # config so non-telephony sessions keep their historical behaviour.
+    turn_0_min_confidence: float = 0.4
+    turn_0_min_alpha_chars: int = 2
 
     # LLM settings
     llm_model: str = "llama-3.3-70b-versatile"
@@ -121,6 +168,18 @@ class VoiceSessionConfig:
     telephony_provider: str = "sip"  # "sip" | "vonage" | "twilio" | "browser"
     agent_config: Optional[AgentConfig] = None
     system_prompt: str = ""
+    # Call direction — set by the bridge when the per-call first_speaker
+    # is known, used by build_telephony_session_config to pick the right
+    # base prompt (inbound vs outbound) up front. Defaults to OUTBOUND so
+    # every legacy call path keeps its current behaviour.
+    direction: Direction = Direction.OUTBOUND
+    # Persona key — "lead_gen" / "customer_support" / "receptionist", or
+    # None for legacy/non-telephony sessions. Set by
+    # build_telephony_session_config when the campaign has a
+    # script_config.persona_type. Used at runtime for greeting selection
+    # (T4-A2) and is the natural carrier for any future per-persona
+    # decision (voice recommendations, latency tuning, etc.).
+    persona_type: Optional[str] = None
     campaign_id: str = "ask-ai"
     lead_id: str = "demo-user"
     # Tenant context for per-tenant credential resolution (T1.1 follow-up).
