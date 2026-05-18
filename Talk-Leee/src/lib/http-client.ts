@@ -128,17 +128,29 @@ function defaultMessageForStatus(status?: number) {
 
 let _sessionExpiredHandler: (() => void) | null = null;
 let _sessionExpiredFired = false;
+let _freshLoginUntil = 0;
 
-// `markFreshLogin` previously opened a 4-second window after login to
-// swallow the FIRST 401, which masked the underlying race between the
-// freshly-issued JWT and the middleware/proxy's parallel session check.
-// Phase B introduced silent refresh-on-401 (see `tryRefresh` above), so
-// that race no longer surfaces — a transient 401 is automatically
-// rotated and retried. We keep the export as a no-op so existing call
-// sites compile during the migration; remove the call after Phase C
-// ships and downstream code is updated.
+// Grace window after a fresh login. Any 401 (including one from
+// /auth/refresh failing) inside this window is treated as a transient
+// race — we do NOT fire session-expired and do NOT clear the stored
+// token. The user just got a valid login response; bouncing them back
+// to /login because /auth/me 401'd a few hundred ms later is the bug
+// users keep hitting on prod.
+//
+// Causes the grace window covers:
+//   - Clock skew between client JWT iat and server's "not before"
+//   - Browser cookie commit lagging the localStorage write
+//   - Refresh token rotation racing with parallel /auth/me calls
+//   - Stale cookies from a prior origin (vercel.app) still in the jar
+const FRESH_LOGIN_GRACE_MS = 8000;
+
 export function markFreshLogin() {
     _sessionExpiredFired = false;
+    _freshLoginUntil = Date.now() + FRESH_LOGIN_GRACE_MS;
+}
+
+function isWithinFreshLoginGrace(): boolean {
+    return Date.now() < _freshLoginUntil;
 }
 
 export function setSessionExpiredHandler(fn: (() => void) | null) {
@@ -156,6 +168,18 @@ export function resetSessionExpiredLatch() {
 }
 
 function fireSessionExpired() {
+    // Don't bounce the user back to /login if they JUST finished a
+    // successful login round-trip. Within FRESH_LOGIN_GRACE_MS the
+    // backend session is still settling (cookie commits, JWT iat skew,
+    // refresh-token rotation race) — any 401 here is almost certainly
+    // transient and we should let the request fail soft instead of
+    // tearing down auth state.
+    if (isWithinFreshLoginGrace()) {
+        if (typeof console !== "undefined" && process.env.NODE_ENV !== "production") {
+            console.debug("[auth] session-expired swallowed inside fresh-login grace window");
+        }
+        return;
+    }
     if (_sessionExpiredFired) return;
     _sessionExpiredFired = true;
     if (!_sessionExpiredHandler) return;
@@ -381,10 +405,16 @@ export function createHttpClient(config: HttpClientConfig) {
             // idempotent — parallel requests racing on 401 trigger
             // exactly one redirect.
             if (res.status === 401) {
-                try {
-                    setToken(null);
-                } catch {
-                    // ignore — clearing storage must not derail the throw
+                // Inside the fresh-login grace window, keep the bearer
+                // token in storage — wiping it would force the next
+                // call to use cookie-only auth even though localStorage
+                // still has the valid JWT from /auth/login.
+                if (!isWithinFreshLoginGrace()) {
+                    try {
+                        setToken(null);
+                    } catch {
+                        // ignore — clearing storage must not derail the throw
+                    }
                 }
                 fireSessionExpired();
             }
