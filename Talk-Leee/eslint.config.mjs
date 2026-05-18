@@ -9,6 +9,13 @@ const compat = new FlatCompat({ baseDirectory: __dirname });
 
 const eslintConfig = defineConfig([
   ...compat.extends("next/core-web-vitals", "next/typescript"),
+  // Typographical-only rules — not real bugs. Downgrade to warning so a
+  // stray apostrophe in marketing copy can't block a production deploy.
+  {
+    rules: {
+      "react/no-unescaped-entities": "warn",
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
