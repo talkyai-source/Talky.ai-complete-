@@ -1,0 +1,43 @@
+# Phase 4.3 — Chaos: partition Redis from one AZ.
+#
+# Simulates a Redis Sentinel quorum failover by network-partitioning
+# the current Redis master from the backend pods in one zone for 2
+# minutes. The other zone's pods (and the Sentinel quorum) must:
+#   1. Detect the master as down within ~10s (Sentinel timeout).
+#   2. Promote a replica.
+#   3. Backend pods reconnect transparently (Sentinel client returns
+#      the new master on the next call).
+#
+# What this proves:
+#   - Active calls on the partitioned-zone pods don't drop (their
+#     in-process state is intact; Redis is only used for cluster-wide
+#     concurrency, which falls back to per-pod cap during partition).
+#   - The keyspace_expiry_listener (Phase 2.2) reconnects after the
+#     partition heals.
+#   - global_concurrency.acquire_lease returns
+#     "redis_unavailable_fallback" during partition; calls aren't refused.
+#
+# Run from the same Argo-Rollouts / soak-test pipeline as pod-kill.
+
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: talky-redis-partition
+  namespace: talky
+spec:
+  action: partition
+  mode: all
+  selector:
+    namespaces: ["talky"]
+    labelSelectors:
+      app.kubernetes.io/name: talky
+  direction: to
+  target:
+    mode: all
+    selector:
+      namespaces: ["talky"]
+      labelSelectors:
+        app.kubernetes.io/name: redis-sentinel
+  duration: "2m"
+  scheduler:
+    cron: "0 */6 * * *"   # every 6h during soak window

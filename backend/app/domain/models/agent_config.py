@@ -74,14 +74,32 @@ class ConversationFlow(BaseModel):
 
 
 class AgentConfig(BaseModel):
-    """Complete agent configuration for a campaign"""
-    
+    """Complete agent configuration for a campaign.
+
+    Dual-path note (T4-A5): on the persona-driven path
+    (``script_config.persona_type`` set), the ``business_type`` and
+    ``tone`` fields below are populated from ``_PERSONA_DEFAULTS`` for
+    logging / analytics consistency but are NOT injected into the LLM
+    prompt — the persona body in ``app/services/scripts/prompts/personas/``
+    already encodes role and voice in prose. On the legacy path (no
+    persona, e.g. Ask AI demo), ``prompt_manager._legacy_render`` reads
+    these fields and stamps them into the system prompt. Do not delete
+    them; the legacy callers depend on them.
+    """
+
     # Identity
     goal: AgentGoal = Field(..., description="Primary conversation goal")
-    business_type: str = Field(..., description="Type of business (e.g., 'dental clinic')")
+    business_type: str = Field(
+        ...,
+        description=(
+            "Type of business (e.g., 'dental clinic'). Read by the legacy "
+            "prompt_manager render path. Persona-driven prompts ignore this "
+            "field — the persona body encodes the business framing in prose."
+        ),
+    )
     agent_name: str = Field(..., description="Agent's name")
     company_name: str = Field(..., description="Company name")
-    
+
     # Behavior
     rules: ConversationRule = Field(
         default_factory=ConversationRule,
@@ -91,11 +109,15 @@ class AgentConfig(BaseModel):
         default_factory=ConversationFlow,
         description="Conversation flow configuration"
     )
-    
+
     # Style
     tone: str = Field(
         default="polite, professional, conversational",
-        description="Agent's tone and style"
+        description=(
+            "Agent's tone and style. Read by the legacy prompt_manager "
+            "render path. Persona-driven prompts ignore this field — the "
+            "persona body encodes voice and tone in prose."
+        ),
     )
     personality_traits: List[str] = Field(
         default_factory=lambda: ["friendly", "helpful", "concise"],

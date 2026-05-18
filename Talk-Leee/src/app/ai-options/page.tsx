@@ -77,6 +77,31 @@ export default function AIOptionsPage() {
     const [providers, setProviders] = useState<ProviderListResponse | null>(null);
     const [voices, setVoices] = useState<VoiceInfo[]>([]);
     const [config, setConfig] = useState<AIProviderConfig | null>(null);
+
+    /* T4-C3 — voice-tuning helpers. updateVoiceTuningField patches a
+     * single field on config.voice_tuning; resetVoiceTuningField
+     * deletes the field so the backend falls back to defaults. Both
+     * write into the same config state so the existing Save button
+     * persists everything in one round-trip. */
+    function updateVoiceTuningField<K extends keyof NonNullable<AIProviderConfig["voice_tuning"]>>(
+        field: K,
+        value: NonNullable<AIProviderConfig["voice_tuning"]>[K],
+    ) {
+        setConfig((prev) => {
+            if (!prev) return prev;
+            const current = prev.voice_tuning ?? {};
+            return { ...prev, voice_tuning: { ...current, [field]: value } };
+        });
+    }
+
+    function resetVoiceTuningField(field: keyof NonNullable<AIProviderConfig["voice_tuning"]>) {
+        setConfig((prev) => {
+            if (!prev) return prev;
+            const current = { ...(prev.voice_tuning ?? {}) };
+            delete current[field];
+            return { ...prev, voice_tuning: current };
+        });
+    }
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [saveSuccess, setSaveSuccess] = useState(false);
@@ -765,6 +790,225 @@ export default function AIOptionsPage() {
                                 <p className="text-xs text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-400 mt-1">Total Pipeline (ms)</p>
                             </div>
                         </div>
+                    </motion.div>
+
+                    {/* Voice tuning (T4-C3) — per-tenant overrides for
+                       end-of-turn timing, eager-mode threshold, turn-0
+                       floor. Sits inside the existing config payload, so
+                       the page-level Save button persists it. */}
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.45 }}
+                        className="content-card group"
+                    >
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-lg font-semibold text-white group-hover:text-gray-900 dark:group-hover:text-white">
+                                Voice tuning
+                            </h3>
+                            <span className="text-xs text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-400">
+                                Optional · falls back to defaults when unset
+                            </span>
+                        </div>
+                        <p className="text-xs text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-400 mb-4">
+                            Conversational rhythm tuning for this tenant. Each field is optional —
+                            "Reset to default" clears the override so the global default takes over
+                            again. Changes apply on the next call after Save.
+                        </p>
+                        {config && (() => {
+                            const tuning = config.voice_tuning ?? {};
+                            const eot = tuning.stt_eot_threshold;
+                            const timeout = tuning.stt_eot_timeout_ms;
+                            const eager = tuning.stt_eager_eot_threshold;
+                            const eagerExplicit = "stt_eager_eot_threshold" in tuning;
+                            const minConf = tuning.turn_0_min_confidence;
+                            const minChars = tuning.turn_0_min_alpha_chars;
+                            return (
+                                <div className="space-y-5">
+                                    {/* EOT confidence threshold */}
+                                    <div>
+                                        <div className="flex items-center justify-between text-xs">
+                                            <span className="text-white group-hover:text-gray-900 dark:group-hover:text-white font-medium">
+                                                End-of-turn confidence threshold
+                                                <span className="ml-2 text-gray-400 dark:text-gray-500">default 0.85</span>
+                                            </span>
+                                            <span className="font-mono text-emerald-400">
+                                                {eot !== undefined ? eot.toFixed(2) : "—"}
+                                            </span>
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min={0.5} max={0.9} step={0.05}
+                                            value={eot ?? 0.85}
+                                            onChange={(e) =>
+                                                updateVoiceTuningField("stt_eot_threshold", parseFloat(e.target.value))
+                                            }
+                                            className="w-full mt-1 accent-purple-500"
+                                        />
+                                        {eot !== undefined && (
+                                            <button
+                                                type="button"
+                                                onClick={() => resetVoiceTuningField("stt_eot_threshold")}
+                                                className="text-[11px] text-gray-400 hover:text-gray-300 dark:hover:text-gray-700 underline"
+                                            >
+                                                Reset to default
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    {/* EOT timeout */}
+                                    <div>
+                                        <div className="flex items-center justify-between text-xs">
+                                            <span className="text-white group-hover:text-gray-900 dark:group-hover:text-white font-medium">
+                                                End-of-turn silence timeout (ms)
+                                                <span className="ml-2 text-gray-400 dark:text-gray-500">default 500</span>
+                                            </span>
+                                            <span className="font-mono text-emerald-400">
+                                                {timeout !== undefined ? timeout : "—"}
+                                            </span>
+                                        </div>
+                                        <input
+                                            type="number"
+                                            min={500} max={10000} step={100}
+                                            value={timeout ?? 500}
+                                            onChange={(e) => {
+                                                const v = parseInt(e.target.value, 10);
+                                                if (!Number.isNaN(v)) {
+                                                    updateVoiceTuningField("stt_eot_timeout_ms", v);
+                                                }
+                                            }}
+                                            className="w-full mt-1 px-3 py-2 rounded bg-white/5 border border-white/10 text-white text-sm"
+                                        />
+                                        {timeout !== undefined && (
+                                            <button
+                                                type="button"
+                                                onClick={() => resetVoiceTuningField("stt_eot_timeout_ms")}
+                                                className="text-[11px] text-gray-400 hover:text-gray-300 dark:hover:text-gray-700 underline"
+                                            >
+                                                Reset to default
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    {/* Eager EOT threshold + disable checkbox */}
+                                    <div>
+                                        <div className="flex items-center justify-between text-xs">
+                                            <span className="text-white group-hover:text-gray-900 dark:group-hover:text-white font-medium">
+                                                Eager-mode threshold (speculative LLM start)
+                                                <span className="ml-2 text-gray-400 dark:text-gray-500">default 0.7</span>
+                                            </span>
+                                            <span className="font-mono text-emerald-400">
+                                                {!eagerExplicit
+                                                    ? "—"
+                                                    : eager === null
+                                                        ? "disabled"
+                                                        : (eager as number).toFixed(2)}
+                                            </span>
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min={0.3} max={0.9} step={0.05}
+                                            value={(eager ?? 0.7) as number}
+                                            onChange={(e) =>
+                                                updateVoiceTuningField("stt_eager_eot_threshold", parseFloat(e.target.value))
+                                            }
+                                            disabled={eager === null}
+                                            className="w-full mt-1 accent-purple-500 disabled:opacity-40"
+                                        />
+                                        <div className="flex items-center gap-3 mt-1 flex-wrap">
+                                            <label className="flex items-center gap-1 text-[11px] text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-400">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={eager === null}
+                                                    onChange={(e) =>
+                                                        updateVoiceTuningField(
+                                                            "stt_eager_eot_threshold",
+                                                            e.target.checked ? null : 0.7,
+                                                        )
+                                                    }
+                                                    className="accent-purple-500"
+                                                />
+                                                Disable eager mode entirely
+                                            </label>
+                                            {eagerExplicit && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => resetVoiceTuningField("stt_eager_eot_threshold")}
+                                                    className="text-[11px] text-gray-400 hover:text-gray-300 dark:hover:text-gray-700 underline"
+                                                >
+                                                    Reset to default
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Turn-0 minimum confidence */}
+                                    <div>
+                                        <div className="flex items-center justify-between text-xs">
+                                            <span className="text-white group-hover:text-gray-900 dark:group-hover:text-white font-medium">
+                                                Turn-0 minimum confidence
+                                                <span className="ml-2 text-gray-400 dark:text-gray-500">default 0.4</span>
+                                            </span>
+                                            <span className="font-mono text-emerald-400">
+                                                {minConf !== undefined ? minConf.toFixed(2) : "—"}
+                                            </span>
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min={0.0} max={1.0} step={0.05}
+                                            value={minConf ?? 0.4}
+                                            onChange={(e) =>
+                                                updateVoiceTuningField("turn_0_min_confidence", parseFloat(e.target.value))
+                                            }
+                                            className="w-full mt-1 accent-purple-500"
+                                        />
+                                        {minConf !== undefined && (
+                                            <button
+                                                type="button"
+                                                onClick={() => resetVoiceTuningField("turn_0_min_confidence")}
+                                                className="text-[11px] text-gray-400 hover:text-gray-300 dark:hover:text-gray-700 underline"
+                                            >
+                                                Reset to default
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    {/* Turn-0 minimum alpha chars */}
+                                    <div>
+                                        <div className="flex items-center justify-between text-xs">
+                                            <span className="text-white group-hover:text-gray-900 dark:group-hover:text-white font-medium">
+                                                Turn-0 minimum alphabetic characters
+                                                <span className="ml-2 text-gray-400 dark:text-gray-500">default 2</span>
+                                            </span>
+                                            <span className="font-mono text-emerald-400">
+                                                {minChars !== undefined ? minChars : "—"}
+                                            </span>
+                                        </div>
+                                        <input
+                                            type="number"
+                                            min={1} max={10} step={1}
+                                            value={minChars ?? 2}
+                                            onChange={(e) => {
+                                                const v = parseInt(e.target.value, 10);
+                                                if (!Number.isNaN(v)) {
+                                                    updateVoiceTuningField("turn_0_min_alpha_chars", v);
+                                                }
+                                            }}
+                                            className="w-full mt-1 px-3 py-2 rounded bg-white/5 border border-white/10 text-white text-sm"
+                                        />
+                                        {minChars !== undefined && (
+                                            <button
+                                                type="button"
+                                                onClick={() => resetVoiceTuningField("turn_0_min_alpha_chars")}
+                                                className="text-[11px] text-gray-400 hover:text-gray-300 dark:hover:text-gray-700 underline"
+                                            >
+                                                Reset to default
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })()}
                     </motion.div>
 
                     {/* LLM Test Section */}

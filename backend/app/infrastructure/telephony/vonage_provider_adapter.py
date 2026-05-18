@@ -37,11 +37,30 @@ class VonageProviderAdapter(TelephonyProviderAdapter):
     The adapter lazily initialises the Vonage SDK client on first use.
     """
 
-    def __init__(self) -> None:
-        self._api_key: str = os.getenv("VONAGE_API_KEY", "")
-        self._api_secret: str = os.getenv("VONAGE_API_SECRET", "")
-        self._app_id: str = os.getenv("VONAGE_APP_ID", "")
-        self._private_key_path: str = os.getenv("VONAGE_PRIVATE_KEY_PATH", "./config/private.key")
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        api_secret: Optional[str] = None,
+        app_id: Optional[str] = None,
+        private_key: Optional[str] = None,
+        private_key_path: Optional[str] = None,
+        from_number: Optional[str] = None,
+    ) -> None:
+        """
+        Construct with explicit per-tenant creds OR fall back to env vars.
+
+        ``private_key`` is the PEM body (e.g. value pulled from DB). Either
+        ``private_key`` or ``private_key_path`` may be provided; the SDK
+        accepts either.
+        """
+        self._api_key: str = api_key or os.getenv("VONAGE_API_KEY", "")
+        self._api_secret: str = api_secret or os.getenv("VONAGE_API_SECRET", "")
+        self._app_id: str = app_id or os.getenv("VONAGE_APP_ID", "")
+        self._private_key: Optional[str] = private_key
+        self._private_key_path: str = private_key_path or os.getenv(
+            "VONAGE_PRIVATE_KEY_PATH", "./config/private.key"
+        )
+        self._from_number: str = from_number or ""
         self._client = None
 
     def _get_client(self):
@@ -50,11 +69,13 @@ class VonageProviderAdapter(TelephonyProviderAdapter):
             return self._client
         try:
             from vonage import Vonage, Auth
+            # Prefer in-memory key (per-tenant DB-stored) over a filesystem path.
+            private_key_arg = self._private_key or self._private_key_path
             auth = Auth(
                 api_key=self._api_key,
                 api_secret=self._api_secret,
                 application_id=self._app_id,
-                private_key=self._private_key_path,
+                private_key=private_key_arg,
             )
             self._client = Vonage(auth=auth)
             return self._client
@@ -206,6 +227,31 @@ class VonageProviderAdapter(TelephonyProviderAdapter):
             return True
         except Exception:
             return False
+
+    async def ping_with_detail(self) -> Dict[str, Any]:
+        """
+        Verbose credential check for the Settings "Test" button.
+
+        Validates we can build a Vonage client with the supplied creds.
+        A full API round-trip is intentionally avoided to keep this cheap
+        and to not require the test creds to have any specific scopes.
+        Returns ``{ok, latency_ms, error?}``.
+        """
+        import time
+        start = time.perf_counter()
+        if not self._api_key or not self._app_id:
+            return {
+                "ok": False,
+                "latency_ms": 0,
+                "error": "Missing api_key or app_id",
+            }
+        try:
+            self._get_client()
+            latency_ms = int((time.perf_counter() - start) * 1000)
+            return {"ok": True, "latency_ms": latency_ms}
+        except Exception as exc:
+            latency_ms = int((time.perf_counter() - start) * 1000)
+            return {"ok": False, "latency_ms": latency_ms, "error": str(exc)}
 
     # ------------------------------------------------------------------
     # Introspection

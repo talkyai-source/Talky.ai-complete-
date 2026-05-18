@@ -890,7 +890,7 @@ export function VoiceAgentPopup() {
     };
 
     return (
-        <div className="pointer-events-auto fixed bottom-5 right-2 sm:bottom-6 sm:right-3 z-50 flex items-center gap-2">
+        <div className="pointer-events-auto fixed bottom-5 left-2 sm:bottom-6 sm:left-3 z-50 flex items-center gap-2">
             <div className="relative">
                 <button
                     onClick={handleMainButtonClick}

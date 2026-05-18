@@ -32,14 +32,6 @@ type TenantDraft = {
     subConcurrency: string;
 };
 
-function stableNumberFromString(input: string) {
-    let hash = 0;
-    for (let i = 0; i < input.length; i++) {
-        hash = (hash * 31 + input.charCodeAt(i)) >>> 0;
-    }
-    return hash;
-}
-
 function createId() {
     const c = globalThis.crypto;
     if (c && "randomUUID" in c && typeof c.randomUUID === "function") return c.randomUUID();
@@ -57,59 +49,19 @@ function normalizePartnerId(partnerId: string) {
     return partnerId.trim().toLowerCase();
 }
 
-function getPartnerLimits(partnerId: string): PartnerLimits {
-    const key = normalizePartnerId(partnerId);
-
-    if (key === "acme") return { maxMinutes: 10_000, maxConcurrency: 10 };
-    if (key === "zen") return { maxMinutes: 7_500, maxConcurrency: 8 };
-
-    const seed = stableNumberFromString(key || "default");
-    const maxMinutes = 5_000 + (seed % 20_001);
-    const maxConcurrency = 5 + (seed % 21);
-    return { maxMinutes, maxConcurrency };
+function getPartnerLimits(_partnerId: string): PartnerLimits {
+    // Real partner limits are persisted server-side per partner row; this
+    // client-only widget no longer fabricates them. The form lets the
+    // operator configure the actual limit and persists locally until the
+    // backend GET /admin/partner-limits/{partner_id} is wired up.
+    return { maxMinutes: 0, maxConcurrency: 0 };
 }
 
-function initialTenantsForPartner(partnerId: string): Tenant[] {
-    const key = normalizePartnerId(partnerId);
-    const now = Date.now();
-
-    if (key === "acme") {
-        return [
-            {
-                id: "acme-clinic-ai",
-                tenantName: "Clinic AI",
-                allocatedMinutes: 1000,
-                subConcurrency: 3,
-                status: "active",
-                createdAt: now - 14 * 24 * 60 * 60 * 1000,
-                updatedAt: now - 2 * 24 * 60 * 60 * 1000,
-            },
-            {
-                id: "acme-dental-bot",
-                tenantName: "Dental Bot",
-                allocatedMinutes: 800,
-                subConcurrency: 2,
-                status: "suspended",
-                createdAt: now - 8 * 24 * 60 * 60 * 1000,
-                updatedAt: now - 3 * 24 * 60 * 60 * 1000,
-            },
-        ];
-    }
-
-    if (key === "zen") {
-        return [
-            {
-                id: "zen-salon-assistant",
-                tenantName: "Salon Assistant",
-                allocatedMinutes: 600,
-                subConcurrency: 2,
-                status: "active",
-                createdAt: now - 10 * 24 * 60 * 60 * 1000,
-                updatedAt: now - 1 * 24 * 60 * 60 * 1000,
-            },
-        ];
-    }
-
+function initialTenantsForPartner(_partnerId: string): Tenant[] {
+    // Previously seeded with hardcoded "Clinic AI", "Dental Bot",
+    // "Salon Assistant" rows for demo partners. Removed — empty state
+    // is the honest default until the backend exposes
+    // GET /admin/partners/{id}/tenants.
     return [];
 }
 

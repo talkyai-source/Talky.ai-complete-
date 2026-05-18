@@ -66,6 +66,58 @@ class CampaignUpdateRequest(BaseModel):
         return validate_pool(v)
 
 
+class CampaignPromptPreviewRequest(BaseModel):
+    """Request body for ``POST /campaigns/preview-prompt`` (T4-B4).
+
+    Mirrors the fields ``CampaignCreateRequest`` carries that affect the
+    composed prompt, plus the per-call ``direction`` so operators can see
+    both outbound and inbound shapes from the same form draft. Read-only —
+    the endpoint never writes to the DB.
+    """
+
+    persona_type: Literal["lead_gen", "customer_support", "receptionist"]
+    company_name: str = Field(..., min_length=1)
+    agent_name: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Single agent name to render the preview with. Real campaigns "
+            "rotate from a pool, but a preview just needs one concrete value."
+        ),
+    )
+    campaign_slots: dict = Field(default_factory=dict)
+    additional_instructions: Optional[str] = None
+    direction: Literal["outbound", "inbound"] = "outbound"
+
+
+class CampaignPromptPreviewResponse(BaseModel):
+    """Response body for ``POST /campaigns/preview-prompt``."""
+
+    system_prompt: str = Field(
+        ...,
+        description="The full assembled system prompt the LLM would receive.",
+    )
+    greeting: str = Field(
+        ...,
+        description=(
+            "The pre-synthesized TTS opener for this persona × direction. "
+            "Same string the live call would speak as the AI's first audio."
+        ),
+    )
+    direction: Literal["outbound", "inbound"]
+    has_inbound_directive: bool = Field(
+        ...,
+        description=(
+            "True when the assembled prompt carries the canonical inbound "
+            "directive sentinel — i.e. the AI is shaped to behave as the "
+            "receiver, not the caller."
+        ),
+    )
+    prompt_chars: int = Field(
+        ..., description="Length of the assembled system_prompt in characters.",
+    )
+
+
 class ContactCreate(BaseModel):
     """Request body for adding a single contact to a campaign."""
 

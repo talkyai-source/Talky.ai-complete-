@@ -11,6 +11,15 @@ from enum import Enum
 logger = logging.getLogger(__name__)
 
 
+def _round_ms(value: Optional[float]) -> str:
+    """Format a millisecond float as an integer string for log messages.
+    Returns ``'-'`` when the value is missing so the log line stays
+    grep-friendly instead of showing 'None'."""
+    if value is None:
+        return "-"
+    return str(int(round(value)))
+
+
 class LatencyStage(Enum):
     """Stages in the voice pipeline for latency tracking."""
     SPEECH_END = "speech_end"
@@ -166,6 +175,11 @@ class LatencyTracker:
     def __init__(self):
         self._metrics: Dict[str, LatencyMetrics] = {}
         self._history: Dict[str, list] = {}  # call_id -> list of past metrics
+        # Set of call_ids that have already had their first-turn latency
+        # logged. The set is intentionally never trimmed during a call's
+        # lifetime; cleanup_call() removes the entry on hangup so a new
+        # call with a recycled id isn't muted.
+        self._first_turn_logged: set[str] = set()
     
     def start_turn(self, call_id: str, turn_id: int) -> None:
         """
@@ -343,6 +357,81 @@ class LatencyTracker:
             }
         )
 
+    def log_first_turn_if_applicable(
+        self,
+        call_id: str,
+        *,
+        mode: str,
+        prompt_kind: str,
+        persona: Optional[str] = None,
+    ) -> None:
+        """Emit a structured ``first_turn_latency`` log line exactly once
+        per call.
+
+        First-turn latency is what callers actually feel — it's where every
+        cold-start cost lands (LLM HTTP/2 setup, TTS handshake, prompt
+        compilation). Subsequent turns hide most of that, so the per-turn
+        log alone makes the first-turn problem invisible in dashboards.
+        This method emits a separate, easy-to-grep line that operators can
+        slice by ``mode`` (agent / user) and ``prompt_kind`` (inbound /
+        outbound).
+
+        The method is idempotent — only the first completed turn for a
+        given call_id produces a log line. The hangup hook calls
+        :meth:`cleanup_call` which clears the bookkeeping so a recycled
+        call_id is not muted.
+
+        Skips quietly when:
+        - the call has no metrics yet,
+        - the active turn was interrupted (no audio reached the caller),
+        - audio_start_time was never marked (the turn never produced TTS).
+
+        These skip cases are expected — barge-in and STT-only no-ops
+        shouldn't pollute the first-turn dataset.
+        """
+        if call_id in self._first_turn_logged:
+            return
+        metrics = self._metrics.get(call_id)
+        if metrics is None:
+            return
+        if metrics.audio_start_time is None or metrics.turn_outcome != "completed":
+            return
+
+        self._first_turn_logged.add(call_id)
+        logger.info(
+            "first_turn_latency call=%s turn=%d mode=%s prompt_kind=%s "
+            "persona=%s speech_to_audio_ms=%s llm_first_token_ms=%s "
+            "tts_first_chunk_ms=%s llm_total_ms=%s tts_total_ms=%s",
+            call_id[:12],
+            metrics.turn_id,
+            mode,
+            prompt_kind,
+            persona or "none",
+            _round_ms(metrics.total_latency_ms),
+            _round_ms(metrics.llm_first_token_ms),
+            _round_ms(metrics.tts_first_chunk_ms),
+            _round_ms(metrics.llm_latency_ms),
+            _round_ms(metrics.tts_latency_ms),
+        )
+
+        # Mirror to Prometheus (T4-B2). Local import keeps the latency
+        # tracker callable in test contexts that don't want the metric
+        # registry side-effects of importing prometheus_client.
+        if metrics.total_latency_ms is not None:
+            try:
+                from app.infrastructure.metrics.voice_metrics import (
+                    observe_first_turn_latency_seconds,
+                )
+                observe_first_turn_latency_seconds(
+                    metrics.total_latency_ms / 1000.0,
+                    mode=mode,
+                    prompt_kind=prompt_kind,
+                    persona=persona,
+                )
+            except Exception as exc:  # noqa: BLE001
+                # Metrics export must never crash the call path.
+                logger.debug("voice_metrics_observe_failed err=%s", exc)
+
     def get_percentiles(
         self,
         call_id: str,
@@ -418,6 +507,7 @@ class LatencyTracker:
             del self._metrics[call_id]
         if call_id in self._history:
             del self._history[call_id]
+        self._first_turn_logged.discard(call_id)
     
     def get_all_active_calls(self) -> Dict[str, LatencyMetrics]:
         """Get metrics for all active calls."""

@@ -14,7 +14,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
 from fastapi.encoders import jsonable_encoder
 from app.core.postgres_adapter import Client
 
-from app.api.v1.dependencies import get_db_client
+from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
 from app.infrastructure.assistant.agent import assistant_graph, AgentState
 
 logger = logging.getLogger(__name__)
@@ -361,18 +361,25 @@ async def assistant_chat(
 
 @router.get("/conversations")
 async def list_conversations(
+    current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100)
 ):
-    """List user's assistant conversations."""
+    """List user's assistant conversations.
+
+    ``get_current_user`` is required so the per-request RLS tenant
+    context is set; otherwise the SELECT returns 0 rows and the UI
+    sees an empty conversation list. Same fix pattern as the campaign
+    endpoints.
+    """
     offset = (page - 1) * page_size
-    
+
     response = db_client.table("assistant_conversations").select(
         "id, title, message_count, last_message_at, created_at",
         count="exact"
     ).order("last_message_at", desc=True).range(offset, offset + page_size - 1).execute()
-    
+
     return {
         "conversations": response.data,
         "total": response.count,
@@ -384,35 +391,46 @@ async def list_conversations(
 @router.get("/conversations/{conversation_id}")
 async def get_conversation(
     conversation_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)
 ):
-    """Get a specific conversation with messages."""
+    """Get a specific conversation with messages.
+
+    ``get_current_user`` enforces tenant isolation via RLS — without
+    it any authenticated user could read any conversation by ID.
+    """
     response = db_client.table("assistant_conversations").select(
         "id, title, messages, context, message_count, started_at, last_message_at"
     ).eq("id", conversation_id).single().execute()
-    
+
     if not response.data:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Conversation not found")
-    
+
     return response.data
 
 
 @router.delete("/conversations/{conversation_id}")
 async def delete_conversation(
     conversation_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)
 ):
-    """Delete a conversation."""
+    """Delete a conversation.
+
+    ``get_current_user`` enforces tenant isolation — without it the
+    DELETE would run with no RLS scope.
+    """
     db_client.table("assistant_conversations").delete().eq(
         "id", conversation_id
     ).execute()
-    
+
     return {"success": True, "message": "Conversation deleted"}
 
 
 @router.get("/actions")
 async def list_actions(
+    current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
     type: Optional[str] = Query(None),
     page: int = Query(1, ge=1),

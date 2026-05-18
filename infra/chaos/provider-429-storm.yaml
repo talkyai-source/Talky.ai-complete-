@@ -1,0 +1,68 @@
+# Phase 4.3 — Chaos: throttle one provider key with a 429 storm.
+#
+# This experiment is implemented at the application layer rather than
+# in chaos-mesh because chaos-mesh can't synthesise HTTP 429 responses
+# from external services. Instead, we ship a "throttler" sidecar that
+# proxies calls to the targeted provider and returns 429 on a fixed
+# % of requests for a fixed window.
+#
+# Operator workflow:
+#   1. Pick a non-tenant provider API key from the pool (one of the
+#      pool slots can be a "chaos key" that points at this proxy).
+#   2. Apply this manifest to start the proxy.
+#   3. Update the live ELEVENLABS_API_KEYS / GROQ_API_KEYS env to
+#      include the chaos-proxy key.
+#   4. Run the soak load.
+#
+# What this proves:
+#   - KeyPool detects the 429s, cools the chaos key, routes traffic
+#     to healthy keys.
+#   - ResilientLLMProvider / ResilientTTSProvider don't trip the
+#     circuit breaker until ALL keys cool simultaneously.
+#   - p95 turn latency stays within SLO during the storm.
+#
+# Sidecar image is a tiny aiohttp proxy (build separately and push to
+# ghcr); replace `image` with your own.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: talky-provider-429-throttler
+  namespace: talky
+  labels:
+    role: chaos
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: talky-provider-throttler }
+  template:
+    metadata:
+      labels: { app: talky-provider-throttler }
+    spec:
+      containers:
+        - name: throttler
+          image: ghcr.io/talkyai/chaos-throttler:0.1.0
+          env:
+            - name: UPSTREAM_HOST
+              value: "api.elevenlabs.io"           # or api.groq.com / api.deepgram.com
+            - name: THROTTLE_PCT
+              value: "30"                            # 30% of requests get 429
+            - name: WINDOW_SECONDS
+              value: "300"                            # 5-minute storm
+            - name: LISTEN_PORT
+              value: "8443"
+          ports:
+            - containerPort: 8443
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: talky-provider-throttler
+  namespace: talky
+spec:
+  selector: { app: talky-provider-throttler }
+  ports:
+    - name: https
+      port: 443
+      targetPort: 8443

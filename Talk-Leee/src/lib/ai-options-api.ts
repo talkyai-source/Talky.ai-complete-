@@ -42,6 +42,18 @@ export interface ProviderListResponse {
     };
 }
 
+/** Per-tenant voice-pipeline tuning (T4-C3). All fields are optional —
+ *  any field omitted falls back to the env / code default at lookup time
+ *  on the backend. ``stt_eager_eot_threshold = null`` is meaningful: it
+ *  disables eager mode entirely for that tenant. */
+export interface VoiceTuning {
+    stt_eot_threshold?: number;
+    stt_eager_eot_threshold?: number | null;
+    stt_eot_timeout_ms?: number;
+    turn_0_min_confidence?: number;
+    turn_0_min_alpha_chars?: number;
+}
+
 export interface AIProviderConfig {
     llm_provider: string;
     llm_model: string;
@@ -54,6 +66,8 @@ export interface AIProviderConfig {
     tts_model: string;
     tts_voice_id: string;
     tts_sample_rate: number;
+    /** T4-C3 — per-tenant overrides; unset / empty means "use defaults". */
+    voice_tuning?: VoiceTuning | null;
 }
 
 export interface LLMTestRequest {

@@ -1,0 +1,33 @@
+# Phase 4.3 — Chaos: random pod kill every 10 minutes.
+#
+# Apply with chaos-mesh installed:
+#   kubectl apply -f infra/chaos/pod-kill.yaml
+#
+# Stop the experiment with:
+#   kubectl delete -f infra/chaos/pod-kill.yaml
+#
+# What this proves:
+#   - HPA replaces the killed pod within ~90s
+#   - Calls on other pods are unaffected
+#   - Drained pod's calls complete cleanly via lifespan shutdown loop
+#   - NGINX consistent-hash upstream rebalances only the dead pod's
+#     hash slice (existing calls on surviving pods don't move)
+#
+# Off by default during business hours; the schedule below targets
+# weekly soak windows. Adjust `schedule` per your maintenance policy.
+
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: talky-random-pod-kill
+  namespace: talky
+spec:
+  action: pod-kill
+  mode: one
+  duration: "1m"
+  selector:
+    namespaces: ["talky"]
+    labelSelectors:
+      "app.kubernetes.io/name": talky
+  scheduler:
+    cron: "*/10 * * * *"   # every 10 min during the soak window

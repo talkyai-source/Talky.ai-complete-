@@ -1,0 +1,22 @@
+{{ include "talky.fullname" . }} deployed.
+
+Quick checks:
+
+  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/name={{ include "talky.name" . }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "talky.fullname" . }} 8000:{{ .Values.service.port }}
+  curl -sf http://localhost:8000/api/v1/healthz/ready
+
+Required external secrets (create before installing):
+
+  talky-db        keys: pgbouncer_url, pgbouncer_ro_url
+  talky-redis     key:  url
+  talky-providers keys: groq_api_keys, elevenlabs_api_keys,
+                        deepgram_api_keys, cartesia_api_keys
+
+Image tag:
+
+  helm upgrade --install talky infra/helm/talky \
+      --namespace {{ .Release.Namespace }} \
+      --set image.tag=<git-sha>
+
+The chart REFUSES :latest — image.tag is a required value.

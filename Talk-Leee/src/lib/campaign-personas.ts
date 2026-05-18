@@ -23,6 +23,15 @@ export interface PersonaSpec {
     title: string;
     summary: string;
     slots: SlotDef[];
+    /**
+     * Voice-catalog keywords that pair well with this persona's tone
+     * (T4-B5). The voice picker surfaces voices whose name, description,
+     * or tags contain any of these as "Recommended for {persona}". The
+     * list is intentionally short — operators can still pick any voice;
+     * recommendations just lower the chance of a sales-bro voice on a
+     * receptionist persona, or a sleepy voice on a lead-gen one.
+     */
+    recommended_voice_keywords: string[];
 }
 
 export const PERSONAS: PersonaSpec[] = [
@@ -30,6 +39,9 @@ export const PERSONAS: PersonaSpec[] = [
         value: "lead_gen",
         title: "Lead Generation",
         summary: "Outbound calls — qualify leads and book consultations.",
+        recommended_voice_keywords: [
+            "warm", "energetic", "conversational", "friendly", "natural", "confident",
+        ],
         slots: [
             { key: "industry", label: "Industry", placeholder: "e.g. roofing", kind: "text", required: true },
             { key: "services_description", label: "Services", placeholder: "What the company does, one sentence", kind: "textarea", required: true },
@@ -47,6 +59,9 @@ export const PERSONAS: PersonaSpec[] = [
         value: "customer_support",
         title: "Customer Support",
         summary: "Inbound — resolve issues, handle escalations, book callbacks.",
+        recommended_voice_keywords: [
+            "calm", "clear", "professional", "neutral", "patient", "trustworthy",
+        ],
         slots: [
             { key: "business_hours", label: "Business hours", placeholder: "e.g. Mon–Fri 9am–6pm EST", kind: "text", required: true },
             { key: "website", label: "Website", placeholder: "company.com", kind: "text", required: true },
@@ -65,6 +80,9 @@ export const PERSONAS: PersonaSpec[] = [
         value: "receptionist",
         title: "AI Receptionist",
         summary: "Inbound — answer, route, book appointments, take messages.",
+        recommended_voice_keywords: [
+            "warm", "professional", "friendly", "welcoming", "polite", "efficient",
+        ],
         slots: [
             { key: "business_type", label: "Business type", placeholder: "e.g. dental practice", kind: "text", required: true },
             { key: "business_address", label: "Address", kind: "text", required: true },
@@ -78,6 +96,56 @@ export const PERSONAS: PersonaSpec[] = [
         ],
     },
 ];
+
+/** Voice-shape used by the matcher. Mirrors the fields available on
+ *  ``VoiceInfo`` from ``ai-options-api.ts`` — kept narrow so the helper
+ *  doesn't pull in an import cycle and works with any
+ *  catalog-row-like object. */
+export interface VoiceForRecommendation {
+    name?: string;
+    description?: string;
+    tags?: string[];
+}
+
+/** Lower-cases and joins all the voice fields a recommendation matcher
+ *  cares about. Pulled out so the tests can exercise the same join. */
+function _voiceHaystack(voice: VoiceForRecommendation): string {
+    return [
+        voice.name ?? "",
+        voice.description ?? "",
+        ...(voice.tags ?? []),
+    ].join(" ").toLowerCase();
+}
+
+/** True when the voice's name / description / tags contain any of the
+ *  persona's recommended keywords. Substring match, case-insensitive.
+ *  Returns false on empty keyword lists so a future persona without
+ *  recommendations doesn't accidentally flag every voice. */
+export function isRecommendedVoiceForPersona(
+    voice: VoiceForRecommendation,
+    personaType: PersonaType,
+): boolean {
+    const persona = PERSONAS.find((p) => p.value === personaType);
+    if (!persona || persona.recommended_voice_keywords.length === 0) {
+        return false;
+    }
+    const haystack = _voiceHaystack(voice);
+    return persona.recommended_voice_keywords.some(
+        (k) => haystack.includes(k.toLowerCase()),
+    );
+}
+
+/** Sort key: recommended voices first (preserving their relative order),
+ *  others after. Stable sort caller — pass through ``Array.sort``. */
+export function compareVoicesByPersonaRecommendation(
+    personaType: PersonaType,
+): (a: VoiceForRecommendation, b: VoiceForRecommendation) => number {
+    return (a, b) => {
+        const ra = isRecommendedVoiceForPersona(a, personaType) ? 1 : 0;
+        const rb = isRecommendedVoiceForPersona(b, personaType) ? 1 : 0;
+        return rb - ra;
+    };
+}
 
 /** Parse a kv-list textarea (lines of "key | value") into the shape the
  *  backend's customer_support persona expects for common_issues. */

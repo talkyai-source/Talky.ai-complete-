@@ -1,0 +1,156 @@
+# Talky.ai helm values.
+#
+# Every knob the Phase 1+2 code reads is surfaced here so the chart
+# stays declarative — the env block in the Deployment is rendered
+# from this file rather than hard-coded.
+
+# ── Image & rollout ─────────────────────────────────────────────
+image:
+  repository: ghcr.io/talkyai/backend
+  tag: ""                  # MUST be set per-deploy. Never "latest".
+  pullPolicy: IfNotPresent
+imagePullSecrets:
+  - name: ghcr-pull
+
+# ── Replica count + autoscaling ─────────────────────────────────
+# Phase 3 default: 3 pods × 50 calls = 150 cluster cap. Raise
+# replicaCount and maxReplicas for Phase 4's 1000-call target.
+replicaCount: 3
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  # Custom-metric scaler reads `talky_active_calls` and
+  # `talky_pod_capacity` from Prometheus via the Prometheus
+  # Adapter. Falls back to CPU when `customMetricEnabled: false`.
+  customMetricEnabled: true
+  targetCallSaturationPercent: 70
+  cpuTargetUtilization: 70
+
+# ── Telephony tuning (read by the app at startup) ───────────────
+telephony:
+  maxSessionsPerPod: 50
+  drainTimeoutSeconds: 300
+  capacityRetryAfterSeconds: 30
+  asyncioDebug: false             # set true for staging-only soak runs
+
+# ── Provider concurrency caps (per-process semaphore sizes) ─────
+providers:
+  groqMaxConcurrent: 80
+  elevenlabsMaxConcurrent: 200
+  deepgramMaxConcurrent: 80
+  cartesiaMaxConcurrent: 80
+
+# ── Database (PgBouncer fronted) ────────────────────────────────
+postgres:
+  # Both URLs SHOULD point at PgBouncer in transaction mode, NOT
+  # raw Postgres. PgBouncer handles the fan-out from N app pods
+  # to a small backend pool.
+  primaryUrlSecret:
+    name: talky-db
+    key: pgbouncer_url
+  replicaUrlSecret:
+    name: talky-db
+    key: pgbouncer_ro_url
+  poolMinSize: 5
+  poolMaxSize: 20
+  readPoolMinSize: 2
+  readPoolMaxSize: 15
+  # MUST be 0 when DATABASE_URL points at PgBouncer in transaction
+  # mode (server-side prepared statements aren't allowed there).
+  statementCacheSize: 0
+
+# ── Redis (HA; Sentinel or Cluster) ─────────────────────────────
+redis:
+  # mode: "single" | "sentinel" | "cluster". Sentinel is the
+  # Phase-3 default; Cluster is for the 1000-call Phase 4 step.
+  mode: sentinel
+  urlSecret:
+    name: talky-redis
+    key: url
+  sentinel:
+    serviceName: mymaster
+    addresses:
+      - redis-sentinel-0.redis-sentinel.talky.svc.cluster.local:26379
+      - redis-sentinel-1.redis-sentinel.talky.svc.cluster.local:26379
+      - redis-sentinel-2.redis-sentinel.talky.svc.cluster.local:26379
+  cluster:
+    nodes:
+      - redis-cluster-0.redis-cluster.talky.svc.cluster.local:6379
+      - redis-cluster-1.redis-cluster.talky.svc.cluster.local:6379
+      - redis-cluster-2.redis-cluster.talky.svc.cluster.local:6379
+
+# ── Resources ───────────────────────────────────────────────────
+resources:
+  requests:
+    cpu: "1500m"
+    memory: "1.5Gi"
+  limits:
+    cpu: "2000m"
+    memory: "2Gi"
+
+# ── Service / ingress ───────────────────────────────────────────
+service:
+  type: ClusterIP
+  port: 8000
+  # Headless service so each pod resolves to its own DNS name.
+  # The NGINX consistent-hash upstream block uses these per-pod
+  # records to maintain session affinity.
+  headless: true
+
+ingress:
+  enabled: false           # NGINX in front is templated separately
+
+# ── Probes ──────────────────────────────────────────────────────
+probes:
+  readiness:
+    path: /api/v1/healthz/ready
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 2
+  liveness:
+    path: /api/v1/healthz/live
+    initialDelaySeconds: 30
+    periodSeconds: 15
+    timeoutSeconds: 3
+    failureThreshold: 4
+
+# ── PodDisruptionBudget ─────────────────────────────────────────
+pdb:
+  enabled: true
+  minAvailable: "50%"      # Never let voluntary disruption below half
+
+# ── NetworkPolicy ───────────────────────────────────────────────
+# Restricts egress so the backend can only reach Postgres, Redis,
+# and external provider APIs (resolved via DNS, allowed via
+# namespaceSelector + egress rules in the template).
+networkPolicy:
+  enabled: true
+
+# ── Service account ─────────────────────────────────────────────
+serviceAccount:
+  create: true
+  name: ""                 # default = chart fullname
+
+# ── Pod placement ───────────────────────────────────────────────
+podAntiAffinity: soft      # spread pods across nodes; never bin-pack
+nodeSelector: {}
+tolerations: []
+
+# ── Termination grace ───────────────────────────────────────────
+# MUST exceed telephony.drainTimeoutSeconds so the lifespan shutdown
+# loop finishes draining active calls before SIGKILL fires.
+terminationGracePeriodSeconds: 360
+
+# ── Container security ──────────────────────────────────────────
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+podSecurityContext:
+  fsGroup: 1000

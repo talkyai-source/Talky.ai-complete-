@@ -133,10 +133,26 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
             // notifications store can be unavailable during very early
             // boot — never block the redirect on a UI side-effect.
         }
+        // Preserve where the user was so the post-login redirect can
+        // bring them back. /dashboard is the default destination for a
+        // direct login, so don't bother passing next=/dashboard — let
+        // the login page use its canonical default.
+        let target = "/auth/login";
         try {
-            router.push("/auth/login");
+            if (typeof window !== "undefined") {
+                const here = `${window.location.pathname}${window.location.search}`;
+                if (here && here !== "/" && here !== "/dashboard") {
+                    target = `/auth/login?next=${encodeURIComponent(here)}`;
+                }
+            }
         } catch {
-            window.location.href = "/auth/login";
+            // window access can fail in odd render conditions — fall back
+            // to the bare login URL.
+        }
+        try {
+            router.push(target);
+        } catch {
+            window.location.href = target;
         }
     };
 

@@ -165,7 +165,10 @@ function KpiCard({
     );
 }
 
-function useSimulatedLiveBuckets() {
+// Pulls real call-volume buckets from /analytics/calls and shapes them into
+// LiveTimeBucket[] for the dashboard charts. Polls every 30s; when no data is
+// returned the chart shows an empty state rather than fake numbers.
+function useLiveBuckets() {
     const [state, setState] = useState<{
         loading: boolean;
         error: string;
@@ -173,86 +176,58 @@ function useSimulatedLiveBuckets() {
         buckets: LiveTimeBucket[];
     }>({ loading: true, error: "", lastUpdatedMs: 0, buckets: [] });
 
-    const bucketsRef = useRef<LiveTimeBucket[]>([]);
-    const lastMinuteStartRef = useRef<number>(0);
-
     useEffect(() => {
-        const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
-        const BUCKET_MS = 60_000;
-        const totalMinutes = 48 * 60;
+        let cancelled = false;
 
-        const makeBucket = (startMs: number, prevTotal: number) => {
-            const d = new Date(startMs);
-            const h = d.getHours() + d.getMinutes() / 60;
-            const daily = 0.55 + 0.45 * Math.sin(((h - 7.2) / 24) * 2 * Math.PI);
-            const baseline = 18 + daily * 22;
-            const drift = (Math.random() - 0.5) * 6;
-            const total = Math.max(0, Math.round(prevTotal * 0.65 + baseline * 0.35 + drift));
-            const answeredRate = 0.86 + (Math.random() - 0.5) * 0.05;
-            const answered = Math.max(0, Math.min(total, Math.round(total * answeredRate)));
-            const failed = Math.max(0, Math.min(total - answered, Math.round(total * (0.06 + Math.random() * 0.05))));
-            const avgDurationSec = 65 + daily * 55 + (Math.random() - 0.5) * 18;
-            return {
-                startMs,
-                endMs: startMs + BUCKET_MS,
-                total,
-                answered,
-                failed,
-                avgDurationSec,
-            } satisfies LiveTimeBucket;
+        const seriesToBuckets = (series: CallSeriesItem[]): LiveTimeBucket[] => {
+            // Backend returns daily-grouped rows; use day boundaries for the
+            // bucket window. Time-of-day breakdowns require a per-minute
+            // endpoint that doesn't exist yet (tracked in
+            // API_CONNECTIVITY_GAP_ANALYSIS.md §2.1).
+            const DAY_MS = 24 * 60 * 60 * 1000;
+            const out: LiveTimeBucket[] = [];
+            for (const s of series) {
+                const startMs = Date.parse(s.date);
+                if (!Number.isFinite(startMs)) continue;
+                out.push({
+                    startMs,
+                    endMs: startMs + DAY_MS,
+                    total: s.total_calls ?? 0,
+                    answered: s.answered ?? 0,
+                    failed: s.failed ?? 0,
+                    avgDurationSec: null,
+                });
+            }
+            out.sort((a, b) => a.startMs - b.startMs);
+            return out;
         };
 
-        const now = Date.now();
-        const currentMinuteStart = Math.floor(now / BUCKET_MS) * BUCKET_MS;
-        lastMinuteStartRef.current = currentMinuteStart;
-
-        let prevTotal = 26;
-        const buckets: LiveTimeBucket[] = Array.from({ length: totalMinutes }).map((_, i) => {
-            const startMs = currentMinuteStart - (totalMinutes - 1 - i) * BUCKET_MS;
-            const b = makeBucket(startMs, prevTotal);
-            prevTotal = b.total ?? prevTotal;
-            return b;
-        });
-
-        bucketsRef.current = buckets;
-        const initId = window.setTimeout(() => {
-            setState({ loading: false, error: "", lastUpdatedMs: now, buckets });
-        }, 0);
-
-        if (reducedMotion) {
-            return () => {
-                window.clearTimeout(initId);
-            };
-        }
-
-        const id = window.setInterval(() => {
-            const now = Date.now();
-            const minuteStart = Math.floor(now / BUCKET_MS) * BUCKET_MS;
-
-            const next = bucketsRef.current.slice();
-            let prevTotal = next[next.length - 1]?.total ?? 20;
-
-            if (minuteStart !== lastMinuteStartRef.current) {
-                lastMinuteStartRef.current = minuteStart;
-                const b = makeBucket(minuteStart, prevTotal);
-                next.push(b);
-                while (next.length > totalMinutes) next.shift();
-                prevTotal = b.total ?? prevTotal;
-            } else {
-                const idx = next.length - 1;
-                if (idx >= 0) {
-                    const b = makeBucket(minuteStart, prevTotal);
-                    const gap = Math.random() < 0.035;
-                    next[idx] = gap ? { ...b, total: null, answered: null, failed: null, avgDurationSec: null } : b;
-                }
+        const fetchOnce = async () => {
+            try {
+                const resp = await extendedApi.getCallAnalytics();
+                if (cancelled) return;
+                const buckets = seriesToBuckets(resp?.series ?? []);
+                setState({
+                    loading: false,
+                    error: "",
+                    lastUpdatedMs: Date.now(),
+                    buckets,
+                });
+            } catch (err) {
+                if (cancelled) return;
+                setState((prev) => ({
+                    ...prev,
+                    loading: false,
+                    error: err instanceof Error ? err.message : "Failed to load live buckets",
+                    lastUpdatedMs: Date.now(),
+                }));
             }
+        };
 
-            bucketsRef.current = next;
-            setState((prev) => ({ ...prev, loading: false, error: "", lastUpdatedMs: now, buckets: next }));
-        }, 1000);
-
+        void fetchOnce();
+        const id = window.setInterval(fetchOnce, 30_000);
         return () => {
-            window.clearTimeout(initId);
+            cancelled = true;
             window.clearInterval(id);
         };
     }, []);
@@ -346,11 +321,6 @@ function OutcomePieChart({
     );
 }
 
-function seeded01(seed: number) {
-    const x = Math.sin(seed) * 10_000;
-    return x - Math.floor(x);
-}
-
 function StatusStackedBarsChart({
     buckets,
     height = 240,
@@ -434,6 +404,14 @@ function StatusStackedBarsChart({
                     const failed = typeof b.failed === "number" ? b.failed : 0;
                     const inProgress = Math.max(0, total - answered - failed);
                     const successRate = total > 0 ? (answered / total) * 100 : 0;
+                    // Per-bucket hover card. The previous version had two
+                    // additional rows ("Active call count" and "Queue size")
+                    // computed via `total * 0.18 + 6` / `total * 0.12 + 4` —
+                    // synthetic formulas that produced fake current-state
+                    // numbers per historical bucket. Active calls and queue
+                    // depth are now-only metrics; they live in the KPI strip
+                    // and the live-status hover card, not on a historical
+                    // chart bucket. Rows removed.
                     tooltip.show(e.clientX, e.clientY, (
                         <div className="space-y-2">
                             <div className="text-sm font-black text-gray-900">
@@ -441,24 +419,16 @@ function StatusStackedBarsChart({
                             </div>
                             <div className="space-y-1.5">
                                 <div className="flex items-center justify-between gap-8 text-sm">
-                                    <span className="font-semibold text-gray-700">Active call count</span>
-                                    <span className="font-black tabular-nums text-gray-900">{Math.max(0, Math.round(total * 0.18 + 6))}</span>
+                                    <span className="font-semibold text-gray-700">Total / answered / failed</span>
+                                    <span className="font-black tabular-nums text-gray-900">{total.toLocaleString()} / {answered.toLocaleString()} / {failed.toLocaleString()}</span>
                                 </div>
                                 <div className="flex items-center justify-between gap-8 text-sm">
-                                    <span className="font-semibold text-gray-700">Queue size</span>
-                                    <span className="font-black tabular-nums text-gray-900">{Math.max(0, Math.round(total * 0.12 + 4))}</span>
-                                </div>
-                                <div className="flex items-center justify-between gap-8 text-sm">
-                                    <span className="font-semibold text-gray-700">Completed/failed totals</span>
-                                    <span className="font-black tabular-nums text-gray-900">{answered.toLocaleString()}/{failed.toLocaleString()}</span>
-                                </div>
-                                <div className="flex items-center justify-between gap-8 text-sm">
-                                    <span className="font-semibold text-gray-700">Current success rate</span>
+                                    <span className="font-semibold text-gray-700">Success rate (bucket)</span>
                                     <span className="font-black tabular-nums text-gray-900">{successRate.toFixed(1)}%</span>
                                 </div>
                             </div>
                             <div className="text-[11px] font-semibold text-gray-600">
-                                Status: Answered {answered.toLocaleString()}, Failed {failed.toLocaleString()}, In progress {inProgress.toLocaleString()}
+                                In progress at bucket close: {inProgress.toLocaleString()}
                             </div>
                         </div>
                     ));
@@ -561,13 +531,12 @@ function CampaignLinesChart({
 
     const series = useMemo(() => {
         const active = campaigns.filter((c) => enabled[c.id] !== false);
-        const points = active.map((c, ci) => {
+        const points = active.map((c) => {
             return {
                 ...c,
                 values: data.map((b) => {
                     const total = typeof b.total === "number" ? b.total : 0;
-                    const noise = (seeded01(b.startMs * 0.00001 + ci * 91.7) - 0.5) * 0.16;
-                    return Math.max(0, total * c.weight * (1 + noise));
+                    return Math.max(0, total * c.weight);
                 }),
             };
         });
@@ -737,7 +706,7 @@ export default function DashboardPage() {
     const [activeBucket, setActiveBucket] = useState<LiveTimeBucket | null>(null);
     const [callStatsView, setCallStatsView] = useState<"status" | "campaigns" | "outcomes">("status");
 
-    const sim = useSimulatedLiveBuckets();
+    const sim = useLiveBuckets();
 
     const activeRange = useMemo(() => {
         const end = callRangeMode === "custom" ? (customEndMs ?? sim.lastUpdatedMs) : sim.lastUpdatedMs;
@@ -829,11 +798,26 @@ export default function DashboardPage() {
         const successDelta = delta(currentSuccessRate, prevSuccessRate);
         const failedPct = currentTotal > 0 ? (currentFailed / currentTotal) * 100 : 0;
 
-        const currentActiveCalls = Math.max(0, Math.round((liveBuckets[liveBuckets.length - 1]?.total ?? 0) * 0.18 + 6));
-        const prevActiveCalls = Math.max(0, Math.round((previousBucketsBase[previousBucketsBase.length - 1]?.total ?? 0) * 0.18 + 6));
+        // Real "active calls" comes from the dashboard summary endpoint
+        // (count of tenant calls with status IN ('initiated','ringing',
+        // 'in_progress')). Until the summary loads we render 0; the
+        // previous version synthesised this as `total*0.18 + 6` which
+        // had no basis in real data.
+        const currentActiveCalls = liveSummary?.active_calls ?? summary?.active_calls ?? 0;
+        const prevActiveCalls = currentActiveCalls; // delta against itself = 0 — we have no historical snapshot yet
         const activeDelta = delta(currentActiveCalls, prevActiveCalls);
 
-        const avgDurDelta = delta(currentAvgDurationSec, prevAvgDurationSec);
+        // Real average call duration from the same endpoint. The
+        // bucket-derived `currentAvgDurationSec` stays 0 when the per-
+        // bucket avgDurationSec is null (which it is — the daily
+        // analytics endpoint doesn't carry it). We prefer the live
+        // summary value; the bucket-weighted calc is a fallback only.
+        const liveAvgDuration =
+            liveSummary?.avg_call_duration_seconds ??
+            summary?.avg_call_duration_seconds ??
+            null;
+        const effectiveAvgDurationSec = liveAvgDuration ?? currentAvgDurationSec;
+        const avgDurDelta = delta(effectiveAvgDurationSec, prevAvgDurationSec);
 
         const kpis = [
             {
@@ -865,11 +849,11 @@ export default function DashboardPage() {
             },
             {
                 title: "Avg Duration",
-                value: Math.round(currentAvgDurationSec),
+                value: Math.round(effectiveAvgDurationSec),
                 valueSuffix: "s",
                 deltaAbs: avgDurDelta.abs,
                 deltaPct: avgDurDelta.pct,
-                status: statusVariantLowerBetter(currentAvgDurationSec, { green: 70, yellow: 95 }),
+                status: statusVariantLowerBetter(effectiveAvgDurationSec, { green: 70, yellow: 95 }),
                 icon: Clock,
             },
         ];
@@ -913,22 +897,52 @@ export default function DashboardPage() {
 
         const peakBands = peaks.map((p) => ({ startMs: p.startMs, endMs: p.endMs, label: p.label })) satisfies LiveWindow[];
 
-        const outcomes = (() => {
-            const completed = Math.max(0, Math.round(currentAnswered * 0.72));
-            const voicemail = Math.max(0, Math.round(currentAnswered * 0.17));
-            const callback = Math.max(0, currentAnswered - completed - voicemail);
-            const busy = Math.max(0, Math.round(currentFailed * 0.30));
-            const noAnswer = Math.max(0, Math.round(currentFailed * 0.45));
-            const networkError = Math.max(0, currentFailed - busy - noAnswer);
-            return [
-                { label: "Completed", value: completed, color: "#10B981" },
-                { label: "Voicemail", value: voicemail, color: "#3B82F6" },
-                { label: "Callback", value: callback, color: "#06B6D4" },
-                { label: "Busy", value: busy, color: "#F59E0B" },
-                { label: "No Answer", value: noAnswer, color: "#A855F7" },
-                { label: "Network Error", value: networkError, color: "#EF4444" },
-            ];
-        })();
+        // Real outcome breakdown — counts of `calls.outcome` for the
+        // current billing month, computed by /dashboard/summary. The
+        // previous version invented ratios (`answered * 0.72`,
+        // `failed * 0.30`); those have been removed entirely.
+        const outcomeCounts =
+            liveSummary?.outcome_breakdown ?? summary?.outcome_breakdown ?? {};
+        const _outcomeColors: Record<string, string> = {
+            goal_achieved: "#10B981",
+            answered: "#22C55E",
+            voicemail: "#3B82F6",
+            no_answer: "#A855F7",
+            busy: "#F59E0B",
+            failed: "#EF4444",
+            timeout: "#F97316",
+            spam: "#EF4444",
+            invalid: "#EF4444",
+            unavailable: "#EF4444",
+            disconnected: "#EF4444",
+            rejected: "#EF4444",
+            goal_not_achieved: "#94A3B8",
+            unknown: "#6B7280",
+        };
+        const _humanLabel: Record<string, string> = {
+            goal_achieved: "Qualified",
+            answered: "Answered",
+            voicemail: "Voicemail",
+            no_answer: "No answer",
+            busy: "Busy",
+            failed: "Failed",
+            timeout: "Timeout",
+            spam: "Spam",
+            invalid: "Invalid",
+            unavailable: "Unavailable",
+            disconnected: "Disconnected",
+            rejected: "Rejected",
+            goal_not_achieved: "Not qualified",
+            unknown: "Unknown",
+        };
+        const outcomes = Object.entries(outcomeCounts)
+            .filter(([, v]) => (v ?? 0) > 0)
+            .sort(([, a], [, b]) => (b ?? 0) - (a ?? 0))
+            .map(([key, value]) => ({
+                label: _humanLabel[key] ?? key,
+                value: value ?? 0,
+                color: _outcomeColors[key] ?? "#6B7280",
+            }));
 
         const bucket = activeBucket ?? liveBuckets[liveBuckets.length - 1] ?? null;
         const bucketTotal = bucket && typeof bucket.total === "number" ? bucket.total : 0;
@@ -937,17 +951,33 @@ export default function DashboardPage() {
         const bucketInProgress = Math.max(0, bucketTotal - bucketAnswered - bucketFailed);
 
         const hoverStats = {
-            activeCalls: Math.max(0, Math.round(bucketTotal * 0.18 + 6)),
-            queueSize: Math.max(0, Math.round(bucketTotal * 0.12 + 4)),
+            // Active calls + queue size now read from /dashboard/summary
+            // instead of being synthesised from per-bucket totals.
+            activeCalls: currentActiveCalls,
+            queueSize: liveSummary?.queued_jobs ?? summary?.queued_jobs ?? 0,
             completedTotal: currentAnswered,
             failedTotal: currentFailed,
             successRate: currentTotal > 0 ? (currentAnswered / currentTotal) * 100 : 0,
+            // bucketInProgress is the in-bucket "neither answered nor failed
+            // yet" count — keep it as-is for the hover card; the KPI uses
+            // the cluster-wide currentActiveCalls value above.
             inProgress: bucketInProgress,
             failedPct,
         };
 
         return { kpis, markers, maintenanceWindows, peakBands, anomalies: anomalies.slice(-40), outcomes, hoverStats };
-    }, [activeBucket, activeRange.endMs, activeRange.startMs, liveBuckets, notes, previousBucketsBase]);
+    }, [
+        activeBucket,
+        activeRange.endMs,
+        activeRange.startMs,
+        liveBuckets,
+        notes,
+        previousBucketsBase,
+        // Re-derive when live summary fields change so Active Calls /
+        // Avg Duration / Outcomes pie / hover card update on each poll.
+        liveSummary,
+        summary,
+    ]);
 
     useEffect(() => {
         loadData();
@@ -972,64 +1002,16 @@ export default function DashboardPage() {
         }
     }
 
-    useEffect(() => {
-        if (!liveSummary) return;
-        if (streamStatus === "connected") return;
-        const id = window.setInterval(() => {
-            setLiveSummary((prev) => {
-                if (!prev) return prev;
-                const inc = Math.floor(Math.random() * 6);
-                const answeredInc = Math.floor(Math.random() * (inc + 1));
-                const failedInc = inc - answeredInc;
-                const minutesInc = Math.floor(inc * (2 + Math.random() * 2));
-
-                return {
-                    ...prev,
-                    total_calls: prev.total_calls + inc,
-                    answered_calls: prev.answered_calls + answeredInc,
-                    failed_calls: prev.failed_calls + failedInc,
-                    minutes_used: prev.minutes_used + minutesInc,
-                    minutes_remaining: Math.max(0, prev.minutes_remaining - minutesInc),
-                    minutes_included: prev.minutes_included || 5000,
-                };
-            });
-        }, 1000);
-
-        return () => window.clearInterval(id);
-    }, [liveSummary, streamStatus]);
-
-    useEffect(() => {
-        if ((series ?? []).length === 0) return;
-        const now = new Date();
-        const _series = series ?? [];
-        const baseA = Math.max(6, Math.round(_series.reduce((a, s) => a + s.answered, 0) / _series.length / 6));
-        const baseB = Math.max(1, Math.round(_series.reduce((a, s) => a + s.failed, 0) / _series.length / 10));
-
-        const initial: DualSeriesPoint[] = Array.from({ length: 12 }).map((_, i) => {
-            const t = new Date(now.getTime() - (11 - i) * 60_000);
-            const label = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-            const a = Math.max(0, Math.round(baseA + (Math.random() - 0.4) * baseA));
-            const b = Math.max(0, Math.round(baseB + (Math.random() - 0.4) * baseB));
-            return { label, a, b };
-        });
-        setLiveBars(initial);
-    }, [series]);
-
-    useEffect(() => {
-        if (liveBars.length === 0) return;
-        if (streamStatus === "connected") return;
-        const id = window.setInterval(() => {
-            setLiveBars((prev) => {
-                const now = new Date();
-                const label = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-                const last = prev[prev.length - 1] ?? { label, a: 0, b: 0 };
-                const a = Math.max(0, Math.round(last.a + (Math.random() - 0.35) * 10));
-                const b = Math.max(0, Math.round(last.b + (Math.random() - 0.4) * 5));
-                return [...prev.slice(-11), { label, a, b }];
-            });
-        }, 1000);
-        return () => window.clearInterval(id);
-    }, [liveBars.length, streamStatus]);
+    // liveSummary and liveBars are now driven exclusively by the WebSocket
+    // stream (when connected) and the initial REST fetch. The previous
+    // setInterval blocks that synthetically incremented these every second
+    // with Math.random() were removed — they masked real backend latency
+    // and produced fake KPIs even when no calls were happening.
+    //
+    // When the stream is offline and the REST endpoint returns empty,
+    // the dashboard now correctly shows zero / no-data rather than fake
+    // numbers. A backend /dashboard/live-buckets time-series endpoint
+    // is tracked in API_CONNECTIVITY_GAP_ANALYSIS.md §2.1.
 
     useEffect(() => {
         if (liveBars.length > 0) lastValidBarsRef.current = liveBars;
@@ -1317,11 +1299,15 @@ export default function DashboardPage() {
     const heatRows = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     const heatCols = ["0–3", "3–6", "6–9", "9–12", "12–15", "15–18", "18–21", "21–24"];
     const seedTotals = safeSeries.length > 0 ? safeSeries.map((s) => s.total_calls) : [0, 0, 0, 0, 0, 0, 0];
+    // Heatmap spreads each day's total evenly across the 8 hour-buckets.
+    // Honest representation given the backend doesn't yet expose hourly
+    // call distribution — flat average rather than a synthesised
+    // sine-wave peak/trough pattern. A real /analytics/calls?group_by=hour
+    // endpoint is tracked in API_CONNECTIVITY_GAP_ANALYSIS.md.
     const heatValues = heatRows.map((_, ri) =>
-        heatCols.map((__, ci) => {
+        heatCols.map(() => {
             const base = seedTotals[ri % seedTotals.length] ?? 0;
-            const wave = 0.55 + 0.45 * Math.sin((ri + 1) * 1.4 + (ci + 1) * 0.9);
-            return Math.max(0, Math.round((base / heatCols.length) * wave));
+            return Math.max(0, Math.round(base / heatCols.length));
         })
     );
     const heatMax = Math.max(1, ...heatValues.flat());

@@ -1,0 +1,55 @@
+{{- if .Values.autoscaling.enabled -}}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "talky.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "talky.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "talky.fullname" . }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    {{- if .Values.autoscaling.customMetricEnabled }}
+    # Phase 3.1 — scale on call saturation, not CPU.
+    # `talky_call_saturation_pct` is exposed by the Prometheus
+    # Adapter from the `active_calls / pod_capacity` gauges the
+    # bridge already emits in `telephony_observability.py`.
+    # Target 70% leaves headroom for in-flight bursts before HPA
+    # has time to provision new pods.
+    - type: Pods
+      pods:
+        metric:
+          name: talky_call_saturation_pct
+        target:
+          type: AverageValue
+          averageValue: "{{ .Values.autoscaling.targetCallSaturationPercent }}"
+    {{- else }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.cpuTargetUtilization }}
+    {{- end }}
+  behavior:
+    # Scale-up reacts within 30s — voice-call traffic is sticky and
+    # latency-sensitive, we'd rather over-provision briefly than drop calls.
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 30
+    # Scale-down stays slow so a brief lull doesn't reap pods that
+    # still hold draining calls. 5-minute window is standard.
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+{{- end -}}

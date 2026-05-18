@@ -1,0 +1,15 @@
+apiVersion: v2
+name: talky
+description: |
+  Talky.ai voice-AI dialer. Multi-pod backend behind NGINX with
+  consistent-hash session affinity, Redis-backed cluster-wide
+  concurrency, PgBouncer + read-replica routing, custom-metric
+  HPA on active calls, and graceful drain wired to the lifespan
+  shutdown hook.
+type: application
+version: 0.3.0          # bumps on every Phase 3+ change
+appVersion: "1.0.0"
+kubeVersion: ">=1.27.0-0"
+maintainers:
+  - name: Talky platform
+home: https://talky.example.com

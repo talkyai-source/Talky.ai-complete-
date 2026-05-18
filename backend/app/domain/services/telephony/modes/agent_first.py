@@ -18,7 +18,10 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from app.domain.services.telephony.config import _build_outbound_greeting
+from app.domain.services.telephony.config import (
+    _build_outbound_greeting,
+    _build_call_greeting,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -125,10 +128,18 @@ async def _send_outbound_greeting(voice_session) -> None:
         else:
             # ── Slow path: real-time TTS (ringing pre-synth unavailable) ─
             await asyncio.sleep(0.05)
-            greeting = _build_outbound_greeting(session)
+            # Pick the greeting that matches the call direction so a
+            # user-first call falling through to slow-path doesn't
+            # accidentally read the outbound consent-first opener.
+            # Falls back to "agent" framing when first_speaker is unset
+            # (legacy code paths or non-telephony sessions).
+            first_speaker = (
+                getattr(voice_session, "_first_speaker", None) or "agent"
+            )
+            greeting = _build_call_greeting(session, first_speaker=first_speaker)
             logger.info(
-                "outbound_greeting_realtime call_id=%s text=%r",
-                call_id[:12], greeting[:60],
+                "outbound_greeting_realtime call_id=%s first_speaker=%s text=%r",
+                call_id[:12], first_speaker, greeting[:60],
             )
             await voice_session.pipeline.synthesize_and_send_audio(
                 session, greeting, websocket=None
@@ -172,8 +183,9 @@ async def prepare_pre_originate_greeting(
 
     Runs only when the agent will actually play audio on answer:
     * ``first_speaker == "agent"`` always pre-synths.
-    * ``first_speaker == "user"`` pre-synths only when the user-first fallback
-      is enabled (off by default).
+    * ``first_speaker == "user"`` pre-synths when EITHER the silence
+      safety net is enabled (default after T1.3) OR instant-pickup mode
+      is enabled (opt-in via ``TELEPHONY_USER_FIRST_GREET_ON_PICKUP``).
 
     On success, attaches ``_presynth_greeting_audio`` (list of PCM chunks)
     and ``_presynth_greeting_text`` to ``pre_warm_session`` so the
@@ -183,20 +195,21 @@ async def prepare_pre_originate_greeting(
     Raises ``RuntimeError`` when pre-synth runs but produces zero audio
     chunks, so the caller can refuse to ring a cold pipeline.
     """
-    from app.domain.services.telephony.modes.user_first import _user_first_fallback_enabled
-
-    should_presynth = (
-        effective_first_speaker == "agent" or _user_first_fallback_enabled()
+    # Both first-speaker modes always play a greeting:
+    # * agent-first speaks immediately on pickup
+    # * caller-first waits 2s then speaks the SAME greeting
+    # So pre-synth is unconditional — the gate that used to skip it for
+    # "silent caller-first" mode was removed when the silence handler
+    # was retired.
+    #
+    # The greeting text is direction-aware: caller-first uses the inbound
+    # receiver phrasing ("Hello, this is {agent} from {company} — how can
+    # I help?") so the AI sounds like someone picking up the phone after
+    # the callee said hello, rather than reading a cold-call opener.
+    greeting_text = _build_call_greeting(
+        pre_warm_session.call_session,
+        first_speaker=effective_first_speaker,
     )
-    if not should_presynth:
-        logger.info(
-            "pre_originate_greeting_skipped first_speaker=user "
-            "fallback_enabled=false call_id=%s",
-            pre_warm_session.call_id[:12],
-        )
-        return
-
-    greeting_text = _build_outbound_greeting(pre_warm_session.call_session)
     chunks: list[bytes] = []
     tts_config = pre_warm_session.config
     async for audio_chunk in pre_warm_session.tts_provider.stream_synthesize(

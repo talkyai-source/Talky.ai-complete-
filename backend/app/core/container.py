@@ -52,6 +52,86 @@ def _build_redis_url() -> str:
         return f"redis://{host}:{port}/{db}"
 
 
+def _parse_address_list(value: str) -> list[tuple[str, int]]:
+    """Parse `host1:port1,host2:port2,...` into [(host, port), ...]."""
+    out: list[tuple[str, int]] = []
+    for raw in (value or "").split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        if ":" not in raw:
+            out.append((raw, 6379))
+            continue
+        host, _, port = raw.rpartition(":")
+        try:
+            out.append((host, int(port)))
+        except ValueError:
+            logger.warning("redis_address_invalid value=%r — skipping", raw)
+    return out
+
+
+async def _build_sentinel_client():
+    """Build an async Redis client routed through Sentinel.
+
+    Reads:
+      REDIS_SENTINEL_ADDRESSES   — CSV of host:port (≥3 nodes recommended)
+      REDIS_SENTINEL_SERVICE_NAME — master name (default: "mymaster")
+      REDIS_PASSWORD              — auth for the data plane
+      REDIS_SENTINEL_PASSWORD     — auth for Sentinel itself (if set)
+    """
+    from redis.asyncio.sentinel import Sentinel
+
+    addresses = _parse_address_list(os.getenv("REDIS_SENTINEL_ADDRESSES", ""))
+    if not addresses:
+        raise RuntimeError(
+            "REDIS_MODE=sentinel but REDIS_SENTINEL_ADDRESSES is empty"
+        )
+    service_name = os.getenv("REDIS_SENTINEL_SERVICE_NAME", "mymaster")
+
+    sentinel = Sentinel(
+        addresses,
+        socket_timeout=2.0,
+        sentinel_kwargs={
+            "password": os.getenv("REDIS_SENTINEL_PASSWORD") or None,
+        },
+        password=os.getenv("REDIS_PASSWORD") or None,
+        decode_responses=True,
+    )
+    # `master_for` returns a redis.asyncio.Redis bound to the current
+    # master via the sentinel — failover is handled transparently.
+    return sentinel.master_for(
+        service_name,
+        socket_timeout=2.0,
+        decode_responses=True,
+    )
+
+
+async def _build_cluster_client():
+    """Build an async RedisCluster client.
+
+    Reads:
+      REDIS_CLUSTER_NODES — CSV of host:port (any 3+ entry-points;
+                            the client discovers the rest of the topology)
+      REDIS_PASSWORD       — auth (single shared cluster password)
+    """
+    from redis.asyncio.cluster import RedisCluster, ClusterNode
+
+    addresses = _parse_address_list(os.getenv("REDIS_CLUSTER_NODES", ""))
+    if not addresses:
+        raise RuntimeError(
+            "REDIS_MODE=cluster but REDIS_CLUSTER_NODES is empty"
+        )
+    startup_nodes = [ClusterNode(host=h, port=p) for h, p in addresses]
+    return RedisCluster(
+        startup_nodes=startup_nodes,
+        password=os.getenv("REDIS_PASSWORD") or None,
+        decode_responses=True,
+        socket_timeout=2.0,
+        # Re-use a moved/ask response to refresh the topology automatically.
+        require_full_coverage=False,
+    )
+
+
 class ServiceContainer:
     """
     Central container for all application services.
@@ -211,26 +291,41 @@ class ServiceContainer:
     # ── Private initializers ──────────────────────────────────────
 
     async def _initialize_redis(self) -> None:
-        """Initialize Redis with password authentication."""
+        """Initialize Redis client.
+
+        Phase 3.2 adds two HA paths driven by `REDIS_MODE`:
+          - "sentinel" → connect via Sentinel quorum, master discovery
+            handled by the redis-py SentinelManagedConnection.
+          - "cluster"  → connect to a Redis Cluster (3 shards × 2 replicas
+            in production). All key access patterns in this codebase are
+            already cluster-safe.
+          - "single"   (default) → preserves the existing single-node
+            behaviour exactly so dev/staging single-Redis setups keep working.
+        """
         if not REDIS_AVAILABLE:
             logger.warning("redis.asyncio not installed — queue features will use fallback")
             return
 
-        redis_url = _build_redis_url()
-        # Log URL with password masked
-        log_url = redis_url.replace(
-            os.getenv("REDIS_PASSWORD", "NOPASSWORD"),
-            "***"
-        ) if os.getenv("REDIS_PASSWORD") else redis_url
-
+        mode = (os.getenv("REDIS_MODE") or "single").lower()
         try:
-            self._redis = redis.from_url(
-                redis_url,
-                encoding="utf-8",
-                decode_responses=True,
-            )
+            if mode == "sentinel":
+                self._redis = await _build_sentinel_client()
+                logger.info("redis_connected mode=sentinel")
+            elif mode == "cluster":
+                self._redis = await _build_cluster_client()
+                logger.info("redis_connected mode=cluster")
+            else:
+                redis_url = _build_redis_url()
+                log_url = redis_url.replace(
+                    os.getenv("REDIS_PASSWORD", "NOPASSWORD"), "***"
+                ) if os.getenv("REDIS_PASSWORD") else redis_url
+                self._redis = redis.from_url(
+                    redis_url,
+                    encoding="utf-8",
+                    decode_responses=True,
+                )
+                logger.info(f"redis_connected mode=single url={log_url}")
             await self._redis.ping()
-            logger.info(f"Redis connected: {log_url}")
         except Exception as e:
             logger.warning(f"Redis not available ({e}) — using in-memory fallback")
             self._redis = None

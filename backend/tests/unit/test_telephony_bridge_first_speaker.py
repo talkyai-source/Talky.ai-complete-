@@ -28,70 +28,145 @@ class TestOutboundFirstSpeaker:
         with patch.dict(os.environ, {"TELEPHONY_FIRST_SPEAKER": "agent"}):
             assert _outbound_first_speaker() == "agent"
 
-    def test_user_first_open_window_defaults_to_safety_net(self):
-        """User-first fallback should not race normal caller pickup speech."""
-        from app.api.v1.endpoints.telephony_bridge import _user_first_open_seconds
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("TELEPHONY_USER_FIRST_OPEN_S", None)
-            assert _user_first_open_seconds() == 5.0
+    def test_caller_first_uses_same_greeting_path_as_agent_first(self):
+        """Caller-first model is now: same greeting flow as agent-first,
+        just delayed by 2 seconds. The retired silence safety net /
+        predicted-response watcher / per-persona ack constants are gone.
+        Verify the simplified module still exposes the LLM prewarm helper
+        that the new-call lifecycle still depends on."""
+        from app.domain.services.telephony.modes import user_first
 
-    def test_user_first_open_window_clamps_subsecond_values(self):
-        """A sub-second fallback opener recreates the first-turn delay."""
-        from app.api.v1.endpoints.telephony_bridge import _user_first_open_seconds
-        with patch.dict(os.environ, {"TELEPHONY_USER_FIRST_OPEN_S": "0.3"}):
-            assert _user_first_open_seconds() == 2.0
+        # The only public helper that survived simplification.
+        assert hasattr(user_first, "prewarm_llm_pool")
 
-    def test_user_first_fallback_disabled_by_default(self):
-        """Caller-first mode must remain silent unless fallback is explicit."""
-        from app.api.v1.endpoints.telephony_bridge import _user_first_fallback_enabled
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("TELEPHONY_USER_FIRST_FALLBACK_ENABLED", None)
-            assert _user_first_fallback_enabled() is False
+        # Old machinery is gone — these names must NOT be importable
+        # because that's what stops the dead code from quietly running.
+        assert not hasattr(user_first, "_handle_user_first_silence")
+        assert not hasattr(user_first, "_user_first_fallback_enabled")
+        assert not hasattr(user_first, "_user_first_greet_on_pickup_enabled")
+        assert not hasattr(user_first, "_user_first_open_seconds")
 
-    def test_user_first_fallback_opt_in(self):
-        """Fallback greeting is available only as an explicit safety net."""
-        from app.api.v1.endpoints.telephony_bridge import _user_first_fallback_enabled
-        for value in ("1", "true", "yes", "on"):
-            with patch.dict(os.environ, {"TELEPHONY_USER_FIRST_FALLBACK_ENABLED": value}):
-                assert _user_first_fallback_enabled() is True
-
-    def test_caller_first_prompt_is_inbound_style(self):
-        """Caller-first must answer like an inbound call, not an outbound opener."""
+    def test_caller_first_swaps_legacy_outbound_for_inbound_base(self):
+        """When the session has the legacy outbound prompt, caller-first must
+        replace it with the dedicated inbound base — not append on top."""
         from app.api.v1.endpoints.telephony_bridge import (
             _apply_caller_first_inbound_prompt,
         )
+        from app.domain.services.telephony_session_config import (
+            TELEPHONY_ESTIMATION_SYSTEM_PROMPT,
+        )
 
+        legacy_prompt = TELEPHONY_ESTIMATION_SYSTEM_PROMPT.format(
+            agent_name="Sarah",
+            company_name="All States Estimation",
+        )
         call_session = SimpleNamespace(
-            system_prompt="BASE PROMPT",
+            system_prompt=legacy_prompt,
             agent_config=SimpleNamespace(
                 agent_name="Sarah",
                 company_name="All States Estimation",
             ),
         )
-        voice_session = SimpleNamespace(call_session=call_session)
+        voice_session = SimpleNamespace(call_session=call_session, call_id="abc123")
 
         _apply_caller_first_inbound_prompt(voice_session)
 
-        assert "CALLER-FIRST INBOUND MODE" in call_session.system_prompt
-        assert "caller called us" in call_session.system_prompt
-        assert "do not ask whether they have a minute" in call_session.system_prompt
-        assert "Hi, this is Sarah from All States Estimation." in call_session.system_prompt
+        # Outbound persona framing must be gone (the receiver doesn't
+        # introduce themselves as a Business Development Specialist).
+        assert "Business Development Specialist" not in call_session.system_prompt
+        assert "GREETING RESPONSE" not in call_session.system_prompt
+        # Inbound framing must be present and parameterized.
+        assert "answering the phone at All States Estimation" in call_session.system_prompt
+        assert "Hello, All States Estimation, this is Sarah" in call_session.system_prompt
+        assert "The caller called US" in call_session.system_prompt
+
+    def test_caller_first_prepends_directive_to_non_legacy_prompt(self):
+        """Persona-composed and other custom prompts must receive a
+        top-anchored inbound directive so the LLM picks up as the receiver.
+        The persona's own body must remain intact below the directive."""
+        from app.api.v1.endpoints.telephony_bridge import (
+            _apply_caller_first_inbound_prompt,
+        )
+        from app.domain.services.telephony.modes.caller_first import (
+            INBOUND_DIRECTIVE_SENTINEL,
+        )
+
+        persona_body = (
+            "You are Sarah, a friendly customer support specialist at Acme.\n"
+            "Listen carefully and answer questions about our products."
+        )
+        call_session = SimpleNamespace(
+            system_prompt=persona_body,
+            agent_config=SimpleNamespace(agent_name="Sarah", company_name="Acme"),
+        )
+        voice_session = SimpleNamespace(call_session=call_session, call_id="abc123")
+
+        _apply_caller_first_inbound_prompt(voice_session)
+
+        # Directive must land at position 0 to dominate early-token attention.
+        assert call_session.system_prompt.startswith(INBOUND_DIRECTIVE_SENTINEL)
+        # Persona body must survive verbatim below the directive.
+        assert persona_body in call_session.system_prompt
+        # Inbound opening pattern must reference the campaign's actual values.
+        assert "Hello, Acme, this is Sarah" in call_session.system_prompt
+
+    def test_caller_first_directive_prepend_is_idempotent(self):
+        """Calling the prepend path twice must not double-prepend the
+        directive — the sentinel guards against repeated injection."""
+        from app.api.v1.endpoints.telephony_bridge import (
+            _apply_caller_first_inbound_prompt,
+        )
+        from app.domain.services.telephony.modes.caller_first import (
+            INBOUND_DIRECTIVE_SENTINEL,
+        )
+
+        persona_body = "You are Sarah at Acme. Be helpful."
+        call_session = SimpleNamespace(
+            system_prompt=persona_body,
+            agent_config=SimpleNamespace(agent_name="Sarah", company_name="Acme"),
+        )
+        voice_session = SimpleNamespace(call_session=call_session, call_id="abc123")
+
+        _apply_caller_first_inbound_prompt(voice_session)
+        first = call_session.system_prompt
+        _apply_caller_first_inbound_prompt(voice_session)
+
+        assert call_session.system_prompt == first
+        assert call_session.system_prompt.count(INBOUND_DIRECTIVE_SENTINEL) == 1
+
+    def test_caller_first_handles_missing_call_session(self):
+        """Defensive: teardown races can leave voice_session.call_session
+        as None. The function must log-and-return rather than crash."""
+        from app.api.v1.endpoints.telephony_bridge import (
+            _apply_caller_first_inbound_prompt,
+        )
+        voice_session = SimpleNamespace(call_session=None, call_id="abc123")
+        # Must not raise.
+        _apply_caller_first_inbound_prompt(voice_session)
 
     def test_caller_first_prompt_is_idempotent(self):
         from app.api.v1.endpoints.telephony_bridge import (
             _apply_caller_first_inbound_prompt,
         )
+        from app.domain.services.telephony_session_config import (
+            TELEPHONY_ESTIMATION_SYSTEM_PROMPT,
+        )
 
+        legacy_prompt = TELEPHONY_ESTIMATION_SYSTEM_PROMPT.format(
+            agent_name="Sarah", company_name="Acme",
+        )
         call_session = SimpleNamespace(
-            system_prompt="BASE PROMPT",
+            system_prompt=legacy_prompt,
             agent_config=SimpleNamespace(agent_name="Sarah", company_name="Acme"),
         )
-        voice_session = SimpleNamespace(call_session=call_session)
+        voice_session = SimpleNamespace(call_session=call_session, call_id="abc123")
 
         _apply_caller_first_inbound_prompt(voice_session)
+        first_swap = call_session.system_prompt
         _apply_caller_first_inbound_prompt(voice_session)
-
-        assert call_session.system_prompt.count("CALLER-FIRST INBOUND MODE") == 1
+        # The first swap leaves the inbound directive sentinel in the
+        # prompt; the second call detects it and returns without mutating.
+        assert call_session.system_prompt == first_swap
 
     def test_ringing_alias_moves_caller_first_prewarm_state(self):
         """Asterisk trunk channel IDs must consume the planned caller-first session."""

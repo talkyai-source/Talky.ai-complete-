@@ -12,7 +12,8 @@ function read(relFromSrc: string) {
 }
 
 test("new routes use DashboardLayout", () => {
-    assert.match(read("app/settings/connectors/page.tsx"), /<DashboardLayout/);
+    // Connectors moved out of /settings/ to a top-level /connectors route.
+    assert.match(read("app/connectors/page.tsx"), /<DashboardLayout/);
     assert.match(read("app/assistant/page.tsx"), /<DashboardLayout/);
     assert.match(read("app/assistant/actions/page.tsx"), /<DashboardLayout/);
     assert.match(read("app/assistant/meetings/page.tsx"), /<DashboardLayout/);

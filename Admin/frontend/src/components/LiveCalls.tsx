@@ -10,14 +10,18 @@ interface Call {
     duration: string;
 }
 
-// Mock data - will be replaced with actual API call when endpoint is available
-const mockCalls: Call[] = [
-    { id: '123456', tenant: 'ACME Inc.', agent: 'AI Bot', status: 'in-progress', duration: '2:34' },
-    { id: '123469', tenant: 'ACME Inc.', agent: 'AI Bot', status: 'in-progress', duration: '1:15' },
-    { id: '123463', tenant: 'ACME Inc.', agent: 'AI Bot', status: 'queued', duration: '-' },
-    { id: '123456', tenant: 'ACME Inc.', agent: 'John D', status: 'in-progress', duration: '0:45' },
-    { id: '123458', tenant: 'Beta Corp.', agent: 'AI Bot', status: 'failed', duration: '-' },
-];
+function formatDuration(seconds: number): string {
+    if (!Number.isFinite(seconds) || seconds <= 0) return '-';
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function mapApiStatus(s: string): Call['status'] {
+    if (s === 'in_progress' || s === 'initiated' || s === 'ringing') return 'in-progress';
+    if (s === 'queued') return 'queued';
+    return 'failed';
+}
 
 function StatusBadge({ status }: { status: Call['status'] }) {
     const statusConfig = {
@@ -37,7 +41,7 @@ function StatusBadge({ status }: { status: Call['status'] }) {
 }
 
 export function LiveCalls() {
-    const [calls] = useState<Call[]>(mockCalls);
+    const [calls, setCalls] = useState<Call[]>([]);
     const [isPaused, setIsPaused] = useState(false);
     const [pauseLoading, setPauseLoading] = useState(false);
     const [showConfirm, setShowConfirm] = useState(false);
@@ -55,6 +59,37 @@ export function LiveCalls() {
             }
         };
         fetchPauseStatus();
+    }, []);
+
+    // Poll the real /admin/calls/live endpoint every 5s. The previous
+    // version of this widget rendered a hardcoded list of fake calls
+    // (ACME / Beta Corp / etc.) — that's gone.
+    useEffect(() => {
+        let cancelled = false;
+        const fetchOnce = async () => {
+            try {
+                const response = await api.getLiveCalls();
+                if (cancelled) return;
+                const items = response.data ?? [];
+                setCalls(
+                    items.map((c) => ({
+                        id: c.id,
+                        tenant: c.tenant_name || c.tenant_id || '—',
+                        agent: c.campaign_name || 'AI Bot',
+                        status: mapApiStatus(c.status),
+                        duration: formatDuration(c.duration_seconds),
+                    })),
+                );
+            } catch {
+                if (!cancelled) setCalls([]);
+            }
+        };
+        void fetchOnce();
+        const id = window.setInterval(fetchOnce, 5_000);
+        return () => {
+            cancelled = true;
+            window.clearInterval(id);
+        };
     }, []);
 
     const handlePauseToggle = useCallback(async () => {

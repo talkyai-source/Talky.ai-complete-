@@ -46,6 +46,23 @@ import { extractAuthorizationUrl } from "@/lib/connectors-utils";
 import { apiBaseUrl } from "@/lib/env";
 import { getBrowserAuthToken, setBrowserAuthToken } from "@/lib/auth-token";
 
+// Inline DTO for the new /alerts endpoint (avoids a circular import with
+// campaign-performance.ts AlertItem; the hook re-maps to AlertItem).
+type AlertItemDto = {
+    id: string;
+    title: string;
+    description: string | null;
+    severity: string;
+    type: string;
+    status: string;
+    createdAt: string;
+    updatedAt: string;
+    acknowledged: boolean;
+    relatedCampaignIds: string[];
+    metadata: Record<string, unknown> | null;
+    resolutionNotes: string | null;
+};
+
 let _httpClient: ReturnType<typeof createHttpClient> | undefined;
 
 function httpClient() {
@@ -106,6 +123,80 @@ export const backendApi = {
     health: async (signal?: AbortSignal) => {
         const data = await httpClient().request<{ status: string }>({ path: backendEndpoints.health.path, timeoutMs: 2500, signal });
         return data;
+    },
+    events: {
+        list: async (
+            input: { categories?: string[]; severities?: string[]; since?: string; cursor?: string; limit?: number },
+            signal?: AbortSignal,
+        ): Promise<{
+            items: Array<{
+                id: string;
+                category: string;
+                title: string;
+                description: string | null;
+                severity: string | null;
+                related_campaign_id: string | null;
+                related_call_id: string | null;
+                actor_user_id: string | null;
+                metadata: Record<string, unknown> | null;
+                created_at: string;
+            }>;
+            next_cursor: string | null;
+        }> => {
+            // FastAPI repeats the param for list[str] query args; the http-client's
+            // built-in `query` serializer can't emit repeated keys, so build the
+            // query string by hand with URLSearchParams.
+            const params = new URLSearchParams();
+            params.set("limit", String(input.limit ?? 50));
+            if (input.cursor) params.set("cursor", input.cursor);
+            if (input.since) params.set("since", input.since);
+            for (const c of input.categories ?? []) params.append("category", c);
+            for (const s of input.severities ?? []) params.append("severity", s);
+
+            const data = await httpClient().request({
+                path: `${backendEndpoints.eventsList.path}?${params.toString()}`,
+                timeoutMs: 8_000,
+                signal,
+            });
+            return data as never;
+        },
+    },
+    alerts: {
+        list: async (
+            input: { severity?: string[]; status?: string[]; alert_type?: string[]; cursor?: string; limit?: number },
+            signal?: AbortSignal,
+        ) => {
+            const params = new URLSearchParams();
+            params.set("limit", String(input.limit ?? 50));
+            if (input.cursor) params.set("cursor", input.cursor);
+            for (const v of input.severity ?? []) params.append("severity", v);
+            for (const v of input.status ?? []) params.append("status", v);
+            for (const v of input.alert_type ?? []) params.append("alert_type", v);
+            const data = await httpClient().request({
+                path: `${backendEndpoints.alertsList.path}?${params.toString()}`,
+                timeoutMs: 8_000,
+                signal,
+            });
+            return data as { items: AlertItemDto[]; next_cursor: string | null };
+        },
+        ack: async (alertId: string, note?: string) => {
+            const data = await httpClient().request({
+                path: backendEndpoints.alertsAck.path.replace("{alert_id}", encodeURIComponent(alertId)),
+                method: "POST",
+                body: { note },
+                timeoutMs: 8_000,
+            });
+            return data as AlertItemDto;
+        },
+        resolve: async (alertId: string, resolution_notes: string) => {
+            const data = await httpClient().request({
+                path: backendEndpoints.alertsResolve.path.replace("{alert_id}", encodeURIComponent(alertId)),
+                method: "POST",
+                body: { resolution_notes },
+                timeoutMs: 8_000,
+            });
+            return data as AlertItemDto;
+        },
     },
     connectors: {
         list: async (signal?: AbortSignal): Promise<ListResponse<Connector>> => {

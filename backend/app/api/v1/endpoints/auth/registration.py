@@ -136,6 +136,11 @@ async def register(
             verification_token_expires,
         )
 
+        # Seed the platform-default SIP trunk (Blaze Digitel) so the new
+        # tenant can place outbound calls immediately.
+        from app.services.scripts.seed_platform_sip_trunk import seed_for_tenant
+        await seed_for_tenant(conn, str(tenant["id"]))
+
         # --- create server-side session ----------------------------------------
         # Day 5: Pass request for device fingerprinting
         ip = get_client_ip(request)

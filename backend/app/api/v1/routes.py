@@ -41,6 +41,7 @@ from app.api.v1.endpoints.telephony_concurrency import (
 )
 from app.api.v1.endpoints.telephony_runtime import router as telephony_runtime_router
 from app.api.v1.endpoints.telephony_sip import router as telephony_sip_router
+from app.api.v1.endpoints.telephony_providers import router as telephony_providers_router
 from app.api.v1.endpoints.dnc import router as dnc_router
 from app.api.v1.endpoints.tenant_ai_credentials import (
     router as tenant_ai_credentials_router,
@@ -53,6 +54,8 @@ from app.api.v1.endpoints.webhooks_secure import router as webhooks_secure_route
 # --- Day 8: Audit Logs + Suspension + Secrets endpoints ---
 from app.api.v1.endpoints.audit_logs import router as audit_logs_router
 from app.api.v1.endpoints.security_events import router as security_events_router
+from app.api.v1.endpoints.stream_events import router as stream_events_router
+from app.api.v1.endpoints.alerts import router as alerts_router
 from app.api.v1.endpoints.suspensions import router as suspensions_router
 from app.api.v1.endpoints.secrets import router as secrets_router
 from app.api.v1.endpoints.emergency_access import router as emergency_access_router
@@ -79,6 +82,7 @@ api_router.include_router(ai_options_router)
 api_router.include_router(telephony_bridge_router)
 api_router.include_router(vonage_bridge_router)
 api_router.include_router(telephony_sip_router)
+api_router.include_router(telephony_providers_router)
 api_router.include_router(telephony_runtime_router)
 api_router.include_router(telephony_concurrency_router)
 api_router.include_router(tenant_phone_numbers_router)
@@ -96,6 +100,8 @@ api_router.include_router(security_events_router)
 api_router.include_router(suspensions_router)
 api_router.include_router(secrets_router)
 api_router.include_router(emergency_access_router)
+api_router.include_router(stream_events_router)
+api_router.include_router(alerts_router)
 
 # Day 7: Call Guard + Abuse Monitoring
 from app.api.v1.endpoints.call_limits import router as call_limits_router

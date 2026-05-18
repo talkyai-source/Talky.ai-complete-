@@ -239,18 +239,43 @@ class CallService:
             logger.error(f"Failed to update lead {lead_id}: {e}")
     
     def _update_campaign_counters(self, campaign_id: str, outcome: CallOutcome) -> None:
-        """Update campaign completion/failure counters via PostgreSQL RPC."""
+        """Update campaign completion/failure counters via PostgreSQL RPC.
+
+        Counter rules — every terminal outcome bumps exactly one counter so
+        the campaign progress bar reflects "we tried this lead":
+
+          * GOAL_ACHIEVED                              -> calls_completed
+          * ANSWERED, GOAL_NOT_ACHIEVED, VOICEMAIL,
+            BUSY, NO_ANSWER, TIMEOUT, FAILED           -> calls_completed
+            (we DID connect / attempt — it counts toward the success-rate
+            denominator but not the success-rate numerator unless the
+            agent flags GOAL_ACHIEVED)
+          * SPAM, INVALID, UNAVAILABLE, DISCONNECTED,
+            REJECTED                                    -> calls_failed
+            (could not reach the lead at all — distinct from "we tried")
+
+        Previously this method silently dropped retryable outcomes, which
+        left calls_completed / calls_failed at 0 forever for ordinary
+        traffic and made the dashboard's progress_pct / success_rate_pct
+        look like nothing was happening.
+        """
+        # NON_RETRYABLE_OUTCOMES historically included GOAL_ACHIEVED
+        # (because we don't retry a successful call); split that out so
+        # we can route GOAL_ACHIEVED to calls_completed without it
+        # falling through to the calls_failed branch below.
+        non_reachable = NON_RETRYABLE_OUTCOMES - {CallOutcome.GOAL_ACHIEVED}
         try:
-            if outcome == CallOutcome.GOAL_ACHIEVED:
-                self._db_client.rpc("increment_campaign_counter", {
-                    "p_campaign_id": campaign_id,
-                    "p_counter": "calls_completed"
-                }).execute()
-            elif outcome in NON_RETRYABLE_OUTCOMES:
-                self._db_client.rpc("increment_campaign_counter", {
-                    "p_campaign_id": campaign_id,
-                    "p_counter": "calls_failed"
-                }).execute()
+            if outcome in non_reachable:
+                counter = "calls_failed"
+            else:
+                # Everything else (GOAL_ACHIEVED, ANSWERED, retryable
+                # outcomes, GOAL_NOT_ACHIEVED) counts toward the
+                # "calls we executed" bucket.
+                counter = "calls_completed"
+            self._db_client.rpc("increment_campaign_counter", {
+                "p_campaign_id": campaign_id,
+                "p_counter": counter,
+            }).execute()
         except Exception as e:
             logger.error(f"Failed to update campaign counters for {campaign_id}: {e}")
     

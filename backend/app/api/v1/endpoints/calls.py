@@ -99,23 +99,25 @@ async def list_calls(
         where = " AND ".join(conditions)
 
         async with db_client.pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""
-                SELECT c.id, c.talklee_call_id, c.created_at, c.phone_number,
-                       c.status, c.duration_seconds, c.outcome,
-                       camp.name AS campaign_name
-                FROM calls c
-                LEFT JOIN campaigns camp ON camp.id = c.campaign_id
-                WHERE {where}
-                ORDER BY c.created_at DESC
-                LIMIT ${idx} OFFSET ${idx + 1}
-                """,
-                *params, page_size, offset,
-            )
-            total = await conn.fetchval(
-                f"SELECT COUNT(*) FROM calls c WHERE {where}",
-                *params,
-            )
+            async with conn.transaction():
+                await conn.execute("SET LOCAL app.bypass_rls = 'true'")
+                rows = await conn.fetch(
+                    f"""
+                    SELECT c.id, c.talklee_call_id, c.created_at, c.phone_number,
+                           c.status, c.duration_seconds, c.outcome,
+                           camp.name AS campaign_name
+                    FROM calls c
+                    LEFT JOIN campaigns camp ON camp.id = c.campaign_id
+                    WHERE {where}
+                    ORDER BY c.created_at DESC
+                    LIMIT ${idx} OFFSET ${idx + 1}
+                    """,
+                    *params, page_size, offset,
+                )
+                total = await conn.fetchval(
+                    f"SELECT COUNT(*) FROM calls c WHERE {where}",
+                    *params,
+                )
 
         items = []
         for row in rows:

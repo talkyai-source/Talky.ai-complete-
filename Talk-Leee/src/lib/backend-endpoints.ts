@@ -5,6 +5,11 @@ export const backendEndpoints = {
     authSessionsList: { method: "GET", path: "/auth/sessions", tags: ["Auth"], summary: "List active sessions" },
     authSessionsRevoke: { method: "POST", path: "/auth/sessions/revoke", tags: ["Auth"], summary: "Revoke a session" },
 
+    eventsList: { method: "GET", path: "/events", tags: ["Events"], summary: "List stream events (paged)" },
+    alertsList: { method: "GET", path: "/alerts", tags: ["Alerts"], summary: "List operational alerts" },
+    alertsAck: { method: "POST", path: "/alerts/{alert_id}/ack", tags: ["Alerts"], summary: "Acknowledge alert" },
+    alertsResolve: { method: "POST", path: "/alerts/{alert_id}/resolve", tags: ["Alerts"], summary: "Resolve alert" },
+
     connectorsList: { method: "GET", path: "/connectors", tags: ["Connectors"], summary: "List connectors" },
     connectorsCreate: { method: "POST", path: "/connectors", tags: ["Connectors"], summary: "Create connector" },
     connectorsStatus: { method: "GET", path: "/connectors/status", tags: ["Connectors"], summary: "List connector statuses" },

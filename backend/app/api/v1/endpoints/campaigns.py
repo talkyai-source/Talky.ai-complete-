@@ -24,9 +24,17 @@ from app.domain.services.campaign_service import (
     CampaignService, CampaignError, CampaignNotFoundError, CampaignStateError
 )
 from app.domain.services.phone_number_normalizer import normalize_phone_number
-from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
+from app.domain.services.event_emitter import emit_event
+from app.api.v1.dependencies import (
+    get_db_client,
+    get_db_read_client,
+    get_current_user,
+    CurrentUser,
+)
 from app.api.v1.schemas.campaigns import (
     CampaignCreateRequest,
+    CampaignPromptPreviewRequest,
+    CampaignPromptPreviewResponse,
     CampaignStartRequest,
     CampaignUpdateRequest,
     ContactCreate,
@@ -86,7 +94,10 @@ def _build_validated_script_config(
 async def list_campaigns(
     request: Request,
     current_user: CurrentUser = Depends(get_current_user),
-    db_client: Client = Depends(get_db_client),
+    # Phase 3.3 — read-only endpoint routes to the replica pool when
+    # READ_DATABASE_URL is configured; falls back to the primary pool
+    # otherwise (no behaviour change in single-DB deploys).
+    db_client: Client = Depends(get_db_read_client),
 ):
     """List all campaigns belonging to the current user's tenant.
 
@@ -114,6 +125,68 @@ async def list_campaigns(
     except Exception as e:
         logger.error(f"Error listing campaigns: {e}")
         raise HTTPException(status_code=500, detail="Failed to list campaigns")
+
+
+@router.post(
+    "/preview-prompt",
+    response_model=CampaignPromptPreviewResponse,
+    dependencies=[Depends(rate_limit_dependency)],
+)
+async def preview_prompt(
+    body: CampaignPromptPreviewRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Render the system prompt + TTS opener for a campaign draft (T4-B4).
+
+    Read-only — never writes to the DB. Operators use this to see
+    exactly what the AI will be told before starting a campaign,
+    catching slot typos, missing pronunciations, and direction
+    mismatches without burning a real call.
+
+    Authentication is required (rate-limited; same dependency stack
+    as the create endpoint), but no tenant filter is applied because
+    the request body carries the entire campaign draft. Returns
+    400 with a clear message when ``compose_prompt`` rejects the
+    inputs (unknown persona, missing slot, etc.) — same error class
+    the create / update flows surface.
+    """
+    from app.domain.services.telephony_session_config import (
+        build_persona_greeting,
+    )
+    from app.services.scripts.prompts.composer import (
+        PromptCompositionError,
+        compose_prompt,
+    )
+    from app.services.scripts.prompts.direction import (
+        INBOUND_DIRECTIVE_SENTINEL,
+    )
+
+    try:
+        system_prompt = compose_prompt(
+            persona_type=body.persona_type,
+            agent_name=body.agent_name,
+            company_name=body.company_name,
+            campaign_slots=body.campaign_slots,
+            additional_instructions=body.additional_instructions,
+            direction=body.direction,
+        )
+    except PromptCompositionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    greeting = build_persona_greeting(
+        persona_type=body.persona_type,
+        agent_name=body.agent_name,
+        company_name=body.company_name,
+        direction=body.direction,
+    )
+
+    return CampaignPromptPreviewResponse(
+        system_prompt=system_prompt,
+        greeting=greeting,
+        direction=body.direction,
+        has_inbound_directive=INBOUND_DIRECTIVE_SENTINEL in system_prompt,
+        prompt_chars=len(system_prompt),
+    )
 
 
 @router.post("/", dependencies=[Depends(rate_limit_dependency)])
@@ -212,7 +285,8 @@ async def get_campaign(
     campaign_id: str,
     request: Request,
     current_user: CurrentUser = Depends(get_current_user),
-    db_client: Client = Depends(get_db_client),
+    # Phase 3.3 — read-only; routes to replica pool when configured.
+    db_client: Client = Depends(get_db_read_client),
 ):
     """Get campaign details — delegates to CampaignService.
 
@@ -338,18 +412,31 @@ async def start_campaign(
     campaign_id: str,
     request: Request,
     start_request: Optional[CampaignStartRequest] = None,
+    current_user: CurrentUser = Depends(get_current_user),
     idempotency_key: Optional[str] = Depends(idempotency_dependency),
     db_client: Client = Depends(get_db_client)
 ):
     """
     Start a campaign — delegates to CampaignService.
-    
+
+    ``get_current_user`` is required so the per-request RLS tenant
+    context (``app.current_tenant_id``) is set on the connection;
+    without it the campaign-existence SELECT returns zero rows and
+    the endpoint 404s even though the campaign is owned by the
+    calling user. Same fix as ``get_campaign`` and the sibling
+    stats / contacts / jobs endpoints.
+
     Validates, enqueues jobs, and updates status atomically.
     """
     try:
         service = _get_campaign_service(db_client)
-        
-        tenant_id = (start_request.tenant_id if start_request else None)
+
+        # Trust the authenticated user's tenant_id over any value the
+        # client ships in the body — clients shouldn't be able to start
+        # someone else's campaign by spoofing tenant_id in JSON.
+        tenant_id = current_user.tenant_id or (
+            start_request.tenant_id if start_request else None
+        )
         priority_override = (start_request.priority_override if start_request else None)
         first_speaker = (start_request.first_speaker if start_request else "agent")
 
@@ -370,6 +457,19 @@ async def start_campaign(
         # Store for idempotency
         if idempotency_key:
             await store_idempotent_response(request, 200, json.dumps(response_data))
+
+        if tenant_id:
+            async with db_client.pool.acquire() as conn:
+                await emit_event(
+                    conn,
+                    tenant_id=tenant_id,
+                    category="campaign",
+                    title="Campaign started",
+                    description=f"Campaign began processing — {result.jobs_enqueued} jobs queued.",
+                    related_campaign_id=str(result.campaign_id),
+                    actor_user_id=current_user.id,
+                    metadata={"jobs_enqueued": result.jobs_enqueued},
+                )
 
         return response_data
     except CampaignNotFoundError:
@@ -396,12 +496,32 @@ async def start_campaign(
 async def pause_campaign(
     campaign_id: str,
     request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)
 ):
-    """Pause a campaign — delegates to CampaignService."""
+    """Pause a campaign — delegates to CampaignService.
+
+    ``get_current_user`` is required so the per-request RLS tenant
+    context is set; without it the campaign lookup inside the service
+    returns nothing and the user sees a spurious 404. Same fix as
+    ``start_campaign`` / ``stop_campaign``.
+    """
     try:
         service = _get_campaign_service(db_client)
         campaign = await service.pause_campaign(campaign_id)
+
+        if current_user.tenant_id:
+            async with db_client.pool.acquire() as conn:
+                await emit_event(
+                    conn,
+                    tenant_id=current_user.tenant_id,
+                    category="user_action",
+                    title="Campaign paused",
+                    description="Operator paused the campaign.",
+                    related_campaign_id=str(campaign_id),
+                    actor_user_id=current_user.id,
+                )
+
         return {"message": f"Campaign {campaign_id} paused", "campaign": campaign}
     except CampaignNotFoundError:
         raise HTTPException(status_code=404, detail="Campaign not found")
@@ -414,11 +534,17 @@ async def pause_campaign(
 async def stop_campaign(
     campaign_id: str,
     clear_queue: bool = Query(False, description="Clear pending jobs from queue"),
+    current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)
 ):
     """
     Stop a campaign — delegates to CampaignService.
-    
+
+    ``get_current_user`` is required so the per-request RLS tenant
+    context is set; without it the campaign lookup returns nothing
+    and the user sees a spurious 404. Same fix as ``start_campaign``
+    / ``pause_campaign``.
+
     Args:
         campaign_id: Campaign UUID
         clear_queue: If True, mark pending jobs as skipped
@@ -426,6 +552,21 @@ async def stop_campaign(
     try:
         service = _get_campaign_service(db_client)
         campaign = await service.stop_campaign(campaign_id, clear_queue=clear_queue)
+
+        if current_user.tenant_id:
+            async with db_client.pool.acquire() as conn:
+                await emit_event(
+                    conn,
+                    tenant_id=current_user.tenant_id,
+                    category="user_action",
+                    title="Campaign stopped",
+                    description="Operator stopped the campaign."
+                                + (" Pending jobs cleared." if clear_queue else ""),
+                    related_campaign_id=str(campaign_id),
+                    actor_user_id=current_user.id,
+                    metadata={"clear_queue": clear_queue},
+                )
+
         return {
             "message": f"Campaign {campaign_id} stopped",
             "campaign": campaign
@@ -443,10 +584,21 @@ async def get_campaign_jobs(
     status: Optional[str] = Query(None, description="Filter by job status"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)
 ):
-    """Get dialer jobs for a campaign"""
+    """Get dialer jobs for a campaign.
+
+    ``get_current_user`` is required so the per-request RLS tenant
+    context is set on the connection; without it the SELECT returns
+    zero rows. Same fix as the sibling stats / contacts endpoints.
+    """
     try:
+        # RLS now scopes to the current tenant automatically. If
+        # current_user has no tenant_id, return empty rather than 500.
+        if not current_user.tenant_id:
+            return {"jobs": [], "total": 0, "page": page, "page_size": page_size}
+
         query = db_client.table("dialer_jobs").select(
             "*", count="exact"
         ).eq("campaign_id", campaign_id)
@@ -471,16 +623,33 @@ async def get_campaign_jobs(
 @router.get("/{campaign_id}/stats")
 async def get_campaign_stats(
     campaign_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)
 ):
-    """Get statistics for a campaign"""
+    """Get statistics for a campaign.
+
+    ``get_current_user`` is required so the per-request RLS tenant
+    context (``app.current_tenant_id``) is set on the connection;
+    without it the SELECT returns zero rows and the detail page's
+    Promise.all bailout shows a 404 — even though the campaign exists
+    in the DB. This is the same fix already applied to ``get_campaign``;
+    keep stats / contacts / jobs in sync.
+    """
     try:
-        # Get campaign
+        # Get campaign — RLS scopes to the current tenant automatically
+        # once get_current_user is in the dependency chain.
         campaign_response = db_client.table("campaigns").select("*").eq("id", campaign_id).execute()
         if not campaign_response.data:
             raise HTTPException(status_code=404, detail="Campaign not found")
-        
+
         campaign = campaign_response.data[0]
+        # Defense-in-depth tenant check matching ``get_campaign`` —
+        # protects against a future RLS misconfiguration leaking other
+        # tenants' rows through this endpoint.
+        row_tenant = campaign.get("tenant_id")
+        row_tenant_str = str(row_tenant) if row_tenant is not None else None
+        if current_user.tenant_id and row_tenant_str not in (None, current_user.tenant_id):
+            raise HTTPException(status_code=404, detail="Campaign not found")
         
         # Get job counts by status
         jobs_response = db_client.table("dialer_jobs").select("status").eq("campaign_id", campaign_id).execute()
@@ -634,26 +803,39 @@ async def list_campaign_contacts(
     page_size: int = Query(50, ge=1, le=100, description="Items per page"),
     status: Optional[str] = Query(None, description="Filter by status (pending, called, completed, dnc)"),
     last_call_result: Optional[str] = Query(None, description="Filter by last call result"),
+    current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)
 ):
     """
     List all contacts (leads) for a campaign with pagination.
-    
+
     Day 9 Endpoint: GET /campaigns/{id}/contacts
-    
+
+    ``get_current_user`` is required so the per-request RLS tenant
+    context (``app.current_tenant_id``) is set on the connection;
+    without it the campaign-existence SELECT returns zero rows and the
+    endpoint 404s even though the campaign is owned by the calling
+    user. Same fix as ``get_campaign`` and ``get_campaign_stats``.
+
     Features:
     - Paginated response
     - Filter by status (pending, called, completed, dnc)
     - Filter by last_call_result (pending, answered, no_answer, busy, failed, voicemail, goal_achieved)
     - Ordered by created_at descending
-    
+
     Returns:
         Paginated list of contacts with their call status
     """
     try:
-        # 1. Validate campaign exists
-        campaign_response = db_client.table("campaigns").select("id").eq("id", campaign_id).execute()
+        # 1. Validate campaign exists. RLS scopes to the current tenant
+        # automatically now that get_current_user is in the chain.
+        campaign_response = db_client.table("campaigns").select("id, tenant_id").eq("id", campaign_id).execute()
         if not campaign_response.data:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+        # Defense-in-depth tenant check.
+        row_tenant = campaign_response.data[0].get("tenant_id")
+        row_tenant_str = str(row_tenant) if row_tenant is not None else None
+        if current_user.tenant_id and row_tenant_str not in (None, current_user.tenant_id):
             raise HTTPException(status_code=404, detail="Campaign not found")
         
         # 2. Build query
@@ -693,11 +875,17 @@ async def list_campaign_contacts(
 async def remove_contact_from_campaign(
     campaign_id: str,
     contact_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)
 ):
     """
     Remove a contact from a campaign (soft delete).
-    
+
+    ``get_current_user`` is required so the per-request RLS tenant
+    context is set; without it the contact existence SELECT returns
+    zero rows and the endpoint 404s. Same fix as the sibling list /
+    add contact endpoints.
+
     Sets status to 'deleted' rather than actually deleting,
     preserving history for analytics.
     """

@@ -279,12 +279,97 @@ class TestLatencyTracker:
         assert snapshot["response_start_latency_ms"][50] == pytest.approx(500, abs=1)
 
 
+class TestFirstTurnLatencyLog:
+    """Tests for log_first_turn_if_applicable — the once-per-call signal
+    that operators use to slice cold-start latency from steady state."""
+
+    def _completed_metrics(self, tracker: LatencyTracker, call_id: str) -> None:
+        """Walk a call through the marks needed for a 'completed' first turn."""
+        tracker.start_turn(call_id, turn_id=0)
+        m = tracker.get_metrics(call_id)
+        # Use synthetic timestamps so the log-line numbers are deterministic.
+        base = datetime.utcnow()
+        m.speech_end_time = base
+        m.llm_start_time = base + timedelta(milliseconds=10)
+        m.llm_first_token_time = base + timedelta(milliseconds=120)
+        m.llm_end_time = base + timedelta(milliseconds=300)
+        m.tts_start_time = base + timedelta(milliseconds=130)
+        m.tts_first_chunk_time = base + timedelta(milliseconds=250)
+        m.tts_end_time = base + timedelta(milliseconds=600)
+        m.audio_start_time = base + timedelta(milliseconds=260)
+        tracker.mark_completed(call_id)
+
+    def test_emits_once_then_silent(self, caplog):
+        tracker = LatencyTracker()
+        self._completed_metrics(tracker, "call-x")
+
+        with caplog.at_level("INFO", logger="app.domain.services.latency_tracker"):
+            tracker.log_first_turn_if_applicable(
+                "call-x", mode="user", prompt_kind="inbound",
+            )
+            tracker.log_first_turn_if_applicable(
+                "call-x", mode="user", prompt_kind="inbound",
+            )
+
+        first_turn_logs = [r for r in caplog.records if "first_turn_latency" in r.getMessage()]
+        assert len(first_turn_logs) == 1
+        msg = first_turn_logs[0].getMessage()
+        assert "mode=user" in msg
+        assert "prompt_kind=inbound" in msg
+        # Latency math: speech_end → audio_start = 260ms.
+        assert "speech_to_audio_ms=260" in msg
+
+    def test_skips_interrupted_turn(self, caplog):
+        tracker = LatencyTracker()
+        self._completed_metrics(tracker, "call-y")
+        tracker.mark_interrupted("call-y", reason="barge_in")  # overrides outcome
+
+        with caplog.at_level("INFO", logger="app.domain.services.latency_tracker"):
+            tracker.log_first_turn_if_applicable(
+                "call-y", mode="agent", prompt_kind="outbound",
+            )
+
+        first_turn_logs = [r for r in caplog.records if "first_turn_latency" in r.getMessage()]
+        assert first_turn_logs == []
+
+    def test_skips_when_no_audio_was_sent(self, caplog):
+        """A turn that produced no TTS audio is not first-turn-loggable —
+        we want the signal to mean 'caller actually heard a reply'."""
+        tracker = LatencyTracker()
+        tracker.start_turn("call-z", turn_id=0)
+        tracker.mark_speech_end("call-z")
+        tracker.mark_completed("call-z")  # but no audio_start set
+
+        with caplog.at_level("INFO", logger="app.domain.services.latency_tracker"):
+            tracker.log_first_turn_if_applicable(
+                "call-z", mode="user", prompt_kind="outbound",
+            )
+
+        first_turn_logs = [r for r in caplog.records if "first_turn_latency" in r.getMessage()]
+        assert first_turn_logs == []
+
+    def test_cleanup_call_resets_first_turn_state(self, caplog):
+        """A recycled call_id (rare but possible) must be allowed to log
+        again after cleanup_call clears its bookkeeping."""
+        tracker = LatencyTracker()
+        self._completed_metrics(tracker, "call-r")
+
+        with caplog.at_level("INFO", logger="app.domain.services.latency_tracker"):
+            tracker.log_first_turn_if_applicable("call-r", mode="user", prompt_kind="inbound")
+            tracker.cleanup_call("call-r")
+            self._completed_metrics(tracker, "call-r")
+            tracker.log_first_turn_if_applicable("call-r", mode="user", prompt_kind="inbound")
+
+        first_turn_logs = [r for r in caplog.records if "first_turn_latency" in r.getMessage()]
+        assert len(first_turn_logs) == 2
+
+
 class TestGlobalTracker:
     """Tests for global tracker singleton."""
-    
+
     def test_get_latency_tracker_returns_same_instance(self):
         """Test singleton pattern."""
         tracker1 = get_latency_tracker()
         tracker2 = get_latency_tracker()
-        
+
         assert tracker1 is tracker2

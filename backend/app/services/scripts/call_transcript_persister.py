@@ -1,5 +1,6 @@
-"""Bind a telephony VoiceSession to the dialer's calls row and persist the
-transcript on hangup.
+"""Bind a telephony VoiceSession to the dialer's calls row, persist the
+transcript on hangup, and record the call's terminal metrics so dashboard
+minute counts deduct correctly.
 
 Why this exists
 ---------------
@@ -36,8 +37,12 @@ Public API
       Final persist: reads the buffer, writes to calls + transcripts tables,
       clears the buffer. Idempotent; safe to call multiple times.
 
-Both functions swallow their own errors (log and continue) so a transient
-DB hiccup cannot tear down an otherwise-healthy telephony call.
+Both functions swallow their own errors (log and continue) so a
+transient DB hiccup cannot tear down an otherwise-healthy telephony call.
+
+The outcome+counter+lead+dialer_jobs writes that used to live in a
+sister `save_call_metrics_on_hangup` helper now run through
+`call_service.handle_call_status` from `lifecycle._on_call_ended`.
 """
 from __future__ import annotations
 
@@ -45,6 +50,7 @@ import inspect
 import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -85,20 +91,36 @@ async def bind_telephony_call(
     Does NOT modify voice_session.call_id or voice_session.call_session.call_id
     so STT/TTS/media-gateway connection maps continue to work.
 
+    The lookup runs with RLS bypass on a fresh connection — there is no
+    request-scoped tenant context at the moment a call is answered (the
+    PBX channel hasn't been mapped to a tenant yet, that's literally
+    what this function exists to do). Without the bypass the policy
+    `tenant_id = current_setting('app.current_tenant_id')::UUID`
+    matches zero rows and every call ends up as "non-campaign / test"
+    in the eyes of the persister, silently dropping its transcript.
+
     Returns:
         CallBinding if the dialer row exists.
         None if no row matches (non-campaign / test call) or lookup fails.
         Never raises.
     """
+    pool = getattr(db_client, "pool", None)
+    if pool is None:
+        logger.warning("bind_telephony_call no pool on db_client; skipping")
+        return None
     try:
-        query = (
-            db_client.table("calls")
-            .select("id, tenant_id, campaign_id")
-            .eq("external_call_uuid", pbx_channel_id)
-            .limit(1)
-            .execute()
-        )
-        response = await _maybe_await(query)
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("SET LOCAL app.bypass_rls = 'true'")
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, tenant_id, campaign_id
+                    FROM   calls
+                    WHERE  external_call_uuid = $1
+                    LIMIT  1
+                    """,
+                    pbx_channel_id,
+                )
     except Exception as exc:
         logger.warning(
             "bind_telephony_call lookup failed pbx=%s err=%s",
@@ -107,8 +129,7 @@ async def bind_telephony_call(
         )
         return None
 
-    data = getattr(response, "data", None)
-    if not data:
+    if not row:
         logger.debug(
             "bind_telephony_call no dialer row for pbx=%s "
             "(non-campaign test call?)",
@@ -116,13 +137,12 @@ async def bind_telephony_call(
         )
         return None
 
-    row = data[0] if isinstance(data, list) else data
-    internal_call_id_raw = row.get("id")
+    internal_call_id_raw = row["id"]
     if not internal_call_id_raw:
         return None
     internal_call_id = str(internal_call_id_raw)
-    tenant_id_raw = row.get("tenant_id")
-    campaign_id_raw = row.get("campaign_id")
+    tenant_id_raw = row["tenant_id"]
+    campaign_id_raw = row["campaign_id"]
 
     tenant_id = str(tenant_id_raw) if tenant_id_raw else None
     campaign_id = str(campaign_id_raw) if campaign_id_raw else None
@@ -230,36 +250,45 @@ async def save_call_transcript_on_hangup(
 
     try:
         async with db_pool.acquire() as conn:
-            await conn.execute(
-                """
-                UPDATE calls
-                SET transcript = $1,
-                    transcript_json = $2::jsonb,
-                    updated_at = NOW()
-                WHERE id = $3
-                """,
-                text,
-                turns_jsonb,
-                dialer_uuid,
-            )
-            await conn.execute(
-                """
-                INSERT INTO transcripts (
-                    call_id, tenant_id, turns, full_text,
-                    word_count, turn_count,
-                    user_word_count, assistant_word_count
-                ) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8)
-                ON CONFLICT DO NOTHING
-                """,
-                dialer_uuid,
-                tenant_uuid,
-                turns_jsonb,
-                text,
-                word_count,
-                turn_count,
-                user_words,
-                assistant_words,
-            )
+            # The hangup hook is a platform-internal write — it has no
+            # request-scoped JWT to derive `app.current_tenant_id` from,
+            # so without bypassing RLS the calls/transcripts policies
+            # ("tenant_id = current_setting('app.current_tenant_id')")
+            # silently reject every UPDATE/INSERT and the transcript
+            # never lands. SET LOCAL keeps the bypass scoped to this
+            # implicit transaction only.
+            async with conn.transaction():
+                await conn.execute("SET LOCAL app.bypass_rls = 'true'")
+                await conn.execute(
+                    """
+                    UPDATE calls
+                    SET transcript = $1,
+                        transcript_json = $2::jsonb,
+                        updated_at = NOW()
+                    WHERE id = $3
+                    """,
+                    text,
+                    turns_jsonb,
+                    dialer_uuid,
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO transcripts (
+                        call_id, tenant_id, turns, full_text,
+                        word_count, turn_count,
+                        user_word_count, assistant_word_count
+                    ) VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8)
+                    ON CONFLICT DO NOTHING
+                    """,
+                    dialer_uuid,
+                    tenant_uuid,
+                    turns_jsonb,
+                    text,
+                    word_count,
+                    turn_count,
+                    user_words,
+                    assistant_words,
+                )
         logger.info(
             "save_call_transcript_on_hangup persisted calls.id=%s turns=%d words=%d",
             dialer_call_id[:8], turn_count, word_count,
@@ -279,3 +308,34 @@ def _safe_clear(transcript_service, session_call_id: str) -> None:
         transcript_service.clear_buffer(session_call_id)
     except Exception:
         pass
+
+
+def _compute_duration_seconds(voice_session) -> int:
+    """Wall-clock duration from session start → now, floored to int seconds.
+
+    `voice_session.call_session.started_at` is set when the session is
+    created and is timezone-naive UTC (Pydantic default_factory uses
+    `datetime.utcnow`); we coerce both sides to UTC-aware so the
+    subtraction is always defined."""
+    cs = getattr(voice_session, "call_session", None)
+    started_at = getattr(cs, "started_at", None) if cs is not None else None
+    if not isinstance(started_at, datetime):
+        return 0
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+    delta = datetime.now(timezone.utc) - started_at
+    secs = int(delta.total_seconds())
+    return max(0, secs)
+
+
+# `save_call_metrics_on_hangup` was removed — it was a stop-gap that
+# wrote a hardcoded outcome="completed" via a side-channel UPDATE. The
+# proper write path now lives in `lifecycle._on_call_ended` →
+# `outcome_resolver.resolve_call_outcome` → `call_service.handle_call_status`,
+# which:
+#   * runs the atomic update_call_status RPC (calls + leads in one txn),
+#   * dispatches _update_campaign_counters to bump campaign aggregates,
+#   * dispatches _handle_job_completion to retry / finalise the dialer
+#     job.
+# `_compute_duration_seconds()` above is kept — the lifecycle hook
+# still uses it to pass a duration to handle_call_status.

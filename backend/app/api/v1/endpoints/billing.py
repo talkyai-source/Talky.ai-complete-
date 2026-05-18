@@ -4,12 +4,14 @@ Handles Stripe subscription management and payment operations
 """
 import os
 import logging
+from datetime import datetime, timedelta, timezone
+from uuid import UUID
 from fastapi import APIRouter, HTTPException, Depends, Request, status
 from pydantic import BaseModel
-from typing import Optional
+from typing import Any, List, Optional
 from app.core.postgres_adapter import Client
 
-from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser, get_audit_logger
+from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser, get_audit_logger, get_db_pool
 from app.domain.services.billing_service import BillingService
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 
@@ -197,7 +199,8 @@ async def stripe_webhook(
 @router.get("/subscription", response_model=SubscriptionResponse)
 async def get_subscription(
     current_user: CurrentUser = Depends(get_current_user),
-    billing: BillingService = Depends(get_billing_service)
+    billing: BillingService = Depends(get_billing_service),
+    db_pool=Depends(get_db_pool),
 ):
     """
     Get the current user's subscription status.
@@ -209,18 +212,33 @@ async def get_subscription(
     """
     try:
         subscription = await billing.get_subscription(current_user.tenant_id)
-        
+
+        # Live `minutes_used` from the calls table; matches the dashboard
+        # endpoint and the auth/profile path.
+        from app.services.scripts.tenant_minutes import compute_tenant_minutes_used
+        minutes_used = await compute_tenant_minutes_used(
+            db_pool,
+            tenant_id=current_user.tenant_id,
+        )
+
         if not subscription:
+            allocated = (
+                current_user.minutes_remaining + minutes_used
+                if current_user.minutes_remaining is not None
+                else 0
+            )
             return SubscriptionResponse(
                 status="inactive",
-                minutes_allocated=current_user.minutes_remaining,
-                minutes_used=0,
-                minutes_remaining=current_user.minutes_remaining
+                minutes_allocated=allocated,
+                minutes_used=minutes_used,
+                minutes_remaining=current_user.minutes_remaining,
             )
-        
+
         # Get plan info
         plan = subscription.get("plans") or subscription.get("plan") or {}
-        
+        allocated = int(plan.get("minutes", 0) or 0) if plan else 0
+        minutes_remaining = max(0, allocated - minutes_used)
+
         return SubscriptionResponse(
             status=subscription.get("status", "unknown"),
             plan_id=subscription.get("plan_id"),
@@ -228,9 +246,9 @@ async def get_subscription(
             current_period_start=str(subscription.get("current_period_start")) if subscription.get("current_period_start") else None,
             current_period_end=str(subscription.get("current_period_end")) if subscription.get("current_period_end") else None,
             cancel_at_period_end=bool(subscription.get("cancel_at")),
-            minutes_allocated=plan.get("minutes", 0) if plan else 0,
-            minutes_used=current_user.minutes_remaining,  # This would need proper calculation
-            minutes_remaining=current_user.minutes_remaining
+            minutes_allocated=allocated,
+            minutes_used=minutes_used,
+            minutes_remaining=minutes_remaining,
         )
     
     except Exception as e:
@@ -390,6 +408,223 @@ async def list_invoices(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to list invoices: {str(e)}"
         )
+
+
+@router.get("/usage/daily")
+async def get_daily_usage(
+    days: int = 30,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_pool=Depends(get_db_pool),
+):
+    """
+    Daily minutes-used breakdown for the last `days` days (default 30).
+
+    Aggregates `duration_seconds` from the `calls` table grouped by day,
+    same call-status predicate as compute_tenant_minutes_used. Days with
+    no calls return 0 so the response is a continuous time series ready
+    for a sparkline.
+    """
+    days = max(1, min(int(days), 90))
+    try:
+        tenant_uuid = UUID(str(current_user.tenant_id))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid tenant id")
+
+    start = (datetime.now(timezone.utc) - timedelta(days=days - 1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("SET LOCAL app.bypass_rls = 'true'")
+                rows = await conn.fetch(
+                    """
+                    SELECT date_trunc('day', created_at)::date AS day,
+                           COALESCE(SUM(duration_seconds), 0) AS total_seconds,
+                           COUNT(*) AS total_calls,
+                           COUNT(*) FILTER (WHERE status IN ('answered','completed')) AS successful,
+                           COUNT(*) FILTER (WHERE status NOT IN ('answered','completed','in_progress')) AS failed
+                    FROM calls
+                    WHERE tenant_id = $1
+                      AND status = ANY($2::text[])
+                      AND created_at >= $3
+                    GROUP BY day
+                    """,
+                    tenant_uuid,
+                    ["answered", "completed", "in_progress"],
+                    start,
+                )
+    except Exception as e:
+        logger.error(f"Daily usage query failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load daily usage")
+
+    by_day = {r["day"].isoformat(): r for r in rows}
+    out: List[dict] = []
+    for i in range(days):
+        d = (start + timedelta(days=i)).date().isoformat()
+        r = by_day.get(d)
+        total_seconds = int(r["total_seconds"]) if r else 0
+        total_calls = int(r["total_calls"]) if r else 0
+        successful = int(r["successful"]) if r else 0
+        failed = int(r["failed"]) if r else 0
+        out.append({
+            "date": d,
+            "minutesUsed": total_seconds // 60,
+            "totalCalls": total_calls,
+            "successfulCalls": successful,
+            "failedCalls": failed,
+        })
+    return out
+
+
+@router.get("/invoices/{invoice_id}")
+async def get_invoice(
+    invoice_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_pool=Depends(get_db_pool),
+):
+    """
+    Single invoice detail, tenant-scoped.
+    """
+    try:
+        inv_uuid = UUID(invoice_id)
+        tenant_uuid = UUID(str(current_user.tenant_id))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid id")
+
+    try:
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("SET LOCAL app.bypass_rls = 'true'")
+                row = await conn.fetchrow(
+                    """
+                    SELECT i.*, p.name AS plan_name, p.minutes AS plan_minutes,
+                           p.concurrent_calls AS plan_concurrent_calls
+                    FROM invoices i
+                    LEFT JOIN subscriptions s ON s.stripe_subscription_id = i.stripe_subscription_id
+                    LEFT JOIN plans p ON p.id = s.plan_id
+                    WHERE i.id = $1 AND i.tenant_id = $2
+                    """,
+                    inv_uuid,
+                    tenant_uuid,
+                )
+    except Exception as e:
+        logger.error(f"Invoice fetch failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load invoice")
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    amount_due = (row["amount_due"] or 0) / 100.0
+    amount_paid = (row["amount_paid"] or 0) / 100.0
+    plan_minutes = int(row["plan_minutes"] or 0)
+    plan_concurrent = int(row["plan_concurrent_calls"] or 0)
+
+    return {
+        "id": str(row["id"]),
+        "tenantId": str(row["tenant_id"]),
+        "billingPeriodStart": row["period_start"].isoformat() if row["period_start"] else None,
+        "billingPeriodEnd": row["period_end"].isoformat() if row["period_end"] else None,
+        "planName": row["plan_name"] or "—",
+        "planFee": amount_due,
+        "includedMinutes": plan_minutes,
+        "usedMinutes": plan_minutes,
+        "overageMinutes": 0,
+        "overageCharges": 0,
+        "includedConcurrentCalls": plan_concurrent,
+        "peakConcurrentCalls": 0,
+        "adjustments": [],
+        "subtotal": amount_due,
+        "tax": 0,
+        "totalAmount": amount_due,
+        "status": row["status"],
+        "paidAt": row["paid_at"].isoformat() if row["paid_at"] else None,
+        "dueDate": row["due_date"].isoformat() if row["due_date"] else None,
+        "createdAt": row["created_at"].isoformat() if row["created_at"] else None,
+        "currency": row["currency"] or "usd",
+        "amountPaid": amount_paid,
+        "invoicePdf": row["invoice_pdf"],
+        "hostedInvoiceUrl": row["hosted_invoice_url"],
+        "lineItems": [
+            {
+                "description": f"{row['plan_name'] or 'Plan'} subscription",
+                "quantity": 1,
+                "unitPrice": amount_due,
+                "total": amount_due,
+            }
+        ],
+    }
+
+
+@router.get("/overage-alerts")
+async def get_overage_alerts(
+    current_user: CurrentUser = Depends(get_current_user),
+    billing: BillingService = Depends(get_billing_service),
+    db_pool=Depends(get_db_pool),
+):
+    """
+    Derived overage alerts: emits an alert if current usage exceeds the
+    plan's included minutes. No dedicated table; computed on the fly so
+    the UI always reflects the live state from `calls` + `plans`.
+    """
+    try:
+        subscription = await billing.get_subscription(current_user.tenant_id)
+        from app.services.scripts.tenant_minutes import compute_tenant_minutes_used
+        minutes_used = await compute_tenant_minutes_used(
+            db_pool, tenant_id=current_user.tenant_id,
+        )
+    except Exception as e:
+        logger.error(f"Overage alerts query failed: {e}")
+        return []
+
+    plan = (subscription or {}).get("plans") or (subscription or {}).get("plan") or {}
+    allocated = int(plan.get("minutes", 0) or 0)
+    if allocated <= 0:
+        return []
+
+    alerts: List[dict] = []
+    if minutes_used > allocated:
+        exceeded = minutes_used - allocated
+        # Standard $0.10/min overage in mock; real rate would live on plans table
+        rate = float(plan.get("overage_per_minute", 0.10) or 0.10)
+        alerts.append({
+            "type": "minutes",
+            "currentUsage": minutes_used,
+            "limit": allocated,
+            "exceededBy": exceeded,
+            "estimatedCharge": round(exceeded * rate, 2),
+            "severity": "critical",
+        })
+    return alerts
+
+
+@router.get("/adjustments")
+async def get_adjustments(
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Billing adjustments / credits ledger. No backing table yet — returns
+    an empty list so the UI renders an honest empty state instead of
+    pulling from a mock constant.
+    """
+    return []
+
+
+@router.get("/plans")
+async def list_billing_plans(
+    db_client: Client = Depends(get_db_client),
+):
+    """
+    Convenience pass-through to the plans catalog so the frontend can
+    fetch /billing/plans from a single billing module.
+    """
+    try:
+        response = db_client.table("plans").select("*").order("price").execute()
+        return response.data or []
+    except Exception as e:
+        logger.error(f"Failed to list plans: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list plans")
 
 
 @router.get("/config")

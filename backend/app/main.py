@@ -97,6 +97,59 @@ async def lifespan(app: FastAPI):
             raise
         logger.warning(f"Container startup warning: {e}")
 
+    # ── 2.4. Voice-tuning DB lookup wiring (T4-C3) ───────────────
+    # The VoiceTuningResolver supports an async DB lookup so per-tenant
+    # tuning persists in tenant_ai_configs.voice_tuning. Wire the hook
+    # at startup; tests and dev runs without a DB pool fall back to
+    # env-only resolution. Bypass-RLS is set inline because the lookup
+    # runs from a non-request context (no per-tenant session active).
+    try:
+        from app.domain.services.voice_tuning import (
+            get_voice_tuning_resolver,
+        )
+        _voice_tuning_pool = getattr(container, "db_pool", None)
+
+        if _voice_tuning_pool is not None:
+            async def _voice_tuning_db_lookup(tenant_id: str):
+                # One indexed lookup; cache-bypassed by design so UI
+                # edits land on the next call without a restart.
+                async with _voice_tuning_pool.acquire() as conn:
+                    async with conn.transaction():
+                        await conn.execute(
+                            "SET LOCAL app.bypass_rls = 'true'"
+                        )
+                        row = await conn.fetchrow(
+                            "SELECT voice_tuning FROM tenant_ai_configs "
+                            "WHERE tenant_id = $1::uuid",
+                            tenant_id,
+                        )
+                if row is None:
+                    return None
+                raw = row["voice_tuning"]
+                if isinstance(raw, str):
+                    import json as _json
+                    try:
+                        raw = _json.loads(raw)
+                    except (ValueError, TypeError):
+                        return None
+                if isinstance(raw, dict) and raw:
+                    return raw
+                return None
+
+            get_voice_tuning_resolver().set_db_lookup(_voice_tuning_db_lookup)
+            logger.info("voice_tuning_db_lookup_wired")
+        else:
+            logger.info(
+                "voice_tuning_db_lookup_skipped reason=no_db_pool "
+                "— resolver running env-only"
+            )
+    except Exception as exc:  # noqa: BLE001 — voice tuning never blocks startup
+        logger.warning(
+            "voice_tuning_db_lookup_wiring_failed err=%s "
+            "— resolver falls back to env+defaults",
+            exc,
+        )
+
     # ── 2.5. Redis durability probe (T2.4) ──────────────────────
     # Loud WARN in prod when both AOF and RDB are off — dialer jobs
     # would vanish on any Redis restart. Non-fatal: an operator might
@@ -178,6 +231,47 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("Could not restore AI config from DB (using defaults): %s", exc)
 
+    # ── Phase 4.2 — provider cost ledger flusher ────────────────
+    # Records per-call provider cost events and batches them into
+    # tenant_provider_cost_events every COST_LEDGER_FLUSH_INTERVAL_S.
+    # No-op when COST_LEDGER_ENABLED=false.
+    try:
+        from app.domain.services import provider_cost_ledger as _ledger
+        await _ledger.start_flusher(lambda: getattr(container, "db_pool", None))
+    except Exception as exc:
+        logger.warning("cost_ledger_start_failed err=%s", exc)
+
+    # ── Phase 2.2 — cross-pod Redis coordination listeners ──────
+    # Two long-lived tasks per pod:
+    #  • keyspace_expiry_listener: reaps the active-call set the
+    #    instant a lease key TTLs out (crashed pod / hung call).
+    #  • quota_alerts_listener: caches the latest tenant throttle
+    #    decision so make_call doesn't DB-read on the hot path.
+    # Both are best-effort: if Redis is unavailable they no-op.
+    redis_for_listeners = getattr(container, "redis", None)
+    app.state.redis_listener_stop = asyncio.Event()
+    app.state.redis_listener_tasks = []
+    if redis_for_listeners is not None:
+        from app.domain.services.global_concurrency_listener import (
+            keyspace_expiry_listener,
+            quota_alerts_listener,
+        )
+        app.state.redis_listener_tasks = [
+            asyncio.create_task(
+                keyspace_expiry_listener(
+                    redis_for_listeners,
+                    stop_event=app.state.redis_listener_stop,
+                )
+            ),
+            asyncio.create_task(
+                quota_alerts_listener(
+                    redis_for_listeners,
+                    stop_event=app.state.redis_listener_stop,
+                )
+            ),
+        ]
+        logger.info("redis_coordination_listeners_started count=2")
+
     # Auto-connect telephony bridge so campaigns can originate calls immediately.
     # Must happen after container startup (needs event loop to be running).
     from app.infrastructure.telephony.adapter_factory import CallControlAdapterFactory
@@ -249,6 +343,28 @@ async def lifespan(app: FastAPI):
             logger.info("Telephony bridge disconnected")
         except Exception as e:
             logger.error(f"Error disconnecting telephony bridge: {e}")
+
+    # Phase 4.2 — flush + stop the cost ledger.
+    try:
+        from app.domain.services import provider_cost_ledger as _ledger
+        await _ledger.stop_flusher()
+    except Exception as exc:
+        logger.warning("cost_ledger_stop_failed err=%s", exc)
+
+    # Phase 2.2 — stop Redis coordination listeners cleanly.
+    try:
+        if getattr(app.state, "redis_listener_stop", None):
+            app.state.redis_listener_stop.set()
+        for t in getattr(app.state, "redis_listener_tasks", []):
+            if not t.done():
+                t.cancel()
+        if getattr(app.state, "redis_listener_tasks", None):
+            await asyncio.gather(
+                *app.state.redis_listener_tasks, return_exceptions=True,
+            )
+        logger.info("redis_coordination_listeners_stopped")
+    except Exception as exc:
+        logger.warning("redis_listener_shutdown_raised err=%s", exc)
 
     # ── Shutdown ──────────────────────────────────────────────────
     logger.info("Shutting down Talky.ai...")

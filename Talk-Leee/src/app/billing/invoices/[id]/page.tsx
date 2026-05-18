@@ -5,33 +5,74 @@ import Link from "next/link";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Download, FileText, Printer } from "lucide-react";
-import { INVOICES } from "@/lib/billing-mock-data";
-import type { InvoiceStatus } from "@/lib/billing-types";
+import { ArrowLeft, Download, FileText, Loader2, Printer } from "lucide-react";
+import { useBillingInvoice } from "@/lib/billing-api";
 
-function formatCurrency(amount: number) {
-  return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(amount);
+type InvoiceDetail = {
+  id: string;
+  billingPeriodStart: string | null;
+  billingPeriodEnd: string | null;
+  planName: string;
+  planFee: number;
+  includedMinutes: number;
+  usedMinutes: number;
+  overageMinutes: number;
+  includedConcurrentCalls: number;
+  peakConcurrentCalls: number;
+  subtotal: number;
+  tax: number;
+  totalAmount: number;
+  status: string;
+  paidAt: string | null;
+  dueDate: string | null;
+  amountPaid: number;
+  currency: string;
+  hostedInvoiceUrl?: string | null;
+  invoicePdf?: string | null;
+  lineItems: { description: string; quantity: number; unitPrice: number; total: number }[];
+};
+
+function formatCurrency(amount: number, currency = "USD") {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: currency.toUpperCase(),
+    minimumFractionDigits: 2,
+  }).format(amount || 0);
 }
 
-function formatDate(iso: string) {
+function formatDate(iso: string | null) {
+  if (!iso) return "—";
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
-function invoiceStatusBadge(status: InvoiceStatus) {
-  const map: Record<InvoiceStatus, { label: string; className: string }> = {
+function invoiceStatusBadge(status: string) {
+  const s = (status || "").toLowerCase();
+  const map: Record<string, { label: string; className: string }> = {
     paid: { label: "Paid", className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" },
     open: { label: "Open", className: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400" },
     past_due: { label: "Past Due", className: "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400" },
+    uncollectible: { label: "Uncollectible", className: "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400" },
     void: { label: "Void", className: "border-gray-500/30 bg-gray-500/10 text-gray-700 dark:text-gray-400" },
     draft: { label: "Draft", className: "border-gray-500/30 bg-gray-500/10 text-gray-700 dark:text-gray-400" },
   };
-  const b = map[status];
+  const b = map[s] || { label: status || "—", className: "border-gray-500/30 bg-gray-500/10 text-gray-700 dark:text-gray-400" };
   return <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${b.className}`}>{b.label}</span>;
 }
 
 export default function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const invoice = INVOICES.find((inv) => inv.id === id);
+  const query = useBillingInvoice(id);
+  const invoice = query.data as InvoiceDetail | null;
+
+  if (query.isLoading) {
+    return (
+      <DashboardLayout title="Invoice">
+        <div className="flex items-center justify-center py-16 text-muted-foreground">
+          <Loader2 className="mr-2 h-5 w-5 animate-spin" aria-hidden /> Loading invoice…
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   if (!invoice) {
     return (
@@ -47,10 +88,13 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     );
   }
 
-  const adjustmentTotal = invoice.adjustments.reduce((sum, a) => sum + a.amount, 0);
+  const currency = (invoice.currency || "USD").toUpperCase();
 
   return (
-    <DashboardLayout title={`Invoice ${invoice.id}`} description={`Billing period: ${formatDate(invoice.billingPeriodStart)} – ${formatDate(invoice.billingPeriodEnd)}`}>
+    <DashboardLayout
+      title={`Invoice ${invoice.id.slice(0, 8)}`}
+      description={`Billing period: ${formatDate(invoice.billingPeriodStart)} – ${formatDate(invoice.billingPeriodEnd)}`}
+    >
       <div className="space-y-6">
         <div className="flex flex-wrap items-center gap-3">
           <Button asChild variant="outline" size="sm">
@@ -60,17 +104,24 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
           <Button variant="outline" size="sm" onClick={() => window.print()}>
             <Printer className="mr-1 h-4 w-4" aria-hidden /> Print
           </Button>
-          <Button variant="outline" size="sm">
-            <Download className="mr-1 h-4 w-4" aria-hidden /> Download PDF
-          </Button>
+          {invoice.invoicePdf ? (
+            <a href={invoice.invoicePdf} target="_blank" rel="noopener noreferrer">
+              <Button variant="outline" size="sm">
+                <Download className="mr-1 h-4 w-4" aria-hidden /> Download PDF
+              </Button>
+            </a>
+          ) : (
+            <Button variant="outline" size="sm" disabled>
+              <Download className="mr-1 h-4 w-4" aria-hidden /> Download PDF
+            </Button>
+          )}
         </div>
 
-        {/* Invoice Header */}
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle className="flex items-center gap-2"><FileText className="h-5 w-5" aria-hidden /> {invoice.id}</CardTitle>
+                <CardTitle className="flex items-center gap-2"><FileText className="h-5 w-5" aria-hidden /> {invoice.id.slice(0, 12)}</CardTitle>
                 <CardDescription>{invoice.planName} Plan</CardDescription>
               </div>
               {invoiceStatusBadge(invoice.status)}
@@ -88,17 +139,16 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               </div>
               <div>
                 <div className="text-xs font-semibold text-muted-foreground">Payment Date</div>
-                <div className="mt-1 text-sm font-semibold text-foreground">{invoice.paidAt ? formatDate(invoice.paidAt) : "—"}</div>
+                <div className="mt-1 text-sm font-semibold text-foreground">{formatDate(invoice.paidAt)}</div>
               </div>
               <div>
                 <div className="text-xs font-semibold text-muted-foreground">Total Amount</div>
-                <div className="mt-1 text-xl font-black tabular-nums text-foreground">{formatCurrency(invoice.totalAmount)}</div>
+                <div className="mt-1 text-xl font-black tabular-nums text-foreground">{formatCurrency(invoice.totalAmount, currency)}</div>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Usage Breakdown */}
         <Card>
           <CardHeader>
             <CardTitle>Usage Breakdown</CardTitle>
@@ -110,24 +160,21 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                 <div className="mt-1 text-lg font-bold tabular-nums text-foreground">{invoice.includedMinutes.toLocaleString()}</div>
               </div>
               <div className="rounded-xl border border-border bg-card/50 p-4">
-                <div className="text-xs font-semibold text-muted-foreground">Used Minutes</div>
-                <div className="mt-1 text-lg font-bold tabular-nums text-foreground">{invoice.usedMinutes.toLocaleString()}</div>
+                <div className="text-xs font-semibold text-muted-foreground">Concurrent Calls</div>
+                <div className="mt-1 text-lg font-bold tabular-nums text-foreground">{invoice.includedConcurrentCalls}</div>
               </div>
               <div className="rounded-xl border border-border bg-card/50 p-4">
-                <div className="text-xs font-semibold text-muted-foreground">Overage Minutes</div>
-                <div className={`mt-1 text-lg font-bold tabular-nums ${invoice.overageMinutes > 0 ? "text-red-600 dark:text-red-400" : "text-foreground"}`}>
-                  {invoice.overageMinutes > 0 ? `+${invoice.overageMinutes.toLocaleString()}` : "0"}
-                </div>
+                <div className="text-xs font-semibold text-muted-foreground">Subtotal</div>
+                <div className="mt-1 text-lg font-bold tabular-nums text-foreground">{formatCurrency(invoice.subtotal, currency)}</div>
               </div>
               <div className="rounded-xl border border-border bg-card/50 p-4">
-                <div className="text-xs font-semibold text-muted-foreground">Peak Concurrent Calls</div>
-                <div className="mt-1 text-lg font-bold tabular-nums text-foreground">{invoice.peakConcurrentCalls} / {invoice.includedConcurrentCalls}</div>
+                <div className="text-xs font-semibold text-muted-foreground">Amount Paid</div>
+                <div className="mt-1 text-lg font-bold tabular-nums text-foreground">{formatCurrency(invoice.amountPaid, currency)}</div>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Line Items */}
         <Card>
           <CardHeader>
             <CardTitle>Line Items</CardTitle>
@@ -148,31 +195,23 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                     <tr key={i} className="border-b border-border last:border-b-0">
                       <td className="px-4 py-3 font-medium text-foreground">{item.description}</td>
                       <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">{item.quantity > 0 ? item.quantity.toLocaleString() : "—"}</td>
-                      <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">{item.unitPrice !== 0 ? formatCurrency(item.unitPrice) : "—"}</td>
-                      <td className={`px-4 py-3 text-right font-semibold tabular-nums ${item.total < 0 ? "text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>
-                        {item.total !== 0 ? formatCurrency(item.total) : "Included"}
+                      <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">{item.unitPrice !== 0 ? formatCurrency(item.unitPrice, currency) : "—"}</td>
+                      <td className="px-4 py-3 text-right font-semibold tabular-nums text-foreground">
+                        {item.total !== 0 ? formatCurrency(item.total, currency) : "Included"}
                       </td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
-                  {invoice.adjustments.length > 0 && (
-                    <tr className="border-t border-border">
-                      <td colSpan={3} className="px-4 py-2 text-right text-xs font-semibold text-muted-foreground">Adjustments/Credits</td>
-                      <td className={`px-4 py-2 text-right font-semibold tabular-nums ${adjustmentTotal < 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
-                        {formatCurrency(adjustmentTotal)}
-                      </td>
-                    </tr>
-                  )}
                   {invoice.tax > 0 && (
                     <tr className="border-t border-border">
                       <td colSpan={3} className="px-4 py-2 text-right text-xs font-semibold text-muted-foreground">Tax</td>
-                      <td className="px-4 py-2 text-right font-semibold tabular-nums text-foreground">{formatCurrency(invoice.tax)}</td>
+                      <td className="px-4 py-2 text-right font-semibold tabular-nums text-foreground">{formatCurrency(invoice.tax, currency)}</td>
                     </tr>
                   )}
                   <tr className="border-t-2 border-border bg-muted/20">
                     <td colSpan={3} className="px-4 py-3 text-right font-bold text-foreground">Total Due</td>
-                    <td className="px-4 py-3 text-right text-lg font-black tabular-nums text-foreground">{formatCurrency(invoice.totalAmount)}</td>
+                    <td className="px-4 py-3 text-right text-lg font-black tabular-nums text-foreground">{formatCurrency(invoice.totalAmount, currency)}</td>
                   </tr>
                 </tfoot>
               </table>

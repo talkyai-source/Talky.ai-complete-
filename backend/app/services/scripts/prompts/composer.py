@@ -36,8 +36,14 @@ from __future__ import annotations
 import logging
 from typing import Any, Mapping, Optional
 
+from app.services.scripts.prompts.direction import (
+    INBOUND_DIRECTIVE_SENTINEL,
+    inbound_directive_block,
+)
 from app.services.scripts.prompts.guardrails import GENERIC_GUARDRAILS
 from app.services.scripts.prompts.personas import (
+    PERSONA_BODIES,
+    PERSONA_OPENINGS,
     PERSONAS,
     PersonaType,
     REQUIRED_SLOTS_BY_PERSONA,
@@ -48,6 +54,59 @@ from app.services.scripts.prompts.personas import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _format_pronunciations(value: Any) -> str:
+    """Render the optional ``pronunciations`` campaign slot into a
+    PRONUNCIATIONS block the LLM can read on first mention.
+
+    Accepts a dict ``{written: spoken}`` (preferred shape — most
+    natural for operators to type) and tolerates a list of pairs
+    ``[{"name": ..., "say": ...}, ...]`` for compatibility with form
+    builders that prefer ordered lists.
+
+    Returns an empty string for missing / empty / malformed input so
+    callers can unconditionally call this and skip a falsy result.
+    Bad shapes are logged and dropped — a misconfigured campaign must
+    not block the call from going out.
+    """
+    if not value:
+        return ""
+
+    pairs: list[tuple[str, str]] = []
+    if isinstance(value, dict):
+        for written, spoken in value.items():
+            written_s = str(written or "").strip()
+            spoken_s = str(spoken or "").strip()
+            if written_s and spoken_s:
+                pairs.append((written_s, spoken_s))
+    elif isinstance(value, list):
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            written = item.get("name") or item.get("word") or item.get("written")
+            spoken = item.get("say") or item.get("spoken") or item.get("ipa")
+            written_s = str(written or "").strip()
+            spoken_s = str(spoken or "").strip()
+            if written_s and spoken_s:
+                pairs.append((written_s, spoken_s))
+    else:
+        logger.warning(
+            "pronunciations_skipped reason=unsupported_type type=%s",
+            type(value).__name__,
+        )
+        return ""
+
+    if not pairs:
+        return ""
+
+    bullets = "\n".join(f'  "{w}" → say it like "{s}"' for w, s in pairs)
+    return (
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "PRONUNCIATIONS — use these on first mention\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        + bullets
+    )
 
 
 FINAL_RESPONSE_CONTRACT = """\
@@ -76,13 +135,15 @@ def compose_prompt(
     company_name: str,
     campaign_slots: Mapping[str, Any],
     additional_instructions: Optional[str] = None,
+    *,
+    direction: str = "outbound",
 ) -> str:
     """Return the final system prompt string.
 
     Parameters
     ----------
     persona_type:
-        One of the keys in PERSONAS — "lead_gen", "customer_support",
+        One of the keys in PERSONA_BODIES — "lead_gen", "customer_support",
         "receptionist".
     agent_name:
         The agent's on-call name (rotates per call — see
@@ -95,16 +156,32 @@ def compose_prompt(
     additional_instructions:
         Optional freeform text appended at the end — lets the campaign
         creator hot-patch behaviour without a code deploy.
+    direction:
+        ``"outbound"`` (default) when the platform initiated the call,
+        or ``"inbound"`` when the caller is reaching out / first-speaker
+        is ``"user"``. Selects the persona's OPENING block and prepends
+        the canonical inbound directive when applicable. The default
+        preserves pre-T4 behaviour for callers that pass only positional
+        arguments.
 
     Raises
     ------
     PromptCompositionError
-        If `persona_type` is unknown OR any required slot is missing.
+        If `persona_type` is unknown, the direction is unknown for the
+        persona, or any required slot is missing.
     """
-    if persona_type not in PERSONAS:
+    if persona_type not in PERSONA_BODIES:
         raise PromptCompositionError(
             f"Unknown persona_type {persona_type!r}. "
-            f"Known: {sorted(PERSONAS)}"
+            f"Known: {sorted(PERSONA_BODIES)}"
+        )
+
+    direction_key = (direction or "outbound").strip().lower()
+    persona_openings = PERSONA_OPENINGS[persona_type]
+    if direction_key not in persona_openings:
+        raise PromptCompositionError(
+            f"Persona {persona_type!r} has no opening for direction "
+            f"{direction_key!r}. Known directions: {sorted(persona_openings)}"
         )
 
     slots = _prepare_slots(persona_type, campaign_slots)
@@ -119,11 +196,21 @@ def compose_prompt(
             f"Provided: {sorted(slots)}"
         )
 
-    # Fill the persona template. Any leftover {brace} raises KeyError,
-    # which we re-raise as PromptCompositionError so upstream logs make
-    # the cause obvious.
+    # Build the per-direction persona template by concatenating the
+    # selected opening with the body. Both pieces share {placeholders}
+    # that are filled in a single str.format pass below — no recursive
+    # substitution, no template-engine.
+    persona_template = (
+        persona_openings[direction_key] + "\n" + PERSONA_BODIES[persona_type]
+    )
+    # The {direction_opening} marker on the body is a no-op placeholder
+    # for the legacy / backward-compat alias path that pre-merged the
+    # opening into the body string. With the explicit concatenation
+    # above, the marker is empty in the formatted output.
+    slots.setdefault("direction_opening", "")
+
     try:
-        persona_block = PERSONAS[persona_type].format(**slots)
+        persona_block = persona_template.format(**slots)
     except KeyError as exc:
         raise PromptCompositionError(
             f"Persona {persona_type!r} references undefined slot: {exc}. "
@@ -137,7 +224,39 @@ def compose_prompt(
         company_name=company_name,
     )
 
-    parts = [guardrails_block, persona_block]
+    parts: list[str] = []
+    # Inbound calls get the canonical direction directive at position 0
+    # so early-token attention dominates any outbound-flavoured prose
+    # that might still be in the persona body. This block also carries
+    # the INBOUND_DIRECTIVE_SENTINEL, which the runtime
+    # select_inbound_base_prompt() reads as an idempotency signal.
+    if direction_key == "inbound":
+        parts.append(
+            inbound_directive_block(
+                agent_name=agent_name,
+                company_name=company_name,
+            )
+        )
+        # Metric (T4-B2) — distinguishes preferred compose-time
+        # injection from the runtime fallback. A future climb in
+        # source="runtime" relative to source="compose" is the signal
+        # that some persona-driven path is missing direction propagation.
+        try:
+            from app.infrastructure.metrics.voice_metrics import (
+                record_inbound_directive_applied,
+            )
+            record_inbound_directive_applied("compose")
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("voice_metrics_directive_record_failed err=%s", exc)
+    parts.append(guardrails_block)
+    # Pronunciations sit between guardrails and persona so the model
+    # picks them up before reading the company-name-heavy persona body.
+    # Renders to "" when the campaign didn't supply pronunciations,
+    # which the join below skips naturally.
+    pron_block = _format_pronunciations(campaign_slots.get("pronunciations"))
+    if pron_block:
+        parts.append(pron_block)
+    parts.append(persona_block)
     if additional_instructions:
         extra = additional_instructions.strip()
         if extra:
@@ -160,8 +279,8 @@ def compose_prompt(
 
     composed = "\n\n".join(parts)
     logger.debug(
-        "compose_prompt persona=%s agent=%s company=%s chars=%d",
-        persona_type, agent_name, company_name, len(composed),
+        "compose_prompt persona=%s direction=%s agent=%s company=%s chars=%d",
+        persona_type, direction_key, agent_name, company_name, len(composed),
     )
     return composed
 

@@ -14,10 +14,6 @@ import {
     BarChart2,
     Volume2,
     Cpu,
-    CalendarDays,
-    Mail,
-    Bell,
-    Bot,
     PanelLeftClose,
     PanelLeftOpen,
     Shield,
@@ -30,6 +26,7 @@ import {
     ShieldAlert,
     Lock,
     ChevronDown,
+    Plug,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ViewportDrawer } from "@/components/ui/viewport-drawer";
@@ -61,23 +58,12 @@ const navigation: NavItem[] = [
     { name: "Campaigns", href: "/campaigns", icon: Megaphone },
     { name: "Call History", href: "/calls", icon: Phone },
     { name: "Contacts", href: "/contacts", icon: Users },
-    { name: "Email", href: "/email", icon: Mail },
     { name: "Analytics", href: "/analytics", icon: BarChart2 },
     { name: "Recordings", href: "/recordings", icon: Volume2 },
-    {
-        name: "AI Options", href: "/ai-options", icon: Cpu,
-        children: [
-            { name: "AI Options", href: "/ai-options", icon: Cpu },
-            { name: "Assistant", href: "/assistant", icon: Bot },
-        ],
-    },
-    {
-        name: "Meetings", href: "/meetings", icon: CalendarDays,
-        children: [
-            { name: "Meetings", href: "/meetings", icon: CalendarDays },
-            { name: "Reminders", href: "/reminders", icon: Bell },
-        ],
-    },
+    { name: "Connectors", href: "/connectors", icon: Plug },
+    // Assistant moved out of this group — it's queued for v2 and lives
+    // in Settings as a "Coming soon" tile.
+    { name: "AI Options", href: "/ai-options", icon: Cpu },
     {
         name: "Billing & Logs", href: "/billing", icon: CreditCard,
         children: [

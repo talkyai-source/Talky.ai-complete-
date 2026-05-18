@@ -29,6 +29,10 @@ from app.services.scripts.prompt_builder import (
 from app.services.scripts.interruption_filter import (
     is_backchannel,
 )
+from app.services.scripts.tenant_minutes import (
+    compute_tenant_minutes_remaining,
+    compute_tenant_minutes_used,
+)
 from app.services.scripts.prompts import (
     MAX_POOL_SIZE as AGENT_NAME_POOL_MAX,
     PERSONAS,
@@ -42,6 +46,8 @@ __all__ = [
     "CallBinding",
     "bind_telephony_call",
     "save_call_transcript_on_hangup",
+    "compute_tenant_minutes_used",
+    "compute_tenant_minutes_remaining",
     "fetch_campaign_transcripts",
     "format_transcript_turn",
     "format_transcript_turns",

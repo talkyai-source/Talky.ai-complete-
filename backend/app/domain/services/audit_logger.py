@@ -491,6 +491,8 @@ class AuditLogger:
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
         evidence: Optional[dict] = None,
+        title: Optional[str] = None,
+        alert_type: Optional[str] = None,
     ) -> UUID:
         """
         Log a high-priority security event.
@@ -516,14 +518,19 @@ class AuditLogger:
         tenant_uuid = UUID(tenant_id) if isinstance(tenant_id, str) else tenant_id
         session_uuid = UUID(session_id) if isinstance(session_id, str) else session_id
 
+        # `alert_type` (added in migration 0004) toggles whether this row
+        # surfaces on the user-facing Alert Timeline. Pass it for
+        # operational alerts (Network / API / Campaign / System); leave
+        # NULL for security-only events that should stay in the admin
+        # security panel.
         async with self.db_pool.acquire() as conn:
             await conn.execute(
                 """
                 INSERT INTO security_events (
-                    event_id, event_type, severity, description, 
+                    event_id, event_type, severity, description,
                     user_id, tenant_id, session_id, detection_source,
-                    evidence, title, status
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                    evidence, title, status, alert_type
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                 """,
                 event_id,
                 event_type,
@@ -534,8 +541,9 @@ class AuditLogger:
                 session_uuid,
                 detection_source,
                 json.dumps(evidence) if evidence else None,
-                event_type.replace("_", " ").title(),
-                "open"
+                title or event_type.replace("_", " ").title(),
+                "open",
+                alert_type,
             )
 
         return event_id

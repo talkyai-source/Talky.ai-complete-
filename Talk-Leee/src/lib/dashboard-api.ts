@@ -12,6 +12,14 @@ export interface DashboardSummary {
     minutes_included?: number;
     minutes_remaining: number;
     active_campaigns: number;
+
+    // Live + monthly aggregate fields exposed by /dashboard/summary.
+    // Optional so the type stays compatible with older deployments;
+    // page.tsx falls back to 0 when the field is missing.
+    active_calls?: number;
+    avg_call_duration_seconds?: number;
+    queued_jobs?: number;
+    outcome_breakdown?: Record<string, number>;
 }
 
 // Campaign Types
@@ -154,6 +162,34 @@ class DashboardApi {
             throw new Error("Campaign update failed. The backend did not return an updated campaign.");
         }
         return { campaign: response.campaign };
+    }
+
+    async previewCampaignPrompt(input: {
+        persona_type: "lead_gen" | "customer_support" | "receptionist";
+        company_name: string;
+        agent_name: string;
+        campaign_slots: Record<string, unknown>;
+        additional_instructions?: string;
+        direction?: "outbound" | "inbound";
+    }): Promise<{
+        system_prompt: string;
+        greeting: string;
+        direction: "outbound" | "inbound";
+        has_inbound_directive: boolean;
+        prompt_chars: number;
+    }> {
+        return this.client.request({
+            path: "/campaigns/preview-prompt",
+            method: "POST",
+            body: {
+                persona_type: input.persona_type,
+                company_name: input.company_name,
+                agent_name: input.agent_name,
+                campaign_slots: input.campaign_slots,
+                additional_instructions: input.additional_instructions,
+                direction: input.direction ?? "outbound",
+            },
+        });
     }
 
     async startCampaign(

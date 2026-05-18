@@ -151,11 +151,11 @@ class BillingService:
             raise ValueError(f"Plan not found: {plan_id}")
         
         stripe_price_id = plan.data.get("stripe_price_id")
-        
-        if not stripe_price_id:
-            raise ValueError(f"Plan {plan_id} has no stripe_price_id configured")
-        
+
         if self.mock_mode:
+            # In mock mode, stripe_price_id may be NULL — we still return a
+            # fake checkout URL so the frontend flow is fully testable
+            # before real Stripe products are configured.
             # Return mock checkout session
             session_id = f"cs_mock_{tenant_id[:8]}_{plan_id}"
             return {
@@ -164,7 +164,14 @@ class BillingService:
                 "mock_mode": True,
                 "message": "Mock checkout session created. Configure STRIPE_SECRET_KEY for real payments."
             }
-        
+
+        if not stripe_price_id:
+            raise ValueError(
+                f"Plan {plan_id} has no stripe_price_id configured. "
+                "Create the product/price in Stripe Dashboard and update "
+                "plans.stripe_price_id for this row."
+            )
+
         # Create real Stripe Checkout Session
         session = stripe.checkout.Session.create(
             customer=customer_id,
