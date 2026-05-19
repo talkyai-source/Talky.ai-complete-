@@ -64,6 +64,22 @@ class MeResponse(BaseModel):
     role: str
     minutes_remaining: int
 
+    # Suspension fields — sourced from tenants + white_label_partners.
+    # Returning these on /auth/me lets the frontend's SuspensionStateProvider
+    # derive suspension state from the single AuthContext.user instead of
+    # firing its own parallel /auth/me query. See plan Phase 1.
+    #
+    # All fields are nullable: a user without a tenant (rare — e.g. a
+    # platform_admin) has no tenant_status. partner_* are null when the
+    # tenant isn't enrolled with a white-label partner.
+    partner_id: Optional[str] = None
+    tenant_id: Optional[str] = None
+    partner_status: Optional[str] = None        # "active" | "suspended" | null
+    tenant_status: Optional[str] = None         # "active" | "suspended" | null
+    suspended_scope: Optional[str] = None       # "tenant" | "partner" | null
+    suspension_reason: Optional[str] = None
+    suspended_at: Optional[str] = None          # ISO 8601
+
 
 class UpdateMeRequest(BaseModel):
     name: Optional[str] = None
