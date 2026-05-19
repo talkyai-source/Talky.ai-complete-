@@ -1,4 +1,20 @@
-"""POST /auth/logout + POST /auth/logout-all — server-side session revocation."""
+"""Session *lifecycle* endpoints — tear down the **current** caller's session.
+
+Mount: aggregated into the `/auth` router by `auth/__init__.py`, so the routes
+are exposed as `/api/v1/auth/logout` and `/api/v1/auth/logout-all`.
+
+Scope (intentionally narrow):
+  POST /auth/logout      → revoke the current session + refresh family, clear cookies.
+  POST /auth/logout-all  → revoke EVERY session/refresh-token row for the user.
+
+This file does NOT handle cross-device session inspection, suspicious-session
+verification, or selective revoke-by-id. That belongs to its sibling file:
+`app/api/v1/endpoints/sessions.py`, which mounts the `/sessions/*` prefix.
+
+The boundary in one line:
+  - here  (`auth/sessions.py`)  →  "log me (or all of me) out"   →  /auth/*
+  - there (`endpoints/sessions.py`) → "manage my devices"        →  /sessions/*
+"""
 from __future__ import annotations
 
 from typing import Optional

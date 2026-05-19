@@ -2,7 +2,7 @@
 
 Two cookies, one purpose each:
 
-  talky_at   short-lived access JWT (15 min)        Path=/
+  talky_at   short-lived access JWT (15 min)        Path=/api/v1
   talky_rt   long-lived opaque refresh token (7d)   Path=/api/v1/auth
 
 Both are HttpOnly Secure. SameSite is configurable via AUTH_COOKIE_SAMESITE
@@ -33,6 +33,15 @@ REFRESH_COOKIE_NAME = "talky_rt"
 ACCESS_TOKEN_MAX_AGE = 15 * 60
 REFRESH_TOKEN_MAX_AGE = 7 * 24 * 60 * 60
 
+# Cookie Paths are scoped to /api/v1 so the cookies are only sent on
+# real API requests, never on incidental traffic to other origins behind
+# the same host (e.g. /health, /metrics, static asset proxies). The
+# HttpOnly + Secure + SameSite flags make /api/v1 a defense-in-depth
+# tightening, not the primary defense — but narrower scopes reduce the
+# surface for future bugs (a misconfigured /static route can't exfil the
+# cookie via Set-Cookie reflection because the cookie isn't sent there
+# in the first place).
+ACCESS_COOKIE_PATH = "/api/v1"
 REFRESH_COOKIE_PATH = "/api/v1/auth"
 
 
@@ -65,7 +74,7 @@ def set_access_cookie(response: Response, jwt_token: str) -> None:
         key=ACCESS_COOKIE_NAME,
         value=jwt_token,
         max_age=ACCESS_TOKEN_MAX_AGE,
-        path="/",
+        path=ACCESS_COOKIE_PATH,
         httponly=True,
         secure=_cookie_secure(),
         samesite=_samesite(),
@@ -85,6 +94,19 @@ def set_refresh_cookie(response: Response, refresh_token: str) -> None:
 
 
 def clear_auth_cookies(response: Response) -> None:
+    # IMPORTANT: delete_cookie ignores cookies whose path doesn't match,
+    # so we must also issue a clear at the legacy "/" path for any user
+    # whose cookie was set before the path was tightened in P4.2.
+    # Without this their stale Path=/ cookie keeps being sent and they
+    # appear "still logged in" even after logout. The double-delete is
+    # cheap (two Set-Cookie headers, both Max-Age=0).
+    response.delete_cookie(
+        key=ACCESS_COOKIE_NAME,
+        path=ACCESS_COOKIE_PATH,
+        httponly=True,
+        secure=_cookie_secure(),
+        samesite=_samesite(),
+    )
     response.delete_cookie(
         key=ACCESS_COOKIE_NAME,
         path="/",
