@@ -178,6 +178,10 @@ export default function LoginClientPage() {
     const [breachCount, setBreachCount] = useState<number | null>(null);
     const [checkingBreach, setCheckingBreach] = useState(false);
     const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+    // Captured from POST /auth/login when mfa_required=true. Forwarded to
+    // <MFAVerification /> so it can call /auth/mfa/verify with the right
+    // proof — the email field on its own is not accepted by the backend.
+    const [mfaChallengeToken, setMfaChallengeToken] = useState<string | null>(null);
 
     const { applyLoginResult } = useAuth();
     const emailInputRef = useRef<HTMLInputElement | null>(null);
@@ -303,7 +307,18 @@ export default function LoginClientPage() {
             void turnstileToken;
             const response = await api.login(email, password);
 
-            if ((response as unknown as { mfa_required?: boolean }).mfa_required) {
+            if (response.mfa_required) {
+                if (!response.mfa_challenge_token) {
+                    // Server flagged MFA but didn't issue a token — surface
+                    // a real error rather than letting the verify screen
+                    // throw the "Refactor login response" stub.
+                    setError(
+                        "MFA is required but the server didn't return a challenge token. " +
+                            "Please try signing in again.",
+                    );
+                    return;
+                }
+                setMfaChallengeToken(response.mfa_challenge_token);
                 goToStep("mfa");
                 return;
             }
@@ -695,9 +710,14 @@ export default function LoginClientPage() {
                                 transition={stepTransition}
                             >
                                 <MFAVerification
-                                    email={email}
-                                    onSuccess={handleLoginSuccess}
-                                    onBackClick={handleBack}
+                                    challengeToken={mfaChallengeToken}
+                                    onSuccess={(response) =>
+                                        handleLoginSuccess(response as unknown as LoginTokens)
+                                    }
+                                    onBackClick={() => {
+                                        setMfaChallengeToken(null);
+                                        handleBack();
+                                    }}
                                     onError={(err) => setError(err)}
                                 />
                             </motion.div>
