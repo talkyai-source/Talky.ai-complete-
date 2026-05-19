@@ -293,11 +293,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }) => {
         // When a caller passes the access_token, we commit it through the
         // single writer so the new accessToken state stays in sync with
-        // localStorage. Existing call sites (login-client.tsx) that still
-        // call api.setToken() before applyLoginResult will work either
-        // way — this setAccessToken is a no-op-equivalent if the writer
-        // already ran with the same value.
-        if (res.access_token) setAccessToken(res.access_token);
+        // localStorage. Existing call sites (login-client.tsx) still call
+        // api.setToken() BEFORE applyLoginResult — that path writes
+        // localStorage but doesn't touch this reactive state. Fall back
+        // to a localStorage read so the reactive accessToken catches up
+        // even when the caller didn't pass the field explicitly. Phase 5
+        // will eliminate the legacy api.setToken path entirely.
+        const tokenToCommit = res.access_token ?? getBrowserAuthToken();
+        if (tokenToCommit) {
+            // Skip the localStorage write if the value is already there —
+            // setAccessToken's writer is idempotent but we want to avoid
+            // unnecessary cookie-mirror writes in the legacy fallback case.
+            setAccessTokenState(tokenToCommit);
+            if (res.access_token) setBrowserAuthToken(tokenToCommit);
+        }
         setUser({
             id: res.user_id,
             email: res.email,
@@ -306,7 +315,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             minutes_remaining: res.minutes_remaining ?? 0,
         });
         setLoading(false);
-    }, [setAccessToken]);
+    }, []);
 
     // Compute the AuthStatus from the underlying state. Order matters:
     // `loading` wins over presence checks because a freshly-mounted
