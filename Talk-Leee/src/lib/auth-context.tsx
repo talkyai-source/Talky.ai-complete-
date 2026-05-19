@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode, useCallback } from "react";
 import { api } from "@/lib/api";
-import { resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider } from "@/lib/http-client";
+import { resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider, isApiClientError } from "@/lib/http-client";
 import { getBrowserAuthToken, setBrowserAuthToken } from "@/lib/auth-token";
 interface MeResponse {
     id: string;
@@ -45,7 +45,7 @@ interface AuthContextType {
     register: (email: string, password: string, businessName: string, name?: string) => Promise<void>;
     logout: () => Promise<void>;
     setToken: (token: string) => void;
-    refreshUser: () => Promise<void>;
+    refreshUser: (opts?: { silent?: boolean }) => Promise<void>;
     applyLoginResult: (res: {
         user_id: string;
         email: string;
@@ -259,22 +259,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             });
     }, [setAccessToken]);
 
-    const refreshUser = useCallback(async () => {
-        setLoading(true);
+    // `silent: true` callers (Phase 3 suspension-freshness loop, any future
+    // background poll) MUST NOT flip authLoading or tear down auth state
+    // on transient failures. The 30-second loop fires every visibility
+    // change too — a single network blip in any of those would otherwise
+    // bounce the user back to /login.
+    //
+    // The tear-down branch is now gated on `error.code === "unauthorized"`
+    // explicitly, so timeouts, 5xx, and network errors all preserve the
+    // current session. Real 401s still log the user out — those mean the
+    // server has actually invalidated the session.
+    const refreshUser = useCallback(async (opts?: { silent?: boolean }) => {
+        const silent = opts?.silent === true;
+        if (!silent) setLoading(true);
         try {
             const me = await api.getMe();
             setUser(me);
-        } catch {
+        } catch (err) {
             if (isWithinFreshLoginGrace()) {
                 if (process.env.NODE_ENV !== "production") {
                     console.debug("[auth] refreshUser failed in grace window — preserving state");
                 }
                 return;
             }
+            // Only tear down auth state on confirmed unauthorized. Anything
+            // else (network blip, 5xx, timeout, the new heavier /auth/me
+            // query running slow on a cold Vercel function) keeps the
+            // current session intact — the next tick or user action gets
+            // another chance to refresh.
+            const isAuthFailure = isApiClientError(err) && err.code === "unauthorized";
+            if (!isAuthFailure) {
+                if (process.env.NODE_ENV !== "production") {
+                    console.debug(
+                        "[auth] refreshUser non-auth failure — preserving state",
+                        err,
+                    );
+                }
+                return;
+            }
             setAccessToken(null);
             setUser(null);
         } finally {
-            setLoading(false);
+            if (!silent) setLoading(false);
         }
     }, [setAccessToken]);
 
