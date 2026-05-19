@@ -36,8 +36,40 @@ export const LoginResponseSchema = z
 
 export type LoginResponse = z.infer<typeof LoginResponseSchema>;
 
-export const RegisterResponseSchema = LoginResponseSchema;
-export type RegisterResponse = LoginResponse;
+// POST /auth/register no longer issues a session — the response shape
+// changed to {user_id, email, verification_required, verification_email_sent, message}.
+// Users must verify their email and then sign in via /auth/login.
+//
+// Kept the LoginResponse-shaped fallback so a future re-enable of
+// session-on-register doesn't immediately crash the parser.
+export const RegisterResponseSchema = z
+    .object({
+        user_id: z.string(),
+        email: z.string().email(),
+        business_name: z.string().optional().nullable(),
+        verification_required: z.boolean().optional(),
+        verification_email_sent: z.boolean().optional(),
+        message: z.string().optional(),
+        // Legacy fields — null in the new response, present if a future
+        // backend reverts to session-on-register.
+        access_token: z.string().optional().nullable(),
+        token_type: z.string().optional(),
+        role: z.string().optional(),
+        minutes_remaining: z.number().optional(),
+    })
+    .passthrough()
+    .transform((v) => ({
+        user_id: v.user_id,
+        email: v.email,
+        business_name: v.business_name ?? undefined,
+        verification_required: v.verification_required ?? true,
+        verification_email_sent: v.verification_email_sent ?? false,
+        message: v.message ?? "",
+        access_token: v.access_token ?? null,
+        role: v.role ?? null,
+        minutes_remaining: v.minutes_remaining ?? 0,
+    }));
+export type RegisterResponse = z.infer<typeof RegisterResponseSchema>;
 
 export const SignupStartResponseSchema = z
     .object({

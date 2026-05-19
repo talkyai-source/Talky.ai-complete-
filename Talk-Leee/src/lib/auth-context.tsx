@@ -134,16 +134,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         businessName: string,
         name?: string,
     ) => {
+        // /auth/register no longer issues a session: the user must verify
+        // their email and then sign in via /auth/login. We resolve without
+        // setting any auth state — callers should redirect to the "check
+        // your email" screen after this resolves.
+        //
+        // The legacy session-on-register branch is preserved in case a
+        // future backend reverts the behaviour, so this callback stays
+        // forward-compatible.
         const res = await api.register(email, password, businessName, "basic", name);
-        api.setToken(res.access_token);
-        resetSessionExpiredLatch();
-        setUser({
-            id: res.user_id,
-            email: res.email,
-            role: res.role,
-            business_name: res.business_name,
-            minutes_remaining: res.minutes_remaining ?? 0,
-        });
+        if (res.access_token && res.role) {
+            api.setToken(res.access_token);
+            resetSessionExpiredLatch();
+            setUser({
+                id: res.user_id,
+                email: res.email,
+                role: res.role,
+                business_name: res.business_name,
+                minutes_remaining: res.minutes_remaining ?? 0,
+            });
+        }
     }, []);
 
     const logout = useCallback(async () => {
