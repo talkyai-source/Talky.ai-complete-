@@ -212,3 +212,52 @@ async def revoke_family_by_token(
         now,
         reason,
     )
+
+
+async def revoke_all_user_refresh_tokens(
+    conn: asyncpg.Connection,
+    user_id: str,
+    *,
+    reason: str,
+    exclude_family_id: Optional[str] = None,
+) -> int:
+    """
+    Revoke every active refresh token (across all families) for *user_id*.
+
+    Used by password change + MFA disable to force every device to
+    re-authenticate. The current session's access JWT keeps working
+    until it expires (15 min) — by then the user has been informed of
+    the password change in the UI and will sign in again normally.
+
+    Setting ``exclude_family_id`` keeps a single family alive. Pass the
+    current request's family_id when you want the current device to
+    continue without interruption.
+
+    Returns the number of token rows revoked. Idempotent.
+    """
+    now = _now_utc()
+    if exclude_family_id:
+        result = await conn.execute(
+            """
+            UPDATE refresh_tokens
+            SET revoked_at = $2, revoked_reason = $3
+            WHERE user_id = $1
+              AND family_id <> $4
+              AND revoked_at IS NULL
+            """,
+            user_id, now, reason, exclude_family_id,
+        )
+    else:
+        result = await conn.execute(
+            """
+            UPDATE refresh_tokens
+            SET revoked_at = $2, revoked_reason = $3
+            WHERE user_id = $1
+              AND revoked_at IS NULL
+            """,
+            user_id, now, reason,
+        )
+    try:
+        return int(result.split(" ")[-1]) if result else 0
+    except Exception:
+        return 0

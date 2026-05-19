@@ -249,6 +249,7 @@ async def register_begin(
             authenticator_type=body.authenticator_type,
             ip_address=ip,
             user_agent=ua,
+            user_role=current_user.role,
         )
 
     # Parse the JSON string to a dict for the response
@@ -299,6 +300,29 @@ async def register_complete(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Registration verification failed. The passkey could not be registered.",
             ) from e
+
+        # Admin role AAGUID allowlist check. Privileged users
+        # (tenant_admin / partner_admin / platform_admin) can only
+        # enroll authenticators whose AAGUID is in the configured
+        # allowlist (env: PASSKEY_ADMIN_AAGUID_ALLOWLIST). This stops
+        # someone with a compromised admin session from registering a
+        # rogue self-attesting software "authenticator" as their
+        # second factor.
+        from app.core.security.passkeys import check_admin_aaguid_allowed
+        allowed, reason = check_admin_aaguid_allowed(current_user.role, verified.aaguid)
+        if not allowed:
+            logger.warning(
+                "passkey_admin_aaguid_rejected user=%s role=%s aaguid=%s reason=%s",
+                current_user.id, current_user.role, verified.aaguid, reason,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "This authenticator is not on the approved list for "
+                    "admin accounts. Contact your platform administrator "
+                    "to request approval, or enroll a different authenticator."
+                ),
+            )
 
         # Store the verified credential
         display_name = body.display_name or verified.device_type
@@ -351,7 +375,6 @@ async def login_begin(
 
     credential_ids: Optional[list[str]] = None
     user_id: Optional[str] = None
-    has_passkeys = False
 
     async with db_client.pool.acquire() as conn:
         if body.email:
@@ -365,15 +388,12 @@ async def login_begin(
 
             if user_row and user_row["passkey_count"] > 0:
                 user_id = str(user_row["id"])
-                has_passkeys = True
 
                 # Get their credential IDs
                 creds = await get_user_credentials(conn, user_id)
                 credential_ids = [c["credential_id"] for c in creds]
-        else:
-            # Discoverable credential flow - no email provided
-            # Allow any passkey, user identified from userHandle in response
-            has_passkeys = True  # We don't know yet, assume yes for UX
+        # else: discoverable credential flow — no email, authenticator
+        # identifies the user via userHandle in the response
 
         options = await generate_authentication_options(
             conn=conn,
@@ -393,10 +413,20 @@ async def login_begin(
         options.ceremony_id, user_id or "(discoverable)", bool(credential_ids)
     )
 
+    # No-enumeration response: always claim has_passkeys=True regardless
+    # of whether the email exists or has registered credentials. The
+    # actual passkey enrollment status is only revealed at /login/complete
+    # after the signed WebAuthn assertion is verified — that's where
+    # the user is bound to identity, not here.
+    #
+    # The `allowCredentials` field in `options_dict` is empty for unknown
+    # users (and for the discoverable flow), which is the same shape an
+    # authenticator sees regardless. From the attacker's vantage point
+    # the two cases are indistinguishable.
     return LoginBeginResponse(
         ceremony_id=options.ceremony_id,
         options=options_dict,
-        has_passkeys=has_passkeys,
+        has_passkeys=True,
     )
 
 

@@ -326,6 +326,64 @@ async def cleanup_expired_challenges(conn, older_than_minutes: int = 60) -> int:
 # Registration Functions
 # ---------------------------------------------------------------------------
 
+# Roles that get the stricter passkey enrollment policy: INDIRECT
+# attestation (server can verify the authenticator's provenance) + an
+# AAGUID allowlist of known-good vendors. Regular users continue to get
+# attestation=NONE for the smoother UX (every browser supports it,
+# no extra prompts).
+_PRIVILEGED_ROLES_FOR_PASSKEY_ATTESTATION = frozenset({
+    "platform_admin",
+    "partner_admin",
+    "tenant_admin",
+})
+
+
+def _is_privileged_role(role: Optional[str]) -> bool:
+    return bool(role) and role in _PRIVILEGED_ROLES_FOR_PASSKEY_ATTESTATION
+
+
+def _admin_aaguid_allowlist() -> frozenset[str]:
+    """
+    Comma-separated AAGUIDs from env (PASSKEY_ADMIN_AAGUID_ALLOWLIST).
+    Empty = log-only mode (warn on unknown AAGUIDs but accept). Populate
+    in prod with the AAGUIDs of authenticators your security team has
+    audited (YubiKey, Apple iCloud Keychain, 1Password, Bitwarden, etc.).
+    See https://fidoalliance.org/metadata/ for the canonical source.
+    """
+    raw = (os.getenv("PASSKEY_ADMIN_AAGUID_ALLOWLIST") or "").strip()
+    if not raw:
+        return frozenset()
+    return frozenset(p.strip().lower() for p in raw.split(",") if p.strip())
+
+
+def check_admin_aaguid_allowed(role: Optional[str], aaguid: str) -> tuple[bool, str]:
+    """
+    Returns (allowed, reason). For privileged roles, the AAGUID must be
+    in the allowlist (when configured). Non-privileged roles always
+    return (True, "non_privileged").
+
+    If the allowlist env is empty, we LOG a warning but allow the
+    enrollment — gives ops a soak window to observe which AAGUIDs
+    real admins are using before flipping to enforcement.
+    """
+    if not _is_privileged_role(role):
+        return True, "non_privileged"
+    allowlist = _admin_aaguid_allowlist()
+    aaguid_lc = (aaguid or "").strip().lower()
+    if not allowlist:
+        logger.warning(
+            "passkey_admin_aaguid_allowlist_empty role=%s aaguid=%s — accepting "
+            "but please populate PASSKEY_ADMIN_AAGUID_ALLOWLIST before enforcement",
+            role, aaguid_lc,
+        )
+        return True, "allowlist_empty_log_only"
+    if not aaguid_lc:
+        return False, "missing_aaguid"
+    if aaguid_lc not in allowlist:
+        return False, "aaguid_not_in_allowlist"
+    return True, "allowed"
+
+
 async def generate_registration_options(
     conn,
     user_id: str,
@@ -337,6 +395,7 @@ async def generate_registration_options(
     rp_id: Optional[str] = None,
     rp_name: Optional[str] = None,
     rp_origin: Optional[str] = None,
+    user_role: Optional[str] = None,
 ) -> RegistrationOptions:
     """
     Generate WebAuthn registration options for a new passkey.
@@ -377,6 +436,18 @@ async def generate_registration_options(
     display_name = user_name or user_email
     user_id_bytes = user_id.encode("utf-8")  # User handle for the authenticator
 
+    # Attestation preference is role-aware. Privileged users
+    # (tenant_admin, partner_admin, platform_admin) get INDIRECT — the
+    # authenticator's attestation statement is returned but anonymized,
+    # which lets us check AAGUID against the allowlist without exposing
+    # individual device serial. Regular users get NONE for the smoother
+    # UX (no extra confirmation prompts).
+    attestation_pref = (
+        AttestationConveyancePreference.INDIRECT
+        if _is_privileged_role(user_role)
+        else AttestationConveyancePreference.NONE
+    )
+
     # Generate options using py_webauthn
     options = _webauthn_generate_registration_options(
         rp_id=rp_id or RP_ID,
@@ -387,7 +458,7 @@ async def generate_registration_options(
         challenge=challenge_bytes,
         supported_pub_key_algs=SUPPORTED_PUB_KEY_ALGS,
         authenticator_selection=authenticator_selection,
-        attestation=AttestationConveyancePreference.NONE,  # Skip attestation for UX
+        attestation=attestation_pref,
         timeout=120000,  # 2 minutes in milliseconds
     )
 

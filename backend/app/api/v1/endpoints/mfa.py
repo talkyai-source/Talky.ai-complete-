@@ -59,11 +59,13 @@ from app.core.security.recovery import (
     store_recovery_codes,
     verify_and_consume_recovery_code,
 )
+from app.core.security.refresh_tokens import revoke_all_user_refresh_tokens
 from app.core.security.sessions import (
     SESSION_COOKIE_NAME,
     SESSION_LIFETIME_HOURS,
     create_session,
     hash_session_token,
+    revoke_all_user_sessions,
 )
 from app.core.security.totp import (
     decrypt_totp_secret,
@@ -371,15 +373,35 @@ async def setup_mfa(
 
     OWASP: A new setup overwrites any existing pending (unconfirmed) secret.
     """
-    raw_secret = generate_totp_secret()
-    encrypted_secret = encrypt_totp_secret(raw_secret)
-
-    provisioning_uri = get_provisioning_uri(raw_secret, current_user.email)
-    qr_data_uri = generate_qr_code_data_uri(provisioning_uri)
-
     async with db_client.pool.acquire() as conn:
-        # Upsert: replace any existing (possibly unconfirmed) MFA record.
-        # If MFA is already enabled=TRUE, this resets to enabled=FALSE (new setup).
+        # Refuse if MFA is already active. Previously this endpoint
+        # silently overwrote a confirmed enrollment (set enabled=FALSE
+        # + replaced the secret + wiped recovery codes), which gave any
+        # attacker with a stolen session the ability to downgrade an
+        # active user's MFA in one call. Now the user MUST explicitly
+        # disable MFA (password reauth) before re-enrolling.
+        existing = await conn.fetchrow(
+            "SELECT enabled FROM user_mfa WHERE user_id = $1",
+            current_user.id,
+        )
+        if existing and existing["enabled"]:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "MFA is already active for this account. "
+                    "Disable it first via POST /auth/mfa/disable, then re-run setup."
+                ),
+            )
+
+        raw_secret = generate_totp_secret()
+        encrypted_secret = encrypt_totp_secret(raw_secret)
+
+        provisioning_uri = get_provisioning_uri(raw_secret, current_user.email)
+        qr_data_uri = generate_qr_code_data_uri(provisioning_uri)
+
+        # Safe upsert — only ever touches a pending (enabled=FALSE) row
+        # or inserts a new one. Confirmed rows are protected by the
+        # check above.
         await conn.execute(
             """
             INSERT INTO user_mfa
@@ -845,7 +867,26 @@ async def disable_mfa(
 
         await invalidate_all_codes(conn, current_user.id)
 
-    logger.info("MFA disabled for user=%s", current_user.id)
+        # OWASP MFA cheat sheet: "After MFA is disabled, all sessions
+        # MUST be terminated to force re-authentication." Without this,
+        # an attacker who hijacked a session (e.g. via stolen cookie)
+        # could disable MFA via password reauth and then keep using the
+        # same session — the very thing MFA was supposed to protect
+        # against. We revoke EVERY session including the current one;
+        # the user re-logs in cleanly with the new (single-factor)
+        # posture explicit in the UI.
+        await revoke_all_user_sessions(
+            conn,
+            current_user.id,
+            reason="mfa_disabled",
+        )
+        await revoke_all_user_refresh_tokens(
+            conn,
+            current_user.id,
+            reason="mfa_disabled",
+        )
+
+    logger.info("MFA disabled for user=%s — all sessions revoked", current_user.id)
 
     return {
         "detail": "MFA disabled successfully. All recovery codes have been deleted."
