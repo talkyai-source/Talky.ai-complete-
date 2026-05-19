@@ -14,6 +14,8 @@ from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
 from app.core.postgres_adapter import Client
 from app.core.security.password import verify_password
 from app.core.security.recovery import count_remaining_codes, invalidate_all_codes
+from app.core.security.refresh_tokens import revoke_all_user_refresh_tokens
+from app.core.security.sessions import revoke_all_user_sessions
 
 from .schemas import MFADisableRequest, MFAStatusResponse
 
@@ -117,7 +119,26 @@ async def disable_mfa(
 
         await invalidate_all_codes(conn, current_user.id)
 
-    logger.info("MFA disabled for user=%s", current_user.id)
+        # P3.2 — Disabling MFA is a security-affecting action. Force every
+        # OTHER device/session to re-authenticate so a thief who stole one
+        # session (then disabled MFA from it) can't keep using the long-
+        # tail sessions elsewhere. The CURRENT session keeps working
+        # until its JWT (15-min TTL) naturally expires.
+        sessions_revoked = await revoke_all_user_sessions(
+            conn,
+            current_user.id,
+            reason="mfa_disabled",
+        )
+        refresh_revoked = await revoke_all_user_refresh_tokens(
+            conn,
+            current_user.id,
+            reason="mfa_disabled",
+        )
+
+    logger.info(
+        "MFA disabled user=%s sessions_revoked=%s refresh_tokens_revoked=%s",
+        current_user.id, sessions_revoked, refresh_revoked,
+    )
 
     return {
         "detail": "MFA disabled successfully. All recovery codes have been deleted."

@@ -53,15 +53,32 @@ async def setup_mfa(
 
     OWASP: A new setup overwrites any existing pending (unconfirmed) secret.
     """
-    raw_secret = generate_totp_secret()
-    encrypted_secret = encrypt_totp_secret(raw_secret)
-
-    provisioning_uri = get_provisioning_uri(raw_secret, current_user.email)
-    qr_data_uri = generate_qr_code_data_uri(provisioning_uri)
-
     async with db_client.pool.acquire() as conn:
-        # Upsert: replace any existing (possibly unconfirmed) MFA record.
-        # If MFA is already enabled=TRUE, this resets to enabled=FALSE (new setup).
+        # P3.3 — refuse to silently downgrade an account that already has
+        # confirmed MFA. The previous UPSERT would reset enabled=TRUE rows
+        # back to FALSE, leaving the account briefly without 2FA AND
+        # losing the recovery codes the user printed out. The user must
+        # explicitly call /auth/mfa/disable (password-gated) first.
+        existing = await conn.fetchrow(
+            "SELECT enabled FROM user_mfa WHERE user_id = $1",
+            current_user.id,
+        )
+        if existing and existing["enabled"]:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "MFA is already enabled for this account. "
+                    "Disable it first via POST /auth/mfa/disable, then re-run setup."
+                ),
+            )
+
+        raw_secret = generate_totp_secret()
+        encrypted_secret = encrypt_totp_secret(raw_secret)
+
+        provisioning_uri = get_provisioning_uri(raw_secret, current_user.email)
+        qr_data_uri = generate_qr_code_data_uri(provisioning_uri)
+
+        # Upsert any existing (unconfirmed) MFA record with a fresh secret.
         await conn.execute(
             """
             INSERT INTO user_mfa
@@ -97,6 +114,7 @@ async def setup_mfa(
         issuer="Talky.ai",
         account=current_user.email,
     )
+
 
 
 @router.post("/confirm", response_model=MFAConfirmResponse)
