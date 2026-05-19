@@ -31,7 +31,8 @@ async def _fetch_tenant_config(conn, tenant_id: str) -> Optional[AIProviderConfi
             tts_provider,
             tts_model,
             tts_voice_id,
-            tts_sample_rate
+            tts_sample_rate,
+            voice_tuning
         FROM tenant_ai_configs
         WHERE tenant_id = $1
         """,
@@ -39,6 +40,22 @@ async def _fetch_tenant_config(conn, tenant_id: str) -> Optional[AIProviderConfi
     )
     if not row:
         return None
+
+    # voice_tuning is JSONB; asyncpg returns it as dict on the modern driver
+    # but as a str if the pool is configured without a json codec. Handle
+    # both so this works regardless of pool config (the dead shadow file
+    # had the same coercion — preserve it on the port).
+    raw_tuning = row["voice_tuning"]
+    if isinstance(raw_tuning, str):
+        import json as _json
+        try:
+            tuning_dict = _json.loads(raw_tuning)
+        except (ValueError, TypeError):
+            tuning_dict = None
+    elif isinstance(raw_tuning, dict):
+        tuning_dict = raw_tuning if raw_tuning else None
+    else:
+        tuning_dict = None
 
     return AIProviderConfig(
         llm_provider=row["llm_provider"],
@@ -52,10 +69,26 @@ async def _fetch_tenant_config(conn, tenant_id: str) -> Optional[AIProviderConfi
         tts_model=row["tts_model"],
         tts_voice_id=row["tts_voice_id"],
         tts_sample_rate=row["tts_sample_rate"],
+        voice_tuning=tuning_dict,
     )
 
 
 async def _upsert_tenant_config(conn, tenant_id: str, config: AIProviderConfig) -> None:
+    # Coerce voice_tuning through the resolver's public validator so
+    # malformed keys are dropped here instead of polluting the JSONB
+    # blob. Empty / None round-trips to '{}' so the NOT NULL DEFAULT
+    # constraint holds.
+    import json as _json
+    from app.domain.services.voice_tuning import get_voice_tuning_resolver
+
+    if config.voice_tuning:
+        coerced = get_voice_tuning_resolver().coerce_user_partial(
+            config.voice_tuning
+        )
+        voice_tuning_json = _json.dumps(coerced)
+    else:
+        voice_tuning_json = "{}"
+
     await conn.execute(
         """
         INSERT INTO tenant_ai_configs (
@@ -70,10 +103,11 @@ async def _upsert_tenant_config(conn, tenant_id: str, config: AIProviderConfig) 
             tts_provider,
             tts_model,
             tts_voice_id,
-            tts_sample_rate
+            tts_sample_rate,
+            voice_tuning
         )
         VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb
         )
         ON CONFLICT (tenant_id) DO UPDATE SET
             llm_provider = EXCLUDED.llm_provider,
@@ -87,6 +121,7 @@ async def _upsert_tenant_config(conn, tenant_id: str, config: AIProviderConfig) 
             tts_model = EXCLUDED.tts_model,
             tts_voice_id = EXCLUDED.tts_voice_id,
             tts_sample_rate = EXCLUDED.tts_sample_rate,
+            voice_tuning = EXCLUDED.voice_tuning,
             updated_at = NOW()
         """,
         tenant_id,
@@ -101,6 +136,7 @@ async def _upsert_tenant_config(conn, tenant_id: str, config: AIProviderConfig) 
         config.tts_model,
         config.tts_voice_id,
         config.tts_sample_rate,
+        voice_tuning_json,
     )
 
 

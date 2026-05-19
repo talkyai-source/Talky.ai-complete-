@@ -96,8 +96,25 @@ class SIPTrunkResponse(BaseModel):
     auth_username: Optional[str]
     auth_configured: bool
     metadata: Dict[str, Any]
+    last_tested_at: Optional[datetime] = None
+    last_test_result: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
+
+
+class SIPTrunkTestResponse(BaseModel):
+    """Result of POST /trunks/{id}/test — persisted on the trunk row.
+
+    Mirrors the dict returned by the SIP probe helper so the activation
+    gate can read .ok back off the trunk row without re-running the probe.
+    """
+    ok: bool
+    latency_ms: int
+    transport: SIPTransport
+    target: str
+    error: Optional[str] = None
+    detail: Optional[str] = None
+    tested_at: datetime
 
 
 # --- codec policies -----------------------------------------------------

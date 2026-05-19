@@ -29,8 +29,10 @@ from .schemas import (
     SIPTransport,
     SIPTrunkCreateRequest,
     SIPTrunkResponse,
+    SIPTrunkTestResponse,
     SIPTrunkUpdateRequest,
 )
+from .trunk_probe import probe_sip_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +41,24 @@ router = APIRouter(tags=["Telephony SIP"])
 
 # --- helpers (trunk-specific) ------------------------------------------
 
+def _coerce_jsonb(raw):
+    """asyncpg returns JSONB as dict on the modern codec and as str otherwise.
+
+    Tolerate both so the row->response mapping works regardless of pool
+    configuration.
+    """
+    if raw is None or isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
 def _row_to_response(row: asyncpg.Record) -> SIPTrunkResponse:
+    keys = row.keys()
     return SIPTrunkResponse(
         id=row["id"],
         tenant_id=row["tenant_id"],
@@ -52,6 +71,10 @@ def _row_to_response(row: asyncpg.Record) -> SIPTrunkResponse:
         auth_username=row["auth_username"],
         auth_configured=bool(row["auth_password_encrypted"]),
         metadata=row["metadata"] or {},
+        last_tested_at=row["last_tested_at"] if "last_tested_at" in keys else None,
+        last_test_result=(
+            _coerce_jsonb(row["last_test_result"]) if "last_test_result" in keys else None
+        ),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -76,6 +99,8 @@ async def _get_tenant_trunk(
             auth_username,
             auth_password_encrypted,
             metadata,
+            last_tested_at,
+            last_test_result,
             created_at,
             updated_at
         FROM tenant_sip_trunks
@@ -115,6 +140,8 @@ async def list_sip_trunks(
                 auth_username,
                 auth_password_encrypted,
                 metadata,
+                last_tested_at,
+                last_test_result,
                 created_at,
                 updated_at
             FROM tenant_sip_trunks
@@ -243,6 +270,8 @@ async def create_sip_trunk(
                         auth_username,
                         auth_password_encrypted,
                         metadata,
+                        last_tested_at,
+                        last_test_result,
                         created_at,
                         updated_at
                     """,
@@ -446,6 +475,8 @@ async def update_sip_trunk(
                         auth_username,
                         auth_password_encrypted,
                         metadata,
+                        last_tested_at,
+                        last_test_result,
                         created_at,
                         updated_at
                     """,
@@ -558,6 +589,40 @@ async def _set_trunk_active_state(
                 )
                 return quota_problem
 
+            # Activation gate: refuse to flip a trunk live until a probe
+            # has actually proven the host is reachable. Deactivation is
+            # always allowed (you need to be able to disable a broken
+            # trunk fast). Tenants whose last_test_result is missing or
+            # has ok=false must run /trunks/{id}/test first.
+            if active_state:
+                test_row = await conn.fetchrow(
+                    """
+                    SELECT last_tested_at, last_test_result
+                    FROM tenant_sip_trunks
+                    WHERE id = $1 AND tenant_id = $2
+                    """,
+                    trunk_id, current_user.tenant_id,
+                )
+                if test_row:
+                    raw = test_row["last_test_result"]
+                    if isinstance(raw, str):
+                        try:
+                            raw = json.loads(raw)
+                        except Exception:
+                            raw = None
+                    last_ok = bool(raw and raw.get("ok"))
+                    if not last_ok:
+                        return _problem(
+                            request=request,
+                            status_code=400,
+                            title="Activation Blocked",
+                            detail=(
+                                "Run a successful connectivity test before activating "
+                                "this trunk. POST /trunks/{id}/test."
+                            ),
+                            type_suffix="trunk-not-verified",
+                        )
+
             row = await conn.fetchrow(
                 """
                 UPDATE tenant_sip_trunks
@@ -578,6 +643,8 @@ async def _set_trunk_active_state(
                     auth_username,
                     auth_password_encrypted,
                     metadata,
+                    last_tested_at,
+                    last_test_result,
                     created_at,
                     updated_at
                 """,
@@ -653,4 +720,78 @@ async def deactivate_sip_trunk(
         request_id=x_request_id,
         current_user=current_user,
         db_pool=db_pool,
+    )
+
+
+@router.post("/trunks/{trunk_id}/test", response_model=SIPTrunkTestResponse)
+async def test_sip_trunk(
+    trunk_id: UUID,
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_pool: asyncpg.Pool = Depends(get_db_pool),
+):
+    """Probe a tenant's SIP trunk for reachability and persist the result.
+
+    The probe runs a real network handshake (TCP/TLS) or sends a SIP
+    OPTIONS datagram (UDP). The full result dict is stored on the trunk
+    row in last_test_result so the activate endpoint's gate can read
+    .ok back without re-running the probe.
+    """
+    from datetime import datetime, timezone
+
+    tenant_problem = _require_tenant(request, current_user)
+    if tenant_problem:
+        return tenant_problem
+
+    async with db_pool.acquire() as conn:
+        await apply_tenant_rls_context(
+            conn, current_user.tenant_id, current_user.id,
+            request_id=request.headers.get("x-request-id"),
+        )
+        row = await conn.fetchrow(
+            "SELECT sip_domain, port, transport FROM tenant_sip_trunks "
+            "WHERE id = $1 AND tenant_id = $2",
+            trunk_id, current_user.tenant_id,
+        )
+    if not row:
+        return _problem(
+            request=request,
+            status_code=404,
+            title="Trunk Not Found",
+            detail=f"No SIP trunk {trunk_id} for this tenant.",
+            type_suffix="trunk-not-found",
+        )
+
+    result = await probe_sip_endpoint(
+        host=row["sip_domain"], port=row["port"], transport=row["transport"],
+    )
+    tested_at = datetime.now(timezone.utc)
+
+    async with db_pool.acquire() as conn:
+        await apply_tenant_rls_context(
+            conn, current_user.tenant_id, current_user.id,
+            request_id=request.headers.get("x-request-id"),
+        )
+        await conn.execute(
+            """
+            UPDATE tenant_sip_trunks
+            SET last_tested_at = $1,
+                last_test_result = $2::jsonb,
+                updated_at = NOW()
+            WHERE id = $3 AND tenant_id = $4
+            """,
+            tested_at,
+            json.dumps(result),
+            trunk_id,
+            current_user.tenant_id,
+        )
+
+    return SIPTrunkTestResponse(
+        ok=bool(result.get("ok")),
+        latency_ms=int(result.get("latency_ms", 0) or 0),
+        transport=row["transport"],
+        target=f'{row["sip_domain"]}:{row["port"]}',
+        error=result.get("error"),
+        detail=result.get("detail"),
+        tested_at=tested_at,
     )
