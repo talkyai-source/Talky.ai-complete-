@@ -6,16 +6,19 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { validateTotpCode, verifyMfaLogin } from "@/lib/mfa-utils";
+import { api, type LoginResponse } from "@/lib/api";
+import { validateTotpCode } from "@/lib/mfa-utils";
 
 interface MFAVerificationProps {
-  email: string;
-  onSuccess: (tokens: { access_token: string; refresh_token: string }) => void;
+  // Issued by POST /auth/login when mfa_required=true. The verify call
+  // /auth/mfa/verify needs this exact token — email is no longer enough.
+  challengeToken: string | null;
+  onSuccess: (response: LoginResponse) => void;
   onBackClick: () => void;
   onError?: (error: string) => void;
 }
 
-export default function MFAVerification({ email, onSuccess, onBackClick, onError }: MFAVerificationProps) {
+export default function MFAVerification({ challengeToken, onSuccess, onBackClick, onError }: MFAVerificationProps) {
   const [totpCode, setTotpCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -46,6 +49,16 @@ export default function MFAVerification({ email, onSuccess, onBackClick, onError
     e.preventDefault();
     setError("");
 
+    if (!challengeToken) {
+      // Defensive: if the login response didn't surface a challenge_token
+      // we'd reach this screen with nothing to verify against. Bounce the
+      // user back to the credential step rather than silently failing.
+      const errorMsg = "MFA session expired. Please sign in again.";
+      setError(errorMsg);
+      onError?.(errorMsg);
+      return;
+    }
+
     if (!validateTotpCode(totpCode)) {
       const errorMsg = "Please enter a valid 6-8 digit code";
       setError(errorMsg);
@@ -56,7 +69,7 @@ export default function MFAVerification({ email, onSuccess, onBackClick, onError
     setLoading(true);
 
     try {
-      const response = await verifyMfaLogin(email, totpCode);
+      const response = await api.verifyMfaChallenge(challengeToken, totpCode);
       onSuccess(response);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "MFA verification failed. Please try again.";
