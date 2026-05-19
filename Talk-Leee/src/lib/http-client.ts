@@ -233,13 +233,22 @@ function defaultTokenStorage(): TokenStorage {
     const key = "talklee.auth.token";
     return {
         get: () => {
-            // Prefer the externally-installed provider when AuthContext has
-            // mounted (Phase 2 universal-auth-state). Falls back to direct
-            // localStorage for SSR + the pre-mount window.
+            // Phase 2 universal-auth-state: AuthContext installs itself as
+            // the provider so token rotations are reactive. BUT if the
+            // provider returns null we MUST fall through to localStorage —
+            // otherwise a legacy api.setToken() write (which goes through
+            // localStorage but not the React state) is invisible to the
+            // HTTP client and every request goes out without a Bearer
+            // header. That's exactly what caused the post-Phase-3 login
+            // bounce regression: the provider returned its stale null
+            // while localStorage already had the freshly-minted token from
+            // /auth/login. The "if (v) return v" form treats null as
+            // "provider doesn't have an answer", falls through to the
+            // localStorage read, and keeps reactivity for real values.
             if (_externalTokenProvider) {
                 try {
                     const v = _externalTokenProvider();
-                    if (v !== undefined) return v;
+                    if (v) return v;
                 } catch {
                     // Provider threw — fall through to localStorage.
                 }
