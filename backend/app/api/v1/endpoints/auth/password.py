@@ -18,6 +18,7 @@ from app.core.security.password import (
     validate_password_strength,
     verify_password,
 )
+from app.core.security.refresh_tokens import revoke_all_user_refresh_tokens
 from app.core.security.sessions import (
     SESSION_COOKIE_NAME,
     hash_session_token,
@@ -117,6 +118,20 @@ async def change_password(
                 current_user.id,
                 reason="password_change",
                 exclude_token_hash=current_token_hash,
+            )
+
+            # --- ALSO revoke every refresh token for the user -----------------
+            # Without this, a stolen `talky_rt` cookie issued before the
+            # password change would silently keep minting fresh 15-min
+            # access JWTs forever. Revoking the refresh-token family
+            # forces every device — including the legitimate current
+            # session — to re-authenticate the next time their JWT
+            # expires (≤15 min). That's the OWASP-recommended posture
+            # after a credential change.
+            await revoke_all_user_refresh_tokens(
+                conn,
+                current_user.id,
+                reason="password_change",
             )
 
     # --- log password change event (Day 8) -------------------------------------
