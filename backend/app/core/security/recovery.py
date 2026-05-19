@@ -246,6 +246,80 @@ async def count_remaining_codes(
     return int(count or 0)
 
 
+async def verify_recovery_code_returning_id(
+    conn: asyncpg.Connection,
+    user_id: str,
+    raw_code: str,
+) -> Optional[str]:
+    """
+    Verify-without-consuming variant for atomic flows.
+
+    Returns the row id (str) if the code matches an unused row for this
+    user, None otherwise. The caller MUST call `mark_recovery_code_used`
+    inside the same transaction once they're sure the rest of the
+    success path will commit. Used by /auth/mfa/verify so a failure in
+    session creation doesn't strand a consumed-but-unused code.
+
+    This function never raises — returns None on any error.
+    """
+    if not raw_code:
+        return None
+    normalised = _normalise(raw_code)
+    if not normalised:
+        return None
+    code_hash = _sha256(normalised)
+    try:
+        row = await conn.fetchrow(
+            """
+            SELECT id
+            FROM   recovery_codes
+            WHERE  user_id   = $1
+              AND  code_hash = $2
+              AND  used      = FALSE
+            """,
+            user_id,
+            code_hash,
+        )
+        return str(row["id"]) if row else None
+    except Exception as exc:
+        logger.error(
+            "verify_recovery_code_returning_id failed for user=%s err=%s",
+            user_id, exc,
+        )
+        return None
+
+
+async def mark_recovery_code_used(
+    conn: asyncpg.Connection,
+    code_id: str,
+) -> bool:
+    """
+    Mark a recovery code row as consumed. Use AFTER
+    `verify_recovery_code_returning_id` returns a non-None id and INSIDE
+    a transaction with the rest of the success path.
+
+    Returns True iff exactly one row was flipped from used=FALSE to TRUE.
+    Returns False on race (another caller consumed it first) or DB error.
+    """
+    now = datetime.now(timezone.utc)
+    try:
+        result = await conn.execute(
+            """
+            UPDATE recovery_codes
+               SET used    = TRUE,
+                   used_at = $1
+             WHERE id      = $2
+               AND used    = FALSE
+            """,
+            now,
+            code_id,
+        )
+        return _parse_command_tag_count(result) == 1
+    except Exception as exc:
+        logger.error("mark_recovery_code_used failed code_id=%s err=%s", code_id, exc)
+        return False
+
+
 async def verify_and_consume_recovery_code(
     conn: asyncpg.Connection,
     user_id: str,

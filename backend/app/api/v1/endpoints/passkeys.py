@@ -63,6 +63,7 @@ from app.core.security.lockout import check_account_locked, record_login_attempt
 from app.core.security.passkeys import (
     generate_authentication_options,
     generate_registration_options,
+    get_allowed_origins,
     get_credential_by_id,
     get_user_credentials,
     get_user_id_by_credential_id,
@@ -119,6 +120,30 @@ def _get_client_ip(request: Request) -> str:
 
 def _get_user_agent(request: Request) -> Optional[str]:
     return request.headers.get("User-Agent")
+
+
+def _validate_passkey_origin(request: Request) -> str:
+    # Relying on the verifier's `expected_origin or RP_ORIGIN` default means
+    # a misconfigured PASSKEY_RP_ORIGIN env (e.g. silently degraded to a
+    # localhost value in prod) would still accept any RP_ORIGIN-shaped
+    # request the verifier itself synthesised. Pinning the *inbound* Origin
+    # against an explicit allowlist + passing it to the verifier closes that.
+    origin = request.headers.get("origin")
+    if not origin:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Origin header required for passkey ceremonies.",
+        )
+    if origin not in set(get_allowed_origins()):
+        logger.warning(
+            "passkey_origin_rejected origin=%s allowed=%s",
+            origin, sorted(get_allowed_origins()),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Origin not permitted for passkey ceremonies.",
+        )
+    return origin
 
 
 # ===========================================================================
@@ -281,6 +306,7 @@ async def register_complete(
     We verify the attestation, store the credential, and return the passkey ID.
     """
     ip = _get_client_ip(request)
+    expected_origin = _validate_passkey_origin(request)
 
     async with db_client.pool.acquire() as conn:
         # Verify the registration response
@@ -289,6 +315,7 @@ async def register_complete(
                 conn=conn,
                 ceremony_id=body.ceremony_id,
                 credential_response=body.credential_response,
+                expected_origin=expected_origin,
                 ip_address=ip,
             )
         except ValueError as e:
@@ -450,6 +477,7 @@ async def login_complete(
     """
     ip = _get_client_ip(request)
     ua = _get_user_agent(request)
+    expected_origin = _validate_passkey_origin(request)
 
     # Extract credential ID from the response
     raw_credential_id = body.credential_response.get("id")
@@ -534,6 +562,7 @@ async def login_complete(
                 credential_id=credential["credential_id"],
                 credential_public_key=credential["credential_public_key"],
                 current_sign_count=credential["sign_count"],
+                expected_origin=expected_origin,
                 ip_address=ip,
             )
         except ValueError as e:

@@ -1,16 +1,24 @@
-"""
-Session Management Endpoints (Day 5)
+"""Session *management* endpoints — inspect / revoke sessions across devices.
 
-Allows users to manage their active sessions across devices.
+Mount: included directly in `app/api/v1/routes.py` with its own `/sessions`
+prefix, so the routes are exposed as `/api/v1/sessions/*`.
+
+Scope:
+  GET    /sessions/active            → list all active sessions for the user
+  DELETE /sessions/{session_id}      → revoke ONE specific session (not current)
+  POST   /sessions/verify            → "yes, that was me" on a suspicious session
+  GET    /sessions/security-status   → binding + suspicious flags for current session
+
+This file does NOT handle current-session teardown — that belongs to its
+sibling, `app/api/v1/endpoints/auth/sessions.py`, which exposes
+`/auth/logout` and `/auth/logout-all` (lifecycle).
+
+The boundary in one line:
+  - there (`auth/sessions.py`)        → "log me out"          → /auth/*
+  - here  (`endpoints/sessions.py`)   → "manage my devices"   → /sessions/*
 
 OWASP Session Management Cheat Sheet:
   https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
-
-Features:
-- List all active sessions with device info
-- Revoke specific sessions (selective logout)
-- Verify suspicious sessions
-- View session security status
 """
 
 from __future__ import annotations

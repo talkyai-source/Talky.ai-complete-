@@ -133,14 +133,28 @@ async def rotate_refresh_token(
         return None
 
     if row["expires_at"] <= now:
+        # Defense-in-depth: revoke the WHOLE family, not just this row.
+        # If someone is presenting an expired refresh token, the legitimate
+        # user has either been idle for the full 7-day TTL (in which case
+        # no other tokens in the family are valid anyway — no-op) OR they
+        # rotated past it long ago (in which case the family is already
+        # collapsed to the latest token). Either way, marking every
+        # un-revoked family member as `expired_with_subsequent_use` makes
+        # the audit story consistent and shuts down a theoretical race
+        # where a parallel cleanup hadn't yet caught a stale row.
         await conn.execute(
             """
             UPDATE refresh_tokens
-            SET revoked_at = $2, revoked_reason = 'expired'
-            WHERE id = $1 AND revoked_at IS NULL
+            SET revoked_at = $2,
+                revoked_reason = 'expired_with_subsequent_use'
+            WHERE family_id = $1 AND revoked_at IS NULL
             """,
-            row["id"],
+            row["family_id"],
             now,
+        )
+        logger.warning(
+            "refresh.expired_family_revoked family=%s user=%s presented_token_id=%s",
+            row["family_id"], row["user_id"], row["id"],
         )
         return None
 
