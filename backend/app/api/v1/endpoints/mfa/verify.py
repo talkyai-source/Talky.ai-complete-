@@ -8,6 +8,7 @@ records the attempt.
 from __future__ import annotations
 
 import logging
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
@@ -15,12 +16,21 @@ from app.api.v1.dependencies import get_db_client
 from app.core.jwt_security import encode_access_token as _encode_access_token
 from app.core.postgres_adapter import Client
 from app.core.security.lockout import check_account_locked, record_login_attempt
-from app.core.security.recovery import verify_and_consume_recovery_code
+from app.core.security.recovery import (
+    mark_recovery_code_used,
+    verify_recovery_code_returning_id,
+)
 from app.core.security.sessions import create_session, hash_session_token
 from app.core.security.totp import decrypt_totp_secret, verify_totp_code
 
 from ._shared import GENERIC_MFA_ERROR, _get_client_ip, _get_user_agent, _set_session_cookie
-from .challenge import consume_mfa_challenge, resolve_mfa_challenge
+from .challenge import (
+    MFA_VERIFY_MAX_ATTEMPTS,
+    consume_mfa_challenge,
+    invalidate_mfa_challenge,
+    record_failed_mfa_attempt,
+    resolve_mfa_challenge,
+)
 from .schemas import MFAChallengeVerifyRequest, MFAChallengeVerifyResponse
 
 logger = logging.getLogger(__name__)
@@ -130,10 +140,16 @@ async def verify_mfa_challenge(
             )
 
         # --- Verify the second factor ------------------------------------------
+        # Two paths share the success branch — TOTP doesn't have a separate
+        # consume step but recovery codes do. We verify (without consuming)
+        # first, then run the consume + session creation inside a single
+        # transaction below so a mid-flow failure can't strand a burned
+        # recovery code while leaving the user without a session.
         mfa_ok = False
+        recovery_code_id: Optional[str] = None
+        challenge_id = str(challenge["id"])
 
         if body.code:
-            # TOTP path
             try:
                 raw_secret = decrypt_totp_secret(mfa_row["totp_secret_enc"])
             except RuntimeError:
@@ -148,20 +164,20 @@ async def verify_mfa_challenge(
                 last_used_at=mfa_row["last_used_at"],
             )
 
-            if mfa_ok:
-                # Update last_used_at for replay prevention
-                await conn.execute(
-                    "UPDATE user_mfa SET last_used_at = NOW() WHERE user_id = $1",
-                    user_id,
-                )
-
         elif body.recovery_code:
-            # Recovery code path
-            mfa_ok = await verify_and_consume_recovery_code(
+            recovery_code_id = await verify_recovery_code_returning_id(
                 conn, user_id, body.recovery_code
             )
+            mfa_ok = recovery_code_id is not None
 
         if not mfa_ok:
+            # Per-challenge brute-force counter. After MFA_VERIFY_MAX_ATTEMPTS
+            # wrong submissions we burn the challenge — the attacker has to
+            # go back to /auth/login to mint a fresh one, which is itself
+            # rate-limited per-IP and per-email.
+            new_attempts = await record_failed_mfa_attempt(conn, challenge_id)
+            if new_attempts >= MFA_VERIFY_MAX_ATTEMPTS:
+                await invalidate_mfa_challenge(conn, challenge_id)
             await record_login_attempt(
                 conn,
                 email=normalised_email,
@@ -175,42 +191,64 @@ async def verify_mfa_challenge(
                 detail=GENERIC_MFA_ERROR,
             )
 
-        # --- SUCCESS: consume challenge + create full session -----------------
-        await consume_mfa_challenge(conn, str(challenge["id"]))
+        # --- SUCCESS: consume + create session — all in ONE transaction ---
+        async with conn.transaction():
+            if recovery_code_id is not None:
+                # Consume the recovery code we just verified. If another
+                # caller raced us and consumed it first, mark_recovery_code_used
+                # returns False → treat as auth failure inside the same tx so
+                # we don't strand a half-issued session.
+                consumed = await mark_recovery_code_used(conn, recovery_code_id)
+                if not consumed:
+                    logger.warning(
+                        "recovery_code_consume_race user=%s code_id=%s",
+                        user_id, recovery_code_id,
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail=GENERIC_MFA_ERROR,
+                    )
+            else:
+                # TOTP path: replay-prevention timestamp updated inside the
+                # same tx as session creation so the two land together.
+                await conn.execute(
+                    "UPDATE user_mfa SET last_used_at = NOW() WHERE user_id = $1",
+                    user_id,
+                )
 
-        raw_session_token, session_id = await create_session(
-            conn,
-            user_id=user_id,
-            ip_address=ip,
-            user_agent=ua,
-            request=request,
-            return_session_id=True,
-        )
+            await consume_mfa_challenge(conn, challenge_id)
 
-        # Mark session as MFA verified
-        session_hash = hash_session_token(raw_session_token)
-        await conn.execute(
-            """
-            UPDATE security_sessions
-               SET mfa_verified = TRUE
-             WHERE session_token_hash = $1
-            """,
-            session_hash,
-        )
+            raw_session_token, session_id = await create_session(
+                conn,
+                user_id=user_id,
+                ip_address=ip,
+                user_agent=ua,
+                request=request,
+                return_session_id=True,
+            )
 
-        # Record successful login
-        await record_login_attempt(
-            conn,
-            email=normalised_email,
-            user_id=user_id,
-            ip_address=ip,
-            success=True,
-        )
+            session_hash = hash_session_token(raw_session_token)
+            await conn.execute(
+                """
+                UPDATE security_sessions
+                   SET mfa_verified = TRUE
+                 WHERE session_token_hash = $1
+                """,
+                session_hash,
+            )
 
-        await conn.execute(
-            "UPDATE user_profiles SET last_login_at = NOW() WHERE id = $1",
-            user_id,
-        )
+            await record_login_attempt(
+                conn,
+                email=normalised_email,
+                user_id=user_id,
+                ip_address=ip,
+                success=True,
+            )
+
+            await conn.execute(
+                "UPDATE user_profiles SET last_login_at = NOW() WHERE id = $1",
+                user_id,
+            )
 
     # --- Build response -------------------------------------------------------
     tenant_id = str(user_row["tenant_id"]) if user_row["tenant_id"] else None
