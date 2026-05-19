@@ -2,8 +2,8 @@
 
 import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode, useCallback } from "react";
 import { api } from "@/lib/api";
-import { resetSessionExpiredLatch, isWithinFreshLoginGrace } from "@/lib/http-client";
-import { getBrowserAuthToken } from "@/lib/auth-token";
+import { resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider } from "@/lib/http-client";
+import { getBrowserAuthToken, setBrowserAuthToken } from "@/lib/auth-token";
 interface MeResponse {
     id: string;
     email: string;
@@ -25,9 +25,22 @@ interface MeResponse {
     suspended_at?: string;
 }
 
+// Authentication status — derived from accessToken + user + loading flags.
+// "uninitialized": SSR or pre-mount (before AuthProvider's bootstrap runs)
+// "loading"     : bootstrap /auth/me in flight on the client
+// "authenticated": user object present + token present
+// "anonymous"   : no token, no user — present a logged-out shell
+export type AuthStatus = "uninitialized" | "loading" | "authenticated" | "anonymous";
+
 interface AuthContextType {
     user: MeResponse | null;
     loading: boolean;
+    // Phase 2: reactive access token. Subscribers re-render when this
+    // changes (login, refresh-rotation, logout, cross-tab logout). Components
+    // should prefer useAccessToken() (lib/auth-hooks.ts) over reading
+    // localStorage directly.
+    accessToken: string | null;
+    status: AuthStatus;
     login: (email: string, password: string) => Promise<void>;
     register: (email: string, password: string, businessName: string, name?: string) => Promise<void>;
     logout: () => Promise<void>;
@@ -39,6 +52,7 @@ interface AuthContextType {
         role: string;
         business_name?: string | null;
         minutes_remaining?: number;
+        access_token?: string;
     }) => void;
 }
 
@@ -47,6 +61,42 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
     const [user, setUser] = useState<MeResponse | null>(null);
     const [loading, setLoading] = useState(true);
+    // Phase 2: token state owned by AuthContext (single writer). Initialised
+    // synchronously on first render from the persisted store so the bootstrap
+    // effect below sees the right value AND so the http-client's
+    // setTokenProvider() callback below resolves immediately to the right
+    // token rather than null-then-rotate.
+    const [accessToken, setAccessTokenState] = useState<string | null>(() => {
+        if (typeof window === "undefined") return null;
+        return getBrowserAuthToken();
+    });
+
+    // Plumb the live token to the shared HTTP client. Every request reads
+    // _externalTokenProvider() at request time, so a rotation here is
+    // automatically picked up by all consumers without anyone re-reading
+    // localStorage. Cleared on unmount so a unit test that tears down
+    // AuthProvider doesn't leak state across tests.
+    useEffect(() => {
+        setTokenProvider(() => accessToken);
+        return () => setTokenProvider(null);
+    }, [accessToken]);
+
+    // Cross-tab logout: when another tab clears the persisted token, sync
+    // this tab's state. The "storage" event only fires for OTHER tabs'
+    // writes — our own setBrowserAuthToken() doesn't echo through here.
+    // Covers two cases: (a) explicit cross-tab logout, (b) external
+    // tooling (e.g. DevTools clearing storage during a test).
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        function onStorage(e: StorageEvent) {
+            if (e.key !== "talklee.auth.token") return;
+            const next = e.newValue && e.newValue.trim() ? e.newValue : null;
+            setAccessTokenState(next);
+            if (!next) setUser(null);
+        }
+        window.addEventListener("storage", onStorage);
+        return () => window.removeEventListener("storage", onStorage);
+    }, []);
 
     // Bootstrap auth state from the server.
     //
@@ -62,7 +112,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // first-party signal is enough to opt in.
     useEffect(() => {
         let cancelled = false;
-        const legacyToken = getBrowserAuthToken();
+        // After Phase 2 the state-initialised `accessToken` is already the
+        // canonical answer — but for backwards compat (cookie-only sessions
+        // where Bearer isn't set but talky_at cookie is) we still consult
+        // the persistence layer once. Either signal opts us into the
+        // /auth/me bootstrap.
+        const legacyToken = accessToken ?? getBrowserAuthToken();
         if (!legacyToken) {
             // No auth signal — present a logged-out shell. Do NOT call
             // /auth/me or clear anything; the user will log in explicitly.
@@ -111,9 +166,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return () => { cancelled = true; };
     }, []);
 
+    // The ONE writer that touches the persisted token + the reactive state.
+    // Every other action (login, register, logout, setToken, applyLoginResult)
+    // delegates to this so localStorage and React state can't drift out of
+    // sync. Marked `setAccessToken` (not `setAccessTokenState`) to remind
+    // readers that this is the canonical mutation, not the raw setState.
+    const setAccessToken = useCallback((token: string | null) => {
+        setBrowserAuthToken(token);   // writes localStorage + legacy cookie mirror
+        setAccessTokenState(token);   // updates reactive state → re-renders all subscribers
+    }, []);
+
     const login = useCallback(async (email: string, password: string) => {
         const res = await api.login(email, password);
-        api.setToken(res.access_token);
+        setAccessToken(res.access_token);
         // Re-arm the http-client's session-expired latch so the NEXT 401
         // (after this fresh session eventually expires) fires the redirect
         // again.  Without this, a logout → login round-trip would leave
@@ -126,7 +191,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             business_name: res.business_name,
             minutes_remaining: res.minutes_remaining ?? 0,
         });
-    }, []);
+    }, [setAccessToken]);
 
     const register = useCallback(async (
         email: string,
@@ -144,7 +209,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // forward-compatible.
         const res = await api.register(email, password, businessName, "basic", name);
         if (res.access_token && res.role) {
-            api.setToken(res.access_token);
+            setAccessToken(res.access_token);
             resetSessionExpiredLatch();
             setUser({
                 id: res.user_id,
@@ -154,24 +219,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 minutes_remaining: res.minutes_remaining ?? 0,
             });
         }
-    }, []);
+    }, [setAccessToken]);
 
     const logout = useCallback(async () => {
         try {
             await api.logout();
         } catch {
             // Keep logout resilient for explicit user sign-out.
-            api.clearToken();
         } finally {
+            // Always clear local state, regardless of whether the backend
+            // call succeeded. Cross-tab tabs see this via the storage event
+            // listener installed above and drop their own state.
+            setAccessToken(null);
             try {
                 localStorage.removeItem("refresh_token");
             } catch { /* ignore */ }
             setUser(null);
         }
-    }, []);
+    }, [setAccessToken]);
 
     const setToken = useCallback((token: string) => {
-        api.setToken(token);
+        setAccessToken(token);
         resetSessionExpiredLatch();
         // After setting token, try to load real user.
         // Inside the fresh-login grace window, a 401 here is a transient
@@ -186,10 +254,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     }
                     return;
                 }
-                api.clearToken();
+                setAccessToken(null);
                 setUser(null);
             });
-    }, []);
+    }, [setAccessToken]);
 
     const refreshUser = useCallback(async () => {
         setLoading(true);
@@ -203,12 +271,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 }
                 return;
             }
-            api.clearToken();
+            setAccessToken(null);
             setUser(null);
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [setAccessToken]);
 
     // Synchronous user-state population from a login response. The login
     // POST returns enough fields to render the dashboard shell; we use
@@ -221,7 +289,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         role: string;
         business_name?: string | null;
         minutes_remaining?: number;
+        access_token?: string;
     }) => {
+        // When a caller passes the access_token, we commit it through the
+        // single writer so the new accessToken state stays in sync with
+        // localStorage. Existing call sites (login-client.tsx) that still
+        // call api.setToken() before applyLoginResult will work either
+        // way — this setAccessToken is a no-op-equivalent if the writer
+        // already ran with the same value.
+        if (res.access_token) setAccessToken(res.access_token);
         setUser({
             id: res.user_id,
             email: res.email,
@@ -230,11 +306,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             minutes_remaining: res.minutes_remaining ?? 0,
         });
         setLoading(false);
-    }, []);
+    }, [setAccessToken]);
+
+    // Compute the AuthStatus from the underlying state. Order matters:
+    // `loading` wins over presence checks because a freshly-mounted
+    // provider with a persisted token starts at status=loading while the
+    // bootstrap /auth/me confirms the token is still valid.
+    const status: AuthStatus = useMemo(() => {
+        if (typeof window === "undefined") return "uninitialized";
+        if (loading) return "loading";
+        if (user && accessToken) return "authenticated";
+        return "anonymous";
+    }, [loading, user, accessToken]);
 
     const value = useMemo(
-        () => ({ user, loading, login, register, logout, setToken, refreshUser, applyLoginResult }),
-        [loading, user, login, register, logout, setToken, refreshUser, applyLoginResult],
+        () => ({ user, loading, accessToken, status, login, register, logout, setToken, refreshUser, applyLoginResult }),
+        [loading, user, accessToken, status, login, register, logout, setToken, refreshUser, applyLoginResult],
     );
 
     return (
@@ -253,6 +340,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 const SSR_FALLBACK_AUTH_CONTEXT: AuthContextType = {
     user: null,
     loading: true,
+    accessToken: null,
+    status: "uninitialized",
     login: async () => {
         throw new Error("useAuth used outside AuthProvider on client");
     },

@@ -130,6 +130,38 @@ let _sessionExpiredHandler: (() => void) | null = null;
 let _sessionExpiredFired = false;
 let _freshLoginUntil = 0;
 
+// ──────────────────────────────────────────────────────────────────────────
+// Token provider — Phase 2 of the universal-auth-state refactor.
+//
+// Before this, every HttpClient instance defaulted to reading the Bearer
+// token from `localStorage["talklee.auth.token"]` AT REQUEST TIME. That
+// works but it means components and other readers also have to reach into
+// localStorage themselves to "see" the current token — there's no
+// reactive subscription, and a token rotation isn't visible to a
+// component that did `useMemo(() => getBrowserAuthToken(), [])` at mount.
+//
+// With Phase 2's universal model, `AuthContext` becomes the single owner
+// of the token state. It installs itself as the provider on mount via
+// `setTokenProvider(() => authContextState.accessToken)`. The HTTP client
+// then reads `_externalTokenProvider()` (when set) at request time, so
+// any rotation in AuthContext is automatically picked up by every API
+// call without anyone re-reading localStorage.
+//
+// We deliberately do NOT import AuthContext here to avoid a circular
+// import (auth-context.tsx imports `api` which depends on this module).
+// The deferred-injection pattern: AuthContext mounts → calls
+// setTokenProvider in a useEffect → from that point on, every request
+// reads the live token. The brief pre-mount window (between this module
+// loading and AuthProvider mounting) falls back to the localStorage
+// reader — which is what every request did before Phase 2 anyway, so
+// the SSR + first-paint paths are unchanged.
+// ──────────────────────────────────────────────────────────────────────────
+let _externalTokenProvider: (() => string | null) | null = null;
+
+export function setTokenProvider(fn: (() => string | null) | null) {
+    _externalTokenProvider = fn;
+}
+
 // Grace window after a fresh login. Any 401 (including one from
 // /auth/refresh failing) inside this window is treated as a transient
 // race — we do NOT fire session-expired and do NOT clear the stored
@@ -201,6 +233,17 @@ function defaultTokenStorage(): TokenStorage {
     const key = "talklee.auth.token";
     return {
         get: () => {
+            // Prefer the externally-installed provider when AuthContext has
+            // mounted (Phase 2 universal-auth-state). Falls back to direct
+            // localStorage for SSR + the pre-mount window.
+            if (_externalTokenProvider) {
+                try {
+                    const v = _externalTokenProvider();
+                    if (v !== undefined) return v;
+                } catch {
+                    // Provider threw — fall through to localStorage.
+                }
+            }
             if (typeof window === "undefined") return mem;
             try {
                 return window.localStorage.getItem(key);
