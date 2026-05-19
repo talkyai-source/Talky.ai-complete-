@@ -1,11 +1,18 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Loader2, ShieldAlert } from "lucide-react";
-import { api, type MeResponse } from "@/lib/api";
+import { type MeResponse } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
+
+// 30-second freshness for suspension state. The previous implementation
+// fired a parallel GET /auth/me here via useQuery; the new model derives
+// state from AuthContext.user (which the login flow seeds + the bootstrap
+// /auth/me refreshes) and triggers AuthContext.refreshUser() on a 30-second
+// cadence so a tenant suspension applied from admin still propagates to
+// active dashboards within the existing latency budget.
+const SUSPENSION_POLL_INTERVAL_MS = 30_000;
 
 type SuspensionScope = "partner" | "tenant" | null;
 
@@ -107,34 +114,24 @@ function mergeSuspensionState(serverState: SuspensionState, override: ScopedSusp
 }
 
 export function SuspensionStateProvider({ children }: { children: React.ReactNode }) {
-    const { user } = useAuth();
+    // Phase 3 of the universal-auth-state refactor: drop the parallel
+    // GET /auth/me useQuery and consume suspension fields from
+    // AuthContext.user directly. The 30-second freshness cadence is
+    // preserved via a setInterval on refreshUser() — a single shared
+    // /auth/me at AuthContext, not two parallel ones racing the cookie
+    // commit window post-login.
+    const { user, loading: authLoading, refreshUser } = useAuth();
     const [override, setOverride] = useState<ScopedSuspensionOverride | null>(null);
 
-    const statusQuery = useQuery({
-        queryKey: ["accountSuspensionState", user?.id ?? "guest"],
-        queryFn: () => api.getMe(),
-        enabled: Boolean(user),
-        refetchInterval: () => {
-            if (typeof document === "undefined") return 30_000;
-            if (document.visibilityState === "hidden") return false;
-            return 30_000;
-        },
-        refetchOnReconnect: true,
-        refetchOnWindowFocus: true,
-        refetchOnMount: "always",
-        staleTime: 0,
-        retry: 1,
-    });
-
-    const serverState = useMemo(() => deriveSuspensionState(statusQuery.data ?? user), [statusQuery.data, user]);
+    const serverState = useMemo(() => deriveSuspensionState(user), [user]);
     const state = useMemo(() => mergeSuspensionState(serverState, override), [override, serverState]);
 
+    // Clear any optimistic override when the user logs out.
     useEffect(() => {
-        if (!user) {
-            setOverride(null);
-        }
+        if (!user) setOverride(null);
     }, [user]);
 
+    // Drop a stale override once the server-fetched state catches up.
     useEffect(() => {
         if (!override) return;
         if (mergeSuspensionState(serverState, override).suspended === serverState.suspended) {
@@ -148,21 +145,59 @@ export function SuspensionStateProvider({ children }: { children: React.ReactNod
         }
     }, [override, serverState]);
 
+    // 30-second freshness loop. Only polls when there's an active user
+    // and the document is visible — no point burning CPU + bandwidth on
+    // /auth/me for a backgrounded tab. Tab returning to focus triggers
+    // a refresh via the visibilitychange listener below so suspension
+    // state is up-to-date the moment the user looks at the page again.
+    useEffect(() => {
+        if (!user) return;
+        let cancelled = false;
+        const tick = () => {
+            if (cancelled) return;
+            if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+            void refreshUser();
+        };
+        const handle = setInterval(tick, SUSPENSION_POLL_INTERVAL_MS);
+        return () => {
+            cancelled = true;
+            clearInterval(handle);
+        };
+    }, [user, refreshUser]);
+
+    // Refresh when the tab becomes visible again — covers the "left it
+    // open in a background tab for an hour" case where the interval
+    // didn't fire.
+    useEffect(() => {
+        if (typeof document === "undefined") return;
+        if (!user) return;
+        const onVisibility = () => {
+            if (document.visibilityState === "visible") void refreshUser();
+        };
+        document.addEventListener("visibilitychange", onVisibility);
+        return () => document.removeEventListener("visibilitychange", onVisibility);
+    }, [user, refreshUser]);
+
+    // Cross-tab suspension push: when an admin in another tab applies a
+    // suspension change via applyScopedUpdate(), receivers refetch their
+    // user state immediately rather than waiting for the next 30s tick.
     useEffect(() => {
         if (typeof BroadcastChannel === "undefined") return;
         const channel = new BroadcastChannel("account-suspension");
         channel.onmessage = () => {
-            void statusQuery.refetch();
+            void refreshUser();
         };
         return () => channel.close();
-    }, [statusQuery]);
+    }, [refreshUser]);
 
     const value = useMemo<SuspensionContextValue>(
         () => ({
             state,
-            loading: Boolean(user) && (statusQuery.isLoading || statusQuery.isFetching),
+            // loading is true only during AuthContext's bootstrap — once
+            // that resolves there's no separate suspension load to wait on.
+            loading: Boolean(user) && authLoading,
             refresh: async () => {
-                await statusQuery.refetch();
+                await refreshUser();
             },
             applyScopedUpdate: (input) => {
                 setOverride(input);
@@ -174,7 +209,7 @@ export function SuspensionStateProvider({ children }: { children: React.ReactNod
                 }
             },
         }),
-        [state, statusQuery, user]
+        [state, user, authLoading, refreshUser]
     );
 
     return <SuspensionStateContext.Provider value={value}>{children}</SuspensionStateContext.Provider>;
