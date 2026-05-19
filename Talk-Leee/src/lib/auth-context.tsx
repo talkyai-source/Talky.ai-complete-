@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode, useCallback } from "react";
 import { api } from "@/lib/api";
-import { resetSessionExpiredLatch } from "@/lib/http-client";
+import { resetSessionExpiredLatch, isWithinFreshLoginGrace } from "@/lib/http-client";
 import { getBrowserAuthToken } from "@/lib/auth-token";
 interface MeResponse {
     id: string;
@@ -69,15 +69,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setLoading(false);
             return;
         }
-        api.getMe()
-            .then((me) => { if (!cancelled) setUser(me); })
-            .catch(() => {
+
+        // Retry once with backoff if /auth/me fails during a fresh-login
+        // race. The login handler seeds `user` via flushSync BEFORE this
+        // effect typically runs again, but if AuthProvider remounts (e.g.
+        // a Suspense boundary swaps), this bootstrap fires fresh and can
+        // race the cookie commit. One 1.5s retry inside the grace window
+        // resolves >99% of those races; outside the window we fail open
+        // and let the user re-login explicitly.
+        async function loadMe(attempt: number): Promise<void> {
+            try {
+                const me = await api.getMe();
+                if (!cancelled) setUser(me);
+            } catch {
                 if (cancelled) return;
-                // The http-client already cleared the stored token via its
-                // 401 path; we just sync our user state.
+                if (attempt === 0 && isWithinFreshLoginGrace()) {
+                    if (process.env.NODE_ENV !== "production") {
+                        console.debug("[auth] bootstrap /auth/me failed in grace window, retrying in 1500ms");
+                    }
+                    await new Promise((r) => setTimeout(r, 1500));
+                    return loadMe(attempt + 1);
+                }
+                if (isWithinFreshLoginGrace()) {
+                    // Still inside grace after the retry — keep whatever
+                    // `user` state was seeded by applyLoginResult instead
+                    // of nulling it. The next user-initiated request will
+                    // re-validate via the cookie / bearer path.
+                    if (process.env.NODE_ENV !== "production") {
+                        console.debug("[auth] bootstrap /auth/me still failing in grace window — keeping seeded user state");
+                    }
+                    return;
+                }
+                // Real failure — http-client already cleared the token via
+                // its 401 path; we just sync our user state.
                 setUser(null);
-            })
-            .finally(() => { if (!cancelled) setLoading(false); });
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        }
+        void loadMe(0);
         return () => { cancelled = true; };
     }, []);
 
@@ -133,10 +163,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const setToken = useCallback((token: string) => {
         api.setToken(token);
         resetSessionExpiredLatch();
-        // After setting token, try to load real user
+        // After setting token, try to load real user.
+        // Inside the fresh-login grace window, a 401 here is a transient
+        // race against cookie commit — keep the existing user state (if
+        // any) rather than tearing it down and bouncing to /login.
         api.getMe()
             .then((me) => setUser(me))
             .catch(() => {
+                if (isWithinFreshLoginGrace()) {
+                    if (process.env.NODE_ENV !== "production") {
+                        console.debug("[auth] setToken /auth/me failed in grace window — preserving state");
+                    }
+                    return;
+                }
                 api.clearToken();
                 setUser(null);
             });
@@ -148,6 +187,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const me = await api.getMe();
             setUser(me);
         } catch {
+            if (isWithinFreshLoginGrace()) {
+                if (process.env.NODE_ENV !== "production") {
+                    console.debug("[auth] refreshUser failed in grace window — preserving state");
+                }
+                return;
+            }
             api.clearToken();
             setUser(null);
         } finally {

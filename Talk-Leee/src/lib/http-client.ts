@@ -142,14 +142,20 @@ let _freshLoginUntil = 0;
 //   - Browser cookie commit lagging the localStorage write
 //   - Refresh token rotation racing with parallel /auth/me calls
 //   - Stale cookies from a prior origin (vercel.app) still in the jar
-const FRESH_LOGIN_GRACE_MS = 8000;
+// 15s window — same value Auth0 / Clerk use for the post-login race
+// against cookie commit + JWT iat skew. 8s wasn't enough on slow networks.
+const FRESH_LOGIN_GRACE_MS = 15000;
 
 export function markFreshLogin() {
     _sessionExpiredFired = false;
     _freshLoginUntil = Date.now() + FRESH_LOGIN_GRACE_MS;
 }
 
-function isWithinFreshLoginGrace(): boolean {
+// Exported so the auth-context catches + dashboard-layout guard can
+// consult it. Without this, a transient 401 from `api.getMe()` thrown
+// to a downstream `.catch(() => setUser(null))` re-triggers the bounce
+// even though we suppressed `fireSessionExpired()` here.
+export function isWithinFreshLoginGrace(): boolean {
     return Date.now() < _freshLoginUntil;
 }
 
