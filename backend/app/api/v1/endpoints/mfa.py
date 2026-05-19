@@ -253,15 +253,18 @@ async def create_mfa_challenge(
     return raw_token
 
 
+MFA_VERIFY_MAX_ATTEMPTS = 5  # Per-challenge brute-force cap.
+
+
 async def resolve_mfa_challenge(conn, raw_token: str) -> Optional[dict[str, str]]:
     """
     Validate a raw challenge token and return the challenge row if valid.
 
-    Checks: exists, not used, not expired.
+    Checks: exists, not used, not expired, attempts < MFA_VERIFY_MAX_ATTEMPTS.
     Does NOT consume the challenge — call consume_mfa_challenge() after
-    successful TOTP verification.
+    successful TOTP verification, or record_failed_mfa_attempt() on failure.
 
-    Returns the row dict or None.
+    Returns the row dict (including current attempts count) or None.
     """
     if not raw_token:
         return None
@@ -271,14 +274,16 @@ async def resolve_mfa_challenge(conn, raw_token: str) -> Optional[dict[str, str]
 
     row = await conn.fetchrow(
         """
-        SELECT id, user_id, ip_address, expires_at, used
+        SELECT id, user_id, ip_address, expires_at, used, attempts
         FROM   mfa_challenges
         WHERE  challenge_hash = $1
           AND  used           = FALSE
           AND  expires_at     > $2
+          AND  attempts       < $3
         """,
         token_hash,
         now,
+        MFA_VERIFY_MAX_ATTEMPTS,
     )
     return dict(row) if row else None
 
@@ -293,6 +298,49 @@ async def consume_mfa_challenge(conn, challenge_id: str) -> None:
                used_at = $1
          WHERE id      = $2
            AND used    = FALSE
+        """,
+        now,
+        challenge_id,
+    )
+
+
+async def record_failed_mfa_attempt(conn, challenge_id: str) -> int:
+    """
+    Increment the attempt counter on a challenge after a wrong code.
+    Returns the new attempt count. Callers should compare against
+    MFA_VERIFY_MAX_ATTEMPTS to decide whether to invalidate the challenge.
+
+    The UPDATE is atomic: parallel wrong-code submissions each contribute
+    one increment, so two simultaneous racing attackers cannot exceed
+    the cap.
+    """
+    row = await conn.fetchrow(
+        """
+        UPDATE mfa_challenges
+           SET attempts = attempts + 1
+         WHERE id       = $1
+           AND used     = FALSE
+        RETURNING attempts
+        """,
+        challenge_id,
+    )
+    return int(row["attempts"]) if row else MFA_VERIFY_MAX_ATTEMPTS + 1
+
+
+async def invalidate_mfa_challenge(conn, challenge_id: str) -> None:
+    """
+    Permanently invalidate a challenge after exceeding the attempt cap.
+    Used after MFA_VERIFY_MAX_ATTEMPTS wrong submissions — forces the
+    attacker to start over with a fresh /auth/login round-trip, which is
+    gated by the per-account login lockout already in place.
+    """
+    now = datetime.now(timezone.utc)
+    await conn.execute(
+        """
+        UPDATE mfa_challenges
+           SET used    = TRUE,
+               used_at = $1
+         WHERE id      = $2
         """,
         now,
         challenge_id,
@@ -609,6 +657,18 @@ async def verify_mfa_challenge(
             )
 
         if not mfa_ok:
+            # Per-challenge brute-force cap: increment the attempts
+            # counter and invalidate the challenge if we've hit the
+            # max. Doing it inside the same DB connection keeps the
+            # increment atomic across parallel verify calls.
+            attempts_after = await record_failed_mfa_attempt(conn, str(challenge["id"]))
+            if attempts_after >= MFA_VERIFY_MAX_ATTEMPTS:
+                await invalidate_mfa_challenge(conn, str(challenge["id"]))
+                logger.warning(
+                    "mfa_challenge_invalidated_after_max_attempts user_id=%s ip=%s attempts=%d",
+                    user_id, ip, attempts_after,
+                )
+
             await record_login_attempt(
                 conn,
                 email=normalised_email,

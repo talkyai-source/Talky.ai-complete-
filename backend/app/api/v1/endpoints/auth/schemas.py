@@ -39,6 +39,23 @@ class AuthTokenResponse(BaseModel):
     mfa_challenge_token: Optional[str] = None
 
 
+class RegisterResponse(BaseModel):
+    """
+    Response from POST /auth/register.
+
+    Returns NO access_token by design: the user must verify their email
+    before they can log in. Issuing a session here would let an attacker
+    register with someone else's address and immediately exercise full
+    tenant_admin powers without ever proving inbox ownership.
+    """
+    user_id: str
+    email: str
+    business_name: str
+    verification_required: bool = True
+    verification_email_sent: bool
+    message: str
+
+
 class MeResponse(BaseModel):
     id: str
     email: str

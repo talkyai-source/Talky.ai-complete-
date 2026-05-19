@@ -15,7 +15,6 @@ from app.core.security.password import (
     hash_password,
     validate_password_strength,
 )
-from app.core.security.sessions import create_session
 from app.core.security.verification_tokens import (
     generate_verification_token,
     get_verification_token_expiry,
@@ -25,21 +24,18 @@ from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services.email_service import get_email_service
 
 from ._shared import (
-    create_jwt,
     get_client_ip,
     get_user_agent,
     limiter,
-    issue_cookie_auth,
-    set_session_cookie,
 )
-from .schemas import AuthTokenResponse, RegisterRequest
+from .schemas import RegisterRequest, RegisterResponse
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["auth"])
 
 
-@router.post("/register", response_model=AuthTokenResponse)
+@router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
 @limiter.limit("3/minute")
 async def register(
     request: Request,
@@ -47,7 +43,7 @@ async def register(
     body: RegisterRequest,
     db_client: Client = Depends(get_db_client),
     audit_logger: AuditLogger = Depends(get_audit_logger),
-) -> AuthTokenResponse:
+) -> RegisterResponse:
     """
     Register a new user.
 
@@ -137,27 +133,20 @@ async def register(
         )
 
         # Seed the platform-default SIP trunk (Blaze Digitel) so the new
-        # tenant can place outbound calls immediately.
+        # tenant can place outbound calls immediately AFTER they verify.
         from app.services.scripts.seed_platform_sip_trunk import seed_for_tenant
         await seed_for_tenant(conn, str(tenant["id"]))
 
-        # --- create server-side session ----------------------------------------
-        # Day 5: Pass request for device fingerprinting
         ip = get_client_ip(request)
         ua = get_user_agent(request)
-        raw_session_token, session_id = await create_session(
-            conn,
-            user_id=user_id,
-            ip_address=ip,
-            user_agent=ua,
-            request=request,
-            bind_to_ip=True,
-            bind_to_fingerprint=True,
-            return_session_id=True,
-        )
 
     # --- send verification email -----------------------------------------------
-    # Build verification link - adjust domain based on your setup
+    # No session is created until the user clicks the verification link.
+    # Issuing a session here historically let an attacker register as
+    # victim@example.com (without owning the inbox) and get a 15-min
+    # JWT + 7-day refresh cookie immediately — full tenant_admin powers
+    # without ever proving email ownership. The verification link lands
+    # the user on /auth/login where they sign in normally.
     settings = get_settings()
     verification_link = f"{settings.api_base_url}/api/v1/auth/verify-email?token={verification_token}"
     email_service = get_email_service()
@@ -171,24 +160,6 @@ async def register(
         logger.warning(
             f"Failed to send verification email to {body.email} after registration"
         )
-        # Don't fail the registration if email send fails, but log it
-
-    # --- issue JWT + set cookie ------------------------------------------------
-    token = create_jwt(user_id, body.email, "owner", str(tenant["id"]), session_id)
-    set_session_cookie(response, raw_session_token)
-
-    async with db_client.pool.acquire() as conn:
-        await issue_cookie_auth(
-            response,
-            conn,
-            user_id=user_id,
-            email=body.email,
-            role="owner",
-            tenant_id=str(tenant["id"]),
-            session_id=session_id,
-            ip=ip,
-            user_agent=ua,
-        )
 
     # --- log registration event (Day 8) ----------------------------------------
     await audit_logger.log(
@@ -197,18 +168,20 @@ async def register(
         actor_type="user",
         tenant_id=str(tenant["id"]),
         action="user_registered",
-        description=f"New user registered: {body.email}",
+        description=f"New user registered: {body.email} (pending email verification)",
         metadata={"plan_id": forced_plan_id, "business_name": body.business_name},
         ip_address=ip,
         user_agent=ua,
     )
 
-    return AuthTokenResponse(
-        access_token=token,
+    return RegisterResponse(
         user_id=user_id,
         email=body.email,
-        role="owner",
         business_name=body.business_name,
-        minutes_remaining=plan["minutes"],
-        message="Registration successful. Please verify your email to enable full access.",
+        verification_required=True,
+        verification_email_sent=bool(email_sent),
+        message=(
+            "Account created. Check your inbox for a verification link — "
+            "you'll be able to sign in after clicking it."
+        ),
     )

@@ -639,15 +639,36 @@ async def verify_authentication(
     # Consume the challenge (single-use)
     await consume_challenge(conn, ceremony_id)
 
-    # Check for clone detection (W3C §6.1.3)
+    # Clone detection (W3C §6.1.3). If the authenticator's monotonic
+    # sign-count went backwards or stayed the same, the credential has
+    # been cloned and used elsewhere — the only way the counter can
+    # regress. Per spec we MUST reject authentication; previously this
+    # path only logged and continued, allowing both the attacker and the
+    # legitimate user to keep authenticating indefinitely.
     new_sign_count = verification.new_sign_count
     if current_sign_count > 0 and new_sign_count <= current_sign_count:
         logger.critical(
-            "CLONE DETECTED: credential_id=%s old_count=%d new_count=%d",
-            credential_id, current_sign_count, new_sign_count
+            "passkey_clone_detected credential_id=%s old_count=%d new_count=%d user_id=%s",
+            credential_id, current_sign_count, new_sign_count, user_id,
         )
-        # Still allow login but flag for security review
-        # In production, you might want to notify admins or force re-enrollment
+        # Disable the cloned credential — the user must re-enroll a
+        # fresh authenticator. We delete rather than soft-disable because
+        # the schema has no is_active column AND a deleted credential
+        # cannot be silently re-armed by a row UPDATE elsewhere.
+        try:
+            await conn.execute(
+                "DELETE FROM user_passkeys WHERE credential_id = $1",
+                credential_id,
+            )
+        except Exception as exc:
+            # Never fail the rejection on a DB cleanup hiccup — the
+            # critical log entry still gives ops a paper trail.
+            logger.error("passkey_clone_cleanup_failed credential_id=%s err=%s",
+                         credential_id, exc)
+        raise ValueError(
+            "Authenticator integrity check failed. This passkey has been disabled; "
+            "please enroll a new one."
+        )
 
     logger.info(
         "Authentication verified: credential_id=%s... new_sign_count=%d",
