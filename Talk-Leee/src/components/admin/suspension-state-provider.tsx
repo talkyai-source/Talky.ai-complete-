@@ -156,7 +156,11 @@ export function SuspensionStateProvider({ children }: { children: React.ReactNod
         const tick = () => {
             if (cancelled) return;
             if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
-            void refreshUser();
+            // silent: true — a transient /auth/me failure in the freshness
+            // loop must NOT bounce the user back to /login. The previous
+            // implementation tore down auth state on any error, which
+            // turned a 200ms network blip every 30 seconds into a logout.
+            void refreshUser({ silent: true });
         };
         const handle = setInterval(tick, SUSPENSION_POLL_INTERVAL_MS);
         return () => {
@@ -172,7 +176,7 @@ export function SuspensionStateProvider({ children }: { children: React.ReactNod
         if (typeof document === "undefined") return;
         if (!user) return;
         const onVisibility = () => {
-            if (document.visibilityState === "visible") void refreshUser();
+            if (document.visibilityState === "visible") void refreshUser({ silent: true });
         };
         document.addEventListener("visibilitychange", onVisibility);
         return () => document.removeEventListener("visibilitychange", onVisibility);
@@ -185,7 +189,7 @@ export function SuspensionStateProvider({ children }: { children: React.ReactNod
         if (typeof BroadcastChannel === "undefined") return;
         const channel = new BroadcastChannel("account-suspension");
         channel.onmessage = () => {
-            void refreshUser();
+            void refreshUser({ silent: true });
         };
         return () => channel.close();
     }, [refreshUser]);
