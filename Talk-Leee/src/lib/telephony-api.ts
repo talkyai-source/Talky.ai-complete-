@@ -11,8 +11,7 @@
  * UI reflects server state immediately.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiBaseUrl } from "@/lib/env";
-import { getBrowserAuthToken } from "@/lib/auth-token";
+import { api as sharedApi } from "@/lib/api";
 
 // ----- Types ----------------------------------------------------------------
 
@@ -88,30 +87,31 @@ export interface SipTrunkTestResponse extends SipTrunkTestResult {
 }
 
 // ----- Fetch helper ---------------------------------------------------------
+//
+// Phase 5 universal-auth-state: delegates to the shared `api` client so
+// requests participate in refresh-on-401, single-flight refresh dedup,
+// fresh-login grace, and the unified session-expired redirect latch.
+// Public contract preserved: this helper throws on non-2xx with the
+// backend's detail message (or "Request failed (N)" fallback) — the
+// shared client's ApiClientError carries those fields.
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-    const base = apiBaseUrl();
-    const token = getBrowserAuthToken();
-    const res = await fetch(`${base}${path}`, {
-        ...init,
-        credentials: "include",
-        headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            ...init?.headers,
-        },
-    });
-    if (!res.ok) {
-        let detail = `Request failed (${res.status})`;
+type ApiInit = {
+    method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+    body?: string;
+    headers?: Record<string, string>;
+};
+
+async function api<T>(path: string, init?: ApiInit): Promise<T> {
+    const method = (init?.method as "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | undefined) ?? "GET";
+    let body: unknown;
+    if (init?.body !== undefined) {
         try {
-            const j = await res.json();
-            detail = j?.error?.message || j?.detail || detail;
+            body = JSON.parse(init.body);
         } catch {
-            // ignore
+            body = init.body;
         }
-        throw new Error(detail);
     }
-    return (await res.json()) as T;
+    return await sharedApi.request<T>({ path, method, body, headers: init?.headers });
 }
 
 // ----- Query keys -----------------------------------------------------------

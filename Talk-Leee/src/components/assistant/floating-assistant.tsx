@@ -28,7 +28,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bot, Loader2, MessageCircle, Send, X } from "lucide-react";
 import { apiBaseUrl } from "@/lib/env";
-import { getBrowserAuthToken } from "@/lib/auth-token";
+import { useAccessToken } from "@/lib/auth-hooks";
 
 /*
  * NOTE on the sidebar offset: this component used to import
@@ -102,13 +102,22 @@ export function FloatingAssistant() {
     const reconnectTimerRef = useRef<number | null>(null);
     const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
+    // Reactive token via Phase 2's AuthContext-backed hook. Subscribing
+    // here means wsUrl re-computes on login, on cross-tab logout (storage
+    // event), and on access-token rotation (refresh). The previous
+    // implementation snapshot the token via getBrowserAuthToken() at
+    // mount with an empty deps array — that ran before AuthContext
+    // hydrated localStorage on the first dashboard mount, so wsUrl was
+    // null for the lifetime of the component and the panel rendered the
+    // "Sign in to chat" CTA despite the user being authenticated. This
+    // is the Phase 5 fix for the Ask-AI re-prompt bug.
+    const accessToken = useAccessToken();
     const wsUrl = useMemo(() => {
-        const token = getBrowserAuthToken();
-        if (!token) return null;
-        const params = new URLSearchParams({ token });
+        if (!accessToken) return null;
+        const params = new URLSearchParams({ token: accessToken });
         if (conversationIdRef.current) params.set("conversation_id", conversationIdRef.current);
         return `${resolveWsBase()}/assistant/chat?${params.toString()}`;
-    }, []);
+    }, [accessToken]);
 
     const isAuthed = wsUrl !== null;
 
