@@ -1,4 +1,4 @@
-import { createHttpClient } from "@/lib/http-client";
+import { sharedHttpClient } from "@/lib/api";
 import { apiBaseUrl } from "@/lib/env";
 
 // Dashboard Types
@@ -113,9 +113,13 @@ interface CallListItem {
     campaign_name?: string;
 }
 
-// Dashboard API - Real backend integration
+// Dashboard API - Real backend integration.
+//
+// AH-Phase-B: shared HttpClient instance (see lib/api.ts → sharedHttpClient).
+// One instance, one single-flight refresh state, no parallel
+// /auth/refresh races between dashboard-api and api.ts.
 class DashboardApi {
-    private client = createHttpClient({ baseUrl: apiBaseUrl() });
+    private get client() { return sharedHttpClient(); }
 
     // Dashboard
     async getDashboardSummary(): Promise<DashboardSummary> {
