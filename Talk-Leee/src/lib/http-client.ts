@@ -184,6 +184,17 @@ export function markFreshLogin() {
     _freshLoginUntil = Date.now() + FRESH_LOGIN_GRACE_MS;
 }
 
+/**
+ * AH-Phase-E: clear the grace window immediately. Called by
+ * AuthContext.logout so a user who logs in and out within 15s doesn't
+ * leave a lingering suppression window — a subsequent 401 in the next
+ * remnant seconds would otherwise be silently swallowed instead of
+ * bouncing the now-anonymous user.
+ */
+export function clearFreshLoginGrace() {
+    _freshLoginUntil = 0;
+}
+
 // Exported so the auth-context catches + dashboard-layout guard can
 // consult it. Without this, a transient 401 from `api.getMe()` thrown
 // to a downstream `.catch(() => setUser(null))` re-triggers the bounce
