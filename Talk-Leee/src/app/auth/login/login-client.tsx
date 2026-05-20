@@ -29,7 +29,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { markFreshLogin, recordAuthDiag } from "@/lib/http-client";
+import { markFreshLogin } from "@/lib/http-client";
 import MFAVerification from "@/components/auth/mfa-verification";
 import PasskeyLogin from "@/components/auth/passkey-login";
 
@@ -255,18 +255,6 @@ export default function LoginClientPage() {
                 role === "white_label_admin"
                     ? "/white-label/dashboard"
                     : safeNext ?? (cameFromAssistant ? "/" : "/dashboard");
-
-            recordAuthDiag("login.before-navigation", {
-                destination,
-                rawNext, safeNext, from, role,
-                hasLocalStorageToken: typeof window !== "undefined"
-                    ? Boolean(window.localStorage?.getItem?.("talklee.auth.token"))
-                    : null,
-                hasLegacyCookie: typeof document !== "undefined"
-                    ? document.cookie.includes("talklee_auth_token=")
-                    : null,
-                cookieLen: typeof document !== "undefined" ? document.cookie.length : 0,
-            });
 
             // Use a hard navigation instead of router.push.
             //
