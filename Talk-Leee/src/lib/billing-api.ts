@@ -1,35 +1,40 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiBaseUrl } from "@/lib/env";
-import { getBrowserAuthToken } from "@/lib/auth-token";
+import { api } from "@/lib/api";
 
 // ── Fetch helper ──
 //
-// Uses the canonical apiBaseUrl() from @/lib/env so this module reads the same
-// NEXT_PUBLIC_API_BASE_URL the rest of the app does. The previous
-// process.env.NEXT_PUBLIC_API_URL was a different (unset) variable, which is
-// why every hook silently fell back to mock data even when the backend was
-// running.
+// Phase 5 universal-auth-state: this helper used to bake its own auth
+// header from a localStorage read at request time. It now delegates to
+// the shared `api` client so requests participate in refresh-on-401,
+// single-flight refresh dedup, fresh-login grace, and the unified
+// session-expired redirect latch.
 //
-// On non-2xx responses or network errors, hooks now return null/[] instead of
-// fake constants so consuming pages render an honest empty state.
+// Public contract preserved: returns null on any error (network, 4xx,
+// 5xx) so consuming pages render an honest empty state instead of
+// throwing. Callers rely on `useQuery`'s data-or-null surface.
 
-async function billingFetch<T>(path: string, options?: RequestInit): Promise<T | null> {
-  const baseUrl = apiBaseUrl();
-  if (!baseUrl) return null;
+type BillingFetchInit = {
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  body?: string;
+};
+
+async function billingFetch<T>(path: string, options?: BillingFetchInit): Promise<T | null> {
   try {
-    const token = getBrowserAuthToken();
-    const res = await fetch(`${baseUrl}${path}`, {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...options?.headers,
-      },
-    });
-    if (!res.ok) return null;
-    return (await res.json()) as T;
+    const method = (options?.method as "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | undefined) ?? "GET";
+    // billing hooks historically pass `body` as a JSON-encoded string
+    // (JSON.stringify(...)); the shared client expects an object, so
+    // parse it back. Empty/no body stays undefined.
+    let body: unknown;
+    if (options?.body !== undefined) {
+      try {
+        body = JSON.parse(options.body);
+      } catch {
+        body = options.body;
+      }
+    }
+    return await api.request<T>({ path, method, body });
   } catch {
     return null;
   }

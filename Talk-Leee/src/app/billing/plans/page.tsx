@@ -7,8 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Check, Loader2, Star } from "lucide-react";
 import { useBillingPlan, useBillingPlans } from "@/lib/billing-api";
-import { apiBaseUrl } from "@/lib/env";
-import { getBrowserAuthToken } from "@/lib/auth-token";
+import { api } from "@/lib/api";
 
 type PlanRow = {
   id: string;
@@ -45,33 +44,16 @@ export default function PlansPage() {
     setCheckoutError(null);
     setCheckoutPlanId(planId);
     try {
-      const base = apiBaseUrl();
-      const token = getBrowserAuthToken();
       const origin = typeof window !== "undefined" ? window.location.origin : "";
-      const res = await fetch(`${base}/billing/create-checkout-session`, {
+      const data = await api.request<{ checkout_url?: string; mock_mode?: boolean; message?: string }>({
+        path: "/billing/create-checkout-session",
         method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
+        body: {
           plan_id: planId,
           success_url: `${origin}/billing?checkout=success`,
           cancel_url: `${origin}/billing/plans?checkout=cancel`,
-        }),
+        },
       });
-      if (!res.ok) {
-        let detail = `Checkout failed (${res.status})`;
-        try {
-          const j = await res.json();
-          detail = j?.error?.message || j?.detail || detail;
-        } catch {
-          // ignore
-        }
-        throw new Error(detail);
-      }
-      const data: { checkout_url?: string; mock_mode?: boolean; message?: string } = await res.json();
       if (data.mock_mode) {
         setCheckoutError(
           "Stripe is not configured on the server yet — clicking a plan would normally redirect to Stripe Checkout. " +

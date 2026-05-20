@@ -18,6 +18,7 @@ import LogoutButton from "@/components/auth/logout-button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TelephonyProvidersSection } from "@/components/settings/telephony-providers-section";
 import { useAuth } from "@/lib/auth-context";
+import { useAccessToken } from "@/lib/auth-hooks";
 import { api } from "@/lib/api";
 import { notificationsStore } from "@/lib/notifications";
 import { Loader2 } from "lucide-react";
@@ -40,7 +41,14 @@ const routings: NotificationRouting[] = ["inApp", "webhook", "both", "none"];
 export default function SettingsPage() {
     const { settings } = useNotificationsState();
     const { setSettings, setCategory } = useNotificationsActions();
-    const [token, setToken] = useState("");
+    // Phase 5 universal-auth-state: token now comes from AuthContext via
+    // the reactive useAccessToken() hook. The previous implementation
+    // dynamically imported `getBrowserAuthToken` inside a mount-time
+    // useEffect — which raced AuthContext bootstrap and snapshotted the
+    // token at that moment, so a later /auth/refresh wouldn't reach the
+    // MFA / Passkey panels. Empty string preserves the previous truthy
+    // gating in the JSX (`token && <Foo token={token}/>`).
+    const token = useAccessToken() ?? "";
     const [showMfaSetup, setShowMfaSetup] = useState(false);
     const [showPasskeySetup, setShowPasskeySetup] = useState(false);
     const [mfaEnabled, setMfaEnabled] = useState(false);
@@ -169,21 +177,8 @@ export default function SettingsPage() {
         }
     }
 
-    // Get JWT from the canonical auth-token storage. Earlier this hardcoded
-    // localStorage.getItem("access_token"), which is the WRONG key — the
-    // rest of the app stores the JWT under "talklee.auth.token" (via
-    // src/lib/auth-token.ts → setBrowserAuthToken). With the old key the
-    // settings page never saw a token, so the MFA / Passkey panels
-    // silently refused to render their setup flows.
-    useEffect(() => {
-        let cancelled = false;
-        (async () => {
-            const { getBrowserAuthToken } = await import("@/lib/auth-token");
-            const savedToken = getBrowserAuthToken() || "";
-            if (!cancelled) setToken(savedToken);
-        })();
-        return () => { cancelled = true; };
-    }, []);
+    // Phase 5: token sourcing moved to useAccessToken() above. The
+    // previous mount-time dynamic-import useEffect is no longer needed.
 
     return (
         <DashboardLayout title="Settings" description="Configure notifications, telephony, and your account.">

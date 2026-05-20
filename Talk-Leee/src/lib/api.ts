@@ -187,6 +187,19 @@ class ApiClient {
         setBrowserAuthToken(null);
     }
 
+    /**
+     * Generic escape hatch for raw requests that don't (yet) have a
+     * dedicated method on this class. Phase 5 of the universal-auth-state
+     * refactor uses this so the React-Query hook files (billing-api,
+     * telephony-api) can delegate one-liner fetches through the shared
+     * client without each duplicating auth-header injection,
+     * refresh-on-401, single-flight refresh dedup, or the
+     * session-expired latch.
+     */
+    request<T>(opts: import("@/lib/http-client").HttpRequestOptions): Promise<T> {
+        return this.client().request(opts) as Promise<T>;
+    }
+
     /* ---------- Auth ---------- */
 
     /**

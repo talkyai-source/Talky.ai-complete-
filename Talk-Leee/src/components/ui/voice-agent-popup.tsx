@@ -5,7 +5,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { MessageCircle } from "lucide-react";
 import { apiBaseUrl } from "@/lib/env";
-import { getBrowserAuthToken } from "@/lib/auth-token";
+import { useAccessToken } from "@/lib/auth-hooks";
 
 function parseConfiguredApiUrl(): URL | null {
     try {
@@ -85,6 +85,11 @@ const AudioVisualizer: React.FC<{ isActive: boolean; audioLevel: number }> = ({ 
 export function VoiceAgentPopup() {
     const router = useRouter();
     const pathname = usePathname();
+    // Phase 5 universal-auth-state: subscribe to AuthContext for the
+    // sign-in gate. Replaces a getBrowserAuthToken() snapshot inside
+    // handleMainButtonClick — which would have been stale if the user
+    // logged in or out without re-mounting this component.
+    const accessToken = useAccessToken();
     const [aiState, setAiState] = useState<AIState>("idle");
     const [audioLevel, setAudioLevel] = useState(0);
     const [error, setError] = useState<string | null>(null);
@@ -827,8 +832,7 @@ export function VoiceAgentPopup() {
     }, [handleMessage, endSession, cleanupAudioPlayer, startMicrophone, stopMicrophone, initializeAudioPlayer, playTessaIntro, prefetchTessaIntro, router, pathname]);
 
     const handleMainButtonClick = useCallback(() => {
-        const token = getBrowserAuthToken();
-        if (!token) {
+        if (!accessToken) {
             router.push(`/auth/login?next=${encodeURIComponent(pathname)}`);
             return;
         }
@@ -837,7 +841,7 @@ export function VoiceAgentPopup() {
         } else {
             endSession();
         }
-    }, [isActive, startSession, endSession, router, pathname]);
+    }, [accessToken, isActive, startSession, endSession, router, pathname]);
 
     // Pre-fetch Tessa's intro audio so it's ready the moment the button is pressed.
     useEffect(() => {

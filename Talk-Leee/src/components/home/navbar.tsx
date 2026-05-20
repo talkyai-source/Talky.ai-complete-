@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bot, ChevronDown, PhoneCall, Sparkles, Moon, Sun, X, Headphones, BadgeCheck } from "lucide-react";
 import { useTheme } from "@/components/providers/theme-provider";
-import { getBrowserAuthToken, setBrowserAuthToken } from "@/lib/auth-token";
+import { useAuth } from "@/lib/auth-context";
 import { industryNavItems } from "@/Industries/industries";
 
 export function Navbar() {
@@ -100,12 +100,16 @@ export function Navbar() {
     [router]
   );
 
+  // Phase 5 universal-auth-state: dev-only hack to surface "logged in"
+  // UI on the homepage during local development without a real backend
+  // login. Routed through AuthContext so the token write also drives a
+  // re-render and matches the production code path. No-op in production.
+  const { accessToken, setToken } = useAuth();
   useEffect(() => {
     if (process.env.NODE_ENV !== "development") return;
-    const token = getBrowserAuthToken();
-    if (token) return;
-    setBrowserAuthToken("dev-token");
-  }, []);
+    if (accessToken) return;
+    setToken("dev-token");
+  }, [accessToken, setToken]);
 
   const closeMobileMenu = useCallback(() => {
     const details = mobileMenuRef.current;
