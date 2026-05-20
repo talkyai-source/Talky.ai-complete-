@@ -29,6 +29,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bot, Loader2, MessageCircle, Send, X } from "lucide-react";
 import { apiBaseUrl } from "@/lib/env";
 import { useAccessToken } from "@/lib/auth-hooks";
+import { useAuth } from "@/lib/auth-context";
 
 /*
  * NOTE on the sidebar offset: this component used to import
@@ -104,31 +105,38 @@ export function FloatingAssistant() {
 
     // Reactive token via Phase 2's AuthContext-backed hook. Subscribing
     // here means wsUrl re-computes on login, on cross-tab logout (storage
-    // event), and on access-token rotation (refresh). The previous
-    // implementation snapshot the token via getBrowserAuthToken() at
-    // mount with an empty deps array — that ran before AuthContext
-    // hydrated localStorage on the first dashboard mount, so wsUrl was
-    // null for the lifetime of the component and the panel rendered the
-    // "Sign in to chat" CTA despite the user being authenticated. This
-    // is the Phase 5 fix for the Ask-AI re-prompt bug.
+    // event), and on access-token rotation (refresh).
     //
-    // AH-Phase-A: the JWT is NO LONGER embedded in the WS URL. Putting
-    // it there made the token visible in proxy logs, Sentry breadcrumbs,
-    // browser history, and any reverse-proxy access log — a single
-    // 15-minute exposure for anyone with read on those. The URL now
-    // carries only the resumable conversation_id; the token goes out as
-    // the first WebSocket frame (`{type:"auth",token}`) AFTER the
-    // connection opens. The token still drives wsUrl identity (so a
-    // rotation forces a fresh connect with a fresh auth frame), but it
-    // is not interpolated into the URL string.
+    // AH-Phase-A: the JWT is no longer embedded in the WS URL. URL
+    // carries only the resumable conversation_id.
+    //
+    // AH-Phase-F2: gate now keys on `user` (came from /auth/me, which
+    // works via HttpOnly cookies) rather than `accessToken` (which is
+    // null when the Bearer fallback is disabled). The backend tries
+    // the talky_at cookie before falling back to the first-frame
+    // {type:"auth",token} message:
+    //   - Bearer fallback ON:  accessToken is set → frontend sends
+    //     auth frame on open → backend uses it.
+    //   - Bearer fallback OFF: accessToken is null but cookie travels
+    //     on the WS handshake → backend uses cookie, no auth frame
+    //     needed.
+    // Token rotation still triggers a reconnect because accessToken is
+    // in the wsUrl useMemo deps — the connect callback identity
+    // changes and the open/close effect tears down + re-connects with
+    // the fresh credential set.
     const accessToken = useAccessToken();
+    const { user } = useAuth();
     const wsUrl = useMemo(() => {
-        if (!accessToken) return null;
+        // accessToken is in the deps below (not interpolated into the
+        // URL) so a token rotation invalidates the memo identity and
+        // triggers a reconnect with the new credential set.
+        void accessToken;
+        if (!user) return null;
         const params = new URLSearchParams();
         if (conversationIdRef.current) params.set("conversation_id", conversationIdRef.current);
         const qs = params.toString();
         return `${resolveWsBase()}/assistant/chat${qs ? `?${qs}` : ""}`;
-    }, [accessToken]);
+    }, [user, accessToken]);
 
     const isAuthed = wsUrl !== null;
 
@@ -205,11 +213,24 @@ export function FloatingAssistant() {
         ws.onopen = () => {
             reconnectAttemptsRef.current = 0;
             setStatus("open");
-            // AH-Phase-A: send auth as the first frame. Backend waits up
-            // to 5s for this; missing or malformed auth → 1008 close.
-            // accessToken is captured by the useCallback closure at the
-            // time of connect(); a token rotation rebuilds wsUrl which
-            // triggers a fresh connect with the up-to-date token.
+            // AH-Phase-A / Phase-F2: auth credential resolution.
+            //
+            // Backend tries (in order): talky_at HttpOnly cookie →
+            // first-frame {type:"auth",token} → ?token= URL query.
+            // The cookie travels on the WS handshake automatically
+            // (browsers send it for api.talkleeai.com just like fetch)
+            // so the cookie-only path needs NOTHING from this client.
+            //
+            // We only emit the first-frame auth when accessToken is
+            // non-empty — that's the Bearer-fallback path (admin
+            // frontend / native shell). In the cookie-only mode
+            // (NEXT_PUBLIC_BEARER_FALLBACK=false) accessToken is null,
+            // we skip the frame, and the backend auths via cookie.
+            //
+            // The backend tolerates a stale auth frame after cookie
+            // auth succeeds (falls through the main loop's
+            // type-dispatch as a no-op), so this branch is safe to
+            // emit even when redundant.
             if (accessToken) {
                 try {
                     ws.send(JSON.stringify({ type: "auth", token: accessToken }));
