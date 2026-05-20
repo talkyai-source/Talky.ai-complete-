@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode, useCallback } from "react";
 import { api } from "@/lib/api";
-import { resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider, isApiClientError } from "@/lib/http-client";
+import { clearFreshLoginGrace, resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider, isApiClientError } from "@/lib/http-client";
 import { consumeLegacyAuthCookie, getBrowserAuthToken, setBrowserAuthToken } from "@/lib/auth-token";
 interface MeResponse {
     id: string;
@@ -111,6 +111,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         window.addEventListener("storage", onStorage);
         return () => window.removeEventListener("storage", onStorage);
+    }, []);
+
+    // AH-Phase-E: retry a previously-failed logout on mount. If the user
+    // clicked Sign Out and the backend call failed (offline, 5xx,
+    // timeout), AuthContext.logout queued a `talky.logout.pending`
+    // localStorage flag. Re-fire api.logout silently — the server
+    // invalidates the refresh_tokens row, clearing the cookies, and
+    // narrows the window where a leaked JWT could still be used.
+    // Runs once per mount, before the /auth/me bootstrap.
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        let pending: string | null = null;
+        try { pending = window.localStorage.getItem("talky.logout.pending"); } catch { /* ignore */ }
+        if (!pending) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                await api.logout();
+                if (cancelled) return;
+                try { window.localStorage.removeItem("talky.logout.pending"); } catch { /* ignore */ }
+                if (process.env.NODE_ENV !== "production") {
+                    console.debug("[auth] retried pending logout, server confirmed");
+                }
+            } catch (err) {
+                if (cancelled) return;
+                if (isApiClientError(err) && (err.status === 401 || err.status === 403)) {
+                    // Server already considers us logged out — success.
+                    try { window.localStorage.removeItem("talky.logout.pending"); } catch { /* ignore */ }
+                } else {
+                    // Still failing; leave the flag for the next mount.
+                    if (process.env.NODE_ENV !== "production") {
+                        console.debug("[auth] pending logout retry still failing — will retry on next mount");
+                    }
+                }
+            }
+        })();
+        return () => { cancelled = true; };
     }, []);
 
     // Bootstrap auth state from the server.
@@ -241,10 +278,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, [setAccessToken]);
 
     const logout = useCallback(async () => {
+        // AH-Phase-E: distinguish "logout actually invalidated the
+        // server-side session" from "logout call failed and the row may
+        // still be alive". On failure (network drop, 5xx) we set a
+        // localStorage flag so the NEXT page load (or AuthProvider mount)
+        // retries silently. 401/403 from the backend means the server
+        // already considers us logged out — that's a success state and
+        // the flag is cleared.
+        let serverConfirmedLogout = false;
         try {
             await api.logout();
-        } catch {
-            // Keep logout resilient for explicit user sign-out.
+            serverConfirmedLogout = true;
+        } catch (err) {
+            if (isApiClientError(err) && (err.status === 401 || err.status === 403)) {
+                // Server already considers this session gone. Treat as success.
+                serverConfirmedLogout = true;
+            } else {
+                serverConfirmedLogout = false;
+                if (process.env.NODE_ENV !== "production") {
+                    console.warn("[auth] logout call failed; queued for retry on next mount", err);
+                }
+            }
         } finally {
             // Always clear local state, regardless of whether the backend
             // call succeeded. Cross-tab tabs see this via the storage event
@@ -258,8 +312,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // next logout clears it across the user base; this whole try
             // block can be deleted after the 2-week soak.
             setAccessToken(null);
+            // Phase E: kill the fresh-login grace window. If the user
+            // logged in and out within 15s, a lingering grace would
+            // suppress an otherwise-correct session-expired bounce on the
+            // next API call. Logout is the explicit signal that "any
+            // recent login is no longer in effect."
+            clearFreshLoginGrace();
             try {
                 localStorage.removeItem("refresh_token");
+                if (serverConfirmedLogout) {
+                    localStorage.removeItem("talky.logout.pending");
+                } else {
+                    // Queue the retry. Bootstrap effect on next mount
+                    // (or a focus-driven retry) will re-fire api.logout
+                    // until the server confirms.
+                    localStorage.setItem("talky.logout.pending", String(Date.now()));
+                }
             } catch { /* ignore */ }
             setUser(null);
         }
