@@ -111,12 +111,23 @@ export function FloatingAssistant() {
     // null for the lifetime of the component and the panel rendered the
     // "Sign in to chat" CTA despite the user being authenticated. This
     // is the Phase 5 fix for the Ask-AI re-prompt bug.
+    //
+    // AH-Phase-A: the JWT is NO LONGER embedded in the WS URL. Putting
+    // it there made the token visible in proxy logs, Sentry breadcrumbs,
+    // browser history, and any reverse-proxy access log — a single
+    // 15-minute exposure for anyone with read on those. The URL now
+    // carries only the resumable conversation_id; the token goes out as
+    // the first WebSocket frame (`{type:"auth",token}`) AFTER the
+    // connection opens. The token still drives wsUrl identity (so a
+    // rotation forces a fresh connect with a fresh auth frame), but it
+    // is not interpolated into the URL string.
     const accessToken = useAccessToken();
     const wsUrl = useMemo(() => {
         if (!accessToken) return null;
-        const params = new URLSearchParams({ token: accessToken });
+        const params = new URLSearchParams();
         if (conversationIdRef.current) params.set("conversation_id", conversationIdRef.current);
-        return `${resolveWsBase()}/assistant/chat?${params.toString()}`;
+        const qs = params.toString();
+        return `${resolveWsBase()}/assistant/chat${qs ? `?${qs}` : ""}`;
     }, [accessToken]);
 
     const isAuthed = wsUrl !== null;
@@ -194,6 +205,19 @@ export function FloatingAssistant() {
         ws.onopen = () => {
             reconnectAttemptsRef.current = 0;
             setStatus("open");
+            // AH-Phase-A: send auth as the first frame. Backend waits up
+            // to 5s for this; missing or malformed auth → 1008 close.
+            // accessToken is captured by the useCallback closure at the
+            // time of connect(); a token rotation rebuilds wsUrl which
+            // triggers a fresh connect with the up-to-date token.
+            if (accessToken) {
+                try {
+                    ws.send(JSON.stringify({ type: "auth", token: accessToken }));
+                } catch {
+                    // Send failure here just means the socket already
+                    // closed; onclose will handle status.
+                }
+            }
         };
 
         ws.onmessage = (event) => {
@@ -249,7 +273,7 @@ export function FloatingAssistant() {
             setStatus("error");
         };
 
-        ws.onclose = () => {
+        ws.onclose = (event) => {
             // Only act if this is still the active socket. A planned
             // teardown via closeSocket() nulls wsRef before close(); a
             // token-rotation reconnect installs a new ws in wsRef before
@@ -259,6 +283,25 @@ export function FloatingAssistant() {
             if (wsRef.current !== ws) return;
             wsRef.current = null;
             setStatus("closed");
+            // AH-Phase-A: 1008 = policy violation. Backend uses it for
+            // (a) cross-origin upgrade rejected and (b) auth-frame
+            // missing/invalid. Both are terminal — backing off and
+            // retrying with the same accessToken won't change the
+            // outcome and would just hammer the backend. Surface as a
+            // system message; user can re-open the panel after a real
+            // login or after AuthContext refreshes the token.
+            if (event.code === 1008) {
+                setMessages((prev) => [
+                    ...prev,
+                    {
+                        id: uid(),
+                        role: "system",
+                        content: "Your session expired. Please sign in again to continue.",
+                        ts: Date.now(),
+                    },
+                ]);
+                return;
+            }
             // Reconnect with backoff while the panel is open. Cap the
             // attempts so a permanently-down backend doesn't hammer.
             if (open && reconnectAttemptsRef.current < 5) {
@@ -268,7 +311,7 @@ export function FloatingAssistant() {
                 reconnectTimerRef.current = window.setTimeout(connect, delay);
             }
         };
-    }, [open, wsUrl]);
+    }, [accessToken, open, wsUrl]);
 
     // Lifecycle: connect when expanded, close when collapsed, AND
     // reconnect when accessToken rotates mid-session. Token rotation
