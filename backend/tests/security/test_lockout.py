@@ -100,6 +100,28 @@ class TestGetConsecutiveFailures:
         result = await get_consecutive_failures(mock_conn, "user@example.com")
         assert result == 0
 
+    @pytest.mark.asyncio
+    async def test_query_excludes_failures_before_last_success(self, mock_conn):
+        """
+        AH-Phase-D: a successful login must reset the failure counter.
+
+        We verify the SQL by asserting the COALESCE subquery that
+        anchors the failure window AFTER the most recent success is
+        present. The functional behaviour ("9 fails + 1 success + 1
+        fail counts as 1") is covered by the postgres integration
+        suite; this unit test is the structural guard against a
+        future refactor accidentally dropping the reset clause and
+        re-introducing the loophole.
+        """
+        mock_conn.fetchval.return_value = 0
+        await get_consecutive_failures(mock_conn, "user@example.com")
+        sql = mock_conn.fetchval.call_args[0][0]
+        assert "success = TRUE" in sql, (
+            "get_consecutive_failures must consult the latest successful login "
+            "to reset the counter; the SQL no longer contains the success-boundary subquery."
+        )
+        assert "COALESCE" in sql
+
 
 # ========================================================================
 # record_login_attempt (DB-dependent)

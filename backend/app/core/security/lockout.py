@@ -79,10 +79,21 @@ async def get_consecutive_failures(
     email: str,
 ) -> int:
     """
-    Count failed login attempts for *email* within the observation window.
+    Count *consecutive* failed login attempts for *email* within the
+    observation window.
 
-    Only rows with ``success = FALSE`` are counted.  The window resets
-    naturally because old rows fall outside the ``created_at >= $2`` bound.
+    AH-Phase-D fix: a successful login resets the failure counter. The
+    previous query just counted ``success = FALSE`` rows in the window
+    — meaning 9 failures followed by a success followed by 1 failure
+    would still count as 10 failures and trigger a lockout. The
+    counter now starts AFTER the most recent successful login for
+    this email (or from the window start if there's no recent
+    success).
+
+    Only rows with ``success = FALSE`` are counted. The window resets
+    naturally because old rows fall outside the ``created_at >= $2``
+    bound; the "after most recent success" clause adds a second reset
+    boundary so a successful login also clears the slate.
     """
     window_start = datetime.now(timezone.utc) - timedelta(
         minutes=OBSERVATION_WINDOW_MINUTES
@@ -95,6 +106,13 @@ async def get_consecutive_failures(
         WHERE  email      = $1
           AND  success    = FALSE
           AND  created_at >= $2
+          AND  created_at > COALESCE(
+                   (SELECT MAX(created_at)
+                    FROM   login_attempts
+                    WHERE  email   = $1
+                      AND  success = TRUE),
+                   '1970-01-01'::timestamptz
+               )
         """,
         email.lower(),
         window_start,
@@ -127,7 +145,10 @@ async def check_account_locked(
     if lockout_seconds == 0:
         return None
 
-    # Find the timestamp of the most recent failure inside the window.
+    # Find the timestamp of the most recent failure inside the window
+    # AND after the most recent success — same boundary as
+    # get_consecutive_failures so the two queries can't disagree about
+    # what counts as the current failure run.
     window_start = datetime.now(timezone.utc) - timedelta(
         minutes=OBSERVATION_WINDOW_MINUTES
     )
@@ -138,6 +159,13 @@ async def check_account_locked(
         WHERE  email      = $1
           AND  success    = FALSE
           AND  created_at >= $2
+          AND  created_at > COALESCE(
+                   (SELECT MAX(created_at)
+                    FROM   login_attempts
+                    WHERE  email   = $1
+                      AND  success = TRUE),
+                   '1970-01-01'::timestamptz
+               )
         """,
         email.lower(),
         window_start,
