@@ -85,6 +85,15 @@ class Settings(BaseSettings):
     kms_provider: str = "local"
     jwt_secret: str | None = None
     secret_key: str | None = None
+    # AH-Phase-C: previous signing key during graceful rotation.
+    # When the operator rotates `JWT_SECRET`, the previous value is
+    # moved into `JWT_SECRET_PREVIOUS` for one window of (access TTL
+    # + refresh TTL = ~7 days). The verifier tries the current secret
+    # first; on signature-only failure it retries with the previous so
+    # tokens issued under the old key keep working until they expire.
+    # New tokens are always signed with the current secret. Clear
+    # `JWT_SECRET_PREVIOUS` after the rotation window completes.
+    jwt_secret_previous: str | None = None
     
     # Provider API Keys (Centralized)
     deepgram_api_key: str | None = None
@@ -112,7 +121,7 @@ class Settings(BaseSettings):
     jwt_audience: str | None = None  # Optional audience claim (aud)
     jwt_leeway_seconds: int = 60  # Clock skew tolerance (60 seconds)
 
-    @field_validator("jwt_secret", "secret_key", mode="before")
+    @field_validator("jwt_secret", "secret_key", "jwt_secret_previous", mode="before")
     @classmethod
     def _normalize_secret_fields(cls, value: Any) -> str | None:
         if value is None:
@@ -173,6 +182,16 @@ class Settings(BaseSettings):
         2. SECRET_KEY (legacy fallback)
         """
         return self.jwt_secret or self.secret_key
+
+    @property
+    def effective_jwt_secret_previous(self) -> str | None:
+        """
+        Previous JWT signing secret used only during graceful rotation.
+        Returns None when no rotation is in progress (steady state).
+        Verifier-only — `encode_access_token` always signs with
+        `effective_jwt_secret`.
+        """
+        return self.jwt_secret_previous
 
 
 @lru_cache

@@ -80,6 +80,19 @@ def encode_access_token(
 
 
 def decode_and_validate_token(token: str) -> Dict[str, Any]:
+    """
+    Verify a JWT and return its payload.
+
+    AH-Phase-C: supports graceful signing-key rotation. When the
+    operator rotates `JWT_SECRET`, the previous value is moved into
+    `JWT_SECRET_PREVIOUS`. This verifier tries the current secret
+    first; on a signature-only failure (other validation errors
+    propagate immediately so an expired or malformed token doesn't get
+    a second chance), it retries with the previous secret. Tokens
+    signed under the old key keep working until they expire naturally
+    — 15min for access, 7d for refresh — at which point operators can
+    clear `JWT_SECRET_PREVIOUS`.
+    """
     settings = get_settings()
     secret = _require_secret()
     algorithm = _resolve_algorithm()
@@ -106,21 +119,37 @@ def decode_and_validate_token(token: str) -> Dict[str, Any]:
         "verify_aud": bool(settings.jwt_audience),
         "verify_iss": bool(settings.jwt_issuer),
     }
-    decode_kwargs: Dict[str, Any] = {
-        "key": secret,
+    base_kwargs: Dict[str, Any] = {
         "algorithms": [algorithm],
         "options": options,
         "leeway": max(0, int(settings.jwt_leeway_seconds)),
     }
     if settings.jwt_issuer:
-        decode_kwargs["issuer"] = settings.jwt_issuer
+        base_kwargs["issuer"] = settings.jwt_issuer
     if settings.jwt_audience:
-        decode_kwargs["audience"] = settings.jwt_audience
+        base_kwargs["audience"] = settings.jwt_audience
 
+    # Primary verification path — current signing secret.
     try:
-        payload = jwt.decode(token, **decode_kwargs)
+        payload = jwt.decode(token, key=secret, **base_kwargs)
     except jwt.ExpiredSignatureError as exc:
+        # Expired tokens never get a second chance. The previous secret
+        # would not save them.
         raise JWTValidationError("Token has expired") from exc
+    except jwt.InvalidSignatureError:
+        # Signature didn't verify under the current key. If a previous
+        # key is configured, retry with it — this is the rotation
+        # graceful-handoff window. Any other InvalidTokenError sub-class
+        # (missing claim, wrong audience, etc.) skips the fallback.
+        previous = settings.effective_jwt_secret_previous
+        if not previous:
+            raise JWTValidationError("Invalid or expired token")
+        try:
+            payload = jwt.decode(token, key=previous, **base_kwargs)
+        except jwt.ExpiredSignatureError as exc:
+            raise JWTValidationError("Token has expired") from exc
+        except jwt.InvalidTokenError as exc:
+            raise JWTValidationError("Invalid or expired token") from exc
     except jwt.InvalidTokenError as exc:
         raise JWTValidationError("Invalid or expired token") from exc
 
