@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode, useCallback } from "react";
 import { api } from "@/lib/api";
-import { resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider, isApiClientError, recordAuthDiag } from "@/lib/http-client";
+import { resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider, isApiClientError } from "@/lib/http-client";
 import { getBrowserAuthToken, setBrowserAuthToken } from "@/lib/auth-token";
 interface MeResponse {
     id: string;
@@ -77,7 +77,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // localStorage. Cleared on unmount so a unit test that tears down
     // AuthProvider doesn't leak state across tests.
     useEffect(() => {
-        recordAuthDiag("authprovider.accessToken-changed", { hasToken: Boolean(accessToken) });
         setTokenProvider(() => accessToken);
         return () => setTokenProvider(null);
     }, [accessToken]);
@@ -92,7 +91,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         function onStorage(e: StorageEvent) {
             if (e.key !== "talklee.auth.token") return;
             const next = e.newValue && e.newValue.trim() ? e.newValue : null;
-            recordAuthDiag("storage-event.cross-tab", { hasNewValue: Boolean(next) });
             setAccessTokenState(next);
             if (!next) setUser(null);
         }
@@ -174,7 +172,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // sync. Marked `setAccessToken` (not `setAccessTokenState`) to remind
     // readers that this is the canonical mutation, not the raw setState.
     const setAccessToken = useCallback((token: string | null) => {
-        recordAuthDiag("setAccessToken", { hasToken: Boolean(token), stack: new Error().stack });
         setBrowserAuthToken(token);   // writes localStorage + legacy cookie mirror
         setAccessTokenState(token);   // updates reactive state → re-renders all subscribers
     }, []);
@@ -300,7 +297,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 }
                 return;
             }
-            recordAuthDiag("teardown.401-outside-grace", {});
             setAccessToken(null);
             setUser(null);
         } finally {

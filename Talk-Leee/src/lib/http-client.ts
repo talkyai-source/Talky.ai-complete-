@@ -162,36 +162,6 @@ export function setTokenProvider(fn: (() => string | null) | null) {
     _externalTokenProvider = fn;
 }
 
-// Diagnostic — writes events to localStorage AND console.warn so they
-// survive the bounce navigation. The user can paste the contents of
-// localStorage.getItem("__authDiag") back to root-cause the regression.
-export function recordAuthDiag(label: string, data: Record<string, unknown>) {
-    // Capture the URL where this diag fired — critical for the bounce-loop
-    // investigation since AuthProvider remounts on each hard nav and we need
-    // to know which page each event corresponds to.
-    let here = "";
-    try {
-        if (typeof window !== "undefined") {
-            here = `${window.location.pathname}${window.location.search}`;
-        }
-    } catch { /* ignore */ }
-    const entry = { label, ts: new Date().toISOString(), here, ...data };
-    try {
-        if (typeof console !== "undefined") {
-            // eslint-disable-next-line no-console
-            console.warn("[auth-diag]", label, entry);
-        }
-    } catch { /* ignore */ }
-    try {
-        if (typeof window !== "undefined" && window.localStorage) {
-            const raw = window.localStorage.getItem("__authDiag");
-            const list: unknown[] = raw ? JSON.parse(raw) : [];
-            list.push(entry);
-            // keep last 50 entries to avoid runaway growth
-            window.localStorage.setItem("__authDiag", JSON.stringify(list.slice(-50)));
-        }
-    } catch { /* ignore */ }
-}
 
 // Grace window after a fresh login. Any 401 (including one from
 // /auth/refresh failing) inside this window is treated as a transient
@@ -237,16 +207,20 @@ export function resetSessionExpiredLatch() {
 }
 
 function fireSessionExpired() {
+    // Don't bounce the user back to /login if they JUST finished a
+    // successful login round-trip. Within FRESH_LOGIN_GRACE_MS the
+    // backend session is still settling (cookie commits, JWT iat skew,
+    // refresh-token rotation race) — any 401 here is almost certainly
+    // transient and we should let the request fail soft instead of
+    // tearing down auth state.
     if (isWithinFreshLoginGrace()) {
-        recordAuthDiag("fireSessionExpired.suppressed.grace", {});
+        if (typeof console !== "undefined" && process.env.NODE_ENV !== "production") {
+            console.debug("[auth] session-expired swallowed inside fresh-login grace window");
+        }
         return;
     }
-    if (_sessionExpiredFired) {
-        recordAuthDiag("fireSessionExpired.latched", {});
-        return;
-    }
+    if (_sessionExpiredFired) return;
     _sessionExpiredFired = true;
-    recordAuthDiag("fireSessionExpired.FIRING", { stack: new Error().stack });
     if (!_sessionExpiredHandler) return;
     try {
         _sessionExpiredHandler();
@@ -490,7 +464,10 @@ export function createHttpClient(config: HttpClientConfig) {
             // idempotent — parallel requests racing on 401 trigger
             // exactly one redirect.
             if (res.status === 401) {
-                recordAuthDiag("api.401", { url, method, requestId, inGrace: isWithinFreshLoginGrace() });
+                // Inside the fresh-login grace window, keep the bearer
+                // token in storage — wiping it would force the next
+                // call to use cookie-only auth even though localStorage
+                // still has the valid JWT from /auth/login.
                 if (!isWithinFreshLoginGrace()) {
                     try {
                         setToken(null);
