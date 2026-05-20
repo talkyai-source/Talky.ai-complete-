@@ -1,4 +1,3 @@
-import { createHttpClient } from "@/lib/http-client";
 import { backendEndpoints } from "@/lib/backend-endpoints";
 import {
     AssistantActionSchema,
@@ -43,8 +42,7 @@ import {
     type VoiceFeature,
 } from "@/lib/models";
 import { extractAuthorizationUrl } from "@/lib/connectors-utils";
-import { apiBaseUrl } from "@/lib/env";
-import { getBrowserAuthToken, setBrowserAuthToken } from "@/lib/auth-token";
+import { sharedHttpClient } from "@/lib/api";
 
 // Inline DTO for the new /alerts endpoint (avoids a circular import with
 // campaign-performance.ts AlertItem; the hook re-maps to AlertItem).
@@ -63,26 +61,15 @@ type AlertItemDto = {
     resolutionNotes: string | null;
 };
 
-let _httpClient: ReturnType<typeof createHttpClient> | undefined;
-
-function httpClient() {
-    if (_httpClient) return _httpClient;
-    // CRITICAL: read/write the JWT from the same canonical storage the
-    // rest of the app uses (lib/auth-token.ts → "talklee.auth.token").
-    // Previously this hardcoded `getToken: () => null, setToken: () => {}`,
-    // which meant every request via backend-api.ts (including the
-    // connectors page's GET /connectors/status) went out with NO
-    // Authorization header, the backend correctly 401'd, the http-client's
-    // session-expired handler interpreted it as session expiry, and the
-    // user was thrown back to the login page the moment they opened
-    // /connectors.
-    _httpClient = createHttpClient({
-        baseUrl: apiBaseUrl(),
-        getToken: () => getBrowserAuthToken(),
-        setToken: (t) => setBrowserAuthToken(t),
-    });
-    return _httpClient;
-}
+// AH-Phase-B: delegate to the single shared HttpClient instance owned
+// by lib/api.ts. The previous per-module instance had its own
+// single-flight refresh state, so a 401 from a backend-api call racing
+// a 401 from an api.ts call fired two parallel /auth/refresh requests
+// — the second response could clobber the first's token write.
+// AuthContext's setTokenProvider() callback (Phase 2 universal-auth-state)
+// attaches to the shared instance, so the explicit getToken/setToken
+// callbacks here are now redundant.
+const httpClient = sharedHttpClient;
 
 function parseOrThrow<T>(schema: { parse: (v: unknown) => T }, data: unknown) {
     return schema.parse(data);

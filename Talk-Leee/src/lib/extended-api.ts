@@ -1,4 +1,4 @@
-import { createHttpClient } from "@/lib/http-client";
+import { sharedHttpClient } from "@/lib/api";
 import { apiBaseUrl } from "@/lib/env";
 
 // CSV Upload Response
@@ -61,9 +61,17 @@ export interface CampaignCallsResponse {
     total: number;
 }
 
-// Extended API - Real backend integration
+// Extended API - Real backend integration.
+//
+// AH-Phase-B: shared HttpClient instance (see lib/api.ts → sharedHttpClient).
+// Note: the two bare-fetch sites in this file (uploadCSV multipart and
+// fetchRecordingBlob binary) still need the raw fetch because the
+// shared client assumes JSON bodies + responses. They consume
+// `this.client.getToken()` for auth — which now returns the token from
+// the shared client's tokenProvider, so they participate in the same
+// rotation behaviour.
 class ExtendedApi {
-    private client = createHttpClient({ baseUrl: apiBaseUrl() });
+    private get client() { return sharedHttpClient(); }
 
     // CSV Upload
     async uploadCSV(campaignId: string, file: File, skipDuplicates: boolean = true): Promise<BulkImportResponse> {

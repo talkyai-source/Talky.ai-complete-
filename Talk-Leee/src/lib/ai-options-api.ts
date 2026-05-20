@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createHttpClient } from "@/lib/http-client";
+import { sharedHttpClient } from "@/lib/api";
 import { apiBaseUrl } from "@/lib/env";
 
 export interface ModelInfo {
@@ -257,13 +257,8 @@ const RawLatencyBenchmarkResponseSchema = z
     })
     .passthrough();
 
-let _httpClient: ReturnType<typeof createHttpClient> | undefined;
-
-function httpClient() {
-    if (_httpClient) return _httpClient;
-    _httpClient = createHttpClient({ baseUrl: apiBaseUrl() });
-    return _httpClient;
-}
+// AH-Phase-B: single shared HttpClient (see lib/api.ts → sharedHttpClient).
+const httpClient = sharedHttpClient;
 
 function normalizeModel(model: z.infer<typeof RawModelSchema>): ModelInfo {
     return {

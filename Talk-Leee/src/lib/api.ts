@@ -150,13 +150,36 @@ export type ChangePasswordResponse = z.infer<typeof ChangePasswordResponseSchema
 /*  API Client                                                         */
 /* ------------------------------------------------------------------ */
 
-class ApiClient {
-    private _client: ReturnType<typeof createHttpClient> | undefined;
+/**
+ * AH-Phase-B: the singleton HttpClient instance shared by every
+ * browser-side API wrapper (api.ts, backend-api.ts, dashboard-api.ts,
+ * ai-options-api.ts, extended-api.ts, …). Single-flight refresh dedup,
+ * the fresh-login grace window, and the session-expired latch are all
+ * PER-INSTANCE state — without sharing, simultaneous 401s from two
+ * wrappers each fire /auth/refresh in parallel and the second
+ * response can clobber the first's token write. AuthContext's
+ * setTokenProvider() callback (Phase 2 of the universal-auth-state
+ * plan) attaches to this one instance, so token rotation is
+ * automatically picked up everywhere.
+ *
+ * Lazy-initialised on first read so apiBaseUrl() is resolved AFTER
+ * any env-var bootstrap has run. The server-side Next.js route at
+ * app/api/voices/route.ts intentionally uses its own short-lived
+ * client per request (different lifecycle: Vercel function, no
+ * AuthContext) — it's the only legitimate exception.
+ */
+let _sharedHttpClient: ReturnType<typeof createHttpClient> | undefined;
 
+export function sharedHttpClient() {
+    if (!_sharedHttpClient) {
+        _sharedHttpClient = createHttpClient({ baseUrl: apiBaseUrl() });
+    }
+    return _sharedHttpClient;
+}
+
+class ApiClient {
     private client() {
-        if (this._client) return this._client;
-        this._client = createHttpClient({ baseUrl: apiBaseUrl() });
-        return this._client;
+        return sharedHttpClient();
     }
 
     private parseOrThrow<T>(
