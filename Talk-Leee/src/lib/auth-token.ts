@@ -7,16 +7,30 @@
 // instead. Direct callers outside auth-context.tsx are forbidden and
 // blocked by the structural test added in Phase 8.
 //
-// What changed from Phase A→C plumbing:
-//   - The non-HttpOnly mirror cookie `talklee_auth_token` is no longer
-//     written. `setBrowserAuthToken` now only touches localStorage.
-//   - The cookie is still READ once during AuthContext bootstrap so
-//     pre-deploy sessions can be migrated to localStorage (and the
-//     legacy cookie cleared). After the 2-week soak, both the cookie
-//     READ in AuthContext and `authTokenCookieName` / `readLegacyCookie`
-//     can be deleted entirely.
+// AH-Phase-F: the Bearer fallback is now gated by
+// `NEXT_PUBLIC_BEARER_FALLBACK`. Default ON for backwards-compat (the
+// Ask-AI WebSocket relies on the in-memory accessToken to send the
+// first-frame auth — turning the flag off without overhauling the WS
+// breaks Ask-AI). Operators who don't use WebSocket auth (cookie-only
+// flows) can set `NEXT_PUBLIC_BEARER_FALLBACK=false` to eliminate the
+// localStorage XSS surface entirely; in that mode this module becomes
+// read-only and the in-memory `accessToken` state in AuthContext is
+// the only place a JWT ever lives client-side.
 const STORAGE_KEY = "talklee.auth.token";
 const LEGACY_COOKIE_NAME = "talklee_auth_token";
+
+function bearerFallbackEnabled(): boolean {
+    // Default ON. Only the literal string "false" turns it off, so a
+    // typo / unset env never accidentally disables the fallback.
+    if (typeof process === "undefined") return true;
+    const raw = process.env.NEXT_PUBLIC_BEARER_FALLBACK;
+    if (raw === undefined || raw === null) return true;
+    return raw.toLowerCase() !== "false";
+}
+
+export function isBearerFallbackEnabled(): boolean {
+    return bearerFallbackEnabled();
+}
 
 export function authTokenStorageKey() {
     return STORAGE_KEY;
@@ -64,6 +78,12 @@ export function consumeLegacyAuthCookie(): string | null {
 
 export function getBrowserAuthToken(): string | null {
     if (typeof window === "undefined") return null;
+    // Always READ — even when the fallback is disabled, we still need
+    // to surface any value lingering from a prior session so the
+    // operator can flip the flag without forcing existing users to
+    // re-login. The next setBrowserAuthToken(null) call (logout) or
+    // setBrowserAuthToken(newToken) (login → no-op when disabled)
+    // either clears or no-ops, draining the storage naturally.
     try {
         const v = window.localStorage.getItem(STORAGE_KEY);
         if (v && v.trim().length > 0) return v;
@@ -73,9 +93,16 @@ export function getBrowserAuthToken(): string | null {
 
 export function setBrowserAuthToken(token: string | null) {
     if (typeof window === "undefined") return;
+    // Clearing (logout) always runs — leaving a stale token in storage
+    // would defeat the security intent.
+    if (token === null) {
+        try { window.localStorage.removeItem(STORAGE_KEY); } catch {}
+        return;
+    }
+    // Writing a fresh token honours the Phase F opt-in.
+    if (!bearerFallbackEnabled()) return;
     try {
-        if (token) window.localStorage.setItem(STORAGE_KEY, token);
-        else window.localStorage.removeItem(STORAGE_KEY);
+        window.localStorage.setItem(STORAGE_KEY, token);
     } catch {}
 }
 

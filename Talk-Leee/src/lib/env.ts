@@ -15,6 +15,13 @@ const EnvSchema = z.object({
     NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).optional(),
     NEXT_PUBLIC_SENTRY_PROFILES_SAMPLE_RATE: z.coerce.number().min(0).max(1).optional(),
     NEXT_PUBLIC_SENTRY_ENABLED: z.coerce.boolean().optional(),
+    // AH-Phase-F: opt-out of the localStorage Bearer fallback. Default
+    // is ON (current behaviour preserved); set to the literal string
+    // "false" to disable. Disabling eliminates the XSS attack surface
+    // from the JWT in localStorage but requires the Ask-AI WebSocket
+    // to use cookie auth instead of the in-memory accessToken (Phase
+    // F2 follow-up). See lib/auth-token.ts for the gate.
+    NEXT_PUBLIC_BEARER_FALLBACK: z.string().optional(),
 });
 
 const PUBLIC_ENV_KEYS = [
@@ -42,6 +49,7 @@ function parseEnv() {
         NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE: process.env.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE,
         NEXT_PUBLIC_SENTRY_PROFILES_SAMPLE_RATE: process.env.NEXT_PUBLIC_SENTRY_PROFILES_SAMPLE_RATE,
         NEXT_PUBLIC_SENTRY_ENABLED: process.env.NEXT_PUBLIC_SENTRY_ENABLED,
+        NEXT_PUBLIC_BEARER_FALLBACK: process.env.NEXT_PUBLIC_BEARER_FALLBACK,
     };
 
     const parsed = EnvSchema.safeParse(raw);
