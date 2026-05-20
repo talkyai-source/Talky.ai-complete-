@@ -29,7 +29,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { markFreshLogin } from "@/lib/http-client";
+import { markFreshLogin, recordAuthDiag } from "@/lib/http-client";
 import MFAVerification from "@/components/auth/mfa-verification";
 import PasskeyLogin from "@/components/auth/passkey-login";
 
@@ -256,7 +256,35 @@ export default function LoginClientPage() {
                     ? "/white-label/dashboard"
                     : safeNext ?? (cameFromAssistant ? "/" : "/dashboard");
 
-            router.push(destination);
+            recordAuthDiag("login.before-router-push", {
+                destination,
+                rawNext, safeNext, from, role,
+                hasLocalStorageToken: typeof window !== "undefined"
+                    ? Boolean(window.localStorage?.getItem?.("talklee.auth.token"))
+                    : null,
+                hasLegacyCookie: typeof document !== "undefined"
+                    ? document.cookie.includes("talklee_auth_token=")
+                    : null,
+                cookieLen: typeof document !== "undefined" ? document.cookie.length : 0,
+            });
+            try {
+                router.push(destination);
+                recordAuthDiag("login.router-push-returned", { destination });
+            } catch (err) {
+                recordAuthDiag("login.router-push-threw", { destination, err: String(err) });
+                throw err;
+            }
+            // Diag a tick later — if we're still on /auth/login here the soft
+            // nav didn't take effect.
+            setTimeout(() => {
+                recordAuthDiag("login.after-router-push.+50ms", {});
+            }, 50);
+            setTimeout(() => {
+                recordAuthDiag("login.after-router-push.+500ms", {});
+            }, 500);
+            setTimeout(() => {
+                recordAuthDiag("login.after-router-push.+2000ms", {});
+            }, 2000);
         },
         [router, searchParams, rememberMe, applyLoginResult],
     );
