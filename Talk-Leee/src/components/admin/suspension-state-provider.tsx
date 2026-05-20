@@ -6,12 +6,10 @@ import { type MeResponse } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
-// 30-second freshness for suspension state. The previous implementation
-// fired a parallel GET /auth/me here via useQuery; the new model derives
-// state from AuthContext.user (which the login flow seeds + the bootstrap
-// /auth/me refreshes) and triggers AuthContext.refreshUser() on a 30-second
-// cadence so a tenant suspension applied from admin still propagates to
-// active dashboards within the existing latency budget.
+// 30-second freshness for suspension state. After Phase 3 the parallel
+// /auth/me query was removed in favour of AuthContext.refreshUser() so
+// only ONE /auth/me fires on dashboard mount instead of two racing each
+// other through the post-login cookie-commit window.
 const SUSPENSION_POLL_INTERVAL_MS = 30_000;
 
 type SuspensionScope = "partner" | "tenant" | null;
@@ -114,24 +112,22 @@ function mergeSuspensionState(serverState: SuspensionState, override: ScopedSusp
 }
 
 export function SuspensionStateProvider({ children }: { children: React.ReactNode }) {
-    // Phase 3 of the universal-auth-state refactor: drop the parallel
-    // GET /auth/me useQuery and consume suspension fields from
-    // AuthContext.user directly. The 30-second freshness cadence is
-    // preserved via a setInterval on refreshUser() — a single shared
-    // /auth/me at AuthContext, not two parallel ones racing the cookie
-    // commit window post-login.
+    // Phase 3 of universal-auth-state: consume user from AuthContext rather
+    // than firing our own parallel /auth/me. The 30s freshness loop calls
+    // AuthContext.refreshUser({ silent: true }) so transient blips can't
+    // tear down auth state and bounce the user to /login.
     const { user, loading: authLoading, refreshUser } = useAuth();
     const [override, setOverride] = useState<ScopedSuspensionOverride | null>(null);
 
     const serverState = useMemo(() => deriveSuspensionState(user), [user]);
     const state = useMemo(() => mergeSuspensionState(serverState, override), [override, serverState]);
 
-    // Clear any optimistic override when the user logs out.
     useEffect(() => {
-        if (!user) setOverride(null);
+        if (!user) {
+            setOverride(null);
+        }
     }, [user]);
 
-    // Drop a stale override once the server-fetched state catches up.
     useEffect(() => {
         if (!override) return;
         if (mergeSuspensionState(serverState, override).suspended === serverState.suspended) {

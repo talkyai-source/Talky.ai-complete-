@@ -206,20 +206,29 @@ export function resetSessionExpiredLatch() {
 }
 
 function fireSessionExpired() {
-    // Don't bounce the user back to /login if they JUST finished a
-    // successful login round-trip. Within FRESH_LOGIN_GRACE_MS the
-    // backend session is still settling (cookie commits, JWT iat skew,
-    // refresh-token rotation race) — any 401 here is almost certainly
-    // transient and we should let the request fail soft instead of
-    // tearing down auth state.
     if (isWithinFreshLoginGrace()) {
-        if (typeof console !== "undefined" && process.env.NODE_ENV !== "production") {
-            console.debug("[auth] session-expired swallowed inside fresh-login grace window");
-        }
+        // eslint-disable-next-line no-console
+        console.warn("[auth-diag] fireSessionExpired SUPPRESSED (grace window)", {
+            ts: new Date().toISOString(),
+        });
         return;
     }
-    if (_sessionExpiredFired) return;
+    if (_sessionExpiredFired) {
+        // eslint-disable-next-line no-console
+        console.warn("[auth-diag] fireSessionExpired LATCHED (already fired)", {
+            ts: new Date().toISOString(),
+        });
+        return;
+    }
     _sessionExpiredFired = true;
+    // FORCE-LOG so we can capture in DevTools who fired this. This is the
+    // 401-handler redirect path — most likely culprit for the post-login
+    // bounce we haven't been able to reproduce in logs.
+    // eslint-disable-next-line no-console
+    console.warn("[auth-diag] fireSessionExpired FIRING REDIRECT", {
+        ts: new Date().toISOString(),
+        stack: new Error().stack,
+    });
     if (!_sessionExpiredHandler) return;
     try {
         _sessionExpiredHandler();
@@ -463,10 +472,11 @@ export function createHttpClient(config: HttpClientConfig) {
             // idempotent — parallel requests racing on 401 trigger
             // exactly one redirect.
             if (res.status === 401) {
-                // Inside the fresh-login grace window, keep the bearer
-                // token in storage — wiping it would force the next
-                // call to use cookie-only auth even though localStorage
-                // still has the valid JWT from /auth/login.
+                // eslint-disable-next-line no-console
+                console.warn("[auth-diag] 401 from API call", {
+                    url, method, ts: new Date().toISOString(),
+                    requestId, inGrace: isWithinFreshLoginGrace(),
+                });
                 if (!isWithinFreshLoginGrace()) {
                     try {
                         setToken(null);

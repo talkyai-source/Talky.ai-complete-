@@ -43,18 +43,28 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
         if (!requireAuth) return;
         if (authLoading) return;
         if (user) return;
-        // During the fresh-login grace window, suppress the bounce-back.
-        // A transient 401 from a parallel /auth/me racing the cookie
-        // commit can briefly set user=null before the bootstrap retry
-        // re-hydrates. Bouncing during that window is the bug users
-        // were hitting; outside the window this guard is a no-op and
-        // normal session-expired behaviour is preserved.
         if (isWithinFreshLoginGrace()) {
-            if (process.env.NODE_ENV !== "production") {
-                console.debug("[auth] DashboardLayout suppressed redirect: inside fresh-login grace window");
-            }
+            // eslint-disable-next-line no-console
+            console.warn("[auth-diag] DashboardLayout: suppressed redirect (grace window)", {
+                user, authLoading, pathname, ts: new Date().toISOString(),
+            });
             return;
         }
+        // FORCE-LOG the bounce site so we can capture it in DevTools and figure out
+        // who actually nulled `user`. Temporary diagnostic — to be removed once
+        // the rotational-login regression is root-caused.
+        // eslint-disable-next-line no-console
+        console.warn("[auth-diag] DashboardLayout: FIRING REDIRECT TO /auth/login", {
+            user, authLoading, pathname,
+            localStorageToken: typeof window !== "undefined"
+                ? Boolean(window.localStorage?.getItem?.("talklee.auth.token"))
+                : null,
+            legacyCookie: typeof document !== "undefined"
+                ? document.cookie.includes("talklee_auth_token=")
+                : null,
+            ts: new Date().toISOString(),
+            stack: new Error().stack,
+        });
         const next = pathname ?? "/dashboard";
         try {
             router.replace(`/auth/login?next=${encodeURIComponent(next)}`);
