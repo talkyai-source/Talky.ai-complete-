@@ -12,7 +12,7 @@ import { SuspensionBanner, useSuspensionState } from "@/components/admin/suspens
 import { cn } from "@/lib/utils";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { isWithinFreshLoginGrace } from "@/lib/http-client";
+import { isWithinFreshLoginGrace, recordAuthDiag } from "@/lib/http-client";
 // Text-based floating assistant — same agent backend as the rest of the
 // app, mounted globally on every authenticated dashboard route. The
 // component is `"use client"`, every browser-only API it touches
@@ -44,25 +44,19 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
         if (authLoading) return;
         if (user) return;
         if (isWithinFreshLoginGrace()) {
-            // eslint-disable-next-line no-console
-            console.warn("[auth-diag] DashboardLayout: suppressed redirect (grace window)", {
-                user, authLoading, pathname, ts: new Date().toISOString(),
-            });
+            recordAuthDiag("dashboardLayout.suppressed.grace", { pathname });
             return;
         }
-        // FORCE-LOG the bounce site so we can capture it in DevTools and figure out
-        // who actually nulled `user`. Temporary diagnostic — to be removed once
-        // the rotational-login regression is root-caused.
-        // eslint-disable-next-line no-console
-        console.warn("[auth-diag] DashboardLayout: FIRING REDIRECT TO /auth/login", {
-            user, authLoading, pathname,
+        recordAuthDiag("dashboardLayout.FIRING_REDIRECT", {
+            pathname,
+            hasUser: Boolean(user),
+            authLoading,
             localStorageToken: typeof window !== "undefined"
                 ? Boolean(window.localStorage?.getItem?.("talklee.auth.token"))
                 : null,
             legacyCookie: typeof document !== "undefined"
                 ? document.cookie.includes("talklee_auth_token=")
                 : null,
-            ts: new Date().toISOString(),
             stack: new Error().stack,
         });
         const next = pathname ?? "/dashboard";

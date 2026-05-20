@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode, useCallback } from "react";
 import { api } from "@/lib/api";
-import { resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider, isApiClientError } from "@/lib/http-client";
+import { resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider, isApiClientError, recordAuthDiag } from "@/lib/http-client";
 import { getBrowserAuthToken, setBrowserAuthToken } from "@/lib/auth-token";
 interface MeResponse {
     id: string;
@@ -77,6 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // localStorage. Cleared on unmount so a unit test that tears down
     // AuthProvider doesn't leak state across tests.
     useEffect(() => {
+        recordAuthDiag("authprovider.accessToken-changed", { hasToken: Boolean(accessToken) });
         setTokenProvider(() => accessToken);
         return () => setTokenProvider(null);
     }, [accessToken]);
@@ -91,11 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         function onStorage(e: StorageEvent) {
             if (e.key !== "talklee.auth.token") return;
             const next = e.newValue && e.newValue.trim() ? e.newValue : null;
-            // eslint-disable-next-line no-console
-            console.warn("[auth-diag] storage event fired (cross-tab)", {
-                hasNewValue: Boolean(next),
-                ts: new Date().toISOString(),
-            });
+            recordAuthDiag("storage-event.cross-tab", { hasNewValue: Boolean(next) });
             setAccessTokenState(next);
             if (!next) setUser(null);
         }
@@ -177,10 +174,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // sync. Marked `setAccessToken` (not `setAccessTokenState`) to remind
     // readers that this is the canonical mutation, not the raw setState.
     const setAccessToken = useCallback((token: string | null) => {
-        // eslint-disable-next-line no-console
-        console.warn("[auth-diag] setAccessToken called", {
-            hasToken: Boolean(token), ts: new Date().toISOString(), stack: new Error().stack,
-        });
+        recordAuthDiag("setAccessToken", { hasToken: Boolean(token), stack: new Error().stack });
         setBrowserAuthToken(token);   // writes localStorage + legacy cookie mirror
         setAccessTokenState(token);   // updates reactive state → re-renders all subscribers
     }, []);
@@ -306,8 +300,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 }
                 return;
             }
-            // eslint-disable-next-line no-console
-            console.warn("[auth-diag] tearing down auth state", { reason: "401 outside grace", ts: new Date().toISOString() });
+            recordAuthDiag("teardown.401-outside-grace", {});
             setAccessToken(null);
             setUser(null);
         } finally {
