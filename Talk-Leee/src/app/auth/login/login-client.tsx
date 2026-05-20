@@ -256,7 +256,7 @@ export default function LoginClientPage() {
                     ? "/white-label/dashboard"
                     : safeNext ?? (cameFromAssistant ? "/" : "/dashboard");
 
-            recordAuthDiag("login.before-router-push", {
+            recordAuthDiag("login.before-navigation", {
                 destination,
                 rawNext, safeNext, from, role,
                 hasLocalStorageToken: typeof window !== "undefined"
@@ -267,24 +267,32 @@ export default function LoginClientPage() {
                     : null,
                 cookieLen: typeof document !== "undefined" ? document.cookie.length : 0,
             });
-            try {
+
+            // Use a hard navigation instead of router.push.
+            //
+            // Next.js's router.push has a known soft-nav quirk: when the
+            // current URL has `?next=<destination>` (e.g. /auth/login?next=/dashboard
+            // because middleware redirected the user here when they weren't
+            // authenticated), and you then call router.push("/dashboard"),
+            // the router silently no-ops — it treats the navigation as
+            // already-pending via the `next` param and drops the new push.
+            // The URL bar never updates and the user appears to be "stuck"
+            // on the login page even though everything is correct.
+            //
+            // window.location.assign guarantees a full page navigation.
+            // Cookies are 100% committed by the time the new page's first
+            // request fires (no race), the URL bar updates immediately,
+            // and middleware sees the legacy cookie + the new HttpOnly
+            // talky_at on api.talkleeai.com when the dashboard's first
+            // API calls go out. The downside is a full page reload (slight
+            // flash of background) but that's worth it for correctness.
+            if (typeof window !== "undefined") {
+                window.location.assign(destination);
+            } else {
+                // SSR / no-window fallback (shouldn't happen — this code only
+                // runs from a form-submit handler in a Client Component).
                 router.push(destination);
-                recordAuthDiag("login.router-push-returned", { destination });
-            } catch (err) {
-                recordAuthDiag("login.router-push-threw", { destination, err: String(err) });
-                throw err;
             }
-            // Diag a tick later — if we're still on /auth/login here the soft
-            // nav didn't take effect.
-            setTimeout(() => {
-                recordAuthDiag("login.after-router-push.+50ms", {});
-            }, 50);
-            setTimeout(() => {
-                recordAuthDiag("login.after-router-push.+500ms", {});
-            }, 500);
-            setTimeout(() => {
-                recordAuthDiag("login.after-router-push.+2000ms", {});
-            }, 2000);
         },
         [router, searchParams, rememberMe, applyLoginResult],
     );
