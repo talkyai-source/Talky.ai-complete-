@@ -31,7 +31,7 @@ from app.core.security.sessions import (
     revoke_session_by_token,
 )
 
-from ._shared import clear_session_cookie
+from ._shared import clear_session_cookie, limiter
 
 router = APIRouter(tags=["auth"])
 
@@ -64,7 +64,9 @@ async def logout(
 
 
 @router.post("/logout-all")
+@limiter.limit("10/hour")
 async def logout_all(
+    request: Request,
     response: Response,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
@@ -75,6 +77,14 @@ async def logout_all(
     Use case: account compromise response, "sign out everywhere" feature.
     Also revokes every refresh token row owned by the user so the cookie
     auth path can't be used to continue from another browser either.
+
+    AH-Phase-G rate limit: 10/hour per IP. Logout-all has real cost
+    (one DB update per session row) and is also a griefing vector — an
+    attacker who exfiltrated ONE session JWT can repeatedly invalidate
+    every other session the user owns, even though they only need one
+    invalidation to lock the user out. Cap it. 10/hour is well above
+    any plausible legitimate use (a user clicking the button twice a
+    minute by accident) and well below the abuse threshold.
     """
     async with db_client.pool.acquire() as conn:
         count = await revoke_all_user_sessions(

@@ -100,13 +100,19 @@ export function Navbar() {
     [router]
   );
 
-  // Phase 5 universal-auth-state: dev-only hack to surface "logged in"
-  // UI on the homepage during local development without a real backend
-  // login. Routed through AuthContext so the token write also drives a
-  // re-render and matches the production code path. No-op in production.
+  // AH-Phase-G: dev-only hack to surface "logged in" UI on the homepage
+  // during local development without a real backend login. Routed
+  // through AuthContext so the token write also drives a re-render.
+  //
+  // Hardened gate: was `NODE_ENV === "development"` (truthy on any
+  // pipeline that didn't explicitly set NODE_ENV=production — too
+  // easy to ship by accident). Now requires an EXPLICIT opt-in via
+  // `NEXT_PUBLIC_ENABLE_DEV_AUTH=1`. A misconfigured prod build that
+  // forgets to set NODE_ENV no longer accidentally writes a fake
+  // token to AuthContext.
   const { accessToken, setToken } = useAuth();
   useEffect(() => {
-    if (process.env.NODE_ENV !== "development") return;
+    if (process.env.NEXT_PUBLIC_ENABLE_DEV_AUTH !== "1") return;
     if (accessToken) return;
     setToken("dev-token");
   }, [accessToken, setToken]);

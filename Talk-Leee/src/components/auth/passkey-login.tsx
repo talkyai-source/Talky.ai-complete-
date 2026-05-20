@@ -12,7 +12,12 @@ import {
 } from "@/lib/webauthn-utils";
 
 interface PasskeyLoginProps {
-  onSuccess: (tokens: { access_token: string; refresh_token: string }) => void;
+  // AH-Phase-G: refresh_token dropped from the callback type — Phase 7
+  // ended all frontend reads of it. The HttpOnly talky_rt cookie is
+  // the canonical refresh store. The shape stays loose with
+  // additional optional fields because completePasskeyAuth returns a
+  // full LoginResponse.
+  onSuccess: (tokens: { access_token: string }) => void;
   onError?: (error: string) => void;
   disabled?: boolean;
 }

@@ -199,20 +199,20 @@ export async function completePasskeyAuth(
   credentialData: Record<string, unknown>
 ): Promise<{
   access_token: string;
-  refresh_token: string;
   role?: string;
   user_id?: string;
   email?: string;
   business_name?: string | null;
   minutes_remaining?: number;
 }> {
+  // AH-Phase-G hygiene: refresh_token dropped from the return type.
+  // The backend still emits the field in the body (Zod schema in
+  // lib/api.ts keeps parsing it) but nothing on the frontend reads
+  // it after Phase 7 — the HttpOnly talky_rt cookie is the canonical
+  // refresh-token store. The vestigial type field was misleading.
   const data = await api.completePasskeyLogin(ceremonyId, credentialData);
-  // LoginResponse from shared client already has the right shape — cookie
-  // commit + AuthContext seeding is handled by the caller (login-client.tsx)
-  // via applyLoginResult, same as password login.
   return data as unknown as {
     access_token: string;
-    refresh_token: string;
     role?: string;
     user_id?: string;
     email?: string;
