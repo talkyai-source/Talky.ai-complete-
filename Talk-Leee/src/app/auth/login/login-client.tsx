@@ -199,7 +199,13 @@ export default function LoginClientPage() {
     const handleLoginSuccess = useCallback(
         async (tokens: LoginTokens) => {
             api.setToken(tokens.access_token);
-            localStorage.setItem("refresh_token", tokens.refresh_token);
+            // Phase 7 universal-auth-state: dropped the
+            // `localStorage.setItem("refresh_token", …)` write. Nothing
+            // reads it — the backend's `talky_rt` HttpOnly cookie is the
+            // canonical refresh-token store; the shared http-client hits
+            // /auth/refresh which sends the cookie via credentials: 'include'.
+            // The legacy localStorage write was Phase A-era plumbing that
+            // never got cleaned up.
             if (rememberMe) localStorage.setItem("remember_me", "true");
 
             // Seed AuthContext.user from the login response BEFORE the

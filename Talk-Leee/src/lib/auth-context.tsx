@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode, useCallback } from "react";
 import { api } from "@/lib/api";
 import { resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider, isApiClientError } from "@/lib/http-client";
-import { getBrowserAuthToken, setBrowserAuthToken } from "@/lib/auth-token";
+import { consumeLegacyAuthCookie, getBrowserAuthToken, setBrowserAuthToken } from "@/lib/auth-token";
 interface MeResponse {
     id: string;
     email: string;
@@ -66,9 +66,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // effect below sees the right value AND so the http-client's
     // setTokenProvider() callback below resolves immediately to the right
     // token rather than null-then-rotate.
+    //
+    // Phase 7 migration shim: if the canonical localStorage key is empty
+    // but the user has a legacy `talklee_auth_token` cookie from a
+    // pre-Phase-7 session, consume the cookie value once. consumeLegacy…
+    // clears the cookie atomically with the read, so this is single-shot.
+    // The fall-through `setBrowserAuthToken(migrated)` commits the value
+    // into the canonical store for all subsequent renders / tabs.
+    // REMOVE AFTER 2026-06-03 (2-week soak after Phase 7 deploy).
     const [accessToken, setAccessTokenState] = useState<string | null>(() => {
         if (typeof window === "undefined") return null;
-        return getBrowserAuthToken();
+        const persisted = getBrowserAuthToken();
+        if (persisted) return persisted;
+        const migrated = consumeLegacyAuthCookie();
+        if (migrated) {
+            setBrowserAuthToken(migrated);
+            return migrated;
+        }
+        return null;
     });
 
     // Plumb the live token to the shared HTTP client. Every request reads
@@ -100,16 +115,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Bootstrap auth state from the server.
     //
-    // Skip the call when there's no legacy Bearer token AND no plausible
-    // cookie auth signal — otherwise a cold visit fires /auth/me without
-    // credentials, the http-client treats the 401 as session expiry, wipes
-    // any in-flight localStorage write from a concurrent login, and tears
-    // down sibling API calls (the connectors page's 10-second poll, the
-    // dashboard query, etc.). The original gated behaviour is correct in
-    // hybrid mode where cookies don't cross from api.talkleeai.com to
-    // localhost. In pure cookie mode `document.cookie` reading won't see
-    // httpOnly `talky_at`, but `talklee_auth_token` (legacy mirror) or any
-    // first-party signal is enough to opt in.
+    // Skip the call when there's no Bearer token. Otherwise a cold visit
+    // fires /auth/me without credentials, the http-client treats the
+    // 401 as session expiry, wipes any in-flight localStorage write
+    // from a concurrent login, and tears down sibling API calls (the
+    // connectors page's 10-second poll, the dashboard query, etc.).
+    // The Phase 7 migration shim above absorbed any legacy
+    // `talklee_auth_token` cookie into the canonical localStorage key,
+    // so by the time we reach this effect the only persistence we
+    // need to consult is `accessToken`.
     useEffect(() => {
         let cancelled = false;
         // After Phase 2 the state-initialised `accessToken` is already the
@@ -171,8 +185,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // delegates to this so localStorage and React state can't drift out of
     // sync. Marked `setAccessToken` (not `setAccessTokenState`) to remind
     // readers that this is the canonical mutation, not the raw setState.
+    //
+    // Phase 7: setBrowserAuthToken now writes ONLY the canonical
+    // localStorage key. The legacy `talklee_auth_token` cookie mirror
+    // was removed — it was non-HttpOnly pure attack surface with the
+    // shared client + AuthContext fallback path doing its job.
     const setAccessToken = useCallback((token: string | null) => {
-        setBrowserAuthToken(token);   // writes localStorage + legacy cookie mirror
+        setBrowserAuthToken(token);   // writes localStorage (canonical, single key)
         setAccessTokenState(token);   // updates reactive state → re-renders all subscribers
     }, []);
 
@@ -230,6 +249,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // Always clear local state, regardless of whether the backend
             // call succeeded. Cross-tab tabs see this via the storage event
             // listener installed above and drop their own state.
+            //
+            // Phase 7: also scrub the legacy `refresh_token` localStorage
+            // key on logout. Nothing in the app writes it anymore (Phase 7
+            // dropped the login-success + oauth-callback writes), but any
+            // user who logged in before Phase 7 still has a stale value
+            // sitting in their browser. One defensive removeItem on the
+            // next logout clears it across the user base; this whole try
+            // block can be deleted after the 2-week soak.
             setAccessToken(null);
             try {
                 localStorage.removeItem("refresh_token");

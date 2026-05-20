@@ -49,10 +49,14 @@ function AuthCallbackInner() {
                 // Store the token
                 api.setToken(accessToken);
 
-                // Also store refresh token if available
-                if (refreshToken && typeof window !== "undefined") {
-                    localStorage.setItem("refresh_token", refreshToken);
-                }
+                // Phase 7 universal-auth-state: dropped the
+                // `localStorage.setItem("refresh_token", refreshToken)`
+                // write. Nothing reads that key — the canonical refresh
+                // path uses the backend's HttpOnly `talky_rt` cookie via
+                // credentials: 'include'. Supabase magic-link callbacks
+                // surface the refreshToken in the URL hash but we no
+                // longer mirror it into localStorage.
+                void refreshToken;
 
                 // Try to create profile if this is first login (registration)
                 try {
