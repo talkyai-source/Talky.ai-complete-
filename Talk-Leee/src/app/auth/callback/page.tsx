@@ -3,7 +3,6 @@
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
-import { apiBaseUrl } from "@/lib/env";
 import { captureException } from "@/lib/monitoring";
 import { Loader2 } from "lucide-react";
 
@@ -58,19 +57,11 @@ function AuthCallbackInner() {
                 // longer mirror it into localStorage.
                 void refreshToken;
 
-                // Try to create profile if this is first login (registration)
+                // Try to create profile if this is first login (registration).
+                // Phase 8: routed through shared client. api.setToken above
+                // primed the token provider so this picks it up automatically.
                 try {
-                    await fetch(
-                        `${apiBaseUrl()}/auth/create-profile`,
-                        {
-                            method: "POST",
-                            headers: {
-                                "Authorization": `Bearer ${accessToken}`,
-                                "Content-Type": "application/json"
-                            }
-                        }
-                    );
-                    // Ignore errors - profile might already exist
+                    await api.request<unknown>({ path: "/auth/create-profile", method: "POST" });
                 } catch {
                     // Ignore - profile creation is optional
                 }
