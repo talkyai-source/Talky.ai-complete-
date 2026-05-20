@@ -98,26 +98,47 @@ def _first_row(data):
 # WEBSOCKET ENDPOINT (Official FastAPI Pattern)
 # =============================================================================
 
+def _read_cookie_token(websocket: WebSocket) -> Optional[str]:
+    """
+    AH-Phase-F2: read the talky_at HttpOnly cookie from the WebSocket
+    handshake. Browsers send cookies for the WS destination origin
+    (api.talkleeai.com) on the handshake automatically, the same way
+    they do for fetch. Path-scoped to /api/v1, which covers the WS
+    endpoint at /api/v1/assistant/chat, so the cookie is present
+    when the user has an active REST session.
+
+    Returns the cookie value or None.
+    """
+    raw = websocket.cookies.get("talky_at")
+    if not raw:
+        return None
+    stripped = raw.strip()
+    return stripped or None
+
+
 async def _resolve_ws_token(websocket: WebSocket, url_token: Optional[str]) -> Optional[str]:
     """
     Phase A auth-hardening: resolve the auth token without exposing it in
     the WebSocket URL.
 
-    Preferred path: the client sends `{"type":"auth","token":"<JWT>"}` as
-    the first frame within 5 seconds of `accept()`. The token never
-    appears in the URL → can't leak via access logs, Sentry breadcrumbs,
-    proxy logs, or browser history.
-
-    Backwards-compat fallback (deprecated, 24h soak): if the URL contains
-    `?token=<JWT>` we accept it once with a warning log. Frontend ships
-    the token-in-message flow alongside this commit; this fallback
-    catches in-flight reconnects during the rolling deploy window. Remove
-    the fallback after the 24h soak completes.
+    AH-Phase-F2 priority order:
+      1. `talky_at` HttpOnly cookie  — preferred. Same auth surface as
+         REST endpoints, no JS-readable token, works with
+         NEXT_PUBLIC_BEARER_FALLBACK=false on the frontend.
+      2. First-message {"type":"auth","token":"…"}  — frame fallback for
+         clients that can't carry cookies (admin frontend, native
+         shells). 5-second wait after accept().
+      3. `?token=` URL query  — deprecated Phase A backwards-compat,
+         logged as warning. Cut in a follow-up commit after the 24h soak.
     """
+    cookie_token = _read_cookie_token(websocket)
+    if cookie_token:
+        return cookie_token
+
     if url_token:
         logger.warning(
             "assistant_ws: deprecated ?token= URL query used — "
-            "client should migrate to first-message auth"
+            "client should migrate to cookie or first-message auth"
         )
         return url_token
 

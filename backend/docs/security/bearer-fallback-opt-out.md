@@ -48,22 +48,21 @@ After deploy:
 
 ## What breaks if you opt out today
 
-**Ask-AI WebSocket auth.** Phase A (commit 1660253) made the WS auth
-work by sending the JWT as a first frame after `onopen`. The client
-reads the JWT from `accessToken` to build the frame. With the Bearer
-fallback OFF, `accessToken` is null on cold load (no localStorage to
-hydrate from), so the WS auth frame contains an empty token and the
-backend closes with code 1008.
+**Nothing on the talkleeai.com browser** — Phase F2 (commit forthcoming)
+made the Ask-AI WebSocket cookie-aware. The backend now tries the
+`talky_at` HttpOnly cookie before falling back to the first-frame
+`{type:"auth",token}` message. With the Bearer fallback OFF, the
+client sends NO first-frame auth and the backend uses the cookie —
+the same auth surface the REST endpoints use.
 
-**Mitigation today (interim):** leave `NEXT_PUBLIC_BEARER_FALLBACK`
-unset (default ON) on the talkleeai.com Vercel project.
-
-**Real fix (Phase F2 follow-up):** change the assistant_ws.py auth to
-read the `talky_at` HttpOnly cookie directly from `websocket.cookies`
-instead of expecting a JWT in the first frame. The browser sends
-cookies on the WS handshake automatically; no client-side token
-needed. Once that's deployed, this Bearer fallback can be turned off
-without breaking Ask-AI.
+What still needs the fallback ON:
+  - **Admin frontend** at `Admin/frontend/` — uses Bearer for its own
+    domain. Has its own Vercel project; leave its
+    `NEXT_PUBLIC_BEARER_FALLBACK` unset until it's migrated to cookies.
+  - **Native shells** that wrap the web app and may not carry
+    cross-origin cookies depending on the WebView implementation.
+  - **Embedded webviews** in third-party apps where cookie behavior
+    is restricted.
 
 ## What stays the same regardless of the flag
 
