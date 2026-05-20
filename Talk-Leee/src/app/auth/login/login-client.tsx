@@ -37,7 +37,11 @@ import PasskeyLogin from "@/components/auth/passkey-login";
 type Step = "email" | "password" | "mfa" | "passkey";
 type LoginTokens = {
     access_token: string;
-    refresh_token: string;
+    // AH-Phase-G: refresh_token field dropped. Phase 7 removed every
+    // frontend reader; the HttpOnly talky_rt cookie is the canonical
+    // refresh store. The backend still emits refresh_token in the
+    // response body (lib/api.ts Zod schema keeps parsing it) but
+    // login-client doesn't consume it.
     role?: string;
     user_id?: string;
     email?: string;
