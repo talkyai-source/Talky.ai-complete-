@@ -141,6 +141,15 @@ export function FloatingAssistant() {
         window.location.href = `/auth/login?${params.toString()}`;
     }, []);
 
+    // Phase 6 universal-auth-state: closeSocket is the planned-teardown
+    // path (panel collapsed, unmount, token rotation, logout). Strip the
+    // event handlers off the outgoing socket BEFORE calling .close() so
+    // the asynchronous onclose firing later — which would normally
+    // trigger the backoff-reconnect — can't clobber a freshly-opened
+    // replacement socket. Without this, a token rotation that opens a
+    // new ws while the old one is still draining its close would have
+    // the old's onclose null out wsRef.current and schedule a redundant
+    // reconnect of the now-valid new connection.
     const closeSocket = useCallback(() => {
         const ws = wsRef.current;
         wsRef.current = null;
@@ -148,11 +157,17 @@ export function FloatingAssistant() {
             window.clearTimeout(reconnectTimerRef.current);
             reconnectTimerRef.current = null;
         }
-        if (ws && ws.readyState !== WebSocket.CLOSED) {
-            try {
-                ws.close();
-            } catch {
-                /* noop */
+        if (ws) {
+            ws.onopen = null;
+            ws.onmessage = null;
+            ws.onerror = null;
+            ws.onclose = null;
+            if (ws.readyState !== WebSocket.CLOSED) {
+                try {
+                    ws.close();
+                } catch {
+                    /* noop */
+                }
             }
         }
     }, []);
@@ -235,6 +250,13 @@ export function FloatingAssistant() {
         };
 
         ws.onclose = () => {
+            // Only act if this is still the active socket. A planned
+            // teardown via closeSocket() nulls wsRef before close(); a
+            // token-rotation reconnect installs a new ws in wsRef before
+            // this old one's async onclose fires. In either case we don't
+            // want to overwrite wsRef or schedule a backoff reconnect for
+            // a socket that's already been superseded.
+            if (wsRef.current !== ws) return;
             wsRef.current = null;
             setStatus("closed");
             // Reconnect with backoff while the panel is open. Cap the
@@ -248,7 +270,18 @@ export function FloatingAssistant() {
         };
     }, [open, wsUrl]);
 
-    // Open / close lifecycle: connect when expanded, close when collapsed.
+    // Lifecycle: connect when expanded, close when collapsed, AND
+    // reconnect when accessToken rotates mid-session. Token rotation
+    // flows through wsUrl → connect (deps include wsUrl) → this effect
+    // re-runs. The cleanup closes the prior socket cleanly (Phase 6
+    // detaches its event handlers first, so the delayed onclose can't
+    // misfire); the body opens a new socket with the rotated token.
+    //
+    // conversationIdRef preserves the assistant_conversations row id
+    // across the reconnect, so the backend's resume-on-conversation_id
+    // path (assistant_ws.py STEP 3) replays the full message history
+    // and the user's chat continues seamlessly across the 15-minute
+    // JWT TTL boundary.
     useEffect(() => {
         if (open) {
             connect();
