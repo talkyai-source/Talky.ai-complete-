@@ -33,12 +33,13 @@ export default function LogoutButton({
     setError("");
 
     try {
-      // Call logout API
+      // Call logout API — backend clears talky_at + talky_rt cookies and
+      // AuthContext.logout (Phase 2) drops the canonical localStorage
+      // key. The Phase 7 universal-auth-state cleanup removed the
+      // `access_token` / `refresh_token` localStorage scrub here: those
+      // keys were never properly written, so scrubbing them is dead
+      // ceremony that misled readers into thinking the keys were live.
       await logoutCurrentSession(token);
-
-      // Clear local storage
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
 
       // Call success callback if provided
       onLogoutComplete?.();
@@ -50,9 +51,6 @@ export default function LogoutButton({
       setError(errorMsg);
       onError?.(errorMsg);
 
-      // Still clear tokens and redirect on error
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
       setTimeout(() => {
         router.push("/auth/login");
       }, 1500);

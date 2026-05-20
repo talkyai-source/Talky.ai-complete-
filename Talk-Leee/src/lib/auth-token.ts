@@ -1,24 +1,29 @@
-// DEPRECATED — kept only during the Phase A→C cookie migration.
+// Phase 7 universal-auth-state: this module is the single writer/reader
+// of `localStorage["talklee.auth.token"]`, the Bearer-fallback storage
+// used for environments where the HttpOnly `talky_at` cookie isn't
+// carried (admin frontend, future native shell wrappers, some embedded
+// webviews). AuthContext is the single in-app caller — components and
+// non-AuthContext code paths use `useAccessToken()` / `useAuth()`
+// instead. Direct callers outside auth-context.tsx are forbidden and
+// blocked by the structural test added in Phase 8.
 //
-// Phase A switched the backend to issue httpOnly `talky_at` (15min) +
-// `talky_rt` (7d) cookies on every successful auth. Phase B made the
-// HTTP client send `credentials: 'include'` and silently rotate via
-// `/auth/refresh`. The localStorage key and non-httpOnly mirror cookie
-// below predate that and are only read so users mid-migration with an
-// existing Bearer token still bootstrap cleanly.
-//
-// REMOVE AFTER SOAK: once Phase A+B have been in production long enough
-// for every active session (24h max) to have rotated, delete this file
-// plus every importer found via `grep authTokenCookieName`.
+// What changed from Phase A→C plumbing:
+//   - The non-HttpOnly mirror cookie `talklee_auth_token` is no longer
+//     written. `setBrowserAuthToken` now only touches localStorage.
+//   - The cookie is still READ once during AuthContext bootstrap so
+//     pre-deploy sessions can be migrated to localStorage (and the
+//     legacy cookie cleared). After the 2-week soak, both the cookie
+//     READ in AuthContext and `authTokenCookieName` / `readLegacyCookie`
+//     can be deleted entirely.
 const STORAGE_KEY = "talklee.auth.token";
-const COOKIE_NAME = "talklee_auth_token";
+const LEGACY_COOKIE_NAME = "talklee_auth_token";
 
 export function authTokenStorageKey() {
     return STORAGE_KEY;
 }
 
 export function authTokenCookieName() {
-    return COOKIE_NAME;
+    return LEGACY_COOKIE_NAME;
 }
 
 function readCookie(name: string) {
@@ -40,14 +45,29 @@ function readCookie(name: string) {
     return null;
 }
 
+/**
+ * Phase 7 migration helper. AuthContext calls this exactly once on
+ * mount: if a legacy `talklee_auth_token` cookie is present from a
+ * pre-Phase-7 session, surface its value (AuthContext will commit it
+ * into the canonical localStorage key) and clear the cookie. Returns
+ * null when no legacy cookie exists, which is the steady-state path
+ * after the 2-week soak.
+ */
+export function consumeLegacyAuthCookie(): string | null {
+    if (typeof document === "undefined") return null;
+    const value = readCookie(LEGACY_COOKIE_NAME);
+    if (!value || !value.trim()) return null;
+    const isProd = process.env.NODE_ENV === "production";
+    document.cookie = `${LEGACY_COOKIE_NAME}=; Path=/; Max-Age=0; SameSite=Lax${isProd ? "; Secure" : ""}`;
+    return value;
+}
+
 export function getBrowserAuthToken(): string | null {
     if (typeof window === "undefined") return null;
     try {
         const v = window.localStorage.getItem(STORAGE_KEY);
         if (v && v.trim().length > 0) return v;
     } catch {}
-    const cookie = readCookie(COOKIE_NAME);
-    if (cookie && cookie.trim().length > 0) return cookie;
     return null;
 }
 
@@ -57,13 +77,5 @@ export function setBrowserAuthToken(token: string | null) {
         if (token) window.localStorage.setItem(STORAGE_KEY, token);
         else window.localStorage.removeItem(STORAGE_KEY);
     } catch {}
-
-    if (typeof document === "undefined") return;
-    const isProd = process.env.NODE_ENV === "production";
-    if (!token) {
-        document.cookie = `${COOKIE_NAME}=; Path=/; Max-Age=0; SameSite=Lax${isProd ? "; Secure" : ""}`;
-        return;
-    }
-    document.cookie = `${COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; Max-Age=${60 * 60 * 24 * 7}; SameSite=Lax${isProd ? "; Secure" : ""}`;
 }
 

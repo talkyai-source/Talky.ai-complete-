@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { HoverTooltip, useHoverTooltip } from "@/components/ui/hover-tooltip";
-import { apiBaseUrl } from "@/lib/env";
+import { api } from "@/lib/api";
 
 type MinutesBySubTenant = {
     subTenant: string;
@@ -73,20 +73,18 @@ const EMPTY_ANALYTICS: PartnerAnalytics = {
 };
 
 async function fetchPartnerAnalytics(partnerId: string): Promise<PartnerAnalytics> {
-    const baseUrl = apiBaseUrl();
-    if (!baseUrl) return EMPTY_ANALYTICS;
+    // Phase 7 universal-auth-state: delegates to the shared `api` client.
+    // The previous implementation read `localStorage.getItem("access_token")`
+    // — the wrong key (canonical key is "talklee.auth.token"). The fetch
+    // went out with no Authorization, the backend 401'd, the page
+    // rendered EMPTY_ANALYTICS forever. The shared client supplies the
+    // right token via the AuthContext-backed tokenProvider callback and
+    // also participates in refresh-on-401 / grace / latch.
     try {
-        const token = typeof window !== "undefined"
-            ? localStorage.getItem("access_token")
-            : null;
-        const res = await fetch(
-            `${baseUrl}/analytics/partners/${encodeURIComponent(partnerId)}`,
-            {
-                headers: token ? { Authorization: `Bearer ${token}` } : {},
-            },
-        );
-        if (!res.ok) return EMPTY_ANALYTICS;
-        const data = (await res.json()) as Partial<PartnerAnalytics>;
+        const data = await api.request<Partial<PartnerAnalytics>>({
+            path: `/analytics/partners/${encodeURIComponent(partnerId)}`,
+            method: "GET",
+        });
         return {
             minutesBySubTenant: data.minutesBySubTenant ?? [],
             concurrencyPeaks: data.concurrencyPeaks ?? [],
