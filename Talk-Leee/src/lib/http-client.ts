@@ -162,6 +162,28 @@ export function setTokenProvider(fn: (() => string | null) | null) {
     _externalTokenProvider = fn;
 }
 
+// Diagnostic — writes events to localStorage AND console.warn so they
+// survive the bounce navigation. The user can paste the contents of
+// localStorage.getItem("__authDiag") back to root-cause the regression.
+export function recordAuthDiag(label: string, data: Record<string, unknown>) {
+    const entry = { label, ts: new Date().toISOString(), ...data };
+    try {
+        if (typeof console !== "undefined") {
+            // eslint-disable-next-line no-console
+            console.warn("[auth-diag]", label, entry);
+        }
+    } catch { /* ignore */ }
+    try {
+        if (typeof window !== "undefined" && window.localStorage) {
+            const raw = window.localStorage.getItem("__authDiag");
+            const list: unknown[] = raw ? JSON.parse(raw) : [];
+            list.push(entry);
+            // keep last 50 entries to avoid runaway growth
+            window.localStorage.setItem("__authDiag", JSON.stringify(list.slice(-50)));
+        }
+    } catch { /* ignore */ }
+}
+
 // Grace window after a fresh login. Any 401 (including one from
 // /auth/refresh failing) inside this window is treated as a transient
 // race — we do NOT fire session-expired and do NOT clear the stored
@@ -207,28 +229,15 @@ export function resetSessionExpiredLatch() {
 
 function fireSessionExpired() {
     if (isWithinFreshLoginGrace()) {
-        // eslint-disable-next-line no-console
-        console.warn("[auth-diag] fireSessionExpired SUPPRESSED (grace window)", {
-            ts: new Date().toISOString(),
-        });
+        recordAuthDiag("fireSessionExpired.suppressed.grace", {});
         return;
     }
     if (_sessionExpiredFired) {
-        // eslint-disable-next-line no-console
-        console.warn("[auth-diag] fireSessionExpired LATCHED (already fired)", {
-            ts: new Date().toISOString(),
-        });
+        recordAuthDiag("fireSessionExpired.latched", {});
         return;
     }
     _sessionExpiredFired = true;
-    // FORCE-LOG so we can capture in DevTools who fired this. This is the
-    // 401-handler redirect path — most likely culprit for the post-login
-    // bounce we haven't been able to reproduce in logs.
-    // eslint-disable-next-line no-console
-    console.warn("[auth-diag] fireSessionExpired FIRING REDIRECT", {
-        ts: new Date().toISOString(),
-        stack: new Error().stack,
-    });
+    recordAuthDiag("fireSessionExpired.FIRING", { stack: new Error().stack });
     if (!_sessionExpiredHandler) return;
     try {
         _sessionExpiredHandler();
@@ -472,11 +481,7 @@ export function createHttpClient(config: HttpClientConfig) {
             // idempotent — parallel requests racing on 401 trigger
             // exactly one redirect.
             if (res.status === 401) {
-                // eslint-disable-next-line no-console
-                console.warn("[auth-diag] 401 from API call", {
-                    url, method, ts: new Date().toISOString(),
-                    requestId, inGrace: isWithinFreshLoginGrace(),
-                });
+                recordAuthDiag("api.401", { url, method, requestId, inGrace: isWithinFreshLoginGrace() });
                 if (!isWithinFreshLoginGrace()) {
                     try {
                         setToken(null);
