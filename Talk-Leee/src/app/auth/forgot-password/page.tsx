@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { apiBaseUrl } from "@/lib/env";
+import { api } from "@/lib/api";
 
 const emailSchema = z.string().email("Please enter a valid email address");
 
@@ -56,17 +56,14 @@ function ForgotPasswordInner() {
         setError("");
 
         try {
-            const res = await fetch(`${apiBaseUrl()}/auth/forgot-password`, {
+            // Phase 8: routed through shared client. Endpoint is
+            // pre-login but the shared client tolerates missing
+            // Authorization (the backend rate-limits by email anyway).
+            await api.request<unknown>({
+                path: "/auth/forgot-password",
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ email }),
+                body: { email },
             });
-            if (!res.ok) {
-                const body = await res.json().catch(() => null);
-                throw new Error(
-                    body?.detail || body?.message || "Failed to send reset code",
-                );
-            }
             // Backend always returns 200 to prevent user-enumeration. Move on
             // to the code-entry step regardless — if the email isn't
             // registered the user just won't receive a code, which is the
@@ -96,22 +93,16 @@ function ForgotPasswordInner() {
         }
         setLoading(true);
         try {
-            const res = await fetch(`${apiBaseUrl()}/auth/reset-password`, {
+            await api.request<unknown>({
+                path: "/auth/reset-password",
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
+                body: {
                     email,
                     code: code.trim(),
                     new_password: newPassword,
                     confirm_password: confirmPassword,
-                }),
+                },
             });
-            if (!res.ok) {
-                const body = await res.json().catch(() => null);
-                throw new Error(
-                    body?.detail || body?.message || "Failed to reset password",
-                );
-            }
             setStep("done");
             // Auto-redirect after a moment so the user actually reads the
             // success state before being pulled back to /auth/login.
