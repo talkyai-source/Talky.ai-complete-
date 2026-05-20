@@ -166,7 +166,16 @@ export function setTokenProvider(fn: (() => string | null) | null) {
 // survive the bounce navigation. The user can paste the contents of
 // localStorage.getItem("__authDiag") back to root-cause the regression.
 export function recordAuthDiag(label: string, data: Record<string, unknown>) {
-    const entry = { label, ts: new Date().toISOString(), ...data };
+    // Capture the URL where this diag fired — critical for the bounce-loop
+    // investigation since AuthProvider remounts on each hard nav and we need
+    // to know which page each event corresponds to.
+    let here = "";
+    try {
+        if (typeof window !== "undefined") {
+            here = `${window.location.pathname}${window.location.search}`;
+        }
+    } catch { /* ignore */ }
+    const entry = { label, ts: new Date().toISOString(), here, ...data };
     try {
         if (typeof console !== "undefined") {
             // eslint-disable-next-line no-console
