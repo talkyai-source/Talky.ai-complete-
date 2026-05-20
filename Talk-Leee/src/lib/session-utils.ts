@@ -12,7 +12,7 @@
  * this backend (returned 404), so the Devices tab never rendered.
  */
 
-import { apiBaseUrl } from "@/lib/env";
+import { api } from "@/lib/api";
 
 export interface Device {
   id: string;
@@ -101,10 +101,6 @@ interface SessionInfoApi {
   expires_at: string;
 }
 
-function authHeaders(token: string): HeadersInit {
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
 function mapDevice(s: SessionInfoApi): Device {
   const fallbackType: Device["type"] = "unknown";
   const rawType = (s.device_type ?? "").toLowerCase();
@@ -126,48 +122,27 @@ function mapDevice(s: SessionInfoApi): Device {
   };
 }
 
+// Phase 4 universal-auth-state: each function below now delegates to the
+// shared `api` client (lib/api.ts). The shared client handles auth header
+// injection from AuthContext, refresh-on-401, fresh-login grace window,
+// and the unified session-expired redirect. The `token` parameter is
+// kept on the public signature for backward compatibility but no longer
+// consulted.
+
 /**
  * Gets list of all active devices/sessions
  */
-export async function getActiveSessions(token: string): Promise<Device[]> {
-  const base = apiBaseUrl();
-  const response = await fetch(`${base}/sessions/active`, {
-    method: "GET",
-    credentials: "include",
-    headers: authHeaders(token),
-  });
-
-  if (!response.ok) {
-    throw new Error("Failed to fetch active sessions");
-  }
-
-  const payload = (await response.json()) as { sessions: SessionInfoApi[] };
-  return (payload.sessions ?? []).map(mapDevice);
+export async function getActiveSessions(_token?: string): Promise<Device[]> {
+  const payload = await api.getActiveSessions();
+  return (payload.sessions ?? []).map((s) => mapDevice(s as unknown as SessionInfoApi));
 }
 
 /**
  * Logs out a specific session/device. Backend refuses if you try to
  * revoke the current session — use logoutCurrentSession for that.
  */
-export async function logoutSession(token: string, sessionId: string): Promise<{ success: boolean }> {
-  const base = apiBaseUrl();
-  const response = await fetch(`${base}/sessions/${encodeURIComponent(sessionId)}`, {
-    method: "DELETE",
-    credentials: "include",
-    headers: authHeaders(token),
-  });
-
-  if (!response.ok) {
-    let detail = "Failed to logout session";
-    try {
-      const j = await response.json();
-      detail = j?.detail || j?.error?.message || detail;
-    } catch {
-      // ignore
-    }
-    throw new Error(detail);
-  }
-
+export async function logoutSession(_token: string | undefined, sessionId: string): Promise<{ success: boolean }> {
+  await api.revokeSession(sessionId);
   return { success: true };
 }
 
@@ -178,32 +153,19 @@ export async function logoutSession(token: string, sessionId: string): Promise<{
  * current. To preserve the current session we list, then revoke each
  * non-current row.
  */
-export async function logoutAllOtherSessions(token: string): Promise<{ success: boolean }> {
-  const sessions = await getActiveSessions(token);
+export async function logoutAllOtherSessions(_token?: string): Promise<{ success: boolean }> {
+  const sessions = await getActiveSessions();
   const others = sessions.filter((s) => !s.isCurrent);
   // Fire revokes in parallel — backend will reject the current one anyway.
-  await Promise.all(others.map((s) => logoutSession(token, s.id).catch(() => undefined)));
+  await Promise.all(others.map((s) => logoutSession(undefined, s.id).catch(() => undefined)));
   return { success: true };
 }
 
 /**
  * Logs out the current session (user logout)
  */
-export async function logoutCurrentSession(token: string): Promise<{ success: boolean }> {
-  const base = apiBaseUrl();
-  const response = await fetch(`${base}/auth/logout`, {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders(token),
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error("Failed to logout");
-  }
-
+export async function logoutCurrentSession(_token?: string): Promise<{ success: boolean }> {
+  await api.logout();
   return { success: true };
 }
 

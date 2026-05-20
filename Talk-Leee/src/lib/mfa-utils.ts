@@ -25,8 +25,7 @@
  * showed a never-ending spinner.
  */
 
-import { apiBaseUrl } from "@/lib/env";
-import { getBrowserAuthToken } from "@/lib/auth-token";
+import { api } from "@/lib/api";
 
 // ----- Response types --------------------------------------------------------
 
@@ -106,55 +105,17 @@ export function getTimeRemaining(): number {
 }
 
 // ----- HTTP plumbing --------------------------------------------------------
-
-function authHeaders(token?: string): HeadersInit {
-    const bearer = token || getBrowserAuthToken() || "";
-    return bearer ? { Authorization: `Bearer ${bearer}` } : {};
-}
-
-async function postJson<T>(path: string, token: string, body?: unknown): Promise<T> {
-    const base = apiBaseUrl();
-    const res = await fetch(`${base}${path}`, {
-        method: "POST",
-        credentials: "include",
-        headers: {
-            "Content-Type": "application/json",
-            ...authHeaders(token),
-        },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    if (!res.ok) {
-        let detail = `Request failed (${res.status})`;
-        try {
-            const j = await res.json();
-            detail = j?.detail || j?.error?.message || detail;
-        } catch {
-            // ignore
-        }
-        throw new Error(detail);
-    }
-    return (await res.json()) as T;
-}
-
-async function getJson<T>(path: string, token: string): Promise<T> {
-    const base = apiBaseUrl();
-    const res = await fetch(`${base}${path}`, {
-        method: "GET",
-        credentials: "include",
-        headers: authHeaders(token),
-    });
-    if (!res.ok) {
-        let detail = `Request failed (${res.status})`;
-        try {
-            const j = await res.json();
-            detail = j?.detail || j?.error?.message || detail;
-        } catch {
-            // ignore
-        }
-        throw new Error(detail);
-    }
-    return (await res.json()) as T;
-}
+//
+// Phase 4 of the universal-auth-state plan removed the bare-fetch helpers
+// (postJson / getJson / authHeaders) that used to live here. The MFA
+// endpoints all have corresponding methods on the shared `api` client
+// (lib/api.ts) which handle: auth header injection from AuthContext via
+// the deferred token provider, automatic refresh-on-401, the fresh-login
+// grace window, single-flight refresh dedup, and the unified
+// session-expired redirect. Each public function below now delegates to
+// the shared client and adapts the response shape; the `token` parameter
+// is kept on the public signature for backward compatibility with the
+// existing callers but is no longer consulted.
 
 /**
  * Extracts the raw base32 secret from an otpauth:// URI.
@@ -173,14 +134,8 @@ function extractSecretFromUri(uri: string): string {
 
 // ----- Public API -----------------------------------------------------------
 
-export async function startMfaSetup(token: string): Promise<MFASetupResponse> {
-    type Raw = {
-        provisioning_uri: string;
-        qr_code: string;
-        issuer: string;
-        account: string;
-    };
-    const raw = await postJson<Raw>("/auth/mfa/setup", token);
+export async function startMfaSetup(_token?: string): Promise<MFASetupResponse> {
+    const raw = await api.setupMfa();
     return {
         qrCode: raw.qr_code,
         manualEntryKey: extractSecretFromUri(raw.provisioning_uri),
@@ -190,16 +145,8 @@ export async function startMfaSetup(token: string): Promise<MFASetupResponse> {
     };
 }
 
-export async function confirmMfaSetup(token: string, code: string): Promise<MFAConfirmResponse> {
-    type Raw = {
-        enabled: boolean;
-        recovery_codes: string[];
-        recovery_codes_count: number;
-        message: string;
-    };
-    const raw = await postJson<Raw>("/auth/mfa/confirm", token, {
-        code: code.trim().replace(/\D/g, ""),
-    });
+export async function confirmMfaSetup(_token: string | undefined, code: string): Promise<MFAConfirmResponse> {
+    const raw = await api.confirmMfa(code.trim().replace(/\D/g, ""));
     return {
         enabled: true,
         recoveryCodes: raw.recovery_codes,
@@ -208,13 +155,8 @@ export async function confirmMfaSetup(token: string, code: string): Promise<MFAC
     };
 }
 
-export async function getMfaStatus(token: string): Promise<MFAStatusResponse> {
-    type Raw = {
-        enabled: boolean;
-        verified_at: string | null;
-        recovery_codes_remaining: number;
-    };
-    const raw = await getJson<Raw>("/auth/mfa/status", token);
+export async function getMfaStatus(_token?: string): Promise<MFAStatusResponse> {
+    const raw = await api.getMfaStatus();
     return {
         enabled: raw.enabled,
         verifiedAt: raw.verified_at,
@@ -222,72 +164,15 @@ export async function getMfaStatus(token: string): Promise<MFAStatusResponse> {
     };
 }
 
-export async function disableMfa(token: string, password: string): Promise<{ success: boolean }> {
-    await postJson<unknown>("/auth/mfa/disable", token, { password });
+export async function disableMfa(_token: string | undefined, password: string): Promise<{ success: boolean }> {
+    await api.disableMfa(password);
     return { success: true };
 }
 
 export async function regenerateRecoveryCodes(
-    token: string,
+    _token: string | undefined,
     code: string,
 ): Promise<{ recoveryCodes: string[] }> {
-    type Raw = { recovery_codes: string[]; recovery_codes_count: number; message: string };
-    const raw = await postJson<Raw>("/auth/mfa/recovery-codes/regenerate", token, {
-        code: code.trim().replace(/\D/g, ""),
-    });
+    const raw = await api.regenerateRecoveryCodes(code.trim().replace(/\D/g, ""));
     return { recoveryCodes: raw.recovery_codes };
-}
-
-/**
- * @deprecated Use `verifyMfaChallenge` — the real backend flow needs the
- * challenge_token from the login response, not the email. Kept as a stub
- * to keep `mfa-verification.tsx` compiling while the login flow is being
- * refactored to forward `challenge_token`.
- */
-export async function verifyMfaLogin(
-    _email: string,
-    _totpCode: string,
-): Promise<{ access_token: string; refresh_token: string }> {
-    throw new Error(
-        "MFA login challenge requires challenge_token. " +
-        "Refactor login response to expose it, then call verifyMfaChallenge.",
-    );
-}
-
-/**
- * Step-2 of the two-step login flow.
- * Caller supplies the challenge token from the login response, plus one of
- * `code` (TOTP) or `recoveryCode` (backup code).
- */
-export async function verifyMfaChallenge(input: {
-    challengeToken: string;
-    code?: string;
-    recoveryCode?: string;
-}): Promise<{ accessToken: string; userId: string; email: string; role: string }> {
-    const base = apiBaseUrl();
-    const res = await fetch(`${base}/auth/mfa/verify`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            challenge_token: input.challengeToken,
-            code: input.code ? input.code.trim().replace(/\D/g, "") : undefined,
-            recovery_code: input.recoveryCode?.trim() || undefined,
-        }),
-    });
-    if (!res.ok) {
-        throw new Error("Invalid MFA code");
-    }
-    const raw = (await res.json()) as {
-        access_token: string;
-        user_id: string;
-        email: string;
-        role: string;
-    };
-    return {
-        accessToken: raw.access_token,
-        userId: raw.user_id,
-        email: raw.email,
-        role: raw.role,
-    };
 }
