@@ -69,12 +69,34 @@ def _cookie_secure() -> bool:
     return _secure_flag() or _samesite() == "none"
 
 
+def _cookie_domain() -> str | None:
+    """
+    Registered-domain scope for the auth cookies (2026-05-21 systemic
+    fix). When `AUTH_COOKIE_DOMAIN` is set to the registrable domain
+    (e.g. `talkleeai.com`), the cookies become visible to every
+    subdomain that shares it — talkleeai.com (frontend + edge middleware),
+    api.talkleeai.com (REST + WS), admin.talkleeai.com (if/when added),
+    etc.
+
+    This eliminates the recurring "X needs to know the session but the
+    cookie is scoped to Y" bug pattern that gave us three production
+    incidents in three days. GitHub uses the same architecture for
+    github.com + api.github.com + gist.github.com.
+
+    Unset / empty → host-only cookies (the previous default). Keeps
+    local dev on localhost working without configuration.
+    """
+    raw = (os.getenv("AUTH_COOKIE_DOMAIN", "") or "").strip()
+    return raw or None
+
+
 def set_access_cookie(response: Response, jwt_token: str) -> None:
     response.set_cookie(
         key=ACCESS_COOKIE_NAME,
         value=jwt_token,
         max_age=ACCESS_TOKEN_MAX_AGE,
         path=ACCESS_COOKIE_PATH,
+        domain=_cookie_domain(),
         httponly=True,
         secure=_cookie_secure(),
         samesite=_samesite(),
@@ -87,6 +109,7 @@ def set_refresh_cookie(response: Response, refresh_token: str) -> None:
         value=refresh_token,
         max_age=REFRESH_TOKEN_MAX_AGE,
         path=REFRESH_COOKIE_PATH,
+        domain=_cookie_domain(),
         httponly=True,
         secure=_cookie_secure(),
         samesite=_samesite(),
@@ -94,30 +117,37 @@ def set_refresh_cookie(response: Response, refresh_token: str) -> None:
 
 
 def clear_auth_cookies(response: Response) -> None:
-    # IMPORTANT: delete_cookie ignores cookies whose path doesn't match,
-    # so we must also issue a clear at the legacy "/" path for any user
-    # whose cookie was set before the path was tightened in P4.2.
-    # Without this their stale Path=/ cookie keeps being sent and they
-    # appear "still logged in" even after logout. The double-delete is
-    # cheap (two Set-Cookie headers, both Max-Age=0).
-    response.delete_cookie(
-        key=ACCESS_COOKIE_NAME,
-        path=ACCESS_COOKIE_PATH,
-        httponly=True,
-        secure=_cookie_secure(),
-        samesite=_samesite(),
-    )
-    response.delete_cookie(
-        key=ACCESS_COOKIE_NAME,
-        path="/",
-        httponly=True,
-        secure=_cookie_secure(),
-        samesite=_samesite(),
-    )
-    response.delete_cookie(
-        key=REFRESH_COOKIE_NAME,
-        path=REFRESH_COOKIE_PATH,
-        httponly=True,
-        secure=_cookie_secure(),
-        samesite=_samesite(),
-    )
+    """
+    Logout cookie scrub.
+
+    Six delete_cookie calls, three per cookie name, two factors of
+    variation:
+      - Path (canonical vs legacy "/" from before P4.2 tightening)
+      - Domain (registered-domain scope vs host-only legacy)
+
+    Browsers treat (name, path, domain) as the cookie key. A delete
+    only matches its exact tuple, so a host-only cookie set BEFORE
+    today's parent-domain migration is invisible to a delete that
+    specifies a domain. We issue every variation so any state a user
+    might be carrying gets cleared, regardless of when they logged in.
+    """
+    domain = _cookie_domain()
+    for path in (ACCESS_COOKIE_PATH, "/"):
+        for dom in {domain, None}:
+            response.delete_cookie(
+                key=ACCESS_COOKIE_NAME,
+                path=path,
+                domain=dom,
+                httponly=True,
+                secure=_cookie_secure(),
+                samesite=_samesite(),
+            )
+    for dom in {domain, None}:
+        response.delete_cookie(
+            key=REFRESH_COOKIE_NAME,
+            path=REFRESH_COOKIE_PATH,
+            domain=dom,
+            httponly=True,
+            secure=_cookie_secure(),
+            samesite=_samesite(),
+        )
