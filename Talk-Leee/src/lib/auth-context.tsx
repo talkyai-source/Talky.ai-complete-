@@ -172,26 +172,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Bootstrap auth state from the server.
     //
-    // Skip the call when there's no Bearer token. Otherwise a cold visit
-    // fires /auth/me without credentials, the http-client treats the
-    // 401 as session expiry, wipes any in-flight localStorage write
-    // from a concurrent login, and tears down sibling API calls (the
-    // connectors page's 10-second poll, the dashboard query, etc.).
-    // The Phase 7 migration shim above absorbed any legacy
-    // `talklee_auth_token` cookie into the canonical localStorage key,
-    // so by the time we reach this effect the only persistence we
-    // need to consult is `accessToken`.
+    // Two gating strategies depending on the deploy mode:
+    //
+    //   Bearer-fallback ON (default): skip /auth/me when there's no Bearer
+    //   token in localStorage. The Bearer's presence is the proxy signal
+    //   that "we have a session." Without it, calling /auth/me on a cold
+    //   anonymous visit fires a 401 → trips the session-expired latch →
+    //   tears down sibling API calls. The protective behaviour we want
+    //   for visitors who land on /auth/login without a session.
+    //
+    //   Bearer-fallback OFF (Phase F+F2 cookie-only mode): the JWT is
+    //   never written to localStorage anymore. The HttpOnly `talky_at`
+    //   cookie IS the session and JS can't read it. So we MUST call
+    //   /auth/me unconditionally on mount — if the cookie's valid the
+    //   server returns the user; if not we get a 401 and present a
+    //   logged-out shell. The latch-tearing-down concern is mitigated
+    //   by the fresh-login grace window and by the fact that nothing
+    //   in localStorage is at risk of being wiped anymore.
+    //
+    // Hotfix 2026-05-21: the previous gate only checked the Bearer path,
+    // so after the Phase F flip every page reload bounced the user to
+    // /auth/login even with a valid cookie. The branch on
+    // isBearerFallbackEnabled() restores the correct cookie-mode
+    // behaviour.
     useEffect(() => {
         let cancelled = false;
-        // After Phase 2 the state-initialised `accessToken` is already the
-        // canonical answer — but for backwards compat (cookie-only sessions
-        // where Bearer isn't set but talky_at cookie is) we still consult
-        // the persistence layer once. Either signal opts us into the
-        // /auth/me bootstrap.
         const legacyToken = accessToken ?? getBrowserAuthToken();
-        if (!legacyToken) {
-            // No auth signal — present a logged-out shell. Do NOT call
-            // /auth/me or clear anything; the user will log in explicitly.
+        const inCookieOnlyMode = !isBearerFallbackEnabled();
+        if (!legacyToken && !inCookieOnlyMode) {
+            // Bearer mode + no Bearer = anonymous cold visit. Don't
+            // call /auth/me, just present the logged-out shell.
             setLoading(false);
             return;
         }
