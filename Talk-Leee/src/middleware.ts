@@ -357,10 +357,29 @@ export async function middleware(req: NextRequest) {
         return res;
     }
 
-    const url = req.nextUrl.clone();
-    url.pathname = "/auth/login";
-    url.searchParams.set("next", `${pathname}${search}`);
-    const res = NextResponse.redirect(url);
+    // Hotfix 2026-05-21: the middleware can ONLY see cookies for the
+    // talkleeai.com origin. The canonical session cookie `talky_at` is
+    // scoped to api.talkleeai.com, so it never reaches this edge
+    // function. Pre-Phase-7 we relied on a non-HttpOnly mirror cookie
+    // `talklee_auth_token` set on talkleeai.com — Phase 7 deleted that
+    // writer without replacing it, so every authenticated user since
+    // yesterday's deploy hit the redirect-to-/auth/login branch even
+    // though their api.talkleeai.com session was perfectly valid.
+    //
+    // Fail-open hotfix: pass the request through. The client-side
+    // DashboardLayout already handles the unauthenticated case
+    // (renders a spinner during /auth/me, redirects to /auth/login
+    // when user is null after the bootstrap completes). UX is
+    // slightly different (brief spinner vs. instant redirect for
+    // anonymous visitors) but no security regression — every backend
+    // endpoint still enforces auth, the page HTML carries no PII
+    // before /auth/me succeeds.
+    //
+    // Proper fix to ship next: introduce a non-secret session-marker
+    // cookie on talkleeai.com (`talky.has_session=1; Path=/`) that
+    // tracks login state without exposing the JWT. Then this branch
+    // can return to fail-closed.
+    const res = NextResponse.next({ request: { headers: requestHeaders } });
     setSecurityHeaders(res, { csp, inProd, https });
     return res;
 }
