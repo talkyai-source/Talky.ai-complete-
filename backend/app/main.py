@@ -22,7 +22,7 @@ from app.api.operational import (
     root,
 )
 from app.core.app_bootstrap import configure_logging, configure_middleware
-from app.core.config import ConfigManager
+from app.core.config import ConfigManager, get_settings
 
 # ── Logging ──────────────────────────────────────────────────────
 configure_logging()
@@ -378,11 +378,22 @@ async def lifespan(app: FastAPI):
     logger.info("Talky.ai shutdown complete")
 
 
+_settings_for_app = get_settings()
+_is_prod = (_settings_for_app.environment or "").lower() == "production"
+
+# Vuln-fix 2026-05-21: lock the FastAPI auto-generated docs to non-prod.
+# In production /docs, /redoc, /openapi.json hand any visitor a complete
+# machine-readable map of every endpoint, parameter, and schema — that's
+# the recon phase done for them. We keep the docs available on
+# staging/dev where they're genuinely useful.
 app = FastAPI(
     title="Talky.ai — AI Voice Dialer",
     description="Intelligent voice communication platform with AI agents",
     version="1.0.0",
     lifespan=lifespan,
+    docs_url=None if _is_prod else "/docs",
+    redoc_url=None if _is_prod else "/redoc",
+    openapi_url=None if _is_prod else "/openapi.json",
 )
 
 # ── Middleware stack (order matters — outermost first) ────────────

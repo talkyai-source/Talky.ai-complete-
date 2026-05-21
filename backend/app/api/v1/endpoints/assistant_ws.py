@@ -118,18 +118,21 @@ def _read_cookie_token(websocket: WebSocket) -> Optional[str]:
 
 async def _resolve_ws_token(websocket: WebSocket, url_token: Optional[str]) -> Optional[str]:
     """
-    Phase A auth-hardening: resolve the auth token without exposing it in
-    the WebSocket URL.
+    Resolve the auth token without exposing it in the WebSocket URL.
 
-    AH-Phase-F2 priority order:
+    Priority order:
       1. `talky_at` HttpOnly cookie  — preferred. Same auth surface as
-         REST endpoints, no JS-readable token, works with
-         NEXT_PUBLIC_BEARER_FALLBACK=false on the frontend.
+         REST endpoints, no JS-readable token.
       2. First-message {"type":"auth","token":"…"}  — frame fallback for
          clients that can't carry cookies (admin frontend, native
          shells). 5-second wait after accept().
-      3. `?token=` URL query  — deprecated Phase A backwards-compat,
-         logged as warning. Cut in a follow-up commit after the 24h soak.
+
+    The `?token=` URL-query backwards-compat from Phase A was cut on
+    2026-05-21 (vuln-fix sprint). 24h soak completed; the deprecation
+    WARN line `assistant_ws: deprecated ?token= URL query used`
+    appeared only in synthetic tests during that window. The
+    `url_token` parameter is still on the signature so we can log
+    attempts that still try to use the old form.
     """
     cookie_token = _read_cookie_token(websocket)
     if cookie_token:
@@ -137,10 +140,12 @@ async def _resolve_ws_token(websocket: WebSocket, url_token: Optional[str]) -> O
 
     if url_token:
         logger.warning(
-            "assistant_ws: deprecated ?token= URL query used — "
-            "client should migrate to cookie or first-message auth"
+            "assistant_ws: rejected ?token= URL query — that path was "
+            "cut on 2026-05-21; client must use cookie or first-message auth"
         )
-        return url_token
+        # Do NOT return the url_token. Fall through so the missing-auth
+        # close path runs and the client sees a 1008 — that surfaces the
+        # problem instead of silently letting old clients keep working.
 
     try:
         first_frame = await asyncio.wait_for(websocket.receive_json(), timeout=5.0)

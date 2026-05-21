@@ -37,8 +37,44 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Rate limiter — keyed by client IP (first line of defence; per-account
 # lockout via login_attempts is the second line — see lockout.py)
+#
+# Vuln-fix 2026-05-21: slowapi's default get_remote_address reads
+# `request.client.host` which behind nginx is always the proxy
+# loopback. uvicorn here doesn't enable ProxyHeadersMiddleware so
+# Starlette won't rewrite client.host from X-Forwarded-For either —
+# net effect is every request shares ONE bucket, so an attacker can
+# either (a) blow past the per-route limit by spreading attempts
+# across many accounts under the shared bucket, or (b) rotate
+# X-Forwarded-For values to create fresh buckets when ProxyHeaders IS
+# in use elsewhere.
+#
+# The fix uses X-Real-IP first (which nginx sets and we control), then
+# leftmost X-Forwarded-For, then client.host. Configure nginx to set
+# both headers and to *override* (not append) any client-supplied
+# X-Forwarded-For; that's outside this file but documented in the
+# corresponding nginx hardening runbook.
 # ---------------------------------------------------------------------------
-limiter = Limiter(key_func=get_remote_address)
+def _real_client_ip(request: "Request") -> str:
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip and real_ip.strip():
+        return real_ip.strip()
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        # First entry = original client (nginx prepends, we trust the leftmost)
+        first = forwarded.split(",")[0].strip()
+        if first:
+            return first
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+limiter = Limiter(key_func=_real_client_ip)
+
+# `get_remote_address` import retained for backwards compatibility with
+# any test that imports it from this module's namespace; safe to remove
+# once those imports are audited.
+_ = get_remote_address
 
 # ---------------------------------------------------------------------------
 # OWASP: generic error message — never reveal which field was wrong
