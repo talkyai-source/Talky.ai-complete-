@@ -357,25 +357,30 @@ export async function middleware(req: NextRequest) {
         return res;
     }
 
-    // Fail-closed for protected paths.
+    // Fail-open during the parent-domain cookie migration window.
     //
-    // The earlier 2026-05-21 hotfix made this branch fail-open because
-    // Phase 7 had broken the middleware's view of the session (the
-    // canonical talky_at cookie was scoped host-only to
-    // api.talkleeai.com and never reached this edge function).
+    // We re-enabled fail-closed earlier today after shipping
+    // AUTH_COOKIE_DOMAIN=talkleeai.com on the backend. That works for
+    // sessions CREATED after the env change — their talky_at cookie
+    // is parent-domain scoped and the middleware sees it.
     //
-    // The systemic fix shipped the same day: backend now issues
-    // talky_at with `Domain=talkleeai.com` (AUTH_COOKIE_DOMAIN env
-    // var). The cookie is now visible to every subdomain that shares
-    // the registrable domain — talkleeai.com (this middleware),
-    // api.talkleeai.com, admin.talkleeai.com (when added), etc. The
-    // hasAuthSignal check above now genuinely reflects "this client
-    // has an active session", so we can safely redirect anonymous
-    // visitors away from /dashboard without bouncing real users.
-    const url = req.nextUrl.clone();
-    url.pathname = "/auth/login";
-    url.searchParams.set("next", `${pathname}${search}`);
-    const res = NextResponse.redirect(url);
+    // But existing pre-migration sessions still hold a host-only
+    // cookie on api.talkleeai.com that this middleware will NEVER
+    // see. Bouncing them to /auth/login was correct in principle but
+    // they couldn't get past it (their refresh-token rotation
+    // happens on the api domain too, so the new cookies never get
+    // issued through the middleware path).
+    //
+    // The right behaviour during migration is fail-open: let the
+    // request through, the client-side AuthContext + DashboardLayout
+    // make the redirect call after /auth/me returns. New logins
+    // immediately get parent-domain cookies; old sessions migrate
+    // naturally on their next /auth/refresh (within 15 min).
+    //
+    // Once existing sessions have drained (after the access-token
+    // TTL is twice elapsed, i.e. ~30 min after deploy), we can
+    // re-enable fail-closed safely.
+    const res = NextResponse.next({ request: { headers: requestHeaders } });
     setSecurityHeaders(res, { csp, inProd, https });
     return res;
 }
