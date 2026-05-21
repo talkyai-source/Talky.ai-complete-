@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode, useCallback } from "react";
 import { api } from "@/lib/api";
 import { clearFreshLoginGrace, resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider, isApiClientError } from "@/lib/http-client";
-import { consumeLegacyAuthCookie, getBrowserAuthToken, setBrowserAuthToken } from "@/lib/auth-token";
+import { consumeLegacyAuthCookie, getBrowserAuthToken, isBearerFallbackEnabled, setBrowserAuthToken } from "@/lib/auth-token";
 interface MeResponse {
     id: string;
     email: string;
@@ -77,7 +77,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [accessToken, setAccessTokenState] = useState<string | null>(() => {
         if (typeof window === "undefined") return null;
         const persisted = getBrowserAuthToken();
-        if (persisted) return persisted;
+        if (persisted) {
+            // Vuln-fix 2026-05-21: when the Bearer fallback is disabled
+            // by env, any token sitting in localStorage is a leftover
+            // from a session that logged in BEFORE the flag flipped. We
+            // want it out of localStorage immediately rather than
+            // waiting 7 days for natural rotation — the JWT in storage
+            // is the XSS attack surface the flag was meant to close.
+            //
+            // Wipe it from storage (one-shot, idempotent) but RETURN
+            // the value so the in-memory session continues normally.
+            // The user stays logged in via cookies; only the
+            // exfiltratable copy goes away. Next page load: no
+            // persisted token, AuthContext bootstraps via the
+            // /auth/me cookie path.
+            if (!isBearerFallbackEnabled()) {
+                try {
+                    window.localStorage.removeItem("talklee.auth.token");
+                } catch { /* ignore */ }
+            }
+            return persisted;
+        }
         const migrated = consumeLegacyAuthCookie();
         if (migrated) {
             setBrowserAuthToken(migrated);
