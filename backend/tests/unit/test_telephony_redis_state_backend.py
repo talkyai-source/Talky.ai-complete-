@@ -68,6 +68,9 @@ class FakeRegistry:
     def __init__(self):
         self.calls: list[tuple] = []
         self.pod_id = "test-pod"
+        # Controllable recovery inputs for recover_orphans tests.
+        self.sessions: list[dict] = []
+        self.alive: set = set()
 
     async def register_call(self, call_id, *, state, tenant_id=None, campaign_id=None, first_speaker=None):
         self.calls.append(("register", call_id, state, tenant_id, campaign_id, first_speaker))
@@ -78,9 +81,16 @@ class FakeRegistry:
     async def touch_call(self, call_id):
         self.calls.append(("touch", call_id))
 
+    async def scan_sessions(self):
+        self.calls.append(("scan",))
+        return list(self.sessions)
+
+    async def is_incarnation_alive(self, incarnation_id):
+        return incarnation_id in self.alive
+
     async def list_own_calls(self):
         self.calls.append(("list_own",))
-        return [{"call_id": "recovered-1", "state": "active", "pod_id": self.pod_id}]
+        return [s for s in self.sessions if s.get("pod_id") == self.pod_id]
 
     async def write_heartbeat(self, ttl_seconds):
         self.calls.append(("heartbeat", ttl_seconds))
@@ -193,11 +203,63 @@ async def test_alias_re_registers_under_new_id(sb_module):
 
 
 @pytest.mark.asyncio
-async def test_recover_orphans_delegates_to_registry(sb_module):
+async def test_recover_orphans_reclaims_only_dead_incarnations(sb_module):
+    """The safety invariant: recover only sessions whose owning
+    incarnation is dead (no heartbeat), never our own, never a live peer."""
+    reg = FakeRegistry()
+    reg.pod_id = "me"
+    reg.sessions = [
+        {"call_id": "mine", "pod_id": "me", "state": "active"},          # skip: own
+        {"call_id": "live-peer", "pod_id": "peer-A", "state": "active"}, # skip: alive
+        {"call_id": "dead-peer", "pod_id": "peer-B", "state": "active"}, # RECOVER
+    ]
+    reg.alive = {"peer-A"}  # peer-B's heartbeat is gone
+    backend = sb_module.RedisBackedStateBackend(reg)
+
+    orphans = await backend.recover_orphans()
+    ids = {o["call_id"] for o in orphans}
+    assert ids == {"dead-peer"}
+    # The reclaimed orphan was unregistered (claimed) exactly once.
+    assert ("unregister", "dead-peer") in reg.calls
+    assert ("unregister", "mine") not in reg.calls
+    assert ("unregister", "live-peer") not in reg.calls
+
+
+@pytest.mark.asyncio
+async def test_recover_orphans_empty_when_all_alive(sb_module):
+    reg = FakeRegistry()
+    reg.pod_id = "me"
+    reg.sessions = [{"call_id": "c1", "pod_id": "peer-A", "state": "active"}]
+    reg.alive = {"peer-A"}
+    backend = sb_module.RedisBackedStateBackend(reg)
+    assert await backend.recover_orphans() == []
+
+
+@pytest.mark.asyncio
+async def test_start_heartbeat_writes_immediately_and_is_idempotent(sb_module):
     reg = FakeRegistry()
     backend = sb_module.RedisBackedStateBackend(reg)
-    out = await backend.recover_orphans()
-    assert out == [{"call_id": "recovered-1", "state": "active", "pod_id": "test-pod"}]
+    await backend.start_heartbeat()
+    # One immediate heartbeat write on start.
+    assert any(c[0] == "heartbeat" for c in reg.calls)
+    first_task = backend._heartbeat_task
+    assert first_task is not None and not first_task.done()
+    # Idempotent — a second call doesn't spawn a new task.
+    await backend.start_heartbeat()
+    assert backend._heartbeat_task is first_task
+    await backend.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_clears_heartbeat_and_cancels_task(sb_module):
+    reg = FakeRegistry()
+    backend = sb_module.RedisBackedStateBackend(reg)
+    await backend.start_heartbeat()
+    task = backend._heartbeat_task
+    await backend.shutdown()
+    assert ("clear_heartbeat",) in reg.calls
+    assert backend._heartbeat_task is None
+    assert task.cancelled() or task.done()
 
 
 def test_no_running_loop_skips_mirror_but_updates_local(sb_module, fake_bridge_module):
@@ -261,6 +323,18 @@ class FakeRedis:
     async def delete(self, key):
         self.hashes.pop(key, None)
         self.strings.pop(key, None)
+        self.sets.pop(key, None)
+
+    async def exists(self, key):
+        return 1 if (key in self.strings or key in self.hashes or key in self.sets) else 0
+
+    async def scan_iter(self, match=None):
+        import fnmatch
+        # Snapshot keys so deletion during iteration is safe.
+        keys = list(self.hashes.keys())
+        for k in keys:
+            if match is None or fnmatch.fnmatch(k, match):
+                yield k
 
     def pipeline(self, transaction=True):
         return _FakePipe(self)
@@ -339,6 +413,38 @@ async def test_registry_promote_ringing_to_active(registry):
     owned = await registry.list_own_calls()
     assert len(owned) == 1
     assert owned[0]["state"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_recovery_end_to_end_with_real_registry(sb_module):
+    """Full path: a shared FakeRedis holds sessions from a dead peer and a
+    live peer; the backend's recover_orphans (via the REAL SessionRegistry
+    scan_iter/exists/hgetall) reclaims only the dead peer's call."""
+    from app.domain.services.telephony.session_registry import SessionRegistry
+
+    shared = FakeRedis()
+
+    # Dead peer registered a call but never wrote (or lost) its heartbeat.
+    dead = SessionRegistry(shared, "host:dead0001")
+    await dead.register_call("dead-call", state="active", tenant_id="t-dead")
+
+    # Live peer registered a call AND has a heartbeat.
+    live = SessionRegistry(shared, "host:live0002")
+    await live.register_call("live-call", state="active", tenant_id="t-live")
+    await live.write_heartbeat(60)
+
+    # The recovering process.
+    me = SessionRegistry(shared, "host:me000003")
+    await me.write_heartbeat(60)
+    backend = sb_module.RedisBackedStateBackend(me)
+
+    orphans = await backend.recover_orphans()
+    assert {o["call_id"] for o in orphans} == {"dead-call"}
+    assert orphans[0]["tenant_id"] == "t-dead"
+
+    # The dead call's hash was deleted (claimed); the live one remains.
+    remaining = {s["call_id"] for s in await me.scan_sessions()}
+    assert remaining == {"live-call"}
 
 
 @pytest.mark.asyncio

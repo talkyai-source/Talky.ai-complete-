@@ -295,6 +295,21 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Telephony bridge auto-connect failed (non-fatal): {e}")
 
+    # Phase 1 item 1 — telephony state recovery. Start this process's
+    # heartbeat, then reclaim any calls a dead predecessor left in the
+    # Redis ledger (hang them up + record the terminal state). Both are
+    # no-ops on the in-memory backend, so this is safe regardless of
+    # TELEPHONY_STATE_BACKEND. Best-effort — never block startup.
+    try:
+        from app.domain.services.telephony.state_backend import get_state_backend
+        from app.domain.services.telephony.lifecycle import recover_orphaned_calls
+        await get_state_backend().start_heartbeat()
+        recovered = await recover_orphaned_calls()
+        if recovered:
+            logger.info("telephony startup recovery: reclaimed %d orphaned call(s)", recovered)
+    except Exception as e:
+        logger.warning(f"Telephony state recovery failed (non-fatal): {e}")
+
     yield
 
     # Phase 1.4 — flip readiness to NOT_READY immediately so the load
@@ -346,6 +361,14 @@ async def lifespan(app: FastAPI):
             logger.info("Telephony bridge disconnected")
         except Exception as e:
             logger.error(f"Error disconnecting telephony bridge: {e}")
+
+    # Phase 1 item 1 — stop the heartbeat and clear it so the successor
+    # process recovers our calls immediately rather than waiting for the
+    # heartbeat TTL to lapse. No-op on the in-memory backend.
+    try:
+        await _sb.shutdown()
+    except Exception as e:
+        logger.warning(f"Telephony state backend shutdown failed (non-fatal): {e}")
 
     # Phase 4.2 — flush + stop the cost ledger.
     try:

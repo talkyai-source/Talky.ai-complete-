@@ -428,6 +428,8 @@ class SessionRegistryProto(Protocol):
     Declared as a Protocol so the backend isn't import-coupled to the
     concrete registry and tests can pass a fake."""
 
+    pod_id: str
+
     async def register_call(
         self,
         call_id: str,
@@ -442,7 +444,11 @@ class SessionRegistryProto(Protocol):
 
     async def touch_call(self, call_id: str) -> None: ...
 
+    async def scan_sessions(self) -> list[dict[str, Any]]: ...
+
     async def list_own_calls(self) -> list[dict[str, Any]]: ...
+
+    async def is_incarnation_alive(self, incarnation_id: str) -> bool: ...
 
     async def write_heartbeat(self, ttl_seconds: int) -> None: ...
 
@@ -484,12 +490,20 @@ class RedisBackedStateBackend:
     local-only, never breaks.
     """
 
+    # Heartbeat cadence: renew every _HEARTBEAT_INTERVAL_S with a
+    # _HEARTBEAT_TTL_S TTL. TTL must be comfortably larger than the
+    # interval so a single slow tick doesn't make a live process look
+    # dead. 20s interval / 60s TTL gives 3 missed beats of slack.
+    _HEARTBEAT_INTERVAL_S = 20
+    _HEARTBEAT_TTL_S = 60
+
     def __init__(self, registry: "SessionRegistryProto"):
         self._local = LocalOnlyStateBackend()
         self._registry = registry
         # Keep strong refs to in-flight mirror tasks so they aren't GC'd
         # mid-flight (asyncio only holds weak refs to tasks).
         self._tasks: set[Any] = set()
+        self._heartbeat_task: Optional[Any] = None
 
     # ── Fire-and-forget helper ──────────────────────────────────────
 
@@ -662,19 +676,81 @@ class RedisBackedStateBackend:
         self._spawn(self._registry.touch_call(call_id))
 
     async def recover_orphans(self) -> list[dict[str, Any]]:
-        # Implemented in step 4. For now, surface the ledger entries this
-        # pod owns so the wiring can be smoke-tested; step 4 adds the
-        # heartbeat-based dead-pod filter and the actual hangup.
-        return await self._registry.list_own_calls()
+        """Return — and claim — the ledger entries whose owning process
+        is confirmed dead (its heartbeat key is gone).
+
+        Safety: an entry is only an orphan if (a) it was NOT written by
+        THIS incarnation, and (b) the owning incarnation's heartbeat is
+        absent. A live sibling worker's heartbeat is present, so its
+        calls are skipped — no cross-worker clobbering. ``is_incarnation_
+        alive`` returns True on a Redis error, so a transient blip never
+        causes a false 'dead' verdict.
+
+        Claimed orphans are unregistered from the ledger here so a
+        concurrent caller (startup + watchdog) can't recover the same
+        call twice. The caller is responsible for the ARI hangup and the
+        recovery stream-event.
+        """
+        sessions = await self._registry.scan_sessions()
+        my_id = self._registry.pod_id
+        orphans: list[dict[str, Any]] = []
+        for entry in sessions:
+            owner = entry.get("pod_id")
+            if not owner or owner == my_id:
+                continue
+            if await self._registry.is_incarnation_alive(owner):
+                continue
+            orphans.append(entry)
+        # Claim them (delete the hash) so they're recovered exactly once.
+        for entry in orphans:
+            call_id = entry.get("call_id")
+            if call_id:
+                await self._registry.unregister_call(call_id)
+        if orphans:
+            logger.info(
+                "telephony recover_orphans: %d dead-process call(s) reclaimed",
+                len(orphans),
+            )
+        return orphans
 
     async def start_heartbeat(self) -> None:
-        # Implemented in step 4.
-        return None
+        """Begin renewing this incarnation's heartbeat. Idempotent."""
+        import asyncio
+        if self._heartbeat_task is not None and not self._heartbeat_task.done():
+            return
+        # Write one immediately so recovery on a fast-restarting peer
+        # sees us alive without waiting a full interval.
+        await self._registry.write_heartbeat(self._HEARTBEAT_TTL_S)
+        self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+        logger.info(
+            "telephony heartbeat started pod=%s interval=%ds ttl=%ds",
+            self._registry.pod_id, self._HEARTBEAT_INTERVAL_S, self._HEARTBEAT_TTL_S,
+        )
+
+    async def _heartbeat_loop(self) -> None:
+        import asyncio
+        try:
+            while True:
+                await asyncio.sleep(self._HEARTBEAT_INTERVAL_S)
+                await self._registry.write_heartbeat(self._HEARTBEAT_TTL_S)
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:  # never let the loop die silently
+            logger.warning("telephony heartbeat loop error: %s", exc)
 
     async def shutdown(self) -> None:
-        # Implemented in step 4 (clear heartbeat). For now, await any
-        # in-flight mirror tasks so a clean shutdown doesn't drop writes.
+        """Graceful shutdown: stop the heartbeat, clear it so the
+        successor process recovers our calls immediately, and drain any
+        in-flight mirror writes."""
         import asyncio
+        if self._heartbeat_task is not None:
+            self._heartbeat_task.cancel()
+            try:
+                await self._heartbeat_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._heartbeat_task = None
+        await self._registry.clear_heartbeat()
         pending = list(self._tasks)
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
@@ -688,16 +764,23 @@ class RedisBackedStateBackend:
 _STATE_BACKEND: Optional[TelephonyStateBackend] = None
 
 
-def _resolve_pod_id() -> str:
-    """Stable per-host/deployment id. Matches the convention used in
-    ``lifecycle._on_new_call`` (global-concurrency leases): prefer the
-    ``POD_ID`` env var, else the hostname. Stability across restarts is
-    what lets a fresh process inherit the previous incarnation's
-    owned-calls set for recovery."""
+def _resolve_incarnation_id() -> str:
+    """Per-PROCESS identity: ``{host}:{short-uuid}``, unique each start.
+
+    NOT a stable hostname. Uniqueness per process is what makes recovery
+    safe under ``--workers N``: each worker has its own heartbeat, and a
+    restarting worker only reclaims sessions whose owning incarnation's
+    heartbeat is gone. A live sibling keeps a distinct id + heartbeat, so
+    its calls are never reclaimed. The host prefix keeps the id readable
+    in ``redis-cli`` (``telephony:pod:host:ab12cd34:heartbeat``)."""
     import os as _os
-    pod = _os.getenv("POD_ID")
-    if pod:
-        return pod
+    import uuid as _uuid
+    host = _os.getenv("POD_ID") or _safe_hostname()
+    return f"{host}:{_uuid.uuid4().hex[:8]}"
+
+
+def _safe_hostname() -> str:
+    import os as _os
     try:
         return _os.uname().nodename
     except Exception:
@@ -726,7 +809,7 @@ def _build_backend() -> TelephonyStateBackend:
             )
             return LocalOnlyStateBackend()
         from app.domain.services.telephony.session_registry import SessionRegistry
-        registry = SessionRegistry(redis_client, _resolve_pod_id())
+        registry = SessionRegistry(redis_client, _resolve_incarnation_id())
         logger.info(
             "telephony_state_backend=redis pod_id=%s — restart recovery enabled",
             registry.pod_id,

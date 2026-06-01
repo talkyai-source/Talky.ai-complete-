@@ -259,10 +259,89 @@ async def _session_watchdog() -> None:
             except Exception as exc:
                 logger.debug("global_concurrency_watchdog_step_failed err=%s", exc)
 
+            # ----- Phase 1 item 1: dead-process call recovery -----
+            # Reclaim calls left behind by a crashed peer incarnation
+            # whose heartbeat has now expired. On a graceful restart the
+            # successor handles these at startup; this watchdog pass
+            # catches the hard-crash case once the dead heartbeat TTLs
+            # out (~60s). No-op on the memory backend.
+            try:
+                await recover_orphaned_calls()
+            except Exception as exc:
+                logger.debug("orphan_recovery_watchdog_step_failed err=%s", exc)
+
         except asyncio.CancelledError:
             return
         except Exception as exc:
             logger.warning("telephony_watchdog error: %s", exc)
+
+
+async def recover_orphaned_calls() -> int:
+    """Hang up and record calls abandoned by a dead process incarnation.
+
+    ``state_backend.recover_orphans()`` returns ledger entries whose
+    owning incarnation's heartbeat is gone (and atomically claims them so
+    they're processed once). For each, we:
+
+      1. Best-effort hang up the PBX channel — a no-op if Asterisk
+         already tore it down when the owning process died, but it
+         releases the channel if Asterisk parked it.
+      2. Emit a Track-B call-ended stream event (via the provider call
+         id → ``calls`` row resolver) so the dashboard shows the call as
+         ended-on-restart instead of stuck "in call" forever.
+
+    Returns the number of calls recovered. No-op (returns 0) on the
+    in-memory backend, which has no cross-process ledger.
+    """
+    sb = _state()
+    try:
+        orphans = await sb.recover_orphans()
+    except Exception as exc:
+        logger.warning("recover_orphaned_calls: recover_orphans failed: %s", exc)
+        return 0
+    if not orphans:
+        return 0
+
+    from app.core.container import get_container as _gc
+    from app.domain.services.call_status import (
+        CallState, record_call_state_by_provider_id,
+    )
+    container = _gc()
+    db_pool = getattr(container, "db_pool", None) if container.is_initialized else None
+    adapter = _bridge()._adapter
+
+    recovered = 0
+    for entry in orphans:
+        call_id = entry.get("call_id")
+        if not call_id:
+            continue
+        # 1. Best-effort PBX hangup.
+        if adapter is not None:
+            try:
+                await adapter.hangup(call_id)
+            except Exception as exc:
+                logger.debug("orphan_recovery hangup_noop call=%s err=%s", call_id[:12], exc)
+        # 2. Record the terminal state so the UI/outcome is accurate.
+        if db_pool is not None:
+            try:
+                await record_call_state_by_provider_id(
+                    db_pool,
+                    provider_call_id=call_id,
+                    new_state=CallState.ENDED,
+                    metadata={
+                        "description": "Call ended — recovered after a process restart",
+                        "reason": "process_restart_recovery",
+                        "prior_owner": entry.get("pod_id"),
+                    },
+                )
+            except Exception as exc:
+                logger.debug("orphan_recovery state_emit_failed call=%s err=%s", call_id[:12], exc)
+        recovered += 1
+        logger.info(
+            "orphan_recovery reclaimed call=%s prior_owner=%s tenant=%s",
+            call_id[:12], entry.get("pod_id"), entry.get("tenant_id") or "-",
+        )
+    return recovered
 
 
 def _pipeline_done_cb(task: asyncio.Task, call_id: str) -> None:
