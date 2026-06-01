@@ -119,6 +119,12 @@ async def _session_watchdog() -> None:
             # ----- Active session inactivity sweep -----
             stale = []
             for call_id, vs in _sb.iter_voice_session_items():
+                # Refresh the Redis ledger TTL for every live call each
+                # tick (debounced in the backend) so a call that's up but
+                # momentarily silent — caller on hold, long agent turn —
+                # doesn't let its ledger entry expire and become an
+                # un-recoverable zombie. No-op on the memory backend.
+                _sb.touch_call(call_id)
                 # FIX 1 — last_activity_at lives on CallSession (vs.call_session),
                 # not VoiceSession (vs).  Use the pre-built is_stale() method which
                 # compares datetime correctly instead of mixing monotonic time + datetime.
@@ -938,9 +944,14 @@ async def _on_audio_received(call_id: str, audio_bytes: bytes) -> None:
     """Route incoming audio from the PBX into the media gateway (STT input)."""
     # Hot path (per RTP packet). get_voice_session is a process-local dict
     # read in both backends — Redis is never touched here.
-    voice_session = _state().get_voice_session(call_id)
+    sb = _state()
+    voice_session = sb.get_voice_session(call_id)
     if not voice_session:
         return
+    # Refresh the Redis ledger TTL so a long call's entry never expires
+    # underneath it. Debounced inside the backend (>=30s), so calling it
+    # on every audio frame is cheap — a dict lookup, no Redis per packet.
+    sb.touch_call(call_id)
     try:
         await voice_session.media_gateway.on_audio_received(
             voice_session.call_id, audio_bytes

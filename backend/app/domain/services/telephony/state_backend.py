@@ -497,6 +497,12 @@ class RedisBackedStateBackend:
     _HEARTBEAT_INTERVAL_S = 20
     _HEARTBEAT_TTL_S = 60
 
+    # Min seconds between real Redis TTL refreshes for a given call on the
+    # audio hot path. Must be comfortably below the active-session TTL
+    # (600s) so the entry never expires under a live call: 30s leaves a
+    # 20x margin even if a couple of refreshes are missed.
+    _TOUCH_DEBOUNCE_S = 30
+
     def __init__(self, registry: "SessionRegistryProto"):
         self._local = LocalOnlyStateBackend()
         self._registry = registry
@@ -504,6 +510,8 @@ class RedisBackedStateBackend:
         # mid-flight (asyncio only holds weak refs to tasks).
         self._tasks: set[Any] = set()
         self._heartbeat_task: Optional[Any] = None
+        # call_id -> last monotonic time we actually hit Redis for a touch.
+        self._last_touch: dict[str, float] = {}
 
     # ── Fire-and-forget helper ──────────────────────────────────────
 
@@ -554,6 +562,9 @@ class RedisBackedStateBackend:
         # Unregister regardless of whether the local pop found anything —
         # idempotent and guards against a local/Redis drift.
         self._spawn(self._registry.unregister_call(call_id))
+        # Drop the touch-debounce bookkeeping so the map can't grow
+        # unbounded across the process lifetime.
+        self._last_touch.pop(call_id, None)
         return vs
 
     def voice_session_count(self) -> int:
@@ -673,6 +684,21 @@ class RedisBackedStateBackend:
     # step 5) so the plumbing is exercised end-to-end.
 
     def touch_call(self, call_id: str) -> None:
+        """Refresh the ledger TTL for a live call — safe to call on the
+        per-RTP-packet audio path because it's debounced.
+
+        At ~50 packets/sec/call, hitting Redis every packet would be
+        thousands of EXPIREs/sec. Instead we record the last real touch
+        per call_id (monotonic clock) and only mirror to Redis when
+        ``_TOUCH_DEBOUNCE_S`` has elapsed. The common case is a dict
+        lookup + float compare — microseconds, no Redis, no task spawn.
+        """
+        import time as _time
+        now = _time.monotonic()
+        last = self._last_touch.get(call_id)
+        if last is not None and (now - last) < self._TOUCH_DEBOUNCE_S:
+            return
+        self._last_touch[call_id] = now
         self._spawn(self._registry.touch_call(call_id))
 
     async def recover_orphans(self) -> list[dict[str, Any]]:

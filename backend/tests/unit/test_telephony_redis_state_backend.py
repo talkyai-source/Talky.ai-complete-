@@ -166,12 +166,39 @@ async def test_pop_ringing_warmup_does_not_unregister(sb_module):
 
 
 @pytest.mark.asyncio
-async def test_touch_call_refreshes_ttl(sb_module):
+async def test_touch_call_first_hit_then_debounced(sb_module):
+    """First touch hits Redis; an immediate second touch is debounced
+    (no Redis op); after the debounce window elapses it hits again."""
     reg = FakeRegistry()
     backend = sb_module.RedisBackedStateBackend(reg)
+
     backend.touch_call("call-1")
     await _drain(backend)
-    assert ("touch", "call-1") in reg.calls
+    assert reg.calls.count(("touch", "call-1")) == 1
+
+    # Immediate second touch — debounced, no new Redis op.
+    backend.touch_call("call-1")
+    await _drain(backend)
+    assert reg.calls.count(("touch", "call-1")) == 1
+
+    # Simulate the debounce window having elapsed by ageing the bookkeeping.
+    backend._last_touch["call-1"] -= backend._TOUCH_DEBOUNCE_S + 1
+    backend.touch_call("call-1")
+    await _drain(backend)
+    assert reg.calls.count(("touch", "call-1")) == 2
+
+
+@pytest.mark.asyncio
+async def test_pop_voice_session_clears_touch_debounce(sb_module):
+    reg = FakeRegistry()
+    backend = sb_module.RedisBackedStateBackend(reg)
+    backend.set_voice_session("call-1", object())
+    backend.touch_call("call-1")
+    await _drain(backend)
+    assert "call-1" in backend._last_touch
+    backend.pop_voice_session("call-1")
+    await _drain(backend)
+    assert "call-1" not in backend._last_touch
 
 
 @pytest.mark.asyncio
