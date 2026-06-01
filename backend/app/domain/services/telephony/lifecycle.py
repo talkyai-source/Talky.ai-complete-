@@ -53,6 +53,18 @@ def _bridge():
     return telephony_bridge
 
 
+def _state():
+    """The telephony state backend (Phase 1, item 1 of the architecture
+    roadmap). All per-call state reads/writes go through this so the
+    Redis-backed backend can mirror them for restart recovery. Lazy
+    import keeps the module-load graph acyclic — same rationale as
+    ``_bridge()`` above. ``_adapter`` is NOT state-backend-managed (it's
+    a live ARI/ESL connection); it stays accessed via ``_bridge()``.
+    """
+    from app.domain.services.telephony.state_backend import get_state_backend
+    return get_state_backend()
+
+
 # Watchdog timeouts (read once at import time — match prior bridge behaviour).
 _SESSION_INACTIVITY_TIMEOUT_S = int(os.getenv("TELEPHONY_INACTIVITY_TIMEOUT_S", "300"))
 _SESSION_MAX_DURATION_S = int(os.getenv("TELEPHONY_MAX_CALL_DURATION_S", "3600"))
@@ -65,8 +77,9 @@ def _pop_ringing_warmup(call_id: str):
     Returns the (VoiceSession, connect_task) tuple if present, else None.
     Callers are responsible for cancelling the task and ending the session.
     """
-    _bridge()._ringing_warmup_created_at.pop(call_id, None)
-    return _bridge()._ringing_warmups.pop(call_id, None)
+    _sb = _state()
+    _sb.clear_ringing_started_at(call_id)
+    return _sb.pop_ringing_warmup(call_id)
 
 
 # ---------------------------------------------------------------------------
@@ -101,10 +114,11 @@ async def _session_watchdog() -> None:
         try:
             await asyncio.sleep(30)
             now = asyncio.get_event_loop().time()
+            _sb = _state()
 
             # ----- Active session inactivity sweep -----
             stale = []
-            for call_id, vs in list(_bridge()._telephony_sessions.items()):
+            for call_id, vs in _sb.iter_voice_session_items():
                 # FIX 1 — last_activity_at lives on CallSession (vs.call_session),
                 # not VoiceSession (vs).  Use the pre-built is_stale() method which
                 # compares datetime correctly instead of mixing monotonic time + datetime.
@@ -120,12 +134,12 @@ async def _session_watchdog() -> None:
 
             # ----- Orphaned ringing-warmup sweep (bug #3 / #7) -----
             stale_ringing = [
-                cid for cid, created_at in list(_bridge()._ringing_warmup_created_at.items())
+                cid for cid, created_at in _sb.iter_ringing_started_at_items()
                 if (now - created_at) > _bridge()._RINGING_MAX_AGE_S
             ]
             for cid in stale_ringing:
                 ringing = _pop_ringing_warmup(cid)
-                _bridge()._ringing_events.pop(cid, None)
+                _sb.pop_ringing_event(cid)
                 logger.warning(
                     "telephony_watchdog: orphaned ringing_warmup %s "
                     "(age >%ds) — releasing STT/TTS sockets",
@@ -147,29 +161,28 @@ async def _session_watchdog() -> None:
             # Events without a matching warmup entry are pure leakage; drop on
             # the same age policy. (Events with a matching warmup entry get
             # cleaned up by the warmup sweep above.)
+            _warmup_keys = {cid for cid, _ in _sb.iter_ringing_started_at_items()}
+            _session_keys = {cid for cid, _ in _sb.iter_voice_session_items()}
             stale_events = [
-                cid for cid in list(_bridge()._ringing_events.keys())
-                if cid not in _bridge()._ringing_warmup_created_at
-                and cid not in _bridge()._telephony_sessions
+                cid for cid in _sb.iter_ringing_event_keys()
+                if cid not in _warmup_keys and cid not in _session_keys
             ]
             for cid in stale_events:
-                _bridge()._ringing_events.pop(cid, None)
+                _sb.pop_ringing_event(cid)
 
             # ----- Phase 1.3: orphan sweep across remaining session-keyed maps
             # Anything keyed by gateway_session_id whose call_id is no longer
             # an active or ringing-warming session is leakage from a crashed
             # call path that never called _on_call_ended. Drop on the same age
             # policy as ringing warmups.
-            active_call_ids = set(_bridge()._telephony_sessions.keys()) | set(
-                _bridge()._ringing_warmup_created_at.keys()
-            )
+            active_call_ids = _session_keys | _warmup_keys
             orphan_gw = [
-                gw_id for gw_id, cid in list(_bridge()._gateway_session_to_call_id.items())
+                gw_id for gw_id, cid in _sb.iter_gateway_session_items()
                 if cid not in active_call_ids
             ]
             for gw_id in orphan_gw:
-                _bridge()._gateway_session_to_call_id.pop(gw_id, None)
-                buf = _bridge()._early_audio_buffers.pop(gw_id, None)
+                _sb.remove_gateway_session(gw_id)
+                buf = _sb.drain_early_audio(gw_id)
                 if buf:
                     logger.warning(
                         "telephony_watchdog: dropping orphan early_audio_buffer "
@@ -179,9 +192,10 @@ async def _session_watchdog() -> None:
 
             # Buffers that exist without any gateway-session mapping at all are
             # dead audio from calls that never registered. Cap their age too.
-            for gw_id in list(_bridge()._early_audio_buffers.keys()):
-                if gw_id not in _bridge()._gateway_session_to_call_id:
-                    _bridge()._early_audio_buffers.pop(gw_id, None)
+            _gw_keys = {gw for gw, _ in _sb.iter_gateway_session_items()}
+            for gw_id in _sb.iter_early_audio_keys():
+                if gw_id not in _gw_keys:
+                    _sb.discard_early_audio(gw_id)
 
             # ----- Cartesia per-call WS sweep -----
             # cartesia.py keeps a per-call WS in _call_ws / _call_ws_locks /
@@ -198,14 +212,15 @@ async def _session_watchdog() -> None:
                     # internal call_id state that no longer matches an active
                     # session. This is a no-op when state is already clean.
                     cartesia_singletons = set()
-                    for vs in list(_bridge()._telephony_sessions.values()):
+                    _live_sessions = [vs for _, vs in _sb.iter_voice_session_items()]
+                    for vs in _live_sessions:
                         tts = getattr(vs, "tts_provider", None)
                         if tts is None or getattr(tts, "name", None) != "cartesia":
                             continue
                         cartesia_singletons.add(id(tts))
                         live_ids = {
                             getattr(v, "call_id", None)
-                            for v in _bridge()._telephony_sessions.values()
+                            for v in _live_sessions
                         }
                         live_ids.discard(None)
                         for cid in list(getattr(tts, "_call_ws", {}).keys()):
@@ -238,7 +253,7 @@ async def _session_watchdog() -> None:
                 _c = _gc()
                 _redis = getattr(_c, "redis", None) if _c.is_initialized else None
                 if _redis is not None:
-                    for live_id in list(_bridge()._telephony_sessions.keys()):
+                    for live_id, _ in _sb.iter_voice_session_items():
                         await refresh_lease(_redis, call_id=live_id)
                     await reconcile_orphans(_redis)
             except Exception as exc:
@@ -271,7 +286,7 @@ def _pipeline_done_cb(task: asyncio.Task, call_id: str) -> None:
         # CallOutcome.FAILED (rather than the default ANSWERED) when
         # _on_call_ended runs the call_service chain.
         try:
-            vs = _bridge()._telephony_sessions.get(call_id)
+            vs = _state().get_voice_session(call_id)
             if vs is not None:
                 vs._pipeline_failed = True
         except Exception:
@@ -296,13 +311,14 @@ async def _on_ringing(call_id: str) -> None:
     """
     if _bridge()._adapter is None or getattr(_bridge()._adapter, "name", "") != "asterisk":
         return
+    _sb = _state()
     if (
-        call_id in _bridge()._ringing_warmups
-        or call_id in _bridge()._ringing_events
-        or call_id in _bridge()._telephony_sessions
+        _sb.has_ringing_warmup(call_id)
+        or _sb.get_ringing_event(call_id) is not None
+        or _sb.get_voice_session(call_id) is not None
     ):
         return  # idempotent/reserved — never create a second warmup for a call
-    if len(_bridge()._telephony_sessions) + len(_bridge()._ringing_warmups) >= _bridge()._MAX_TELEPHONY_SESSIONS:
+    if _sb.voice_session_count() + _sb.ringing_warmup_count() >= _bridge()._MAX_TELEPHONY_SESSIONS:
         logger.warning(
             "ringing_warmup_skipped_at_capacity call_id=%s", call_id[:12],
         )
@@ -313,7 +329,7 @@ async def _on_ringing(call_id: str) -> None:
     # when the answer path checks for it (even if create_voice_session
     # takes ~1 s).
     evt = asyncio.Event()
-    _bridge()._ringing_events[call_id] = evt
+    _sb.set_ringing_event(call_id, evt)
 
     _t0 = asyncio.get_event_loop().time()
     logger.info(f"WARMUP ringing_warmup_start {call_id[:12]}")
@@ -425,8 +441,9 @@ async def _on_ringing(call_id: str) -> None:
 
         combined_task = asyncio.create_task(_warmup_and_presynth())
 
-        _bridge()._ringing_warmups[call_id] = (voice_session, combined_task)
-        _bridge()._ringing_warmup_created_at[call_id] = asyncio.get_event_loop().time()
+        _sb = _state()
+        _sb.set_ringing_warmup(call_id, voice_session, combined_task)
+        _sb.set_ringing_started_at(call_id, asyncio.get_event_loop().time())
         elapsed_ms = (asyncio.get_event_loop().time() - _t0) * 1000.0
         logger.info(
             "WARMUP ringing_warmup_ready call_id=%s warmups=%d setup_ms=%.0f",
@@ -467,13 +484,33 @@ async def _reject_overcap_call(call_id: str) -> None:
 
 async def _on_new_call(call_id: str) -> None:
     """Initialize AI pipeline when a new SIP call arrives."""
+    # Track B (live call transparency): the remote side just picked up.
+    # Emit ANSWERED so the live-calls panel flips from "ringing" to a
+    # green "in-call" pill. Pre-pipeline start so the UI updates fast.
+    # Best-effort — never block call setup on a status emit.
+    try:
+        from app.domain.services.call_status import (
+            CallState, record_call_state_by_provider_id,
+        )
+        from app.core.container import get_container as _gc
+        _c = _gc()
+        await record_call_state_by_provider_id(
+            _c.db_pool,
+            provider_call_id=call_id,
+            new_state=CallState.ANSWERED,
+            metadata={"description": "Call answered"},
+        )
+    except Exception as exc:
+        logger.debug("call_status.answered_emit_raised call=%s err=%s", call_id[:12], exc)
+
     # Per-pod cap (existing, kept as a backstop so a single pod never
     # exceeds its MAX_TELEPHONY_SESSIONS memory budget). The global cap
     # below is the new cluster-wide check (T1.2).
-    if len(_bridge()._telephony_sessions) >= _bridge()._MAX_TELEPHONY_SESSIONS:
+    _pod_session_count = _state().voice_session_count()
+    if _pod_session_count >= _bridge()._MAX_TELEPHONY_SESSIONS:
         logger.error(
             "telephony_at_pod_capacity sessions=%d call_id=%s — rejecting",
-            len(_bridge()._telephony_sessions), call_id[:12],
+            _pod_session_count, call_id[:12],
         )
         await _reject_overcap_call(call_id)
         return
@@ -506,7 +543,8 @@ async def _on_new_call(call_id: str) -> None:
         return
 
     _new_call_t0 = asyncio.get_event_loop().time()
-    logger.info(f"BRIDGE new_call {call_id[:12]} (ringing_warmup_available={call_id in _bridge()._ringing_warmups})")
+    _sb = _state()
+    logger.info(f"BRIDGE new_call {call_id[:12]} (ringing_warmup_available={_sb.has_ringing_warmup(call_id)})")
     try:
         orchestrator = _get_orchestrator()
 
@@ -531,7 +569,7 @@ async def _on_new_call(call_id: str) -> None:
         # asyncio.Event that _on_ringing sets when its warmup completes.
         pre = _pop_ringing_warmup(call_id)
         if pre is None and is_asterisk:
-            ringing_evt = _bridge()._ringing_events.get(call_id)
+            ringing_evt = _sb.get_ringing_event(call_id)
             if ringing_evt is not None:
                 logger.info(
                     "BRIDGE waiting_for_ringing_warmup call_id=%s",
@@ -552,7 +590,7 @@ async def _on_new_call(call_id: str) -> None:
                         "BRIDGE ringing_warmup_consumed call_id=%s wait_ms=%.0f",
                         call_id[:12], _wait_ms,
                     )
-            _bridge()._ringing_events.pop(call_id, None)  # clean up event
+            _sb.pop_ringing_event(call_id)  # clean up event
         connect_task: Optional[asyncio.Task] = None
         if pre is not None:
             voice_session, connect_task = pre  # type: ignore[assignment]
@@ -560,7 +598,7 @@ async def _on_new_call(call_id: str) -> None:
             config = _build_telephony_session_config(gateway_type=gateway_type)
             voice_session = await orchestrator.create_voice_session(config)
 
-        _bridge()._telephony_sessions[call_id] = voice_session
+        _sb.set_voice_session(call_id, voice_session)
 
         # ── Bind dialer calls.id for campaign transcript persist ────────
         # Non-destructive: stashes _dialer_call_id on voice_session without
@@ -591,7 +629,7 @@ async def _on_new_call(call_id: str) -> None:
         if is_asterisk:
             gateway_session_id = getattr(_bridge()._adapter, "_gateway_sessions", {}).get(call_id)
             if gateway_session_id:
-                _bridge()._gateway_session_to_call_id[gateway_session_id] = call_id
+                _sb.set_call_id_for_gateway_session(gateway_session_id, call_id)
 
             await voice_session.media_gateway.on_call_started(
                 voice_session.call_id,
@@ -656,7 +694,7 @@ async def _on_new_call(call_id: str) -> None:
             # buffers those orphan chunks.  Now that the media gateway is
             # registered, replay them so Flux sees the callee's first words.
             if gateway_session_id:
-                early_chunks = _bridge()._early_audio_buffers.pop(gateway_session_id, None)
+                early_chunks = _sb.drain_early_audio(gateway_session_id)
                 if early_chunks:
                     logger.info(
                         "early_audio_drain call_id=%s chunks=%d — "
@@ -804,7 +842,7 @@ async def _on_new_call(call_id: str) -> None:
         # PBX hangup will fire _on_call_ended, but end_session() is idempotent
         # and running it here guards against cases where the hangup path
         # silently drops the StasisEnd event.
-        orphan = _bridge()._telephony_sessions.pop(call_id, None)
+        orphan = _state().pop_voice_session(call_id)
         if orphan is not None:
             try:
                 await _get_orchestrator().end_session(orphan)
@@ -819,7 +857,9 @@ async def _on_new_call(call_id: str) -> None:
 
 async def _on_audio_received(call_id: str, audio_bytes: bytes) -> None:
     """Route incoming audio from the PBX into the media gateway (STT input)."""
-    voice_session = _bridge()._telephony_sessions.get(call_id)
+    # Hot path (per RTP packet). get_voice_session is a process-local dict
+    # read in both backends — Redis is never touched here.
+    voice_session = _state().get_voice_session(call_id)
     if not voice_session:
         return
     try:
@@ -833,6 +873,25 @@ async def _on_audio_received(call_id: str, audio_bytes: bytes) -> None:
 async def _on_call_ended(call_id: str) -> None:
     """Clean up voice session when the call hangs up."""
     logger.info(f"Telephony bridge: call ended {call_id[:12]}")
+
+    # Track B (live call transparency): mark the call ENDED in calls.status
+    # and emit a stream_events row so the live-calls panel removes it from
+    # the in-flight list and shows the final outcome. Best-effort — never
+    # block teardown on a status emit.
+    try:
+        from app.domain.services.call_status import (
+            CallState, record_call_state_by_provider_id,
+        )
+        from app.core.container import get_container as _gc
+        _c = _gc()
+        await record_call_state_by_provider_id(
+            _c.db_pool,
+            provider_call_id=call_id,
+            new_state=CallState.ENDED,
+            metadata={"description": "Call ended"},
+        )
+    except Exception as exc:
+        logger.debug("call_status.ended_emit_raised call=%s err=%s", call_id[:12], exc)
 
     # T1.2 — release the global concurrency lease FIRST, even if the
     # rest of the teardown fails. The lease TTL would reap it in 10
@@ -865,7 +924,7 @@ async def _on_call_ended(call_id: str) -> None:
         except Exception as exc:
             logger.debug(f"Ringing session end_session failed for {call_id[:12]}: {exc}")
 
-    voice_session = _bridge()._telephony_sessions.pop(call_id, None)
+    voice_session = _state().pop_voice_session(call_id)
     if voice_session:
         # Cancel any per-call task that's still running. Without this,
         # tasks spawned during the call (silence handler, greeting,
@@ -983,11 +1042,8 @@ async def _on_call_ended(call_id: str) -> None:
             await _get_orchestrator().end_session(voice_session)
         except Exception:
             pass
-    # Clean up gateway session mapping and early audio buffer
-    keys_to_remove = [k for k, v in _bridge()._gateway_session_to_call_id.items() if v == call_id]
-    for k in keys_to_remove:
-        _bridge()._gateway_session_to_call_id.pop(k, None)
-        _bridge()._early_audio_buffers.pop(k, None)
+    # Clean up gateway session mapping and early audio buffer for this call.
+    _state().remove_gateway_sessions_for_call(call_id)
 
 
 async def _on_ws_session_start(call_id: str) -> None:
@@ -997,14 +1053,15 @@ async def _on_ws_session_start(call_id: str) -> None:
     """
     from app.infrastructure.telephony.freeswitch_audio_bridge import get_audio_bridge
 
-    voice_session = _bridge()._telephony_sessions.get(call_id)
+    _sb = _state()
+    voice_session = _sb.get_voice_session(call_id)
     if not voice_session:
         # GAP 4 — Race: mod_audio_fork WebSocket can connect before _on_new_call
         # stores the session (especially under server load).  Poll for up to 2s
         # (40 × 50ms) before giving up — was 1s (20 × 50ms).
         for _ in range(40):
             await asyncio.sleep(0.05)
-            voice_session = _bridge()._telephony_sessions.get(call_id)
+            voice_session = _sb.get_voice_session(call_id)
             if voice_session:
                 break
 

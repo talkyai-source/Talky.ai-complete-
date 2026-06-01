@@ -117,15 +117,26 @@ class TelephonyStateBackend(Protocol):
 
     def remove_gateway_sessions_for_call(self, call_id: str) -> None: ...
 
+    def remove_gateway_session(self, gateway_session_id: str) -> None:
+        """Remove a single gateway-session mapping by its own id (used by
+        the watchdog's orphan sweep, which iterates by gateway id)."""
+        ...
+
     def iter_gateway_session_items(self) -> list[tuple[str, str]]: ...
 
     # ── Early-audio buffer (bytes by gateway_session_id) ────────────
 
-    def append_early_audio(self, gateway_session_id: str, chunk: bytes) -> None: ...
+    def append_early_audio(self, gateway_session_id: str, chunk: bytes) -> int:
+        """Append a chunk to the early-audio buffer (capped). Returns the
+        new buffer length so the caller can log 'buffering started' once
+        on the first chunk."""
+        ...
 
     def drain_early_audio(self, gateway_session_id: str) -> list[bytes]: ...
 
     def discard_early_audio(self, gateway_session_id: str) -> None: ...
+
+    def iter_early_audio_keys(self) -> list[str]: ...
 
     # ── Ringing warmup dict (live VoiceSession + Task) ──────────────
 
@@ -148,6 +159,16 @@ class TelephonyStateBackend(Protocol):
 
     def iter_ringing_warmup_keys(self) -> list[str]: ...
 
+    def ringing_warmup_count(self) -> int: ...
+
+    def alias_ringing_call(self, original_call_id: str, actual_call_id: str) -> bool:
+        """Move all three ringing-state entries (warmup, started_at,
+        event) from ``original_call_id`` to ``actual_call_id`` when the
+        PBX swaps our planned channel id for a trunk-created one.
+        Returns True if anything moved. Wraps the existing
+        ``ringing_alias.alias_ringing_call_id`` helper."""
+        ...
+
     # ── Ringing-warmup timestamps (float, for the watchdog) ─────────
 
     def set_ringing_started_at(self, call_id: str, ts: float) -> None: ...
@@ -165,6 +186,8 @@ class TelephonyStateBackend(Protocol):
     def get_ringing_event(self, call_id: str) -> Optional[object]: ...
 
     def pop_ringing_event(self, call_id: str) -> Optional[object]: ...
+
+    def iter_ringing_event_keys(self) -> list[str]: ...
 
     # ── Lifecycle / liveness ────────────────────────────────────────
     #
@@ -279,24 +302,34 @@ class LocalOnlyStateBackend:
             self._tb._gateway_session_to_call_id.pop(gw, None)
             self._tb._early_audio_buffers.pop(gw, None)
 
+    def remove_gateway_session(self, gateway_session_id: str) -> None:
+        self._tb._gateway_session_to_call_id.pop(gateway_session_id, None)
+
     def iter_gateway_session_items(self) -> list[tuple[str, str]]:
         return list(self._tb._gateway_session_to_call_id.items())
 
     # ── Early-audio buffer ──────────────────────────────────────────
 
-    def append_early_audio(self, gateway_session_id: str, chunk: bytes) -> None:
+    def append_early_audio(self, gateway_session_id: str, chunk: bytes) -> int:
         buf = self._tb._early_audio_buffers.setdefault(gateway_session_id, [])
-        # Preserve the existing 250-chunk cap (~10s of 40ms batches).
-        if len(buf) >= self._tb._EARLY_AUDIO_MAX_CHUNKS:
-            # Drop oldest — matches today's behaviour at the boundary.
-            buf.pop(0)
-        buf.append(chunk)
+        # Faithful to the original audio-callback behaviour: once the
+        # buffer hits the cap (~10s of 40ms batches) we STOP appending,
+        # keeping the earliest audio (the caller's opening words) and
+        # dropping later chunks. The buffer only lives for the brief race
+        # window before _on_new_call drains it, so the cap is a safety
+        # bound that's never reached in practice.
+        if len(buf) < self._tb._EARLY_AUDIO_MAX_CHUNKS:
+            buf.append(chunk)
+        return len(buf)
 
     def drain_early_audio(self, gateway_session_id: str) -> list[bytes]:
         return self._tb._early_audio_buffers.pop(gateway_session_id, []) or []
 
     def discard_early_audio(self, gateway_session_id: str) -> None:
         self._tb._early_audio_buffers.pop(gateway_session_id, None)
+
+    def iter_early_audio_keys(self) -> list[str]:
+        return list(self._tb._early_audio_buffers.keys())
 
     # ── Ringing warmup ──────────────────────────────────────────────
 
@@ -325,6 +358,19 @@ class LocalOnlyStateBackend:
     def iter_ringing_warmup_keys(self) -> list[str]:
         return list(self._tb._ringing_warmups.keys())
 
+    def ringing_warmup_count(self) -> int:
+        return len(self._tb._ringing_warmups)
+
+    def alias_ringing_call(self, original_call_id: str, actual_call_id: str) -> bool:
+        from app.domain.services.telephony.ringing_alias import alias_ringing_call_id
+        return alias_ringing_call_id(
+            original_call_id=original_call_id,
+            actual_call_id=actual_call_id,
+            ringing_warmups=self._tb._ringing_warmups,
+            ringing_warmup_created_at=self._tb._ringing_warmup_created_at,
+            ringing_events=self._tb._ringing_events,
+        )
+
     # ── Ringing started_at ──────────────────────────────────────────
 
     def set_ringing_started_at(self, call_id: str, ts: float) -> None:
@@ -349,6 +395,9 @@ class LocalOnlyStateBackend:
 
     def pop_ringing_event(self, call_id: str) -> Optional[object]:
         return self._tb._ringing_events.pop(call_id, None)
+
+    def iter_ringing_event_keys(self) -> list[str]:
+        return list(self._tb._ringing_events.keys())
 
     # ── Lifecycle no-ops ────────────────────────────────────────────
 

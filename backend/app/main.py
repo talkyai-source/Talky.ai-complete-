@@ -302,20 +302,22 @@ async def lifespan(app: FastAPI):
     # below waits up to DRAIN_TIMEOUT_S for natural completion before
     # forcing teardown.
     from app.core import readiness as _readiness
+    from app.domain.services.telephony.state_backend import get_state_backend as _get_sb
+    _sb = _get_sb()
     _readiness.begin_drain()
     logger.info(
         "lifespan_drain_begin active=%d timeout_s=%d",
-        len(_tb._telephony_sessions), _readiness.DRAIN_TIMEOUT_S,
+        _sb.voice_session_count(), _readiness.DRAIN_TIMEOUT_S,
     )
     drain_deadline = asyncio.get_event_loop().time() + _readiness.DRAIN_TIMEOUT_S
     while (
-        _tb._telephony_sessions
+        _sb.voice_session_count() > 0
         and asyncio.get_event_loop().time() < drain_deadline
     ):
         await asyncio.sleep(2.0)
         logger.info(
             "lifespan_drain_wait active=%d elapsed_s=%.1f",
-            len(_tb._telephony_sessions),
+            _sb.voice_session_count(),
             _readiness.drain_seconds_elapsed(),
         )
 
@@ -323,12 +325,13 @@ async def lifespan(app: FastAPI):
     # FIX 5 — End active voice sessions first so recordings are saved and the PBX
     # receives a hangup signal.  Without this, callers hear abrupt disconnect and
     # the PBX holds channels open until its own ringing/idle timeout.
-    if _tb._telephony_sessions:
+    _remaining = _sb.iter_voice_session_items()
+    if _remaining:
         logger.info(
             "Shutdown: ending %d active telephony session(s) (drain expired)",
-            len(_tb._telephony_sessions),
+            len(_remaining),
         )
-        for call_id in list(_tb._telephony_sessions.keys()):
+        for call_id, _vs in _remaining:
             try:
                 await _tb._on_call_ended(call_id)
             except Exception as shutdown_err:

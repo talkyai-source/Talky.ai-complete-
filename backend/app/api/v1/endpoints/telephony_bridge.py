@@ -61,8 +61,8 @@ from app.domain.services.telephony.modes.agent_first import (  # noqa: E402
 from app.domain.services.telephony.modes.caller_first import (  # noqa: E402
     select_inbound_base_prompt,
 )
-from app.domain.services.telephony.ringing_alias import (  # noqa: E402
-    alias_ringing_call_id,
+from app.domain.services.telephony.state_backend import (  # noqa: E402
+    get_state_backend,
 )
 
 logger = logging.getLogger(__name__)
@@ -144,13 +144,7 @@ def _alias_ringing_call_id(original_call_id: str, actual_call_id: str) -> None:
     the first real PBX channel consumes the exact prewarmed session whose
     prompt and _first_speaker were prepared before dialing.
     """
-    moved = alias_ringing_call_id(
-        original_call_id=original_call_id,
-        actual_call_id=actual_call_id,
-        ringing_warmups=_ringing_warmups,
-        ringing_warmup_created_at=_ringing_warmup_created_at,
-        ringing_events=_ringing_events,
-    )
+    moved = get_state_backend().alias_ringing_call(original_call_id, actual_call_id)
     if moved:
         logger.info(
             "ringing_warmup_alias_moved original_call_id=%s actual_call_id=%s",
@@ -243,7 +237,7 @@ async def start_telephony(
         # touching telephony internals.
         from app.core import readiness as _readiness
         _readiness.set_capacity_providers(
-            active_count=lambda: len(_telephony_sessions),
+            active_count=lambda: get_state_backend().voice_session_count(),
             max_capacity=lambda: _MAX_TELEPHONY_SESSIONS,
         )
 
@@ -318,17 +312,21 @@ async def telephony_status():
     global_current = await _global_current(_redis)
     global_cap = _resolve_cap()
 
+    # Read the per-pod active count once through the state backend so the
+    # three capacity fields below stay consistent within this response.
+    _active_session_count = get_state_backend().voice_session_count()
+
     return JSONResponse({
         "status": "running" if healthy else "degraded",
         "connected": _adapter.connected,
         "adapter": _adapter.name,
-        "active_sessions": len(_telephony_sessions),
+        "active_sessions": _active_session_count,
         "healthy": healthy,
         "capacity": {
             # Per-pod count stays so single-pod dashboards don't break.
-            "current": len(_telephony_sessions),
+            "current": _active_session_count,
             "max": _MAX_TELEPHONY_SESSIONS,
-            "pct_used": round(len(_telephony_sessions) / max(_MAX_TELEPHONY_SESSIONS, 1) * 100, 1),
+            "pct_used": round(_active_session_count / max(_MAX_TELEPHONY_SESSIONS, 1) * 100, 1),
             # Cluster-wide view (null when Redis is unavailable).
             "global_current": global_current,
             "global_max": global_cap,
@@ -386,16 +384,17 @@ async def make_call(
             detail={"error": "pod_draining"},
         )
     if _readiness.is_pod_at_capacity():
+        _active_session_count = get_state_backend().voice_session_count()
         logger.warning(
             "make_call_pod_at_capacity active=%d cap=%d dest=%s",
-            len(_telephony_sessions), _MAX_TELEPHONY_SESSIONS, destination,
+            _active_session_count, _MAX_TELEPHONY_SESSIONS, destination,
         )
         raise HTTPException(
             status_code=503,
             headers={"Retry-After": str(_readiness.retry_after_seconds_for_capacity())},
             detail={
                 "error": "pod_at_capacity",
-                "active_sessions": len(_telephony_sessions),
+                "active_sessions": _active_session_count,
                 "max_sessions": _MAX_TELEPHONY_SESSIONS,
             },
         )
@@ -793,11 +792,15 @@ async def make_call(
         if pre_warm_session is not None and planned_call_id is not None:
             done_future: asyncio.Future = asyncio.get_event_loop().create_future()
             done_future.set_result(None)
-            _ringing_warmups[planned_call_id] = (pre_warm_session, done_future)
-            _ringing_warmup_created_at[planned_call_id] = asyncio.get_event_loop().time()
             evt = asyncio.Event()
             evt.set()
-            _ringing_events[planned_call_id] = evt
+            _sb = get_state_backend()
+            _sb.set_ringing_warmup(
+                planned_call_id, pre_warm_session, done_future,
+                first_speaker=effective_first_speaker,
+            )
+            _sb.set_ringing_started_at(planned_call_id, asyncio.get_event_loop().time())
+            _sb.set_ringing_event(planned_call_id, evt)
             stored_call_id = planned_call_id
             logger.info(
                 "pre_originate_session_prestored call_id=%s first_speaker=%s",
@@ -822,15 +825,19 @@ async def make_call(
         if pre_warm_session is not None and stored_call_id != call_id:
             done_future: asyncio.Future = asyncio.get_event_loop().create_future()
             done_future.set_result(None)
-            _ringing_warmups[call_id] = (pre_warm_session, done_future)
-            _ringing_warmup_created_at[call_id] = asyncio.get_event_loop().time()
             evt = asyncio.Event()
             evt.set()
-            _ringing_events[call_id] = evt
+            _sb = get_state_backend()
+            _sb.set_ringing_warmup(
+                call_id, pre_warm_session, done_future,
+                first_speaker=effective_first_speaker,
+            )
+            _sb.set_ringing_started_at(call_id, asyncio.get_event_loop().time())
+            _sb.set_ringing_event(call_id, evt)
             if stored_call_id is not None:
-                _ringing_warmups.pop(stored_call_id, None)
-                _ringing_warmup_created_at.pop(stored_call_id, None)
-                _ringing_events.pop(stored_call_id, None)
+                _sb.pop_ringing_warmup(stored_call_id)
+                _sb.clear_ringing_started_at(stored_call_id)
+                _sb.pop_ringing_event(stored_call_id)
             stored_call_id = call_id
             logger.info(
                 "pre_originate_session_stored call_id=%s first_speaker=%s",
@@ -859,9 +866,10 @@ async def make_call(
     except Exception as exc:
         logger.error(f"Failed to originate call: {exc}")
         if stored_call_id is not None:
-            _ringing_warmups.pop(stored_call_id, None)
-            _ringing_warmup_created_at.pop(stored_call_id, None)
-            _ringing_events.pop(stored_call_id, None)
+            _sb = get_state_backend()
+            _sb.pop_ringing_warmup(stored_call_id)
+            _sb.clear_ringing_started_at(stored_call_id)
+            _sb.pop_ringing_event(stored_call_id)
         # Clean up the pre-warmed session on originate failure
         if pre_warm_session is not None:
             try:
@@ -994,16 +1002,18 @@ async def receive_gateway_audio(session_id: str, request: Request):
     except Exception:
         return JSONResponse({"status": "ok"})
 
+    _sb = get_state_backend()
+
     # Direct lookup first (fast path — registered in _on_new_call).
-    matched_call_id: Optional[str] = _gateway_session_to_call_id.get(session_id)
+    matched_call_id: Optional[str] = _sb.get_call_id_for_gateway_session(session_id)
 
     # Fallback: prefix match for race conditions before mapping is registered.
     if not matched_call_id:
-        for call_id in list(_telephony_sessions.keys()):
+        for call_id, _vs in _sb.iter_voice_session_items():
             if session_id.startswith(f"asterisk-{call_id[:12]}"):
                 matched_call_id = call_id
                 # Cache it to speed up future lookups.
-                _gateway_session_to_call_id[session_id] = call_id
+                _sb.set_call_id_for_gateway_session(session_id, call_id)
                 break
 
     if matched_call_id:
@@ -1012,17 +1022,13 @@ async def receive_gateway_audio(session_id: str, request: Request):
         # Session not registered yet — buffer for later drain in _on_new_call.
         # This covers the race where the C++ gateway starts POSTing audio before
         # _on_new_call (fired as create_task) has populated the lookup tables.
-        buf = _early_audio_buffers.get(session_id)
-        if buf is None:
-            buf = []
-            _early_audio_buffers[session_id] = buf
+        new_len = _sb.append_early_audio(session_id, audio_bytes)
+        if new_len == 1:
             logger.info(
                 "early_audio_buffering session_id=%s — "
                 "audio arrived before session registration",
                 session_id,
             )
-        if len(buf) < _EARLY_AUDIO_MAX_CHUNKS:
-            buf.append(audio_bytes)
 
     return JSONResponse({"status": "ok"})
 

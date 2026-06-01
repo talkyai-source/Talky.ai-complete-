@@ -169,6 +169,26 @@ def test_gateway_session_set_get_remove(backend):
     assert backend.get_call_id_for_gateway_session("gw-3") == "call-2"
 
 
+def test_remove_gateway_session_single_key(backend):
+    """The watchdog removes orphan gateway mappings one id at a time."""
+    backend.set_call_id_for_gateway_session("gw-1", "call-1")
+    backend.set_call_id_for_gateway_session("gw-2", "call-1")
+    backend.remove_gateway_session("gw-1")
+    assert backend.get_call_id_for_gateway_session("gw-1") is None
+    assert backend.get_call_id_for_gateway_session("gw-2") == "call-1"
+
+
+def test_iter_gateway_and_early_audio_and_ringing_event_keys(backend):
+    backend.set_call_id_for_gateway_session("gw-1", "c-1")
+    backend.append_early_audio("gw-2", b"x")
+    import asyncio as _a
+    backend.set_ringing_event("call-1", _a.Event())
+
+    assert dict(backend.iter_gateway_session_items()) == {"gw-1": "c-1"}
+    assert backend.iter_early_audio_keys() == ["gw-2"]
+    assert backend.iter_ringing_event_keys() == ["call-1"]
+
+
 def test_remove_gateway_sessions_for_call_also_drops_early_audio(backend, fake_bridge_module):
     """The legacy ``_on_call_ended`` cleanup drops the audio buffer
     keyed by each gateway-session-id that maps to the dying call.
@@ -196,16 +216,23 @@ def test_early_audio_append_and_drain_returns_in_order(backend):
     assert backend.drain_early_audio("gw-1") == []
 
 
-def test_early_audio_cap_drops_oldest(backend, fake_bridge_module):
-    """The legacy cap is 250 chunks (~10s of 40ms batches).
-    Going over drops the oldest. Verify with a small cap so the test is fast."""
+def test_early_audio_cap_keeps_earliest_and_drops_later(backend, fake_bridge_module):
+    """Faithful to the original audio-callback cap: once full, STOP
+    appending — keep the earliest audio (caller's opening words), drop
+    later chunks. Verify with a small cap so the test is fast."""
     fake_bridge_module._EARLY_AUDIO_MAX_CHUNKS = 3
-    for i in range(5):
-        backend.append_early_audio("gw-1", bytes([i]))
+    lengths = [backend.append_early_audio("gw-1", bytes([i])) for i in range(5)]
 
+    # Returned length saturates at the cap.
+    assert lengths == [1, 2, 3, 3, 3]
     drained = backend.drain_early_audio("gw-1")
-    # The first two were dropped; we keep the last 3.
-    assert drained == [bytes([2]), bytes([3]), bytes([4])]
+    # We kept the first 3; chunks 3 and 4 were dropped.
+    assert drained == [bytes([0]), bytes([1]), bytes([2])]
+
+
+def test_append_early_audio_returns_new_length(backend):
+    assert backend.append_early_audio("gw-1", b"a") == 1
+    assert backend.append_early_audio("gw-1", b"b") == 2
 
 
 def test_drain_missing_returns_empty_list(backend):
@@ -246,6 +273,42 @@ def test_ringing_warmup_supports_none_task(backend):
     voice = object()
     backend.set_ringing_warmup("call-1", voice, None)
     assert backend.get_ringing_warmup("call-1") == (voice, None)
+
+
+def test_ringing_warmup_count(backend):
+    assert backend.ringing_warmup_count() == 0
+    backend.set_ringing_warmup("a", object(), None)
+    backend.set_ringing_warmup("b", object(), None)
+    assert backend.ringing_warmup_count() == 2
+    backend.pop_ringing_warmup("a")
+    assert backend.ringing_warmup_count() == 1
+
+
+def test_alias_ringing_call_moves_all_three_entries(backend):
+    """When the PBX swaps the planned channel id for a real one, all
+    three ringing-state entries move atomically to the new id."""
+    voice, task = object(), object()
+    backend.set_ringing_warmup("planned", voice, task)
+    backend.set_ringing_started_at("planned", 123.0)
+    event = asyncio.Event()
+    backend.set_ringing_event("planned", event)
+
+    moved = backend.alias_ringing_call("planned", "actual")
+    assert moved is True
+
+    # Old id is gone, new id holds everything.
+    assert backend.get_ringing_warmup("planned") is None
+    assert backend.get_ringing_started_at("planned") is None
+    assert backend.get_ringing_event("planned") is None
+    assert backend.get_ringing_warmup("actual") == (voice, task)
+    assert backend.get_ringing_started_at("actual") == 123.0
+    assert backend.get_ringing_event("actual") is event
+
+
+def test_alias_ringing_call_noop_when_ids_equal(backend):
+    backend.set_ringing_warmup("same", object(), None)
+    assert backend.alias_ringing_call("same", "same") is False
+    assert backend.get_ringing_warmup("same") is not None
 
 
 def test_ringing_started_at_round_trip(backend):
