@@ -366,10 +366,14 @@ def test_default_flag_returns_local_backend(monkeypatch, fake_bridge_module):
     assert isinstance(backend, sb_mod.LocalOnlyStateBackend)
 
 
-def test_redis_flag_falls_back_to_local_until_step2(monkeypatch, fake_bridge_module, caplog):
-    """Selecting ``redis`` before step 2 ships must not crash the pod —
-    we log a warning and fall back to local. This is the safety net
-    for an operator who flips the env var early."""
+def test_redis_flag_without_redis_falls_back_to_local(monkeypatch, fake_bridge_module, caplog):
+    """Selecting ``redis`` when no Redis client is available (container
+    not initialised / redis disabled) must not crash the pod — we log a
+    warning and fall back to local. Safety net for a misconfigured flag.
+
+    In this unit-test context there's no initialised DI container, so
+    _resolve_redis_client() returns None and we get the fallback path.
+    """
     monkeypatch.setenv("TELEPHONY_STATE_BACKEND", "redis")
     from app.domain.services.telephony import state_backend as sb_mod
     importlib.reload(sb_mod)
@@ -377,7 +381,20 @@ def test_redis_flag_falls_back_to_local_until_step2(monkeypatch, fake_bridge_mod
     with caplog.at_level("WARNING"):
         backend = sb_mod.get_state_backend()
     assert isinstance(backend, sb_mod.LocalOnlyStateBackend)
-    assert any("RedisBackedStateBackend" in r.message for r in caplog.records)
+    assert any("no Redis client" in r.message for r in caplog.records)
+
+
+def test_redis_flag_with_client_builds_redis_backend(monkeypatch, fake_bridge_module):
+    """When a Redis client IS available, the flag builds the
+    write-through RedisBackedStateBackend."""
+    monkeypatch.setenv("TELEPHONY_STATE_BACKEND", "redis")
+    from app.domain.services.telephony import state_backend as sb_mod
+    importlib.reload(sb_mod)
+    sb_mod.reset_state_backend_for_tests()
+    # Force a non-None redis client so the redis branch is taken.
+    monkeypatch.setattr(sb_mod, "_resolve_redis_client", lambda: object())
+    backend = sb_mod.get_state_backend()
+    assert isinstance(backend, sb_mod.RedisBackedStateBackend)
 
 
 def test_unknown_flag_falls_back_to_local_with_warning(monkeypatch, fake_bridge_module, caplog):

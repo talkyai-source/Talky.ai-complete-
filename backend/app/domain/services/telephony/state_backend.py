@@ -418,6 +418,269 @@ class LocalOnlyStateBackend:
 
 
 # ─────────────────────────────────────────────────────────────────────
+# Redis-backed implementation (write-through mirror)
+# ─────────────────────────────────────────────────────────────────────
+
+
+class SessionRegistryProto(Protocol):
+    """The subset of ``SessionRegistry`` that the Redis backend uses.
+
+    Declared as a Protocol so the backend isn't import-coupled to the
+    concrete registry and tests can pass a fake."""
+
+    async def register_call(
+        self,
+        call_id: str,
+        *,
+        state: str,
+        tenant_id: Optional[str] = None,
+        campaign_id: Optional[str] = None,
+        first_speaker: Optional[str] = None,
+    ) -> None: ...
+
+    async def unregister_call(self, call_id: str) -> None: ...
+
+    async def touch_call(self, call_id: str) -> None: ...
+
+    async def list_own_calls(self) -> list[dict[str, Any]]: ...
+
+    async def write_heartbeat(self, ttl_seconds: int) -> None: ...
+
+    async def clear_heartbeat(self) -> None: ...
+
+
+class RedisBackedStateBackend:
+    """Same in-process storage as ``LocalOnlyStateBackend``, plus a
+    best-effort Redis mirror of the call-ownership ledger so calls
+    survive a process restart.
+
+    # Design: composition + write-through
+
+    All reads and all live-object storage delegate to an embedded
+    ``LocalOnlyStateBackend`` — identical hot-path behaviour, no Redis
+    on the per-RTP-packet path. On the four lifecycle *writes* that
+    change which calls are live (session set/pop, ringing-warmup set),
+    we ALSO mirror to Redis via ``SessionRegistry``.
+
+    # Why the mirror is fire-and-forget
+
+    The backend Protocol methods are synchronous (they're called from
+    deep inside async handlers without ``await``), but Redis ops are
+    async. Rather than make every call site ``await`` — re-touching the
+    code step 2 just migrated — we schedule the Redis write as a tracked
+    ``asyncio.Task``. This is correct for a restart-safety ledger:
+
+      * Reads never depend on the mirror (they're local).
+      * Same-call set→pop happen seconds/minutes apart, so the tiny
+        create-order race window is never hit in practice.
+      * Every ledger entry has a TTL, so even a lost write self-heals.
+      * Recovery (step 4) only acts on entries owned by a *dead* pod
+        (missing heartbeat); a live pod's transient inconsistency is
+        never acted on and TTLs out.
+
+    If there's no running event loop (e.g. a unit test calling the sync
+    method directly), the mirror write is skipped with a debug log —
+    the local store still updates, so behaviour degrades to
+    local-only, never breaks.
+    """
+
+    def __init__(self, registry: "SessionRegistryProto"):
+        self._local = LocalOnlyStateBackend()
+        self._registry = registry
+        # Keep strong refs to in-flight mirror tasks so they aren't GC'd
+        # mid-flight (asyncio only holds weak refs to tasks).
+        self._tasks: set[Any] = set()
+
+    # ── Fire-and-forget helper ──────────────────────────────────────
+
+    def _spawn(self, coro) -> None:
+        try:
+            import asyncio
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop — skip the mirror (local store still updated).
+            logger.debug("redis_state_backend: no running loop, skipping mirror write")
+            coro.close()
+            return
+        task = loop.create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._on_task_done)
+
+    def _on_task_done(self, task: Any) -> None:
+        self._tasks.discard(task)
+        exc = task.exception() if not task.cancelled() else None
+        if exc is not None:
+            logger.warning("redis_state_backend mirror task failed: %s", exc)
+
+    # ── Voice session registry (write-through) ──────────────────────
+
+    def set_voice_session(
+        self,
+        call_id: str,
+        voice_session: object,
+        *,
+        tenant_id: Optional[str] = None,
+        campaign_id: Optional[str] = None,
+        first_speaker: Optional[str] = None,
+    ) -> None:
+        self._local.set_voice_session(
+            call_id, voice_session,
+            tenant_id=tenant_id, campaign_id=campaign_id, first_speaker=first_speaker,
+        )
+        self._spawn(self._registry.register_call(
+            call_id, state="active",
+            tenant_id=tenant_id, campaign_id=campaign_id, first_speaker=first_speaker,
+        ))
+
+    def get_voice_session(self, call_id: str) -> Optional[object]:
+        return self._local.get_voice_session(call_id)
+
+    def pop_voice_session(self, call_id: str) -> Optional[object]:
+        vs = self._local.pop_voice_session(call_id)
+        # Unregister regardless of whether the local pop found anything —
+        # idempotent and guards against a local/Redis drift.
+        self._spawn(self._registry.unregister_call(call_id))
+        return vs
+
+    def voice_session_count(self) -> int:
+        return self._local.voice_session_count()
+
+    def iter_voice_session_items(self) -> list[tuple[str, object]]:
+        return self._local.iter_voice_session_items()
+
+    # ── Gateway map (local only — hot path / not needed for recovery) ─
+
+    def get_call_id_for_gateway_session(self, gateway_session_id: str) -> Optional[str]:
+        return self._local.get_call_id_for_gateway_session(gateway_session_id)
+
+    def set_call_id_for_gateway_session(self, gateway_session_id: str, call_id: str) -> None:
+        self._local.set_call_id_for_gateway_session(gateway_session_id, call_id)
+
+    def remove_gateway_sessions_for_call(self, call_id: str) -> None:
+        self._local.remove_gateway_sessions_for_call(call_id)
+
+    def remove_gateway_session(self, gateway_session_id: str) -> None:
+        self._local.remove_gateway_session(gateway_session_id)
+
+    def iter_gateway_session_items(self) -> list[tuple[str, str]]:
+        return self._local.iter_gateway_session_items()
+
+    # ── Early audio (local only — transient race-window buffer) ─────
+
+    def append_early_audio(self, gateway_session_id: str, chunk: bytes) -> int:
+        return self._local.append_early_audio(gateway_session_id, chunk)
+
+    def drain_early_audio(self, gateway_session_id: str) -> list[bytes]:
+        return self._local.drain_early_audio(gateway_session_id)
+
+    def discard_early_audio(self, gateway_session_id: str) -> None:
+        self._local.discard_early_audio(gateway_session_id)
+
+    def iter_early_audio_keys(self) -> list[str]:
+        return self._local.iter_early_audio_keys()
+
+    # ── Ringing warmup (write-through: register as 'ringing') ───────
+
+    def set_ringing_warmup(
+        self,
+        call_id: str,
+        voice_session: object,
+        connect_task: Optional[object],
+        *,
+        tenant_id: Optional[str] = None,
+        campaign_id: Optional[str] = None,
+        first_speaker: Optional[str] = None,
+    ) -> None:
+        self._local.set_ringing_warmup(
+            call_id, voice_session, connect_task,
+            tenant_id=tenant_id, campaign_id=campaign_id, first_speaker=first_speaker,
+        )
+        self._spawn(self._registry.register_call(
+            call_id, state="ringing",
+            tenant_id=tenant_id, campaign_id=campaign_id, first_speaker=first_speaker,
+        ))
+
+    def get_ringing_warmup(self, call_id: str) -> Optional[tuple[object, Optional[object]]]:
+        return self._local.get_ringing_warmup(call_id)
+
+    def pop_ringing_warmup(self, call_id: str) -> Optional[tuple[object, Optional[object]]]:
+        # No Redis unregister here: the common path is "consume → promote
+        # to active" (set_voice_session re-registers). Orphaned ringing
+        # entries TTL out on their own (180s) and are only recovered if
+        # the owning pod is dead — see module docstring.
+        return self._local.pop_ringing_warmup(call_id)
+
+    def has_ringing_warmup(self, call_id: str) -> bool:
+        return self._local.has_ringing_warmup(call_id)
+
+    def iter_ringing_warmup_keys(self) -> list[str]:
+        return self._local.iter_ringing_warmup_keys()
+
+    def ringing_warmup_count(self) -> int:
+        return self._local.ringing_warmup_count()
+
+    def alias_ringing_call(self, original_call_id: str, actual_call_id: str) -> bool:
+        moved = self._local.alias_ringing_call(original_call_id, actual_call_id)
+        if moved:
+            # Re-register under the new id; the old id's hash TTLs out.
+            self._spawn(self._registry.register_call(actual_call_id, state="ringing"))
+        return moved
+
+    # ── Ringing started_at / events (local only) ────────────────────
+
+    def set_ringing_started_at(self, call_id: str, ts: float) -> None:
+        self._local.set_ringing_started_at(call_id, ts)
+
+    def get_ringing_started_at(self, call_id: str) -> Optional[float]:
+        return self._local.get_ringing_started_at(call_id)
+
+    def clear_ringing_started_at(self, call_id: str) -> None:
+        self._local.clear_ringing_started_at(call_id)
+
+    def iter_ringing_started_at_items(self) -> list[tuple[str, float]]:
+        return self._local.iter_ringing_started_at_items()
+
+    def set_ringing_event(self, call_id: str, event: object) -> None:
+        self._local.set_ringing_event(call_id, event)
+
+    def get_ringing_event(self, call_id: str) -> Optional[object]:
+        return self._local.get_ringing_event(call_id)
+
+    def pop_ringing_event(self, call_id: str) -> Optional[object]:
+        return self._local.pop_ringing_event(call_id)
+
+    def iter_ringing_event_keys(self) -> list[str]:
+        return self._local.iter_ringing_event_keys()
+
+    # ── Lifecycle ───────────────────────────────────────────────────
+    #
+    # touch_call / recover_orphans / heartbeat are fleshed out in step 4.
+    # Step 3 wires touch_call straight through (no debounce yet — that's
+    # step 5) so the plumbing is exercised end-to-end.
+
+    def touch_call(self, call_id: str) -> None:
+        self._spawn(self._registry.touch_call(call_id))
+
+    async def recover_orphans(self) -> list[dict[str, Any]]:
+        # Implemented in step 4. For now, surface the ledger entries this
+        # pod owns so the wiring can be smoke-tested; step 4 adds the
+        # heartbeat-based dead-pod filter and the actual hangup.
+        return await self._registry.list_own_calls()
+
+    async def start_heartbeat(self) -> None:
+        # Implemented in step 4.
+        return None
+
+    async def shutdown(self) -> None:
+        # Implemented in step 4 (clear heartbeat). For now, await any
+        # in-flight mirror tasks so a clean shutdown doesn't drop writes.
+        import asyncio
+        pending = list(self._tasks)
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+
+# ─────────────────────────────────────────────────────────────────────
 # Backend selection (feature flag)
 # ─────────────────────────────────────────────────────────────────────
 
@@ -425,24 +688,50 @@ class LocalOnlyStateBackend:
 _STATE_BACKEND: Optional[TelephonyStateBackend] = None
 
 
+def _resolve_pod_id() -> str:
+    """Stable per-host/deployment id. Matches the convention used in
+    ``lifecycle._on_new_call`` (global-concurrency leases): prefer the
+    ``POD_ID`` env var, else the hostname. Stability across restarts is
+    what lets a fresh process inherit the previous incarnation's
+    owned-calls set for recovery."""
+    import os as _os
+    pod = _os.getenv("POD_ID")
+    if pod:
+        return pod
+    try:
+        return _os.uname().nodename
+    except Exception:
+        return "pod-unknown"
+
+
 def _build_backend() -> TelephonyStateBackend:
     """Build the configured backend.
 
     Reads ``TELEPHONY_STATE_BACKEND`` once. Defaults to ``memory`` so
     deploying this module doesn't change behaviour until an operator
-    explicitly flips the flag. ``redis`` will be implemented in step 2.
+    explicitly flips the flag. ``redis`` builds the write-through mirror
+    backend when the DI container exposes a live Redis client; if Redis
+    isn't available it falls back to local memory so a misconfigured
+    flag never takes the pod down.
     """
     choice = os.getenv("TELEPHONY_STATE_BACKEND", "memory").strip().lower()
     if choice == "redis":
-        # Step 2 of the migration will add this branch. Until then we
-        # log a warning and fall back to local memory rather than
-        # crash, so an early env-var rollout doesn't take the pod down.
-        logger.warning(
-            "TELEPHONY_STATE_BACKEND=redis selected but RedisBackedStateBackend "
-            "is not yet implemented — falling back to LocalOnlyStateBackend. "
-            "Track item 1 of ARCHITECTURE_REVIEW_2026-05-31.md."
+        redis_client = _resolve_redis_client()
+        if redis_client is None:
+            logger.warning(
+                "TELEPHONY_STATE_BACKEND=redis but no Redis client is available "
+                "(container not initialised or redis disabled) — falling back to "
+                "LocalOnlyStateBackend. The pod still works, just without "
+                "restart-recovery."
+            )
+            return LocalOnlyStateBackend()
+        from app.domain.services.telephony.session_registry import SessionRegistry
+        registry = SessionRegistry(redis_client, _resolve_pod_id())
+        logger.info(
+            "telephony_state_backend=redis pod_id=%s — restart recovery enabled",
+            registry.pod_id,
         )
-        return LocalOnlyStateBackend()
+        return RedisBackedStateBackend(registry)
     if choice != "memory":
         logger.warning(
             "TELEPHONY_STATE_BACKEND=%s is not a known choice; "
@@ -450,6 +739,24 @@ def _build_backend() -> TelephonyStateBackend:
             choice,
         )
     return LocalOnlyStateBackend()
+
+
+def _resolve_redis_client() -> Optional[Any]:
+    """Fetch the live Redis client from the DI container, or None.
+
+    Mirrors the ``getattr(container, "redis", None)`` pattern used
+    across the telephony stack. Returns None when the container isn't
+    initialised yet (e.g. very early startup) so callers degrade
+    gracefully."""
+    try:
+        from app.core.container import get_container
+        container = get_container()
+        if not getattr(container, "is_initialized", False):
+            return None
+        return getattr(container, "redis", None)
+    except Exception as exc:
+        logger.debug("state_backend: could not resolve redis client: %s", exc)
+        return None
 
 
 def get_state_backend() -> TelephonyStateBackend:
