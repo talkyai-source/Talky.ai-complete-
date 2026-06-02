@@ -43,7 +43,10 @@ ASK_AI_CONFIG = {
     # 2026-04-23. Revert to "llama-3.1-8b-instant" + llm_provider "groq" if
     # Gemini quality regresses — see voice_orchestrator._LLM_API_KEY_ENV.
     "llm_provider": "gemini",
-    "llm_model": "gemini-2.5-flash",
+    # 2026-05-22: switched from gemini-2.5-flash to gemini-3.1-flash-lite-preview.
+    # 3.1 Flash-Lite is ~2.5× faster TTFT and ~64% higher throughput — both
+    # directly reduce the perceived response delay in this voice popup.
+    "llm_model": "gemini-3.1-flash-lite-preview",
     "llm_temperature": 0.6,
     # 90 tokens covers 4-sentence pricing answers while keeping normal replies short.
     "llm_max_tokens": 90,

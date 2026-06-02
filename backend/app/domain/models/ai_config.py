@@ -45,6 +45,10 @@ class GroqModel(str, Enum):
 class GeminiModel(str, Enum):
     """Available Gemini / Gemma models served via the Google AI Studio API."""
     GEMINI_2_5_FLASH = "gemini-2.5-flash"
+    # Released March 2026 (developer preview). ~2.5× faster TTFT and ~64%
+    # higher output throughput than 2.5 Flash — the right default for
+    # latency-critical voice paths like the Ask AI popup.
+    GEMINI_3_1_FLASH_LITE = "gemini-3.1-flash-lite-preview"
     # Reserved for Gemma 4 — uncomment and add a matching GEMINI_MODELS entry
     # once Google AI Studio exposes them. No other code change needed; the
     # GeminiLLMProvider already handles arbitrary model names.
@@ -286,11 +290,25 @@ GROQ_MODELS = [
 
 GEMINI_MODELS = [
     ModelInfo(
+        id=GeminiModel.GEMINI_3_1_FLASH_LITE.value,
+        name="Gemini 3.1 Flash-Lite (preview)",
+        description=(
+            "Fastest Gemini for real-time voice. ~2.5× faster time-to-first-token "
+            "and ~64% higher throughput than 2.5 Flash. Released March 2026, "
+            "still in developer preview — best choice for latency-critical paths."
+        ),
+        speed="~380 tokens/s",
+        price="Lower than 2.5 Flash",
+        context_window=1_048_576,
+        is_preview=True,
+        provider="gemini",
+    ),
+    ModelInfo(
         id=GeminiModel.GEMINI_2_5_FLASH.value,
         name="Gemini 2.5 Flash",
         description=(
-            "Google's low-latency flagship Flash model. ~1M-token context, "
-            "65K max output, optimized for streaming voice agents."
+            "Google's stable Flash model. ~1M-token context, 65K max output. "
+            "Slower than 3.1 Flash-Lite but GA and supports free-tier grounding."
         ),
         speed="~250 tokens/s",
         price="$0.30 input / $2.50 output per 1M tokens",

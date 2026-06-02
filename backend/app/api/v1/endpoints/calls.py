@@ -52,6 +52,131 @@ class CallListResponse(BaseModel):
     total: int
 
 
+class LiveCallItem(BaseModel):
+    """Snapshot of one currently-in-flight call for the live panel.
+
+    Shape is intentionally lean — the live panel polls every 2s and
+    renders dozens of these. Anything not strictly needed for the live
+    row (transcript, recording, full metadata) belongs on CallDetail.
+    """
+    id: str
+    talklee_call_id: Optional[str] = None
+    to_number: str
+    status: str                          # CallState value
+    started_at: Optional[str] = None
+    answered_at: Optional[str] = None
+    ended_at: Optional[str] = None
+    duration_seconds: Optional[int] = None
+    outcome: Optional[str] = None
+    campaign_id: Optional[str] = None
+    campaign_name: Optional[str] = None
+    lead_id: Optional[str] = None
+    caller_id: Optional[str] = None      # the FROM number used
+
+
+class LiveCallsResponse(BaseModel):
+    items: List[LiveCallItem]
+    server_time: str                     # so the FE can compute elapsed
+                                          # times even if its clock drifts
+
+
+# Statuses that count as "in flight" for the live panel. Old finalised
+# rows (ended/completed/failed) only show up if they ended very recently
+# (see `recent_window_seconds` below).
+_LIVE_STATUSES = ("queued", "dialing", "ringing", "answered", "in_call", "initiated")
+
+
+@router.get("/live", response_model=LiveCallsResponse)
+async def list_live_calls(
+    campaign_id: Optional[str] = Query(
+        None,
+        description="If set, restrict to this campaign. Otherwise all of the user's calls in flight.",
+    ),
+    recent_window_seconds: int = Query(
+        60, ge=0, le=600,
+        description="Also include calls that ended within this many seconds. "
+                    "Keeps the panel showing the outcome briefly before the row vanishes.",
+    ),
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """Snapshot of every call currently in flight for the tenant.
+
+    Designed to be polled every 1-2s by a frontend live panel. Returns
+    the union of:
+      * calls whose status is one of `_LIVE_STATUSES`, and
+      * calls that ended within `recent_window_seconds` seconds.
+
+    Tenant scope is enforced via `apply_tenant_filter` AND the
+    SELECT runs through the RLS-protected pool — same defence-in-depth
+    pattern the list endpoint uses.
+    """
+    from datetime import datetime, timezone
+    if not current_user.tenant_id:
+        return LiveCallsResponse(items=[], server_time=datetime.now(timezone.utc).isoformat())
+
+    placeholders = ", ".join(f"${i+1}" for i in range(len(_LIVE_STATUSES)))
+    # Note: status IN (...) OR (ended within window) — single SELECT
+    # so the panel gets a coherent snapshot.
+    args: list = list(_LIVE_STATUSES)
+    args.append(current_user.tenant_id)
+    args.append(recent_window_seconds)
+    where_campaign = ""
+    if campaign_id:
+        where_campaign = f" AND c.campaign_id = ${len(args) + 1}"
+        args.append(campaign_id)
+
+    sql = f"""
+        SELECT c.id, c.talklee_call_id, c.phone_number AS to_number,
+               c.status, c.started_at, c.answered_at, c.ended_at,
+               c.duration_seconds, c.outcome, c.campaign_id, c.lead_id,
+               camp.name AS campaign_name,
+               t.calling_rules->>'caller_id' AS caller_id
+        FROM   calls c
+        LEFT   JOIN campaigns camp ON camp.id = c.campaign_id
+        LEFT   JOIN tenants   t    ON t.id    = c.tenant_id
+        WHERE  c.tenant_id = ${len(_LIVE_STATUSES) + 1}
+          AND  (
+                  c.status IN ({placeholders})
+                  OR (c.ended_at IS NOT NULL
+                      AND c.ended_at >= NOW() - (${len(_LIVE_STATUSES) + 2} || ' seconds')::INTERVAL)
+                )
+          {where_campaign}
+        ORDER BY COALESCE(c.started_at, c.created_at) DESC
+        LIMIT  100
+    """
+
+    try:
+        async with db_client.pool.acquire() as conn:
+            rows = await conn.fetch(sql, *args)
+    except Exception as exc:
+        logger.error("list_live_calls failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to list live calls")
+
+    items: List[LiveCallItem] = []
+    for r in rows:
+        items.append(LiveCallItem(
+            id=str(r["id"]),
+            talklee_call_id=r["talklee_call_id"],
+            to_number=r["to_number"] or "",
+            status=r["status"] or "unknown",
+            started_at=r["started_at"].isoformat() if r["started_at"] else None,
+            answered_at=r["answered_at"].isoformat() if r["answered_at"] else None,
+            ended_at=r["ended_at"].isoformat() if r["ended_at"] else None,
+            duration_seconds=r["duration_seconds"],
+            outcome=r["outcome"],
+            campaign_id=str(r["campaign_id"]) if r["campaign_id"] else None,
+            campaign_name=r["campaign_name"],
+            lead_id=str(r["lead_id"]) if r["lead_id"] else None,
+            caller_id=r["caller_id"],
+        ))
+
+    return LiveCallsResponse(
+        items=items,
+        server_time=datetime.now(timezone.utc).isoformat(),
+    )
+
+
 @router.get("/", response_model=CallListResponse)
 async def list_calls(
     page: int = Query(1, ge=1, description="Page number"),
