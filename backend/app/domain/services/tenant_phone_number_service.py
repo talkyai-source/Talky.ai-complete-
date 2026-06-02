@@ -57,8 +57,16 @@ class TenantPhoneNumberService:
         Safe to call on a cold DB: falls through to False on any error so
         origination gets a clean 403 instead of a 500.
         """
+        # tenant_phone_numbers has an RLS policy that filters on
+        # `current_setting('app.current_tenant_id')`. The bridge endpoint that
+        # calls this isn't running under TenantMiddleware (the dialer worker
+        # hits it with a query-param tenant_id and no JWT), so a raw
+        # pool.acquire() would return zero rows and every caller_id appears
+        # unverified. `acquire_with_tenant()` sets the GUC for the scope of
+        # this query — see app/core/db_utils.py.
+        from app.core.db_utils import acquire_with_tenant
         try:
-            async with self._db_pool.acquire() as conn:
+            async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
                 row = await conn.fetchrow(
                     """
                     SELECT status, stir_shaken_token
@@ -69,6 +77,9 @@ class TenantPhoneNumberService:
                     tenant_id,
                     e164,
                 )
+        except ValueError:
+            # acquire_with_tenant raises ValueError for non-UUID tenant ids.
+            return False
         except Exception as exc:
             logger.error(
                 "tenant_phone_number_lookup_failed tenant=%s e164=%s err=%s",

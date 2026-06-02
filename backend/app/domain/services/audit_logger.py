@@ -1,6 +1,7 @@
 """
 Audit Logger Service - Comprehensive audit logging with tamper-evident properties
 """
+import logging
 import os
 import hashlib
 import hmac
@@ -12,6 +13,8 @@ from uuid import UUID, uuid4
 
 import asyncpg
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 
 class AuditEvent(str, Enum):
@@ -549,43 +552,78 @@ class AuditLogger:
         return event_id
 
     async def flush(self) -> None:
-        """Flush batched entries to database"""
+        """Flush batched entries to database.
+
+        A single bad row (e.g. orphan FK after a user was deleted while the
+        event was still in-batch) must NEVER take down the whole flush —
+        that propagates as a 500 to whichever unrelated request happened to
+        trip the flush. So fall back to per-row inserts on failure and just
+        drop the rows that the DB rejects.
+        """
         if not self._batch:
             return
 
-        async with self.db_pool.acquire() as conn:
-            # Use executemany for efficient batch insert
-            await conn.executemany(
-                """
-                INSERT INTO audit_logs (
-                    event_id, event_time, event_type, event_category, severity,
-                    actor_id, actor_type, actor_role, tenant_id, resource_type, resource_id,
-                    ip_address, user_agent, session_id, device_fingerprint, country_code,
-                    action, description, before_state, after_state, metadata,
-                    previous_hash, entry_hash, signature, compliance_tags, retention_until
-                ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-                    $17, $18, $19, $20, $21, $22, $23, $24, $25, $26
-                )
-                """,
-                [
-                    (
-                        e["event_id"], e["event_time"], e["event_type"], e["event_category"],
-                        e["severity"], e["actor_id"], e["actor_type"], e["actor_role"],
-                        e["tenant_id"], e["resource_type"], e["resource_id"], e["ip_address"],
-                        e["user_agent"], e["session_id"], e["device_fingerprint"],
-                        e["country_code"], e["action"], e["description"], json.dumps(e["before_state"]) if e["before_state"] else None,
-                        json.dumps(e["after_state"]) if e["after_state"] else None,
-                        json.dumps(e["metadata"]) if e["metadata"] else None,
-                        e["previous_hash"], e["entry_hash"], e["signature"],
-                        e["compliance_tags"], e["retention_until"]
-                    )
-                    for e in self._batch
-                ]
-            )
-
+        # Snapshot + reset the batch first so a long INSERT doesn't block
+        # concurrent log() calls from queueing new entries, and so an
+        # unrecoverable error doesn't trap the same poison rows forever.
+        batch = self._batch
         self._batch = []
         self._last_flush = datetime.utcnow()
+
+        rows = [
+            (
+                e["event_id"], e["event_time"], e["event_type"], e["event_category"],
+                e["severity"], e["actor_id"], e["actor_type"], e["actor_role"],
+                e["tenant_id"], e["resource_type"], e["resource_id"], e["ip_address"],
+                e["user_agent"], e["session_id"], e["device_fingerprint"],
+                e["country_code"], e["action"], e["description"],
+                json.dumps(e["before_state"]) if e["before_state"] else None,
+                json.dumps(e["after_state"]) if e["after_state"] else None,
+                json.dumps(e["metadata"]) if e["metadata"] else None,
+                e["previous_hash"], e["entry_hash"], e["signature"],
+                e["compliance_tags"], e["retention_until"],
+            )
+            for e in batch
+        ]
+
+        sql = """
+            INSERT INTO audit_logs (
+                event_id, event_time, event_type, event_category, severity,
+                actor_id, actor_type, actor_role, tenant_id, resource_type, resource_id,
+                ip_address, user_agent, session_id, device_fingerprint, country_code,
+                action, description, before_state, after_state, metadata,
+                previous_hash, entry_hash, signature, compliance_tags, retention_until
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+                $17, $18, $19, $20, $21, $22, $23, $24, $25, $26
+            )
+        """
+
+        async with self.db_pool.acquire() as conn:
+            try:
+                await conn.executemany(sql, rows)
+                return
+            except Exception as exc:
+                logger.warning(
+                    "audit_logger batch flush failed (%s rows): %s — "
+                    "falling back to per-row inserts and dropping rejected rows.",
+                    len(rows), exc,
+                )
+
+            # Per-row fallback. Each insert runs in its own implicit
+            # transaction, so one bad row no longer poisons the rest.
+            dropped = 0
+            for row in rows:
+                try:
+                    await conn.execute(sql, *row)
+                except Exception as row_exc:
+                    dropped += 1
+                    logger.error(
+                        "audit_logger dropping bad row event_id=%s actor_id=%s: %s",
+                        row[0], row[5], row_exc,
+                    )
+            if dropped:
+                logger.warning("audit_logger dropped %s of %s rows this flush", dropped, len(rows))
 
     async def query(
         self,

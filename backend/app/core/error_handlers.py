@@ -69,11 +69,43 @@ def _envelope(
 async def http_exception_handler(
     request: Request, exc: StarletteHTTPException
 ) -> JSONResponse:
-    code = _DEFAULT_CODES.get(exc.status_code, "http_error")
+    """Render HTTPException as the canonical envelope.
+
+    `detail` can be either a string or a dict:
+      - **str**  → goes into `message`; `code` falls back to the
+        status-code default (e.g. "forbidden").
+      - **dict** → recognised as a structured error. The handler
+        promotes `code` (or legacy `error`) and `message` to the
+        top of the envelope and puts every other key into `details`.
+        Without this unwrap, dict details were stringified via
+        `str(exc.detail)`, producing envelopes like
+        `{"error":{"message":"{'error': 'x', ...}"}}` — a Python repr
+        inside JSON that clients can't reliably parse.
+    """
+    default_code = _DEFAULT_CODES.get(exc.status_code, "http_error")
     headers = dict(exc.headers or {})
+
+    detail = exc.detail
+    code = default_code
+    details: Any | None = None
+
+    if isinstance(detail, dict):
+        raw_code = detail.get("code") or detail.get("error")
+        if isinstance(raw_code, str) and raw_code.strip():
+            code = raw_code.strip()
+        raw_message = detail.get("message")
+        if isinstance(raw_message, str) and raw_message.strip():
+            message = raw_message
+        else:
+            message = code.replace("_", " ").capitalize()
+        leftover = {k: v for k, v in detail.items() if k not in {"code", "error", "message"}}
+        details = leftover or None
+    else:
+        message = str(detail) if detail is not None else default_code
+
     return JSONResponse(
         status_code=exc.status_code,
-        content=_envelope(code=code, message=str(exc.detail)),
+        content=_envelope(code=code, message=message, details=details),
         headers=headers,
     )
 
