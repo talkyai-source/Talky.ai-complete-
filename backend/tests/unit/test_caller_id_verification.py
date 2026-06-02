@@ -27,6 +27,14 @@ from app.domain.services.tenant_phone_number_service import (
 # Fake DB pool helpers
 # ────────────────────────────────────────────────────────────────────────────
 
+# A valid UUID — is_verified_for_tenant now routes through
+# acquire_with_tenant(), which validates the tenant id is a real UUID
+# (SET LOCAL app.current_tenant_id can't be parameter-bound, so it's
+# interpolated and must be a safe UUID). Non-UUID ids raise ValueError
+# and the service falls through to False before any status logic runs.
+_TENANT_ID = "11111111-1111-1111-1111-111111111111"
+
+
 class _FakeConn:
     def __init__(self, row: Any):
         self._row = row
@@ -36,6 +44,12 @@ class _FakeConn:
 
     async def __aexit__(self, *_):
         return False
+
+    def transaction(self):
+        # acquire_with_tenant() opens `async with conn.transaction():` so
+        # the SET LOCAL tenant GUC lives for the read. The fake reuses its
+        # own async-CM protocol — the yielded value is unused.
+        return self
 
     async def fetchrow(self, *args, **kwargs):
         return self._row
@@ -63,28 +77,28 @@ class _FakePool:
 async def test_verified_number_passes():
     pool = _FakePool({"status": "verified", "stir_shaken_token": "attest_ABC"})
     svc = TenantPhoneNumberService(pool)
-    assert await svc.is_verified_for_tenant("tenant-a", "+14155551234") is True
+    assert await svc.is_verified_for_tenant(_TENANT_ID, "+14155551234") is True
 
 
 @pytest.mark.asyncio
 async def test_unknown_number_fails():
     pool = _FakePool(None)
     svc = TenantPhoneNumberService(pool)
-    assert await svc.is_verified_for_tenant("tenant-a", "+14155551234") is False
+    assert await svc.is_verified_for_tenant(_TENANT_ID, "+14155551234") is False
 
 
 @pytest.mark.asyncio
 async def test_pending_number_fails():
     pool = _FakePool({"status": "pending_verification", "stir_shaken_token": None})
     svc = TenantPhoneNumberService(pool)
-    assert await svc.is_verified_for_tenant("tenant-a", "+14155551234") is False
+    assert await svc.is_verified_for_tenant(_TENANT_ID, "+14155551234") is False
 
 
 @pytest.mark.asyncio
 async def test_revoked_number_fails():
     pool = _FakePool({"status": "revoked", "stir_shaken_token": "attest_ABC"})
     svc = TenantPhoneNumberService(pool)
-    assert await svc.is_verified_for_tenant("tenant-a", "+14155551234") is False
+    assert await svc.is_verified_for_tenant(_TENANT_ID, "+14155551234") is False
 
 
 @pytest.mark.asyncio
@@ -92,10 +106,10 @@ async def test_verified_but_no_attestation_fails_in_prod_mode():
     pool = _FakePool({"status": "verified", "stir_shaken_token": None})
     svc = TenantPhoneNumberService(pool)
     # Dev path: no attestation required.
-    assert await svc.is_verified_for_tenant("tenant-a", "+14155551234") is True
+    assert await svc.is_verified_for_tenant(_TENANT_ID, "+14155551234") is True
     # Prod path: attestation required, should fail.
     assert await svc.is_verified_for_tenant(
-        "tenant-a", "+14155551234", require_attestation=True
+        _TENANT_ID, "+14155551234", require_attestation=True
     ) is False
 
 
@@ -105,7 +119,7 @@ async def test_db_failure_denies_cleanly():
     broken_pool = MagicMock()
     broken_pool.acquire.side_effect = RuntimeError("db down")
     svc = TenantPhoneNumberService(broken_pool)
-    assert await svc.is_verified_for_tenant("tenant-a", "+14155551234") is False
+    assert await svc.is_verified_for_tenant(_TENANT_ID, "+14155551234") is False
 
 
 # ────────────────────────────────────────────────────────────────────────────
