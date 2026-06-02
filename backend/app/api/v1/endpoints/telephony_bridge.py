@@ -32,6 +32,7 @@ from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, WebSocket
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from app.domain.interfaces.call_control_adapter import CallControlAdapter
 from app.infrastructure.telephony.adapter_factory import CallControlAdapterFactory
@@ -339,22 +340,26 @@ async def telephony_status():
     })
 
 
+class MakeCallRequest(BaseModel):
+    """Body for POST /sip/telephony/call.
+
+    This endpoint is an INTERNAL service-to-service entrypoint — the
+    dialer worker (a separate process) calls it to originate through the
+    API process that owns the persistent ARI adapter. It used to take
+    query-string params; a JSON body avoids the ``+``-as-space E.164
+    encoding foot-gun that query strings have, and pairs with the
+    ``X-Internal-Service-Token`` CSRF exemption (see core/security/csrf).
+    """
+    destination: str
+    caller_id: str = "1001"
+    campaign_id: Optional[str] = None
+    tenant_id: Optional[str] = None
+    first_speaker: Optional[Literal["agent", "user"]] = None
+    agent_name: Optional[str] = None
+
+
 @router.post("/call")
-async def make_call(
-    request: Request,
-    destination: str = Query(..., description="Destination extension or phone number (E.164)"),
-    caller_id: str = Query(default="1001", description="Caller ID to display"),
-    campaign_id: Optional[str] = Query(None, description="Campaign context"),
-    tenant_id: Optional[str] = Query(None, description="Tenant ID (optional, defaults from auth)"),
-    first_speaker: Optional[Literal["agent", "user"]] = Query(
-        None,
-        description="Per-call override for who speaks first. Falls back to TELEPHONY_FIRST_SPEAKER env.",
-    ),
-    agent_name: Optional[str] = Query(
-        None,
-        description="Per-call agent name picked from the campaign's name pool. Stays stable for the whole call.",
-    ),
-):
+async def make_call(request: Request, body: MakeCallRequest):
     """
     Originate an outbound call via the active B2BUA adapter.
 
@@ -369,6 +374,16 @@ async def make_call(
 
     Returns 429 if call is blocked/throttled, 202 if queued.
     """
+    # Unpack the request body into the local names the rest of this
+    # handler uses (kept identical so the originate/guard/warmup logic
+    # below is untouched by the query-string → JSON-body migration).
+    destination = body.destination
+    caller_id = body.caller_id
+    campaign_id = body.campaign_id
+    tenant_id = body.tenant_id
+    first_speaker = body.first_speaker
+    agent_name = body.agent_name
+
     if not _adapter or not _adapter.connected:
         raise HTTPException(status_code=400, detail="Telephony adapter not connected")
 

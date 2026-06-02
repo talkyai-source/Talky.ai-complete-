@@ -20,9 +20,21 @@ Endpoints that establish or refresh auth state (``/auth/login*``,
 ``/auth/signup*``, ``/auth/refresh``) are also exempt: pre-login there
 is no auth state to forge, and ``/auth/refresh`` is itself protected by
 SameSite=Strict on the refresh cookie's restricted path.
+
+Internal service-to-service calls (the dialer worker originating a call
+against the API process that owns the ARI adapter) carry an
+``X-Internal-Service-Token`` shared secret instead of a browser Origin.
+These are not browser-driven and cannot be CSRF-forged, so a valid
+token exempts the request. This replaces the earlier hack where the
+dialer spoofed ``Origin: <FRONTEND_URL>`` to slip past this check —
+a backend service should authenticate as itself, not impersonate the
+browser origin. The bypass is fail-safe: when ``INTERNAL_SERVICE_TOKEN``
+is unset, no token is ever accepted.
 """
 from __future__ import annotations
 
+import os
+import secrets
 from typing import Iterable
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -31,6 +43,8 @@ from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp
 
 from app.core.config import get_settings
+
+_INTERNAL_TOKEN_HEADER = "x-internal-service-token"
 
 _UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 _EXEMPT_PATH_PREFIXES = (
@@ -53,6 +67,20 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             if allowed_origins is not None
             else set(get_settings().allowed_origins)
         )
+        # Shared secret for internal service-to-service calls. Read once
+        # at startup; empty/unset means the internal-token bypass is
+        # disabled entirely (fail-safe).
+        self._internal_token = os.getenv("INTERNAL_SERVICE_TOKEN", "").strip()
+
+    def _is_valid_internal_token(self, request: Request) -> bool:
+        if not self._internal_token:
+            return False
+        presented = request.headers.get(_INTERNAL_TOKEN_HEADER, "")
+        if not presented:
+            return False
+        # Constant-time compare so a timing side-channel can't be used to
+        # recover the token byte-by-byte.
+        return secrets.compare_digest(presented, self._internal_token)
 
     async def dispatch(self, request: Request, call_next) -> Response:
         if request.method not in _UNSAFE_METHODS:
@@ -67,6 +95,11 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         # not forgeable.
         auth_header = request.headers.get("authorization", "")
         if auth_header.lower().startswith("bearer "):
+            return await call_next(request)
+
+        # Internal service-to-service calls (dialer worker → originate)
+        # authenticate with a shared-secret header, not a browser Origin.
+        if self._is_valid_internal_token(request):
             return await call_next(request)
 
         origin = request.headers.get("origin")

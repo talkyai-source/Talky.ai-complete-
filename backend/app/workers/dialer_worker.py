@@ -179,7 +179,13 @@ class DialerWorker:
         4. Create call record in database
         """
         logger.info(f"Processing job {job.job_id} for lead {job.lead_id} (attempt {job.attempt_number})")
-        
+
+        # Reset bridge-response state captured by `_make_call` — must be
+        # cleared per-job so a previous failure doesn't classify the
+        # next one.
+        self._last_bridge_http_status = None
+        self._last_bridge_body = None
+
         try:
             campaign_status = await self._get_campaign_status(job.campaign_id)
             if campaign_status not in {"running", "active"}:
@@ -287,6 +293,35 @@ class DialerWorker:
                     # 6. Create tracked DB records using an internal UUID plus provider call ID.
                     internal_call_id, talklee_call_id, leg_id = await self._create_call_record(job, provider_call_id)
 
+                    # B1: transition the call into the public state machine
+                    # (Track B). The dialer worker drove the call to "dialing"
+                    # the moment the bridge accepted the originate request;
+                    # subsequent transitions (ringing → answered → ended) are
+                    # written by the asterisk_adapter ARI callbacks.
+                    try:
+                        from app.domain.services.call_status import (
+                            CallState, record_call_state,
+                        )
+                        await record_call_state(
+                            self._db_pool,
+                            call_id=internal_call_id,
+                            tenant_id=job.tenant_id,
+                            campaign_id=job.campaign_id,
+                            new_state=CallState.DIALING,
+                            metadata={
+                                "phone_number": str(job.phone_number),
+                                "agent_name": getattr(job, "agent_name", None),
+                                "provider_call_id": provider_call_id,
+                                "description": f"Dialing {job.phone_number}",
+                            },
+                        )
+                    except Exception as state_exc:
+                        # B1 must never block a successful originate.
+                        logger.warning(
+                            "call_status.dialing_emit_failed call=%s err=%s",
+                            internal_call_id, state_exc,
+                        )
+
                     # 7. Update lead status to 'calling'
                     await self._update_lead_status(job.lead_id, "calling")
 
@@ -324,30 +359,96 @@ class DialerWorker:
                 
         except Exception as e:
             self._jobs_failed += 1
-            logger.error(f"Failed to process job {job.job_id}: {e}", exc_info=True)
-
-            # Record failure and potentially schedule retry
             job.last_error = str(e)
             job.last_outcome = CallOutcome.FAILED
 
-            should_retry, retry_reason = job.should_retry(goal_achieved=False)
-
-            if should_retry:
-                # Reset lead back to pending so it can be picked up again
-                await self._update_lead_status(job.lead_id, "pending")
-                await self.queue_service.schedule_retry(job, delay_seconds=job.RETRY_DELAY_SECONDS)
-                await self._update_job_status(job.job_id, JobStatus.RETRY_SCHEDULED, error=str(e))
+            # Track 2: classify the failure (bridge response → category +
+            # reason) and ask the policy module how to retry. Feature flag
+            # `RETRY_POLICY=legacy` reverts to the old flat-delay path so
+            # operators can roll back without redeploying.
+            from app.workers.retry_policy import (
+                classify_telephony_response,
+                legacy_decision,
+                parse_bridge_error,
+                smart_decision,
+                use_smart_policy,
+            )
+            if use_smart_policy():
+                code, msg = parse_bridge_error(self._last_bridge_body)
+                category, reason = classify_telephony_response(
+                    http_status=self._last_bridge_http_status,
+                    error_code=code,
+                    message=msg or str(e),
+                )
+                decision = smart_decision(
+                    category=category,
+                    reason=reason,
+                    attempt_number=job.attempt_number,
+                )
             else:
-                # Max retries exceeded — mark lead as failed
+                # Faithful legacy behaviour: tenant's flat retry delay,
+                # capped at job.MAX_ATTEMPTS, no classification.
+                _should, _ = job.should_retry(goal_achieved=False)
+                decision = legacy_decision(
+                    attempt_number=job.attempt_number,
+                    max_attempts=getattr(job, "MAX_ATTEMPTS", 3),
+                    delay_seconds=getattr(job, "RETRY_DELAY_SECONDS", 7200),
+                    reason="legacy_no_classification",
+                )
+
+            logger.error(
+                "%s job=%s lead=%s dest=%s err=%s",
+                decision.log_message,
+                job.job_id,
+                job.lead_id,
+                job.phone_number,
+                str(e)[:200],
+            )
+
+            # Persist category/reason on the job + lead. Best-effort —
+            # never let a logging/DB hiccup mask the original failure.
+            try:
+                await self._record_job_failure_classification(
+                    job_id=job.job_id,
+                    category=decision.category.value,
+                    reason=decision.reason,
+                )
+            except Exception as record_exc:
+                logger.warning(
+                    "failed to persist failure classification for job=%s: %s",
+                    job.job_id, record_exc,
+                )
+
+            if decision.should_retry:
+                await self._update_lead_status(job.lead_id, "pending")
+                await self.queue_service.schedule_retry(
+                    job, delay_seconds=decision.delay_seconds,
+                )
+                await self._update_job_status(
+                    job.job_id, JobStatus.RETRY_SCHEDULED, error=str(e),
+                )
+            else:
+                # Either the category disallows retries (INVALID_INPUT)
+                # or the per-category attempt budget is exhausted.
                 await self._update_lead_status(job.lead_id, "failed")
                 await self.queue_service.mark_failed(job.job_id, str(e))
-                await self._update_job_status(job.job_id, JobStatus.FAILED, error=str(e))
+                await self._update_job_status(
+                    job.job_id, JobStatus.FAILED, error=str(e),
+                )
     
     # Sentinel returned by _make_call when the bridge says the voice
     # pipeline is not ready (HTTP 503). Distinct from None ("real failure")
     # so process_job can apply infrastructure-aware backoff without
     # consuming the job's retry budget.
     _PIPELINE_UNAVAILABLE = "__pipeline_unavailable__"
+
+    # Set by `_make_call` whenever a non-success response from the
+    # telephony bridge would otherwise return None. The except-clause
+    # in `process_job` reads these so the retry classifier (Track 2)
+    # can map them to a FailureCategory and choose a sensible delay.
+    # Reset on every job to avoid leaking state across attempts.
+    _last_bridge_http_status: Optional[int] = None
+    _last_bridge_body: Optional[str] = None
 
     async def _make_call(self, job: DialerJob, rules: CallingRules) -> Optional[str]:
         """
@@ -366,23 +467,36 @@ class DialerWorker:
 
         api_base = os.getenv("API_BASE_URL", "http://localhost:8000")
         caller_id = getattr(rules, "caller_id", None) or os.getenv("DEFAULT_CALLER_ID", "1001")
-        url = (
-            f"{api_base}/api/v1/sip/telephony/call"
-            f"?destination={job.phone_number}"
-            f"&caller_id={caller_id}"
-            f"&tenant_id={job.tenant_id}"
-            f"&campaign_id={job.campaign_id}"
-            f"&first_speaker={job.first_speaker}"
-        )
-        if job.agent_name:
-            # urlencode to be safe — names can contain spaces or accents.
-            from urllib.parse import quote
-            url += f"&agent_name={quote(job.agent_name, safe='')}"
+        url = f"{api_base}/api/v1/sip/telephony/call"
 
+        # JSON body (not a query string) so E.164 numbers with a leading
+        # "+" can't be mangled by URL form-encoding (the old query-string
+        # path decoded "+" as a space → caller_id mismatch → 403).
+        payload: dict = {
+            "destination": str(job.phone_number),
+            "caller_id": str(caller_id),
+            "tenant_id": str(job.tenant_id) if job.tenant_id else None,
+            "campaign_id": str(job.campaign_id) if job.campaign_id else None,
+            "first_speaker": job.first_speaker,
+        }
+        if job.agent_name:
+            payload["agent_name"] = job.agent_name
+
+        # Authenticate as an internal service. Preferred: a shared-secret
+        # X-Internal-Service-Token header (CSRF-exempt — see
+        # core/security/csrf). Until INTERNAL_SERVICE_TOKEN is provisioned
+        # on both api + worker, fall back to the legacy Origin:<FRONTEND_URL>
+        # spoof so this code deploys as a no-op and the token can be flipped
+        # on safely. Remove the fallback once the token is rolled out.
+        internal_token = os.getenv("INTERNAL_SERVICE_TOKEN", "").strip()
         try:
             headers = {"Content-Type": "application/json"}
+            if internal_token:
+                headers["X-Internal-Service-Token"] = internal_token
+            else:
+                headers["Origin"] = os.getenv("FRONTEND_URL") or "http://localhost:3000"
             async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                     if resp.status == 503:
                         body = await resp.text()
                         logger.warning(
@@ -393,6 +507,9 @@ class DialerWorker:
                         return self._PIPELINE_UNAVAILABLE
                     if resp.status not in (200, 202):
                         body = await resp.text()
+                        # Stash for the classifier in process_job's except branch.
+                        self._last_bridge_http_status = resp.status
+                        self._last_bridge_body = body
                         logger.error(
                             "Telephony bridge rejected call: status=%s body=%s dest=%s",
                             resp.status, body[:200], job.phone_number,
@@ -450,7 +567,6 @@ class DialerWorker:
             # Fail-closed: errors in guard = block call
             return "block"
 
-    @asynccontextmanager
     async def _emit_progress_event_throttled(self, job) -> None:
         """Emit a "Campaign progress updated" stream event, throttled.
 
@@ -480,6 +596,7 @@ class DialerWorker:
         except Exception as exc:  # noqa: BLE001
             logger.debug("emit_progress_event_throttled failed: %s", exc)
 
+    @asynccontextmanager
     async def _acquire_db(self):
         """
         Acquire a connection from the pool with backend-service RLS context.
@@ -722,7 +839,40 @@ class DialerWorker:
                 
         except Exception as e:
             logger.error(f"Failed to update job status: {e}")
-    
+
+    async def _record_job_failure_classification(
+        self,
+        *,
+        job_id: str,
+        category: str,
+        reason: str,
+    ) -> None:
+        """Persist the Track 2 failure classification on the job row.
+
+        The columns are added by the alembic migration that ships with
+        Track 2. The UPDATE is wrapped in a try/except so a missing
+        column (mid-deploy, schema drift) doesn't make the failure path
+        itself fail — it just logs and moves on.
+        """
+        try:
+            async with self._acquire_db() as conn:
+                await conn.execute(
+                    """
+                    UPDATE dialer_jobs
+                    SET failure_category = $2,
+                        failure_reason = $3,
+                        updated_at = NOW()
+                    WHERE id = $1
+                    """,
+                    job_id, category, reason,
+                )
+        except Exception as exc:
+            logger.warning(
+                "could not write failure_category/reason for job=%s "
+                "(missing columns? not yet migrated?): %s",
+                job_id, exc,
+            )
+
     async def _publish_call_event(
         self,
         call_id: str,
