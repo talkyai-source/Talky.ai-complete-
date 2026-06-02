@@ -14,16 +14,18 @@ from app.core.security.lockout import (
     seconds_until_unlocked,
 )
 from app.core.security.password import rehash_if_needed, verify_password
-from app.core.security.sessions import create_session
+from app.core.security.sessions import SESSION_COOKIE_NAME, create_session
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 
 from ._shared import (
+    COOKIE_MAX_AGE,
     GENERIC_AUTH_ERROR,
     create_jwt,
     get_client_ip,
     get_user_agent,
     issue_cookie_auth,
     limiter,
+    session_cookie_secure,
 )
 from .schemas import LoginRequest
 

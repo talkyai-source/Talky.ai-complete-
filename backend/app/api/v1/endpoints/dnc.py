@@ -29,6 +29,7 @@ from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool
 from app.domain.services.dnc_service import (
     KNOWN_SOURCES,
     SOURCE_BULK_IMPORT,
+    SOURCE_CALLER_OPT_OUT,
     SOURCE_MANUAL_ADMIN,
     DNCEntry,
     DNCService,

@@ -7,6 +7,7 @@ SIP calls, and all other interactions.
 
 This is a singleton service that maintains the current configuration.
 """
+import os
 import random
 from typing import Optional
 from app.domain.models.ai_config import (

@@ -3,7 +3,7 @@ Dialer Job Model
 Represents a single call job in the dialer queue
 """
 from pydantic import BaseModel, Field
-from typing import Literal, Optional, Set
+from typing import Literal, Optional, ClassVar, Set
 from datetime import datetime
 from enum import Enum
 

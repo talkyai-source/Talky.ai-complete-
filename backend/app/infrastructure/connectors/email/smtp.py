@@ -28,7 +28,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.utils import formataddr
 
-from app.infrastructure.connectors.base import OAuthTokens
+from app.infrastructure.connectors.base import BaseConnector, ConnectorCapability, OAuthTokens
 from app.infrastructure.connectors.email.base import EmailProvider, EmailMessage
 
 logger = logging.getLogger(__name__)
@@ -214,7 +214,7 @@ class SMTPConnector(EmailProvider):
             
         except smtplib.SMTPAuthenticationError as e:
             logger.error(f"SMTP authentication failed: {e}")
-            raise ValueError("Email authentication failed. Please check SMTP credentials.")
+            raise ValueError(f"Email authentication failed. Please check SMTP credentials.")
         except smtplib.SMTPException as e:
             logger.error(f"SMTP error: {e}")
             raise ValueError(f"Failed to send email: {str(e)}")

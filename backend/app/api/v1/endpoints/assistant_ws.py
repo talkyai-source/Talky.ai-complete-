@@ -6,6 +6,7 @@ Following official FastAPI WebSocket patterns.
 import asyncio
 import logging
 import json
+import os
 import uuid
 from typing import Optional
 from datetime import datetime

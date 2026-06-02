@@ -17,6 +17,7 @@ Usage:
 """
 import asyncio
 import logging
+import struct
 from contextlib import suppress
 from typing import Optional, Callable, Dict
 from dataclasses import dataclass

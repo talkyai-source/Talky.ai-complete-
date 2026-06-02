@@ -6,9 +6,10 @@ Day 8: Comprehensive notification system with email and Slack support
 """
 import logging
 import os
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, List, Any
 from enum import Enum
 from datetime import datetime
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
 

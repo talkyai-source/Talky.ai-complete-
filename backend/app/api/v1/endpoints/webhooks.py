@@ -4,10 +4,12 @@ Webhooks API Endpoints
 Call lifecycle webhooks used by the dialer engine and voice pipeline.
 """
 import logging
+from typing import Optional
 
 from fastapi import APIRouter, Request, HTTPException, Depends
 
 from app.core.postgres_adapter import Client
+from app.domain.models.dialer_job import CallOutcome
 from app.api.v1.dependencies import get_db_client
 
 logger = logging.getLogger(__name__)

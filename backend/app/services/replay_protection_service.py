@@ -8,7 +8,7 @@ Prevents replay attacks by:
 """
 import logging
 from typing import Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timedelta
 from app.core.postgres_adapter import Client
 
 from app.services.audit_service import get_audit_service

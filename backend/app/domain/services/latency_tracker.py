@@ -4,7 +4,7 @@ Tracks end-to-end latency metrics for voice pipeline turns
 """
 import logging
 from datetime import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Optional
 from enum import Enum
 

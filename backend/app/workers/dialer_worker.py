@@ -12,7 +12,7 @@ import signal
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 from contextlib import asynccontextmanager
 
@@ -546,7 +546,7 @@ class DialerWorker:
             "allow" | "block" | "throttle" | "queue"
         """
         try:
-            from app.domain.services.call_guard import CallGuard
+            from app.domain.services.call_guard import CallGuard, GuardDecision
 
             guard = CallGuard(
                 db_pool=self._db_pool,

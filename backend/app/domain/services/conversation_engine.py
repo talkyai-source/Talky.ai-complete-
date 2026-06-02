@@ -347,19 +347,19 @@ class ConversationEngine:
                 f"This is objection #{context.objection_count + 1}."
             ),
             ConversationState.CLOSING: (
-                "The user has shown interest. Confirm the next steps clearly. "
-                "If this is an appointment confirmation, restate the time and date. "
-                "Thank them and end positively."
+                f"The user has shown interest. Confirm the next steps clearly. "
+                f"If this is an appointment confirmation, restate the time and date. "
+                f"Thank them and end positively."
             ),
             ConversationState.TRANSFER: (
-                "The user requested to speak with a human. "
-                "Acknowledge their request politely and inform them you're transferring them now. "
-                "Thank them for their time."
+                f"The user requested to speak with a human. "
+                f"Acknowledge their request politely and inform them you're transferring them now. "
+                f"Thank them for their time."
             ),
             ConversationState.GOODBYE: (
-                "End the conversation politely. "
-                "Thank them for their time and wish them well. "
-                "Keep it brief and warm."
+                f"End the conversation politely. "
+                f"Thank them for their time and wish them well. "
+                f"Keep it brief and warm."
             ),
         }
         

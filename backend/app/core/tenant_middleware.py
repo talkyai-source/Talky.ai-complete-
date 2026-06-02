@@ -28,6 +28,7 @@ from app.core.security.tenant_isolation import (
     set_bypass_rls,
     set_current_user_context,
     clear_tenant_context,
+    get_current_tenant_id,
 )
 
 logger = logging.getLogger(__name__)

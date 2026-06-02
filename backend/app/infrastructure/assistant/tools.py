@@ -6,7 +6,7 @@ All tools receive tenant_id as context and are scoped to that tenant's data.
 """
 import logging
 from typing import Optional, List, Dict, Any
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pydantic import BaseModel, Field
 from app.core.postgres_adapter import Client
 

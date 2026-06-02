@@ -2,6 +2,7 @@
 Dialer Queue Service
 Redis-based job queue with priority support
 """
+import asyncio
 import json
 import logging
 from typing import Optional, List

@@ -36,7 +36,7 @@ import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import AsyncIterator, Iterable, Optional
 
 logger = logging.getLogger(__name__)

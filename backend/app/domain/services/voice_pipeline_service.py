@@ -17,17 +17,20 @@ from datetime import datetime
 from fastapi import WebSocket
 
 from app.domain.models.session import CallSession, CallState
-from app.domain.models.conversation import AudioChunk, Message, MessageRole, BargeInSignal
+from app.domain.models.conversation import AudioChunk, TranscriptChunk, Message, MessageRole, BargeInSignal
+from app.domain.models.conversation_state import ConversationState, CallOutcomeType
 from app.domain.interfaces.stt_provider import STTProvider
 from app.infrastructure.llm.groq import GroqLLMProvider, LLMTimeoutError
 from app.infrastructure.telephony.browser_media_gateway import SessionGoneError
 from app.domain.interfaces.tts_provider import TTSProvider
 from app.domain.interfaces.media_gateway import MediaGateway
+from app.domain.services.conversation_engine import ConversationEngine
 from app.domain.services.prompt_manager import PromptManager
 from app.domain.services.transcript_service import TranscriptService
-from app.domain.services.llm_guardrails import LLMGuardrailsConfig, get_guardrails
+from app.domain.services.llm_guardrails import LLMGuardrails, LLMGuardrailsConfig, get_guardrails
 from app.services.scripts.interruption_filter import is_backchannel as _is_backchannel
 from app.domain.services.latency_tracker import get_latency_tracker
+from app.domain.services.global_ai_config import get_global_config
 from app.domain.services.ask_ai_constants import TALKY_PRODUCT_INFO as _ASK_AI_PRODUCT_INFO, PRODUCT_KEYWORDS as _ASK_AI_PRODUCT_KEYWORDS
 from app.domain.services.end_session_action import (
     build_end_session_tool_instructions,
@@ -941,7 +944,7 @@ class VoicePipelineService:
         tenant_id = getattr(session, "tenant_id", None)
 
         if not full_transcript:
-            logger.debug("Empty transcript, skipping turn", extra={"call_id": call_id})
+            logger.debug(f"Empty transcript, skipping turn", extra={"call_id": call_id})
             return
 
         # Turn-0 floor — protects the first AI reply (the one that "anchors"

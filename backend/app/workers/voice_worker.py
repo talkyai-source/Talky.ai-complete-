@@ -10,6 +10,7 @@ import logging
 import os
 import signal
 import json
+from datetime import datetime
 from typing import Optional
 
 from app.core.dotenv_compat import load_dotenv

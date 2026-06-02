@@ -5,14 +5,16 @@ Orchestrates SMS sending with templates and audit logging.
 Day 27: Timed Communication System
 """
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, List, Dict, Any
+from datetime import datetime
 import asyncpg
 import json
 
-from app.infrastructure.connectors.sms import get_vonage_sms_provider
+from app.infrastructure.connectors.sms import get_vonage_sms_provider, SMSResult
 from app.domain.services.sms_template_manager import (
     get_sms_template_manager,
-    SMSTemplateManager
+    SMSTemplateManager,
+    SMSTemplateType
 )
 
 logger = logging.getLogger(__name__)

@@ -21,7 +21,8 @@ from app.core.postgres_adapter import Client
 from app.domain.models.voice_intent import (
     VoiceActionableIntent,
     ActionReadiness,
-    DetectedIntent
+    DetectedIntent,
+    CallRecommendation
 )
 
 logger = logging.getLogger(__name__)

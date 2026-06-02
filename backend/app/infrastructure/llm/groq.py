@@ -20,7 +20,7 @@ from typing import AsyncIterator, Dict, List, Optional
 import httpx
 from groq import AsyncGroq, APITimeoutError as GroqAPITimeoutError, RateLimitError as GroqRateLimitError
 from app.domain.interfaces.llm_provider import LLMProvider
-from app.domain.models.conversation import Message
+from app.domain.models.conversation import Message, MessageRole
 from app.infrastructure.providers.key_pool import KeyPool, parse_keys_csv
 from app.infrastructure.providers.provider_concurrency import get_provider_guard
 from app.utils.resilience import CircuitBreaker, CircuitOpenError

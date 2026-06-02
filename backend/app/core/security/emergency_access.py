@@ -6,7 +6,7 @@ import json
 import secrets
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID, uuid4
 
 import redis.asyncio as aioredis

@@ -9,7 +9,7 @@ Extracted from ConversationEngine to enable:
 """
 import re
 import logging
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from app.domain.models.conversation_state import UserIntent
 

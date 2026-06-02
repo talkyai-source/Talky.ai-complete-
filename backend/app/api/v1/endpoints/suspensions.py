@@ -3,17 +3,19 @@ Suspension Management API Endpoints
 
 User, tenant, and partner suspension with appeal workflow.
 """
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.api.v1.dependencies import require_permissions, get_audit_logger, get_suspension_service
+from app.api.v1.dependencies import get_current_user, require_permissions, get_audit_logger, get_suspension_service
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services.suspension_service import (
     SuspensionService,
     SuspensionType,
+    TargetType,
 )
 
 router = APIRouter(prefix="/admin/suspensions", tags=["Suspensions"])

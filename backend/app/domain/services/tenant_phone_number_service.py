@@ -9,6 +9,7 @@ so it uses the covering partial index on (tenant_id, e164) WHERE status='verifie
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any, Optional
 
 from app.domain.models.tenant_phone_number import (

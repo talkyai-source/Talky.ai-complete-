@@ -21,6 +21,11 @@ from app.infrastructure.connectors.oauth import get_oauth_state_manager, OAuthSt
 from app.infrastructure.connectors.encryption import get_encryption_service
 
 # Import providers to register them
+from app.infrastructure.connectors.calendar.google_calendar import GoogleCalendarConnector
+from app.infrastructure.connectors.calendar.outlook_calendar import OutlookCalendarConnector
+from app.infrastructure.connectors.email.gmail import GmailConnector
+from app.infrastructure.connectors.crm.hubspot import HubSpotConnector
+from app.infrastructure.connectors.drive.google_drive import GoogleDriveConnector
 
 logger = logging.getLogger(__name__)
 

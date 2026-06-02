@@ -19,8 +19,11 @@ See: https://developer.vonage.com/en/voice/voice-api/concepts/websockets
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import struct
+from typing import Optional
 
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse

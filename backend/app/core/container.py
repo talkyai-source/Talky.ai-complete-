@@ -8,6 +8,7 @@ FIX: Redis connection now reads REDIS_PASSWORD from environment and
 import os
 import logging
 from typing import Optional
+from functools import lru_cache
 
 try:
     import redis.asyncio as redis

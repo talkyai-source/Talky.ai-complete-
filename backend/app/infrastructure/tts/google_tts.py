@@ -4,6 +4,7 @@ Uses Chirp 3: HD voices with ultra-realistic speech synthesis
 """
 import os
 import logging
+import asyncio
 import aiohttp
 from typing import AsyncIterator, List, Dict, Optional
 from app.domain.interfaces.tts_provider import TTSProvider

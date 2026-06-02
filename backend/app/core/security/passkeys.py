@@ -28,6 +28,8 @@ Security controls (OWASP + W3C):
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import logging
 import os
 import secrets
@@ -49,7 +51,7 @@ from webauthn import (
     verify_authentication_response,
     verify_registration_response,
 )
-from webauthn.helpers import bytes_to_base64url
+from webauthn.helpers import bytes_to_base64url, parse_client_data_json
 from webauthn.helpers.structs import (
     AttestationConveyancePreference,
     AuthenticatorAttachment,
@@ -717,11 +719,6 @@ async def verify_authentication(
     # legitimate user to keep authenticating indefinitely.
     new_sign_count = verification.new_sign_count
     if current_sign_count > 0 and new_sign_count <= current_sign_count:
-        # NB: this function is keyed by credential_id and has no user_id in
-        # scope — credential_id uniquely identifies the cloned credential,
-        # which is what the responder needs. (Previously referenced an
-        # undefined `user_id`, which would itself have crashed this
-        # security-critical path with NameError.)
         logger.critical(
             "passkey_clone_detected credential_id=%s old_count=%d new_count=%d",
             credential_id, current_sign_count, new_sign_count,

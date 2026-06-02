@@ -3,13 +3,14 @@ Emergency Access API Endpoints
 
 Break-glass dual-control access for critical incidents.
 """
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.api.v1.dependencies import require_permissions, get_audit_logger, get_emergency_access
+from app.api.v1.dependencies import get_current_user, require_permissions, get_audit_logger, get_emergency_access
 from app.core.security.emergency_access import (
     EmergencyAccess,
     EmergencyScenario,
