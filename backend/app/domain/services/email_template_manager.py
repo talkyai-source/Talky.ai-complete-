@@ -293,7 +293,7 @@ See you soon!
         full_content = f"{subject} {body}".lower()
         for pattern in self.BLOCKED_PATTERNS:
             if re.search(pattern, full_content, re.IGNORECASE):
-                issues.append(f"Content contains potentially sensitive information")
+                issues.append("Content contains potentially sensitive information")
                 break
         
         is_valid = len(issues) == 0

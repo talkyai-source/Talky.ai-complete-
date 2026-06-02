@@ -360,7 +360,7 @@ class CRMSyncService:
         seconds = duration_seconds % 60
         
         lines = [
-            f"📞 **Call Summary**",
+            "📞 **Call Summary**",
             f"Duration: {minutes}m {seconds}s",
             ""
         ]

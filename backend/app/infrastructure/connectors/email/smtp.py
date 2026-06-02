@@ -214,7 +214,7 @@ class SMTPConnector(EmailProvider):
             
         except smtplib.SMTPAuthenticationError as e:
             logger.error(f"SMTP authentication failed: {e}")
-            raise ValueError(f"Email authentication failed. Please check SMTP credentials.")
+            raise ValueError("Email authentication failed. Please check SMTP credentials.")
         except smtplib.SMTPException as e:
             logger.error(f"SMTP error: {e}")
             raise ValueError(f"Failed to send email: {str(e)}")

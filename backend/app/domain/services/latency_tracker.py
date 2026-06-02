@@ -435,7 +435,7 @@ class LatencyTracker:
     def get_percentiles(
         self,
         call_id: str,
-        field: str,
+        field_name: str,
         percentiles: tuple[int, ...] = (50, 95),
     ) -> Dict[int, Optional[float]]:
         """
@@ -443,7 +443,7 @@ class LatencyTracker:
         """
         values = []
         for metric in self._history.get(call_id, []):
-            value = getattr(metric, field, None)
+            value = getattr(metric, field_name, None)
             if value is not None:
                 values.append(float(value))
 
@@ -477,7 +477,7 @@ class LatencyTracker:
             "tts_first_chunk_ms",
             "response_start_latency_ms",
         ]
-        return {field: self.get_percentiles(call_id, field) for field in fields}
+        return {fld: self.get_percentiles(call_id, fld) for fld in fields}
     
     def get_average_latency(self, call_id: str) -> Optional[float]:
         """
