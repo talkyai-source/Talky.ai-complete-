@@ -36,6 +36,11 @@ from app.domain.services.end_session_action import (
     build_end_session_tool_instructions,
     parse_end_session_action,
 )
+from app.domain.services.voice_pipeline import (
+    find_sentence_end as _find_sentence_end_impl,
+    is_terminal_period_boundary as _is_terminal_period_boundary_impl,
+    is_repetitive_transcript as _is_repetitive_transcript_impl,
+)
 from app.core.container import get_container
 from app.core.postgres_adapter import Client as PostgresAdapterClient
 from app.core.telemetry import get_tracer, pipeline_span, record_latency, voice_span
@@ -286,19 +291,10 @@ class VoicePipelineService:
     def _register_active_turn_task(self, call_id: str, task: asyncio.Task) -> None:
         self._pending_llm_tasks[call_id] = task
 
-    @staticmethod
-    def _is_repetitive_transcript(text: str) -> bool:
-        """
-        Detect Deepgram Flux hallucination: repetitive STT output (GitHub #1524).
-        Returns True when a single word dominates >50% of a 6+ word transcript.
-        Normal speech ("I'd like to know about your pricing") never hits this.
-        """
-        words = text.lower().split()
-        if len(words) < 6:
-            return False
-        from collections import Counter
-        top_count = Counter(words).most_common(1)[0][1]
-        return (top_count / len(words)) > 0.5
+    # Implementation extracted to voice_pipeline.transcript_heuristics
+    # (item 2). Kept as a static method so the existing public interface
+    # and call sites are unchanged.
+    _is_repetitive_transcript = staticmethod(_is_repetitive_transcript_impl)
 
     @staticmethod
     def _is_ask_ai_session(session: CallSession) -> bool:
@@ -388,97 +384,14 @@ class VoicePipelineService:
 
         session.state = CallState.ENDED
 
-    # Conjunctions that signal a natural clause break after a comma.
-    # Only these trigger early TTS flush — avoids splitting at list commas
-    # ("apples, oranges, and pears") by requiring a coordinating conjunction.
-    _CLAUSE_CONJUNCTIONS = ("and ", "but ", "so ", "or ", "yet ", "nor ")
-    _COMMON_ABBREVIATIONS = {
-        "mr",
-        "mrs",
-        "ms",
-        "dr",
-        "prof",
-        "sr",
-        "jr",
-        "st",
-        "vs",
-        "etc",
-        "e.g",
-        "i.e",
-    }
-
-    @staticmethod
-    def _is_terminal_period_boundary(text: str, index: int) -> bool:
-        """Return False for common abbreviation/initial periods at buffer end."""
-        prefix = text[:index].rstrip()
-        if not prefix:
-            return True
-        token = prefix.rsplit(maxsplit=1)[-1].strip("\"'([{")
-        token_lower = token.lower()
-        if token_lower in VoicePipelineService._COMMON_ABBREVIATIONS:
-            return False
-        if len(token) == 1 and token.isalpha() and token.isupper():
-            return False
-        return True
-
-    @staticmethod
-    def _find_sentence_end(text: str, allow_clause: bool = False) -> int:
-        """
-        Return the index of the first sentence-ending character.
-
-        Streaming LLM chunks often end exactly at punctuation ("Hello.")
-        before a following space token arrives. Treat that terminal punctuation
-        as a boundary so TTS can start immediately instead of waiting for the
-        Groq inter-token stall guard to expire.
-
-        Skips ellipsis (...) to avoid splitting mid-thought pauses.
-
-        allow_clause (default False):
-            When True **and** len(text) >= 80, also match a comma+conjunction
-            boundary (", and", ", but", etc.) that occurs after at least 40
-            characters.  This fires TTS on the first clause of a long opening
-            sentence instead of waiting for the full sentence terminator,
-            cutting perceived latency by 100-250ms on verbose first responses.
-
-            Only activates when the buffer is long enough that we know we are
-            stuck waiting — short responses still flush on hard punctuation.
-        """
-        clause_candidate = -1
-        i = 0
-        while i < len(text):
-            ch = text[i]
-            if ch in "!?":
-                if i + 1 == len(text) or (i + 1 < len(text) and text[i + 1] == " "):
-                    return i
-            elif ch == ".":
-                # Skip ellipsis: advance past ALL consecutive dots so the last
-                # dot of "..." is not mistaken for a sentence terminator.
-                if i + 1 < len(text) and text[i + 1] == ".":
-                    while i + 1 < len(text) and text[i + 1] == ".":
-                        i += 1
-                    # After the ellipsis just continue scanning — don't return.
-                elif i + 1 < len(text) and text[i + 1] == " ":
-                    return i
-                elif i + 1 == len(text) and VoicePipelineService._is_terminal_period_boundary(text, i):
-                    return i
-            elif (
-                allow_clause
-                and ch == ","
-                and i >= 40                          # enough text before the comma
-                and i + 2 < len(text)
-                and text[i + 1] == " "
-                and clause_candidate < 0             # keep the earliest one
-            ):
-                rest = text[i + 2:]
-                if any(rest.startswith(conj) for conj in VoicePipelineService._CLAUSE_CONJUNCTIONS):
-                    clause_candidate = i
-            i += 1
-
-        # Return clause boundary only when no sentence boundary was found AND
-        # the total buffer is long enough to justify an early flush.
-        if allow_clause and clause_candidate >= 0 and len(text) >= 80:
-            return clause_candidate
-        return -1
+    # Sentence-segmentation logic (+ its CLAUSE_CONJUNCTIONS /
+    # COMMON_ABBREVIATIONS constants) extracted to
+    # voice_pipeline.sentence_segmentation (item 2). Kept as static methods
+    # so call sites — self._find_sentence_end(...) and the
+    # VoicePipelineService._find_sentence_end(...) characterization tests —
+    # are unchanged.
+    _is_terminal_period_boundary = staticmethod(_is_terminal_period_boundary_impl)
+    _find_sentence_end = staticmethod(_find_sentence_end_impl)
 
     # ── Pipeline lifecycle ─────────────────────────────────────────
 
@@ -944,7 +857,7 @@ class VoicePipelineService:
         tenant_id = getattr(session, "tenant_id", None)
 
         if not full_transcript:
-            logger.debug(f"Empty transcript, skipping turn", extra={"call_id": call_id})
+            logger.debug("Empty transcript, skipping turn", extra={"call_id": call_id})
             return
 
         # Turn-0 floor — protects the first AI reply (the one that "anchors"
