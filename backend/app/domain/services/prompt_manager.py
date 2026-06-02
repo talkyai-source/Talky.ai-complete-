@@ -12,7 +12,7 @@ Priority order for system prompt selection:
 This means all existing campaigns keep working, and new campaigns
 automatically get the core prompt treatment.
 """
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 from jinja2 import Environment, BaseLoader
 import logging

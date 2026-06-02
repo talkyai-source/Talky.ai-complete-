@@ -16,7 +16,7 @@ import logging
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client

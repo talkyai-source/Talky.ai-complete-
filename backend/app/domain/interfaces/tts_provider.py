@@ -3,7 +3,7 @@ TTS Provider Interface
 Abstract base class for Text-to-Speech providers
 """
 from abc import ABC, abstractmethod
-from typing import AsyncIterator, Optional, List, Dict
+from typing import AsyncIterator, List, Dict
 from app.domain.models.conversation import AudioChunk
 
 

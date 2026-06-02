@@ -172,7 +172,6 @@ async def mark_as_spam_secured(
     )
 
     # Process webhook
-    import json
     try:
         data = await request.json()
         call_id = data.get("call_id")
@@ -246,7 +245,7 @@ async def idempotent_webhook_example(
 
         return result
 
-    except Exception as e:
+    except Exception:
         await release_idempotency_lock(request)
         raise
 
@@ -312,7 +311,6 @@ async def verify_test(request: Request):
 
     Returns instructions for testing signature verification.
     """
-    import json
 
     test_secret = "whsec_test_secret_for_development_only"
     test_payload = b'{"test": "data", "timestamp": 1234567890}'

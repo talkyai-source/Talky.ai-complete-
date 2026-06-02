@@ -41,12 +41,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, time
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
-from uuid import UUID
 
 import asyncpg
 
 from app.domain.services.telephony_rate_limiter import TelephonyRateLimiter, RateLimitAction
-from app.domain.services.telephony_concurrency_limiter import TelephonyConcurrencyLimiter, LeaseKind
+from app.domain.services.telephony_concurrency_limiter import TelephonyConcurrencyLimiter
 
 logger = logging.getLogger(__name__)
 

@@ -14,8 +14,7 @@ from app.infrastructure.connectors.base import ConnectorFactory
 from app.infrastructure.connectors.encryption import get_encryption_service
 from app.domain.services.email_template_manager import (
     get_email_template_manager,
-    EmailTemplateManager,
-    EmailContentValidationError
+    EmailTemplateManager
 )
 
 logger = logging.getLogger(__name__)

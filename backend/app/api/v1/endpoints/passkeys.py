@@ -66,20 +66,16 @@ from app.core.security.passkeys import (
     get_allowed_origins,
     get_credential_by_id,
     get_user_credentials,
-    get_user_id_by_credential_id,
     store_credential,
     update_credential_display_name,
     update_credential_sign_count,
     delete_credential,
     verify_authentication,
     verify_registration,
-    AuthenticationResult,
-    VerifiedCredential,
 )
 from app.core.security.sessions import (
     SESSION_COOKIE_NAME,
     create_session,
-    hash_session_token,
 )
 
 logger = logging.getLogger(__name__)

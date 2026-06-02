@@ -7,7 +7,6 @@ Day 30: CRM & Drive Integration
 import logging
 from typing import Optional, Dict, Any
 from datetime import datetime
-from dataclasses import dataclass, field
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -360,7 +359,7 @@ class CRMSyncService:
         seconds = duration_seconds % 60
         
         lines = [
-            f"📞 **Call Summary**",
+            "📞 **Call Summary**",
             f"Duration: {minutes}m {seconds}s",
             ""
         ]

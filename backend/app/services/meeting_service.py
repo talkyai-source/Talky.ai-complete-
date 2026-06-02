@@ -11,7 +11,6 @@ from app.core.postgres_adapter import Client
 
 from app.infrastructure.connectors.base import ConnectorFactory
 from app.infrastructure.connectors.encryption import get_encryption_service
-from app.domain.models.meeting import Meeting, MeetingStatus, Attendee
 
 logger = logging.getLogger(__name__)
 

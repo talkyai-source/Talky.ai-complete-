@@ -16,10 +16,7 @@ load_dotenv(dotenv_path=_BACKEND_ROOT / ".env", override=False)
 
 from app.api.v1.routes import api_router
 from app.api.operational import (
-    health_check,
-    prometheus_metrics,
     register_operational_routes,
-    root,
 )
 from app.core.app_bootstrap import configure_logging, configure_middleware
 from app.core.config import ConfigManager, get_settings

@@ -31,14 +31,12 @@ from __future__ import annotations
 
 import enum
 import logging
-from dataclasses import dataclass
 from typing import Optional, Set, List, Dict, Any
 from functools import wraps
 
 from fastapi import Depends, HTTPException, status, Request
 
 from app.api.v1.dependencies import CurrentUser, get_current_user
-from app.core.postgres_adapter import Client
 
 logger = logging.getLogger(__name__)
 
@@ -588,7 +586,6 @@ def require_permission(
             tenant_id = user.tenant_id
 
         # Check permission
-        from app.core.postgres_adapter import Client
         # We need to get the db client from the request state or use a default
         # For now, we'll check based on role defaults if no db available
 

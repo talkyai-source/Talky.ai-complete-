@@ -19,7 +19,6 @@ import asyncio
 import logging
 
 from app.domain.services.telephony.config import (
-    _build_outbound_greeting,
     _build_call_greeting,
 )
 

@@ -44,7 +44,6 @@ import logging
 import os
 import socket
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any, Optional
 
 from app.domain.models.dialer_job import DialerJob

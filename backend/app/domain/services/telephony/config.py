@@ -8,14 +8,11 @@ Leaf module — no dependencies on other telephony submodules. Owns:
 from __future__ import annotations
 
 import logging
-import os
 from typing import Optional
 
 from app.domain.services.telephony_session_config import (
     build_persona_greeting,
     build_telephony_session_config,
-    build_telephony_greeting,
-    build_telephony_inbound_greeting,
 )
 from app.domain.services.voice_orchestrator import Direction
 

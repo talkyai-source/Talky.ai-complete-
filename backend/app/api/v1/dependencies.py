@@ -56,7 +56,7 @@ class CurrentUser:
         if self._permissions is not None:
             return permission in self._permissions
         # Fallback to role-based check
-        from app.core.security.rbac import UserRole, ROLE_DEFAULT_PERMISSIONS, normalize_role
+        from app.core.security.rbac import ROLE_DEFAULT_PERMISSIONS, normalize_role
         user_role = normalize_role(self.role)
         user_perms = ROLE_DEFAULT_PERMISSIONS.get(user_role, set())
         return permission in {p.value for p in user_perms}
@@ -364,18 +364,6 @@ async def get_current_user(
     )
 
 
-async def require_admin(
-    current_user: CurrentUser = Depends(get_current_user),
-) -> CurrentUser:
-    """Require admin role for endpoint access."""
-    if current_user.role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required",
-        )
-    return current_user
-
-
 async def get_optional_user(
     request: Request,
     authorization: Optional[str] = Header(None, alias="Authorization"),
@@ -410,15 +398,12 @@ from app.core.security.rbac import (
     require_role,
     require_permission,
     get_user_permissions,
-    get_user_role_in_tenant,
-    get_user_tenants,
     normalize_role,
 )
 from app.core.security.tenant_isolation import (
     TenantContext,
     require_tenant_access,
     get_tenant_context_dependency,
-    get_current_tenant_id,
     validate_tenant_access,
 )
 

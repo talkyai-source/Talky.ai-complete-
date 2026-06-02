@@ -4,7 +4,7 @@ Defines all message types for voice streaming protocol
 
 Based on latest Pydantic v2 and FastAPI WebSocket documentation (2024)
 """
-from pydantic import BaseModel, Field, ConfigDict, field_serializer
+from pydantic import BaseModel, Field, field_serializer
 from typing import Literal, Optional, Dict, Any, Union
 from datetime import datetime
 from enum import Enum

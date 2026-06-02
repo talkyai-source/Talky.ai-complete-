@@ -9,7 +9,6 @@ Day 9 Additions:
 Refactored: Business logic delegates to CampaignService.
 """
 import logging
-import os
 import uuid
 from datetime import datetime
 from typing import Any, List, Optional
@@ -18,8 +17,6 @@ from fastapi import APIRouter, HTTPException, Request, Depends, Query
 from app.core.postgres_adapter import Client
 from app.core.dotenv_compat import load_dotenv
 
-from app.domain.models.dialer_job import DialerJob, JobStatus
-from app.domain.services.queue_service import DialerQueueService
 from app.domain.services.campaign_service import (
     CampaignService, CampaignError, CampaignNotFoundError, CampaignStateError
 )
@@ -38,7 +35,6 @@ from app.api.v1.schemas.campaigns import (
     CampaignStartRequest,
     CampaignUpdateRequest,
     ContactCreate,
-    ContactListResponse,
 )
 
 load_dotenv()

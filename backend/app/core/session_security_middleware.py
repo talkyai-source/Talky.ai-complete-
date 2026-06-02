@@ -39,7 +39,6 @@ from app.core.security.device_fingerprint import generate_device_fingerprint
 from app.core.security.sessions import (
     SESSION_COOKIE_NAME,
     SESSION_STRICT_BINDING,
-    hash_session_token,
     validate_session,
 )
 

@@ -3,7 +3,7 @@ Agent Configuration Models
 Defines agent goals, rules, and conversation flows
 """
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional, Dict
+from typing import List, Dict
 from enum import Enum
 
 
@@ -147,12 +147,12 @@ class AgentConfig(BaseModel):
     def get_goal_description(self) -> str:
         """Get human-readable goal description"""
         goal_descriptions = {
-            AgentGoal.APPOINTMENT_CONFIRMATION: f"confirm an appointment",
-            AgentGoal.LEAD_QUALIFICATION: f"qualify a potential lead",
-            AgentGoal.CALLBACK_SCHEDULING: f"schedule a callback",
-            AgentGoal.INFORMATION_GATHERING: f"gather information",
-            AgentGoal.SURVEY: f"conduct a survey",
-            AgentGoal.REMINDER: f"provide a reminder"
+            AgentGoal.APPOINTMENT_CONFIRMATION: "confirm an appointment",
+            AgentGoal.LEAD_QUALIFICATION: "qualify a potential lead",
+            AgentGoal.CALLBACK_SCHEDULING: "schedule a callback",
+            AgentGoal.INFORMATION_GATHERING: "gather information",
+            AgentGoal.SURVEY: "conduct a survey",
+            AgentGoal.REMINDER: "provide a reminder"
         }
         return goal_descriptions.get(self.goal, "assist you")
     

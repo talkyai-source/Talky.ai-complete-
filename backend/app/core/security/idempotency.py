@@ -15,7 +15,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 
 import redis.asyncio as redis
 from fastapi import Request, HTTPException, status

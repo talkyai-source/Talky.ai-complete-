@@ -2,7 +2,7 @@
 Campaign Domain Models
 """
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime
 from enum import Enum
 

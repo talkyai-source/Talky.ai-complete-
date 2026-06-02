@@ -9,11 +9,10 @@ Day 27: Timed Communication System
 """
 import asyncio
 import logging
-import os
 import signal
 import json
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any
 
 from app.core.dotenv_compat import load_dotenv
 
@@ -25,7 +24,7 @@ try:
 except ImportError as e:
     raise ImportError(f"Required dependency not installed: {e}")
 
-from app.core.db import init_db_pool, close_db_pool, Database
+from app.core.db import init_db_pool, close_db_pool
 
 logger = logging.getLogger(__name__)
 
@@ -297,7 +296,6 @@ class ReminderWorker:
                     # Schedule retry with exponential backoff
                     # Note: Using simple calculation here, might need datetime calc
                     # Assuming next_retry_at logic in SQL or python
-                    import datetime as dt
                     delay_Seconds = 60 * (2 ** (retry_count - 1))
                     
                     await conn.execute(

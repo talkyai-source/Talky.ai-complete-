@@ -8,7 +8,7 @@ import hmac
 import json
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Optional
+from typing import Optional
 from uuid import UUID, uuid4
 
 import asyncpg

@@ -286,7 +286,7 @@ async def update_tenant_user(
                 detail="No fields to update",
             )
 
-        updates.append(f"updated_at = NOW()")
+        updates.append("updated_at = NOW()")
         values.append(tenant_user_id)
 
         # Execute update

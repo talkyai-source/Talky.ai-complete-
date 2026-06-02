@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
-from app.utils.tenant_filter import apply_tenant_filter, verify_tenant_access
+from app.utils.tenant_filter import apply_tenant_filter
 
 logger = logging.getLogger(__name__)
 

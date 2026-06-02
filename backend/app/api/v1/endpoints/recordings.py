@@ -12,16 +12,10 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime, timezone
 
 from app.core.postgres_adapter import Client
 from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
-from app.utils.tenant_filter import apply_tenant_filter, verify_tenant_access
-from app.domain.models.retention_config import (
-    get_retention_config_for_plan,
-    is_recording_accessible,
-)
-from app.domain.services.recording_service import RecordingService, make_recording_service
+from app.domain.services.recording_service import make_recording_service
 
 router = APIRouter(prefix="/recordings", tags=["recordings"])
 

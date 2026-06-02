@@ -42,7 +42,6 @@ dry-run on a staging call.
 """
 from __future__ import annotations
 
-import asyncio
 import collections
 import logging
 from dataclasses import dataclass, field

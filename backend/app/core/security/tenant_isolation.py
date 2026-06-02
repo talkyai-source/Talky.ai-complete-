@@ -31,7 +31,7 @@ from __future__ import annotations
 import logging
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Optional, Dict, Any, Callable
+from typing import Optional, Dict, Any
 from uuid import UUID
 
 from fastapi import Request, Response, HTTPException, status, Depends
@@ -508,7 +508,6 @@ class TenantIsolationMiddleware(BaseHTTPMiddleware):
                 if auth_header:
                     # Import here to avoid circular dependencies
                     from app.core.jwt_security import decode_and_validate_token
-                    from app.api.v1.dependencies import get_current_user
 
                     # Note: We can't easily call async dependencies in middleware
                     # So we just decode the token here for tenant extraction

@@ -24,8 +24,6 @@ from datetime import timedelta
 from app.core.config import get_settings
 from app.core.jwt_security import ACCESS_TOKEN_TTL_MINUTES, encode_access_token
 from app.core.security.cookies import (
-    REFRESH_COOKIE_NAME,
-    clear_auth_cookies,
     set_access_cookie,
     set_refresh_cookie,
 )

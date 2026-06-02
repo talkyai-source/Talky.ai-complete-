@@ -37,14 +37,12 @@ import logging
 from typing import Any, Mapping, Optional
 
 from app.services.scripts.prompts.direction import (
-    INBOUND_DIRECTIVE_SENTINEL,
     inbound_directive_block,
 )
 from app.services.scripts.prompts.guardrails import GENERIC_GUARDRAILS
 from app.services.scripts.prompts.personas import (
     PERSONA_BODIES,
     PERSONA_OPENINGS,
-    PERSONAS,
     PersonaType,
     REQUIRED_SLOTS_BY_PERSONA,
     format_common_issues,

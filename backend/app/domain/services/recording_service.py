@@ -30,7 +30,6 @@ from __future__ import annotations
 import io
 import logging
 import os
-import struct
 import wave
 from dataclasses import dataclass, field
 from datetime import datetime

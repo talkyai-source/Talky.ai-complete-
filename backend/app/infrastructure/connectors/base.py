@@ -6,7 +6,7 @@ Day 24: Unified Connector System
 """
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional, Type
 from datetime import datetime

@@ -10,14 +10,12 @@ from datetime import datetime
 from fastapi.encoders import jsonable_encoder
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
-from langgraph.prebuilt import ToolNode
 
 # LangChain message classes for proper LangGraph compatibility
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 
 from groq import AsyncGroq
 
-import asyncpg  # migrated from db_client
 
 from app.infrastructure.assistant.tools import (
     get_dashboard_stats,
@@ -29,8 +27,7 @@ from app.infrastructure.assistant.tools import (
     send_email,
     send_sms,
     initiate_call,
-    start_campaign,
-    ALL_TOOLS
+    start_campaign
 )
 
 logger = logging.getLogger(__name__)

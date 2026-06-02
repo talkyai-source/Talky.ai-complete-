@@ -15,7 +15,7 @@ Provides:
 
 import logging
 import re
-from typing import Optional, Any
+from typing import Any
 
 from fastapi import Request, status
 from starlette.middleware.base import BaseHTTPMiddleware

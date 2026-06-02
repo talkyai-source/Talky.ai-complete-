@@ -7,7 +7,6 @@ Records who triggered what, when, and the outcome.
 import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime, date
-from uuid import uuid4
 from dataclasses import dataclass
 from enum import Enum
 from app.core.postgres_adapter import Client

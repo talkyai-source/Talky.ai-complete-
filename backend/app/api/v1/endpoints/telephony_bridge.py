@@ -27,7 +27,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from uuid import UUID, uuid4
+from uuid import uuid4
 from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, WebSocket
@@ -39,10 +39,6 @@ from app.infrastructure.telephony.adapter_factory import CallControlAdapterFacto
 from app.domain.services.call_guard import CallGuard, GuardDecision, GuardResult
 from app.domain.services.abuse_detection import AbuseDetectionService
 from app.api.v1.schemas.telephony_bridge import TransferPayload
-from app.services.scripts import (
-    bind_telephony_call,
-    save_call_transcript_on_hangup,
-)
 
 # ---------------------------------------------------------------------------
 # Backward-compat re-exports — implementations live in the telephony package.
@@ -50,11 +46,8 @@ from app.services.scripts import (
 from app.domain.services.telephony.config import (  # noqa: E402
     _outbound_first_speaker,
     _build_telephony_session_config,
-    _build_outbound_greeting,
 )
-from app.domain.services.telephony.modes import resolve_first_speaker  # noqa: E402
 from app.domain.services.telephony.modes.agent_first import (  # noqa: E402
-    _send_outbound_greeting,
     prepare_pre_originate_greeting,
     warm_tts_inference_path,
     warm_llm_stream,
@@ -159,17 +152,11 @@ def _alias_ringing_call_id(original_call_id: str, actual_call_id: str) -> None:
 # ---------------------------------------------------------------------------
 # Helpers / lifecycle (implementations live in the telephony package)
 # ---------------------------------------------------------------------------
-from app.domain.services.telephony.recording import (  # noqa: E402
-    _save_call_recording,
-)
 from app.domain.services.telephony.lifecycle import (  # noqa: E402
-    _pop_ringing_warmup,
     _get_orchestrator,
     _session_watchdog,
     _SESSION_INACTIVITY_TIMEOUT_S,
-    _pipeline_done_cb,
     _on_ringing,
-    _reject_overcap_call,
     _on_new_call,
     _on_audio_received,
     _on_call_ended,

@@ -6,12 +6,11 @@ Day 17: Ensures graceful degradation when LLM fails while maintaining
 human-like conversation flow (no hints that it's an AI).
 """
 import re
-import asyncio
 import logging
-from typing import Tuple, Optional, List, Union
+from typing import Tuple, Optional, Union
 from pydantic import BaseModel, Field
 
-from app.domain.models.conversation_state import ConversationState, CallOutcomeType
+from app.domain.models.conversation_state import ConversationState
 from app.domain.models.agent_config import ConversationRule
 
 logger = logging.getLogger(__name__)

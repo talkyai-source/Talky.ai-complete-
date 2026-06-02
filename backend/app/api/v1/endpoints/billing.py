@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 from fastapi import APIRouter, HTTPException, Depends, Request, status
 from pydantic import BaseModel
-from typing import Any, List, Optional
+from typing import List, Optional
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser, get_audit_logger, get_db_pool

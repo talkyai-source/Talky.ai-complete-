@@ -8,10 +8,9 @@ import json
 import os
 import secrets
 import string
-from base64 import b64decode, b64encode
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Optional
+from typing import Optional
 from uuid import UUID, uuid4
 
 import redis.asyncio as aioredis

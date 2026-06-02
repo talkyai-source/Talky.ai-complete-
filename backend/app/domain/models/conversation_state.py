@@ -3,7 +3,7 @@ Conversation State Models
 Defines conversation states, transitions, and call outcomes
 """
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, List
+from typing import Optional
 from enum import Enum
 
 

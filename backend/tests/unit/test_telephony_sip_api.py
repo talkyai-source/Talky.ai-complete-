@@ -33,7 +33,9 @@ from app.api.v1.endpoints.telephony_sip import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MIGRATION_FILE = REPO_ROOT / "database" / "migrations" / "20260224_add_tenant_sip_onboarding.sql"
+# Raw SQL migrations were consolidated onto Alembic (roadmap item 4) and
+# moved to database/migrations/_archive/ (frozen — see database/MIGRATIONS.md).
+MIGRATION_FILE = REPO_ROOT / "database" / "migrations" / "_archive" / "20260224_add_tenant_sip_onboarding.sql"
 
 
 class _FakeTransaction:

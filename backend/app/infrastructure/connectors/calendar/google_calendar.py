@@ -6,7 +6,7 @@ Day 24: Unified Connector System
 """
 import os
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
 import httpx
