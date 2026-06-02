@@ -548,6 +548,61 @@ class ApiClient {
         return this.client().request({ path, method, timeoutMs: 10_000 });
     }
 
+    /* ---------- Live calls (Track B) ---------- */
+
+    /**
+     * Snapshot of currently-in-flight calls + recently-ended ones.
+     * Designed to be polled every 1-2s by the live panel — the backend
+     * intentionally keeps the shape lean so frequent polling is cheap.
+     */
+    async listLiveCalls(input?: { campaignId?: string; recentWindowSeconds?: number }): Promise<{
+        items: Array<{
+            id: string;
+            talklee_call_id?: string | null;
+            to_number: string;
+            status: string;
+            started_at?: string | null;
+            answered_at?: string | null;
+            ended_at?: string | null;
+            duration_seconds?: number | null;
+            outcome?: string | null;
+            campaign_id?: string | null;
+            campaign_name?: string | null;
+            lead_id?: string | null;
+            caller_id?: string | null;
+        }>;
+        server_time: string;
+    }> {
+        const path = "/calls/live";
+        const query: Record<string, string | number> = {};
+        if (input?.campaignId) query.campaign_id = input.campaignId;
+        if (input?.recentWindowSeconds !== undefined) query.recent_window_seconds = input.recentWindowSeconds;
+        const data = await this.client().request({
+            path,
+            method: "GET",
+            query,
+            timeoutMs: 8_000,
+        });
+        return data as {
+            items: Array<{
+                id: string;
+                talklee_call_id?: string | null;
+                to_number: string;
+                status: string;
+                started_at?: string | null;
+                answered_at?: string | null;
+                ended_at?: string | null;
+                duration_seconds?: number | null;
+                outcome?: string | null;
+                campaign_id?: string | null;
+                campaign_name?: string | null;
+                lead_id?: string | null;
+                caller_id?: string | null;
+            }>;
+            server_time: string;
+        };
+    }
+
     /* ---------- Passkeys (WebAuthn) ---------- */
 
     async checkUserHasPasskeys(email: string): Promise<boolean> {
@@ -656,7 +711,7 @@ class ApiClient {
         backed_up: boolean;
         transports: string[];
         created_at: string;
-        last_used_at?: string;
+        last_used_at?: string | null;
     }>> {
         const path = "/auth/passkeys";
         const method = "GET" as const;
@@ -670,7 +725,8 @@ class ApiClient {
                 backed_up: z.boolean(),
                 transports: z.array(z.string()),
                 created_at: z.string(),
-                last_used_at: z.string().optional(),
+                // Backend returns null (not omitted) when the passkey has never been used.
+                last_used_at: z.string().nullable().optional(),
             })),
         }).parse(data).passkeys;
     }

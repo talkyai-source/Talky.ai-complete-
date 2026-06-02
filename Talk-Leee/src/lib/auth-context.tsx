@@ -475,7 +475,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const status: AuthStatus = useMemo(() => {
         if (typeof window === "undefined") return "uninitialized";
         if (loading) return "loading";
-        if (user && accessToken) return "authenticated";
+        // In cookie-only mode (Phase F+F2), the JWT lives only in the HttpOnly
+        // `talky_at` cookie — JS can't read it, so accessToken stays null even
+        // for a fully-logged-in user. The `user` object is populated by a
+        // successful /auth/me, which is the real proof of an active session
+        // regardless of transport. Gating on `user && accessToken` made every
+        // cookie-only user look anonymous and bounced features like Ask AI
+        // back to /auth/login on click.
+        if (user) return "authenticated";
         return "anonymous";
     }, [loading, user, accessToken]);
 

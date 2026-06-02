@@ -5,7 +5,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { MessageCircle } from "lucide-react";
 import { apiBaseUrl } from "@/lib/env";
-import { useAccessToken } from "@/lib/auth-hooks";
+import { useAuth } from "@/lib/auth-context";
 
 function parseConfiguredApiUrl(): URL | null {
     try {
@@ -89,7 +89,14 @@ export function VoiceAgentPopup() {
     // sign-in gate. Replaces a getBrowserAuthToken() snapshot inside
     // handleMainButtonClick — which would have been stale if the user
     // logged in or out without re-mounting this component.
-    const accessToken = useAccessToken();
+    //
+    // Gate on `status === "authenticated"` rather than the raw access
+    // token: in cookie-only mode the JWT is HttpOnly and JS can't read
+    // it, so the bearer is null for fully-logged-in users. The WS still
+    // authenticates via the cookie because `wss://api.talkleeai.com`
+    // shares the parent `talkleeai.com` domain with the cookie.
+    const { status: authStatus } = useAuth();
+    const isAuthed = authStatus === "authenticated";
     const [aiState, setAiState] = useState<AIState>("idle");
     const [audioLevel, setAudioLevel] = useState(0);
     const [error, setError] = useState<string | null>(null);
@@ -832,7 +839,7 @@ export function VoiceAgentPopup() {
     }, [handleMessage, endSession, cleanupAudioPlayer, startMicrophone, stopMicrophone, initializeAudioPlayer, playTessaIntro, prefetchTessaIntro, router, pathname]);
 
     const handleMainButtonClick = useCallback(() => {
-        if (!accessToken) {
+        if (!isAuthed) {
             router.push(`/auth/login?next=${encodeURIComponent(pathname)}`);
             return;
         }
@@ -841,7 +848,7 @@ export function VoiceAgentPopup() {
         } else {
             endSession();
         }
-    }, [accessToken, isActive, startSession, endSession, router, pathname]);
+    }, [isAuthed, isActive, startSession, endSession, router, pathname]);
 
     // Pre-fetch Tessa's intro audio so it's ready the moment the button is pressed.
     useEffect(() => {

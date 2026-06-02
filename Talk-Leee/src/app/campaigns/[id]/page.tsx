@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { dashboardApi, Campaign, Contact } from "@/lib/dashboard-api";
 import { extendedApi, BulkImportResponse } from "@/lib/extended-api";
 import { ScriptCard } from "@/components/campaigns/script-card";
+import { LiveCallsPanel } from "@/components/campaigns/live-calls-panel";
 import { Modal } from "@/components/ui/modal";
 import {
     ArrowLeft,
@@ -329,6 +330,15 @@ export default function CampaignDetailPage() {
                             </div>
                         </motion.div>
                     </div>
+
+                    {/* Live calls — Track B */}
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.3 }}
+                    >
+                        <LiveCallsPanel campaignId={campaignId} />
+                    </motion.div>
 
                     {/* Contacts */}
                     <motion.div

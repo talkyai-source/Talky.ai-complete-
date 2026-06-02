@@ -13,6 +13,7 @@ import type { NotificationPriority, NotificationRouting, NotificationType } from
 import { Key, Lock } from "lucide-react";
 import MFASetup from "@/components/auth/mfa-setup";
 import PasskeyRegistration from "@/components/auth/passkey-registration";
+import PasskeyList from "@/components/auth/passkey-list";
 import DeviceList from "@/components/auth/device-list";
 import LogoutButton from "@/components/auth/logout-button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -48,9 +49,18 @@ export default function SettingsPage() {
     // token at that moment, so a later /auth/refresh wouldn't reach the
     // MFA / Passkey panels. Empty string preserves the previous truthy
     // gating in the JSX (`token && <Foo token={token}/>`).
+    // In cookie-only auth mode the JWT lives in the HttpOnly `talky_at`
+    // cookie — JS can't read it, so useAccessToken() returns null. The
+    // shared `api` client used by MFASetup / PasskeyRegistration / DeviceList
+    // sends the cookie automatically, so a missing bearer here is fine.
+    // We still pass `token` as a string prop for the children that accept
+    // it, but render-gates below must NOT depend on it being non-empty,
+    // or the panels never mount in cookie-only sessions.
     const token = useAccessToken() ?? "";
     const [showMfaSetup, setShowMfaSetup] = useState(false);
     const [showPasskeySetup, setShowPasskeySetup] = useState(false);
+    // Bumped after a successful passkey registration so <PasskeyList/> re-fetches.
+    const [passkeyRefreshKey, setPasskeyRefreshKey] = useState(0);
     const [mfaEnabled, setMfaEnabled] = useState(false);
     const [mfaVerifiedAt, setMfaVerifiedAt] = useState<string | null>(null);
     const [mfaCodesRemaining, setMfaCodesRemaining] = useState<number>(0);
@@ -64,7 +74,8 @@ export default function SettingsPage() {
     const [showRegen, setShowRegen] = useState(false);
 
     async function refreshMfaStatus(t: string) {
-        if (!t) return;
+        // No early return on empty `t`: in cookie-only mode the JWT is HttpOnly,
+        // so `t` is "" but the shared `api` client still authenticates via cookie.
         try {
             setMfaStatusLoading(true);
             const s = await getMfaStatus(t);
@@ -79,9 +90,8 @@ export default function SettingsPage() {
     }
 
     useEffect(() => {
-        if (token) {
-            void refreshMfaStatus(token);
-        }
+        void refreshMfaStatus(token);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [token]);
 
     async function handleDisableMfa() {
@@ -424,7 +434,7 @@ export default function SettingsPage() {
                                         </Button>
                                     )}
 
-                                    {showMfaSetup && !mfaEnabled && token && (
+                                    {showMfaSetup && !mfaEnabled && (
                                         <MFASetup
                                             token={token}
                                             onSuccess={() => {
@@ -577,15 +587,19 @@ export default function SettingsPage() {
                                         </div>
                                         <Key className="h-5 w-5 text-muted-foreground" aria-hidden />
                                     </div>
+                                    <PasskeyList refreshKey={passkeyRefreshKey} />
                                     {!showPasskeySetup && (
                                         <Button onClick={() => setShowPasskeySetup(true)} variant="outline" className="w-full">
                                             Add a Passkey
                                         </Button>
                                     )}
-                                    {showPasskeySetup && token && (
+                                    {showPasskeySetup && (
                                         <PasskeyRegistration
                                             token={token}
-                                            onSuccess={() => setShowPasskeySetup(false)}
+                                            onSuccess={() => {
+                                                setShowPasskeySetup(false);
+                                                setPasskeyRefreshKey((k) => k + 1);
+                                            }}
                                             onCancel={() => setShowPasskeySetup(false)}
                                         />
                                     )}
@@ -594,7 +608,7 @@ export default function SettingsPage() {
 
                             {/* Devices Tab */}
                             <TabsContent value="devices" className="space-y-4">
-                                {token && <DeviceList token={token} />}
+                                <DeviceList token={token} />
                             </TabsContent>
 
                             {/* Telephony Tab */}
@@ -609,14 +623,12 @@ export default function SettingsPage() {
                                         <div className="text-sm font-semibold text-gray-900 dark:text-zinc-100">Sign out</div>
                                         <div className="mt-1 text-sm text-muted-foreground">End your current session and return to the login page</div>
                                     </div>
-                                    {token && (
-                                        <LogoutButton
-                                            token={token}
-                                            variant="destructive"
-                                            size="default"
-                                            showLabel={true}
-                                        />
-                                    )}
+                                    <LogoutButton
+                                        token={token}
+                                        variant="destructive"
+                                        size="default"
+                                        showLabel={true}
+                                    />
                                 </div>
                             </TabsContent>
                         </Tabs>

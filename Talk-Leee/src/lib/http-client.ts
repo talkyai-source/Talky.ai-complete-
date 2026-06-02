@@ -453,10 +453,25 @@ export function createHttpClient(config: HttpClientConfig) {
             const retryAfterMs = res.status === 429 ? readRetryAfterMs(res) : undefined;
             const requestId = res.headers.get("x-request-id") ?? res.headers.get("x-correlation-id") ?? undefined;
             const body = await readBody(res);
-            const detail =
-                body && typeof body === "object" && "detail" in (body as Record<string, unknown>) ? (body as { detail?: unknown }).detail : undefined;
-            const message = typeof detail === "string" ? detail : defaultMessageForStatus(res.status);
-            const code =
+
+            // Canonical envelope from backend: { error: { code, message, details, request_id } }.
+            // Falls back to the legacy { detail: string|dict } shape (FastAPI default)
+            // for any endpoint that still raises HTTPException directly.
+            const envelope =
+                body && typeof body === "object" && "error" in (body as Record<string, unknown>)
+                    ? ((body as { error?: unknown }).error as { code?: unknown; message?: unknown; details?: unknown } | undefined)
+                    : undefined;
+            const envelopeCode = typeof envelope?.code === "string" ? envelope.code : undefined;
+            const envelopeMessage = typeof envelope?.message === "string" ? envelope.message : undefined;
+            const envelopeDetails = envelope?.details;
+
+            const legacyDetail =
+                body && typeof body === "object" && "detail" in (body as Record<string, unknown>)
+                    ? (body as { detail?: unknown }).detail
+                    : undefined;
+            const legacyMessage = typeof legacyDetail === "string" ? legacyDetail : undefined;
+
+            const defaultCode =
                 res.status === 401
                     ? "unauthorized"
                     : res.status === 403
@@ -466,6 +481,10 @@ export function createHttpClient(config: HttpClientConfig) {
                         : res.status >= 500
                           ? "server_error"
                           : "http_error";
+
+            const code = envelopeCode ?? defaultCode;
+            const message = envelopeMessage ?? legacyMessage ?? defaultMessageForStatus(res.status);
+            const detailsForError = envelopeDetails ?? legacyDetail ?? body;
 
             // Single source of truth for token expiry — clear the
             // stored token, then fire the global session-expired
@@ -493,7 +512,7 @@ export function createHttpClient(config: HttpClientConfig) {
                 status: res.status,
                 code,
                 message,
-                details: body,
+                details: detailsForError,
                 retryAfterMs,
                 requestId,
                 url,

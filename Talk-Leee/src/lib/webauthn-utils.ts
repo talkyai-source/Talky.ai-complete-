@@ -230,7 +230,7 @@ export async function getPasskeys(_token?: string): Promise<PasskeyCredential[]>
     id: p.id,
     name: p.display_name ?? "Passkey",
     createdAt: p.created_at,
-    lastUsedAt: p.last_used_at,
+    lastUsedAt: p.last_used_at ?? undefined,
     transports: p.transports,
   }));
 }
