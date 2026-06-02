@@ -104,6 +104,27 @@ async def test_auth_paths_exempt(middleware, path):
     assert resp.status_code == 200
 
 
+@pytest.mark.asyncio
+async def test_gateway_audio_callback_exempt(middleware):
+    # The C++ voice gateway POSTs audio frames with no Origin/cookie/token;
+    # the internal callback must bypass CSRF or every call goes silent.
+    req = _build_request(
+        method="POST",
+        path="/api/v1/sip/telephony/audio/asterisk-talky-out-abc123-32000",
+    )
+    resp = await middleware.dispatch(req, _call_next_ok)
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_other_telephony_posts_still_protected(middleware):
+    # Only the audio callback is exempt — other telephony POSTs (e.g. /call,
+    # /hangup) must still require Origin/token so they aren't CSRF-forgeable.
+    req = _build_request(method="POST", path="/api/v1/sip/telephony/hangup/xyz")
+    resp = await middleware.dispatch(req, _call_next_ok)
+    assert resp.status_code == 403
+
+
 # ── Internal service-token exemption (dialer worker → originate) ──────
 
 _TOKEN = "s3cret-internal-token-value"

@@ -56,6 +56,14 @@ _EXEMPT_PATH_PREFIXES = (
     "/api/v1/auth/reset-password",
     "/api/v1/auth/verify-email",
     "/api/v1/auth/passkey",
+    # Internal C++ voice-gateway audio callback (Asterisk path). The gateway
+    # POSTs ~50 PCMU frames/sec/call to /sip/telephony/audio/{session_id} as a
+    # same-host service — no browser, no cookie auth, so CSRF (which defends
+    # cookie-authenticated browser requests) provides nothing here. Without
+    # this exemption every frame 403s ("Missing Origin") and the agent is
+    # silent on every call. Hardening follow-up: have the gateway present
+    # X-Internal-Service-Token so this can be authenticated rather than exempt.
+    "/api/v1/sip/telephony/audio",
 )
 
 
