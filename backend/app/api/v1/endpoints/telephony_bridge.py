@@ -58,6 +58,9 @@ from app.domain.services.telephony.modes.caller_first import (  # noqa: E402
 from app.domain.services.telephony.state_backend import (  # noqa: E402
     get_state_backend,
 )
+from app.domain.services.telephony.caller_id_guard import (  # noqa: E402
+    check_caller_id_ownership,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -424,66 +427,31 @@ async def make_call(request: Request, body: MakeCallRequest):
     from app.core.container import get_container
     container = get_container()
 
-    # T0.1 — Caller-ID ownership enforcement.
-    # Before any guard/originate work, refuse the call unless `caller_id`
-    # is registered AND verified under this tenant. In prod we also
-    # require a STIR/SHAKEN attestation token on the DID row (test-only
-    # numbers cannot dial real carriers).
-    #
-    # Ramp-in: CALLER_ID_ENFORCEMENT_MODE = enforce | log | off.
-    #   - enforce (default in prod): violation → HTTP 403.
-    #   - log    (default in dev/staging): violation → WARN + allow.
-    #   - off    : disabled entirely. Use only for first-time bring-up.
-    #
-    # This knob lets operators roll the change out per-environment
-    # without tripping every existing dev/CI workflow on day one.
-    from app.domain.services.tenant_phone_number_service import (
-        TenantPhoneNumberService,
+    # T0.1 — Caller-ID ownership enforcement. The check itself (env-mode
+    # resolution, DID verification, fail-closed lookup) lives in the
+    # telephony package; the endpoint only translates a denial into the
+    # 403. See caller_id_guard.check_caller_id_ownership for the ramp-in
+    # knob (CALLER_ID_ENFORCEMENT_MODE = enforce | log | off).
+    caller_id_decision = await check_caller_id_ownership(
+        container.db_pool,
+        tenant_id=str(effective_tenant_id),
+        caller_id=caller_id,
+        environment=environment,
     )
-    did_svc = TenantPhoneNumberService(container.db_pool)
-    require_attestation = environment == "production"
-    default_mode = "enforce" if environment == "production" else "log"
-    enforcement_mode = (
-        os.getenv("CALLER_ID_ENFORCEMENT_MODE", default_mode).strip().lower()
-    )
-    if enforcement_mode not in {"enforce", "log", "off"}:
-        enforcement_mode = default_mode
-
-    if enforcement_mode != "off":
-        try:
-            caller_id_ok = await did_svc.is_verified_for_tenant(
-                tenant_id=str(effective_tenant_id),
-                e164=caller_id,
-                require_attestation=require_attestation,
-            )
-        except Exception as did_exc:
-            logger.error(
-                "caller_id_verification_lookup_failed tenant=%s caller_id=%s err=%s",
-                effective_tenant_id, caller_id, did_exc,
-            )
-            caller_id_ok = False
-
-        if not caller_id_ok:
-            logger.warning(
-                "caller_id_unauthorized tenant=%s caller_id=%s mode=%s "
-                "environment=%s require_attestation=%s",
-                effective_tenant_id, caller_id, enforcement_mode,
-                environment, require_attestation,
-            )
-            if enforcement_mode == "enforce":
-                raise HTTPException(
-                    status_code=403,
-                    detail={
-                        "error": "caller_id_not_verified",
-                        "message": (
-                            "The caller_id is not registered and verified under "
-                            "this tenant. Register it at POST /api/v1/"
-                            "tenant-phone-numbers and verify before dialing."
-                        ),
-                        "caller_id": caller_id,
-                        "require_attestation": require_attestation,
-                    },
-                )
+    if not caller_id_decision.allowed:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "caller_id_not_verified",
+                "message": (
+                    "The caller_id is not registered and verified under "
+                    "this tenant. Register it at POST /api/v1/"
+                    "tenant-phone-numbers and verify before dialing."
+                ),
+                "caller_id": caller_id,
+                "require_attestation": caller_id_decision.require_attestation,
+            },
+        )
 
     guard = CallGuard(
         db_pool=container.db_pool,

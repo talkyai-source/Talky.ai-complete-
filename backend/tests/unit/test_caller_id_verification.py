@@ -127,12 +127,13 @@ async def test_db_failure_denies_cleanly():
 # ────────────────────────────────────────────────────────────────────────────
 
 def _resolve_mode() -> str:
+    # Exercise the real resolver (extracted into the telephony package)
+    # rather than a copy, so the two can't silently drift apart.
+    from app.domain.services.telephony.caller_id_guard import (
+        resolve_enforcement_mode,
+    )
     environment = os.getenv("ENVIRONMENT", "development").strip().lower()
-    default_mode = "enforce" if environment == "production" else "log"
-    mode = os.getenv("CALLER_ID_ENFORCEMENT_MODE", default_mode).strip().lower()
-    if mode not in {"enforce", "log", "off"}:
-        mode = default_mode
-    return mode
+    return resolve_enforcement_mode(environment)
 
 
 def test_enforcement_defaults_to_enforce_in_prod(monkeypatch: pytest.MonkeyPatch):
@@ -157,6 +158,79 @@ def test_mode_can_be_overridden_to_off_in_dev(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.setenv("CALLER_ID_ENFORCEMENT_MODE", "off")
     assert _resolve_mode() == "off"
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# check_caller_id_ownership — decision logic (extracted from make_call)
+# ────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_ownership_off_mode_allows_without_lookup(monkeypatch):
+    """off mode short-circuits to allowed and never touches the DB."""
+    from app.domain.services.telephony import caller_id_guard
+    monkeypatch.setenv("CALLER_ID_ENFORCEMENT_MODE", "off")
+    # A pool whose acquire() would explode — proves we never call it.
+    exploding = MagicMock()
+    exploding.acquire.side_effect = AssertionError("DB must not be touched in off mode")
+    decision = await caller_id_guard.check_caller_id_ownership(
+        exploding, tenant_id=_TENANT_ID, caller_id="+14155551234",
+        environment="development",
+    )
+    assert decision.allowed is True
+    assert decision.enforcement_mode == "off"
+
+
+@pytest.mark.asyncio
+async def test_ownership_enforce_denies_unverified(monkeypatch):
+    from app.domain.services.telephony import caller_id_guard
+    monkeypatch.setenv("CALLER_ID_ENFORCEMENT_MODE", "enforce")
+    pool = _FakePool(None)  # no row → unverified
+    decision = await caller_id_guard.check_caller_id_ownership(
+        pool, tenant_id=_TENANT_ID, caller_id="+14155551234",
+        environment="development",
+    )
+    assert decision.allowed is False
+
+
+@pytest.mark.asyncio
+async def test_ownership_log_allows_unverified(monkeypatch):
+    """log mode warns but still allows an unverified number."""
+    from app.domain.services.telephony import caller_id_guard
+    monkeypatch.setenv("CALLER_ID_ENFORCEMENT_MODE", "log")
+    pool = _FakePool(None)
+    decision = await caller_id_guard.check_caller_id_ownership(
+        pool, tenant_id=_TENANT_ID, caller_id="+14155551234",
+        environment="development",
+    )
+    assert decision.allowed is True
+    assert decision.enforcement_mode == "log"
+
+
+@pytest.mark.asyncio
+async def test_ownership_enforce_allows_verified(monkeypatch):
+    from app.domain.services.telephony import caller_id_guard
+    monkeypatch.setenv("CALLER_ID_ENFORCEMENT_MODE", "enforce")
+    pool = _FakePool({"status": "verified", "stir_shaken_token": "attest_ABC"})
+    decision = await caller_id_guard.check_caller_id_ownership(
+        pool, tenant_id=_TENANT_ID, caller_id="+14155551234",
+        environment="development",
+    )
+    assert decision.allowed is True
+
+
+@pytest.mark.asyncio
+async def test_ownership_failclosed_on_db_error(monkeypatch):
+    """A DB error during lookup denies cleanly under enforce (no 500)."""
+    from app.domain.services.telephony import caller_id_guard
+    monkeypatch.setenv("CALLER_ID_ENFORCEMENT_MODE", "enforce")
+    broken = MagicMock()
+    broken.acquire.side_effect = RuntimeError("db down")
+    decision = await caller_id_guard.check_caller_id_ownership(
+        broken, tenant_id=_TENANT_ID, caller_id="+14155551234",
+        environment="production",
+    )
+    assert decision.allowed is False
+    assert decision.require_attestation is True
 
 
 # ────────────────────────────────────────────────────────────────────────────
