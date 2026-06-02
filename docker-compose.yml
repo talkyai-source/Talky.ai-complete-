@@ -39,7 +39,10 @@ services:
       POSTGRES_INITDB_ARGS: "--data-checksums"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backend/database/complete_schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      # Canonical schema = pg_dump of prod (see backend/database/MIGRATIONS.md).
+      # The old complete_schema.sql was stale (65 tables vs prod's 76) and is
+      # no longer the init source. Incremental changes apply via Alembic.
+      - ./backend/database/schema/baseline_2026-06-02.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     ports:
       # Bound to 127.0.0.1 only — DB must not be reachable from the public internet.
       - "127.0.0.1:5432:5432"
