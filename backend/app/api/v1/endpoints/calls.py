@@ -139,7 +139,7 @@ async def list_live_calls(
           AND  (
                   c.status IN ({placeholders})
                   OR (c.ended_at IS NOT NULL
-                      AND c.ended_at >= NOW() - (${len(_LIVE_STATUSES) + 2} || ' seconds')::INTERVAL)
+                      AND c.ended_at >= NOW() - make_interval(secs => ${len(_LIVE_STATUSES) + 2}))
                 )
           {where_campaign}
         ORDER BY COALESCE(c.started_at, c.created_at) DESC
