@@ -21,6 +21,7 @@ from app.api.v1.endpoints.auth import router as auth_router
 from app.api.v1.endpoints.billing import router as billing_router
 from app.api.v1.endpoints.calls import router as calls_router
 from app.api.v1.endpoints.campaigns import router as campaigns_router
+from app.api.v1.endpoints.campaign_knowledge import router as campaign_knowledge_router
 from app.api.v1.endpoints.clients import router as clients_router
 from app.api.v1.endpoints.connectors import router as connectors_router
 from app.api.v1.endpoints.contacts import router as contacts_router
@@ -63,6 +64,7 @@ from app.api.v1.endpoints.emergency_access import router as emergency_access_rou
 # Include all routers
 api_router.include_router(auth_router)
 api_router.include_router(campaigns_router)
+api_router.include_router(campaign_knowledge_router)
 api_router.include_router(contacts_router)
 api_router.include_router(calls_router)
 api_router.include_router(recordings_router)
