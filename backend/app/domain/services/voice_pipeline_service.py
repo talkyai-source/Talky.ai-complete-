@@ -45,6 +45,7 @@ from app.domain.services.voice_pipeline.llm_response import (
     generate_llm_response as _generate_llm_response_impl,
     response_max_sentences_for_turn as _response_max_sentences_for_turn_impl,
 )
+from app.domain.services.voice_pipeline.tts_playback import TtsPlayback
 from app.core.container import get_container
 from app.core.postgres_adapter import Client as PostgresAdapterClient
 from app.core.telemetry import get_tracer, pipeline_span, record_latency, voice_span
@@ -218,6 +219,12 @@ class VoicePipelineService:
         self.prompt_manager = PromptManager()
         self.transcript_service = TranscriptService()
         self.latency_tracker = get_latency_tracker()
+
+        # TTS streaming/playback loop extracted to a collaborator (item 2,
+        # slice 3). It reads its deps (tts_provider/media_gateway/
+        # latency_tracker/...) off this service at call time so attribute
+        # patching keeps working; the barge-in event is resolved per call.
+        self._tts_playback = TtsPlayback(self)
         self._barge_in_events: dict[str, asyncio.Event] = {}
         self._pending_llm_tasks: dict[str, asyncio.Task] = {}
         self._tracer = get_tracer()
@@ -1609,182 +1616,16 @@ class VoicePipelineService:
         """
         Synthesize TTS audio and stream it to the media gateway.
         Returns True if TTS was interrupted by barge-in, False on normal completion.
+
+        Implementation extracted to voice_pipeline.tts_playback (item 2, slice 3).
+        Kept as a method so external callers (pipeline.synthesize_and_send_audio)
+        and tests that mock it are unchanged; the barge-in event is resolved here
+        and passed in.
         """
-        call_id = session.call_id
-        barge_in_event = self._barge_in_event_for(session)
-        # Mark TTS as active here so handle_turn_end skips if a greeting
-        # or a previous turn is already speaking.
-        session.tts_active = True
-
-        interrupted = False
-        completed = False
-        silent_reason: Optional[str] = None
-        first_chunk = True
-        first_chunk_sent = False  # track whether any audio reached the gateway
-        try:
-            # If user spoke during the LLM call, the barge-in event is already set.
-            # Don't start TTS — send the stop signal immediately and return.
-            if barge_in_event and barge_in_event.is_set():
-                interrupted = True
-                logger.info(
-                    "barge_in_before_tts",
-                    extra={"call_id": call_id, "turn_id": session.turn_id},
-                )
-                barge_in_event.clear()
-                try:
-                    await self.media_gateway.clear_output_buffer(call_id)
-                except Exception as _e:
-                    logger.debug("barge_in_clear_buffer_failed call_id=%s: %s", call_id[:8], _e)
-                if websocket:
-                    try:
-                        await websocket.send_json({"type": "tts_interrupted", "reason": "barge_in"})
-                    except Exception as _e:
-                        logger.debug("barge_in_ws_notify_failed call_id=%s: %s", call_id[:8], _e)
-                # Must return `interrupted` (True), not bare `return` (None).
-                # A bare return gives None to the caller, which is falsy — the
-                # sentence loop in _stream_llm_and_tts would not break and would
-                # immediately call TTS again with the next sentence, causing the
-                # AI to start speaking again right after being interrupted.
-                return interrupted
-
-            # TTS hard inter-chunk timeout — protects against silent WS hangs
-            # mid-sentence. Pattern adapted from Pipecat
-            # (https://github.com/pipecat-ai/pipecat) — same shape they use for
-            # Deepgram STT reconnect: convert `async for` into manual
-            # `__anext__()` with a per-step deadline so a stuck provider socket
-            # ends the turn cleanly instead of freezing the call.
-            #
-            # 5s is intentionally larger than typical first-chunk latency
-            # (~250ms for Cartesia/Chirp/ElevenLabs streaming) so it never
-            # fires on healthy traffic. It only catches the rare case where
-            # the upstream WS dies without notifying the SDK.
-            _TTS_INTER_CHUNK_TIMEOUT_S = 5.0
-            _tts_iter = self.tts_provider.stream_synthesize(
-                text,
-                voice_id=session.voice_id,
-                sample_rate=self.tts_sample_rate,
-                call_id=call_id,
-            ).__aiter__()
-            provider_exhausted = False
-            while True:
-                try:
-                    audio_chunk = await asyncio.wait_for(
-                        _tts_iter.__anext__(),
-                        timeout=_TTS_INTER_CHUNK_TIMEOUT_S,
-                    )
-                except StopAsyncIteration:
-                    provider_exhausted = True
-                    break
-                except asyncio.TimeoutError:
-                    logger.error(
-                        "tts_inter_chunk_timeout call_id=%s timeout_s=%.1f "
-                        "text=%r — ending turn cleanly to avoid pipeline freeze",
-                        call_id[:12], _TTS_INTER_CHUNK_TIMEOUT_S, text[:60],
-                    )
-                    break
-                if barge_in_event and barge_in_event.is_set():
-                    logger.info(f"Barge-in interrupted TTS for call {call_id}")
-                    interrupted = True
-                    barge_in_event.clear()
-                    try:
-                        await self.media_gateway.clear_output_buffer(call_id)
-                    except Exception as _exc:
-                        logger.debug("clear_output_buffer mid-TTS failed: %s", _exc)
-                    # Tell the browser to stop playing immediately — don't wait for
-                    # handle_barge_in to do it after handle_turn_end completes.
-                    if websocket:
-                        try:
-                            await websocket.send_json({"type": "tts_interrupted", "reason": "barge_in"})
-                        except Exception as _exc:
-                            logger.debug("tts_interrupted WS send failed: %s", _exc)
-                    break
-                if first_chunk:
-                    if track_latency:
-                        self.latency_tracker.mark_tts_first_chunk(call_id)
-                        self.latency_tracker.mark_response_start(call_id)
-                        self.latency_tracker.mark_audio_start(call_id)
-                    first_chunk = False
-                raw = audio_chunk.data if hasattr(audio_chunk, "data") else audio_chunk
-                # Int16 PCM requires an even number of bytes (2 bytes per sample).
-                # Odd-length chunks from a TTS provider indicate a framing error;
-                # silently passing them corrupts every subsequent sample's phase.
-                # Trim the orphan byte here — the gateway's pending_byte mechanism
-                # would hide it, but it's better to surface it at the source.
-                if len(raw) % 2 != 0:
-                    logger.warning(
-                        "TTS chunk odd length %d bytes from %s for call %s — "
-                        "trimming trailing byte to maintain Int16 alignment",
-                        len(raw), getattr(self.tts_provider, "name", "unknown"), call_id,
-                    )
-                    raw = raw[:-1]
-                if not raw:
-                    continue
-                await self.media_gateway.send_audio(call_id, raw)
-                first_chunk_sent = True  # at least one chunk reached the gateway
-                # Check barge-in again immediately after send: barge-in may have
-                # fired during the gateway send await before the next TTS chunk arrives.
-                if barge_in_event and barge_in_event.is_set():
-                    logger.info(f"Barge-in (post-send) interrupted TTS for call {call_id}")
-                    interrupted = True
-                    barge_in_event.clear()
-                    try:
-                        await self.media_gateway.clear_output_buffer(call_id)
-                    except Exception as _exc:
-                        logger.debug("clear_output_buffer post-send failed: %s", _exc)
-                    if websocket:
-                        try:
-                            await websocket.send_json({"type": "tts_interrupted", "reason": "barge_in"})
-                        except Exception as _exc:
-                            logger.debug("tts_interrupted post-send WS send failed: %s", _exc)
-                    break
-            if provider_exhausted and not interrupted:
-                # Normal completion (not interrupted by barge-in) — flush any
-                # remaining bytes in the gateway output buffer so the last
-                # portion of audio is not silently dropped.
-                flush = getattr(self.media_gateway, "flush_tts_buffer", None)
-                if not flush:
-                    flush = getattr(self.media_gateway, "flush_audio_buffer", None)
-                if flush:
-                    try:
-                        await flush(call_id)
-                    except Exception as _exc:
-                        logger.debug("flush buffer failed: %s", _exc)
-                completed = True
-        except SessionGoneError:
-            # Browser WebSocket was torn down while TTS was streaming.
-            # Exit the loop silently — this is normal teardown, not an error.
-            silent_reason = "session_gone"
-            logger.debug("TTS loop stopped: browser session %s already gone", call_id)
-        except Exception as e:
-            silent_reason = "tts_exception"
-            logger.error(f"TTS synthesis error for call {call_id}: {e}", exc_info=True)
-            # FIX 4 — If no audio reached the gateway yet, play a one-shot fallback
-            # so the caller gets an explicit signal instead of silence.  The
-            # _tts_fallback_attempted flag prevents infinite recursion when the
-            # fallback itself fails (e.g. TTS provider is fully down).
-            if not first_chunk_sent and not getattr(session, "_tts_fallback_attempted", False):
-                session._tts_fallback_attempted = True
-                try:
-                    await self.synthesize_and_send_audio(
-                        session,
-                        "I'm sorry, I couldn't respond. Please say that again.",
-                        websocket,
-                        track_latency=False,
-                    )
-                except Exception:
-                    pass
-        finally:
-            if not interrupted and first_chunk:
-                if silent_reason is None and completed:
-                    silent_reason = "provider_empty_stream"
-                if silent_reason is not None:
-                    self._record_silent_turn(call_id, silent_reason)
-            session._tts_fallback_attempted = False
-            if track_latency:
-                self.latency_tracker.mark_tts_end(call_id)
-                if interrupted:
-                    self.latency_tracker.mark_interrupted(call_id, reason="barge_in")
-                elif completed:
-                    self.latency_tracker.mark_completed(call_id)
-            session.tts_active = False
-        return interrupted
+        return await self._tts_playback.synthesize_and_send(
+            session,
+            text,
+            websocket,
+            barge_in_event=self._barge_in_event_for(session),
+            track_latency=track_latency,
+        )
