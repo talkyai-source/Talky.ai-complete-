@@ -71,6 +71,7 @@ def _build_validated_script_config(
     agent_names: List[str],
     campaign_slots: dict,
     additional_instructions: str,
+    knowledge_driven: bool = False,
 ) -> dict[str, Any]:
     """HTTP wrapper around the domain prompt validation service."""
     from app.domain.services.campaign_prompt_service import (
@@ -85,6 +86,7 @@ def _build_validated_script_config(
             agent_names=agent_names,
             campaign_slots=campaign_slots,
             additional_instructions=additional_instructions,
+            knowledge_driven=knowledge_driven,
         )
     except CampaignPromptValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -169,6 +171,7 @@ async def preview_prompt(
             campaign_slots=body.campaign_slots,
             additional_instructions=body.additional_instructions,
             direction=body.direction,
+            knowledge_driven=body.knowledge_driven,
         )
     except PromptCompositionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -244,6 +247,7 @@ async def create_campaign(
             agent_names=campaign_data.agent_names,
             campaign_slots=campaign_data.campaign_slots,
             additional_instructions=campaign_data.system_prompt,
+            knowledge_driven=campaign_data.knowledge_driven,
         )
 
         insert_payload = {
@@ -331,6 +335,7 @@ async def update_campaign(
             agent_names=campaign_data.agent_names,
             campaign_slots=campaign_data.campaign_slots,
             additional_instructions=campaign_data.system_prompt,
+            knowledge_driven=campaign_data.knowledge_driven,
         )
 
         update_payload = {

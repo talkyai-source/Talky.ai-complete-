@@ -32,6 +32,14 @@ class CampaignCreateRequest(BaseModel):
     agent_names: List[str] = Field(..., min_length=1)
     company_name: str = Field(..., min_length=1)
     campaign_slots: dict = Field(default_factory=dict)
+    knowledge_driven: bool = Field(
+        default=False,
+        description=(
+            "Knowledge-first campaign (vectorless-RAG wizard): content comes "
+            "from the uploaded knowledge base, so per-persona content slots are "
+            "not required and the persona prompt is a lean identity+tone shell."
+        ),
+    )
 
     @field_validator("agent_names")
     @classmethod
@@ -57,6 +65,14 @@ class CampaignUpdateRequest(BaseModel):
     agent_names: List[str] = Field(..., min_length=1)
     company_name: str = Field(..., min_length=1)
     campaign_slots: dict = Field(default_factory=dict)
+    knowledge_driven: bool = Field(
+        default=False,
+        description=(
+            "Knowledge-first campaign (vectorless-RAG wizard): content comes "
+            "from the uploaded knowledge base, so per-persona content slots are "
+            "not required and the persona prompt is a lean identity+tone shell."
+        ),
+    )
 
     @field_validator("agent_names")
     @classmethod
@@ -88,6 +104,10 @@ class CampaignPromptPreviewRequest(BaseModel):
     campaign_slots: dict = Field(default_factory=dict)
     additional_instructions: Optional[str] = None
     direction: Literal["outbound", "inbound"] = "outbound"
+    knowledge_driven: bool = Field(
+        default=False,
+        description="Preview the lean knowledge-first prompt (skips content slots).",
+    )
 
 
 class CampaignPromptPreviewResponse(BaseModel):

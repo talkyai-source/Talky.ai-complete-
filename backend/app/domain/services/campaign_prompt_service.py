@@ -22,8 +22,18 @@ def build_validated_script_config(
     agent_names: List[str],
     campaign_slots: dict,
     additional_instructions: str,
+    knowledge_driven: bool = False,
 ) -> dict[str, Any]:
-    """Build script_config only after validating the production prompt path."""
+    """Build script_config only after validating the production prompt path.
+
+    ``knowledge_driven`` (vectorless-RAG creation wizard): when True the
+    campaign's content comes from its uploaded knowledge base, not per-persona
+    content slots — so composition skips the required-slot check and renders a
+    lean identity+tone prompt. company_name + at least one agent name are still
+    required (they anchor the agent's identity). The flag is persisted in
+    script_config so the per-call composer (telephony_session_config) renders
+    the same lean prompt on every call.
+    """
     cleaned_company = company_name.strip()
     cleaned_agents = [name.strip() for name in agent_names if name.strip()]
     if not cleaned_company:
@@ -39,6 +49,7 @@ def build_validated_script_config(
             company_name=cleaned_company,
             campaign_slots=slots,
             additional_instructions=additional_instructions.strip(),
+            knowledge_driven=knowledge_driven,
         )
     except PromptCompositionError as exc:
         raise CampaignPromptValidationError(
@@ -51,4 +62,5 @@ def build_validated_script_config(
         "agent_names": cleaned_agents,
         "campaign_slots": slots,
         "additional_instructions": additional_instructions.strip(),
+        "knowledge_driven": knowledge_driven,
     }

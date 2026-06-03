@@ -129,6 +129,51 @@ class PromptCompositionError(ValueError):
     """
 
 
+# ── Knowledge-driven persona bodies (vectorless-RAG creation wizard) ──
+# Used when a campaign is created knowledge-first: the operator uploads a
+# knowledge base instead of filling per-persona content slots, so the persona
+# prompt is a lean identity + tone shell and the substance is supplied by the
+# injected knowledge tree (see app/services/scripts/knowledge). Slot-free by
+# design — that's the whole point of the simplified creation flow.
+_KNOWLEDGE_DRIVEN_BODIES: dict[str, str] = {
+    "lead_gen": (
+        "You are {agent_name}, an outbound representative for {company_name}. "
+        "Start a natural conversation with the person you've called, spark "
+        "interest, answer their questions accurately, and guide them toward the "
+        "next step (booking, a follow-up, or a clear yes/no)."
+    ),
+    "customer_support": (
+        "You are {agent_name}, a customer-support agent for {company_name}. "
+        "Help the caller resolve their issue and answer their questions "
+        "accurately and patiently; escalate or take a message when you cannot "
+        "fully resolve something."
+    ),
+    "receptionist": (
+        "You are {agent_name}, the receptionist for {company_name}. Greet "
+        "callers warmly, answer their questions, and route them or take a "
+        "message as appropriate."
+    ),
+}
+
+_KNOWLEDGE_DRIVEN_SUFFIX = (
+    "\n\nAnswer using the company knowledge provided to you in this prompt. "
+    "Treat those facts as authoritative. If the caller asks something the "
+    "knowledge does not cover, say you'll follow up with the details rather "
+    "than guessing or inventing anything. Keep replies short, natural, and "
+    "easy to follow on a phone call."
+)
+
+
+def _compose_knowledge_driven_body(
+    persona_type: str, agent_name: str, company_name: str
+) -> str:
+    """Lean, slot-free persona body for knowledge-driven campaigns."""
+    base = _KNOWLEDGE_DRIVEN_BODIES.get(
+        persona_type, _KNOWLEDGE_DRIVEN_BODIES["lead_gen"]
+    )
+    return base.format(agent_name=agent_name, company_name=company_name) + _KNOWLEDGE_DRIVEN_SUFFIX
+
+
 def compose_prompt(
     persona_type: PersonaType,
     agent_name: str,
@@ -137,6 +182,7 @@ def compose_prompt(
     additional_instructions: Optional[str] = None,
     *,
     direction: str = "outbound",
+    knowledge_driven: bool = False,
 ) -> str:
     """Return the final system prompt string.
 
@@ -177,45 +223,54 @@ def compose_prompt(
         )
 
     direction_key = (direction or "outbound").strip().lower()
-    persona_openings = PERSONA_OPENINGS[persona_type]
-    if direction_key not in persona_openings:
-        raise PromptCompositionError(
-            f"Persona {persona_type!r} has no opening for direction "
-            f"{direction_key!r}. Known directions: {sorted(persona_openings)}"
+
+    if knowledge_driven:
+        # Knowledge-first campaign: skip the per-persona content slots and use
+        # a lean identity + tone body. The substance is injected from the
+        # campaign's knowledge base at call time (knowledge/session_inject).
+        persona_block = _compose_knowledge_driven_body(
+            persona_type, agent_name, company_name
         )
+    else:
+        persona_openings = PERSONA_OPENINGS[persona_type]
+        if direction_key not in persona_openings:
+            raise PromptCompositionError(
+                f"Persona {persona_type!r} has no opening for direction "
+                f"{direction_key!r}. Known directions: {sorted(persona_openings)}"
+            )
 
-    slots = _prepare_slots(persona_type, campaign_slots)
-    slots.setdefault("agent_name", agent_name)
-    slots.setdefault("company_name", company_name)
+        slots = _prepare_slots(persona_type, campaign_slots)
+        slots.setdefault("agent_name", agent_name)
+        slots.setdefault("company_name", company_name)
 
-    required = REQUIRED_SLOTS_BY_PERSONA[persona_type]
-    missing = [k for k in required if not slots.get(k)]
-    if missing:
-        raise PromptCompositionError(
-            f"Missing required slots for persona {persona_type!r}: {missing}. "
-            f"Provided: {sorted(slots)}"
+        required = REQUIRED_SLOTS_BY_PERSONA[persona_type]
+        missing = [k for k in required if not slots.get(k)]
+        if missing:
+            raise PromptCompositionError(
+                f"Missing required slots for persona {persona_type!r}: {missing}. "
+                f"Provided: {sorted(slots)}"
+            )
+
+        # Build the per-direction persona template by concatenating the
+        # selected opening with the body. Both pieces share {placeholders}
+        # that are filled in a single str.format pass below — no recursive
+        # substitution, no template-engine.
+        persona_template = (
+            persona_openings[direction_key] + "\n" + PERSONA_BODIES[persona_type]
         )
+        # The {direction_opening} marker on the body is a no-op placeholder
+        # for the legacy / backward-compat alias path that pre-merged the
+        # opening into the body string. With the explicit concatenation
+        # above, the marker is empty in the formatted output.
+        slots.setdefault("direction_opening", "")
 
-    # Build the per-direction persona template by concatenating the
-    # selected opening with the body. Both pieces share {placeholders}
-    # that are filled in a single str.format pass below — no recursive
-    # substitution, no template-engine.
-    persona_template = (
-        persona_openings[direction_key] + "\n" + PERSONA_BODIES[persona_type]
-    )
-    # The {direction_opening} marker on the body is a no-op placeholder
-    # for the legacy / backward-compat alias path that pre-merged the
-    # opening into the body string. With the explicit concatenation
-    # above, the marker is empty in the formatted output.
-    slots.setdefault("direction_opening", "")
-
-    try:
-        persona_block = persona_template.format(**slots)
-    except KeyError as exc:
-        raise PromptCompositionError(
-            f"Persona {persona_type!r} references undefined slot: {exc}. "
-            f"Provided: {sorted(slots)}"
-        ) from exc
+        try:
+            persona_block = persona_template.format(**slots)
+        except KeyError as exc:
+            raise PromptCompositionError(
+                f"Persona {persona_type!r} references undefined slot: {exc}. "
+                f"Provided: {sorted(slots)}"
+            ) from exc
 
     # Guardrails header is also a template (it references {agent_name}
     # and {company_name} in the identity line).

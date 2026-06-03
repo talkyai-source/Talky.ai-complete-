@@ -626,6 +626,7 @@ def build_telephony_session_config(
                 campaign_slots=script_config.get("campaign_slots") or {},
                 additional_instructions=script_config.get("additional_instructions"),
                 direction=direction.value,
+                knowledge_driven=bool(script_config.get("knowledge_driven")),
             )
             logger.info(
                 "telephony_prompt_composed persona=%s agent=%s company=%s campaign=%s",
