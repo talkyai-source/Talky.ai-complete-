@@ -6571,3 +6571,57 @@ COMMENT ON TABLE tenant_ai_credentials IS
 COMMENT ON COLUMN tenant_ai_credentials.encrypted_key IS
     'Envelope-encrypted ciphertext from TokenEncryptionService. '
     'Plaintext never lands in the DB.';
+
+-- =============================================================================
+-- Appended 2026-06-03 (vectorless RAG, P1): campaign knowledge tree.
+-- Mirrors Alembic 0010_campaign_knowledge so fresh installs + CI get it.
+-- =============================================================================
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+ALTER TABLE campaigns
+    ADD COLUMN IF NOT EXISTS knowledge_mode  TEXT NOT NULL DEFAULT 'none',
+    ADD COLUMN IF NOT EXISTS knowledge_model TEXT;
+
+CREATE TABLE IF NOT EXISTS campaign_knowledge_sources (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    campaign_id   UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    tenant_id     UUID NOT NULL,
+    filename      TEXT,
+    raw_md        TEXT NOT NULL,
+    token_count   INTEGER NOT NULL DEFAULT 0,
+    version       INTEGER NOT NULL DEFAULT 1,
+    status        TEXT NOT NULL DEFAULT 'processing'
+                  CHECK (status IN ('processing','ready','failed')),
+    error         TEXT,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_cks_campaign ON campaign_knowledge_sources (campaign_id, status);
+
+CREATE TABLE IF NOT EXISTS campaign_knowledge_nodes (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    campaign_id       UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    tenant_id         UUID NOT NULL,
+    source_id         UUID NOT NULL REFERENCES campaign_knowledge_sources(id) ON DELETE CASCADE,
+    parent_id         UUID REFERENCES campaign_knowledge_nodes(id) ON DELETE CASCADE,
+    depth             INTEGER NOT NULL DEFAULT 0,
+    path              TEXT NOT NULL,
+    position          INTEGER NOT NULL DEFAULT 0,
+    heading           TEXT NOT NULL,
+    content           TEXT NOT NULL DEFAULT '',
+    summary           TEXT,
+    voice_answer      TEXT,
+    keywords          TEXT[],
+    example_questions TEXT[],
+    search_text       TEXT NOT NULL DEFAULT '',
+    search_tsv        tsvector,
+    priority          SMALLINT NOT NULL DEFAULT 0,
+    hit_count         BIGINT NOT NULL DEFAULT 0,
+    enabled           BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ckn_fts      ON campaign_knowledge_nodes USING gin(search_tsv);
+CREATE INDEX IF NOT EXISTS idx_ckn_trgm     ON campaign_knowledge_nodes USING gin(search_text gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_ckn_campaign ON campaign_knowledge_nodes (campaign_id, enabled);
+CREATE INDEX IF NOT EXISTS idx_ckn_tree     ON campaign_knowledge_nodes (campaign_id, parent_id, position);
