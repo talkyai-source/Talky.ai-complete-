@@ -63,6 +63,10 @@ export interface CampaignCreate {
     company_name: string;
     agent_names: string[];      // 1..3 names — rotated per call
     campaign_slots: Record<string, unknown>;
+    // Knowledge-first campaign (vectorless-RAG wizard): content comes from the
+    // uploaded knowledge base, so per-persona content slots are not required and
+    // the persona prompt is a lean identity+tone shell. Default false.
+    knowledge_driven?: boolean;
 }
 
 // Call Types
@@ -175,6 +179,7 @@ class DashboardApi {
         campaign_slots: Record<string, unknown>;
         additional_instructions?: string;
         direction?: "outbound" | "inbound";
+        knowledge_driven?: boolean;
     }): Promise<{
         system_prompt: string;
         greeting: string;
@@ -192,6 +197,7 @@ class DashboardApi {
                 campaign_slots: input.campaign_slots,
                 additional_instructions: input.additional_instructions,
                 direction: input.direction ?? "outbound",
+                knowledge_driven: input.knowledge_driven ?? false,
             },
         });
     }

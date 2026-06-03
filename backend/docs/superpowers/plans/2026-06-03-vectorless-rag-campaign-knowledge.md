@@ -1,7 +1,7 @@
 # Plan — Vectorless RAG: campaign knowledge tree + simplified creation flow
 
 **Date:** 2026-06-03
-**Status:** **P1 + P2 + P3 done; backend live on prod (flag ON), frontend committed (Vercel deploy pending).** Live-call acceptance + P4 (creation wizard) next.
+**Status:** **P1–P4 done. Backend live on prod (flag ON); frontend (P3 panel + P4 wizard) committed, Vercel deploy pending.** Remaining: deploy frontend + live-call acceptance; P5 (optional branch router) only if recall proves weak.
 **Decision locked:** retrieval = **Adaptive FTS** (small KB → inline; large KB → Postgres full-text over enriched tree leaves). No vector DB, no embeddings.
 
 ---
@@ -155,7 +155,7 @@ All tenant-scoped (RLS + `require_tenant_access`), size-capped (e.g. 256KB md), 
   - **Per-turn** (`voice_pipeline/turn_streamer.py`): for `retrieve`/`map_retrieve`, fetch top-k for the caller's latest message and inject for that turn only. Bounded by `KNOWLEDGE_RETRIEVE_TIMEOUT_MS` (250ms) so a slow DB can't hurt TTFT; fully fail-soft. `inline` skips it (already baked).
   - `CallSession.knowledge_mode` added; shared `knowledge_enabled()` gate; flag **enabled on prod** (`CAMPAIGN_KNOWLEDGE_ENABLED=true` in `/opt/talky/backend/.env`). Zero effect for `none`-mode campaigns (returns before any DB call). 8 new unit tests; ruff-F clean. Verified on prod: ingested a 10-node KB into campaign 5f47a5fa → injection bakes it into the prompt; per-turn retrieve resolves all sample questions. **Pending: a human-answered live call for final acceptance.**
 - **P3 — frontend tree: ✅ DONE (2026-06-04).** `Talk-Leee/src/components/campaigns/knowledge-panel.tsx` on the campaign detail page: upload .md/.txt, mode badge (inline/map_retrieve/retrieve) w/ explanation, sources list (status + delete), collapsible/indented node tree showing spoken answer + keyword chips + hit_count analytics, per-node enable/disable + pin (priority) + inline-edit of the spoken answer (optimistic + rollback). Renders nothing when the backend flag is off (GET 404s). API methods added to `src/lib/api.ts`. tsc clean, eslint clean, `next build` OK. Frontend = Vercel project `talkleeai` (NOT in the backend git-deploy; deploys via Vercel).
-- **P4 — creation wizard:** the 3-step flow.
+- **P4 — creation wizard: ✅ DONE (2026-06-04).** Backend: additive **`knowledge_driven`** flag (default false → existing slot-based campaigns unchanged) threaded through `composer.compose_prompt` (lean identity+tone body, skips required content slots), `campaign_prompt_service` (persists flag in script_config), Create/Update/Preview schemas + endpoints, and per-call `telephony_session_config`. Backend live on prod. Frontend: `Talk-Leee/src/components/campaigns/campaign-wizard.tsx` — 3-step (Basics: name/company/persona/agents/voice/goal → Knowledge: upload .md/.txt → Review: prompt+greeting preview via `previewCampaignPrompt(knowledge_driven)`), creates with `knowledge_driven:true` then chains the knowledge upload. Mounted at `/campaigns/new` (default; toggle to the classic `CampaignForm` for power users / editing). 10 new backend unit tests; tsc + eslint clean.
 - **P5 — (optional) recall upgrade:** cached per-call "branch router" LLM call, only if FTS recall proves weak in practice. Long-context inline already covers small KBs.
 
 ## 10. Testing
