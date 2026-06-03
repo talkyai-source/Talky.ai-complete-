@@ -202,7 +202,13 @@ def resample_audio(
     res_type: str = "soxr_hq",
 ) -> bytes:
     """
-    Resample PCM audio from one sample rate to another using librosa+soxr.
+    Resample PCM audio from one sample rate to another using soxr.
+
+    soxr is the same band-limited-sinc resampler librosa delegates to for
+    its ``soxr_*`` res_types, but as a tiny standalone C library — so we
+    call it directly and avoid pulling in the heavy librosa/numba/scipy
+    stack (which was never installed on prod, silently breaking every
+    16->8 kHz TTS encode and leaving callers with a silent agent).
 
     Args:
         audio_data: Raw PCM audio bytes (16-bit or 32-bit float)
@@ -210,10 +216,9 @@ def resample_audio(
         to_rate: Target sample rate in Hz
         channels: Number of audio channels
         bit_depth: Bit depth (16 for int16, 32 for float32)
-        res_type: soxr quality preset. Defaults to "soxr_hq" (high-quality band-limited
-            sinc, used by recording / TTS paths). Telephony hot paths should pass
-            "soxr_mq" — ~3x faster, perceptually identical on phone-bandwidth audio
-            (everything above ~3.4 kHz is empty anyway on G.711-fed calls).
+        res_type: librosa-style soxr preset ("soxr_hq" default, "soxr_mq" on
+            telephony hot paths — ~3x faster, perceptually identical on
+            phone-bandwidth audio). Mapped to the soxr quality code.
 
     Returns:
         Resampled PCM audio bytes (same format as input)
@@ -224,9 +229,9 @@ def resample_audio(
     import numpy as np
 
     try:
-        import librosa
+        import soxr
     except ImportError:
-        raise ImportError("librosa is required for resampling. Install with: pip install librosa soxr")
+        raise ImportError("soxr is required for resampling. Install with: pip install soxr")
 
     # Convert bytes to numpy array
     if bit_depth == 16:
@@ -236,14 +241,14 @@ def resample_audio(
     else:
         raise ValueError(f"Unsupported bit depth: {bit_depth}")
 
-    # Resample using librosa with soxr backend
-    resampled = librosa.resample(
-        audio_array,
-        orig_sr=from_rate,
-        target_sr=to_rate,
-        res_type=res_type,
-    )
-    
+    # Map librosa-style "soxr_mq"/"soxr_hq" presets to soxr quality codes
+    # (QQ/LQ/MQ/HQ/VHQ). Anything unrecognised falls back to HQ.
+    quality = res_type[5:].upper() if res_type.lower().startswith("soxr_") else "HQ"
+    if quality not in {"QQ", "LQ", "MQ", "HQ", "VHQ"}:
+        quality = "HQ"
+
+    resampled = soxr.resample(audio_array, from_rate, to_rate, quality=quality)
+
     # Convert back to original format
     if bit_depth == 16:
         resampled_int = np.clip(resampled * 32768.0, -32768, 32767).astype(np.int16)
