@@ -1,7 +1,7 @@
 # Plan — Vectorless RAG: campaign knowledge tree + simplified creation flow
 
 **Date:** 2026-06-03
-**Status:** **P1 + P2 shipped & verified on prod (2026-06-03/04); flag ON.** Live-call acceptance + P3 (frontend tree) next.
+**Status:** **P1 + P2 + P3 done; backend live on prod (flag ON), frontend committed (Vercel deploy pending).** Live-call acceptance + P4 (creation wizard) next.
 **Decision locked:** retrieval = **Adaptive FTS** (small KB → inline; large KB → Postgres full-text over enriched tree leaves). No vector DB, no embeddings.
 
 ---
@@ -154,7 +154,7 @@ All tenant-scoped (RLS + `require_tenant_access`), size-capped (e.g. 256KB md), 
   - **Pre-warm** (`telephony/prewarm.py` → `knowledge/session_inject.apply_campaign_knowledge`): once, async with the pool. `inline`→bake full `compact_tree` into `call_session.system_prompt`; `map_retrieve`→bake the skeleton (TOC); `retrieve`→nothing here (served per-turn). Also stamps `call_session.tenant_id` (the orchestrator never copied `config.tenant_id`) + `knowledge_mode`.
   - **Per-turn** (`voice_pipeline/turn_streamer.py`): for `retrieve`/`map_retrieve`, fetch top-k for the caller's latest message and inject for that turn only. Bounded by `KNOWLEDGE_RETRIEVE_TIMEOUT_MS` (250ms) so a slow DB can't hurt TTFT; fully fail-soft. `inline` skips it (already baked).
   - `CallSession.knowledge_mode` added; shared `knowledge_enabled()` gate; flag **enabled on prod** (`CAMPAIGN_KNOWLEDGE_ENABLED=true` in `/opt/talky/backend/.env`). Zero effect for `none`-mode campaigns (returns before any DB call). 8 new unit tests; ruff-F clean. Verified on prod: ingested a 10-node KB into campaign 5f47a5fa → injection bakes it into the prompt; per-turn retrieve resolves all sample questions. **Pending: a human-answered live call for final acceptance.**
-- **P3 — frontend tree:** tree view + upload UI + edit/disable.
+- **P3 — frontend tree: ✅ DONE (2026-06-04).** `Talk-Leee/src/components/campaigns/knowledge-panel.tsx` on the campaign detail page: upload .md/.txt, mode badge (inline/map_retrieve/retrieve) w/ explanation, sources list (status + delete), collapsible/indented node tree showing spoken answer + keyword chips + hit_count analytics, per-node enable/disable + pin (priority) + inline-edit of the spoken answer (optimistic + rollback). Renders nothing when the backend flag is off (GET 404s). API methods added to `src/lib/api.ts`. tsc clean, eslint clean, `next build` OK. Frontend = Vercel project `talkleeai` (NOT in the backend git-deploy; deploys via Vercel).
 - **P4 — creation wizard:** the 3-step flow.
 - **P5 — (optional) recall upgrade:** cached per-call "branch router" LLM call, only if FTS recall proves weak in practice. Long-context inline already covers small KBs.
 
