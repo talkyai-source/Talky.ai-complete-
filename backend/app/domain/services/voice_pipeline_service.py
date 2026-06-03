@@ -46,6 +46,7 @@ from app.domain.services.voice_pipeline.llm_response import (
     response_max_sentences_for_turn as _response_max_sentences_for_turn_impl,
 )
 from app.domain.services.voice_pipeline.tts_playback import TtsPlayback
+from app.domain.services.voice_pipeline.turn_runner import TurnRunner
 from app.core.container import get_container
 from app.core.postgres_adapter import Client as PostgresAdapterClient
 from app.core.telemetry import get_tracer, pipeline_span, record_latency, voice_span
@@ -220,14 +221,33 @@ class VoicePipelineService:
         self.transcript_service = TranscriptService()
         self.latency_tracker = get_latency_tracker()
 
-        # TTS streaming/playback loop extracted to a collaborator (item 2,
-        # slice 3). It reads its deps (tts_provider/media_gateway/
-        # latency_tracker/...) off this service at call time so attribute
-        # patching keeps working; the barge-in event is resolved per call.
-        self._tts_playback = TtsPlayback(self)
+        # Extracted collaborators (TtsPlayback/TurnRunner) are exposed as
+        # lazy properties below — they read their deps off this service at
+        # call time, and lazy creation keeps them working even when a test
+        # builds the service via __new__ (bypassing __init__).
         self._barge_in_events: dict[str, asyncio.Event] = {}
         self._pending_llm_tasks: dict[str, asyncio.Task] = {}
         self._tracer = get_tracer()
+
+    @property
+    def _tts_playback(self) -> TtsPlayback:
+        """TTS streaming/playback collaborator (item 2, slice 3). Lazily
+        created so it works even when the service is built via __new__."""
+        inst = self.__dict__.get("_tts_playback_inst")
+        if inst is None:
+            inst = TtsPlayback(self)
+            self.__dict__["_tts_playback_inst"] = inst
+        return inst
+
+    @property
+    def _turn_runner(self) -> TurnRunner:
+        """Per-turn LLM+TTS execution collaborator (item 2, slice 4). Lazily
+        created so it works even when the service is built via __new__."""
+        inst = self.__dict__.get("_turn_runner_inst")
+        if inst is None:
+            inst = TurnRunner(self)
+            self.__dict__["_turn_runner_inst"] = inst
+        return inst
 
     async def _await_task_after_cancel(self, task: asyncio.Task, call_id: str, label: str) -> None:
         try:
@@ -1516,79 +1536,13 @@ class VoicePipelineService:
         turn_id: int = 0,
     ) -> tuple[str, float, float]:
         """
-        Execute the LLM+TTS cycle for one user turn.
+        Execute the LLM+TTS cycle for one user turn (atomic history mgmt).
 
-        Manages conversation history atomically:
-        - User message is appended before LLM starts.
-        - Rolled back on empty response, LLM error, or asyncio.CancelledError.
-        - Assistant message is appended only when a non-empty response is produced.
-
-        Returns (response_text, llm_latency_ms, tts_latency_ms).
+        Implementation extracted to voice_pipeline.turn_runner (item 2,
+        slice 4). Kept as a method so tests that call _run_turn directly are
+        unchanged.
         """
-        call_id = session.call_id
-        history_snapshot = len(session.conversation_history)
-        session.conversation_history.append(
-            Message(role=MessageRole.USER, content=full_transcript)
-        )
-
-        captured_slots = getattr(session, "captured_slots", None)
-        if captured_slots is None or not is_dataclass(captured_slots):
-            session.captured_slots = CapturedSlotsState()
-        session.captured_slots = update_state_from_user_turn(
-            session.captured_slots, full_transcript
-        )
-
-        response_text = ""
-        llm_latency_ms = 0.0
-        tts_latency_ms = 0.0
-
-        try:
-            response_text, llm_latency_ms, tts_latency_ms = await self._stream_llm_and_tts(
-                session, websocket
-            )
-
-            ask_ai_end_action = (
-                parse_end_session_action(response_text)
-                if self._supports_llm_end_session_action(session)
-                else None
-            )
-            if ask_ai_end_action:
-                await self._shutdown_session_for_end_action(
-                    session,
-                    websocket,
-                    ask_ai_end_action["reason"],
-                    ask_ai_end_action["farewell"],
-                )
-                return "", llm_latency_ms, tts_latency_ms
-
-            if response_text and response_text.strip():
-                session.conversation_history.append(
-                    Message(role=MessageRole.ASSISTANT, content=response_text)
-                )
-                self.transcript_service.accumulate_turn(
-                    call_id=call_id,
-                    role="assistant",
-                    content=response_text,
-                    talklee_call_id=session.talklee_call_id,
-                    turn_index=session.turn_id,
-                    event_type="assistant_response",
-                    is_final=True,
-                    include_in_plaintext=True,
-                )
-            else:
-                logger.warning(
-                    f"Empty LLM response for call {call_id} — rolling back user message"
-                )
-                session.conversation_history = session.conversation_history[:history_snapshot]
-
-        except asyncio.CancelledError:
-            session.conversation_history = session.conversation_history[:history_snapshot]
-            raise
-        except Exception as e:
-            logger.error(f"Turn error for call {call_id}: {e}", exc_info=True)
-            session.conversation_history = session.conversation_history[:history_snapshot]
-
-        return response_text, llm_latency_ms, tts_latency_ms
+        return await self._turn_runner.run(session, full_transcript, websocket, turn_id)
 
     # ── LLM helper ────────────────────────────────────────────────
 
