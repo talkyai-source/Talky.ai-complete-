@@ -226,6 +226,15 @@ async def create_campaign(
             valid_voice_ids = {
                 voice.id for voice in await _get_deepgram_voices_for_current_key()
             }
+        elif ai_config.tts_provider == "cartesia":
+            # Was missing — a cartesia global provider fell through to the
+            # elevenlabs set, so every cartesia voice failed validation.
+            from app.api.v1.endpoints.ai_options._catalog import (
+                _get_live_cartesia_voices,
+            )
+            valid_voice_ids = {
+                voice.id for voice in await _get_live_cartesia_voices()
+            }
         else:
             valid_voice_ids = {
                 voice.id for voice in await get_elevenlabs_voices_for_current_key()
