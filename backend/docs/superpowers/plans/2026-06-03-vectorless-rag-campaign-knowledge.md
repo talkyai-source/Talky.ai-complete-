@@ -1,7 +1,7 @@
 # Plan — Vectorless RAG: campaign knowledge tree + simplified creation flow
 
 **Date:** 2026-06-03
-**Status:** **P1–P4 done. Backend live on prod (flag ON); frontend (P3 panel + P4 wizard) committed, Vercel deploy pending.** Remaining: deploy frontend + live-call acceptance; P5 (optional branch router) only if recall proves weak.
+**Status:** **P1–P4 done & fully deployed (2026-06-04). Backend live on prod (flag ON); frontend live at talkleeai.com.** Remaining: human-answered live-call acceptance of P2; P5 (optional branch router) only if recall proves weak.
 **Decision locked:** retrieval = **Adaptive FTS** (small KB → inline; large KB → Postgres full-text over enriched tree leaves). No vector DB, no embeddings.
 
 ---
