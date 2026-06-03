@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { ApplyToCampaignsModal } from "@/components/campaigns/apply-to-campaigns-modal";
 import {
     aiOptionsApi,
     AIProviderConfig,
@@ -119,6 +120,8 @@ export default function AIOptionsPage() {
 
     // TTS Provider filter state
     const [ttsProvider, setTtsProvider] = useState<string>("");
+    // After a save, offer to push this provider+voice onto chosen campaigns.
+    const [applyModal, setApplyModal] = useState<{ provider: string; voiceId: string; voiceLabel?: string } | null>(null);
 
     const voicePreviewAudioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -187,6 +190,13 @@ export default function AIOptionsPage() {
             });
             setTtsProvider(saved.tts_provider);
             setSaveSuccess(true);
+            // Per-campaign provider: offer to apply this saved voice/provider to
+            // existing campaigns (they're not changed automatically).
+            setApplyModal({
+                provider: saved.tts_provider,
+                voiceId: saved.tts_voice_id,
+                voiceLabel: voices.find((v) => v.id === saved.tts_voice_id)?.name,
+            });
             setLatencyWarnings(latency_warnings);
             setTimeout(() => setSaveSuccess(false), 3000);
             if (latency_warnings.length > 0) {
@@ -1077,6 +1087,13 @@ export default function AIOptionsPage() {
                     </motion.div>
                 </div>
             )}
+            <ApplyToCampaignsModal
+                open={!!applyModal}
+                provider={applyModal?.provider ?? ""}
+                voiceId={applyModal?.voiceId ?? ""}
+                voiceLabel={applyModal?.voiceLabel}
+                onClose={() => setApplyModal(null)}
+            />
         </DashboardLayout>
     );
 }

@@ -17,6 +17,7 @@ import {
     CampaignForm,
     type CampaignFormInitial,
 } from "@/components/campaigns/campaign-form";
+import { CampaignBasicsEditor } from "@/components/campaigns/campaign-basics-editor";
 import { dashboardApi, type PersonaType } from "@/lib/dashboard-api";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import { motion } from "framer-motion";
@@ -65,6 +66,8 @@ export default function EditCampaignPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [initial, setInitial] = useState<CampaignFormInitial | null>(null);
+    const [knowledgeDriven, setKnowledgeDriven] = useState(false);
+    const [ttsProvider, setTtsProvider] = useState<string | null>(null);
 
     useEffect(() => {
         let cancelled = false;
@@ -95,6 +98,10 @@ export default function EditCampaignPage() {
                     agent_names: scriptConfig.agent_names ?? [],
                     slots,
                 });
+                setKnowledgeDriven(
+                    Boolean((scriptConfig as Record<string, unknown>).knowledge_driven),
+                );
+                setTtsProvider((campaign as { tts_provider?: string | null }).tts_provider ?? null);
             } catch (err) {
                 if (cancelled) return;
                 setError(err instanceof Error ? err.message : "Failed to load campaign");
@@ -138,7 +145,23 @@ export default function EditCampaignPage() {
                     </div>
                 </div>
             ) : initial ? (
-                <CampaignForm mode="edit" campaignId={campaignId} initialData={initial} />
+                knowledgeDriven ? (
+                    <CampaignBasicsEditor
+                        campaignId={campaignId}
+                        initial={{
+                            name: initial.name,
+                            description: initial.description,
+                            companyName: initial.company_name,
+                            personaType: initial.persona_type,
+                            agentNames: initial.agent_names,
+                            voiceId: initial.voice_id,
+                            ttsProvider,
+                            goal: initial.goal,
+                        }}
+                    />
+                ) : (
+                    <CampaignForm mode="edit" campaignId={campaignId} initialData={initial} />
+                )
             ) : null}
         </DashboardLayout>
     );

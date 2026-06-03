@@ -30,6 +30,7 @@ export interface Campaign {
     status: string;
     system_prompt: string;
     voice_id: string;
+    tts_provider?: string | null;   // per-campaign TTS engine; null = tenant global
     max_concurrent_calls: number;
     total_leads: number;
     calls_completed: number;
@@ -67,6 +68,9 @@ export interface CampaignCreate {
     // uploaded knowledge base, so per-persona content slots are not required and
     // the persona prompt is a lean identity+tone shell. Default false.
     knowledge_driven?: boolean;
+    // Per-campaign TTS provider (cartesia|google|deepgram|elevenlabs). Omit to
+    // use the tenant global. The voice_id is validated against this provider.
+    tts_provider?: string;
 }
 
 // Call Types
@@ -170,6 +174,19 @@ class DashboardApi {
             throw new Error("Campaign update failed. The backend did not return an updated campaign.");
         }
         return { campaign: response.campaign };
+    }
+
+    /** Apply a TTS provider+voice to a chosen set of campaigns (per-campaign). */
+    async applyTtsConfig(input: {
+        tts_provider: string;
+        tts_voice_id: string;
+        campaign_ids: string[];
+    }): Promise<{ updated: string[]; count: number }> {
+        return this.client.request({
+            path: "/campaigns/apply-tts-config",
+            method: "POST",
+            body: input,
+        });
     }
 
     async previewCampaignPrompt(input: {
