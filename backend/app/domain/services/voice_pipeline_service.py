@@ -49,6 +49,7 @@ from app.domain.services.voice_pipeline.tts_playback import TtsPlayback
 from app.domain.services.voice_pipeline.turn_runner import TurnRunner
 from app.domain.services.voice_pipeline.turn_streamer import TurnStreamer
 from app.domain.services.voice_pipeline.audio_ingest import AudioIngest
+from app.domain.services.voice_pipeline.transcript_handler import TranscriptHandler
 from app.core.container import get_container
 from app.core.postgres_adapter import Client as PostgresAdapterClient
 from app.core.telemetry import get_tracer, pipeline_span, record_latency, voice_span
@@ -257,6 +258,16 @@ class VoicePipelineService:
         if inst is None:
             inst = AudioIngest(self)
             self.__dict__["_audio_ingest_inst"] = inst
+        return inst
+
+    @property
+    def _transcript_handler(self) -> TranscriptHandler:
+        """Per-transcript dispatch collaborator (item 2, slice 7). Lazily
+        created so it works under __new__-built services."""
+        inst = self.__dict__.get("_transcript_handler_inst")
+        if inst is None:
+            inst = TranscriptHandler(self)
+            self.__dict__["_transcript_handler_inst"] = inst
         return inst
 
     async def _await_task_after_cancel(self, task: asyncio.Task, call_id: str, label: str) -> None:
@@ -495,138 +506,12 @@ class VoicePipelineService:
         transcript,
         websocket: Optional[WebSocket] = None,
     ) -> None:
-        call_id = session.call_id
+        """Route one STT transcript.
 
-        if isinstance(transcript, BargeInSignal):
-            await self.handle_barge_in(session, websocket)
-            return
-
-        if transcript.metadata and transcript.metadata.get("resumed"):
-            logger.info(f"TurnResumed for call {call_id} — cancelling speculative LLM")
-            session.llm_active = False
-            if call_id in self._pending_llm_tasks:
-                task = self._pending_llm_tasks.pop(call_id)
-                if not task.done():
-                    task.cancel()
-                await self._await_task_after_cancel(task, call_id, "speculative_llm")
-            # Roll back any messages the speculative handle_turn_end appended
-            # before being cancelled.  Without this, orphaned user/assistant
-            # messages corrupt the conversation context for subsequent turns.
-            restore_len = getattr(session, "_speculative_history_len", None)
-            if restore_len is not None and len(session.conversation_history) > restore_len:
-                session.conversation_history = session.conversation_history[:restore_len]
-            session._speculative_history_len = None
-            return
-
-        metadata = transcript.metadata or {}
-        self.transcript_service.bind_call_identity(call_id, session.talklee_call_id)
-
-        # Ensure latency tracker is aligned with current turn ID.
-        # Guard: do NOT reset tracker while LLM/TTS is actively processing.
-        # session.turn_id is pre-incremented before _run_turn is created, so a
-        # tracker turn_id mismatch during active processing is expected — it is
-        # NOT an indication the tracker is stale.
-        current_metrics = self.latency_tracker.get_metrics(call_id)
-        if (not current_metrics or current_metrics.turn_id != session.turn_id) and not session.llm_active:
-            self.latency_tracker.start_turn(call_id, session.turn_id)
-            self.latency_tracker.mark_listening_start(call_id)
-
-        logger.info(
-            "transcript_received",
-            extra={
-                "call_id": call_id,
-                "turn_id": session.turn_id,
-                "timestamp": datetime.utcnow().isoformat(),
-                "text": transcript.text,
-                "is_final": transcript.is_final,
-                "confidence": transcript.confidence,
-                "eager": metadata.get("eager", False),
-            },
-        )
-
-        if websocket and transcript.text:
-            try:
-                msg_type = "transcript_eager" if metadata.get("eager") else "transcript"
-                await websocket.send_json({
-                    "type": msg_type,
-                    "text": transcript.text,
-                    "is_final": transcript.is_final,
-                    "confidence": transcript.confidence,
-                })
-            except Exception as e:
-                logger.warning(f"Failed to send transcript to websocket: {e}")
-
-        if self.stt_provider.detect_turn_end(transcript):
-            # Run as a task (not awaited) so the consumer stays unblocked and
-            # can process a TurnResumed that arrives before the LLM completes.
-            #
-            # Why this matters: Deepgram's barge-in state machine occasionally
-            # sends EndOfTurn → TurnResumed in that order (e.g. user pauses
-            # mid-phrase → EndOfTurn fires → user continues → TurnResumed).
-            # With the old `await handle_turn_end(...)` pattern the consumer
-            # was blocked for the full LLM+TTS duration (~2-10s) — TurnResumed
-            # sat in the queue and arrived too late to cancel the LLM call.
-            # Result: AI responded to a partial/stale transcript ("But") while
-            # the user's real question ("But what is your offering?") was split
-            # across two EndOfTurns, producing a totally off-topic answer.
-            existing = self._pending_llm_tasks.get(call_id)
-            if existing and not existing.done():
-                # A speculative or prior final task is still in flight — skip.
-                logger.debug(
-                    "final turn_end skipped: pending task already running for %s",
-                    call_id[:12],
-                )
-                return
-            session._speculative_history_len = len(session.conversation_history)
-            task = asyncio.create_task(
-                self.handle_turn_end(session, websocket, source="final")
-            )
-            self._pending_llm_tasks[call_id] = task
-            return
-
-        if metadata.get("eager") and transcript.text:
-            if not session.llm_active and call_id not in self._pending_llm_tasks:
-                session.current_user_input = transcript.text
-                # Stash the transcript's confidence alongside the text so
-                # handle_turn_end can apply a turn-0 floor on garbled
-                # mishears without re-acquiring the transcript object.
-                session._last_transcript_confidence = transcript.confidence
-                # Snapshot history length so TurnResumed can roll back any
-                # messages the speculative task appends before cancellation.
-                session._speculative_history_len = len(session.conversation_history)
-                # Speculatively start LLM now (EagerEndOfTurn fired — 150–250ms before
-                # EndOfTurn). If user keeps talking, TurnResumed cancels this task via
-                # the handle_transcript "resumed" branch above (session.llm_active=False
-                # + task.cancel()).
-                task = asyncio.create_task(
-                    self.handle_turn_end(session, websocket, source="speculative")
-                )
-                self._pending_llm_tasks[call_id] = task
-            return
-
-        if transcript.text:
-            event_type = "eager_end_of_turn" if metadata.get("eager") else "update"
-            if transcript.is_final:
-                event_type = "end_of_turn"
-
-            self.transcript_service.accumulate_turn(
-                call_id=call_id,
-                role="user",
-                content=transcript.text,
-                confidence=transcript.confidence,
-                talklee_call_id=session.talklee_call_id,
-                turn_index=session.turn_id,
-                event_type=event_type,
-                is_final=transcript.is_final,
-                audio_window_start=metadata.get("audio_window_start"),
-                audio_window_end=metadata.get("audio_window_end"),
-                include_in_plaintext=transcript.is_final,
-                metadata=metadata,
-            )
-            self.latency_tracker.mark_stt_first_transcript(call_id)
-            session.current_user_input = transcript.text
-            session._last_transcript_confidence = transcript.confidence
-            session.update_activity()
+        Implementation extracted to voice_pipeline.transcript_handler
+        (item 2, slice 7). Kept as a method so callers/tests are unchanged.
+        """
+        return await self._transcript_handler.handle(session, transcript, websocket)
 
     # ── Turn end — the full LLM + TTS cycle ───────────────────────
 
