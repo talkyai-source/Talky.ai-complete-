@@ -1,7 +1,7 @@
 # Plan — Vectorless RAG: campaign knowledge tree + simplified creation flow
 
 **Date:** 2026-06-03
-**Status:** awaiting review (no code yet)
+**Status:** **P1 shipped + validated on prod (2026-06-03).** P2 next.
 **Decision locked:** retrieval = **Adaptive FTS** (small KB → inline; large KB → Postgres full-text over enriched tree leaves). No vector DB, no embeddings.
 
 ---
@@ -145,7 +145,11 @@ All tenant-scoped (RLS + `require_tenant_access`), size-capped (e.g. 256KB md), 
 - API client additions in `Talk-Leee/src/lib/api.ts`.
 
 ## 9. Build sequence (each phase shippable, behind `CAMPAIGN_KNOWLEDGE_ENABLED` flag)
-- **P1 — DB + ingest:** migration 0010 + baseline; `knowledge/` package; upload+ingest endpoint. (No call-path change.) Verify: upload a sample md, inspect nodes + tsv in DB.
+- **P1 — DB + ingest: ✅ DONE (2026-06-03).** migration 0010 + baseline; `knowledge/` package; upload+ingest endpoint. Validated end-to-end against **real prod Postgres + Groq** (harness ran on a test campaign, cleaned up after itself): parse→6 nodes, Groq enrichment on all, `search_tsv` populated, model-aware `knowledge_mode` set, FTS + fuzzy retrieval + `compact_tree` + `hit_count` analytics all correct.
+  - Two retrieval bugs found by the live harness and fixed (commit c3ed6ce):
+    1. **`similarity()` → `word_similarity()`**: `similarity(text, query)` divides by the union of the *whole document's* trigrams → always ~0 for a short query vs long node, so the fuzzy half never fired. `word_similarity(query, text)` scores against the best contiguous extent inside the text — that's what catches STT mishears (`warrantee`→`warranty`).
+    2. **AND-only FTS → tiered OR-recall**: `websearch_to_tsquery` is AND-only, so "what areas do you cover" (`'area' & 'cover'`) missed the Service Areas node (has "area", not "cover"). Retrieval is now tiered: exact-AND (2) > any-term-OR (1, AND-query rewritten to OR) > fuzzy word_similarity (0), sorted by strength→priority→hit_count. Precision wins; recall never silently drops a relevant node. Floor via `KNOWLEDGE_WORD_SIM_FLOOR` (0.35).
+  - **Migration footgun fixed**: revision id `0009_dialer_jobs_failure_classification` (39 chars) overflowed `alembic_version.version_num` varchar(32) → `alembic upgrade head` rolled back, stranding prod at 0008. Shortened to `0009_dialer_failure_class`; keep all future revision ids ≤32 chars.
 - **P2 — retrieval + injection:** `retrieve_knowledge`/`compact_tree`; wire inline at session build + FTS at turn_streamer seam; `knowledge_mode` on session. Flagged. Verify: live call, knowledge block appears, latency unchanged, persona untouched.
 - **P3 — frontend tree:** tree view + upload UI + edit/disable.
 - **P4 — creation wizard:** the 3-step flow.
