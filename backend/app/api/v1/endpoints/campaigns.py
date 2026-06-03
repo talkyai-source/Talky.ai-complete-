@@ -32,6 +32,7 @@ from app.api.v1.dependencies import (
     CurrentUser,
 )
 from app.api.v1.schemas.campaigns import (
+    ApplyTtsConfigRequest,
     CampaignCreateRequest,
     CampaignPromptPreviewRequest,
     CampaignPromptPreviewResponse,
@@ -90,6 +91,30 @@ def _build_validated_script_config(
         )
     except CampaignPromptValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+async def _valid_voice_ids_for_provider(provider: str) -> set[str]:
+    """The set of voice ids valid for a given TTS provider.
+
+    Single source of truth for create/update/bulk-apply so a campaign's
+    per-campaign voice is always validated against the provider it will
+    actually run on (not just the tenant global).
+    """
+    from app.api.v1.endpoints.ai_options import (
+        _english_google_voices,
+        _get_deepgram_voices_for_current_key,
+        get_elevenlabs_voices_for_current_key,
+    )
+
+    if provider == "google":
+        return {v.id for v in _english_google_voices()}
+    if provider == "deepgram":
+        return {v.id for v in await _get_deepgram_voices_for_current_key()}
+    if provider == "cartesia":
+        from app.api.v1.endpoints.ai_options._catalog import _get_live_cartesia_voices
+        return {v.id for v in await _get_live_cartesia_voices()}
+    # default / "elevenlabs"
+    return {v.id for v in await get_elevenlabs_voices_for_current_key()}
 
 
 @router.get("/")
@@ -205,12 +230,7 @@ async def create_campaign(
         if not current_user.tenant_id:
             raise HTTPException(status_code=400, detail="Current user is not associated with a tenant")
 
-        from app.api.v1.endpoints.ai_options import (
-            _english_google_voices,
-            _fetch_tenant_config,
-            _get_deepgram_voices_for_current_key,
-            get_elevenlabs_voices_for_current_key,
-        )
+        from app.api.v1.endpoints.ai_options import _fetch_tenant_config
         from app.domain.models.ai_config import AIProviderConfig
 
         selected_voice_id = campaign_data.voice_id.strip()
@@ -220,33 +240,16 @@ async def create_campaign(
         if ai_config is None:
             ai_config = AIProviderConfig()
 
-        if ai_config.tts_provider == "google":
-            valid_voice_ids = {voice.id for voice in _english_google_voices()}
-        elif ai_config.tts_provider == "deepgram":
-            valid_voice_ids = {
-                voice.id for voice in await _get_deepgram_voices_for_current_key()
-            }
-        elif ai_config.tts_provider == "cartesia":
-            # Was missing — a cartesia global provider fell through to the
-            # elevenlabs set, so every cartesia voice failed validation.
-            from app.api.v1.endpoints.ai_options._catalog import (
-                _get_live_cartesia_voices,
-            )
-            valid_voice_ids = {
-                voice.id for voice in await _get_live_cartesia_voices()
-            }
-        else:
-            valid_voice_ids = {
-                voice.id for voice in await get_elevenlabs_voices_for_current_key()
-            }
-
+        # Per-campaign provider: validate the voice against the campaign's chosen
+        # provider (NULL falls back to the tenant global).
+        effective_provider = (campaign_data.tts_provider or ai_config.tts_provider or "").strip()
+        valid_voice_ids = await _valid_voice_ids_for_provider(effective_provider)
         if selected_voice_id not in valid_voice_ids:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"Voice '{selected_voice_id}' is not available for the current "
-                    f"global TTS provider '{ai_config.tts_provider}'. Update AI Options "
-                    "or choose a matching campaign voice."
+                    f"Voice '{selected_voice_id}' is not available for TTS provider "
+                    f"'{effective_provider}'. Pick a matching voice or change the provider."
                 ),
             )
 
@@ -265,6 +268,7 @@ async def create_campaign(
             "description": campaign_data.description.strip() if campaign_data.description else None,
             "system_prompt": campaign_data.system_prompt.strip(),
             "voice_id": selected_voice_id,
+            "tts_provider": (campaign_data.tts_provider or None),
             "goal": campaign_data.goal.strip() if campaign_data.goal else None,
             "script_config": script_config,
         }
@@ -291,6 +295,48 @@ async def create_campaign(
             await release_idempotency_lock(request)
         logger.error(f"Error creating campaign: {e}")
         raise HTTPException(status_code=500, detail="Failed to create campaign")
+
+
+@router.post("/apply-tts-config", dependencies=[Depends(rate_limit_dependency)])
+async def apply_tts_config(
+    body: ApplyTtsConfigRequest,
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """Apply a TTS provider+voice to a chosen set of the tenant's campaigns.
+
+    Backs the AI Options 'Save → apply to these campaigns' flow. Per-campaign
+    provider means unselected campaigns keep their own engine; only the listed
+    ones are changed. The voice is validated against the provider once.
+    """
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=400, detail="Current user is not associated with a tenant")
+
+    provider = (body.tts_provider or "").strip()
+    voice_id = (body.tts_voice_id or "").strip()
+    valid_voice_ids = await _valid_voice_ids_for_provider(provider)
+    if voice_id not in valid_voice_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Voice '{voice_id}' is not available for TTS provider '{provider}'.",
+        )
+
+    updated: list[str] = []
+    for cid in body.campaign_ids:
+        try:
+            resp = (
+                db_client.table("campaigns")
+                .update({"tts_provider": provider, "voice_id": voice_id})
+                .eq("id", cid)
+                .eq("tenant_id", current_user.tenant_id)
+                .execute()
+            )
+            if getattr(resp, "data", None):
+                updated.append(str(cid))
+        except Exception as exc:
+            logger.warning("apply_tts_config failed for campaign=%s: %s", cid, exc)
+    return {"updated": updated, "count": len(updated), "tts_provider": provider, "voice_id": voice_id}
 
 
 @router.get("/{campaign_id}")
@@ -338,6 +384,27 @@ async def update_campaign(
         if not current_user.tenant_id:
             raise HTTPException(status_code=400, detail="Current user is not associated with a tenant")
 
+        # Per-campaign provider: validate the voice against the campaign's chosen
+        # provider (NULL falls back to the tenant global) — same gate as create.
+        from app.api.v1.endpoints.ai_options import _fetch_tenant_config
+        from app.domain.models.ai_config import AIProviderConfig
+
+        selected_voice_id = campaign_data.voice_id.strip()
+        async with db_client.pool.acquire() as conn:
+            ai_config = await _fetch_tenant_config(conn, current_user.tenant_id)
+        if ai_config is None:
+            ai_config = AIProviderConfig()
+        effective_provider = (campaign_data.tts_provider or ai_config.tts_provider or "").strip()
+        valid_voice_ids = await _valid_voice_ids_for_provider(effective_provider)
+        if selected_voice_id not in valid_voice_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Voice '{selected_voice_id}' is not available for TTS provider "
+                    f"'{effective_provider}'. Pick a matching voice or change the provider."
+                ),
+            )
+
         script_config = _build_validated_script_config(
             persona_type=campaign_data.persona_type,
             company_name=campaign_data.company_name,
@@ -351,7 +418,8 @@ async def update_campaign(
             "name": campaign_data.name.strip(),
             "description": campaign_data.description.strip() if campaign_data.description else None,
             "system_prompt": campaign_data.system_prompt.strip(),
-            "voice_id": campaign_data.voice_id.strip(),
+            "voice_id": selected_voice_id,
+            "tts_provider": (campaign_data.tts_provider or None),
             "goal": campaign_data.goal.strip() if campaign_data.goal else None,
             "script_config": script_config,
         }

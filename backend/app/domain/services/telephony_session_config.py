@@ -593,10 +593,24 @@ def build_telephony_session_config(
     """
     global_config = get_global_config()
 
-    # TODO(production): Use campaign.voice_id when campaign creation UI
-    #                   provides it; fall back to global config as-is.
+    # Per-campaign TTS: each campaign runs on its OWN provider + voice (stored on
+    # the campaign row), falling back to the tenant global when unset. This is
+    # what lets calls honor a campaign's chosen voice/engine independently of the
+    # account default (ends the account-wide-switch side effect).
     tts_provider_type = global_config.tts_provider
     tts_voice_id = global_config.tts_voice_id
+    tts_model = global_config.tts_model
+    _camp_voice = _campaign_attr(campaign, "voice_id")
+    _camp_provider = _campaign_attr(campaign, "tts_provider")
+    if _camp_voice:
+        tts_voice_id = _camp_voice
+    if _camp_provider:
+        tts_provider_type = _camp_provider
+        # A different engine than the global one must not inherit the global's
+        # provider-specific model id — blank it so the adapter uses its own
+        # default (cartesia→sonic-3, elevenlabs→eleven_flash_v2_5, deepgram→voice).
+        if _camp_provider != global_config.tts_provider:
+            tts_model = ""
 
     script_config = _extract_script_config(campaign)
     persona_type = (script_config or {}).get("persona_type")
@@ -748,7 +762,7 @@ def build_telephony_session_config(
         llm_max_tokens=global_config.llm_max_tokens,
         llm_thinking_budget=0,
         voice_id=tts_voice_id,
-        tts_model=global_config.tts_model,
+        tts_model=tts_model,
         tts_sample_rate=16000,
         gateway_sample_rate=16000,
         gateway_input_sample_rate=16000,
@@ -798,6 +812,14 @@ def _campaign_id(campaign: Any) -> str:
     if isinstance(campaign, dict):
         return str(campaign.get("id", "-"))
     return str(getattr(campaign, "id", "-"))
+
+
+def _campaign_attr(campaign: Any, key: str) -> str:
+    """Read a string field off a campaign dict/model; '' when absent/None."""
+    if campaign is None:
+        return ""
+    val = campaign.get(key) if isinstance(campaign, dict) else getattr(campaign, key, None)
+    return str(val).strip() if val else ""
 
 
 def _campaign_tenant_id(campaign: Any) -> Optional[str]:

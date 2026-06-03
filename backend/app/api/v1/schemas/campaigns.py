@@ -40,6 +40,14 @@ class CampaignCreateRequest(BaseModel):
             "not required and the persona prompt is a lean identity+tone shell."
         ),
     )
+    tts_provider: Optional[str] = Field(
+        default=None,
+        description=(
+            "Per-campaign TTS provider (cartesia|google|deepgram|elevenlabs). "
+            "NULL uses the tenant global. The campaign's voice_id is validated "
+            "against this provider and the call runs on it."
+        ),
+    )
 
     @field_validator("agent_names")
     @classmethod
@@ -71,6 +79,14 @@ class CampaignUpdateRequest(BaseModel):
             "Knowledge-first campaign (vectorless-RAG wizard): content comes "
             "from the uploaded knowledge base, so per-persona content slots are "
             "not required and the persona prompt is a lean identity+tone shell."
+        ),
+    )
+    tts_provider: Optional[str] = Field(
+        default=None,
+        description=(
+            "Per-campaign TTS provider (cartesia|google|deepgram|elevenlabs). "
+            "NULL uses the tenant global. The campaign's voice_id is validated "
+            "against this provider and the call runs on it."
         ),
     )
 
@@ -136,6 +152,19 @@ class CampaignPromptPreviewResponse(BaseModel):
     prompt_chars: int = Field(
         ..., description="Length of the assembled system_prompt in characters.",
     )
+
+
+class ApplyTtsConfigRequest(BaseModel):
+    """Apply a saved TTS config (provider + voice) to chosen campaigns.
+
+    Backs the AI Options 'Save → apply to these campaigns' modal. Each chosen
+    campaign's tts_provider + voice_id are set to these values; unselected
+    campaigns are untouched (that's the whole point of per-campaign provider).
+    """
+
+    tts_provider: str = Field(..., min_length=1)
+    tts_voice_id: str = Field(..., min_length=1)
+    campaign_ids: List[str] = Field(..., min_length=1)
 
 
 class ContactCreate(BaseModel):

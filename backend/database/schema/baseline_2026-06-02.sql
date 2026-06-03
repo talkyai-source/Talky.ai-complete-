@@ -6582,6 +6582,10 @@ ALTER TABLE campaigns
     ADD COLUMN IF NOT EXISTS knowledge_mode  TEXT NOT NULL DEFAULT 'none',
     ADD COLUMN IF NOT EXISTS knowledge_model TEXT;
 
+-- 0011: per-campaign TTS provider (NULL = use tenant global)
+ALTER TABLE campaigns
+    ADD COLUMN IF NOT EXISTS tts_provider TEXT;
+
 CREATE TABLE IF NOT EXISTS campaign_knowledge_sources (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     campaign_id   UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
