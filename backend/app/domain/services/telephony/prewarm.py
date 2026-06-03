@@ -173,6 +173,23 @@ async def prepare_prewarmed_session(
         if agent_name:
             pre_warm_session._agent_name = agent_name
 
+        # ── Campaign knowledge (vectorless RAG, P2) ─────────────────────
+        # Flag-gated + fail-soft: for inline/map_retrieve campaigns this bakes
+        # the (compacted) knowledge tree into the session's system prompt now,
+        # while we're async with a DB pool in hand, so every turn has it for
+        # free. retrieve-mode campaigns get nothing here and are served per
+        # turn in turn_streamer. A failure leaves the persona prompt untouched.
+        try:
+            from app.services.scripts.knowledge.session_inject import (
+                apply_campaign_knowledge,
+            )
+            _kb_pool = getattr(getattr(container, "db_client", None), "pool", None)
+            await apply_campaign_knowledge(
+                pre_warm_session.call_session, campaign_row, pool=_kb_pool,
+            )
+        except Exception as _kb_exc:
+            logger.debug("campaign_knowledge_inject_skipped: %s", _kb_exc)
+
         # ───────────────────────────────────────────────────────────────
         # Strict warmup gate — racer-in-starting-blocks model.
         #

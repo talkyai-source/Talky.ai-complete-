@@ -13,7 +13,12 @@ from app.services.scripts.knowledge.budget import (
 )
 from app.services.scripts.knowledge.ingest_service import ingest_markdown
 from app.services.scripts.knowledge.md_tree import ParsedNode, parse_markdown_tree
-from app.services.scripts.knowledge.retrieval import compact_tree, retrieve_knowledge
+from app.services.scripts.knowledge.retrieval import (
+    compact_tree,
+    knowledge_enabled,
+    retrieve_knowledge,
+)
+from app.services.scripts.knowledge.session_inject import apply_campaign_knowledge
 
 __all__ = [
     "ParsedNode",
@@ -25,4 +30,6 @@ __all__ = [
     "ingest_markdown",
     "retrieve_knowledge",
     "compact_tree",
+    "knowledge_enabled",
+    "apply_campaign_knowledge",
 ]

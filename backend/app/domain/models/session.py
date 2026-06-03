@@ -99,7 +99,16 @@ class CallSession(BaseModel):
         None,
         description="Agent configuration for this call"
     )
-    
+    knowledge_mode: Optional[str] = Field(
+        None,
+        description=(
+            "Campaign knowledge retrieval mode (vectorless RAG): "
+            "none|inline|map_retrieve|retrieve. Set at pre-warm from the "
+            "campaign; drives whether turn_streamer does per-turn retrieval. "
+            "None means no knowledge layer (default / feature disabled)."
+        ),
+    )
+
     # ========== Runtime-Only Fields (Not Serialized) ==========
     # These are set after deserialization from Redis
     websocket: Optional[Any] = Field(None, exclude=True, description="Active WebSocket connection")

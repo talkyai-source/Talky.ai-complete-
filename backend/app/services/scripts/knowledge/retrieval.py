@@ -31,6 +31,16 @@ logger = logging.getLogger(__name__)
 _WORD_SIM_FLOOR = float(os.getenv("KNOWLEDGE_WORD_SIM_FLOOR", "0.35"))
 
 
+def knowledge_enabled() -> bool:
+    """Master gate for the campaign-knowledge layer (CAMPAIGN_KNOWLEDGE_ENABLED).
+
+    The whole vectorless-RAG feature — ingest endpoints, pre-warm injection,
+    and per-turn retrieval — is dark until this is flipped on, so it can ship
+    disabled and be rolled out per environment without a redeploy.
+    """
+    return os.getenv("CAMPAIGN_KNOWLEDGE_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
+
+
 async def retrieve_knowledge(
     pool,
     tenant_id: str,

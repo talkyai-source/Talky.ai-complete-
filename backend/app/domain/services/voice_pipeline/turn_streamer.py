@@ -16,6 +16,7 @@ were only used by this method.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -56,6 +57,57 @@ def _truncate_history(history: list, max_pairs: int = _MAX_HISTORY_PAIRS) -> lis
     return history[-(max_pairs * 2):]
 
 
+# Hard cap on the per-turn knowledge lookup so a slow/contended DB can never add
+# more than this to time-to-first-token. On timeout we just skip knowledge for
+# the turn — the agent still answers from its persona + history.
+_KNOWLEDGE_RETRIEVE_TIMEOUT_S = float(os.getenv("KNOWLEDGE_RETRIEVE_TIMEOUT_MS", "250")) / 1000.0
+
+
+async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str:
+    """Top-k campaign knowledge for the caller's latest message, formatted for
+    the system prompt. Only for retrieve/map_retrieve campaigns (inline already
+    baked the whole tree in at pre-warm). Fail-soft: returns "" on anything —
+    no container, no pool, no hit, timeout, or error — so it can never break or
+    stall a turn.
+    """
+    try:
+        last_user = next(
+            (m.content for m in reversed(messages) if m.role == MessageRole.USER), "",
+        )
+        if not last_user.strip():
+            return ""
+
+        from app.core.container import get_container
+        from app.services.scripts.knowledge.retrieval import retrieve_knowledge
+
+        container = get_container()
+        if not getattr(container, "is_initialized", False):
+            return ""
+        pool = getattr(getattr(container, "db_client", None), "pool", None)
+        if pool is None:
+            return ""
+
+        hits = await asyncio.wait_for(
+            retrieve_knowledge(pool, session.tenant_id, session.campaign_id, last_user, k=2),
+            timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
+        )
+        if not hits:
+            return ""
+
+        lines = [
+            "## Relevant company knowledge for this question",
+            "Answer the caller using these facts, in your own words:",
+        ]
+        for h in hits:
+            body = (h.get("voice_answer") or h.get("summary") or h.get("content") or "")
+            body = body.strip().replace("\n", " ")
+            if body:
+                lines.append(f"- {h['heading']}: {body}")
+        return "\n".join(lines) if len(lines) > 2 else ""
+    except (asyncio.TimeoutError, Exception):
+        return ""
+
+
 class TurnStreamer:
     """Streams one turn's LLM tokens and pipelines TTS per sentence."""
 
@@ -88,6 +140,16 @@ class TurnStreamer:
             )
             if any(kw in last_user_text for kw in _ASK_AI_PRODUCT_KEYWORDS):
                 system_prompt = system_prompt + "\n\n" + _ASK_AI_PRODUCT_INFO
+
+        # Campaign knowledge (vectorless RAG): for retrieve / map_retrieve
+        # campaigns, fetch the node(s) matching the caller's latest message and
+        # inject them for THIS turn only. inline campaigns already baked the
+        # whole tree into session.system_prompt at pre-warm, so they skip this.
+        # The lookup is bounded + fail-soft (see _knowledge_block_for_turn).
+        if session.knowledge_mode in ("retrieve", "map_retrieve") and messages:
+            kb_block = await _knowledge_block_for_turn(session, messages)
+            if kb_block:
+                system_prompt = system_prompt + "\n\n" + kb_block
 
         if self._p._supports_llm_end_session_action(session):
             system_prompt = system_prompt + "\n\n" + _END_SESSION_TOOL_INSTRUCTIONS

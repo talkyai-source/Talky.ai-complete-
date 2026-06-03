@@ -16,6 +16,7 @@ from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
 from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.services.scripts.knowledge import ingest_markdown
+from app.services.scripts.knowledge.retrieval import knowledge_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -24,12 +25,8 @@ router = APIRouter(prefix="/campaigns", tags=["campaign-knowledge"])
 _MAX_UPLOAD_BYTES = int(os.getenv("KNOWLEDGE_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))  # 10 MB
 
 
-def _enabled() -> bool:
-    return os.getenv("CAMPAIGN_KNOWLEDGE_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
-
-
 def _require_enabled() -> None:
-    if not _enabled():
+    if not knowledge_enabled():
         raise HTTPException(status_code=404, detail="Campaign knowledge is not enabled")
 
 
