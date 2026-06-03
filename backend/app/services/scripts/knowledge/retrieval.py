@@ -14,13 +14,21 @@ empty/"" so a knowledge hiccup can't break a call.
 from __future__ import annotations
 
 import logging
+import os
 from typing import List, Optional
 
 from app.core.db_utils import acquire_with_tenant
 
 logger = logging.getLogger(__name__)
 
-_TRGM_FLOOR = 0.18   # min trigram similarity to consider a fuzzy match
+# Minimum pg_trgm *word* similarity for the fuzzy fallback. We use
+# word_similarity() (not similarity()) because the query is short and the node
+# text is long: similarity() divides by the union of ALL the document's
+# trigrams → always ~0, so it never fires. word_similarity() instead scores the
+# query against the best-matching contiguous extent inside the text, which is
+# exactly what catches an STT mishear ("warrantee" → the word "warranty").
+# 0.35 comfortably catches single-word mishears without flooding on noise.
+_WORD_SIM_FLOOR = float(os.getenv("KNOWLEDGE_WORD_SIM_FLOOR", "0.35"))
 
 
 async def retrieve_knowledge(
@@ -30,7 +38,17 @@ async def retrieve_knowledge(
     query: str,
     k: int = 2,
 ) -> List[dict]:
-    """Top-k knowledge nodes for `query` (a user transcript). Hybrid FTS+trgm."""
+    """Top-k knowledge nodes for `query` (a user transcript). Hybrid FTS + trgm.
+
+    Tiered so precision wins but recall never silently drops a relevant node:
+      tier 2  exact AND match  — every query lexeme present (websearch tsquery)
+      tier 1  any-term match   — at least one lexeme present (AND tsquery OR'd)
+      tier 0  fuzzy match only — word_similarity over the trigram column,
+                                 for STT mishears the analyzer can't lexicalise
+    Within a tier we sort by match strength, then owner priority, then hit_count.
+    The OR fallback is what rescues conversational queries like "what areas do
+    you cover" where the doc has "areas" but not "cover".
+    """
     q = (query or "").strip()
     if not q:
         return []
@@ -38,20 +56,36 @@ async def retrieve_knowledge(
         async with acquire_with_tenant(pool, tenant_id) as conn:
             rows = await conn.fetch(
                 """
-                SELECT id, heading, summary, voice_answer, content,
-                       ts_rank(search_tsv, websearch_to_tsquery('english', $2)) AS fts,
-                       similarity(search_text, $2) AS sim
-                FROM campaign_knowledge_nodes
-                WHERE campaign_id = $1
-                  AND enabled
-                  AND (search_tsv @@ websearch_to_tsquery('english', $2)
-                       OR similarity(search_text, $2) > $4)
-                ORDER BY (0.7 * ts_rank(search_tsv, websearch_to_tsquery('english', $2))
-                          + 0.3 * similarity(search_text, $2)
-                          + 0.01 * priority) DESC
+                WITH tq AS (
+                    SELECT websearch_to_tsquery('english', $2) AS q_and,
+                           NULLIF(replace(
+                               websearch_to_tsquery('english', $2)::text,
+                               ' & ', ' | '), '')::tsquery AS q_or
+                )
+                SELECT n.id, n.heading, n.summary, n.voice_answer, n.content,
+                       ts_rank(n.search_tsv, tq.q_and) AS fts,
+                       word_similarity($2, n.search_text) AS sim
+                FROM campaign_knowledge_nodes n, tq
+                WHERE n.campaign_id = $1
+                  AND n.enabled
+                  AND (
+                       n.search_tsv @@ tq.q_and
+                    OR (tq.q_or IS NOT NULL AND n.search_tsv @@ tq.q_or)
+                    OR word_similarity($2, n.search_text) >= $4
+                  )
+                ORDER BY
+                    CASE WHEN n.search_tsv @@ tq.q_and THEN 2
+                         WHEN tq.q_or IS NOT NULL AND n.search_tsv @@ tq.q_or THEN 1
+                         ELSE 0 END DESC,
+                    GREATEST(
+                        ts_rank(n.search_tsv, COALESCE(tq.q_or, tq.q_and)),
+                        word_similarity($2, n.search_text)
+                    ) DESC,
+                    n.priority DESC,
+                    n.hit_count DESC
                 LIMIT $3
                 """,
-                campaign_id, q, k, _TRGM_FLOOR,
+                campaign_id, q, k, _WORD_SIM_FLOOR,
             )
             if rows:
                 # analytics: best-effort hit_count bump, same txn (cheap)
