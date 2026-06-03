@@ -10,6 +10,7 @@ import { dashboardApi, Campaign, Contact } from "@/lib/dashboard-api";
 import { extendedApi, BulkImportResponse } from "@/lib/extended-api";
 import { ScriptCard } from "@/components/campaigns/script-card";
 import { LiveCallsPanel } from "@/components/campaigns/live-calls-panel";
+import { KnowledgePanel } from "@/components/campaigns/knowledge-panel";
 import { Modal } from "@/components/ui/modal";
 import {
     ArrowLeft,
@@ -478,6 +479,9 @@ export default function CampaignDetailPage() {
                             </div>
                         )}
                     </motion.div>
+
+                    {/* Knowledge base — vectorless-RAG tree the agent answers from */}
+                    <KnowledgePanel campaignId={campaignId} />
 
                     {/* Script Card — transcripts of every call with timestamps */}
                     <ScriptCard campaignId={campaignId} />

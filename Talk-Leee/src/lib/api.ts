@@ -177,6 +177,51 @@ export function sharedHttpClient() {
     return _sharedHttpClient;
 }
 
+/* ---------- Campaign knowledge (vectorless RAG) types ---------- */
+
+export type KnowledgeMode = "none" | "inline" | "map_retrieve" | "retrieve";
+
+export interface KnowledgeNode {
+    id: string;
+    parent_id: string | null;
+    depth: number;
+    path: string;
+    position: number;
+    heading: string;
+    summary?: string | null;
+    voice_answer?: string | null;
+    keywords?: string[] | null;
+    example_questions?: string[] | null;
+    priority: number;
+    hit_count: number;
+    enabled: boolean;
+    children: KnowledgeNode[];
+}
+
+export interface KnowledgeSource {
+    id: string;
+    filename?: string | null;
+    token_count: number;
+    version: number;
+    status: "processing" | "ready" | "failed";
+    error?: string | null;
+    created_at: string;
+}
+
+export interface CampaignKnowledge {
+    campaign_id: string;
+    knowledge_mode: KnowledgeMode | string | null;
+    sources: KnowledgeSource[];
+    tree: KnowledgeNode[];
+}
+
+export interface KnowledgeIngestResult {
+    source_id: string;
+    node_count: number;
+    token_count: number;
+    mode: KnowledgeMode | string;
+}
+
 class ApiClient {
     private client() {
         return sharedHttpClient();
@@ -601,6 +646,60 @@ class ApiClient {
             }>;
             server_time: string;
         };
+    }
+
+    /* ---------- Campaign knowledge (vectorless RAG) ---------- */
+
+    async getCampaignKnowledge(campaignId: string): Promise<CampaignKnowledge> {
+        const data = await this.client().request({
+            path: `/campaigns/${campaignId}/knowledge`,
+            method: "GET",
+            timeoutMs: 12_000,
+        });
+        return data as CampaignKnowledge;
+    }
+
+    async uploadCampaignKnowledge(
+        campaignId: string,
+        file: File,
+    ): Promise<KnowledgeIngestResult> {
+        const form = new FormData();
+        form.append("file", file);
+        const data = await this.client().request({
+            path: `/campaigns/${campaignId}/knowledge`,
+            method: "POST",
+            body: form,
+            // Ingest parses + LLM-enriches every node — a large doc can take
+            // a while, so give it plenty of headroom.
+            timeoutMs: 180_000,
+        });
+        return data as KnowledgeIngestResult;
+    }
+
+    async updateKnowledgeNode(
+        campaignId: string,
+        nodeId: string,
+        payload: Partial<Pick<KnowledgeNode, "enabled" | "priority" | "summary" | "voice_answer">>,
+    ): Promise<{ id: string; updated: string[] }> {
+        const data = await this.client().request({
+            path: `/campaigns/${campaignId}/knowledge/nodes/${nodeId}`,
+            method: "PATCH",
+            body: payload,
+            timeoutMs: 10_000,
+        });
+        return data as { id: string; updated: string[] };
+    }
+
+    async deleteKnowledgeSource(
+        campaignId: string,
+        sourceId: string,
+    ): Promise<{ deleted: string; knowledge_mode: string }> {
+        const data = await this.client().request({
+            path: `/campaigns/${campaignId}/knowledge/sources/${sourceId}`,
+            method: "DELETE",
+            timeoutMs: 10_000,
+        });
+        return data as { deleted: string; knowledge_mode: string };
     }
 
     /* ---------- Passkeys (WebAuthn) ---------- */
