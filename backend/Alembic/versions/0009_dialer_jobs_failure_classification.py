@@ -21,7 +21,10 @@ from typing import Sequence, Union
 from alembic import op
 from sqlalchemy import text
 
-revision: str = "0009_dialer_jobs_failure_classification"
+# NOTE: id kept <=32 chars — alembic_version.version_num is varchar(32); the
+# original 39-char id ("…failure_classification") couldn't be stamped and broke
+# `alembic upgrade head`. Filename unchanged (alembic keys on the id string).
+revision: str = "0009_dialer_failure_class"
 down_revision: Union[str, None] = "0008_tenant_voice_tuning"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

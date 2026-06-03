@@ -25,7 +25,7 @@ from alembic import op
 from sqlalchemy import text
 
 revision: str = "0010_campaign_knowledge"
-down_revision: Union[str, None] = "0009_dialer_jobs_failure_classification"
+down_revision: Union[str, None] = "0009_dialer_failure_class"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
