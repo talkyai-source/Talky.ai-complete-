@@ -1,7 +1,7 @@
 # Plan — Vectorless RAG: campaign knowledge tree + simplified creation flow
 
 **Date:** 2026-06-03
-**Status:** **P1 shipped + validated on prod (2026-06-03).** P2 next.
+**Status:** **P1 + P2 shipped & verified on prod (2026-06-03/04); flag ON.** Live-call acceptance + P3 (frontend tree) next.
 **Decision locked:** retrieval = **Adaptive FTS** (small KB → inline; large KB → Postgres full-text over enriched tree leaves). No vector DB, no embeddings.
 
 ---
@@ -150,7 +150,10 @@ All tenant-scoped (RLS + `require_tenant_access`), size-capped (e.g. 256KB md), 
     1. **`similarity()` → `word_similarity()`**: `similarity(text, query)` divides by the union of the *whole document's* trigrams → always ~0 for a short query vs long node, so the fuzzy half never fired. `word_similarity(query, text)` scores against the best contiguous extent inside the text — that's what catches STT mishears (`warrantee`→`warranty`).
     2. **AND-only FTS → tiered OR-recall**: `websearch_to_tsquery` is AND-only, so "what areas do you cover" (`'area' & 'cover'`) missed the Service Areas node (has "area", not "cover"). Retrieval is now tiered: exact-AND (2) > any-term-OR (1, AND-query rewritten to OR) > fuzzy word_similarity (0), sorted by strength→priority→hit_count. Precision wins; recall never silently drops a relevant node. Floor via `KNOWLEDGE_WORD_SIM_FLOOR` (0.35).
   - **Migration footgun fixed**: revision id `0009_dialer_jobs_failure_classification` (39 chars) overflowed `alembic_version.version_num` varchar(32) → `alembic upgrade head` rolled back, stranding prod at 0008. Shortened to `0009_dialer_failure_class`; keep all future revision ids ≤32 chars.
-- **P2 — retrieval + injection:** `retrieve_knowledge`/`compact_tree`; wire inline at session build + FTS at turn_streamer seam; `knowledge_mode` on session. Flagged. Verify: live call, knowledge block appears, latency unchanged, persona untouched.
+- **P2 — retrieval + injection: ✅ DONE + verified on prod (2026-06-04).** Two seams:
+  - **Pre-warm** (`telephony/prewarm.py` → `knowledge/session_inject.apply_campaign_knowledge`): once, async with the pool. `inline`→bake full `compact_tree` into `call_session.system_prompt`; `map_retrieve`→bake the skeleton (TOC); `retrieve`→nothing here (served per-turn). Also stamps `call_session.tenant_id` (the orchestrator never copied `config.tenant_id`) + `knowledge_mode`.
+  - **Per-turn** (`voice_pipeline/turn_streamer.py`): for `retrieve`/`map_retrieve`, fetch top-k for the caller's latest message and inject for that turn only. Bounded by `KNOWLEDGE_RETRIEVE_TIMEOUT_MS` (250ms) so a slow DB can't hurt TTFT; fully fail-soft. `inline` skips it (already baked).
+  - `CallSession.knowledge_mode` added; shared `knowledge_enabled()` gate; flag **enabled on prod** (`CAMPAIGN_KNOWLEDGE_ENABLED=true` in `/opt/talky/backend/.env`). Zero effect for `none`-mode campaigns (returns before any DB call). 8 new unit tests; ruff-F clean. Verified on prod: ingested a 10-node KB into campaign 5f47a5fa → injection bakes it into the prompt; per-turn retrieve resolves all sample questions. **Pending: a human-answered live call for final acceptance.**
 - **P3 — frontend tree:** tree view + upload UI + edit/disable.
 - **P4 — creation wizard:** the 3-step flow.
 - **P5 — (optional) recall upgrade:** cached per-call "branch router" LLM call, only if FTS recall proves weak in practice. Long-context inline already covers small KBs.
