@@ -41,6 +41,10 @@ from app.domain.services.voice_pipeline import (
     is_terminal_period_boundary as _is_terminal_period_boundary_impl,
     is_repetitive_transcript as _is_repetitive_transcript_impl,
 )
+from app.domain.services.voice_pipeline.llm_response import (
+    generate_llm_response as _generate_llm_response_impl,
+    response_max_sentences_for_turn as _response_max_sentences_for_turn_impl,
+)
 from app.core.container import get_container
 from app.core.postgres_adapter import Client as PostgresAdapterClient
 from app.core.telemetry import get_tracer, pipeline_span, record_latency, voice_span
@@ -252,28 +256,11 @@ class VoicePipelineService:
             extra={"call_id": call_id, "turn_silent_reason": reason},
         )
 
-    def _response_max_sentences_for_turn(
-        self,
-        turn_or_session,
-        user_input: str = "",
-        *,
-        has_custom_prompt: bool = False,
-    ) -> Optional[int]:
-        """Return the sentence budget for a turn.
-
-        Supports the legacy `(session, user_input, has_custom_prompt=...)`
-        call shape and the newer internal `(turn_id)` shape.
-        """
-        if isinstance(turn_or_session, int):
-            return 2 if turn_or_session == 0 else None
-
-        session = turn_or_session
-        default_limit = getattr(getattr(session, "agent_config", None), "response_max_sentences", 2) or 2
-        text = (user_input or "").lower()
-        asks_pricing = any(term in text for term in ("pricing", "price", "plan", "plans", "package", "packages"))
-        if has_custom_prompt and asks_pricing:
-            return max(default_limit, 4)
-        return default_limit
+    # Sentence-budget logic extracted to voice_pipeline.llm_response (item 2,
+    # slice 2). Uses no instance state, so it's a static delegator — call
+    # sites (self._response_max_sentences_for_turn(...)) and the tests that
+    # call it on the instance are unchanged.
+    _response_max_sentences_for_turn = staticmethod(_response_max_sentences_for_turn_impl)
 
     def _barge_in_event_for(self, session: CallSession) -> asyncio.Event:
         event = self._barge_in_events.get(session.call_id)
@@ -1599,48 +1586,15 @@ class VoicePipelineService:
     # ── LLM helper ────────────────────────────────────────────────
 
     async def get_llm_response(self, session: CallSession, user_input: str) -> str:
-        """Get LLM response with guardrails applied."""
-        call_id = session.call_id
-        try:
-            guardrails = get_guardrails()
-            config = LLMGuardrailsConfig()
+        """Get LLM response with guardrails applied.
 
-            messages = session.conversation_history[:]
-            system_prompt = session.system_prompt
-            if session.captured_slots is not None:
-                system_prompt = compose_system_prompt(system_prompt, session.captured_slots)
-
-            max_sentences = self._response_max_sentences_for_turn(
-                session,
-                user_input,
-                has_custom_prompt=bool(session.system_prompt),
-            )
-
-            tokens: list[str] = []
-            first_token = True
-            async for token in self.llm_provider.stream_chat_with_timeout(
-                messages,
-                system_prompt=system_prompt,
-            ):
-                if first_token:
-                    self.latency_tracker.mark_llm_first_token(call_id)
-                    first_token = False
-                tokens.append(token)
-            response = "".join(tokens)
-
-            sanitized = guardrails.clean_response(response)
-            if max_sentences and sanitized:
-                import re as _re
-                parts = _re.split(r'(?<=[.!?])\s+', sanitized.strip())
-                sanitized = " ".join(parts[:max_sentences])
-            return sanitized
-
-        except LLMTimeoutError:
-            logger.warning(f"LLM timeout for call {call_id}, using fallback")
-            return "I'm sorry, could you repeat that?"
-        except Exception as e:
-            logger.error(f"LLM error for call {call_id}: {e}", exc_info=True)
-            return "I'm sorry, I had trouble processing that. Could you say it again?"
+        Implementation extracted to voice_pipeline.llm_response (item 2,
+        slice 2). Kept as a method so call sites — and tests that mock
+        ``service.get_llm_response`` — are unchanged.
+        """
+        return await _generate_llm_response_impl(
+            self.llm_provider, self.latency_tracker, session, user_input
+        )
 
     # ── TTS helper ────────────────────────────────────────────────
 
