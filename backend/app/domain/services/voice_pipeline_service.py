@@ -47,6 +47,7 @@ from app.domain.services.voice_pipeline.llm_response import (
 )
 from app.domain.services.voice_pipeline.tts_playback import TtsPlayback
 from app.domain.services.voice_pipeline.turn_runner import TurnRunner
+from app.domain.services.voice_pipeline.turn_streamer import TurnStreamer
 from app.core.container import get_container
 from app.core.postgres_adapter import Client as PostgresAdapterClient
 from app.core.telemetry import get_tracer, pipeline_span, record_latency, voice_span
@@ -59,21 +60,9 @@ from app.services.scripts import (
 
 logger = logging.getLogger(__name__)
 
-# FIX 2 — Sliding-window history truncation to prevent context-limit crashes.
-# llama-3.1-8b-instant has an 8,192-token context window.  At ~125 tokens/turn,
-# overflow hits at ~55 turns.  Groq returns HTTP 400 and the apology TTS plays —
-# but without truncation the NEXT turn hits 400 again → infinite apology loop.
-# 20 pairs ≈ 2,500 tokens worst-case, leaving ample room for system prompt + reply.
-_MAX_HISTORY_PAIRS = int(os.getenv("VOICE_MAX_HISTORY_PAIRS", "20"))
-
-_END_SESSION_TOOL_INSTRUCTIONS = build_end_session_tool_instructions()
-
-
-def _truncate_history(history: list, max_pairs: int = _MAX_HISTORY_PAIRS) -> list:
-    """Return the last max_pairs user/assistant pairs from conversation history."""
-    if len(history) <= max_pairs * 2:
-        return history[:]
-    return history[-(max_pairs * 2):]
+# History truncation + end-session-tool instructions moved to
+# voice_pipeline.turn_streamer (item 2, slice 5) — they were only used by
+# the streaming loop that now lives there.
 
 
 def _first_speaker_label(session) -> str:
@@ -247,6 +236,16 @@ class VoicePipelineService:
         if inst is None:
             inst = TurnRunner(self)
             self.__dict__["_turn_runner_inst"] = inst
+        return inst
+
+    @property
+    def _turn_streamer(self) -> TurnStreamer:
+        """LLM-token streaming + sentence-paced TTS collaborator (item 2,
+        slice 5). Lazily created so it works under __new__-built services."""
+        inst = self.__dict__.get("_turn_streamer_inst")
+        if inst is None:
+            inst = TurnStreamer(self)
+            self.__dict__["_turn_streamer_inst"] = inst
         return inst
 
     async def _await_task_after_cancel(self, task: asyncio.Task, call_id: str, label: str) -> None:
@@ -1331,202 +1330,13 @@ class VoicePipelineService:
         session: CallSession,
         websocket: Optional[WebSocket] = None,
     ) -> tuple[str, float, float]:
+        """Stream LLM tokens and pipeline TTS per sentence.
+
+        Implementation extracted to voice_pipeline.turn_streamer (item 2,
+        slice 5). Kept as a method so callers and tests that mock it are
+        unchanged. Returns (full_response_text, llm_latency_ms, tts_latency_ms).
         """
-        Stream LLM tokens and pipeline TTS per sentence.
-
-        Fires {"type": "llm_response"} on the websocket on the first token so the
-        frontend can unblock its audio player before TTS begins — cutting perceived
-        TTFA by the full LLM generation time on short responses.
-
-        TTS starts as soon as the first complete sentence is detected in the token
-        stream.  Subsequent sentences are TTS-ed immediately after the preceding one
-        finishes, so the LLM generates sentence N+1 while sentence N plays back.
-
-        Returns (full_response_text, llm_latency_ms, tts_latency_ms).
-          llm_latency_ms = wall-clock for the entire LLM stream.
-          tts_latency_ms = wall-clock from first TTS call to last TTS completion.
-        """
-        call_id = session.call_id
-        barge_in_event = self._barge_in_events.get(call_id)
-        guardrails = get_guardrails()
-
-        messages = _truncate_history(session.conversation_history)
-        system_prompt = session.system_prompt
-
-        # Ask AI: inject product/pricing info only when the user's message contains
-        # relevant keywords.  On greeting and general turns this keeps the effective
-        # system prompt at ~60 tokens (vs ~360 when the product block is always present),
-        # saving 40-60ms of Groq prefill latency per non-product turn.
-        if session.campaign_id == "ask-ai" and messages:
-            last_user_text = next(
-                (m.content.lower() for m in reversed(messages) if m.role == MessageRole.USER),
-                "",
-            )
-            if any(kw in last_user_text for kw in _ASK_AI_PRODUCT_KEYWORDS):
-                system_prompt = system_prompt + "\n\n" + _ASK_AI_PRODUCT_INFO
-
-        if self._supports_llm_end_session_action(session):
-            system_prompt = system_prompt + "\n\n" + _END_SESSION_TOOL_INSTRUCTIONS
-
-        if session.captured_slots is not None:
-            system_prompt = compose_system_prompt(system_prompt, session.captured_slots)
-
-        last_user_text_for_limit = next(
-            (m.content for m in reversed(messages) if m.role == MessageRole.USER),
-            "",
-        )
-        max_sentences = self._response_max_sentences_for_turn(
-            session,
-            last_user_text_for_limit,
-            has_custom_prompt=bool(session.system_prompt),
-        )
-
-        all_tokens: list[str] = []
-        buf = ""
-        first_token = True
-        first_sentence = True
-        sentences_done = 0
-        tts_was_interrupted = False
-
-        t_llm_start = time.monotonic()
-        t_tts_first: Optional[float] = None
-        t_tts_end: Optional[float] = None
-
-        try:
-            async for token in self.llm_provider.stream_chat_with_timeout(
-                messages,
-                system_prompt=system_prompt,
-            ):
-                if first_token:
-                    self.latency_tracker.mark_llm_first_token(call_id)
-                    # Unblock the frontend audio player immediately on first token
-                    # so the jitter buffer can start filling before TTS begins.
-                    if websocket:
-                        try:
-                            await websocket.send_json({"type": "llm_response"})
-                        except Exception:
-                            pass
-                    first_token = False
-
-                if barge_in_event and barge_in_event.is_set():
-                    tts_was_interrupted = True
-                    break
-
-                all_tokens.append(token)
-                buf += token
-
-                # Flush each complete sentence (or, for long buffers, the first
-                # clause) to TTS as tokens arrive.  allow_clause activates only
-                # when buf >= 80 chars so short responses are unaffected.
-                while not (max_sentences and sentences_done >= max_sentences):
-                    idx = self._find_sentence_end(buf, allow_clause=len(buf) >= 80)
-                    if idx < 0:
-                        break
-
-                    sentence = guardrails.clean_response(buf[:idx + 1].strip())
-                    buf = buf[idx + 2:] if idx + 2 <= len(buf) else ""
-
-                    if not sentence or len(sentence) < 6:
-                        continue
-
-                    if barge_in_event and barge_in_event.is_set():
-                        tts_was_interrupted = True
-                        break
-
-                    if t_tts_first is None:
-                        t_tts_first = time.monotonic()
-                        self.latency_tracker.mark_tts_start(call_id)
-
-                    session.tts_active = True
-                    tts_was_interrupted = await self.synthesize_and_send_audio(
-                        session, sentence, websocket, track_latency=first_sentence,
-                    )
-                    first_sentence = False
-                    t_tts_end = time.monotonic()
-                    sentences_done += 1
-
-                    if tts_was_interrupted:
-                        break
-
-                if tts_was_interrupted:
-                    break
-
-        except LLMTimeoutError:
-            if sentences_done > 0 or t_tts_first is not None:
-                # Partial content already sent to TTS — Groq stalled mid-stream.
-                # The user heard real audio; don't append a fallback on top of it.
-                logger.warning(
-                    "LLM timeout for call %s after %d sentence(s) TTS'd — "
-                    "dropping remaining buffer, no fallback", call_id, sentences_done
-                )
-                buf = ""
-                # Keep all_tokens as-is so conversation history reflects what was said
-            else:
-                # No content reached TTS yet — safe to play fallback
-                logger.warning(f"LLM timeout for call {call_id} (no TTS yet), using fallback")
-                buf = "I'm sorry, could you repeat that?"
-                all_tokens.clear()
-                all_tokens.append(buf)
-        except Exception as e:
-            logger.error(f"LLM streaming error for call {call_id}: {e}", exc_info=True)
-            if sentences_done > 0 or t_tts_first is not None:
-                logger.warning("LLM error for %s after partial TTS — dropping buffer", call_id)
-                buf = ""
-            else:
-                buf = "I'm sorry, I had trouble processing that. Could you say it again?"
-                all_tokens.clear()
-                all_tokens.append(buf)
-
-        t_llm_done = time.monotonic()
-        self.latency_tracker.mark_llm_end(call_id)
-
-        raw_response_text = "".join(all_tokens)
-        ask_ai_end_action = (
-            parse_end_session_action(raw_response_text)
-            if self._supports_llm_end_session_action(session)
-            else None
-        )
-        if ask_ai_end_action:
-            buf = ""
-
-        # TTS any trailing buffer (final sentence without terminal punctuation,
-        # or a one-sentence response with no terminating punctuation at all).
-        if not ask_ai_end_action and not tts_was_interrupted and buf.strip():
-            if not (barge_in_event and barge_in_event.is_set()):
-                if not max_sentences or sentences_done < max_sentences:
-                    sentence = guardrails.clean_response(buf.strip())
-                    if sentence:
-                        if t_tts_first is None:
-                            t_tts_first = time.monotonic()
-                            self.latency_tracker.mark_tts_start(call_id)
-                        session.tts_active = True
-                        tts_was_interrupted = await self.synthesize_and_send_audio(
-                            session, sentence, websocket, track_latency=first_sentence,
-                        )
-                        first_sentence = False
-                        t_tts_end = time.monotonic()
-
-        llm_latency_ms = (t_llm_done - t_llm_start) * 1000
-        tts_latency_ms = (
-            (t_tts_end - t_tts_first) * 1000
-            if t_tts_first is not None and t_tts_end is not None
-            else 0.0
-        )
-
-        # Build the full response for history / logging.
-        # Apply guardrails to the assembled text (strips markdown, fillers, etc.)
-        # and enforce the per-turn sentence cap.
-        if ask_ai_end_action:
-            full_text = raw_response_text.strip()
-        else:
-            full_text = guardrails.clean_response(raw_response_text)
-
-        if not ask_ai_end_action and max_sentences and full_text:
-            import re as _re
-            parts = _re.split(r'(?<=[.!?])\s+', full_text.strip())
-            full_text = " ".join(parts[:max_sentences])
-
-        return full_text, llm_latency_ms, tts_latency_ms
+        return await self._turn_streamer.stream(session, websocket)
 
     async def _run_turn(
         self,
