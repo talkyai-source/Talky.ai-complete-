@@ -129,16 +129,24 @@ class S3Client:
         self.presigned_expiry = int(os.getenv("S3_PRESIGNED_URL_EXPIRY", "3600"))
         self.storage_class = os.getenv("S3_STORAGE_CLASS", "STANDARD")
         endpoint = os.getenv("S3_ENDPOINT_URL")  # None for AWS S3
+        self.access_key = os.getenv("S3_ACCESS_KEY_ID")
+        self.secret_key = os.getenv("S3_SECRET_ACCESS_KEY")
 
-        if not _BOTO3_AVAILABLE:
+        # boto3.client(...) returns a client object even when no credentials are
+        # set, so "client is not None" is NOT a real availability signal. Require
+        # actual credentials — otherwise is_available() reports True, save_and_link
+        # attempts an S3 upload that fails with NoCredentialsError, the row is
+        # marked 'failed', and playback 404s, instead of falling back to local
+        # disk (the intended behaviour when S3 isn't configured).
+        if not _BOTO3_AVAILABLE or not (self.access_key and self.secret_key):
             self._client = None
             return
 
         kwargs: Dict[str, Any] = {
             "service_name": "s3",
             "region_name": self.region,
-            "aws_access_key_id": os.getenv("S3_ACCESS_KEY_ID"),
-            "aws_secret_access_key": os.getenv("S3_SECRET_ACCESS_KEY"),
+            "aws_access_key_id": self.access_key,
+            "aws_secret_access_key": self.secret_key,
             "config": BotoCoreConfig(
                 retries={"max_attempts": 3, "mode": "adaptive"},
                 max_pool_connections=20,
@@ -150,6 +158,8 @@ class S3Client:
         self._client = boto3.client(**kwargs)
 
     def is_available(self) -> bool:
+        # _client is None unless boto3 is installed AND credentials are present
+        # (see __init__), so this no longer reports a credential-less client.
         return _BOTO3_AVAILABLE and self._client is not None
 
     def upload(self, key: str, data: bytes, content_type: str = "audio/wav") -> None:
