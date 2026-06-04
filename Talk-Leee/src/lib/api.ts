@@ -188,6 +188,7 @@ export interface KnowledgeNode {
     path: string;
     position: number;
     heading: string;
+    content?: string | null;
     summary?: string | null;
     voice_answer?: string | null;
     keywords?: string[] | null;
@@ -220,6 +221,15 @@ export interface KnowledgeIngestResult {
     node_count: number;
     token_count: number;
     mode: KnowledgeMode | string;
+}
+
+export interface KnowledgeHit {
+    id: string;
+    heading?: string | null;
+    voice_answer?: string | null;
+    summary?: string | null;
+    fts?: number | null;
+    sim?: number | null;
 }
 
 class ApiClient {
@@ -679,7 +689,7 @@ class ApiClient {
     async updateKnowledgeNode(
         campaignId: string,
         nodeId: string,
-        payload: Partial<Pick<KnowledgeNode, "enabled" | "priority" | "summary" | "voice_answer">>,
+        payload: Partial<Pick<KnowledgeNode, "enabled" | "priority" | "summary" | "voice_answer" | "heading" | "content">>,
     ): Promise<{ id: string; updated: string[] }> {
         const data = await this.client().request({
             path: `/campaigns/${campaignId}/knowledge/nodes/${nodeId}`,
@@ -688,6 +698,21 @@ class ApiClient {
             timeoutMs: 10_000,
         });
         return data as { id: string; updated: string[] };
+    }
+
+    /** Owner "test a question" — run the live retriever and return matches. */
+    async testCampaignKnowledge(
+        campaignId: string,
+        query: string,
+        k = 3,
+    ): Promise<{ query: string; hits: KnowledgeHit[] }> {
+        const data = await this.client().request({
+            path: `/campaigns/${campaignId}/knowledge/test`,
+            method: "POST",
+            body: { query, k },
+            timeoutMs: 12_000,
+        });
+        return data as { query: string; hits: KnowledgeHit[] };
     }
 
     async deleteKnowledgeSource(
