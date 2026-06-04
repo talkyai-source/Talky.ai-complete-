@@ -115,7 +115,7 @@ async def get_knowledge(
             campaign_id,
         )
         nodes = await conn.fetch(
-            "SELECT id, parent_id, depth, path, position, heading, summary, voice_answer, "
+            "SELECT id, parent_id, depth, path, position, heading, content, summary, voice_answer, "
             "       keywords, example_questions, priority, hit_count, enabled "
             "FROM campaign_knowledge_nodes WHERE campaign_id = $1 "
             "ORDER BY string_to_array(path, '.')::int[]",
