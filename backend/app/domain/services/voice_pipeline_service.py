@@ -308,16 +308,27 @@ class VoicePipelineService:
                 logger.debug("End-session farewell playback failed before close: %s", exc)
 
         hangup = getattr(self.media_gateway, "hangup_call", None)
+        hangup_requested = False
         if callable(hangup):
             try:
-                await hangup(call_id, reason)
+                hangup_requested = bool(await hangup(call_id, reason))
             except Exception as exc:
                 logger.debug("End-session telephony hangup failed: %s", exc)
 
-        try:
-            await self.media_gateway.on_call_ended(call_id, reason)
-        except Exception as exc:
-            logger.debug("End-session gateway shutdown failed: %s", exc)
+        # When we ask the PBX to hang up (Asterisk telephony), the authoritative
+        # call-ended teardown (lifecycle._on_call_ended -> _save_call_recording ->
+        # end_session) fires on ChannelDestroyed and owns BOTH the recording save
+        # AND the gateway-session cleanup. Tearing the gateway session down here
+        # would pop the recording_buffer before that path can read it — the root
+        # cause of dropped recordings on agent-ended ("user_goodbye") calls: the
+        # PBX save path then sees an empty buffer and silently skips the save.
+        # For sessions with no PBX hangup (browser / ask_ai), hangup_requested is
+        # False, so we still tear the gateway session down locally as before.
+        if not hangup_requested:
+            try:
+                await self.media_gateway.on_call_ended(call_id, reason)
+            except Exception as exc:
+                logger.debug("End-session gateway shutdown failed: %s", exc)
 
         if websocket:
             try:
