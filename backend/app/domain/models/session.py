@@ -99,6 +99,15 @@ class CallSession(BaseModel):
         None,
         description="Agent configuration for this call"
     )
+    persona_type: Optional[str] = Field(
+        None,
+        description=(
+            "Persona (lead_gen|customer_support|receptionist) mirrored from the "
+            "campaign's script_config.persona_type. Drives spoken-greeting "
+            "selection (build_persona_greeting); None falls back to the generic "
+            "company-less opener."
+        ),
+    )
     knowledge_mode: Optional[str] = Field(
         None,
         description=(

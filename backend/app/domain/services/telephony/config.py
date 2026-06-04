@@ -103,12 +103,17 @@ def _build_call_greeting(session, *, first_speaker: str) -> str:
     del first_speaker
     agent_name, company = _resolve_greeting_context(session)
 
-    # Persona is stored on the session's config when the campaign went
-    # through the persona-driven path. Older sessions / non-telephony
-    # contexts have no config or no persona_type — both produce None
-    # below, which build_persona_greeting handles by falling back.
-    config = getattr(session, "config", None)
-    persona_type = getattr(config, "persona_type", None) if config else None
+    # Persona drives which greeting template is used. It is mirrored straight
+    # onto the CallSession (CallSession.persona_type, copied from the
+    # VoiceSessionConfig at session creation). Read it off the session first;
+    # fall back to a nested ``config`` object for any caller that passes a
+    # config-bearing object (e.g. the VoiceSessionConfig itself). Older /
+    # non-telephony contexts have neither → None, which build_persona_greeting
+    # handles by falling back to the generic opener.
+    persona_type = getattr(session, "persona_type", None)
+    if persona_type is None:
+        config = getattr(session, "config", None)
+        persona_type = getattr(config, "persona_type", None) if config else None
 
     return build_persona_greeting(
         persona_type=persona_type,

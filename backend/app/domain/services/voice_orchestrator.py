@@ -360,6 +360,7 @@ class VoiceOrchestrator:
             conversation_state=ConversationState.GREETING,
             conversation_context=ConversationContext(),
             agent_config=config.agent_config,
+            persona_type=config.persona_type,
             system_prompt=config.system_prompt,
             llm_model=config.llm_model,
             llm_temperature=config.llm_temperature,
