@@ -47,6 +47,7 @@ async def retrieve_knowledge(
     campaign_id: str,
     query: str,
     k: int = 2,
+    bump_hits: bool = True,
 ) -> List[dict]:
     """Top-k knowledge nodes for `query` (a user transcript). Hybrid FTS + trgm.
 
@@ -97,8 +98,10 @@ async def retrieve_knowledge(
                 """,
                 campaign_id, q, k, _WORD_SIM_FLOOR,
             )
-            if rows:
-                # analytics: best-effort hit_count bump, same txn (cheap)
+            if rows and bump_hits:
+                # analytics: best-effort hit_count bump, same txn (cheap).
+                # Skipped for the owner's "test a question" panel so trials
+                # don't inflate the usage stats.
                 await conn.execute(
                     "UPDATE campaign_knowledge_nodes SET hit_count = hit_count + 1 "
                     "WHERE id = ANY($1::uuid[])",

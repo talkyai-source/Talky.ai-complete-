@@ -158,21 +158,91 @@ async def update_node(
     tenant_id = _require_tenant(current_user)
     await _assert_campaign_owned(db_client.pool, tenant_id, campaign_id)
 
-    allowed = {"enabled", "priority", "summary", "voice_answer"}
+    allowed = {"enabled", "priority", "summary", "voice_answer", "heading", "content"}
     fields = {k: v for k, v in payload.items() if k in allowed}
     if not fields:
         raise HTTPException(status_code=400, detail=f"No editable fields (allowed: {sorted(allowed)})")
 
-    sets = ", ".join(f"{k} = ${i+3}" for i, k in enumerate(fields))
     async with acquire_with_tenant(db_client.pool, tenant_id) as conn:
+        set_parts = [f"{k} = ${i + 3}" for i, k in enumerate(fields)]
+        params = list(fields.values())
+        # If heading/content changed, recompute search_text + tsvector so the
+        # retriever reflects the edit (same shape ingest builds).
+        if "heading" in fields or "content" in fields:
+            cur = await conn.fetchrow(
+                "SELECT heading, content, keywords, example_questions "
+                "FROM campaign_knowledge_nodes WHERE id = $1 AND campaign_id = $2",
+                node_id, campaign_id,
+            )
+            if not cur:
+                raise HTTPException(status_code=404, detail="Node not found")
+            heading = fields.get("heading", cur["heading"]) or ""
+            content = fields.get("content", cur["content"]) or ""
+            kw = cur["keywords"] or []
+            eq = cur["example_questions"] or []
+            search_text = " ".join(
+                p for p in [heading, content, " ".join(kw), " ".join(eq)] if p
+            ).strip()
+            idx = len(params) + 3
+            params.append(search_text)
+            set_parts.append(f"search_text = ${idx}")
+            set_parts.append(f"search_tsv = to_tsvector('english', ${idx})")
+
+        sets = ", ".join(set_parts)
         updated = await conn.fetchval(
             f"UPDATE campaign_knowledge_nodes SET {sets}, updated_at = NOW() "
             "WHERE id = $1 AND campaign_id = $2 RETURNING id",
-            node_id, campaign_id, *fields.values(),
+            node_id, campaign_id, *params,
         )
     if not updated:
         raise HTTPException(status_code=404, detail="Node not found")
     return {"id": str(updated), "updated": list(fields.keys())}
+
+
+@router.post("/{campaign_id}/knowledge/test")
+async def test_retrieval(
+    campaign_id: str,
+    payload: dict,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """Run the live retriever for a query and return the matched node(s).
+
+    The owner's "test a question" tool — shows exactly what the agent would pull
+    from the knowledge tree for a caller's question. Does NOT bump hit_count so
+    trials don't inflate usage stats.
+    """
+    _require_enabled()
+    tenant_id = _require_tenant(current_user)
+    await _assert_campaign_owned(db_client.pool, tenant_id, campaign_id)
+
+    query = (payload.get("query") or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="query is required")
+    try:
+        k = max(1, min(int(payload.get("k", 3)), 5))
+    except (TypeError, ValueError):
+        k = 3
+
+    from app.services.scripts.knowledge.retrieval import retrieve_knowledge
+
+    hits = await retrieve_knowledge(
+        db_client.pool, tenant_id, campaign_id, query, k=k, bump_hits=False,
+    )
+    return {
+        "query": query,
+        "hits": [
+            {
+                "id": str(h["id"]),
+                "heading": h.get("heading"),
+                "voice_answer": h.get("voice_answer"),
+                "summary": h.get("summary"),
+                "fts": h.get("fts"),
+                "sim": h.get("sim"),
+            }
+            for h in hits
+        ],
+    }
 
 
 @router.delete("/{campaign_id}/knowledge/sources/{source_id}")
