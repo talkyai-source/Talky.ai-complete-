@@ -47,6 +47,14 @@ from app.infrastructure.assistant.tools.workflow import (
     schedule_reminder,
     execute_action_plan,
 )
+from app.infrastructure.assistant.tools.campaign_admin import (
+    get_campaign_detail,
+    get_knowledge_tree,
+    retrieve_knowledge,
+    update_campaign_config,
+    update_knowledge_node,
+    manage_lead,
+)
 
 # =============================================================================
 # TOOL REGISTRY
@@ -82,7 +90,32 @@ QUERY_TOOLS = {
         "function": get_actions_today,
         "description": "Get assistant actions performed today (emails sent, SMS sent, etc.)",
         "input_schema": None
-    }
+    },
+    # Campaign admin read tools
+    "get_campaign_detail": {
+        "function": get_campaign_detail,
+        "description": (
+            "Get full detail (config, script_config, voice settings) for a single campaign "
+            "by id or name"
+        ),
+        "input_schema": None,
+    },
+    "get_knowledge_tree": {
+        "function": get_knowledge_tree,
+        "description": (
+            "List all knowledge nodes for a campaign (heading, summary, enabled, hit_count) "
+            "ordered by path"
+        ),
+        "input_schema": None,
+    },
+    "retrieve_knowledge": {
+        "function": retrieve_knowledge,
+        "description": (
+            "Run the live RAG retriever for a query against a campaign's knowledge tree; "
+            "returns top-3 matching nodes (heading, voice_answer, summary) without bumping hit_count"
+        ),
+        "input_schema": None,
+    },
 }
 
 ACTION_TOOLS = {
@@ -137,7 +170,36 @@ ACTION_TOOLS = {
         "function": execute_action_plan,
         "description": "Execute a multi-step action plan for complex workflows like 'book meeting + send confirmation + schedule reminder'.",
         "input_schema": ExecuteActionPlanInput
-    }
+    },
+    # Campaign admin edit tools (confirm pattern)
+    "update_campaign_config": {
+        "function": update_campaign_config,
+        "description": (
+            "Preview or apply changes to a campaign's name, goal, or script_config fields "
+            "(persona_type, company_name, agent_names, additional_instructions, knowledge_driven). "
+            "Call with confirm=False first to preview; then confirm=True to apply."
+        ),
+        "input_schema": None,
+    },
+    "update_knowledge_node": {
+        "function": update_knowledge_node,
+        "description": (
+            "Preview or apply edits to a campaign knowledge node "
+            "(heading, content, enabled, priority, summary, voice_answer). "
+            "Recomputes full-text search index when heading or content changes. "
+            "Call with confirm=False to preview; confirm=True to apply."
+        ),
+        "input_schema": None,
+    },
+    "manage_lead": {
+        "function": manage_lead,
+        "description": (
+            "Add or remove a lead from a campaign. "
+            "action='add' requires phone_number; action='remove' requires lead_id. "
+            "Call with confirm=False to preview; confirm=True to apply."
+        ),
+        "input_schema": None,
+    },
 }
 
 ALL_TOOLS = {**QUERY_TOOLS, **ACTION_TOOLS}
@@ -174,6 +236,14 @@ __all__ = [
     "cancel_meeting_tool",
     "schedule_reminder",
     "execute_action_plan",
+    # Campaign admin read tools
+    "get_campaign_detail",
+    "get_knowledge_tree",
+    "retrieve_knowledge",
+    # Campaign admin edit tools
+    "update_campaign_config",
+    "update_knowledge_node",
+    "manage_lead",
     # Registries
     "QUERY_TOOLS",
     "ACTION_TOOLS",

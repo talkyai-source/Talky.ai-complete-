@@ -244,10 +244,11 @@ class TestToolIntegration:
         """Verify expected number of tools"""
         from app.infrastructure.assistant.tools import ALL_TOOLS, QUERY_TOOLS, ACTION_TOOLS
         
-        # 6 query tools + 10 action tools = 16 total
-        assert len(QUERY_TOOLS) == 6
-        assert len(ACTION_TOOLS) == 10  # 8 original + 2 new
-        assert len(ALL_TOOLS) == 16
+        # 9 query tools + 13 action tools = 22 total
+        # (original 6+10=16 plus 3 campaign-admin read + 3 campaign-admin edit)
+        assert len(QUERY_TOOLS) == 9
+        assert len(ACTION_TOOLS) == 13
+        assert len(ALL_TOOLS) == 22
 
 
 class TestSingletonPattern:
