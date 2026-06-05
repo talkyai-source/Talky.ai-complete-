@@ -405,12 +405,16 @@ class ApiClient {
         const method = "GET" as const;
         try {
             const path = "/auth/me";
-            const data = await this.client().request({ path, method, timeoutMs: 12_000 });
+            // Auth PROBE: a 401 means "not logged in", not "session expired".
+            // suppressAuthRedirect lets the auth-context decide (anonymous shell
+            // vs requireAuth bounce) instead of the http-client hard-redirecting
+            // every cold/anonymous visitor to /login.
+            const data = await this.client().request({ path, method, timeoutMs: 12_000, suppressAuthRedirect: true });
             return this.parseOrThrow(MeResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
         } catch (err) {
             if (err instanceof ApiClientError && err.status === 404) {
                 const path = "/me";
-                const data = await this.client().request({ path, method, timeoutMs: 12_000 });
+                const data = await this.client().request({ path, method, timeoutMs: 12_000, suppressAuthRedirect: true });
                 return this.parseOrThrow(MeResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
             }
             throw err;

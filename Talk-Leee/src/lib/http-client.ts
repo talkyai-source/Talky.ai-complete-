@@ -46,6 +46,14 @@ export type HttpRequestOptions<TBody = unknown> = {
     body?: TBody;
     timeoutMs?: number;
     signal?: AbortSignal;
+    // When true, a 401 on this request does NOT clear the stored token or fire
+    // the global session-expired redirect — it just throws so the caller can
+    // handle it locally. Use for AUTH PROBES (/auth/me bootstrap) and OPTIONAL
+    // background calls (e.g. the assistant model picker): an anonymous visitor's
+    // probe 401 must not bounce them to /login, and an optional widget's 401
+    // must not tear down a live session. Real authed calls omit this so genuine
+    // expiry still redirects.
+    suppressAuthRedirect?: boolean;
 };
 
 type TokenStorage = {
@@ -493,7 +501,7 @@ export function createHttpClient(config: HttpClientConfig) {
             // redirect-to-login behaviour. The handler is
             // idempotent — parallel requests racing on 401 trigger
             // exactly one redirect.
-            if (res.status === 401) {
+            if (res.status === 401 && !opts.suppressAuthRedirect) {
                 // Inside the fresh-login grace window, keep the bearer
                 // token in storage — wiping it would force the next
                 // call to use cookie-only auth even though localStorage
