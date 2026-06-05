@@ -243,12 +243,13 @@ class TestToolIntegration:
     async def test_tool_count(self):
         """Verify expected number of tools"""
         from app.infrastructure.assistant.tools import ALL_TOOLS, QUERY_TOOLS, ACTION_TOOLS
-        
-        # 9 query tools + 13 action tools = 22 total
-        # (original 6+10=16 plus 3 campaign-admin read + 3 campaign-admin edit)
+
+        # 9 query tools + 14 action tools = 23 total
+        # (original 6+10=16 plus 3 campaign-admin read + 3 campaign-admin edit
+        #  + 1 campaign AI options: apply_campaign_voice)
         assert len(QUERY_TOOLS) == 9
-        assert len(ACTION_TOOLS) == 13
-        assert len(ALL_TOOLS) == 22
+        assert len(ACTION_TOOLS) == 14
+        assert len(ALL_TOOLS) == 23
 
 
 class TestSingletonPattern:

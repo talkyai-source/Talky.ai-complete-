@@ -412,24 +412,24 @@ async def manage_lead(
     name: Optional[str] = None,
     phone_number: Optional[str] = None,
     lead_id: Optional[str] = None,
+    first_name: Optional[str] = None,
+    last_name: Optional[str] = None,
+    email: Optional[str] = None,
     confirm: bool = False,
 ) -> Dict[str, Any]:
     """
-    Add or remove a lead from a campaign (with confirm pattern).
+    Add, remove (soft-delete), or update a lead in a campaign (confirm pattern).
 
-    action="add":
-      - Requires phone_number. name is split into first_name/last_name on
-        the first space; if no space it goes into first_name only.
-      - Preview shows the lead that would be created.
-      - confirm=True inserts the lead.
+    action="add"    — phone_number required; name split first/last on first space.
+    action="remove" — lead_id required; sets status="deleted" (soft delete).
+    action="update" — lead_id required; any of phone_number/first_name/last_name/email.
 
-    action="remove":
-      - Requires lead_id. Preview shows what will be deleted.
-      - confirm=True deletes the lead (scoped to tenant).
+    confirm=False → preview diff without writing.
+    confirm=True  → apply and return applied=True with diff.
     """
     try:
-        if action not in {"add", "remove"}:
-            return {"error": f"Unknown action '{action}'. Use 'add' or 'remove'."}
+        if action not in {"add", "remove", "update"}:
+            return {"error": f"Unknown action '{action}'. Use 'add', 'remove', or 'update'."}
 
         if not await _verify_campaign_owned(db_client, tenant_id, campaign_id):
             return {"error": "campaign not found"}
@@ -439,20 +439,20 @@ async def manage_lead(
             if not phone_number or not phone_number.strip():
                 return {"error": "phone_number is required for action='add'"}
 
-            # Split name into first/last
-            first_name: Optional[str] = None
-            last_name: Optional[str] = None
+            # name param takes precedence over explicit first_name/last_name
+            fn: Optional[str] = first_name
+            ln: Optional[str] = last_name
             if name and name.strip():
                 parts = name.strip().split(" ", 1)
-                first_name = parts[0] or None
-                last_name = parts[1] if len(parts) > 1 else None
+                fn = parts[0] or None
+                ln = parts[1] if len(parts) > 1 else None
 
             preview_lead = {
                 "tenant_id": tenant_id,
                 "campaign_id": campaign_id,
                 "phone_number": phone_number.strip(),
-                "first_name": first_name,
-                "last_name": last_name,
+                "first_name": fn,
+                "last_name": ln,
                 "status": "pending",
                 "last_call_result": "pending",
                 "call_attempts": 0,
@@ -487,15 +487,57 @@ async def manage_lead(
             }
 
         # ---- REMOVE ----------------------------------------------------------
-        if not lead_id:
-            return {"error": "lead_id is required for action='remove'"}
+        if action == "remove":
+            if not lead_id:
+                return {"error": "lead_id is required for action='remove'"}
 
-        # Read the lead (scoped to tenant)
+            # Read the lead (scoped to tenant)
+            resp = (
+                db_client.table("leads")
+                .select("id,phone_number,first_name,last_name,status,campaign_id")
+                .eq("id", lead_id)
+                .eq("tenant_id", tenant_id)
+                .execute()
+            )
+            if not resp.data:
+                return {"error": "lead not found"}
+
+            existing_lead = resp.data[0]
+
+            if not confirm:
+                return {
+                    "preview": True,
+                    "changes": [
+                        {
+                            "field": "lead",
+                            "before": existing_lead,
+                            "after": {"status": "deleted"},
+                        }
+                    ],
+                    "note": "Not applied yet. Call again with confirm=true to apply.",
+                }
+
+            # Soft delete — matches DELETE /campaigns/{id}/contacts/{contact_id}
+            db_client.table("leads").update({"status": "deleted"}).eq(
+                "id", lead_id
+            ).eq("tenant_id", tenant_id).execute()
+
+            return {
+                "applied": True,
+                "changes": [
+                    {"field": "lead", "before": existing_lead, "after": {"status": "deleted"}}
+                ],
+            }
+
+        # ---- UPDATE ----------------------------------------------------------
+        # action == "update"
+        if not lead_id:
+            return {"error": "lead_id is required for action='update'"}
+
+        # Read current lead (scoped to tenant)
         resp = (
             db_client.table("leads")
-            .select(
-                "id,phone_number,first_name,last_name,status,campaign_id"
-            )
+            .select("id,phone_number,first_name,last_name,email,status,campaign_id")
             .eq("id", lead_id)
             .eq("tenant_id", tenant_id)
             .execute()
@@ -503,29 +545,51 @@ async def manage_lead(
         if not resp.data:
             return {"error": "lead not found"}
 
-        existing_lead = resp.data[0]
+        current = resp.data[0]
+
+        # Build set of fields the caller wants to change
+        candidate: Dict[str, Any] = {}
+        if phone_number is not None:
+            candidate["phone_number"] = phone_number.strip()
+        if first_name is not None:
+            candidate["first_name"] = first_name
+        if last_name is not None:
+            candidate["last_name"] = last_name
+        if email is not None:
+            candidate["email"] = email
+
+        if not candidate:
+            return {
+                "error": (
+                    "No updatable fields provided. "
+                    "Supply at least one of: phone_number, first_name, last_name, email."
+                )
+            }
+
+        diff_entries = _build_diff(
+            {k: current.get(k) for k in candidate},
+            candidate,
+        )
+
+        if not diff_entries:
+            return {
+                "preview": True,
+                "changes": [],
+                "note": "No changes detected.",
+            }
 
         if not confirm:
             return {
                 "preview": True,
-                "changes": [
-                    {
-                        "field": "lead",
-                        "before": existing_lead,
-                        "after": None,
-                    }
-                ],
+                "changes": diff_entries,
                 "note": "Not applied yet. Call again with confirm=true to apply.",
             }
 
-        db_client.table("leads").delete().eq("id", lead_id).eq(
+        db_client.table("leads").update(candidate).eq("id", lead_id).eq(
             "tenant_id", tenant_id
         ).execute()
 
-        return {
-            "applied": True,
-            "changes": [{"field": "lead", "before": existing_lead, "after": None}],
-        }
+        return {"applied": True, "changes": diff_entries}
 
     except Exception as exc:
         logger.error("manage_lead error: %s", exc)

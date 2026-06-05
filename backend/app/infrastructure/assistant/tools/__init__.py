@@ -55,6 +55,9 @@ from app.infrastructure.assistant.tools.campaign_admin import (
     update_knowledge_node,
     manage_lead,
 )
+from app.infrastructure.assistant.tools.campaign_ai_options import (
+    apply_campaign_voice,
+)
 
 # =============================================================================
 # TOOL REGISTRY
@@ -194,8 +197,20 @@ ACTION_TOOLS = {
     "manage_lead": {
         "function": manage_lead,
         "description": (
-            "Add or remove a lead from a campaign. "
-            "action='add' requires phone_number; action='remove' requires lead_id. "
+            "Add, remove, or update a lead in a campaign. "
+            "action='add' requires phone_number; action='remove' requires lead_id "
+            "(soft-deletes by setting status='deleted'); action='update' requires "
+            "lead_id plus any of phone_number, first_name, last_name, email to change. "
+            "Call with confirm=False to preview; confirm=True to apply."
+        ),
+        "input_schema": None,
+    },
+    "apply_campaign_voice": {
+        "function": apply_campaign_voice,
+        "description": (
+            "Preview or apply a TTS provider + voice change across one or more campaigns. "
+            "Validates the voice against the provider's live catalog before writing. "
+            "Requires campaign_ids (list), tts_provider, and voice_id. "
             "Call with confirm=False to preview; confirm=True to apply."
         ),
         "input_schema": None,
@@ -244,6 +259,8 @@ __all__ = [
     "update_campaign_config",
     "update_knowledge_node",
     "manage_lead",
+    # Campaign AI options tools
+    "apply_campaign_voice",
     # Registries
     "QUERY_TOOLS",
     "ACTION_TOOLS",

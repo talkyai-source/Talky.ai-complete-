@@ -531,14 +531,16 @@ async def test_manage_lead_remove_preview_no_delete():
     )
     assert result.get("preview") is True
     assert db._delete_calls == []
+    assert db._update_calls == [], "update was called but confirm=False"
     change = result["changes"][0]
     assert change["before"]["id"] == "lead-1"
-    assert change["after"] is None
+    # Preview shows the new state (soft-delete), not None
+    assert change["after"] == {"status": "deleted"}
 
 
 @pytest.mark.asyncio
-async def test_manage_lead_remove_confirm_deletes():
-    """action=remove, confirm=True → deletes lead."""
+async def test_manage_lead_remove_confirm_soft_deletes():
+    """action=remove, confirm=True → soft-deletes lead (update status=deleted, NOT hard delete)."""
     db = FakeDbClient()
     db.configure_response("campaigns", "select", data=[{"id": "c1"}])
     db.configure_response(
@@ -557,7 +559,10 @@ async def test_manage_lead_remove_confirm_deletes():
         confirm=True,
     )
     assert result.get("applied") is True
-    assert len(db._delete_calls) == 1
+    # Must be a soft delete via update, not hard delete
+    assert db._delete_calls == [], "Hard delete must not be used; use soft-delete (update status)"
+    assert len(db._update_calls) == 1
+    assert db._update_calls[0]["payload"] == {"status": "deleted"}
 
 
 @pytest.mark.asyncio
@@ -569,7 +574,7 @@ async def test_manage_lead_unknown_action():
         tenant_id="t1",
         db_client=db,
         campaign_id="c1",
-        action="update",
+        action="purge",  # not a valid action
         confirm=False,
     )
     assert "error" in result
