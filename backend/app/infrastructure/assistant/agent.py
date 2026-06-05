@@ -32,6 +32,7 @@ from app.infrastructure.assistant.tools import (
     start_campaign,
     ALL_TOOLS
 )
+from app.infrastructure.assistant.tools.llm_schemas import GROQ_TOOL_SCHEMAS
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,11 @@ You help users with:
 - send_sms: Send SMS messages
 - initiate_call: Start an outbound call
 - start_campaign: Start or resume a campaign
+
+- get_campaign_detail / get_knowledge_tree / retrieve_knowledge: inspect a campaign's config + knowledge, and test what the knowledge tree returns for a question
+- update_campaign_config / update_knowledge_node / manage_lead: edit campaign data
+
+**Editing campaigns:** For ANY update_* or manage_lead call, FIRST call it with confirm=false to preview the exact before→after change, show that to the user in plain language, and only call again with confirm=true after they explicitly say yes. Never apply an edit without that confirmation.
 
 **Guidelines:**
 - Be concise and helpful
@@ -192,154 +198,8 @@ async def agent_node(state: AgentState) -> Dict[str, Any]:
             
             messages.append(formatted_msg)
     
-    # Define tools for Groq
-    tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": "get_dashboard_stats",
-                "description": "Get today's call statistics - total calls, success rate, active campaigns",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "date": {"type": "string", "description": "Date in YYYY-MM-DD format, defaults to today"}
-                    },
-                    "required": []
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_usage_info",
-                "description": "Get plan usage - minutes allocated, used, remaining, subscription status",
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                    "required": []
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_leads",
-                "description": "Get leads list with optional filters",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "campaign_id": {"type": "string", "description": "Filter by campaign ID"},
-                        "status": {"type": "string", "description": "Filter by status"},
-                        "limit": {"type": "integer", "description": "Max leads to return", "default": 10}
-                    },
-                    "required": []
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_campaigns",
-                "description": "Get all campaigns with status and progress",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "status": {"type": "string", "description": "Filter by status (draft, running, completed)"}
-                    },
-                    "required": []
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_recent_calls",
-                "description": "Get recent calls with outcomes",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "today_only": {"type": "boolean", "description": "Only show today's calls", "default": True},
-                        "limit": {"type": "integer", "default": 10}
-                    },
-                    "required": []
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_actions_today",
-                "description": "Get assistant actions performed today (emails, SMS, calls triggered)",
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                    "required": []
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "send_email",
-                "description": "Send an email to recipients. Supports templates: meeting_confirmation, follow_up, reminder. Uses Gmail if connected, SMTP fallback otherwise.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "to": {"type": "array", "items": {"type": "string"}, "description": "Email addresses"},
-                        "subject": {"type": "string", "description": "Email subject (ignored if using template)"},
-                        "body": {"type": "string", "description": "Email body (ignored if using template)"},
-                        "template_name": {"type": "string", "description": "Template to use: meeting_confirmation, follow_up, or reminder"},
-                        "template_context": {"type": "object", "description": "Variables for template (e.g., attendee_name, title, date, time)"}
-                    },
-                    "required": ["to", "subject", "body"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "send_sms",
-                "description": "Send SMS to phone numbers",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "to": {"type": "array", "items": {"type": "string"}, "description": "Phone numbers"},
-                        "message": {"type": "string"}
-                    },
-                    "required": ["to", "message"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "initiate_call",
-                "description": "Start an outbound call to a phone number",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "phone_number": {"type": "string"},
-                        "campaign_id": {"type": "string", "description": "Optional campaign context"}
-                    },
-                    "required": ["phone_number"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "start_campaign",
-                "description": "Start or resume a campaign",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "campaign_id": {"type": "string"}
-                    },
-                    "required": ["campaign_id"]
-                }
-            }
-        }
-    ]
+    # Define tools for Groq (schemas live in tools/llm_schemas.py)
+    tools = GROQ_TOOL_SCHEMAS
     
     try:
         response = await groq_client.chat.completions.create(
@@ -461,7 +321,11 @@ async def tool_executor(state: AgentState) -> Dict[str, Any]:
             elif func_name == "start_campaign":
                 result = await start_campaign(tenant_id, db_client, conversation_id=conversation_id, **args)
             else:
-                result = {"error": f"Unknown tool: {func_name}"}
+                entry = ALL_TOOLS.get(func_name)
+                if entry and entry.get("function"):
+                    result = await entry["function"](tenant_id, db_client, **args)
+                else:
+                    result = {"error": f"Unknown tool: {func_name}"}
             
             # Return as ToolMessage for proper LangGraph handling
             tool_message = ToolMessage(
