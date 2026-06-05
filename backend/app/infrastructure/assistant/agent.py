@@ -33,6 +33,7 @@ from app.infrastructure.assistant.tools import (
     ALL_TOOLS
 )
 from app.infrastructure.assistant.tools.llm_schemas import GROQ_TOOL_SCHEMAS
+from app.infrastructure.assistant.model_config import normalize_model
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ class AgentState(TypedDict):
     conversation_id: Optional[str]
     db_client: Any  # PostgreSQL client
     tool_results: List[Dict[str, Any]]
+    model: Optional[str]
 
 
 # =============================================================================
@@ -207,7 +209,7 @@ async def agent_node(state: AgentState) -> Dict[str, Any]:
     
     try:
         response = await groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=normalize_model(state.get("model")),
             messages=messages,
             tools=tools,
             tool_choice="auto",

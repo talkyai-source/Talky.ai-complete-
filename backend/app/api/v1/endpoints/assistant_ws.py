@@ -19,6 +19,7 @@ from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
 from app.core.config import get_settings
 from app.core.jwt_security import JWTValidationError, decode_and_validate_token
 from app.infrastructure.assistant.agent import assistant_graph, AgentState
+from app.infrastructure.assistant.model_config import get_tenant_assistant_model
 
 logger = logging.getLogger(__name__)
 
@@ -356,7 +357,8 @@ async def assistant_chat(
                         "user_id": user_id,
                         "conversation_id": current_conversation_id,
                         "db_client": db_client,
-                        "tool_results": []
+                        "tool_results": [],
+                        "model": await get_tenant_assistant_model(db_client, tenant_id),
                     }
                     
                     # Add history context
