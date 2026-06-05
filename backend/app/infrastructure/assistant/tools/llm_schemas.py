@@ -273,7 +273,9 @@ GROQ_TOOL_SCHEMAS = [
         "function": {
             "name": "manage_lead",
             "description": (
-                "Add or remove a lead/contact. "
+                "Add, remove (soft-delete), or update an existing lead/contact in a campaign. "
+                "Use action='add' to create a new lead, action='remove' to soft-delete (lead_id required), "
+                "or action='update' to edit an existing lead's phone number, name, or email (lead_id required). "
                 "confirm=false previews; confirm=true applies (after user approval)."
             ),
             "parameters": {
@@ -282,18 +284,38 @@ GROQ_TOOL_SCHEMAS = [
                     "campaign_id": {"type": "string", "description": "Campaign UUID"},
                     "action": {
                         "type": "string",
-                        "enum": ["add", "remove"],
-                        "description": "add or remove"
+                        "enum": ["add", "remove", "update"],
+                        "description": "add, remove (soft-delete), or update an existing lead"
                     },
-                    "name": {"type": "string", "description": "Lead name (for add)"},
-                    "phone_number": {"type": "string", "description": "Phone number (required for add)"},
-                    "lead_id": {"type": "string", "description": "Lead UUID (required for remove)"},
+                    "name": {"type": "string", "description": "Lead full name (for add)"},
+                    "phone_number": {"type": "string", "description": "Phone number (required for add; optional for update)"},
+                    "first_name": {"type": "string", "description": "First name (for add or update)"},
+                    "last_name": {"type": "string", "description": "Last name (for add or update)"},
+                    "email": {"type": "string", "description": "Email address (for add or update)"},
+                    "lead_id": {"type": "string", "description": "Lead UUID (required for remove and update)"},
                     "confirm": {
                         "type": "boolean",
                         "description": "false = preview only; true = apply after user approval"
                     }
                 },
                 "required": ["campaign_id", "action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "apply_campaign_voice",
+            "description": "Set the TTS voice + provider (the per-campaign AI options) for one or more campaigns. The voice is validated against the provider. ALWAYS call with confirm=false first to preview, then confirm=true after the user approves.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "campaign_ids": {"type": "array", "items": {"type": "string"}, "description": "Campaign ids to apply to"},
+                    "tts_provider": {"type": "string", "description": "TTS provider, e.g. google, elevenlabs, cartesia, deepgram"},
+                    "voice_id": {"type": "string"},
+                    "confirm": {"type": "boolean", "description": "false = preview only; true = apply after user approval"}
+                },
+                "required": ["campaign_ids", "tts_provider", "voice_id"]
             }
         }
     },
