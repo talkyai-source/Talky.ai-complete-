@@ -30,6 +30,7 @@ import { Bot, Loader2, MessageCircle, Send, X } from "lucide-react";
 import { apiBaseUrl } from "@/lib/env";
 import { useAccessToken } from "@/lib/auth-hooks";
 import { useAuth } from "@/lib/auth-context";
+import { getAssistantWsToken } from "@/lib/assistant-model-api";
 import { AssistantModelPicker } from "./assistant-model-picker";
 
 /*
@@ -192,7 +193,7 @@ export function FloatingAssistant() {
         }
     }, []);
 
-    const connect = useCallback(() => {
+    const connect = useCallback(async () => {
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
         if (!wsUrl) {
             // No token — the panel renders an inline "Sign in" CTA, so we
@@ -202,6 +203,12 @@ export function FloatingAssistant() {
             return;
         }
         setStatus("connecting");
+        // The talky_at auth cookie does NOT reliably travel on the cross-origin
+        // WebSocket handshake (it does on HTTP), so the WS would close 1008
+        // ("session expired") in cookie-only mode. Fetch a short-lived ticket
+        // over authed HTTP (cookie works there) and send it as the auth frame
+        // in onopen — the same global auth the rest of the app uses.
+        const wsTicket = await getAssistantWsToken();
         let ws: WebSocket;
         try {
             ws = new WebSocket(wsUrl);
@@ -214,27 +221,16 @@ export function FloatingAssistant() {
         ws.onopen = () => {
             reconnectAttemptsRef.current = 0;
             setStatus("open");
-            // AH-Phase-A / Phase-F2: auth credential resolution.
-            //
-            // Backend tries (in order): talky_at HttpOnly cookie →
-            // first-frame {type:"auth",token} → ?token= URL query.
-            // The cookie travels on the WS handshake automatically
-            // (browsers send it for api.talkleeai.com just like fetch)
-            // so the cookie-only path needs NOTHING from this client.
-            //
-            // We only emit the first-frame auth when accessToken is
-            // non-empty — that's the Bearer-fallback path (admin
-            // frontend / native shell). In the cookie-only mode
-            // (NEXT_PUBLIC_BEARER_FALLBACK=false) accessToken is null,
-            // we skip the frame, and the backend auths via cookie.
-            //
-            // The backend tolerates a stale auth frame after cookie
-            // auth succeeds (falls through the main loop's
-            // type-dispatch as a no-op), so this branch is safe to
-            // emit even when redundant.
-            if (accessToken) {
+            // Auth via the first {type:"auth",token} frame. The backend tries
+            // the talky_at cookie first, but that cookie is NOT reliably sent on
+            // the cross-origin WS handshake — so we ALWAYS send a token frame,
+            // using the short-lived ticket fetched over authed HTTP (wsTicket,
+            // which carries the same identity as the login token). Falls back to
+            // the in-memory bearer accessToken for admin / native-shell clients.
+            const wsAuthToken = wsTicket ?? accessToken;
+            if (wsAuthToken) {
                 try {
-                    ws.send(JSON.stringify({ type: "auth", token: accessToken }));
+                    ws.send(JSON.stringify({ type: "auth", token: wsAuthToken }));
                 } catch {
                     // Send failure here just means the socket already
                     // closed; onclose will handle status.

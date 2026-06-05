@@ -63,3 +63,34 @@ async def set_assistant_model(
     ).execute()
 
     return {"current": body.model}
+
+
+@router.get("/ws-token")
+async def assistant_ws_token(
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Mint a short-lived token for the assistant WebSocket auth frame.
+
+    The browser reliably sends the auth cookie on HTTP requests but NOT on the
+    cross-origin WebSocket handshake — so the chat WS would get neither a cookie
+    nor a token and close 1008 ("session expired in the assistant"). The client
+    fetches this over normal authed HTTP (cookie works here) and sends the
+    returned token as the first {"type":"auth","token":...} WS frame. It carries
+    the SAME identity claims as the login token and is short-lived (used only to
+    open the socket), so the assistant authenticates with the same global auth as
+    the rest of the app instead of a separate, failing path.
+    """
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No tenant_id on user")
+
+    from datetime import timedelta
+    from app.core.jwt_security import encode_access_token
+
+    token = encode_access_token(
+        user_id=str(current_user.id),
+        email=current_user.email,
+        role=current_user.role,
+        tenant_id=str(current_user.tenant_id),
+        ttl=timedelta(minutes=2),
+    )
+    return {"token": token}
