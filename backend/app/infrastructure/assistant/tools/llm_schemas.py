@@ -320,3 +320,34 @@ GROQ_TOOL_SCHEMAS = [
         }
     },
 ]
+
+
+def _make_optional_params_nullable(schemas: list[dict]) -> list[dict]:
+    """Allow `null` for every NON-required tool parameter.
+
+    Strict tool-call validation (Groq — especially the larger models like
+    gpt-oss-120b / kimi-k2 / qwen, less so llama-3.3-70b) rejects a tool call
+    whose param is `null` when the schema types it as a single concrete type
+    (e.g. {"status": null} against {"type": "string"} → 400 tool_use_failed).
+    Models routinely emit `null` for an optional param they want to leave unset.
+    So for each property NOT in `required`, widen its type to also accept null.
+    The tool functions already treat a missing/None optional arg as "no filter".
+    """
+    for schema in schemas:
+        params = schema.get("function", {}).get("parameters", {})
+        props = params.get("properties", {})
+        required = set(params.get("required", []))
+        for name, prop in props.items():
+            if name in required or not isinstance(prop, dict):
+                continue
+            t = prop.get("type")
+            if isinstance(t, str) and t != "null":
+                prop["type"] = [t, "null"]
+            elif isinstance(t, list) and "null" not in t:
+                prop["type"] = [*t, "null"]
+    return schemas
+
+
+# Applied once at import: optional params become nullable so a model passing
+# `null` for an unset optional arg doesn't fail Groq's tool-call validation.
+GROQ_TOOL_SCHEMAS = _make_optional_params_nullable(GROQ_TOOL_SCHEMAS)
