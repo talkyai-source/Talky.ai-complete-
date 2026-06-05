@@ -288,7 +288,18 @@ async def assistant_chat(
                 "content": "User profile not found."
             })
             return
-        
+
+        # Set the RLS tenant context for this WS connection's task. The agent's
+        # tools and the conversation-history queries below go through
+        # db_client.table(), which resolves the tenant from the
+        # get_current_tenant_id() contextvar. HTTP requests get it from
+        # middleware; a WebSocket does NOT — so without this, every .table()
+        # query runs as the NIL tenant under RLS and returns 0 rows (e.g.
+        # get_campaigns finds nothing, history won't load). Contextvars set here
+        # propagate into the awaited assistant_graph.ainvoke() run.
+        from app.core.security.tenant_isolation import set_current_tenant_id
+        set_current_tenant_id(tenant_id)
+
         # STEP 3: Send connected confirmation
         await manager.send_json(connection_id, {
             "type": "connected",
