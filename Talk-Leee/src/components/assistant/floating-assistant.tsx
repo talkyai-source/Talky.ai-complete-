@@ -30,6 +30,7 @@ import { Bot, Loader2, MessageCircle, Send, X } from "lucide-react";
 import { apiBaseUrl } from "@/lib/env";
 import { useAccessToken } from "@/lib/auth-hooks";
 import { useAuth } from "@/lib/auth-context";
+import { AssistantModelPicker } from "./assistant-model-picker";
 
 /*
  * NOTE on the sidebar offset: this component used to import
@@ -463,6 +464,7 @@ export function FloatingAssistant() {
                                 </span>
                             </div>
                         </div>
+                        <AssistantModelPicker />
                         <button
                             type="button"
                             onClick={() => setOpen(false)}
