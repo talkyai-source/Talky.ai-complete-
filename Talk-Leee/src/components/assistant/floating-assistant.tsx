@@ -104,6 +104,13 @@ export function FloatingAssistant() {
     const reconnectAttemptsRef = useRef(0);
     const reconnectTimerRef = useRef<number | null>(null);
     const messagesEndRef = useRef<HTMLDivElement | null>(null);
+    // Keepalive: ping every ~25s so an idle WS isn't closed by proxies/LBs
+    // (the "reconnecting" churn). Cleared on every teardown.
+    const keepAliveTimerRef = useRef<number | null>(null);
+    // Connect epoch: bumped on every teardown so an async connect() whose
+    // ticket fetch is still in flight can detect it was superseded and abort
+    // instead of opening an orphan socket.
+    const connectEpochRef = useRef(0);
 
     // Reactive token via Phase 2's AuthContext-backed hook. Subscribing
     // here means wsUrl re-computes on login, on cross-tab logout (storage
@@ -172,11 +179,18 @@ export function FloatingAssistant() {
     // the old's onclose null out wsRef.current and schedule a redundant
     // reconnect of the now-valid new connection.
     const closeSocket = useCallback(() => {
+        // Supersede any in-flight async connect() (its ticket fetch may still be
+        // pending) so it won't open an orphan socket after this teardown.
+        connectEpochRef.current += 1;
         const ws = wsRef.current;
         wsRef.current = null;
         if (reconnectTimerRef.current !== null) {
             window.clearTimeout(reconnectTimerRef.current);
             reconnectTimerRef.current = null;
+        }
+        if (keepAliveTimerRef.current !== null) {
+            window.clearInterval(keepAliveTimerRef.current);
+            keepAliveTimerRef.current = null;
         }
         if (ws) {
             ws.onopen = null;
@@ -203,12 +217,22 @@ export function FloatingAssistant() {
             return;
         }
         setStatus("connecting");
-        // The talky_at auth cookie does NOT reliably travel on the cross-origin
-        // WebSocket handshake (it does on HTTP), so the WS would close 1008
-        // ("session expired") in cookie-only mode. Fetch a short-lived ticket
-        // over authed HTTP (cookie works there) and send it as the auth frame
-        // in onopen — the same global auth the rest of the app uses.
+        // Fetch a short-lived ticket over authed HTTP (the cookie works there
+        // but NOT on the cross-origin WS handshake) and send it as the auth
+        // frame in onopen. This HTTP call doubles as the authoritative
+        // "am I still logged in?" probe: if it can't mint a ticket (and there's
+        // no bearer fallback), the session is genuinely gone.
+        const myEpoch = connectEpochRef.current;
         const wsTicket = await getAssistantWsToken();
+        // A teardown or newer connect happened while awaiting the ticket — abort
+        // so we don't open an orphan socket (async-connect race guard).
+        if (myEpoch !== connectEpochRef.current) return;
+        if (!wsTicket && !accessToken) {
+            // Genuinely unauthenticated (HTTP session lost) — NOT a transient WS
+            // drop. Show the sign-in CTA via idle status; do not reconnect-spam.
+            setStatus("idle");
+            return;
+        }
         let ws: WebSocket;
         try {
             ws = new WebSocket(wsUrl);
@@ -236,6 +260,23 @@ export function FloatingAssistant() {
                     // closed; onclose will handle status.
                 }
             }
+            // Keepalive: a periodic app-level ping keeps the idle socket alive
+            // through proxies / load-balancers that close quiet connections
+            // (~60-120s) — the root cause of the "reconnecting" churn. The
+            // backend ignores any non-user_message frame, so this is a no-op
+            // server-side beyond resetting the idle timer.
+            if (keepAliveTimerRef.current !== null) {
+                window.clearInterval(keepAliveTimerRef.current);
+            }
+            keepAliveTimerRef.current = window.setInterval(() => {
+                if (ws.readyState === WebSocket.OPEN) {
+                    try {
+                        ws.send(JSON.stringify({ type: "ping" }));
+                    } catch {
+                        /* socket closing; onclose handles reconnect */
+                    }
+                }
+            }, 25_000);
         };
 
         ws.onmessage = (event) => {
@@ -291,42 +332,29 @@ export function FloatingAssistant() {
             setStatus("error");
         };
 
-        ws.onclose = (event) => {
-            // Only act if this is still the active socket. A planned
-            // teardown via closeSocket() nulls wsRef before close(); a
-            // token-rotation reconnect installs a new ws in wsRef before
-            // this old one's async onclose fires. In either case we don't
-            // want to overwrite wsRef or schedule a backoff reconnect for
-            // a socket that's already been superseded.
+        ws.onclose = () => {
+            // Only act if this is still the active socket (a planned teardown or
+            // a newer connect supersedes this one).
             if (wsRef.current !== ws) return;
             wsRef.current = null;
-            setStatus("closed");
-            // AH-Phase-A: 1008 = policy violation. Backend uses it for
-            // (a) cross-origin upgrade rejected and (b) auth-frame
-            // missing/invalid. Both are terminal — backing off and
-            // retrying with the same accessToken won't change the
-            // outcome and would just hammer the backend. Surface as a
-            // system message; user can re-open the panel after a real
-            // login or after AuthContext refreshes the token.
-            if (event.code === 1008) {
-                setMessages((prev) => [
-                    ...prev,
-                    {
-                        id: uid(),
-                        role: "system",
-                        content: "Your session expired. Please sign in again to continue.",
-                        ts: Date.now(),
-                    },
-                ]);
-                return;
+            if (keepAliveTimerRef.current !== null) {
+                window.clearInterval(keepAliveTimerRef.current);
+                keepAliveTimerRef.current = null;
             }
-            // Reconnect with backoff while the panel is open. Cap the
-            // attempts so a permanently-down backend doesn't hammer.
-            if (open && reconnectAttemptsRef.current < 5) {
+            // Every close while the panel is open is treated as TRANSIENT (idle
+            // drop, network blip, stale ticket) → reconnect with backoff, and
+            // each reconnect fetches a FRESH ticket. We deliberately do NOT show
+            // "session expired" on a close code: a genuine auth loss is detected
+            // in connect() when the ticket can't be minted (→ sign-in CTA). This
+            // is what stops a momentary WS hiccup from logging the user out.
+            if (open && reconnectAttemptsRef.current < 8) {
                 const attempt = reconnectAttemptsRef.current + 1;
                 reconnectAttemptsRef.current = attempt;
+                setStatus("connecting");
                 const delay = Math.min(15_000, 500 * 2 ** attempt);
                 reconnectTimerRef.current = window.setTimeout(connect, delay);
+            } else {
+                setStatus("closed");
             }
         };
     }, [accessToken, open, wsUrl]);
@@ -345,6 +373,9 @@ export function FloatingAssistant() {
     // JWT TTL boundary.
     useEffect(() => {
         if (open) {
+            // Fresh open → reset the backoff so a prior exhausted reconnect
+            // sequence doesn't prevent this open from connecting.
+            reconnectAttemptsRef.current = 0;
             connect();
         } else {
             closeSocket();
