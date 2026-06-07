@@ -37,6 +37,7 @@ export const queryKeys = {
     calls: (page: number, pageSize: number) => ["calls", page, pageSize] as const,
     call: (id: string) => ["call", id] as const,
     callTranscript: (id: string, format: "json" | "text") => ["callTranscript", id, format] as const,
+    callSummary: (id: string) => ["callSummary", id] as const,
     callAnalytics: (fromDate: string | undefined, toDate: string | undefined, groupBy: "day" | "week" | "month") =>
         ["callAnalytics", fromDate ?? "none", toDate ?? "none", groupBy] as const,
     recordings: (page: number, pageSize: number) => ["recordings", page, pageSize] as const,
@@ -665,6 +666,19 @@ export function useCallTranscript(id: string | undefined, format: "json" | "text
             return dashboardApi.getCallTranscript(id, format);
         },
         enabled: Boolean(id),
+    });
+}
+
+export function useCallSummary(id: string | undefined) {
+    return useQuery({
+        queryKey: id ? queryKeys.callSummary(id) : (["callSummary", "missing"] as const),
+        queryFn: async () => {
+            if (!id) throw new Error("Missing call id");
+            return dashboardApi.getCallSummary(id);
+        },
+        enabled: Boolean(id),
+        // Summary generation can take ~2-4s on first call; don't flash stale
+        staleTime: 60_000,
     });
 }
 

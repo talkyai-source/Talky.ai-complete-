@@ -2,11 +2,12 @@
 
 import { useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
-import { Phone, PhoneOff, PhoneIncoming, Clock, ChevronRight, ChevronDown, FileText, Megaphone, Loader2 } from "lucide-react";
+import { Phone, PhoneOff, PhoneIncoming, Clock, ChevronRight, ChevronDown, FileText, Megaphone, Loader2, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { useCalls, useCallTranscript } from "@/lib/api-hooks";
+import { useCalls, useCallTranscript, useCallSummary } from "@/lib/api-hooks";
 import type { Call } from "@/lib/dashboard-api";
+import { CallSummaryCard } from "@/components/calls/CallSummaryCard";
 
 function getStatusIcon(status: string) {
     switch (status) {
@@ -56,14 +57,23 @@ function humanizeOutcome(outcome?: string) {
 
 function CallRow({ call }: { call: Call }) {
     const [expanded, setExpanded] = useState(false);
-    const transcriptQuery = useCallTranscript(expanded ? call.id : undefined, "json");
+    const [showTranscript, setShowTranscript] = useState(false);
+    const summaryQuery = useCallSummary(expanded ? call.id : undefined);
+    const transcriptQuery = useCallTranscript(showTranscript ? call.id : undefined, "json");
 
     return (
         <div className="rounded-xl border border-border bg-background">
-            <div className="grid min-w-0 grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1.1fr)_auto_auto] items-center gap-3 px-4 py-3">
-                <div className="flex min-w-0 items-center gap-3">
-                    {getStatusIcon(call.status)}
-                    <span className="truncate text-sm font-semibold text-foreground">{call.phone_number}</span>
+            <div className="grid min-w-0 grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1.1fr)_auto_auto_auto] items-center gap-3 px-4 py-3">
+                <div className="flex min-w-0 flex-col gap-0.5">
+                    <div className="flex min-w-0 items-center gap-3">
+                        {getStatusIcon(call.status)}
+                        <span className="truncate text-sm font-semibold text-foreground">{call.phone_number}</span>
+                    </div>
+                    {call.summary && (
+                        <p className="truncate pl-7 text-xs text-muted-foreground" title={call.summary}>
+                            {call.summary}
+                        </p>
+                    )}
                 </div>
                 <div className="min-w-0">
                     <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${getStatusStyle(call.status)}`}>
@@ -80,9 +90,22 @@ function CallRow({ call }: { call: Call }) {
                     type="button"
                     onClick={() => setExpanded((v) => !v)}
                     aria-expanded={expanded}
-                    aria-label={expanded ? "Hide transcript" : "Show transcript"}
-                    title={expanded ? "Hide transcript" : "Show transcript"}
+                    aria-label={expanded ? "Hide AI summary" : "Show AI summary"}
+                    title={expanded ? "Hide AI summary" : "Show AI summary"}
                     className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${expanded
+                        ? "border-ring/60 bg-accent text-accent-foreground"
+                        : "border-border bg-background text-muted-foreground hover:text-foreground hover:bg-accent"
+                        }`}
+                >
+                    <Sparkles className="h-4 w-4" />
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setShowTranscript((v) => !v)}
+                    aria-expanded={showTranscript}
+                    aria-label={showTranscript ? "Hide transcript" : "Show transcript"}
+                    title={showTranscript ? "Hide transcript" : "Show transcript"}
+                    className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${showTranscript
                         ? "border-ring/60 bg-accent text-accent-foreground"
                         : "border-border bg-background text-muted-foreground hover:text-foreground hover:bg-accent"
                         }`}
@@ -101,6 +124,32 @@ function CallRow({ call }: { call: Call }) {
             <AnimatePresence initial={false}>
                 {expanded && (
                     <motion.div
+                        key="summary"
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.18 }}
+                        className="overflow-hidden border-t border-border bg-muted/40"
+                    >
+                        <div className="px-4 py-3">
+                            <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                <Sparkles className="h-3.5 w-3.5" />
+                                AI Summary
+                            </div>
+                            <CallSummaryCard
+                                isLoading={summaryQuery.isLoading}
+                                isError={summaryQuery.isError}
+                                error={summaryQuery.error}
+                                data={summaryQuery.data}
+                            />
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            <AnimatePresence initial={false}>
+                {showTranscript && (
+                    <motion.div
                         key="transcript"
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: "auto" }}
@@ -109,6 +158,10 @@ function CallRow({ call }: { call: Call }) {
                         className="overflow-hidden border-t border-border bg-muted/40"
                     >
                         <div className="px-4 py-3">
+                            <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                <FileText className="h-3.5 w-3.5" />
+                                Transcript
+                            </div>
                             {transcriptQuery.isLoading ? (
                                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -228,12 +281,13 @@ function CampaignSection({ group, defaultOpen }: { group: CampaignGroup; default
                         transition={{ duration: 0.2 }}
                         className="overflow-hidden"
                     >
-                        <div className="mt-4 hidden grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1.1fr)_auto_auto] gap-3 px-4 pb-2 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground md:grid">
+                        <div className="mt-4 hidden grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1.1fr)_auto_auto_auto] gap-3 px-4 pb-2 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground md:grid">
                             <div>Phone</div>
                             <div>Status</div>
                             <div>Outcome</div>
                             <div>Duration</div>
                             <div>Date</div>
+                            <div className="text-center">AI</div>
                             <div className="text-center">Script</div>
                             <div />
                         </div>

@@ -88,6 +88,27 @@ export interface Call {
     created_at: string;
     started_at?: string;
     ended_at?: string;
+    /** One-line AI summary headline returned by the call list endpoint. */
+    summary?: string;
+}
+
+// AI Call Summary Types
+export interface CallSummaryObj {
+    headline: string;
+    outcome: string;
+    what_happened: string;
+    key_points: string[];
+    objections: Array<{ objection: string; handled: string }>;
+    commitments: string[];
+    action_items: Array<{ item: string; owner: string }>;
+    sentiment: string;
+    next_step: string;
+    notable_quotes: string[];
+}
+
+export interface CallSummaryEnvelope {
+    available: boolean;
+    summary: CallSummaryObj | null;
 }
 
 export interface CallDetail extends Call {
@@ -284,12 +305,12 @@ class DashboardApi {
 
     // Calls
     async listCalls(page: number = 1, pageSize: number = 20): Promise<{ calls: Call[]; total: number }> {
-        const response = await this.client.request<{ items: CallListItem[]; total: number }>({
+        const response = await this.client.request<{ items: (CallListItem & { summary?: string })[]; total: number }>({
             path: "/calls",
             method: "GET",
             params: { page: String(page), page_size: String(pageSize) },
         });
-        
+
         // Map backend CallListItem to frontend Call format
         const calls: Call[] = response.items.map(item => ({
             id: item.id,
@@ -301,6 +322,7 @@ class DashboardApi {
             outcome: item.outcome,
             duration_seconds: item.duration_seconds,
             created_at: item.timestamp,
+            summary: item.summary,
         }));
         
         return {
@@ -359,6 +381,14 @@ class DashboardApi {
             path: `/calls/${id}/transcript`,
             method: "GET",
             params: { format },
+        });
+    }
+
+    async getCallSummary(id: string): Promise<CallSummaryEnvelope> {
+        return this.client.request<CallSummaryEnvelope>({
+            path: `/calls/${id}/summary`,
+            method: "GET",
+            suppressAuthRedirect: true,
         });
     }
 }
