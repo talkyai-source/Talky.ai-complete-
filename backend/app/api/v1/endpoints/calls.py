@@ -26,6 +26,7 @@ class CallListItem(BaseModel):
     duration_seconds: Optional[int] = None
     outcome: Optional[str] = None
     campaign_name: Optional[str] = None
+    summary: Optional[str] = None
 
 
 class CallDetail(BaseModel):
@@ -42,6 +43,7 @@ class CallDetail(BaseModel):
     campaign_id: Optional[str] = None
     lead_id: Optional[str] = None
     summary: Optional[str] = None
+    summary_json: Optional[dict] = None
 
 
 class CallListResponse(BaseModel):
@@ -230,6 +232,7 @@ async def list_calls(
                     f"""
                     SELECT c.id, c.talklee_call_id, c.created_at, c.phone_number,
                            c.status, c.duration_seconds, c.outcome,
+                           c.summary,
                            camp.name AS campaign_name
                     FROM calls c
                     LEFT JOIN campaigns camp ON camp.id = c.campaign_id
@@ -256,6 +259,7 @@ async def list_calls(
                 duration_seconds=row["duration_seconds"],
                 outcome=row["outcome"],
                 campaign_name=row["campaign_name"],
+                summary=row["summary"],
             ))
 
         return CallListResponse(
@@ -310,6 +314,19 @@ async def get_call(
         if rec_row:
             recording_id = str(rec_row["id"])
         
+        # Normalize summary_json: asyncpg may return JSONB as str or dict
+        import json as _json
+        raw_summary_json = call.get("summary_json")
+        if isinstance(raw_summary_json, str):
+            try:
+                summary_json = _json.loads(raw_summary_json)
+            except (_json.JSONDecodeError, ValueError):
+                summary_json = None
+        elif isinstance(raw_summary_json, dict):
+            summary_json = raw_summary_json
+        else:
+            summary_json = None
+
         created_at = call.get("created_at", "")
         return CallDetail(
             id=str(call["id"]),
@@ -323,7 +340,8 @@ async def get_call(
             recording_id=str(recording_id) if recording_id is not None else None,
             campaign_id=str(call["campaign_id"]) if call.get("campaign_id") else None,
             lead_id=str(call["lead_id"]) if call.get("lead_id") else None,
-            summary=call.get("summary")
+            summary=call.get("summary"),
+            summary_json=summary_json,
         )
     
     except HTTPException:
@@ -421,6 +439,28 @@ async def get_call_transcript(
             status_code=500,
             detail="Failed to fetch transcript"
         )
+
+
+@router.get("/{call_id}/summary")
+async def get_call_summary(
+    call_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """AI call summary (structured). Generates on first request if missing
+    (lazy backfill) and caches it; returns {available:false} when the call has
+    no transcript to summarize."""
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=400, detail="Tenant ID required")
+    from app.domain.services.call_summary.store import generate_and_store
+    try:
+        summary = await generate_and_store(db_client.pool, str(current_user.tenant_id), call_id)
+    except Exception:
+        logger.error("get_call_summary failed call=%s", call_id[:12], exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not generate summary")
+    if summary is None:
+        return {"available": False, "summary": None}
+    return {"available": True, "summary": summary}
 
 
 # =============================================================================
