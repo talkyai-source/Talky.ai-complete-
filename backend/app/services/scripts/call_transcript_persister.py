@@ -46,6 +46,7 @@ sister `save_call_metrics_on_hangup` helper now run through
 """
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import logging
@@ -53,6 +54,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
+
+from app.domain.services.call_summary.store import generate_and_store
+
+# Module-level task set keeps fire-and-forget tasks alive until they
+# complete — without this the GC can destroy a pending task and log
+# "Task was destroyed but it is pending".
+_summary_tasks: set = set()
 
 logger = logging.getLogger(__name__)
 
@@ -293,6 +301,9 @@ async def save_call_transcript_on_hangup(
             "save_call_transcript_on_hangup persisted calls.id=%s turns=%d words=%d",
             dialer_call_id[:8], turn_count, word_count,
         )
+        # Transcript is now in the DB — schedule AI summary generation.
+        # Fire-and-forget: must not block or delay call teardown.
+        _schedule_call_summary(db_pool, tenant_id_str, dialer_call_id)
     except Exception as exc:
         logger.warning(
             "save_call_transcript_on_hangup DB write failed calls.id=%s err=%s",
@@ -300,6 +311,28 @@ async def save_call_transcript_on_hangup(
         )
     finally:
         _safe_clear(transcript_service, session_call_id)
+
+
+def _schedule_call_summary(pool, tenant_id, call_id) -> None:
+    """Fire-and-forget AI summary generation after a call's transcript is saved.
+    Never blocks teardown; never raises. Lazy backfill (GET /calls/{id}/summary)
+    covers any that don't finish (e.g. process restart)."""
+    if not (pool and tenant_id and call_id):
+        return
+    try:
+        task = asyncio.create_task(_safe_generate(pool, str(tenant_id), str(call_id)))
+        _summary_tasks.add(task)
+        task.add_done_callback(_summary_tasks.discard)
+    except RuntimeError:
+        # no running loop (shouldn't happen in the async teardown) — skip; lazy backfill covers it
+        pass
+
+
+async def _safe_generate(pool, tenant_id, call_id) -> None:
+    try:
+        await generate_and_store(pool, tenant_id, call_id)
+    except Exception as exc:
+        logger.warning("call summary generation failed for %s: %s", call_id[:12], exc)
 
 
 def _safe_clear(transcript_service, session_call_id: str) -> None:
