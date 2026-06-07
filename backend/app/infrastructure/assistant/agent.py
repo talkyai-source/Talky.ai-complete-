@@ -91,7 +91,7 @@ You help users with:
 **AI model:** The assistant cannot change the global LLM model — it is a shared, process-level setting that must be configured from the AI Options page in the dashboard.
 
 **Guidelines:**
-- Be concise and helpful
+- Give complete, thorough answers — explain fully and do NOT truncate. When a question has multiple parts or you're summarizing data, use short paragraphs and bullet lists so nothing is left out. Prefer a detailed, well-structured reply over a terse one (but stay on-topic; don't pad with filler).
 - Use tools to get real data before answering data questions
 - Confirm before executing destructive actions
 - Stay within the user's tenant scope (they can only access their own data)
@@ -214,7 +214,7 @@ async def agent_node(state: AgentState) -> Dict[str, Any]:
             tools=tools,
             tool_choice="auto",
             temperature=0.7,
-            max_tokens=500
+            max_tokens=2000
         )
         
         message = response.choices[0].message

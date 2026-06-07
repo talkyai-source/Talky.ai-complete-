@@ -478,7 +478,7 @@ export function FloatingAssistant() {
                 <div
                     role="dialog"
                     aria-label="AI Assistant"
-                    className="fixed bottom-5 right-4 sm:bottom-6 sm:right-6 z-50 flex h-[28rem] w-[22rem] max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-background text-foreground shadow-2xl"
+                    className="fixed bottom-5 right-4 sm:bottom-6 sm:right-6 z-50 flex h-[min(42rem,calc(100vh-5rem))] w-[30rem] max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-background text-foreground shadow-2xl"
                 >
                     {/* Header */}
                     <div className="flex items-center justify-between gap-2 border-b border-border bg-cyan-600/10 px-4 py-3">
