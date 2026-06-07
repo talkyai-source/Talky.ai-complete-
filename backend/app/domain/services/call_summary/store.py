@@ -14,7 +14,10 @@ import logging
 from typing import Optional
 
 from app.core.db_utils import acquire_with_tenant
-from app.domain.services.call_summary.summarizer import summarize_transcript
+from app.domain.services.call_summary.summarizer import (
+    SUMMARY_UNAVAILABLE_HEADLINE,
+    summarize_transcript,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +83,20 @@ async def generate_and_store(
 
     # --- Generate ---
     summary = await summarize_transcript(transcript_text)
+
+    # A fail-soft summarizer error (network/SDK/429, or output that won't parse
+    # as JSON) returns the "Summary unavailable" sentinel. Persisting it would
+    # poison the row: the idempotency check above would then skip this call
+    # forever, leaving it permanently stuck on "Summary unavailable". Return it
+    # WITHOUT persisting so the next view / backfill retries.
+    if summary.get("headline") == SUMMARY_UNAVAILABLE_HEADLINE:
+        logger.warning(
+            "call_summary store: summarizer failed for call %s (tenant %s) — "
+            "not persisting so it can be retried later",
+            call_id,
+            tenant_id,
+        )
+        return summary
 
     # --- Persist (tenant-scoped) ---
     async with acquire_with_tenant(pool, tenant_id) as conn:

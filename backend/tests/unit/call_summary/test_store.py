@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.domain.services.call_summary.store import generate_and_store
+from app.domain.services.call_summary.summarizer import SUMMARY_UNAVAILABLE_HEADLINE
 
 # ---------------------------------------------------------------------------
 # Fake DB infrastructure
@@ -48,6 +49,21 @@ _FAKE_SUMMARY = {
     "action_items": [{"item": "Send trial link", "owner": "agent"}],
     "sentiment": "positive",
     "next_step": "Send trial link",
+    "notable_quotes": [],
+}
+
+# What the summarizer returns when Groq errors (network/SDK/429) or output
+# won't parse — the transient-failure sentinel that must NOT be persisted.
+_FAILED_SUMMARY = {
+    "headline": SUMMARY_UNAVAILABLE_HEADLINE,
+    "outcome": "",
+    "what_happened": "",
+    "key_points": [],
+    "objections": [],
+    "commitments": [],
+    "action_items": [],
+    "sentiment": "",
+    "next_step": "",
     "notable_quotes": [],
 }
 
@@ -160,6 +176,32 @@ class TestGenerateAndStore:
         assert "UPDATE calls" in sql_arg
         json_arg = call_args[0][2]
         assert json.loads(json_arg) == _FAKE_SUMMARY
+
+    async def test_failed_summary_not_persisted(self):
+        """Summarizer fail-soft sentinel → return it but DON'T write the row.
+
+        A transient Groq error returns {"headline": "Summary unavailable", ...}.
+        Persisting it would poison the row: the idempotency check would then skip
+        this call forever, leaving it permanently stuck. The summary is returned
+        to the caller (so the UI can show something) but NOT written, so the next
+        view / backfill retries.
+        """
+        conn = _make_conn({
+            "transcript": "Agent: Hello\nCaller: Hi there",
+            "summary_json": None,
+        })
+
+        mock_summarize = AsyncMock(return_value=_FAILED_SUMMARY)
+        with _patch_acquire(conn):
+            with patch(
+                "app.domain.services.call_summary.store.summarize_transcript",
+                mock_summarize,
+            ):
+                result = await generate_and_store(None, _TENANT_ID, _CALL_ID)
+
+        assert result == _FAILED_SUMMARY      # caller still gets a dict to show
+        mock_summarize.assert_awaited_once()  # it DID attempt summarization
+        conn.execute.assert_not_called()      # but NO UPDATE was issued
 
     async def test_empty_transcript_returns_none(self):
         """transcript is empty string → return None, no summarizer call."""

@@ -16,6 +16,13 @@ from groq import AsyncGroq
 
 logger = logging.getLogger(__name__)
 
+# Headline used when summarization fails (network/SDK error — including a Groq
+# 429 rate-limit — or output that won't parse as JSON twice). This is a
+# TRANSIENT-failure sentinel: store.generate_and_store must NOT persist a
+# summary carrying this headline, so the call is retried on the next view /
+# backfill instead of being permanently stuck showing "Summary unavailable".
+SUMMARY_UNAVAILABLE_HEADLINE = "Summary unavailable"
+
 # ---------------------------------------------------------------------------
 # Prompt
 # ---------------------------------------------------------------------------
@@ -153,7 +160,7 @@ async def summarize_transcript(transcript_text: str) -> dict:
                     "call_summarizer: second JSON parse failed — returning fallback"
                 )
                 result = deepcopy(EMPTY_SUMMARY)
-                result["headline"] = "Summary unavailable"
+                result["headline"] = SUMMARY_UNAVAILABLE_HEADLINE
                 return result
 
         return _coerce(parsed)
@@ -161,5 +168,5 @@ async def summarize_transcript(transcript_text: str) -> dict:
     except Exception as exc:
         logger.warning("call_summarizer: unexpected error — %s", exc)
         result = deepcopy(EMPTY_SUMMARY)
-        result["headline"] = "Summary unavailable"
+        result["headline"] = SUMMARY_UNAVAILABLE_HEADLINE
         return result
