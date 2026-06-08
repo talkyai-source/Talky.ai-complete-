@@ -224,13 +224,17 @@ export async function middleware(req: NextRequest) {
         "img-src 'self' data: blob:",
         "font-src 'self' data:",
         "connect-src " + connectSrc,
-        // media-src needs the backend origin so <audio src> can load the
-        // ElevenLabs preview MP3s from api.talkleeai.com. Reuse the same
-        // origin list as connect-src so anything we can fetch we can also
-        // load as media. Without this the browser silently blocks audio
-        // playback with a CSP violation, no network request fires, and
-        // the UI sees no error.
-        "media-src " + connectSrc,
+        // media-src needs:
+        //  - the backend origin (api.talkleeai.com) so an <audio src> pointed
+        //    straight at a remote MP3 (e.g. ElevenLabs voice previews) loads, and
+        //  - blob: because call recordings are fetched via requestRaw and played
+        //    from a URL.createObjectURL(blob) — blob: is its OWN scheme and is
+        //    NOT covered by 'self' or the https: token. Without blob: the browser
+        //    blocks <audio src="blob:..."> with a CSP violation; the fetch still
+        //    succeeds (blob is created) so the network tab looks fine, but
+        //    playback is blocked and the UI shows "Failed to load audio".
+        //    (img-src above already allows blob: for the same reason.)
+        "media-src " + connectSrc + " blob:",
         "worker-src 'self' blob:",
         "object-src 'none'",
         "base-uri 'self'",

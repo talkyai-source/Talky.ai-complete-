@@ -121,6 +121,12 @@ function AudioPlayer({ recordingId }: { recordingId: string }) {
                 onEnded={handleEnded}
                 onPlay={() => setIsPlaying(true)}
                 onPause={() => setIsPlaying(false)}
+                // Surface a media-load failure (CSP block, corrupt file, network)
+                // up front instead of only when the user clicks play. Guarded on
+                // blobUrl so the URL.revokeObjectURL() teardown on unmount doesn't
+                // flip a stale error. The blob fetch itself already succeeded by
+                // the time this element renders (see the !blobUrl gate above).
+                onError={() => { if (blobUrl) setLoadError("Couldn't load this recording"); }}
             />
             <button
                 onClick={togglePlay}
