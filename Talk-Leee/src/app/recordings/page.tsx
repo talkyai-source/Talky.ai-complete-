@@ -13,6 +13,8 @@ function formatDuration(seconds?: number) {
     return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
+const PLAYBACK_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+
 function AudioPlayer({ recordingId }: { recordingId: string }) {
     const audioRef = useRef<HTMLAudioElement>(null);
     const [isPlaying, setIsPlaying] = useState(false);
@@ -21,6 +23,7 @@ function AudioPlayer({ recordingId }: { recordingId: string }) {
     const [blobUrl, setBlobUrl] = useState<string | null>(null);
     const [loadError, setLoadError] = useState("");
     const [downloading, setDownloading] = useState(false);
+    const [rate, setRate] = useState(1);
 
     useEffect(() => {
         let revoke = "";
@@ -35,14 +38,28 @@ function AudioPlayer({ recordingId }: { recordingId: string }) {
         };
     }, [recordingId]);
 
-    function togglePlay() {
-        if (audioRef.current) {
-            if (isPlaying) {
-                audioRef.current.pause();
-            } else {
-                audioRef.current.play();
+    // Keep the <audio> element's playback speed in sync with the selected rate.
+    // Re-applied when the source loads, because setting src resets playbackRate.
+    useEffect(() => {
+        if (audioRef.current) audioRef.current.playbackRate = rate;
+    }, [rate, blobUrl]);
+
+    async function togglePlay() {
+        const el = audioRef.current;
+        if (!el) return;
+        // Drive isPlaying from the element's real play/pause events (below)
+        // rather than flipping it optimistically: the old code set isPlaying
+        // even when play() rejected, so the icon toggled but nothing played.
+        // play() returns a promise — await + catch it so failures surface.
+        if (el.paused) {
+            el.playbackRate = rate;
+            try {
+                await el.play();
+            } catch {
+                setLoadError("Couldn't play this recording");
             }
-            setIsPlaying(!isPlaying);
+        } else {
+            el.pause();
         }
     }
 
@@ -102,6 +119,8 @@ function AudioPlayer({ recordingId }: { recordingId: string }) {
                 onTimeUpdate={handleTimeUpdate}
                 onLoadedMetadata={handleLoadedMetadata}
                 onEnded={handleEnded}
+                onPlay={() => setIsPlaying(true)}
+                onPause={() => setIsPlaying(false)}
             />
             <button
                 onClick={togglePlay}
@@ -125,6 +144,17 @@ function AudioPlayer({ recordingId }: { recordingId: string }) {
                     {formatDuration(Math.floor(duration))}
                 </span>
             </div>
+            <select
+                value={rate}
+                onChange={(e) => setRate(Number(e.target.value))}
+                title="Playback speed"
+                aria-label="Playback speed"
+                className="rounded-md bg-foreground/5 px-1.5 py-1 text-xs font-medium text-foreground/80 outline-none transition-colors hover:bg-foreground/10 cursor-pointer"
+            >
+                {PLAYBACK_SPEEDS.map((s) => (
+                    <option key={s} value={s}>{s}×</option>
+                ))}
+            </select>
             <button
                 onClick={handleDownload}
                 disabled={downloading}
