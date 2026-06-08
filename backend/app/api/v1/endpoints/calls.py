@@ -87,6 +87,64 @@ class LiveCallsResponse(BaseModel):
 # (see `recent_window_seconds` below).
 _LIVE_STATUSES = ("queued", "dialing", "ringing", "answered", "in_call", "initiated")
 
+# Upper bound on how old a still-"live"-status call may be before we treat it as
+# a phantom (crashed worker / missed hangup / stopped campaign) and stop showing
+# it. No real AI call runs this long, so anything older is stale DB state, not a
+# live call. This is what keeps the panel "exact" — without it a call stuck in
+# dialing/in_call lingers in the feed forever.
+_LIVE_MAX_AGE_MINUTES = 30
+
+
+@router.post("/{call_id}/hangup")
+async def hangup_live_call(
+    call_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """Hang up a single in-flight call from the live panel (operator action).
+
+    Tenant-scoped. Best-effort drops the telephony channel, then marks the row
+    ended so the panel reflects it immediately (this also clears phantom stuck
+    rows whose channel is already gone). Never overwrites an outcome the ARI
+    callback already recorded.
+    """
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="No tenant context")
+    try:
+        async with db_client.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT external_call_uuid, status FROM calls "
+                "WHERE id = $1 AND tenant_id = $2",
+                call_id, current_user.tenant_id,
+            )
+        if not row:
+            raise HTTPException(status_code=404, detail="Call not found")
+
+        ext = row["external_call_uuid"]
+        if ext:
+            try:
+                from app.api.v1.endpoints import telephony_bridge as tb
+                if tb._adapter is not None:
+                    await tb._adapter.hangup(ext)
+            except Exception as exc:
+                # Channel may already be gone — fall through to mark it ended.
+                logger.warning("hangup_live_call adapter hangup failed call=%s: %s", call_id, exc)
+
+        async with db_client.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE calls SET status = 'ended', "
+                "ended_at = COALESCE(ended_at, NOW()), "
+                "outcome = COALESCE(outcome, 'agent_hung_up') "
+                "WHERE id = $1 AND tenant_id = $2",
+                call_id, current_user.tenant_id,
+            )
+        return {"status": "ok", "call_id": call_id}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("hangup_live_call failed call=%s: %s", call_id, exc)
+        raise HTTPException(status_code=500, detail="Failed to hang up call")
+
 
 @router.get("/live", response_model=LiveCallsResponse)
 async def list_live_calls(
@@ -139,7 +197,9 @@ async def list_live_calls(
         LEFT   JOIN tenants   t    ON t.id    = c.tenant_id
         WHERE  c.tenant_id = ${len(_LIVE_STATUSES) + 1}
           AND  (
-                  c.status IN ({placeholders})
+                  (c.status IN ({placeholders})
+                   AND COALESCE(c.started_at, c.created_at)
+                       >= NOW() - make_interval(mins => {_LIVE_MAX_AGE_MINUTES}))
                   OR (c.ended_at IS NOT NULL
                       AND c.ended_at >= NOW() - make_interval(secs => ${len(_LIVE_STATUSES) + 2}))
                 )

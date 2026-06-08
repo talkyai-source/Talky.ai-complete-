@@ -21,7 +21,7 @@ import { Phone, PhoneCall, PhoneOff, PhoneIncoming, CircleCheck, CircleX, Loader
 
 import { api } from "@/lib/api";
 
-const POLL_INTERVAL_MS = 2000;
+const POLL_INTERVAL_MS = 1500;
 const RECENT_WINDOW_SECONDS = 60;
 
 type LiveCall = Awaited<ReturnType<typeof api.listLiveCalls>>["items"][number];
@@ -137,7 +137,28 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
     const [error, setError] = useState<string | null>(null);
     // Tick every second so elapsed-time counters update between polls.
     const [nowMs, setNowMs] = useState<number>(() => Date.now());
+    const [hangingUpId, setHangingUpId] = useState<string | null>(null);
     const aborted = useRef(false);
+
+    async function handleHangup(callId: string) {
+        try {
+            setHangingUpId(callId);
+            await api.hangupCall(callId);
+            // Optimistic: mark ended locally so the row leaves "in flight"
+            // instantly; the next poll reconciles with the server.
+            setItems((prev) =>
+                prev.map((it) =>
+                    it.id === callId
+                        ? { ...it, status: "ended", outcome: it.outcome ?? "agent_hung_up" }
+                        : it,
+                ),
+            );
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Failed to hang up call");
+        } finally {
+            setHangingUpId(null);
+        }
+    }
 
     useEffect(() => {
         aborted.current = false;
@@ -217,6 +238,7 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
                                 <th className="px-4 py-2 text-left font-medium">Status</th>
                                 <th className="px-4 py-2 text-left font-medium">Duration</th>
                                 <th className="px-4 py-2 text-left font-medium">Started</th>
+                                <th className="px-4 py-2 text-right font-medium">Action</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200 dark:divide-white/10">
@@ -245,6 +267,26 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
                                         </td>
                                         <td className="px-4 py-2 text-xs text-muted-foreground">
                                             {c.started_at ? new Date(c.started_at).toLocaleTimeString() : "—"}
+                                        </td>
+                                        <td className="px-4 py-2 text-right">
+                                            {live ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleHangup(c.id)}
+                                                    disabled={hangingUpId === c.id}
+                                                    aria-label={`Hang up call to ${c.to_number}`}
+                                                    title="Hang up"
+                                                    className="inline-flex h-7 w-7 items-center justify-center rounded-md text-red-600 transition-colors hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-950/50 disabled:opacity-50"
+                                                >
+                                                    {hangingUpId === c.id ? (
+                                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                    ) : (
+                                                        <PhoneOff className="h-3.5 w-3.5" />
+                                                    )}
+                                                </button>
+                                            ) : (
+                                                <span className="text-muted-foreground">—</span>
+                                            )}
                                         </td>
                                     </tr>
                                 );

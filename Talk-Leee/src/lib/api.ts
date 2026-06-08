@@ -662,6 +662,16 @@ class ApiClient {
         };
     }
 
+    /** Hang up a single in-flight call from the live panel (operator action). */
+    async hangupCall(callId: string): Promise<{ status: string; call_id: string }> {
+        const data = await this.client().request({
+            path: `/calls/${callId}/hangup`,
+            method: "POST",
+            timeoutMs: 8_000,
+        });
+        return data as { status: string; call_id: string };
+    }
+
     /* ---------- Campaign knowledge (vectorless RAG) ---------- */
 
     async getCampaignKnowledge(campaignId: string): Promise<CampaignKnowledge> {
