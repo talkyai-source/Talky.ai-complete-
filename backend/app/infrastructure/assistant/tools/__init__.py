@@ -57,6 +57,7 @@ from app.infrastructure.assistant.tools.campaign_admin import (
 )
 from app.infrastructure.assistant.tools.campaign_ai_options import (
     apply_campaign_voice,
+    list_voices,
 )
 
 # =============================================================================
@@ -116,6 +117,15 @@ QUERY_TOOLS = {
         "description": (
             "Run the live RAG retriever for a query against a campaign's knowledge tree; "
             "returns top-3 matching nodes (heading, voice_answer, summary) without bumping hit_count"
+        ),
+        "input_schema": None,
+    },
+    "list_voices": {
+        "function": list_voices,
+        "description": (
+            "List available TTS voices (name + id) for a provider "
+            "(google, elevenlabs, cartesia, deepgram). Use before apply_campaign_voice "
+            "to find a voice id from a name."
         ),
         "input_schema": None,
     },
@@ -261,6 +271,7 @@ __all__ = [
     "manage_lead",
     # Campaign AI options tools
     "apply_campaign_voice",
+    "list_voices",
     # Registries
     "QUERY_TOOLS",
     "ACTION_TOOLS",

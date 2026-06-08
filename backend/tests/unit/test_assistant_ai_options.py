@@ -354,8 +354,12 @@ async def test_manage_lead_update_no_change_detected():
 # ===========================================================================
 
 
-async def _fake_valid_voice_ids(provider: str):
-    return {"voice-valid-1", "voice-valid-2"}
+async def _fake_catalog(provider: str):
+    # apply_campaign_voice now resolves names→ids via _voice_catalog_for_provider.
+    return [
+        {"id": "voice-valid-1", "name": "Valid One"},
+        {"id": "voice-valid-2", "name": "Valid Two"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -364,8 +368,8 @@ async def test_apply_campaign_voice_invalid_voice_no_write(monkeypatch):
     import app.infrastructure.assistant.tools.campaign_ai_options as mod
 
     monkeypatch.setattr(
-        "app.api.v1.endpoints.campaigns._valid_voice_ids_for_provider",
-        _fake_valid_voice_ids,
+        "app.infrastructure.assistant.tools.campaign_ai_options._voice_catalog_for_provider",
+        _fake_catalog,
     )
 
     db = FakeDbClient()
@@ -391,8 +395,8 @@ async def test_apply_campaign_voice_invalid_voice_no_write(monkeypatch):
 async def test_apply_campaign_voice_valid_preview(monkeypatch):
     """Valid voice, confirm=False → preview diff, no write."""
     monkeypatch.setattr(
-        "app.api.v1.endpoints.campaigns._valid_voice_ids_for_provider",
-        _fake_valid_voice_ids,
+        "app.infrastructure.assistant.tools.campaign_ai_options._voice_catalog_for_provider",
+        _fake_catalog,
     )
 
     db = FakeDbClient()
@@ -435,8 +439,8 @@ async def test_apply_campaign_voice_valid_preview(monkeypatch):
 async def test_apply_campaign_voice_valid_confirm_updates_each(monkeypatch):
     """Valid voice, confirm=True → updates each campaign with new tts_provider + voice_id."""
     monkeypatch.setattr(
-        "app.api.v1.endpoints.campaigns._valid_voice_ids_for_provider",
-        _fake_valid_voice_ids,
+        "app.infrastructure.assistant.tools.campaign_ai_options._voice_catalog_for_provider",
+        _fake_catalog,
     )
 
     db = FakeDbClient()
@@ -475,8 +479,8 @@ async def test_apply_campaign_voice_valid_confirm_updates_each(monkeypatch):
 async def test_apply_campaign_voice_campaign_not_found(monkeypatch):
     """campaign_id not under tenant → error, no write."""
     monkeypatch.setattr(
-        "app.api.v1.endpoints.campaigns._valid_voice_ids_for_provider",
-        _fake_valid_voice_ids,
+        "app.infrastructure.assistant.tools.campaign_ai_options._voice_catalog_for_provider",
+        _fake_catalog,
     )
 
     db = FakeDbClient()
@@ -500,8 +504,8 @@ async def test_apply_campaign_voice_campaign_not_found(monkeypatch):
 async def test_apply_campaign_voice_empty_list(monkeypatch):
     """Empty campaign_ids → error immediately."""
     monkeypatch.setattr(
-        "app.api.v1.endpoints.campaigns._valid_voice_ids_for_provider",
-        _fake_valid_voice_ids,
+        "app.infrastructure.assistant.tools.campaign_ai_options._voice_catalog_for_provider",
+        _fake_catalog,
     )
 
     db = FakeDbClient()

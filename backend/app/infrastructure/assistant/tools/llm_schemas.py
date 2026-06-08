@@ -312,10 +312,24 @@ GROQ_TOOL_SCHEMAS = [
                 "properties": {
                     "campaign_ids": {"type": "array", "items": {"type": "string"}, "description": "Campaign ids to apply to"},
                     "tts_provider": {"type": "string", "description": "TTS provider, e.g. google, elevenlabs, cartesia, deepgram"},
-                    "voice_id": {"type": "string"},
+                    "voice_id": {"type": "string", "description": "Voice name OR id (e.g. 'Orus', 'andromeda', 'Sarah', or a full id). A name is resolved to the id; call list_voices first if unsure."},
                     "confirm": {"type": "boolean", "description": "false = preview only; true = apply after user approval"}
                 },
                 "required": ["campaign_ids", "tts_provider", "voice_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_voices",
+            "description": "List available TTS voices (name + id) for a provider (google, elevenlabs, cartesia, deepgram). Use this to find a voice id from a name before calling apply_campaign_voice.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tts_provider": {"type": "string", "description": "google | elevenlabs | cartesia | deepgram"}
+                },
+                "required": ["tts_provider"]
             }
         }
     },

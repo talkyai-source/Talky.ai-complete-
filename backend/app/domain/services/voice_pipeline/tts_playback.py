@@ -161,6 +161,24 @@ class TtsPlayback:
                     raw = raw[:-1]
                 if not raw:
                     continue
+                if not first_chunk_sent:
+                    # TEMP diagnostic (cartesia/elevenlabs buzz investigation):
+                    # the probe proved providers emit clean 16kHz audio, so a
+                    # buzz means the gateway's source-format disagrees with the
+                    # actual bytes. Log provider + gateway_fmt + rate + first
+                    # bytes ONCE per call to catch the runtime mismatch.
+                    try:
+                        logger.info(
+                            "TTS_FMT_DEBUG call=%s provider=%s gateway_fmt=%s req_rate=%s "
+                            "first_bytes=%d head=%s",
+                            call_id[:8],
+                            getattr(self._p.tts_provider, "name", "?"),
+                            getattr(self._p.media_gateway, "_tts_source_format", "?"),
+                            getattr(self._p, "tts_sample_rate", "?"),
+                            len(raw), bytes(raw[:8]).hex(),
+                        )
+                    except Exception:
+                        pass
                 await self._p.media_gateway.send_audio(call_id, raw)
                 first_chunk_sent = True  # at least one chunk reached the gateway
                 # Check barge-in again immediately after send: barge-in may have
