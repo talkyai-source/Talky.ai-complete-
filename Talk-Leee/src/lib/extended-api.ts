@@ -78,17 +78,12 @@ class ExtendedApi {
         const formData = new FormData();
         formData.append("file", file);
 
-        // Get auth token from storage
-        const token = this.client.getToken();
-        const headers: Record<string, string> = {};
-        if (token) {
-            headers.Authorization = `Bearer ${token}`;
-        }
-
+        // Authenticate via the session cookie (credentials: "include"), not a
+        // manual Authorization header — a stale localStorage bearer would
+        // override the cookie and 401 on the strict session-bound bearer path.
         const response = await fetch(`${apiBaseUrl()}/contacts/campaigns/${campaignId}/upload?skip_duplicates=${skipDuplicates}`, {
             method: "POST",
             body: formData,
-            headers,
             credentials: "include",
         });
 
@@ -137,14 +132,12 @@ class ExtendedApi {
     }
 
     async fetchRecordingBlob(recordingId: string): Promise<string> {
-        const token = this.client.getToken();
-        const headers: Record<string, string> = {};
-        if (token) {
-            headers.Authorization = `Bearer ${token}`;
-        }
-
+        // Authenticate via the session cookie (credentials: "include"), NOT a
+        // manual Authorization header. A stale localStorage bearer would
+        // OVERRIDE the cookie and force the backend's strict session-bound
+        // bearer path → 401 "Session-bound token required" ("Failed to load
+        // audio"). The cookie path (talky_at) accepts the session directly.
         const response = await fetch(`${apiBaseUrl()}/recordings/${recordingId}/stream`, {
-            headers,
             credentials: "include",
         });
 
