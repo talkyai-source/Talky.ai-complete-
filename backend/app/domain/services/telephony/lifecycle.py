@@ -685,6 +685,22 @@ async def _on_new_call(call_id: str) -> None:
 
         _sb.set_voice_session(call_id, voice_session)
 
+        # Ensure the per-call first-speaker is on the session for the greeting
+        # decision below. The pre-warm-consumed path already carries it; the
+        # fresh-session FALLBACK above does NOT (first_speaker isn't in the
+        # rebuilt config), so a caller-first call would wrongly play the agent
+        # greeting. Apply the value stashed at make_call (idempotent — same
+        # value on the pre-warm path).
+        try:
+            _fs = _sb.get_first_speaker(call_id)
+            if _fs:
+                voice_session._first_speaker = _fs
+                _cs = getattr(voice_session, "call_session", None)
+                if _cs is not None:
+                    _cs._first_speaker = _fs
+        except Exception:
+            pass
+
         # ── Bind dialer calls.id for campaign transcript persist ────────
         # Non-destructive: stashes _dialer_call_id on voice_session without
         # touching voice_session.call_id (STT/TTS connection maps are keyed
@@ -989,6 +1005,7 @@ async def _on_call_ended(call_id: str) -> None:
         except Exception as exc:
             logger.debug(f"Ringing session end_session failed for {call_id[:12]}: {exc}")
 
+    _state().clear_first_speaker(call_id)  # per-call first-speaker stash cleanup
     voice_session = _state().pop_voice_session(call_id)
     if voice_session:
         # Cancel any per-call task that's still running. Without this,

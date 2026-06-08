@@ -591,6 +591,7 @@ async def make_call(request: Request, body: MakeCallRequest):
             )
             _sb.set_ringing_started_at(planned_call_id, asyncio.get_event_loop().time())
             _sb.set_ringing_event(planned_call_id, evt)
+            _sb.set_first_speaker(planned_call_id, effective_first_speaker)
             stored_call_id = planned_call_id
             logger.info(
                 "pre_originate_session_prestored call_id=%s first_speaker=%s",
@@ -624,10 +625,12 @@ async def make_call(request: Request, body: MakeCallRequest):
             )
             _sb.set_ringing_started_at(call_id, asyncio.get_event_loop().time())
             _sb.set_ringing_event(call_id, evt)
+            _sb.set_first_speaker(call_id, effective_first_speaker)
             if stored_call_id is not None:
                 _sb.pop_ringing_warmup(stored_call_id)
                 _sb.clear_ringing_started_at(stored_call_id)
                 _sb.pop_ringing_event(stored_call_id)
+                _sb.clear_first_speaker(stored_call_id)
             stored_call_id = call_id
             logger.info(
                 "pre_originate_session_stored call_id=%s first_speaker=%s",

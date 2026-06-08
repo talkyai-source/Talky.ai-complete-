@@ -179,6 +179,14 @@ class TelephonyStateBackend(Protocol):
 
     def iter_ringing_started_at_items(self) -> list[tuple[str, float]]: ...
 
+    # ── Per-call first speaker ("agent"/"user") ─────────────────────
+
+    def set_first_speaker(self, call_id: str, value: str) -> None: ...
+
+    def get_first_speaker(self, call_id: str) -> Optional[str]: ...
+
+    def clear_first_speaker(self, call_id: str) -> None: ...
+
     # ── Ringing sync events (asyncio.Event, process-local always) ──
 
     def set_ringing_event(self, call_id: str, event: object) -> None: ...
@@ -254,6 +262,10 @@ class LocalOnlyStateBackend:
         # may eventually import this module).
         from app.api.v1.endpoints import telephony_bridge as _tb
         self._tb = _tb
+        # Per-call first-speaker ("agent"/"user"), stored independently of the
+        # ringing-warmup so the answer path can read it even when the warmup was
+        # never consumed (the fresh-session fallback). Process-local.
+        self._first_speaker_by_call: dict[str, str] = {}
 
     # ── Voice session registry ──────────────────────────────────────
 
@@ -384,6 +396,17 @@ class LocalOnlyStateBackend:
 
     def iter_ringing_started_at_items(self) -> list[tuple[str, float]]:
         return list(self._tb._ringing_warmup_created_at.items())
+
+    # ── Per-call first speaker ──────────────────────────────────────
+
+    def set_first_speaker(self, call_id: str, value: str) -> None:
+        self._first_speaker_by_call[call_id] = value
+
+    def get_first_speaker(self, call_id: str) -> Optional[str]:
+        return self._first_speaker_by_call.get(call_id)
+
+    def clear_first_speaker(self, call_id: str) -> None:
+        self._first_speaker_by_call.pop(call_id, None)
 
     # ── Ringing events ──────────────────────────────────────────────
 
@@ -664,6 +687,17 @@ class RedisBackedStateBackend:
 
     def iter_ringing_started_at_items(self) -> list[tuple[str, float]]:
         return self._local.iter_ringing_started_at_items()
+
+    # ── Per-call first speaker (local only) ─────────────────────────
+
+    def set_first_speaker(self, call_id: str, value: str) -> None:
+        self._local.set_first_speaker(call_id, value)
+
+    def get_first_speaker(self, call_id: str) -> Optional[str]:
+        return self._local.get_first_speaker(call_id)
+
+    def clear_first_speaker(self, call_id: str) -> None:
+        self._local.clear_first_speaker(call_id)
 
     def set_ringing_event(self, call_id: str, event: object) -> None:
         self._local.set_ringing_event(call_id, event)
