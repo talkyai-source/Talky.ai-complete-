@@ -188,6 +188,27 @@ class ContactCreate(BaseModel):
         return v
 
 
+class ContactUpdate(BaseModel):
+    """Request body for editing an existing contact. All fields optional —
+    only the provided fields are changed."""
+
+    phone_number: Optional[str] = Field(None, description="New phone number (normalized)")
+    first_name: Optional[str] = Field(None, max_length=100)
+    last_name: Optional[str] = Field(None, max_length=100)
+    email: Optional[str] = Field(None, max_length=255)
+
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        cleaned = re.sub(r"[\s\-\(\)\.]", "", v)
+        if not cleaned:
+            raise ValueError("Phone number cannot be empty")
+        # Length/format enforced in the endpoint (tenant-scoped).
+        return v
+
+
 class ContactListResponse(BaseModel):
     """Response for listing contacts."""
 

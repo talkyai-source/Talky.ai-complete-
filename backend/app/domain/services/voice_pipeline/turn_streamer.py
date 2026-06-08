@@ -87,12 +87,35 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
         if pool is None:
             return ""
 
-        hits = await asyncio.wait_for(
-            retrieve_knowledge(pool, session.tenant_id, session.campaign_id, last_user, k=2),
-            timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
-        )
-        if not hits:
+        _t0 = time.monotonic()
+        try:
+            hits = await asyncio.wait_for(
+                retrieve_knowledge(pool, session.tenant_id, session.campaign_id, last_user, k=2),
+                timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError:
+            # TEMP diagnostic (knowledge-not-used investigation): a timeout here
+            # means FTS retrieval was too slow and the turn answered WITHOUT
+            # knowledge — a prime suspect for "agent isn't using the KB".
+            logger.warning(
+                "KB_DEBUG call=%s TIMEOUT >%.0fms mode=%s tenant=%s — turn without knowledge",
+                session.call_id[:8], _KNOWLEDGE_RETRIEVE_TIMEOUT_S * 1000,
+                session.knowledge_mode, str(session.tenant_id)[:8],
+            )
             return ""
+        _ms = (time.monotonic() - _t0) * 1000.0
+        if not hits:
+            logger.info(
+                "KB_DEBUG call=%s NO_HITS %.0fms q=%r mode=%s tenant=%s",
+                session.call_id[:8], _ms, last_user[:60],
+                session.knowledge_mode, str(session.tenant_id)[:8],
+            )
+            return ""
+        logger.info(
+            "KB_DEBUG call=%s HITS=%d %.0fms q=%r headings=%s",
+            session.call_id[:8], len(hits), _ms, last_user[:60],
+            [h.get("heading") for h in hits],
+        )
 
         lines = [
             "## Relevant company knowledge for this question",
@@ -104,7 +127,8 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
             if body:
                 lines.append(f"- {h['heading']}: {body}")
         return "\n".join(lines) if len(lines) > 2 else ""
-    except (asyncio.TimeoutError, Exception):
+    except Exception as exc:
+        logger.warning("KB_DEBUG call=%s error: %s", getattr(session, "call_id", "?")[:8], exc)
         return ""
 
 

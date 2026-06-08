@@ -270,6 +270,24 @@ class DialerWorker:
                     await self._update_job_status(job.job_id, JobStatus.SKIPPED, reason="call_guard_queued")
                     return
 
+            # Re-check campaign status immediately before originating. The
+            # validation above (rules / scheduling / guard) can take 100-200ms,
+            # and the user may hit Stop in that window. Without this, a job that
+            # passed the top-of-function check still originates into a stopped
+            # campaign — a call stuck "dialing" that the stop-sweep (already run)
+            # never sees.
+            campaign_status = await self._get_campaign_status(job.campaign_id)
+            if campaign_status not in {"running", "active"}:
+                logger.info(
+                    "Campaign %s went %s during job %s validation — skipping originate",
+                    job.campaign_id, campaign_status or "missing", job.job_id,
+                )
+                await self.queue_service.mark_skipped(job.job_id, reason="campaign_stopped")
+                await self._update_job_status(
+                    job.job_id, JobStatus.SKIPPED, error="campaign_stopped_before_originate",
+                )
+                return
+
             try:
                 # 5. Initiate the call via the provider/PBX.
                 provider_call_id = await self._make_call(job, rules)

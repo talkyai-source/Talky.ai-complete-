@@ -699,7 +699,16 @@ async def hangup_calls_for_campaign(campaign_id: str) -> int:
         return 0
     if pool is None:
         return 0
-    active = ("initiated", "ringing", "queued", "in_progress", "answered")
+    # Every NON-terminal call state the dialer/telephony can leave a call in.
+    # MUST include "dialing" (originate accepted, channel ringing out) and
+    # "in_call" (media flowing / AI talking) — these are the live CallState
+    # values (see call_status.CallState); omitting them was why Stop left calls
+    # stuck dialing or still talking. Legacy aliases (initiated/in_progress)
+    # kept so old rows are still swept.
+    active = (
+        "queued", "dialing", "ringing", "answered", "in_call",
+        "initiated", "in_progress",
+    )
     try:
         async with pool.acquire() as conn:
             await conn.execute("SET LOCAL app.bypass_rls = 'on'")

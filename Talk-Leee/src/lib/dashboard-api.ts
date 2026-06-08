@@ -303,6 +303,31 @@ class DashboardApi {
         });
     }
 
+    async deleteContact(
+        campaignId: string,
+        contactId: string
+    ): Promise<{ message: string }> {
+        // Soft-deletes the lead (status='deleted') on the backend. Works for
+        // contacts added via the Add Contact button OR via CSV import — they
+        // are all rows in the same leads table.
+        return this.client.request({
+            path: `/campaigns/${campaignId}/contacts/${contactId}`,
+            method: "DELETE",
+        });
+    }
+
+    async updateContact(
+        campaignId: string,
+        contactId: string,
+        data: { phone_number?: string; first_name?: string; last_name?: string; email?: string }
+    ): Promise<{ message: string; contact: Contact }> {
+        return this.client.request({
+            path: `/campaigns/${campaignId}/contacts/${contactId}`,
+            method: "PATCH",
+            body: data,
+        });
+    }
+
     // Calls
     async listCalls(page: number = 1, pageSize: number = 20): Promise<{ calls: Call[]; total: number }> {
         const response = await this.client.request<{ items: (CallListItem & { summary?: string })[]; total: number }>({

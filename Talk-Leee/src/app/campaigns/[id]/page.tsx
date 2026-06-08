@@ -25,6 +25,7 @@ import {
     CheckCircle,
     XCircle,
     Loader2,
+    Trash2,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -87,6 +88,8 @@ export default function CampaignDetailPage() {
         email: "",
     });
     const [addingContact, setAddingContact] = useState(false);
+    const [deletingContactId, setDeletingContactId] = useState<string | null>(null);
+    const [editingContact, setEditingContact] = useState<Contact | null>(null);
 
     const loadData = useCallback(async () => {
         try {
@@ -161,14 +164,49 @@ export default function CampaignDetailPage() {
         e.preventDefault();
         try {
             setAddingContact(true);
-            await dashboardApi.addContact(campaignId, contactForm);
+            if (editingContact) {
+                await dashboardApi.updateContact(campaignId, editingContact.id, contactForm);
+            } else {
+                await dashboardApi.addContact(campaignId, contactForm);
+            }
             setContactForm({ phone_number: "", first_name: "", last_name: "", email: "" });
             setShowAddContact(false);
+            setEditingContact(null);
             await loadData();
         } catch (err) {
-            alert(err instanceof Error ? err.message : "Failed to add contact");
+            alert(
+                err instanceof Error
+                    ? err.message
+                    : `Failed to ${editingContact ? "update" : "add"} contact`,
+            );
         } finally {
             setAddingContact(false);
+        }
+    }
+
+    function startEditContact(contact: Contact) {
+        setEditingContact(contact);
+        setContactForm({
+            phone_number: contact.phone_number || "",
+            first_name: contact.first_name || "",
+            last_name: contact.last_name || "",
+            email: contact.email || "",
+        });
+        setShowAddContact(true);
+    }
+
+    async function handleDeleteContact(contactId: string, phone: string) {
+        if (!confirm(`Remove ${phone} from this campaign? It will no longer be dialed.`)) return;
+        try {
+            setDeletingContactId(contactId);
+            await dashboardApi.deleteContact(campaignId, contactId);
+            // Optimistically drop the row; reload stats in the background.
+            setContacts((prev) => prev.filter((c) => c.id !== contactId));
+            loadData().catch(() => {});
+        } catch (err) {
+            alert(err instanceof Error ? err.message : "Failed to delete contact");
+        } finally {
+            setDeletingContactId(null);
         }
     }
 
@@ -336,7 +374,7 @@ export default function CampaignDetailPage() {
                                     <Upload className="w-4 h-4" />
                                     Import CSV
                                 </Button>
-                                <Button size="sm" onClick={() => setShowAddContact(true)}>
+                                <Button size="sm" onClick={() => { setEditingContact(null); setContactForm({ phone_number: "", first_name: "", last_name: "", email: "" }); setShowAddContact(true); }}>
                                     <Plus className="w-4 h-4" />
                                     Add Contact
                                 </Button>
@@ -393,9 +431,9 @@ export default function CampaignDetailPage() {
                                 </div>
                                 <div className="flex gap-2">
                                     <Button type="submit" size="sm" disabled={addingContact}>
-                                        {addingContact ? <Loader2 className="w-4 h-4 animate-spin" /> : "Add"}
+                                        {addingContact ? <Loader2 className="w-4 h-4 animate-spin" /> : (editingContact ? "Save changes" : "Add")}
                                     </Button>
-                                    <Button type="button" variant="outline" size="sm" onClick={() => setShowAddContact(false)}>
+                                    <Button type="button" variant="outline" size="sm" onClick={() => { setShowAddContact(false); setEditingContact(null); }}>
                                         Cancel
                                     </Button>
                                 </div>
@@ -415,6 +453,7 @@ export default function CampaignDetailPage() {
                                             <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">Name</th>
                                             <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">Status</th>
                                             <th className="px-4 py-2 text-right text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">Attempts</th>
+                                            <th className="px-4 py-2 text-right text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-border/60">
@@ -432,6 +471,33 @@ export default function CampaignDetailPage() {
                                                     </span>
                                                 </td>
                                                 <td className="px-4 py-3 text-right text-sm text-muted-foreground tabular-nums whitespace-nowrap">{contact.call_attempts}</td>
+                                                <td className="px-4 py-3 text-right whitespace-nowrap">
+                                                    <div className="flex items-center justify-end gap-1">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => startEditContact(contact)}
+                                                            aria-label={`Edit ${contact.phone_number}`}
+                                                            title="Edit contact"
+                                                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                                        >
+                                                            <Pencil className="h-3.5 w-3.5" />
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleDeleteContact(contact.id, contact.phone_number)}
+                                                            disabled={deletingContactId === contact.id}
+                                                            aria-label={`Delete ${contact.phone_number}`}
+                                                            title="Remove contact"
+                                                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                                                        >
+                                                            {deletingContactId === contact.id ? (
+                                                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                            ) : (
+                                                                <Trash2 className="h-3.5 w-3.5" />
+                                                            )}
+                                                        </button>
+                                                    </div>
+                                                </td>
                                             </tr>
                                         ))}
                                     </tbody>

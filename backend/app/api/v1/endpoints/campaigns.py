@@ -42,6 +42,7 @@ from app.api.v1.schemas.campaigns import (
     CampaignStartRequest,
     CampaignUpdateRequest,
     ContactCreate,
+    ContactUpdate,
     ContactListResponse,
 )
 
@@ -897,6 +898,86 @@ async def add_contact_to_campaign(
     except Exception as e:
         logger.error(f"Error adding contact to campaign {campaign_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to add contact")
+
+
+@router.patch("/{campaign_id}/contacts/{contact_id}")
+async def update_contact_in_campaign(
+    campaign_id: str,
+    contact_id: str,
+    contact: ContactUpdate,
+    current_user: CurrentUser = Depends(get_current_user),
+    supabase: Client = Depends(get_db_client),
+):
+    """Edit a single contact (lead) — phone, name, or email. Only the provided
+    fields change. Phone is normalized the same way as add-contact (relaxed for
+    flagged accounts). Tenant-scoped.
+    """
+    db_client = supabase
+    try:
+        existing = (
+            db_client.table("leads")
+            .select("id,phone_number,first_name,last_name,email,campaign_id")
+            .eq("id", contact_id)
+            .eq("campaign_id", campaign_id)
+            .eq("tenant_id", current_user.tenant_id)
+            .execute()
+        )
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Contact not found in this campaign")
+
+        update_payload: dict = {}
+
+        if contact.phone_number is not None:
+            try:
+                if _phone_validation_relaxed(current_user):
+                    normalized_phone = normalize_phone_number_lenient(contact.phone_number)
+                else:
+                    normalized_phone = normalize_phone_number(contact.phone_number)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=f"Invalid phone number: {str(e)}")
+
+            # Reject duplicate within the campaign (excluding this same lead).
+            dupe = (
+                db_client.table("leads").select("id")
+                .eq("campaign_id", campaign_id)
+                .eq("phone_number", normalized_phone)
+                .neq("status", "deleted")
+                .neq("id", contact_id)
+                .execute()
+            )
+            if dupe.data:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Phone number {normalized_phone} already exists in this campaign",
+                )
+            update_payload["phone_number"] = normalized_phone
+
+        if contact.first_name is not None:
+            update_payload["first_name"] = contact.first_name
+        if contact.last_name is not None:
+            update_payload["last_name"] = contact.last_name
+        if contact.email is not None:
+            update_payload["email"] = contact.email
+
+        if not update_payload:
+            raise HTTPException(status_code=400, detail="No fields to update")
+
+        resp = (
+            db_client.table("leads")
+            .update(update_payload)
+            .eq("id", contact_id)
+            .eq("tenant_id", current_user.tenant_id)
+            .execute()
+        )
+        updated = resp.data[0] if resp.data else {**existing.data[0], **update_payload}
+        logger.info("Contact %s updated in campaign %s", contact_id, campaign_id)
+        return {"message": "Contact updated successfully", "contact": updated}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating contact {contact_id} in campaign {campaign_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update contact")
 
 
 @router.get("/{campaign_id}/contacts")

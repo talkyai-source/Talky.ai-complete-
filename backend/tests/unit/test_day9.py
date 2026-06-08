@@ -80,12 +80,20 @@ class TestContactCreateModel:
         contact = ContactCreate(phone_number="(555) 123-4567")
         assert contact.phone_number == "(555) 123-4567"  # Validator just checks, doesn't normalize
     
-    def test_phone_too_short_fails(self):
-        """Phone number too short should fail validation"""
+    def test_phone_short_now_accepted_by_model(self):
+        """Length is enforced in the add-contact endpoint (tenant-scoped — some
+        accounts have phone validation relaxed), NOT in the model. The
+        ContactCreate model now accepts short numbers; only empty/no-digit
+        input is rejected at the model layer."""
+        from app.api.v1.endpoints.campaigns import ContactCreate
+        assert ContactCreate(phone_number="123").phone_number == "123"
+
+    def test_phone_empty_fails(self):
+        """Empty / no-digit phone is still rejected at the model."""
         from app.api.v1.endpoints.campaigns import ContactCreate
         import pydantic
         with pytest.raises(pydantic.ValidationError):
-            ContactCreate(phone_number="123")
+            ContactCreate(phone_number="   ")
 
 
 # Test Campaign model with new fields
