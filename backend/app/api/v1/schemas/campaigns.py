@@ -182,8 +182,9 @@ class ContactCreate(BaseModel):
         cleaned = re.sub(r"[\s\-\(\)\.]", "", v)
         if not cleaned:
             raise ValueError("Phone number cannot be empty")
-        if len(cleaned) < 4:
-            raise ValueError("Phone number too short (minimum 4 digits for SIP extensions)")
+        # Length/format is enforced in the add-contact endpoint, where it can be
+        # tenant-scoped (some accounts have phone validation relaxed for
+        # testing). Only emptiness is rejected here.
         return v
 
 

@@ -60,3 +60,24 @@ def normalize_phone_number(phone: str, default_country: str = "US") -> str:
         return f"+{cleaned}"
 
     return f"+{cleaned}"
+
+
+def normalize_phone_number_lenient(phone: str) -> str:
+    """Lenient normalization that NEVER rejects on length/format.
+
+    For accounts whose phone validation is temporarily relaxed (e.g. adding
+    short or odd test numbers). It tries the strict normalizer first, so a
+    normal number still comes out as proper E.164; only when the strict path
+    rejects the number does it fall back to a digits passthrough (preserving a
+    leading +). The single hard rule that remains is "must contain a digit".
+    """
+    try:
+        return normalize_phone_number(phone)
+    except ValueError:
+        pass  # fall through to the lenient passthrough below
+
+    has_plus = (phone or "").strip().startswith("+")
+    digits = re.sub(r"[^\d]", "", phone or "")
+    if not digits:
+        raise ValueError("Phone number contains no digits")
+    return f"+{digits}" if has_plus else digits

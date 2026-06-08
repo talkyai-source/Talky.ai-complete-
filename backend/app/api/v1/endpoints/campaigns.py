@@ -23,7 +23,10 @@ from app.domain.services.queue_service import DialerQueueService
 from app.domain.services.campaign_service import (
     CampaignService, CampaignError, CampaignNotFoundError, CampaignStateError
 )
-from app.domain.services.phone_number_normalizer import normalize_phone_number
+from app.domain.services.phone_number_normalizer import (
+    normalize_phone_number,
+    normalize_phone_number_lenient,
+)
 from app.domain.services.event_emitter import emit_event
 from app.api.v1.dependencies import (
     get_db_client,
@@ -771,6 +774,19 @@ async def get_campaign_stats(
 # Day 9: Contact Management Endpoints
 # =============================================================================
 
+# TEMP — relaxed phone validation (remove ~2026-08; see memory
+# "phone_validation_relaxed_temp"). Accounts in this set may add contacts with
+# short/odd test numbers that the strict validator would reject. Scoped by login
+# email so it only affects these accounts and never other tenants.
+_RELAXED_PHONE_EMAILS = {"uzairdevelops@gmail.com"}
+
+
+def _phone_validation_relaxed(user) -> bool:
+    """True when the signed-in user's phone validation is temporarily relaxed."""
+    email = getattr(user, "email", None)
+    return bool(email and email.strip().lower() in _RELAXED_PHONE_EMAILS)
+
+
 @router.post("/{campaign_id}/contacts")
 async def add_contact_to_campaign(
     campaign_id: str,
@@ -817,10 +833,15 @@ async def add_contact_to_campaign(
             if candidate:
                 default_country = str(candidate).upper()
 
+        # Phone validation is relaxed for specific accounts (TEMP) so they can
+        # add short/odd test numbers; normal numbers still normalize to E.164.
         try:
-            normalized_phone = normalize_phone_number(
-                contact.phone_number, default_country=default_country,
-            )
+            if _phone_validation_relaxed(current_user):
+                normalized_phone = normalize_phone_number_lenient(contact.phone_number)
+            else:
+                normalized_phone = normalize_phone_number(
+                    contact.phone_number, default_country=default_country,
+                )
         except ValueError as e:
             raise HTTPException(status_code=400, detail=f"Invalid phone number: {str(e)}")
         
