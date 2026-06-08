@@ -76,7 +76,8 @@ class VoicePipelineWorker:
         self._active_pipelines: dict[str, asyncio.Task] = {}
         
         self.running = False
-        
+        self._shutdown_done = False
+
         # Stats
         self._calls_handled = 0
         self._calls_failed = 0
@@ -181,7 +182,10 @@ class VoicePipelineWorker:
         except asyncio.CancelledError:
             logger.info("Worker received cancellation signal")
         finally:
-            await pubsub.unsubscribe(self.CALL_CHANNEL)
+            try:
+                await pubsub.unsubscribe(self.CALL_CHANNEL)
+            except Exception:
+                pass
             await self.shutdown()
     
     async def _handle_event(self, event: dict) -> None:
@@ -287,7 +291,11 @@ class VoicePipelineWorker:
         logger.info(f"Stopped pipeline for call {call_id}: {reason}")
     
     async def shutdown(self) -> None:
-        """Graceful shutdown."""
+        """Graceful shutdown. Idempotent — safe to call from both run()'s
+        finally and main()'s finally."""
+        if self._shutdown_done:
+            return
+        self._shutdown_done = True
         logger.info("Shutting down Voice Pipeline Worker...")
         self.running = False
         
@@ -354,19 +362,27 @@ async def main():
     logging.getLogger().setLevel(getattr(logging, _vc.worker_log_level, logging.INFO))
 
     worker = VoicePipelineWorker()
-    
+
     # Handle shutdown signals
     loop = asyncio.get_event_loop()
-    
+    run_task = asyncio.ensure_future(worker.run())
+
     def signal_handler():
         logger.info("Received shutdown signal")
         worker.running = False
-    
+        # The run loop blocks on pubsub.listen(); flipping `running` alone does
+        # NOT unblock it (an idle worker may never get another message), so the
+        # process would hang until systemd's 90s TimeoutStopSec SIGKILLs it.
+        # Cancel the run task to interrupt the blocked await and shut down now.
+        run_task.cancel()
+
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, signal_handler)
-    
+
     try:
-        await worker.run()
+        await run_task
+    except asyncio.CancelledError:
+        logger.info("Voice Pipeline Worker run cancelled — shutting down")
     except KeyboardInterrupt:
         logger.info("Worker interrupted by user")
     finally:

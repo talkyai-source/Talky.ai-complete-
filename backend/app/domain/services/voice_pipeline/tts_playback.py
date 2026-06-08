@@ -111,6 +111,10 @@ class TtsPlayback:
             # Orphan byte carried across chunk boundaries to keep Int16 samples
             # aligned when a provider splits a sample between two chunks.
             pending_byte = b""
+            # One retry if the provider yields NO audio within the inter-chunk
+            # timeout (a brief stall before the sentence starts). Safe — nothing
+            # has played yet, so no duplicate audio.
+            stall_retried = False
             while True:
                 try:
                     audio_chunk = await asyncio.wait_for(
@@ -121,6 +125,30 @@ class TtsPlayback:
                     provider_exhausted = True
                     break
                 except asyncio.TimeoutError:
+                    # If NOTHING has played yet, the synthesis never really
+                    # started (a brief provider stall — Cartesia's docs note
+                    # idle WebSockets close after 5 min and transient stalls
+                    # happen). Retry the whole synthesis ONCE: safe because no
+                    # audio was emitted (no duplication), and a fresh
+                    # stream_synthesize reopens the Cartesia WS if it had dropped.
+                    if not first_chunk_sent and not stall_retried:
+                        stall_retried = True
+                        logger.warning(
+                            "tts pre-first-chunk stall %.1fs call=%s — retrying synthesis once",
+                            _TTS_INTER_CHUNK_TIMEOUT_S, call_id[:12],
+                        )
+                        try:
+                            await _tts_iter.aclose()
+                        except Exception:
+                            pass
+                        _tts_iter = self._p.tts_provider.stream_synthesize(
+                            text,
+                            voice_id=session.voice_id,
+                            sample_rate=self._p.tts_sample_rate,
+                            call_id=call_id,
+                        ).__aiter__()
+                        pending_byte = b""
+                        continue
                     logger.error(
                         "tts_inter_chunk_timeout call_id=%s timeout_s=%.1f "
                         "text=%r — ending turn cleanly to avoid pipeline freeze",
