@@ -71,6 +71,10 @@ async def generate_llm_response(llm_provider, latency_tracker, session, user_inp
         async for token in llm_provider.stream_chat_with_timeout(
             messages,
             system_prompt=system_prompt,
+            # Honor the tenant's AI-Options settings per turn. None falls back
+            # to the provider's configured default inside stream_chat.
+            temperature=getattr(session, "llm_temperature", None),
+            max_tokens=getattr(session, "llm_max_tokens", None),
         ):
             if first_token:
                 latency_tracker.mark_llm_first_token(call_id)

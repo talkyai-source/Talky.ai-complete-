@@ -736,40 +736,15 @@ async def _on_new_call(call_id: str) -> None:
             # the variance in setup duration.
             _early_first_speaker = resolve_first_speaker(voice_session)
             if _early_first_speaker == "user":
-                async def _delayed_greeting_early(_vs=voice_session, _t0=_new_call_t0):
-                    sess = _vs.call_session
-                    sess.llm_active = True
-                    try:
-                        try:
-                            elapsed = asyncio.get_event_loop().time() - _t0
-                            remaining = max(0.0, 2.0 - elapsed)
-                            logger.info(
-                                "caller_first_greeting_armed call=%s elapsed_ms=%.0f sleep_ms=%.0f",
-                                _vs.call_id[:12], elapsed * 1000.0, remaining * 1000.0,
-                            )
-                            await asyncio.sleep(remaining)
-                        except asyncio.CancelledError:
-                            return
-                        try:
-                            sess.current_user_input = ""
-                        except AttributeError:
-                            pass
-                        barge_ev = getattr(sess, "barge_in_event", None)
-                        if barge_ev is not None:
-                            barge_ev.clear()
-                        elapsed_at_fire = (
-                            asyncio.get_event_loop().time() - _t0
-                        ) * 1000.0
-                        logger.info(
-                            "caller_first_greeting_fire call=%s elapsed_ms=%.0f",
-                            _vs.call_id[:12], elapsed_at_fire,
-                        )
-                    finally:
-                        sess.llm_active = False
-                    await _send_outbound_greeting(_vs)
-
-                voice_session._greeting_task = asyncio.create_task(
-                    _delayed_greeting_early()
+                # Caller-speaks-first: the caller opens, so play NO auto/pre-
+                # recorded intro. The agent waits and responds naturally on the
+                # first caller turn (handle_turn_end). Previously a 2s-delayed
+                # greeting fired here, which collided with that natural response
+                # (two things talking over each other). Agent-first still greets
+                # immediately (see below).
+                logger.info(
+                    "caller_first_no_greeting call=%s — waiting for caller, no auto intro",
+                    voice_session.call_id[:12],
                 )
 
             # ── Drain early audio buffer ────────────────────────────────

@@ -39,7 +39,9 @@ class _FakeLLM:
     def __init__(self, tokens):
         self._tokens = tokens
 
-    async def stream_chat_with_timeout(self, messages, system_prompt=None):
+    async def stream_chat_with_timeout(self, messages, system_prompt=None, **kwargs):
+        # **kwargs mirrors the real signature (temperature/max_tokens are now
+        # passed per turn from the session's AI-Options config).
         for t in self._tokens:
             yield t
 

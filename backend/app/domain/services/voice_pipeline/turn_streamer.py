@@ -60,7 +60,10 @@ def _truncate_history(history: list, max_pairs: int = _MAX_HISTORY_PAIRS) -> lis
 # Hard cap on the per-turn knowledge lookup so a slow/contended DB can never add
 # more than this to time-to-first-token. On timeout we just skip knowledge for
 # the turn — the agent still answers from its persona + history.
-_KNOWLEDGE_RETRIEVE_TIMEOUT_S = float(os.getenv("KNOWLEDGE_RETRIEVE_TIMEOUT_MS", "250")) / 1000.0
+# 500ms: retrieval runs CONCURRENTLY with the LLM's first-token latency, so a
+# larger budget here adds ~0 perceived delay but sharply cuts silent
+# "timed-out → answered without knowledge" turns under DB load.
+_KNOWLEDGE_RETRIEVE_TIMEOUT_S = float(os.getenv("KNOWLEDGE_RETRIEVE_TIMEOUT_MS", "500")) / 1000.0
 
 
 async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str:
@@ -71,11 +74,16 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
     stall a turn.
     """
     try:
-        last_user = next(
-            (m.content for m in reversed(messages) if m.role == MessageRole.USER), "",
-        )
+        # Primary query = caller's latest message, enriched with the previous
+        # caller turn so follow-ups ("can you do that there?", "and the price?")
+        # still match the right node. Latest is listed first so it dominates rank.
+        user_msgs = [m.content for m in reversed(messages) if m.role == MessageRole.USER]
+        last_user = user_msgs[0] if user_msgs else ""
         if not last_user.strip():
             return ""
+        query = last_user
+        if len(user_msgs) > 1 and user_msgs[1].strip():
+            query = f"{last_user} {user_msgs[1]}".strip()
 
         from app.core.container import get_container
         from app.services.scripts.knowledge.retrieval import retrieve_knowledge
@@ -90,7 +98,7 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
         _t0 = time.monotonic()
         try:
             hits = await asyncio.wait_for(
-                retrieve_knowledge(pool, session.tenant_id, session.campaign_id, last_user, k=2),
+                retrieve_knowledge(pool, session.tenant_id, session.campaign_id, query, k=5),
                 timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
@@ -118,8 +126,11 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
         )
 
         lines = [
-            "## Relevant company knowledge for this question",
-            "Answer the caller using these facts, in your own words:",
+            "## Company knowledge — official answers (authoritative)",
+            "Use the facts below to answer the caller. Speak naturally and "
+            "conversationally, but stay faithful to this information — it is the "
+            "official company answer. Do not contradict it or invent details "
+            "beyond it:",
         ]
         for h in hits:
             body = (h.get("voice_answer") or h.get("summary") or h.get("content") or "")
@@ -206,6 +217,10 @@ class TurnStreamer:
             async for token in self._p.llm_provider.stream_chat_with_timeout(
                 messages,
                 system_prompt=system_prompt,
+                # Honor the tenant's AI-Options settings per turn. None falls
+                # back to the provider's configured default inside stream_chat.
+                temperature=getattr(session, "llm_temperature", None),
+                max_tokens=getattr(session, "llm_max_tokens", None),
             ):
                 if first_token:
                     self._p.latency_tracker.mark_llm_first_token(call_id)
