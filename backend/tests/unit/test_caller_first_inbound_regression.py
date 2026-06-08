@@ -1,17 +1,19 @@
 """End-to-end-shape regression for caller-speaks-first persona framing.
 
-The bug class this test guards against: the AI greets like an outbound
-caller ("Hi, this is X from Y") even though the campaign is configured
-for caller-speaks-first. That happened historically when the inbound
-prompt patch was append-only and got pushed out of early-token attention,
-or when the patch silently skipped persona-composed prompts.
+The bug class this test guards against: on a caller-speaks-first OUTBOUND
+call the AI plays receptionist ("Hello, this is X — how can I help you?")
+instead of leading with its own introduction + purpose, OR the call-
+direction directive gets pushed out of early-token attention / silently
+skipped on persona-composed prompts. Caller-first is a turn-taking choice
+(wait for the callee to speak), NOT a genuine inbound call — the agent
+dialed them, so it owns the opening.
 
 These tests do NOT spin up the LLM — they validate the contract at the
 last application boundary before the LLM call: the active
 ``call_session.system_prompt`` after the bridge applies caller-first
-shaping. If that prompt doesn't carry the inbound directive in a position
-where the LLM will weight it, the AI cannot reliably produce a receiver
-opener.
+shaping. If that prompt doesn't carry the directive in a position where
+the LLM will weight it, the AI cannot reliably produce the outbound
+introduce-yourself-and-purpose opener.
 
 What's exercised:
     bridge fan-in  →  build_telephony_session_config
@@ -98,12 +100,12 @@ class TestActivePromptCarriesInboundContract:
 
         active = voice_session.call_session.system_prompt
         assert active.startswith(INBOUND_DIRECTIVE_SENTINEL), (
-            "Inbound sentinel must lead the prompt so early-token "
+            "Caller-first sentinel must lead the prompt so early-token "
             "attention dominates the persona below it."
         )
-        assert "Hello, All States Estimation, this is Adam" in active, (
-            "Canonical receiver opener missing — LLM lacks the explicit "
-            "phrasing it should follow on turn 0."
+        assert "this is Adam from All States Estimation" in active, (
+            "Outbound opener missing — LLM lacks the explicit introduce-"
+            "yourself-and-purpose phrasing it should follow on turn 0."
         )
 
     def test_legacy_path_does_not_leak_outbound_persona(self):
@@ -138,8 +140,9 @@ class TestActivePromptCarriesInboundContract:
         assert active.startswith(INBOUND_DIRECTIVE_SENTINEL)
         # Persona body still present below directive.
         assert "friendly customer support specialist at Acme" in active
-        # Canonical opener present and parameterized to this campaign.
-        assert "Hello, Acme, this is Sarah" in active
+        # Outbound opener present and parameterized to this campaign — the
+        # agent introduces itself as "<agent> from <company>", not a receiver.
+        assert "Sarah from Acme" in active
 
     def test_canonical_opener_matches_receiver_pattern(self):
         """The canonical opener phrasing must still match the receiver

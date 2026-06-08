@@ -71,14 +71,16 @@ class TestOutboundFirstSpeaker:
 
         _apply_caller_first_inbound_prompt(voice_session)
 
-        # Outbound persona framing must be gone (the receiver doesn't
-        # introduce themselves as a Business Development Specialist).
+        # The old outbound estimation persona block must be gone (the
+        # legacy swap replaces it wholesale with the caller-first base).
         assert "Business Development Specialist" not in call_session.system_prompt
         assert "GREETING RESPONSE" not in call_session.system_prompt
-        # Inbound framing must be present and parameterized.
-        assert "answering the phone at All States Estimation" in call_session.system_prompt
-        assert "Hello, All States Estimation, this is Sarah" in call_session.system_prompt
-        assert "The caller called US" in call_session.system_prompt
+        # Caller-first OUTBOUND framing must be present and parameterized:
+        # the agent calls on behalf of the company and leads with its own
+        # introduction after the callee speaks — it must NOT play receptionist.
+        assert "calling on behalf of All States Estimation" in call_session.system_prompt
+        assert "this is Sarah from All States Estimation" in call_session.system_prompt
+        assert "YOU called THEM on behalf of All States Estimation" in call_session.system_prompt
 
     def test_caller_first_prepends_directive_to_non_legacy_prompt(self):
         """Persona-composed and other custom prompts must receive a
@@ -107,8 +109,9 @@ class TestOutboundFirstSpeaker:
         assert call_session.system_prompt.startswith(INBOUND_DIRECTIVE_SENTINEL)
         # Persona body must survive verbatim below the directive.
         assert persona_body in call_session.system_prompt
-        # Inbound opening pattern must reference the campaign's actual values.
-        assert "Hello, Acme, this is Sarah" in call_session.system_prompt
+        # Outbound opening must reference the campaign's actual values — the
+        # agent introduces itself as "<agent> from <company>", not as a receiver.
+        assert "Sarah from Acme" in call_session.system_prompt
 
     def test_caller_first_directive_prepend_is_idempotent(self):
         """Calling the prepend path twice must not double-prepend the

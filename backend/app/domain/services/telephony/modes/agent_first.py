@@ -211,6 +211,16 @@ async def prepare_pre_originate_greeting(
         first_speaker=effective_first_speaker,
     )
     chunks: list[bytes] = []
+    # Carry the orphan byte across chunks. Int16 (s16le) providers like
+    # ElevenLabs HTTP-stream PCM that can split a 2-byte sample across two
+    # chunks (odd-length chunk). DROPPING that trailing byte (raw[:-1])
+    # byte-shifts every following sample → white-noise buzz on the whole
+    # greeting. Instead, hold the orphan and prepend it to the next chunk so
+    # sample alignment is preserved. This is the same fix applied to the
+    # conversation path in voice_pipeline/tts_playback.py — the pre-synth
+    # greeting is a SEPARATE path that pumps chunks straight to the media
+    # gateway, so it needed the fix independently.
+    pending = b""
     tts_config = pre_warm_session.config
     async for audio_chunk in pre_warm_session.tts_provider.stream_synthesize(
         text=greeting_text,
@@ -225,11 +235,20 @@ async def prepare_pre_originate_greeting(
             if hasattr(audio_chunk, "data")
             else audio_chunk
         )
+        if not raw:
+            continue
+        if not isinstance(raw, (bytes, bytearray)):
+            raw = bytes(raw)
+        raw = pending + bytes(raw)
+        pending = b""
+        if len(raw) % 2 != 0:
+            pending = raw[-1:]
+            raw = raw[:-1]
         if raw:
-            if len(raw) % 2 != 0:
-                raw = raw[:-1]
-            if raw:
-                chunks.append(raw)
+            chunks.append(raw)
+    # A single trailing orphan byte at stream end has no partner sample —
+    # it's a genuinely incomplete final sample (not a misalignment source),
+    # so it is dropped rather than carried.
 
     if not chunks:
         raise RuntimeError(
