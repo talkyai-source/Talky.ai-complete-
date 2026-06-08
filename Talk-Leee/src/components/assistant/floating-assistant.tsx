@@ -32,6 +32,7 @@ import { useAccessToken } from "@/lib/auth-hooks";
 import { useAuth } from "@/lib/auth-context";
 import { getAssistantWsToken } from "@/lib/assistant-model-api";
 import { AssistantModelPicker } from "./assistant-model-picker";
+import { MarkdownMessage } from "./markdown-message";
 
 /*
  * NOTE on the sidebar offset: this component used to import
@@ -280,7 +281,13 @@ export function FloatingAssistant() {
         };
 
         ws.onmessage = (event) => {
-            let payload: { type?: string; content?: unknown; conversation_id?: string };
+            let payload: {
+                type?: string;
+                content?: unknown;
+                conversation_id?: string;
+                id?: unknown;
+                delta?: unknown;
+            };
             try {
                 payload = JSON.parse(event.data);
             } catch {
@@ -293,9 +300,48 @@ export function FloatingAssistant() {
                         conversationIdRef.current = payload.conversation_id;
                     }
                     break;
+                case "conversation_created":
+                    // Backend persisted a new conversation row — capture its id
+                    // so a reconnect resumes this same thread.
+                    if (typeof payload.conversation_id === "string") {
+                        conversationIdRef.current = payload.conversation_id;
+                    }
+                    break;
                 case "assistant_typing":
                     setTyping(Boolean(payload.content));
                     break;
+                // --- streaming (token-by-token) ---
+                case "assistant_message_start": {
+                    const startId = typeof payload.id === "string" ? payload.id : uid();
+                    setTyping(false);
+                    setMessages((prev) => [
+                        ...prev,
+                        { id: startId, role: "assistant", content: "", ts: Date.now() },
+                    ]);
+                    break;
+                }
+                case "assistant_token": {
+                    const tokId = typeof payload.id === "string" ? payload.id : null;
+                    const delta = typeof payload.delta === "string" ? payload.delta : "";
+                    if (!tokId || !delta) break;
+                    setMessages((prev) =>
+                        prev.map((m) =>
+                            m.id === tokId ? { ...m, content: m.content + delta } : m,
+                        ),
+                    );
+                    break;
+                }
+                case "assistant_message_end": {
+                    const endId = typeof payload.id === "string" ? payload.id : null;
+                    setTyping(false);
+                    if (endId && typeof payload.content === "string") {
+                        const finalText = payload.content;
+                        setMessages((prev) =>
+                            prev.map((m) => (m.id === endId ? { ...m, content: finalText } : m)),
+                        );
+                    }
+                    break;
+                }
                 case "assistant_message":
                     setTyping(false);
                     setMessages((prev) => [
@@ -578,13 +624,13 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
     return (
         <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
             <div
-                className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm ${
+                className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${
                     isUser
-                        ? "bg-cyan-600 text-white"
+                        ? "whitespace-pre-wrap bg-cyan-600 text-white"
                         : "bg-muted text-foreground"
                 }`}
             >
-                {msg.content}
+                {isUser ? msg.content : <MarkdownMessage content={msg.content} />}
             </div>
         </div>
     );

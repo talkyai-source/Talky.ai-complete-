@@ -359,73 +359,118 @@ async def assistant_chat(
                     "content": True
                 })
                 
-                # Process with agent
+                # Process with the streaming ReAct loop (true token-by-token).
                 try:
-                    # Prepare state
-                    agent_state: AgentState = {
-                        "messages": [{"role": "user", "content": user_content}],
-                        "tenant_id": tenant_id,
-                        "user_id": user_id,
-                        "conversation_id": current_conversation_id,
-                        "db_client": db_client,
-                        "tool_results": [],
-                        "model": await get_tenant_assistant_model(db_client, tenant_id),
-                    }
-                    
-                    # Add history context
-                    if len(messages_history) > 1:
-                        history_messages = []
-                        for msg in messages_history[-10:-1]:
-                            history_messages.append({
-                                "role": msg.get("role", "user"),
-                                "content": msg.get("content", "")
+                    from app.infrastructure.assistant.streaming import stream_assistant_reply
+
+                    # Last 10 messages (incl. the just-added user turn) as context.
+                    chat_messages = [
+                        {"role": m.get("role", "user"), "content": m.get("content", "")}
+                        for m in messages_history[-10:]
+                    ]
+
+                    # Streaming bubble state. The model may emit a short text
+                    # "preamble" before a tool call; each text turn becomes its
+                    # own bubble (start -> token* -> end), tool turns just toggle
+                    # the typing indicator.
+                    current_msg_id: Optional[str] = None
+                    buf: list[str] = []  # tokens for the currently-open bubble
+
+                    tenant_model = await get_tenant_assistant_model(db_client, tenant_id)
+                    async for ev in stream_assistant_reply(
+                        chat_messages=chat_messages,
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        conversation_id=current_conversation_id,
+                        db_client=db_client,
+                        model=tenant_model,
+                    ):
+                        etype = ev.get("type")
+
+                        if etype == "token":
+                            if current_msg_id is None:
+                                current_msg_id = str(uuid.uuid4())
+                                buf = []
+                                # first token: drop the thinking indicator and
+                                # open a fresh assistant bubble on the client
+                                await manager.send_json(connection_id, {
+                                    "type": "assistant_typing", "content": False
+                                })
+                                await manager.send_json(connection_id, {
+                                    "type": "assistant_message_start", "id": current_msg_id
+                                })
+                            buf.append(ev.get("delta", ""))
+                            await manager.send_json(connection_id, {
+                                "type": "assistant_token",
+                                "id": current_msg_id,
+                                "delta": ev.get("delta", ""),
                             })
-                        agent_state["messages"] = history_messages + agent_state["messages"]
-                    
-                    # Run agent
-                    logger.info("Running agent...")
-                    result = await assistant_graph.ainvoke(agent_state)
-                    logger.info(f"Agent returned {len(result.get('messages', []))} messages")
-                    
-                    # Extract response - handle AIMessage
-                    from langchain_core.messages import AIMessage
-                    
-                    assistant_content = ""
-                    for msg in result.get("messages", []):
-                        if isinstance(msg, AIMessage):
-                            assistant_content = msg.content or ""
-                        elif isinstance(msg, dict) and msg.get("role") == "assistant":
-                            assistant_content = msg.get("content", "")
-                        elif hasattr(msg, 'content') and hasattr(msg, 'type'):
-                            if msg.type in ("ai", "assistant"):
-                                assistant_content = msg.content or ""
-                    
-                    if not assistant_content:
-                        # Fallback
-                        last_msg = result.get("messages", [])[-1] if result.get("messages") else None
-                        if last_msg:
-                            if isinstance(last_msg, AIMessage):
-                                assistant_content = last_msg.content or "I processed your request."
-                            elif isinstance(last_msg, dict):
-                                assistant_content = last_msg.get("content", "I processed your request.")
-                            elif hasattr(last_msg, 'content'):
-                                assistant_content = last_msg.content or "I processed your request."
-                        else:
-                            assistant_content = "I'm not sure how to respond to that."
-                    
-                    # Add to history
-                    messages_history.append({
-                        "role": "assistant",
-                        "content": assistant_content,
-                        "timestamp": datetime.utcnow().isoformat()
-                    })
-                    
-                    # Send response
-                    await manager.send_json(connection_id, {
-                        "type": "assistant_message",
-                        "content": assistant_content
-                    })
-                    
+
+                        elif etype == "tool_start":
+                            # close any open preamble bubble, then show the
+                            # thinking indicator while the tool runs
+                            if current_msg_id is not None:
+                                text = "".join(buf)
+                                await manager.send_json(connection_id, {
+                                    "type": "assistant_message_end",
+                                    "id": current_msg_id,
+                                    "content": text,
+                                })
+                                if text.strip():
+                                    messages_history.append({
+                                        "role": "assistant",
+                                        "content": text,
+                                        "timestamp": datetime.utcnow().isoformat(),
+                                    })
+                                current_msg_id = None
+                                buf = []
+                            await manager.send_json(connection_id, {
+                                "type": "assistant_typing", "content": True
+                            })
+
+                        elif etype == "final":
+                            final_text = ev.get("content", "") or "".join(buf)
+                            if current_msg_id is not None:
+                                await manager.send_json(connection_id, {
+                                    "type": "assistant_message_end",
+                                    "id": current_msg_id,
+                                    "content": final_text,
+                                })
+                            else:
+                                # no tokens streamed this turn (e.g. empty answer)
+                                msg_id = str(uuid.uuid4())
+                                if not final_text.strip():
+                                    final_text = "I processed your request."
+                                await manager.send_json(connection_id, {
+                                    "type": "assistant_message_start", "id": msg_id
+                                })
+                                await manager.send_json(connection_id, {
+                                    "type": "assistant_message_end",
+                                    "id": msg_id, "content": final_text,
+                                })
+                            if final_text.strip():
+                                messages_history.append({
+                                    "role": "assistant",
+                                    "content": final_text,
+                                    "timestamp": datetime.utcnow().isoformat(),
+                                })
+                            current_msg_id = None
+                            buf = []
+
+                        elif etype == "error":
+                            err_text = ev.get("content", "Sorry, I encountered an error.")
+                            await manager.send_json(connection_id, {
+                                "type": "assistant_typing", "content": False
+                            })
+                            await manager.send_json(connection_id, {
+                                "type": "assistant_message", "content": err_text
+                            })
+                            messages_history.append({
+                                "role": "assistant",
+                                "content": err_text,
+                                "timestamp": datetime.utcnow().isoformat(),
+                            })
+
                     # Persist chat state without breaking the already-sent assistant reply.
                     try:
                         if current_conversation_id:

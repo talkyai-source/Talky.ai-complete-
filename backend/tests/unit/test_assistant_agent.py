@@ -6,6 +6,7 @@ from decimal import Decimal
 import pytest
 
 from app.infrastructure.assistant import agent
+from app.infrastructure.assistant.tools import ALL_TOOLS
 
 
 @pytest.mark.asyncio
@@ -18,7 +19,11 @@ async def test_tool_executor_json_encodes_decimal_payloads(monkeypatch):
             "minutes_used": Decimal("12.5"),
         }
 
-    monkeypatch.setattr(agent, "get_usage_info", fake_get_usage_info)
+    # tool_executor now routes through the shared dispatcher (ALL_TOOLS
+    # registry), so override the registry entry rather than the agent-module
+    # name. The behaviour under test — _dump_json encoding Decimals in the
+    # ToolMessage — is unchanged.
+    monkeypatch.setitem(ALL_TOOLS["get_usage_info"], "function", fake_get_usage_info)
 
     result = await agent.tool_executor(
         {

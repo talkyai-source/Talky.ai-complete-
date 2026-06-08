@@ -33,6 +33,7 @@ from app.infrastructure.assistant.tools import (
     ALL_TOOLS
 )
 from app.infrastructure.assistant.tools.llm_schemas import GROQ_TOOL_SCHEMAS
+from app.infrastructure.assistant.tools.dispatch import dispatch_tool
 from app.infrastructure.assistant.model_config import normalize_model
 
 logger = logging.getLogger(__name__)
@@ -304,49 +305,15 @@ async def tool_executor(state: AgentState) -> Dict[str, Any]:
             args = getattr(tc, "args", {}) or {}
             tool_call_id = getattr(tc, "id", "")
         
-        try:
-            # Route to appropriate tool
-            if func_name == "get_dashboard_stats":
-                result = await get_dashboard_stats(tenant_id, db_client, **args)
-            elif func_name == "get_usage_info":
-                result = await get_usage_info(tenant_id, db_client)
-            elif func_name == "get_leads":
-                result = await get_leads(tenant_id, db_client, **args)
-            elif func_name == "get_campaigns":
-                result = await get_campaigns(tenant_id, db_client, **args)
-            elif func_name == "get_recent_calls":
-                result = await get_recent_calls(tenant_id, db_client, **args)
-            elif func_name == "get_actions_today":
-                result = await get_actions_today(tenant_id, db_client)
-            elif func_name == "send_email":
-                result = await send_email(tenant_id, db_client, conversation_id=conversation_id, **args)
-            elif func_name == "send_sms":
-                result = await send_sms(tenant_id, db_client, conversation_id=conversation_id, **args)
-            elif func_name == "initiate_call":
-                result = await initiate_call(tenant_id, db_client, conversation_id=conversation_id, **args)
-            elif func_name == "start_campaign":
-                result = await start_campaign(tenant_id, db_client, conversation_id=conversation_id, **args)
-            else:
-                entry = ALL_TOOLS.get(func_name)
-                if entry and entry.get("function"):
-                    result = await entry["function"](tenant_id, db_client, **args)
-                else:
-                    result = {"error": f"Unknown tool: {func_name}"}
-            
-            # Return as ToolMessage for proper LangGraph handling
-            tool_message = ToolMessage(
-                content=_dump_json(result),
-                tool_call_id=tool_call_id
-            )
-            results.append(tool_message)
-            
-        except Exception as e:
-            logger.error(f"Tool execution error for {func_name}: {e}")
-            error_message = ToolMessage(
-                content=_dump_json({"error": str(e)}),
-                tool_call_id=tool_call_id
-            )
-            results.append(error_message)
+        # Route through the shared dispatcher (single source of truth, also
+        # used by the streaming loop). dispatch_tool never raises — failures
+        # come back as {"error": ...}.
+        result = await dispatch_tool(func_name, tenant_id, db_client, conversation_id, args)
+        tool_message = ToolMessage(
+            content=_dump_json(result),
+            tool_call_id=tool_call_id,
+        )
+        results.append(tool_message)
     
     # Also store raw results for websocket response
     raw_results = [{"role": "tool", "tool_call_id": getattr(m, "tool_call_id", ""), "content": m.content} for m in results]
