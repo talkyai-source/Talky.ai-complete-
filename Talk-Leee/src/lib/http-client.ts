@@ -535,9 +535,109 @@ export function createHttpClient(config: HttpClientConfig) {
         return (await res.text()) as unknown as TResponse;
     }
 
+    /**
+     * Like {@link request} but returns the raw {@link Response} without
+     * parsing — for binary endpoints (audio streams, file downloads) and
+     * multipart responses the JSON-oriented `request` can't handle.
+     *
+     * Crucially it reuses the SAME auth (cookie + optional bearer) AND the
+     * single-flight refresh-on-401 retry. Before this, the recordings audio
+     * stream and CSV upload used bare `fetch()` calls that did NOT refresh,
+     * so once the short-lived `talky_at` cookie rotated (~15 min) they 401'd
+     * and surfaced as "Failed to load audio" / failed upload — even though
+     * the cookie-auth backend was healthy. Routing them through here makes
+     * them survive a rotated cookie exactly like every JSON call does.
+     *
+     * Throws {@link ApiClientError} on a non-OK response.
+     */
+    async function requestRaw<TBody = unknown>(opts: HttpRequestOptions<TBody>): Promise<Response> {
+        const method = opts.method ?? "GET";
+        const url = buildUrl(baseUrl, opts.path, opts.query ?? opts.params);
+        const isRefreshCall = opts.path === "/auth/refresh" || opts.path.endsWith("/auth/refresh");
+
+        let res: Response;
+        try {
+            res = await raw(opts);
+            if (res.status === 401 && !isRefreshCall) {
+                const refreshed = await tryRefresh(refreshUrl);
+                if (refreshed) {
+                    res = await raw(opts);
+                }
+            }
+        } catch (err) {
+            if (err instanceof DOMException && err.name === "AbortError") {
+                throw new ApiClientError({ code: "aborted", message: "Request aborted", url, method });
+            }
+            if (err instanceof Error && err.message === "Timeout") {
+                throw new ApiClientError({ code: "timeout", message: "Request timed out", url, method });
+            }
+            throw new ApiClientError({
+                code: "network_error",
+                message: err instanceof Error ? err.message : "Network error",
+                url,
+                method,
+                details: err,
+            });
+        }
+
+        // Same session-expiry handling as `request`: a genuine 401 (refresh
+        // also failed) clears the stale token and fires the global
+        // session-expired redirect so the user lands back on login.
+        if (res.status === 401 && !opts.suppressAuthRedirect) {
+            if (!isWithinFreshLoginGrace()) {
+                try {
+                    setToken(null);
+                } catch {
+                    // ignore — clearing storage must not derail the throw
+                }
+            }
+            fireSessionExpired();
+        }
+
+        if (!res.ok) {
+            const requestId = res.headers.get("x-request-id") ?? res.headers.get("x-correlation-id") ?? undefined;
+            const code =
+                res.status === 401
+                    ? "unauthorized"
+                    : res.status === 403
+                      ? "forbidden"
+                      : res.status === 429
+                        ? "rate_limited"
+                        : res.status >= 500
+                          ? "server_error"
+                          : "http_error";
+            // Safe to consume the body here — the response is an error, so the
+            // caller won't read it as binary. Surface the backend's detail
+            // (e.g. CSV validation errors) instead of a generic status line.
+            const body = await readBody(res);
+            const envelope =
+                body && typeof body === "object" && "error" in (body as Record<string, unknown>)
+                    ? ((body as { error?: unknown }).error as { message?: unknown } | undefined)
+                    : undefined;
+            const envelopeMessage = typeof envelope?.message === "string" ? envelope.message : undefined;
+            const legacyDetail =
+                body && typeof body === "object" && "detail" in (body as Record<string, unknown>)
+                    ? (body as { detail?: unknown }).detail
+                    : undefined;
+            const legacyMessage = typeof legacyDetail === "string" ? legacyDetail : undefined;
+            throw new ApiClientError({
+                status: res.status,
+                code,
+                message: envelopeMessage ?? legacyMessage ?? defaultMessageForStatus(res.status),
+                details: legacyDetail ?? body,
+                url,
+                method,
+                requestId,
+            });
+        }
+
+        return res;
+    }
+
     return {
         request,
         raw,
+        requestRaw,
         setToken,
         getToken,
     };

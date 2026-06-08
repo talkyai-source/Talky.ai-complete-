@@ -1,5 +1,4 @@
 import { sharedHttpClient } from "@/lib/api";
-import { apiBaseUrl } from "@/lib/env";
 
 // CSV Upload Response
 export interface BulkImportResponse {
@@ -64,12 +63,12 @@ export interface CampaignCallsResponse {
 // Extended API - Real backend integration.
 //
 // AH-Phase-B: shared HttpClient instance (see lib/api.ts → sharedHttpClient).
-// Note: the two bare-fetch sites in this file (uploadCSV multipart and
-// fetchRecordingBlob binary) still need the raw fetch because the
-// shared client assumes JSON bodies + responses. They consume
-// `this.client.getToken()` for auth — which now returns the token from
-// the shared client's tokenProvider, so they participate in the same
-// rotation behaviour.
+// The two binary sites here (uploadCSV multipart, fetchRecordingBlob audio)
+// go through `client.requestRaw` — same cookie+bearer auth and
+// refresh-on-401 retry as every JSON call, but it returns the raw Response
+// so binary/multipart bodies aren't JSON-parsed. Earlier these used bare
+// fetch() with no refresh, so a rotated `talky_at` cookie 401'd them and
+// surfaced as "Failed to load audio" / failed upload.
 class ExtendedApi {
     private get client() { return sharedHttpClient(); }
 
@@ -78,21 +77,14 @@ class ExtendedApi {
         const formData = new FormData();
         formData.append("file", file);
 
-        // Authenticate via the session cookie (credentials: "include"), not a
-        // manual Authorization header — a stale localStorage bearer would
-        // override the cookie and 401 on the strict session-bound bearer path.
-        const response = await fetch(`${apiBaseUrl()}/contacts/campaigns/${campaignId}/upload?skip_duplicates=${skipDuplicates}`, {
+        const response = await this.client.requestRaw({
+            path: `/contacts/campaigns/${campaignId}/upload`,
             method: "POST",
+            query: { skip_duplicates: String(skipDuplicates) },
             body: formData,
-            credentials: "include",
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.detail || `Upload failed: ${response.statusText}`);
-        }
-
-        return response.json();
+        return (await response.json()) as BulkImportResponse;
     }
 
     // Analytics
@@ -132,19 +124,15 @@ class ExtendedApi {
     }
 
     async fetchRecordingBlob(recordingId: string): Promise<string> {
-        // Authenticate via the session cookie (credentials: "include"), NOT a
-        // manual Authorization header. A stale localStorage bearer would
-        // OVERRIDE the cookie and force the backend's strict session-bound
-        // bearer path → 401 "Session-bound token required" ("Failed to load
-        // audio"). The cookie path (talky_at) accepts the session directly.
-        const response = await fetch(`${apiBaseUrl()}/recordings/${recordingId}/stream`, {
-            credentials: "include",
+        // Route through requestRaw so this binary stream gets the SAME auth
+        // (cookie + optional bearer) AND refresh-on-401 retry as every JSON
+        // call. The previous bare fetch() did no refresh, so once the
+        // short-lived talky_at cookie rotated (~15 min) it 401'd and showed
+        // "Failed to load audio" even though the backend was healthy.
+        const response = await this.client.requestRaw({
+            path: `/recordings/${recordingId}/stream`,
+            method: "GET",
         });
-
-        if (!response.ok) {
-            throw new Error(`Failed to fetch recording: ${response.statusText}`);
-        }
-
         const blob = await response.blob();
         return URL.createObjectURL(blob);
     }
