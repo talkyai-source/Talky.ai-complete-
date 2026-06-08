@@ -108,6 +108,9 @@ class TtsPlayback:
                 call_id=call_id,
             ).__aiter__()
             provider_exhausted = False
+            # Orphan byte carried across chunk boundaries to keep Int16 samples
+            # aligned when a provider splits a sample between two chunks.
+            pending_byte = b""
             while True:
                 try:
                     audio_chunk = await asyncio.wait_for(
@@ -147,17 +150,21 @@ class TtsPlayback:
                         self._p.latency_tracker.mark_audio_start(call_id)
                     first_chunk = False
                 raw = audio_chunk.data if hasattr(audio_chunk, "data") else audio_chunk
-                # Int16 PCM requires an even number of bytes (2 bytes per sample).
-                # Odd-length chunks from a TTS provider indicate a framing error;
-                # silently passing them corrupts every subsequent sample's phase.
-                # Trim the orphan byte here — the gateway's pending_byte mechanism
-                # would hide it, but it's better to surface it at the source.
+                # Int16 PCM = 2 bytes/sample. A provider streaming raw PCM can
+                # split a sample ACROSS chunk boundaries: a chunk arrives odd-
+                # length with the sample's other byte in the NEXT chunk. CARRY
+                # that orphan byte forward (prepend it to the next chunk) instead
+                # of dropping it — dropping byte-shifts every following sample
+                # (high/low swapped) → loud buzz. This was the ElevenLabs
+                # eleven_v3 buzz: frequent odd chunks, worse on long RAG-backed
+                # answers (more chunks → more split samples).
+                if not isinstance(raw, (bytes, bytearray)):
+                    raw = bytes(raw)
+                if pending_byte:
+                    raw = pending_byte + raw
+                    pending_byte = b""
                 if len(raw) % 2 != 0:
-                    logger.warning(
-                        "TTS chunk odd length %d bytes from %s for call %s — "
-                        "trimming trailing byte to maintain Int16 alignment",
-                        len(raw), getattr(self._p.tts_provider, "name", "unknown"), call_id,
-                    )
+                    pending_byte = raw[-1:]
                     raw = raw[:-1]
                 if not raw:
                     continue
