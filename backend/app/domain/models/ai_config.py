@@ -49,6 +49,10 @@ class GeminiModel(str, Enum):
     # higher output throughput than 2.5 Flash — the right default for
     # latency-critical voice paths like the Ask AI popup.
     GEMINI_3_1_FLASH_LITE = "gemini-3.1-flash-lite-preview"
+    # Gemini 3.5 Flash — GA (June 2026), Google's most capable Flash model. The
+    # "best" pick for quality on talking + testing. Uses thinking_level (run at
+    # "minimal" for voice); slightly higher TTFT floor than 3.1 Flash-Lite.
+    GEMINI_3_5_FLASH = "gemini-3.5-flash"
     # Reserved for Gemma 4 — uncomment and add a matching GEMINI_MODELS entry
     # once Google AI Studio exposes them. No other code change needed; the
     # GeminiLLMProvider already handles arbitrary model names.
@@ -289,6 +293,20 @@ GROQ_MODELS = [
 # Google AI Studio exposes those endpoints.
 
 GEMINI_MODELS = [
+    ModelInfo(
+        id=GeminiModel.GEMINI_3_5_FLASH.value,
+        name="Gemini 3.5 Flash",
+        description=(
+            "Google's most capable Flash model (GA, June 2026). Best quality "
+            "for talking and testing. Thinking runs at 'minimal' for low "
+            "latency — slightly higher time-to-first-token than 3.1 Flash-Lite."
+        ),
+        speed="~300 tokens/s",
+        price="Higher than 3.1 Flash-Lite",
+        context_window=1_048_576,
+        is_preview=False,
+        provider="gemini",
+    ),
     ModelInfo(
         id=GeminiModel.GEMINI_3_1_FLASH_LITE.value,
         name="Gemini 3.1 Flash-Lite (preview)",

@@ -97,10 +97,19 @@ class CircuitBreaker:
                     raise CircuitOpenError(self.name, remaining)
         return self
 
+    # Control-flow exceptions are NOT service failures and must never trip the
+    # breaker: a cancelled task (CancelledError) or a closed async-generator
+    # (GeneratorExit — e.g. the caller stopped iterating a stream early) is
+    # normal flow. Counting them opened the gemini-llm breaker mid-call when the
+    # streaming wrapper closed a stalled stream early (incident 2026-06-09).
+    _CONTROL_FLOW_EXC: tuple = (asyncio.CancelledError, GeneratorExit)
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         if exc_type is None:
             await self._on_success()
-        elif exc_type and not issubclass(exc_type, tuple(self.excluded_exceptions)):
+        elif issubclass(exc_type, self._CONTROL_FLOW_EXC):
+            pass  # control flow, not a fault — neither success nor failure
+        elif not issubclass(exc_type, tuple(self.excluded_exceptions)):
             await self._on_failure()
         # Don't suppress the exception
         return False

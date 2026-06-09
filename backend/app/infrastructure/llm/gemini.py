@@ -141,14 +141,15 @@ class GeminiLLMProvider(LLMProvider):
         try:
             from google.genai import types as genai_types
 
+            warm_cfg_kwargs = {"temperature": 0.0, "max_output_tokens": 1}
+            warm_tc = self._build_thinking_config(self._model, self._thinking_budget)
+            if warm_tc is not None:
+                warm_cfg_kwargs["thinking_config"] = warm_tc
             await asyncio.wait_for(
                 self._client.aio.models.generate_content(
                     model=self._model,
                     contents="hi",
-                    config=genai_types.GenerateContentConfig(
-                        temperature=0.0,
-                        max_output_tokens=1,
-                    ),
+                    config=genai_types.GenerateContentConfig(**warm_cfg_kwargs),
                 ),
                 timeout=2.0,
             )
@@ -164,6 +165,43 @@ class GeminiLLMProvider(LLMProvider):
     async def cleanup(self) -> None:
         """Release client reference for GC."""
         self._client = None
+
+    @staticmethod
+    def _build_thinking_config(model: str, thinking_budget: Optional[int]):
+        """Pick the thinking knob the model actually honours, or None.
+
+        The voice path expresses "thinking off" as ``thinking_budget=0`` — the
+        right thing to do for low latency. But that parameter only works on the
+        Gemini 2.5 family. Gemini 3.x **ignores** ``thinking_budget`` (it uses
+        ``thinking_level``) and cannot have thinking fully disabled; ``minimal``
+        is its lowest-latency level. Sending the 2.5-era param to a 3.x model is
+        a silent no-op, so the model can still spend time reasoning mid-stream —
+        the call-stall traced on 2026-06-09. Translate the caller's intent into
+        whichever knob the model's family honours.
+        """
+        try:
+            from google.genai import types as genai_types
+        except ImportError:
+            return None
+        if not hasattr(genai_types, "ThinkingConfig"):
+            return None
+
+        m = (model or "").lower()
+        is_gemini_3 = m.startswith("gemini-3") or m in {
+            "gemini-flash-latest", "gemini-pro-latest",
+        }
+        if is_gemini_3:
+            # thinking_budget is ignored on 3.x — map intent to thinking_level.
+            # 0 / unset -> "minimal" (lowest latency, what voice wants).
+            level = "low" if (thinking_budget or 0) > 0 else "minimal"
+            try:
+                return genai_types.ThinkingConfig(thinking_level=level)
+            except Exception:  # noqa: BLE001 — SDK predates thinking_level
+                return None
+        # Gemini 2.5 (and anything else that takes a budget): honour it if given.
+        if thinking_budget is None:
+            return None
+        return genai_types.ThinkingConfig(thinking_budget=int(thinking_budget))
 
     # ------------------------------------------------------------------
     # Streaming
@@ -249,12 +287,12 @@ class GeminiLLMProvider(LLMProvider):
             "stop_sequences": stop_sequences,
             "system_instruction": system_prompt if system_prompt else None,
         }
-        if thinking_budget is not None and hasattr(genai_types, "ThinkingConfig"):
-            # Gemini 2.5 family: thinking_budget=0 disables internal reasoning
-            # for the lowest TTFT, which is what voice agents want.
-            gen_config_kwargs["thinking_config"] = genai_types.ThinkingConfig(
-                thinking_budget=int(thinking_budget),
-            )
+        thinking_config = self._build_thinking_config(model, thinking_budget)
+        if thinking_config is not None:
+            # 2.5 family -> thinking_budget; 3.x -> thinking_level="minimal".
+            # Keeps reasoning off (or minimal) so the model doesn't stall a
+            # real-time voice turn part-way through its reply.
+            gen_config_kwargs["thinking_config"] = thinking_config
 
         gen_config = genai_types.GenerateContentConfig(**gen_config_kwargs)
 

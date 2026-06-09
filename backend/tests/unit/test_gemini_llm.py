@@ -36,6 +36,7 @@ class _FakeContent:
 @dataclass
 class _FakeThinkingConfig:
     thinking_budget: Optional[int] = None
+    thinking_level: Optional[str] = None
 
 
 @dataclass
@@ -314,3 +315,47 @@ async def test_thinking_budget_can_be_overridden_per_call():
 
     cfg = create.await_args.kwargs["config"]
     assert cfg.thinking_config.thinking_budget == 512
+
+
+# ---------------------------------------------------------------------------
+# Thinking-config family mapping (the 2026-06-09 stall fix).
+#   2.5 family  -> thinking_budget (0 fully disables)
+#   3.x family  -> thinking_level  (cannot disable; "minimal" = lowest latency)
+# Sending thinking_budget to a 3.x model is a silent no-op, so the model could
+# still reason mid-stream and stall a live voice turn.
+# ---------------------------------------------------------------------------
+
+def test_thinking_config_gemini_25_uses_budget():
+    tc = GeminiLLMProvider._build_thinking_config("gemini-2.5-flash", 0)
+    assert tc is not None
+    assert tc.thinking_budget == 0
+    assert tc.thinking_level is None
+
+
+def test_thinking_config_gemini_25_none_budget_omits():
+    assert GeminiLLMProvider._build_thinking_config("gemini-2.5-flash", None) is None
+
+
+@pytest.mark.parametrize("model", [
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3.5-flash",
+    "gemini-flash-latest",
+])
+def test_thinking_config_gemini_3x_off_intent_maps_to_minimal_level(model):
+    tc = GeminiLLMProvider._build_thinking_config(model, 0)
+    assert tc is not None
+    assert tc.thinking_level == "minimal"
+    assert tc.thinking_budget is None
+
+
+def test_thinking_config_gemini_3x_none_budget_still_minimal():
+    # Even with no explicit budget, never let a 3.x model think on a voice turn.
+    tc = GeminiLLMProvider._build_thinking_config("gemini-3.5-flash", None)
+    assert tc is not None
+    assert tc.thinking_level == "minimal"
+
+
+def test_thinking_config_gemini_3x_positive_budget_maps_to_low():
+    tc = GeminiLLMProvider._build_thinking_config("gemini-3.5-flash", 256)
+    assert tc is not None
+    assert tc.thinking_level == "low"

@@ -20,6 +20,7 @@ MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     "llama-3.1-70b-versatile": 131072,
     "gemini-2.5-flash": 1_000_000,
     "gemini-3.1-flash-lite": 1_000_000,
+    "gemini-3.5-flash": 1_000_000,
 }
 _DEFAULT_CONTEXT_WINDOW = 8192
 
