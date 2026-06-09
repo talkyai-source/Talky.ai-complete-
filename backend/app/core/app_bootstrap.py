@@ -25,6 +25,14 @@ def configure_logging() -> None:
         level=getattr(logging, log_level, logging.INFO),
         format="%(asctime)s %(levelname)-8s [%(name)s] [req=%(request_id)s] %(message)s",
         datefmt="%H:%M:%S",
+        # force=True reclaims the root logger even if an earlier import (or
+        # uvicorn) already attached a handler. Without it, basicConfig is a
+        # silent no-op and our INFO level + format never take effect — which is
+        # why the telephony pipeline's INFO logs (BRIDGE, originate, hangup,
+        # the concurrency lease lifecycle) never reached journald and made the
+        # 10/10 leak so hard to diagnose. This runs at import, BEFORE Sentry's
+        # logging handler is added in lifespan, so Sentry capture is unaffected.
+        force=True,
     )
     request_id_filter = RequestIdLogFilter()
     for handler in logging.getLogger().handlers:

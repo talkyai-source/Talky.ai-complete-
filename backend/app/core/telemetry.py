@@ -78,7 +78,23 @@ def setup_telemetry(app: Any) -> None:
 
     service_name = os.getenv("OTEL_SERVICE_NAME", "talky-backend")
     environment  = os.getenv("OTEL_ENVIRONMENT", os.getenv("ENVIRONMENT", "production"))
-    endpoint     = os.getenv("OTEL_EXPORTER_ENDPOINT", "")  # empty = console
+    endpoint     = os.getenv("OTEL_EXPORTER_ENDPOINT", "")  # OTLP gRPC collector
+    console_export = os.getenv("OTEL_CONSOLE_EXPORT", "false").lower() in ("true", "1", "yes")
+
+    # The ConsoleSpanExporter prints EVERY span (one per DB query, HTTP
+    # request, and Redis command) as multi-line JSON to stdout. In production
+    # that floods journald, buries real application logs, and wastes disk/CPU.
+    # It is now strictly opt-in. With no OTLP collector AND no explicit
+    # OTEL_CONSOLE_EXPORT, skip tracing setup entirely — no exporter, no
+    # auto-instrumentation overhead, no flood. (Set OTEL_EXPORTER_ENDPOINT to
+    # ship traces to a collector in prod, or OTEL_CONSOLE_EXPORT=true to dump
+    # spans locally while debugging.)
+    if not endpoint and not console_export:
+        logger.info(
+            "OpenTelemetry tracing: no OTLP endpoint and OTEL_CONSOLE_EXPORT "
+            "off — tracing disabled (avoids the console span flood)."
+        )
+        return
 
     resource = Resource(attributes={
         SERVICE_NAME: service_name,
@@ -96,15 +112,19 @@ def setup_telemetry(app: Any) -> None:
             _provider.add_span_processor(BatchSpanProcessor(exporter))
             logger.info(f"OTel tracing → OTLP gRPC at {endpoint}")
         except ImportError:
+            # Do NOT silently fall back to the console exporter — that's the
+            # flood we're fixing. Disable tracing and say why.
             logger.warning(
-                "opentelemetry-exporter-otlp-proto-grpc not installed. "
-                "Falling back to console exporter."
+                "opentelemetry-exporter-otlp-proto-grpc not installed — "
+                "tracing disabled (refusing to flood logs with the console "
+                "exporter). Install the OTLP exporter, or set "
+                "OTEL_CONSOLE_EXPORT=true to dump spans to the console for dev."
             )
-            _provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
+            return
     else:
-        # Development: print spans to stdout
+        # Explicit local opt-in only (OTEL_CONSOLE_EXPORT=true) — very verbose.
         _provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
-        logger.info("OTel tracing → console (set OTEL_EXPORTER_ENDPOINT for production)")
+        logger.info("OTel tracing → console (OTEL_CONSOLE_EXPORT) — DEV ONLY, verbose")
 
     trace.set_tracer_provider(_provider)
     _tracer = trace.get_tracer(service_name)
