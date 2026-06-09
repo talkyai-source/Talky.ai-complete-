@@ -378,7 +378,61 @@ class TestSchedulingRules:
         
         assert can_call is False
         assert "concurrent" in reason.lower()
-    
+
+    @pytest.mark.asyncio
+    async def test_override_blocks_at_cap_using_authoritative_count(self):
+        """The concurrency gate uses the authoritative live count passed in
+        (the bridge's global_concurrency Redis ledger), not the in-memory one."""
+        from app.domain.services.scheduling_rules import SchedulingRuleEngine
+        engine = SchedulingRuleEngine()
+        rules = CallingRules(
+            time_window_start="00:00", time_window_end="23:59",
+            max_concurrent_calls=10, timezone="UTC",
+        )
+        can_call, reason = await engine.can_make_call(
+            tenant_id="t", campaign_id="c", rules=rules,
+            active_calls_override=10,
+        )
+        assert can_call is False
+        assert "concurrent" in reason.lower()
+
+    @pytest.mark.asyncio
+    async def test_override_ignores_leaked_inmemory_counter(self):
+        """Regression for the 10/10 outage: even if the in-memory counter has
+        leaked past the cap (register_call_start with no matching end — its
+        decrement signal never fired), an authoritative override BELOW the cap
+        must still ALLOW the call."""
+        from app.domain.services.scheduling_rules import SchedulingRuleEngine
+        engine = SchedulingRuleEngine()
+        rules = CallingRules(
+            time_window_start="00:00", time_window_end="23:59",
+            max_concurrent_calls=10, timezone="UTC",
+        )
+        for _ in range(10):  # simulate the leak: in-memory wedged at the cap
+            engine.register_call_start("t", "c")
+        can_call, reason = await engine.can_make_call(
+            tenant_id="t", campaign_id="c", rules=rules,
+            active_calls_override=0,  # bridge says 0 calls are actually live
+        )
+        assert can_call is True, reason
+
+    @pytest.mark.asyncio
+    async def test_override_none_falls_back_to_inmemory(self):
+        """Redis-down (override None) falls back to the in-memory counter."""
+        from app.domain.services.scheduling_rules import SchedulingRuleEngine
+        engine = SchedulingRuleEngine()
+        rules = CallingRules(
+            time_window_start="00:00", time_window_end="23:59",
+            max_concurrent_calls=1, timezone="UTC",
+        )
+        engine.register_call_start("t", "c")  # in-memory = 1 = cap
+        can_call, reason = await engine.can_make_call(
+            tenant_id="t", campaign_id="c", rules=rules,
+            active_calls_override=None,
+        )
+        assert can_call is False
+        assert "concurrent" in reason.lower()
+
     @pytest.mark.asyncio
     async def test_lead_cooldown(self):
         """Test lead cooldown enforcement"""

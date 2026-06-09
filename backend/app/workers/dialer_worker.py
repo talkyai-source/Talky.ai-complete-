@@ -206,12 +206,27 @@ class DialerWorker:
             # 2. Get lead info for cooldown check
             lead_last_called = await self._get_lead_last_called(job.lead_id)
             
-            # 3. Check scheduling rules
+            # 3. Check scheduling rules. Gate concurrency on the telephony
+            # bridge's authoritative live-call count (global_concurrency Redis
+            # ledger), NOT the dialer's in-memory counter — the latter had no
+            # decrement signal, so it leaked monotonically to the cap and
+            # wedged every outbound call (the 10/10 outage). A None count
+            # (Redis unavailable) falls through to the in-memory fallback.
+            active_override = None
+            try:
+                from app.domain.services.global_concurrency import current_count
+                if self._redis is not None:
+                    active_override = await current_count(self._redis)
+            except Exception as exc:
+                logger.debug("dialer_active_count_failed err=%s", exc)
+                active_override = None
+
             can_call, reason = await self.rules_engine.can_make_call(
                 tenant_id=job.tenant_id,
                 campaign_id=job.campaign_id,
                 rules=rules,
-                lead_last_called=lead_last_called
+                lead_last_called=lead_last_called,
+                active_calls_override=active_override,
             )
             
             if not can_call:
@@ -247,8 +262,13 @@ class DialerWorker:
                 await self._update_job_status(job.job_id, JobStatus.SKIPPED, reason=reason)
                 return
             
-            # 4. Register call start (for concurrent tracking)
-            self.rules_engine.register_call_start(job.tenant_id, job.campaign_id)
+            # 4. Concurrency is now tracked authoritatively by the telephony
+            # bridge's global_concurrency ledger (acquired on answer, released
+            # on hangup, self-healed by the watchdog reconcile) and read above
+            # via active_calls_override. The dialer no longer feeds its own
+            # in-memory counter: it had no decrement signal, so it leaked to
+            # the cap and wedged all calls. (register_call_start/end remain on
+            # the rules engine for unit tests.)
 
             # 4.5. Run Call Guard validation before initiating call
             guard_decision = await self._evaluate_call_guard(job, rules)

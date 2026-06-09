@@ -31,7 +31,8 @@ class SchedulingRuleEngine:
         tenant_id: str,
         campaign_id: str,
         rules: CallingRules,
-        lead_last_called: Optional[datetime] = None
+        lead_last_called: Optional[datetime] = None,
+        active_calls_override: Optional[int] = None,
     ) -> Tuple[bool, str]:
         """
         Check if a call can be made now.
@@ -51,8 +52,20 @@ class SchedulingRuleEngine:
             logger.debug(f"Time window check failed: {window_reason}")
             return False, window_reason
         
-        # Rule 2: Concurrent call limit check
-        current_tenant_calls = self._active_calls.get(tenant_id, 0)
+        # Rule 2: Concurrent call limit check.
+        # Prefer the authoritative live-call count the caller passes in (the
+        # telephony bridge's global_concurrency Redis ledger, which acquires a
+        # slot on answer, releases on hangup, and self-heals via the watchdog
+        # channel reconcile). The in-memory self._active_calls counter is a
+        # last-resort fallback ONLY: it has no reliable decrement signal here
+        # (a call's lifecycle lives in the API process, not the dialer), so
+        # relying on it alone leaks monotonically until restart and wedges
+        # every outbound call at the cap (the 10/10 outage).
+        current_tenant_calls = (
+            active_calls_override
+            if active_calls_override is not None
+            else self._active_calls.get(tenant_id, 0)
+        )
         if current_tenant_calls >= rules.max_concurrent_calls:
             reason = f"max_concurrent_calls_reached_{current_tenant_calls}/{rules.max_concurrent_calls}"
             logger.debug(f"Concurrent limit reached for tenant {tenant_id}: {reason}")
