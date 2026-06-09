@@ -199,9 +199,12 @@ class CallService:
             "ended_at": datetime.utcnow().isoformat(),
             "updated_at": datetime.utcnow().isoformat()
         }
-        if duration:
+        # Persist duration whenever it was computed (including 0) so short/failed
+        # calls still record a row that reflects reality instead of leaving
+        # duration_seconds NULL. None means "not computed" — leave it untouched.
+        if duration is not None:
             call_update["duration_seconds"] = int(duration)
-        
+
         await self._call_repo.update(call_uuid, call_update)
         
         # Update lead status via repository

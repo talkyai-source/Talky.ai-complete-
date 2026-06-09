@@ -113,4 +113,61 @@ async def generate_and_store(
             summary.get("headline", ""),
         )
 
+    # The AI just judged the call — if it reads as a lead (goal achieved),
+    # flag the contact green for follow-up. Best-effort; never blocks the
+    # summary return.
+    await mark_lead_from_summary(pool, tenant_id, call_id, summary)
+
     return summary
+
+
+def _outcome_is_lead(outcome: str) -> bool:
+    """True when the AI's outcome label means "this is a lead / goal achieved".
+
+    The summarizer's ``outcome`` is a free-text label that STARTS with one of:
+    qualified | disqualified | callback | no_interest | voicemail | error.
+    We treat ``qualified`` and ``callback`` as leads worth following up.
+    ``startswith("qualified")`` deliberately excludes ``disqualified`` (it
+    starts with "dis").
+    """
+    o = (outcome or "").strip().lower()
+    return o.startswith("qualified") or o.startswith("callback")
+
+
+async def mark_lead_from_summary(
+    pool, tenant_id: str, call_id: str, summary: dict
+) -> bool:
+    """Flag the call's contact as a lead when the AI summary says so.
+
+    Sets ``leads.is_lead`` + a short ``follow_up_note`` (the AI's next-step /
+    headline) on the contact linked to this call. Best-effort: logs and returns
+    False on any error so it never breaks post-call processing. Returns True if
+    a contact was flagged.
+    """
+    try:
+        if not _outcome_is_lead(str(summary.get("outcome") or "")):
+            return False
+        note = (summary.get("next_step") or summary.get("headline") or "").strip()
+        async with acquire_with_tenant(pool, tenant_id) as conn:
+            result = await conn.execute(
+                """
+                UPDATE leads AS l
+                   SET is_lead          = true,
+                       follow_up_note    = $2,
+                       qualified_at      = NOW(),
+                       qualified_call_id = $1,
+                       updated_at        = NOW()
+                  FROM calls AS c
+                 WHERE c.id = $1
+                   AND l.id = c.lead_id
+                """,
+                call_id,
+                note or "Lead — please follow up.",
+            )
+        flagged = result.endswith("1") if isinstance(result, str) else False
+        if flagged:
+            logger.info("lead_marked call=%s tenant=%s note=%r", call_id, tenant_id, note)
+        return flagged
+    except Exception as exc:  # noqa: BLE001 — never break post-call processing
+        logger.warning("mark_lead_from_summary failed for call %s: %s", call_id, exc)
+        return False

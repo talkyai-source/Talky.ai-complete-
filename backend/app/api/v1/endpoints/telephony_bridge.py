@@ -58,6 +58,10 @@ from app.domain.services.telephony.caller_id_guard import (  # noqa: E402
 from app.domain.services.telephony.prewarm import (  # noqa: E402
     prepare_prewarmed_session,
 )
+from app.domain.services.telephony.failure_reasons import (  # noqa: E402
+    humanize_failure,
+)
+from app.domain.services.event_emitter import emit_event_via_pool  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -558,6 +562,25 @@ async def make_call(request: Request, body: MakeCallRequest):
     # Agent-first mode: greeting buffered. User-first mode: STT + TTS WS open
     # so Flux is ready to listen the instant the callee picks up.
     if pre_warm_session is None:
+        # Surface WHY the call couldn't start in the live activity feed so the
+        # operator sees it in the dashboard (e.g. "TTS out of credits") instead
+        # of only a server log. Best-effort — never blocks the 503.
+        failure_category, human_msg = humanize_failure(prewarm.failure_reason)
+        if effective_tenant_id:
+            await emit_event_via_pool(
+                container.db_pool,
+                tenant_id=str(effective_tenant_id),
+                category="call",
+                title="Call could not start",
+                description=human_msg,
+                severity="critical",
+                related_campaign_id=str(campaign_id) if campaign_id else None,
+                metadata={
+                    "failure_category": failure_category,
+                    "failure_reason": prewarm.failure_reason,
+                    "destination": destination,
+                },
+            )
         detail_msg = (
             "Voice pipeline is not ready. Refusing to originate the call "
             "to avoid silence on pickup. Check TTS/STT provider health."

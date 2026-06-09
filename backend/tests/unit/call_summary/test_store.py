@@ -150,7 +150,9 @@ class TestGenerateAndStore:
 
         assert result == _FAKE_SUMMARY
         mock_summarize.assert_awaited_once()
-        conn.execute.assert_awaited_once()  # UPDATE was issued
+        # Summary UPDATE issued. (Lead-marking may add a second UPDATE when the
+        # outcome reads as a lead — assert the summary write specifically.)
+        assert any("UPDATE calls" in c.args[0] for c in conn.execute.await_args_list)
 
     async def test_no_summary_json_calls_summarizer_and_writes(self):
         """Transcript present, no summary_json → summarize + UPDATE."""
@@ -169,12 +171,12 @@ class TestGenerateAndStore:
 
         assert result == _FAKE_SUMMARY
         mock_summarize.assert_awaited_once_with("Agent: Hello there!\nCaller: Hi, I'm interested.")
-        conn.execute.assert_awaited_once()
-        # Verify the UPDATE call contains the JSON-serialized summary
-        call_args = conn.execute.await_args
-        sql_arg = call_args[0][0]
-        assert "UPDATE calls" in sql_arg
-        json_arg = call_args[0][2]
+        # The summary UPDATE is one of the execute calls (lead-marking may add a
+        # second UPDATE leads). Find the summary write specifically.
+        summary_call = next(
+            c for c in conn.execute.await_args_list if "UPDATE calls" in c.args[0]
+        )
+        json_arg = summary_call.args[2]
         assert json.loads(json_arg) == _FAKE_SUMMARY
 
     async def test_failed_summary_not_persisted(self):
@@ -287,6 +289,54 @@ class TestGenerateAndStore:
             ):
                 await generate_and_store(None, _TENANT_ID, _CALL_ID)
 
-        call_args = conn.execute.await_args
-        headline_arg = call_args[0][3]  # $3 in the UPDATE
+        # Find the summary UPDATE specifically (lead-marking may add a 2nd write).
+        summary_call = next(
+            c for c in conn.execute.await_args_list if "UPDATE calls" in c.args[0]
+        )
+        headline_arg = summary_call.args[3]  # $3 in the summary UPDATE
         assert headline_arg == _FAKE_SUMMARY["headline"]
+
+
+# ---------------------------------------------------------------------------
+# Post-call lead marking (Phase 1)
+# ---------------------------------------------------------------------------
+
+class TestLeadMarking:
+    def test_outcome_is_lead_classification(self):
+        from app.domain.services.call_summary.store import _outcome_is_lead
+        assert _outcome_is_lead("qualified — wants a demo")
+        assert _outcome_is_lead("Qualified")
+        assert _outcome_is_lead("callback requested")
+        assert not _outcome_is_lead("disqualified — not a fit")  # starts with 'dis'
+        assert not _outcome_is_lead("no_interest")
+        assert not _outcome_is_lead("voicemail")
+        assert not _outcome_is_lead("")
+        assert not _outcome_is_lead(None)  # type: ignore[arg-type]
+
+    async def test_mark_lead_flags_contact_when_qualified(self):
+        from app.domain.services.call_summary.store import mark_lead_from_summary
+        conn = _make_conn(None)
+        conn.execute = AsyncMock(return_value="UPDATE 1")
+        with _patch_acquire(conn):
+            flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY)
+        assert flagged is True
+        sql = conn.execute.await_args.args[0]
+        assert "UPDATE leads" in sql and "is_lead" in sql
+
+    async def test_mark_lead_skips_when_not_a_lead(self):
+        from app.domain.services.call_summary.store import mark_lead_from_summary
+        conn = _make_conn(None)
+        with _patch_acquire(conn):
+            flagged = await mark_lead_from_summary(
+                None, _TENANT_ID, _CALL_ID, {"outcome": "no_interest", "next_step": ""}
+            )
+        assert flagged is False
+        conn.execute.assert_not_called()  # no DB write for non-leads
+
+    async def test_mark_lead_never_raises_on_db_error(self):
+        from app.domain.services.call_summary.store import mark_lead_from_summary
+        conn = _make_conn(None)
+        conn.execute = AsyncMock(side_effect=RuntimeError("db down"))
+        with _patch_acquire(conn):
+            flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY)
+        assert flagged is False  # swallowed, best-effort

@@ -30,7 +30,7 @@ import asyncpg
 
 logger = logging.getLogger(__name__)
 
-VALID_CATEGORIES = {"campaign", "system", "alert", "user_action", "milestone"}
+VALID_CATEGORIES = {"campaign", "system", "alert", "user_action", "milestone", "call"}
 VALID_SEVERITIES = {None, "info", "warning", "critical"}
 
 

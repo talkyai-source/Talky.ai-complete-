@@ -208,6 +208,7 @@ class TurnStreamer:
         first_sentence = True
         sentences_done = 0
         tts_was_interrupted = False
+        suppressed_for_action = False
 
         t_llm_start = time.monotonic()
         t_tts_first: Optional[float] = None
@@ -239,6 +240,19 @@ class TurnStreamer:
 
                 all_tokens.append(token)
                 buf += token
+
+                # If the model is emitting the structured end-session action
+                # (pure JSON — by contract "no spoken text outside JSON"), do NOT
+                # stream it to TTS, or the {"action":...} envelope gets read
+                # aloud when the caller says goodbye. Accumulate it instead; it's
+                # parsed after the stream and only the farewell is spoken. Detect
+                # by the first non-whitespace char being '{'.
+                if (
+                    self._p._supports_llm_end_session_action(session)
+                    and buf.lstrip()[:1] == "{"
+                ):
+                    suppressed_for_action = True
+                    continue
 
                 # Flush each complete sentence (or, for long buffers, the first
                 # clause) to TTS as tokens arrive.
@@ -308,6 +322,11 @@ class TurnStreamer:
             else None
         )
         if ask_ai_end_action:
+            buf = ""
+        elif suppressed_for_action:
+            # We withheld a JSON-looking response from TTS but it didn't parse as
+            # a valid end-session action — drop it instead of reading the raw
+            # envelope aloud.
             buf = ""
 
         # TTS any trailing buffer (final sentence without terminal punctuation).
