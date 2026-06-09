@@ -59,8 +59,8 @@ class TestPreviewPromptEndpoint:
         assert resp.prompt_chars == len(resp.system_prompt)
         # Outbound greeting is the per-persona lead_gen sales opener.
         assert "Adam" in resp.greeting and "Acme" in resp.greeting
-        # System prompt carries persona-specific markers.
-        assert "ROLE — LEAD GENERATION" in resp.system_prompt
+        # System prompt carries persona-specific markers (stage-machine body).
+        assert "WHO YOU ARE" in resp.system_prompt
 
     async def test_inbound_carries_directive_and_inbound_greeting(self):
         body = CampaignPromptPreviewRequest(
@@ -78,7 +78,9 @@ class TestPreviewPromptEndpoint:
 
         assert resp.direction == "inbound"
         assert resp.has_inbound_directive is True
-        assert "INBOUND CALL" in resp.system_prompt
+        # The caller-first directive was reframed: a caller-speaks-first call
+        # is still OUR outbound call (see the caller-first "hello dojo" fix).
+        assert "OUTBOUND CALL — CALLEE SPEAKS FIRST" in resp.system_prompt
         # Inbound greeting variant 0 contains the canonical phrase.
         assert "thanks for reaching out" in resp.greeting.lower()
 

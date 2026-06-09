@@ -120,6 +120,31 @@ the hard rules above.
 """
 
 
+# Applied to EVERY composed prompt (every persona, slot-based or
+# knowledge-driven). Makes the campaign's vectorless-RAG knowledge base the
+# single source of truth and resolves any prompt-vs-knowledge conflict in the
+# knowledge base's favour. Placed high in the prompt (right after the hard
+# guardrails) so it dominates the facts the persona body may also mention.
+KNOWLEDGE_PRECEDENCE = """\
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+COMPANY KNOWLEDGE — SINGLE SOURCE OF TRUTH
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Facts about this business — pricing, packages, fees, availability, services,
+coverage, policies, timelines, and any specific detail — come from the
+"Company knowledge" provided to you (retrieved live from this campaign's
+knowledge base each turn, shown under a "Company knowledge" heading).
+- It is AUTHORITATIVE. If ANYTHING else in this prompt conflicts with the
+  Company knowledge, follow the Company knowledge.
+- Quote prices, numbers, dates, and specific facts ONLY from the Company
+  knowledge — never from memory, training, or assumption.
+- If the Company knowledge does not contain what the caller asked, say you'll
+  get them the exact details and follow up. Do not guess, estimate, round, or
+  invent.
+- Read it naturally for the phone (paraphrase). Never read it aloud like a
+  document, and never mention "the knowledge base" or that facts were retrieved.
+"""
+
+
 class PromptCompositionError(ValueError):
     """Raised when a persona is unknown or a required slot is missing.
 
@@ -167,7 +192,19 @@ _KNOWLEDGE_DRIVEN_SUFFIX = (
 def _compose_knowledge_driven_body(
     persona_type: str, agent_name: str, company_name: str
 ) -> str:
-    """Lean, slot-free persona body for knowledge-driven campaigns."""
+    """Persona body for knowledge-driven (slot-free) campaigns.
+
+    lead_gen gets the full stage-driven playbook (same behaviour as the
+    slot-based body, minus the campaign positioning slots) so a
+    knowledge-first lead-gen campaign is just as dynamic. Other personas use
+    the lean identity shell for now. The knowledge-precedence rule is added
+    once for every persona by compose_prompt.
+    """
+    if persona_type == "lead_gen":
+        from app.services.scripts.prompts.personas.lead_gen import LEAD_GEN_KD_BODY
+        return LEAD_GEN_KD_BODY.format(
+            agent_name=agent_name, company_name=company_name
+        )
     base = _KNOWLEDGE_DRIVEN_BODIES.get(
         persona_type, _KNOWLEDGE_DRIVEN_BODIES["lead_gen"]
     )
@@ -304,6 +341,10 @@ def compose_prompt(
         except Exception as exc:  # noqa: BLE001
             logger.debug("voice_metrics_directive_record_failed err=%s", exc)
     parts.append(guardrails_block)
+    # Knowledge base is the single source of truth — placed right after the
+    # hard guardrails so it outranks any facts the persona body may mention
+    # and resolves prompt-vs-knowledge conflicts in the knowledge's favour.
+    parts.append(KNOWLEDGE_PRECEDENCE)
     # Pronunciations sit between guardrails and persona so the model
     # picks them up before reading the company-name-heavy persona body.
     # Renders to "" when the campaign didn't supply pronunciations,

@@ -74,12 +74,14 @@ def test_compose_lead_gen_full():
     assert "HARD RULES" in out
     assert "NATURAL CONVERSATION ENGINE" in out
     assert "NICHE AND COMPLIANCE ADAPTATION" in out
-    assert "ROLE — LEAD GENERATION" in out
-    assert "DISCOVERY BEFORE PITCH" in out
-    assert "CROSS-NICHE QUALIFICATION MAP" in out
-    assert "qualified next step" in out
+    # New stage-machine persona structure (replaces the old prose body).
+    assert "WHO YOU ARE" in out
+    assert "STAGE 2 — DISCOVER" in out
+    assert "STAGE 3 — QUALIFY" in out
+    assert "OBJECTIONS & RESISTANCE" in out
+    assert "WIN CONDITION" in out
     # Guardrails come before the persona block.
-    assert out.index("HARD RULES") < out.index("ROLE — LEAD GENERATION")
+    assert out.index("HARD RULES") < out.index("WHO YOU ARE")
     # Agent identity + one representative campaign slot are filled in.
     assert "Alex" in out
     assert "Acme" in out
@@ -127,13 +129,15 @@ def test_composed_prompt_has_voice_safe_output_rules():
     assert "conversation history to understand where the call is" in out
 
 
-def test_prompt_identity_is_not_deceptive():
+def test_prompt_identity_is_honest_not_deceptive():
     out = compose_prompt("lead_gen", "Alex", "Acme", LEAD_GEN_SLOTS)
+    # Honest-disclosure stance: never claim to be human, never volunteer it,
+    # but tell the truth briefly when the caller directly asks.
     assert "You are a real person" not in out
-    assert "Never mention AI, bots, automation" in out
-    assert "If directly asked whether you are automated or AI" in out
-    assert "do not discuss technology" in out
-    assert "This is\n   Alex with Acme" in out
+    assert "Be honest about what you are" in out
+    assert "Never claim to be human" in out
+    assert "if the caller directly asks whether you are a bot" in out
+    assert "AI assistant for Acme" in out
 
 
 def test_additional_instructions_cannot_be_presented_as_higher_priority():
@@ -165,10 +169,10 @@ def test_additional_instructions_cannot_be_presented_as_higher_priority():
                 "services_description": "plumbing, HVAC, and emergency repairs",
             },
             [
-                "CROSS-NICHE QUALIFICATION MAP",
-                "Home services",
-                "Healthcare/dental/wellness",
-                "Legal/finance/insurance",
+                "CAMPAIGN POSITIONING",
+                "plumbing, HVAC, and emergency repairs",
+                "STAGE 2 — DISCOVER",
+                "WIN CONDITION",
             ],
         ),
         (
@@ -231,7 +235,7 @@ def test_additional_instructions_appended_last():
         additional_instructions="Always offer the warranty option first.",
     )
     assert "ADDITIONAL CAMPAIGN INSTRUCTIONS" in out
-    assert out.index("ROLE — LEAD GENERATION") < out.index("ADDITIONAL CAMPAIGN INSTRUCTIONS")
+    assert out.index("WHO YOU ARE") < out.index("ADDITIONAL CAMPAIGN INSTRUCTIONS")
     assert "warranty option first" in out
     assert out.index("ADDITIONAL CAMPAIGN INSTRUCTIONS") < out.index("FINAL RESPONSE CONTRACT")
 
@@ -243,7 +247,9 @@ def test_unknown_persona_raises():
 
 def test_missing_required_slot_raises():
     slots = dict(LEAD_GEN_SLOTS)
-    slots.pop("pricing_info")
+    # pricing_info / company_differentiator are no longer required (they now
+    # come from the Company knowledge). Drop a slot that is still required.
+    slots.pop("industry")
     with pytest.raises(PromptCompositionError, match="Missing required slots"):
         compose_prompt("lead_gen", "Alex", "Acme", slots)
 

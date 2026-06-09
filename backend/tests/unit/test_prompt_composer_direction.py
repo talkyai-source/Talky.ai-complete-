@@ -125,27 +125,27 @@ class TestDirectionContract:
 
 class TestPerPersonaDirectionalOpeners:
     def test_lead_gen_outbound_opener(self):
-        """Outbound lead_gen — cold-call opener with consent question."""
+        """Outbound lead_gen — permission-based opener (introduce + reason +
+        an easy out), not a pitch."""
         flat = _flat(compose_prompt(
             "lead_gen", "Alex", "Acme", LEAD_GEN_SLOTS,
             direction="outbound",
         ))
-        # The cold-call wording must be present.
-        assert "Alex calling from Acme" in flat
-        assert "decent time for a quick two-minute chat" in flat
+        assert "Alex from Acme" in flat
+        assert "out of the blue" in flat
+        assert "bad time" in flat
 
     def test_lead_gen_inbound_opener(self):
-        """Inbound lead_gen — receiver-style opener; no 'calling from'
-        phrase pointing the AI at the caller."""
-        out = compose_prompt(
+        """Caller-speaks-first lead_gen — still an OUTBOUND call: introduce +
+        reason, explicitly NOT a receptionist 'how can I help'."""
+        flat = _flat(compose_prompt(
             "lead_gen", "Alex", "Acme", LEAD_GEN_SLOTS,
             direction="inbound",
-        )
-        flat = _flat(out)
-        assert "thanks for reaching out" in flat.lower()
-        assert "How can I help?" in flat
-        # Outbound consent question must NOT appear in the inbound prompt.
-        assert "decent time for a quick two-minute chat" not in flat
+        ))
+        assert "this is Alex from Acme" in flat
+        assert "reaching out" in flat.lower()
+        # The opener must explicitly tell the agent not to play receptionist.
+        assert "do not play receptionist" in flat.lower()
 
     def test_customer_support_inbound_opener(self):
         flat = _flat(compose_prompt(
@@ -272,8 +272,8 @@ class TestPronunciationsHook:
         slots = {**LEAD_GEN_SLOTS, "pronunciations": {"Acme": "AK-mee"}}
         out = compose_prompt("lead_gen", "Alex", "Acme", slots)
         pron_idx = out.index("PRONUNCIATIONS")
-        # The persona's ROLE header is the first persona-body marker.
-        role_idx = out.index("ROLE — LEAD GENERATION")
+        # "WHO YOU ARE" is the first persona-body marker (the playbook header).
+        role_idx = out.index("WHO YOU ARE")
         assert pron_idx < role_idx
 
     def test_pronunciations_list_of_pairs_renders(self):
@@ -330,7 +330,7 @@ class TestPronunciationsHook:
         # pronunciations, then persona.
         directive_idx = out.index(INBOUND_DIRECTIVE_SENTINEL)
         pron_idx = out.index("PRONUNCIATIONS")
-        role_idx = out.index("ROLE — LEAD GENERATION")
+        role_idx = out.index("WHO YOU ARE")
         assert directive_idx < pron_idx < role_idx
 
 

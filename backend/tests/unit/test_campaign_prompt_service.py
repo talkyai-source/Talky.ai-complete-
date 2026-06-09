@@ -63,7 +63,9 @@ def test_build_validated_script_config_rejects_missing_agent_names():
 
 def test_build_validated_script_config_rejects_incomplete_persona_slots():
     slots = dict(LEAD_GEN_SLOTS)
-    slots.pop("pricing_info")
+    # pricing_info / company_differentiator now come from the Company
+    # knowledge; drop a slot that is still required.
+    slots.pop("industry")
 
     with pytest.raises(CampaignPromptValidationError, match="incomplete or invalid"):
         build_validated_script_config(

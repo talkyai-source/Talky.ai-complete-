@@ -211,6 +211,10 @@ async def test_ask_ai_llm_end_session_action_says_farewell_then_closes():
     media_gateway = AsyncMock()
     media_gateway.start_playback_tracking = MagicMock()
     media_gateway.wait_for_playback_complete = AsyncMock(return_value=True)
+    # A browser / ask_ai gateway has no PBX hangup — so teardown happens
+    # locally via on_call_ended (unlike the telephony path, where it is
+    # deferred to ChannelDestroyed). Model that absence explicitly.
+    media_gateway.hangup_call = None
     tts_provider = MagicMock()
 
     async def _farewell_audio_stream(*args, **kwargs):
@@ -279,7 +283,11 @@ async def test_telephony_llm_end_session_action_says_farewell_then_hangs_up():
 
     assert tts_provider.stream_synthesize.call_args.args[0] == "Goodbye, have a good one."
     media_gateway.hangup_call.assert_awaited_once_with(session.call_id, "user_goodbye")
-    media_gateway.on_call_ended.assert_awaited_once_with(session.call_id, "user_goodbye")
+    # PBX hangup was requested: the authoritative call-ended teardown (recording
+    # save + gateway-session cleanup) is deferred to lifecycle._on_call_ended on
+    # ChannelDestroyed. Tearing it down here would pop the recording buffer early
+    # (the dropped-recordings root cause), so on_call_ended must NOT fire here.
+    media_gateway.on_call_ended.assert_not_awaited()
     assert session.state == CallState.ENDED
 
 
