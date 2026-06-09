@@ -292,6 +292,36 @@ class AsteriskAdapter(CallControlAdapter):
             except Exception:
                 return {}
 
+    async def list_active_channel_ids(self) -> Optional[set]:
+        """Return the set of channel IDs Asterisk currently has up.
+
+        Ground truth for the session watchdog's zombie reconcile: a local
+        voice session whose call_id is NOT in this set corresponds to a
+        channel Asterisk has already torn down — i.e. a ChannelDestroyed
+        event we missed. Such a session must be force-ended so it releases
+        its global concurrency slot (otherwise the slot leaks until a long
+        inactivity timeout, and ~10 leaks block ALL outbound calls).
+
+        Returns ``None`` (not an empty set) when ARI can't be queried, so
+        the caller can distinguish "no channels" from "couldn't check" and
+        skip the reconcile rather than wrongly tearing down live calls.
+        """
+        if not self._session:
+            return None
+        try:
+            channels = await self._ari("GET", "/channels")
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("ari_list_channels_failed err=%s", exc)
+            return None
+        if not isinstance(channels, list):
+            return None
+        ids: set = set()
+        for ch in channels:
+            cid = ch.get("id") if isinstance(ch, dict) else None
+            if cid:
+                ids.add(cid)
+        return ids
+
     async def _gateway(
         self,
         method: str,

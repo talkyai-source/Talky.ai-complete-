@@ -95,6 +95,51 @@ def _get_orchestrator():
 # Audio pipeline lifecycle (called when a new call arrives on any B2BUA)
 # ---------------------------------------------------------------------------
 
+# Watchdog zombie-session reconcile state. Maps a local voice-session
+# call_id → how many consecutive watchdog ticks it has been ABSENT from
+# Asterisk's live channel list. A genuine live call appears every tick so it
+# never accumulates; a session orphaned by a missed ChannelDestroyed event is
+# absent every tick and trips the threshold, releasing its leaked slot.
+_zombie_channel_ticks: dict[str, int] = {}
+_ZOMBIE_TICK_THRESHOLD = 2  # ~60s at the 30s watchdog cadence
+
+
+def _detect_zombie_sessions(
+    local_ids: list,
+    live_channel_ids: Optional[set],
+    *,
+    threshold: int = _ZOMBIE_TICK_THRESHOLD,
+) -> list:
+    """Reconcile local voice-session ids against Asterisk's live channel ids;
+    return ids missing for >= ``threshold`` consecutive ticks.
+
+    Pure except for the module-level ``_zombie_channel_ticks`` counter it
+    advances. The debounce absorbs a transient ARI hiccup or a just-created
+    session whose channel briefly races the list — a real live call is present
+    every tick, so it can never reach the threshold.
+
+    ``live_channel_ids is None`` means "couldn't query ARI this tick": a no-op
+    that returns ``[]`` and advances no counter, so a flaky ARI read never
+    tears down live calls.
+    """
+    if live_channel_ids is None:
+        return []
+    local_set = set(local_ids)
+    # Forget counters for sessions that are no longer local (ended normally).
+    for cid in list(_zombie_channel_ticks):
+        if cid not in local_set:
+            _zombie_channel_ticks.pop(cid, None)
+    zombies: list = []
+    for cid in local_ids:
+        if cid in live_channel_ids:
+            _zombie_channel_ticks.pop(cid, None)  # present → reset
+        else:
+            n = _zombie_channel_ticks.get(cid, 0) + 1
+            _zombie_channel_ticks[cid] = n
+            if n >= threshold:
+                zombies.append(cid)
+    return zombies
+
 
 async def _session_watchdog() -> None:
     """
@@ -137,6 +182,37 @@ async def _session_watchdog() -> None:
                     call_id[:12], _SESSION_INACTIVITY_TIMEOUT_S,
                 )
                 await _on_call_ended(call_id)
+
+            # ----- Authoritative zombie-session reconcile -----
+            # Ground-truth check against Asterisk: a local voice session whose
+            # channel no longer exists is a zombie left by a missed
+            # ChannelDestroyed event. The inactivity sweep above can miss these
+            # (a stuck pipeline/greeting task keeps last_activity_at fresh), and
+            # the lease-refresh loop further down then keeps the zombie's global
+            # concurrency slot alive — ~10 such leaks fill the cap and block ALL
+            # outbound calls (the 10/10 incident). Force-end zombies here, BEFORE
+            # the lease refresh, so the slot is released within ~60s. Runs only
+            # on the Asterisk adapter; a None channel list (ARI unreachable) is a
+            # safe no-op.
+            try:
+                _adapter = _bridge()._adapter
+                if _adapter is not None and getattr(_adapter, "name", None) == "asterisk":
+                    _live_ids = await _adapter.list_active_channel_ids()
+                    _zombies = _detect_zombie_sessions(
+                        [cid for cid, _ in _sb.iter_voice_session_items()],
+                        _live_ids,
+                    )
+                    for cid in _zombies:
+                        _zombie_channel_ticks.pop(cid, None)
+                        logger.warning(
+                            "telephony_watchdog: zombie session %s — no Asterisk "
+                            "channel for %d ticks, forcing end to release its "
+                            "concurrency slot",
+                            cid[:12], _ZOMBIE_TICK_THRESHOLD,
+                        )
+                        await _on_call_ended(cid)
+            except Exception as exc:
+                logger.debug("zombie_reconcile_failed err=%s", exc)
 
             # ----- Orphaned ringing-warmup sweep (bug #3 / #7) -----
             stale_ringing = [
