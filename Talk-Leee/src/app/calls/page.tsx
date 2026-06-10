@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
-import { Phone, PhoneOff, PhoneIncoming, Clock, ChevronRight, ChevronDown, FileText, Megaphone, Loader2, Sparkles, Play, Pause } from "lucide-react";
+import { Phone, PhoneOff, PhoneIncoming, Clock, ChevronRight, ChevronDown, FileText, Megaphone, Loader2, Sparkles, Play, Pause, Search } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { useCalls, useCallTranscript, useCallSummary } from "@/lib/api-hooks";
@@ -90,14 +90,18 @@ function CallRow({ call }: { call: Call }) {
                             {call.summary}
                         </p>
                     )}
-                    {call.lead_outcome && (
-                        <span
-                            className={`ml-7 w-fit rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${statusPillClass(call.lead_outcome.split("|")[0])}`}
-                            title={call.lead_outcome}
-                        >
-                            {call.lead_outcome.split("|")[0].trim()}
-                        </span>
-                    )}
+                    {call.lead_outcome && (() => {
+                        const verdict = call.lead_outcome.split("|")[0].trim().toLowerCase();
+                        const isLead = verdict.startsWith("qualified") || verdict.startsWith("callback");
+                        return (
+                            <span
+                                className={`ml-7 w-fit rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${statusPillClass(verdict)}`}
+                                title={call.lead_outcome}
+                            >
+                                {isLead ? "Lead — follow up" : verdict}
+                            </span>
+                        );
+                    })()}
                 </div>
                 <div className="min-w-0">
                     <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${getStatusStyle(call.status)}`}>
@@ -358,9 +362,23 @@ function CampaignSection({ group, defaultOpen }: { group: CampaignGroup; default
 export default function CallsPage() {
     const [page, setPage] = useState(1);
     const pageSize = 50;
+    const [search, setSearch] = useState("");
+    const [filter, setFilter] = useState<"all" | "leads" | "issues">("all");
 
     const q = useCalls(page, pageSize);
-    const calls = useMemo(() => q.data?.calls ?? [], [q.data]);
+    const allCalls = useMemo(() => q.data?.calls ?? [], [q.data]);
+    const calls = useMemo(() => {
+        const term = search.trim().toLowerCase();
+        return allCalls.filter((c) => {
+            if (term && !(c.phone_number || "").toLowerCase().includes(term)) return false;
+            const v = (c.lead_outcome || "").toLowerCase();
+            if (filter === "leads") return v.startsWith("qualified") || v.startsWith("callback");
+            if (filter === "issues") {
+                return c.status === "failed" || v.startsWith("no_interest") || v.startsWith("disqualified");
+            }
+            return true;
+        });
+    }, [allCalls, search, filter]);
     const total = q.data?.total ?? 0;
     const error = q.isError ? (q.error instanceof Error ? q.error.message : "Failed to load calls") : "";
     const groups = useMemo(() => groupByCampaign(calls), [calls]);
@@ -375,7 +393,7 @@ export default function CallsPage() {
                 </div>
             ) : error ? (
                 <div className="content-card border-destructive/30 text-destructive">{error}</div>
-            ) : calls.length === 0 ? (
+            ) : allCalls.length === 0 ? (
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -389,9 +407,59 @@ export default function CallsPage() {
                 </motion.div>
             ) : (
                 <div className="space-y-4">
-                    {groups.map((g, idx) => (
-                        <CampaignSection key={g.id} group={g} defaultOpen={idx === 0} />
-                    ))}
+                    {/* Search + filter toolbar — client-side over the loaded page */}
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="relative w-full sm:max-w-xs">
+                            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                            <input
+                                type="text"
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                                placeholder="Search by phone number…"
+                                className="w-full rounded-lg border border-border bg-background py-2 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/40"
+                            />
+                        </div>
+                        <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-1">
+                            {([
+                                ["all", "All"],
+                                ["leads", "Leads"],
+                                ["issues", "Issues"],
+                            ] as const).map(([key, label]) => (
+                                <button
+                                    key={key}
+                                    type="button"
+                                    onClick={() => setFilter(key)}
+                                    className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors duration-150 ease-out ${
+                                        filter === key
+                                            ? "bg-accent text-accent-foreground"
+                                            : "text-muted-foreground hover:text-foreground"
+                                    }`}
+                                >
+                                    {label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {calls.length === 0 ? (
+                        <div className="content-card py-12 text-center">
+                            <p className="text-muted-foreground">No calls match your search or filter.</p>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setSearch("");
+                                    setFilter("all");
+                                }}
+                                className="mt-3 text-sm font-semibold text-foreground underline-offset-4 hover:underline"
+                            >
+                                Clear filters
+                            </button>
+                        </div>
+                    ) : (
+                        groups.map((g, idx) => (
+                            <CampaignSection key={g.id} group={g} defaultOpen={idx === 0} />
+                        ))
+                    )}
 
                     {totalPages > 1 && (
                         <motion.div

@@ -26,6 +26,7 @@ import {
     XCircle,
     Loader2,
     Trash2,
+    Search,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -64,6 +65,7 @@ export default function CampaignDetailPage() {
     const [contacts, setContacts] = useState<Contact[]>([]);
     const [stats, setStats] = useState<{
         total_leads: number;
+        qualified_leads?: number;
         goals_achieved: number;
         job_status_counts: Record<string, number>;
         call_outcome_counts: Record<string, number>;
@@ -90,6 +92,20 @@ export default function CampaignDetailPage() {
     const [addingContact, setAddingContact] = useState(false);
     const [deletingContactId, setDeletingContactId] = useState<string | null>(null);
     const [editingContact, setEditingContact] = useState<Contact | null>(null);
+    const [contactSearch, setContactSearch] = useState("");
+    const [contactFilter, setContactFilter] = useState<"all" | "leads">("all");
+
+    const filteredContacts = contacts.filter((c) => {
+        if (contactFilter === "leads" && !c.is_lead) return false;
+        const term = contactSearch.trim().toLowerCase();
+        if (!term) return true;
+        const name = `${c.first_name || ""} ${c.last_name || ""}`.toLowerCase();
+        return (
+            (c.phone_number || "").toLowerCase().includes(term) ||
+            name.includes(term) ||
+            (c.email || "").toLowerCase().includes(term)
+        );
+    });
 
     const loadData = useCallback(async () => {
         try {
@@ -280,7 +296,7 @@ export default function CampaignDetailPage() {
                     </motion.div>
 
                     {/* Stats */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
                         <motion.div
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -294,6 +310,22 @@ export default function CampaignDetailPage() {
                                 <div>
                                     <p className="text-2xl font-bold text-foreground">{stats?.total_leads || 0}</p>
                                     <p className="text-sm text-muted-foreground">Total Leads</p>
+                                </div>
+                            </div>
+                        </motion.div>
+                        <motion.div
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.12 }}
+                            className="content-card"
+                        >
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 rounded-lg bg-emerald-500/10">
+                                    <Users className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                                </div>
+                                <div>
+                                    <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">{stats?.qualified_leads ?? 0}</p>
+                                    <p className="text-sm text-muted-foreground">Qualified Leads</p>
                                 </div>
                             </div>
                         </motion.div>
@@ -445,7 +477,46 @@ export default function CampaignDetailPage() {
                                 No contacts yet. Add contacts to start your campaign.
                             </div>
                         ) : (
-                            <div className="overflow-x-auto">
+                          <>
+                            {/* Search + lead filter toolbar */}
+                            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="relative w-full sm:max-w-xs">
+                                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                    <input
+                                        type="text"
+                                        value={contactSearch}
+                                        onChange={(e) => setContactSearch(e.target.value)}
+                                        placeholder="Search by phone, name or email…"
+                                        className="w-full rounded-lg border border-border bg-background py-2 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/40"
+                                    />
+                                </div>
+                                <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-1">
+                                    {([
+                                        ["all", "All"],
+                                        ["leads", "Leads"],
+                                    ] as const).map(([key, label]) => (
+                                        <button
+                                            key={key}
+                                            type="button"
+                                            onClick={() => setContactFilter(key)}
+                                            className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors duration-150 ease-out ${
+                                                contactFilter === key
+                                                    ? "bg-accent text-accent-foreground"
+                                                    : "text-muted-foreground hover:text-foreground"
+                                            }`}
+                                        >
+                                            {label}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {filteredContacts.length === 0 ? (
+                              <div className="py-8 text-center text-muted-foreground">
+                                No contacts match your search or filter.
+                              </div>
+                            ) : (
+                              <div className="overflow-x-auto">
                                 <table className="w-full">
                                     <thead className="border-b border-border">
                                         <tr>
@@ -457,7 +528,7 @@ export default function CampaignDetailPage() {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-border/60">
-                                        {contacts.map((contact) => (
+                                        {filteredContacts.map((contact) => (
                                             <tr key={contact.id} className={`transition-colors hover:bg-muted/30 ${contact.is_lead ? "bg-green-500/5" : ""}`}>
                                                 <td className="px-4 py-3 text-sm text-foreground tabular-nums whitespace-nowrap">{contact.phone_number}</td>
                                                 <td className="px-4 py-3 text-sm text-muted-foreground whitespace-nowrap">
@@ -518,7 +589,9 @@ export default function CampaignDetailPage() {
                                         ))}
                                     </tbody>
                                 </table>
-                            </div>
+                              </div>
+                            )}
+                          </>
                         )}
                     </motion.div>
 

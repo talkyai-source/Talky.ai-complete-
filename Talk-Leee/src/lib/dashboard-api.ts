@@ -151,6 +151,8 @@ interface CallListItem {
     duration_seconds?: number;
     outcome?: string;
     campaign_name?: string;
+    recording_id?: string | null;
+    lead_outcome?: string | null;
 }
 
 // Dashboard API - Real backend integration.
@@ -280,6 +282,7 @@ class DashboardApi {
         campaign_id: string;
         campaign_status: string;
         total_leads: number;
+        qualified_leads?: number;
         job_status_counts: Record<string, number>;
         call_outcome_counts: Record<string, number>;
         goals_achieved: number;
@@ -359,6 +362,8 @@ class DashboardApi {
             duration_seconds: item.duration_seconds,
             created_at: item.timestamp,
             summary: item.summary,
+            recording_id: item.recording_id,
+            lead_outcome: item.lead_outcome,
         }));
         
         return {

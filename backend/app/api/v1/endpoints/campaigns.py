@@ -767,11 +767,25 @@ async def get_campaign_stats(
             verdict = str((sj or {}).get("outcome") or "").strip().lower() if isinstance(sj, dict) else ""
             if call.get("goal_achieved") or verdict.startswith("qualified") or verdict.startswith("callback"):
                 goals_achieved += 1
-        
+
+        # Real contact + qualified-lead counts. The campaigns.total_leads column
+        # drifts (set at create, not updated on bulk contact upload — it showed 1
+        # while 5 contacts existed), so count the leads table directly.
+        total_leads = (
+            db_client.table("leads").select("id", count="exact")
+            .eq("campaign_id", campaign_id).neq("status", "deleted").execute().count or 0
+        )
+        qualified_leads = (
+            db_client.table("leads").select("id", count="exact")
+            .eq("campaign_id", campaign_id).eq("is_lead", True)
+            .neq("status", "deleted").execute().count or 0
+        )
+
         return {
             "campaign_id": campaign_id,
             "campaign_status": campaign.get("status"),
-            "total_leads": campaign.get("total_leads", 0),
+            "total_leads": total_leads,
+            "qualified_leads": qualified_leads,
             "job_status_counts": status_counts,
             "call_outcome_counts": outcome_counts,
             "goals_achieved": goals_achieved
