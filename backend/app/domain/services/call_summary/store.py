@@ -63,17 +63,26 @@ async def generate_and_store(
     if existing is not None and not force:
         # asyncpg may return JSONB as a str or as a dict depending on
         # whether a codec is registered.  Handle both shapes.
+        existing_dict: Optional[dict] = None
         if isinstance(existing, str):
             try:
-                return json.loads(existing)
+                existing_dict = json.loads(existing)
             except json.JSONDecodeError:
                 logger.warning(
                     "call_summary store: summary_json for call %s is invalid JSON — re-generating",
                     call_id,
                 )
         else:
-            # Already a dict (asyncpg decoded it)
-            return dict(existing)
+            existing_dict = dict(existing)
+        if existing_dict is not None:
+            # Self-heal: re-assert the lead flag from the existing summary.
+            # Lead-marking shipped after some summaries already existed, and the
+            # post-call generate path short-circuits here before reaching the
+            # marker — so without this, historical qualified/callback calls never
+            # flag their contact. Idempotent + best-effort (only writes leads when
+            # the outcome is a lead and the contact isn't already flagged).
+            await mark_lead_from_summary(pool, tenant_id, call_id, existing_dict)
+            return existing_dict
 
     # --- Transcript check ---
     transcript_text: str = row["transcript"] or ""
@@ -160,6 +169,7 @@ async def mark_lead_from_summary(
                   FROM calls AS c
                  WHERE c.id = $1
                    AND l.id = c.lead_id
+                   AND l.is_lead = false
                 """,
                 call_id,
                 note or "Lead — please follow up.",

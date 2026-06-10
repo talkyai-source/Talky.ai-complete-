@@ -92,6 +92,8 @@ export interface Call {
     summary?: string;
     /** Recording id (if a recording exists) — enables inline play in the list. */
     recording_id?: string | null;
+    /** AI per-call verdict ("qualified | …", "callback | …", "no_interest | …") — the "was this call a success" answer. */
+    lead_outcome?: string | null;
 }
 
 // AI Call Summary Types

@@ -90,6 +90,14 @@ function CallRow({ call }: { call: Call }) {
                             {call.summary}
                         </p>
                     )}
+                    {call.lead_outcome && (
+                        <span
+                            className={`ml-7 w-fit rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${statusPillClass(call.lead_outcome.split("|")[0])}`}
+                            title={call.lead_outcome}
+                        >
+                            {call.lead_outcome.split("|")[0].trim()}
+                        </span>
+                    )}
                 </div>
                 <div className="min-w-0">
                     <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${getStatusStyle(call.status)}`}>

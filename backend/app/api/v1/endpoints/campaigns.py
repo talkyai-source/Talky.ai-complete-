@@ -745,15 +745,27 @@ async def get_campaign_stats(
             status = job.get("status", "unknown")
             status_counts[status] = status_counts.get(status, 0) + 1
         
-        # Get call outcomes
-        calls_response = db_client.table("calls").select("outcome, goal_achieved").eq("campaign_id", campaign_id).execute()
-        
+        # Get call outcomes. "goals_achieved" = the live resolver flag OR the
+        # post-call AI verdict reading as a success (qualified/callback). The
+        # goal_achieved flag alone is currently never set on the call path, so
+        # the AI summary verdict is the real success signal — without this the
+        # card sticks at 0 even when calls clearly qualified leads.
+        import json as _json
+        calls_response = db_client.table("calls").select("outcome, goal_achieved, summary_json").eq("campaign_id", campaign_id).execute()
+
         outcome_counts = {}
         goals_achieved = 0
         for call in calls_response.data or []:
             outcome = call.get("outcome", "unknown")
             outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
-            if call.get("goal_achieved"):
+            sj = call.get("summary_json")
+            if isinstance(sj, str):
+                try:
+                    sj = _json.loads(sj)
+                except Exception:
+                    sj = None
+            verdict = str((sj or {}).get("outcome") or "").strip().lower() if isinstance(sj, dict) else ""
+            if call.get("goal_achieved") or verdict.startswith("qualified") or verdict.startswith("callback"):
                 goals_achieved += 1
         
         return {

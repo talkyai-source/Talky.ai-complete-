@@ -27,6 +27,10 @@ class CallListItem(BaseModel):
     outcome: Optional[str] = None
     campaign_name: Optional[str] = None
     summary: Optional[str] = None
+    recording_id: Optional[str] = None
+    # AI per-call verdict from the post-call summary (e.g. "qualified | …",
+    # "callback | …", "no_interest | …") — the "was this call a success" answer.
+    lead_outcome: Optional[str] = None
 
 
 class CallDetail(BaseModel):
@@ -293,6 +297,7 @@ async def list_calls(
                     SELECT c.id, c.talklee_call_id, c.created_at, c.phone_number,
                            c.status, c.duration_seconds, c.outcome,
                            c.summary,
+                           c.summary_json->>'outcome' AS lead_outcome,
                            camp.name AS campaign_name,
                            (SELECT r.id FROM recordings_s3 r
                              WHERE r.call_id = c.id
@@ -324,6 +329,7 @@ async def list_calls(
                 campaign_name=row["campaign_name"],
                 summary=row["summary"],
                 recording_id=str(row["recording_id"]) if row["recording_id"] is not None else None,
+                lead_outcome=row["lead_outcome"],
             ))
 
         return CallListResponse(

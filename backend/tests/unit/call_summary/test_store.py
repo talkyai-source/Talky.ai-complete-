@@ -112,7 +112,9 @@ class TestGenerateAndStore:
 
         assert result == _EXISTING_SUMMARY
         mock_summarize.assert_not_called()
-        conn.execute.assert_not_called()  # no UPDATE issued
+        # Idempotent: the summary row is NOT re-written. (Lead-marking self-heal
+        # may run a leads UPDATE — assert only that no summary write happened.)
+        assert not any("UPDATE calls" in c.args[0] for c in conn.execute.await_args_list)
 
     async def test_idempotent_str_summary_json(self):
         """summary_json already set as JSON string (no codec) → parse + return."""
@@ -131,7 +133,7 @@ class TestGenerateAndStore:
 
         assert result == _EXISTING_SUMMARY
         mock_summarize.assert_not_called()
-        conn.execute.assert_not_called()
+        assert not any("UPDATE calls" in c.args[0] for c in conn.execute.await_args_list)
 
     async def test_force_re_summarizes_even_if_summary_exists(self):
         """force=True → summarizer called + UPDATE issued even when summary_json set."""
