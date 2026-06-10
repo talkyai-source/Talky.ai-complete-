@@ -31,8 +31,9 @@ logger = logging.getLogger(__name__)
 
 
 async def _voice_catalog_for_provider(provider: str) -> List[Dict[str, str]]:
-    """Return [{id, name}] for a provider, reusing the AI-Options catalogs
-    (same source of truth as _valid_voice_ids_for_provider)."""
+    """Return [{id, name, gender, accent, description}] for a provider, reusing
+    the AI-Options catalogs (same source of truth as
+    _valid_voice_ids_for_provider). Meta fields are "" when unknown."""
     from app.api.v1.endpoints.ai_options import (
         _english_google_voices,
         _get_deepgram_voices_for_current_key,
@@ -54,32 +55,57 @@ async def _voice_catalog_for_provider(provider: str) -> List[Dict[str, str]]:
         vid = getattr(v, "id", None)
         if not vid:
             continue
-        catalog.append({"id": vid, "name": getattr(v, "name", None) or vid})
+        catalog.append({
+            "id": vid,
+            "name": getattr(v, "name", None) or vid,
+            "gender": getattr(v, "gender", None) or "",
+            "accent": getattr(v, "accent", None) or "",
+            "description": getattr(v, "description", None) or "",
+        })
     return catalog
 
 
-def _resolve_voice(query: str, catalog: List[Dict[str, str]]) -> Optional[str]:
-    """Resolve a voice id from an id OR a name. Returns the id or None.
+def _voice_name_for_id(voice_id: Optional[str], catalog: List[Dict[str, str]]) -> Optional[str]:
+    """Human label for a voice id: 'Name (id)' — or the raw id if unknown."""
+    if not voice_id:
+        return voice_id
+    for v in catalog:
+        if v["id"] == voice_id:
+            return v["name"] if v["name"] == voice_id else f"{v['name']} ({voice_id})"
+    return voice_id
 
-    Order: exact id → exact name (case-insensitive) → unique substring of
-    name → unique substring of id. Ambiguous or no match → None.
+
+def _resolve_voice(
+    query: str, catalog: List[Dict[str, str]]
+) -> tuple[Optional[str], List[Dict[str, str]]]:
+    """Resolve a voice id from an id OR a name.
+
+    Returns (resolved_id, candidates):
+      - (id, [])          unique match
+      - (None, [..])      ambiguous — candidates are the matching voices
+      - (None, [])        no match at all
+
+    Order: exact id → exact name (case-insensitive) → substring of name →
+    substring of id.
     """
     if not query:
-        return None
+        return None, []
     q = query.strip().lower()
     for v in catalog:  # exact id
         if v["id"].lower() == q:
-            return v["id"]
+            return v["id"], []
     for v in catalog:  # exact name
         if (v["name"] or "").lower() == q:
-            return v["id"]
+            return v["id"], []
     subs = [v for v in catalog if q in (v["name"] or "").lower()]
     if len(subs) == 1:
-        return subs[0]["id"]
+        return subs[0]["id"], []
+    if len(subs) > 1:
+        return None, subs
     subs_id = [v for v in catalog if q in v["id"].lower()]
     if len(subs_id) == 1:
-        return subs_id[0]["id"]
-    return None
+        return subs_id[0]["id"], []
+    return None, subs_id
 
 
 async def apply_campaign_voice(
@@ -111,14 +137,25 @@ async def apply_campaign_voice(
         catalog = await _voice_catalog_for_provider(tts_provider)
         valid = {v["id"] for v in catalog}
         if voice_id not in valid:
-            resolved = _resolve_voice(voice_id, catalog)
+            resolved, candidates = _resolve_voice(voice_id, catalog)
             if resolved:
                 voice_id = resolved
+            elif candidates:
+                return {
+                    "error": f"'{voice_id}' matches more than one {tts_provider} voice.",
+                    "ambiguous": True,
+                    "candidates": [
+                        {"id": v["id"], "name": v["name"], "gender": v.get("gender", ""), "accent": v.get("accent", "")}
+                        for v in candidates[:15]
+                    ],
+                    "hint": "Ask the user which of these voices they meant, then call again with that exact name or id.",
+                }
             else:
                 return {
                     "error": f"Voice '{voice_id}' not found for provider '{tts_provider}'.",
                     "available_voices": [
-                        {"id": v["id"], "name": v["name"]} for v in catalog[:40]
+                        {"id": v["id"], "name": v["name"], "gender": v.get("gender", "")}
+                        for v in catalog[:40]
                     ],
                     "hint": "Pick one of the listed voice names or ids and try again.",
                 }
@@ -140,6 +177,9 @@ async def apply_campaign_voice(
                 return {"error": f"Campaign '{cid}' not found for this tenant."}
 
             row = resp.data[0]
+            # Show voice NAMES in the diff (the card reads "Rachel (id…)" →
+            # "Sarah (id…)" instead of two opaque ids). The before voice may
+            # belong to a different provider — then the raw id is shown.
             previews.append(
                 {
                     "campaign_id": cid,
@@ -151,9 +191,9 @@ async def apply_campaign_voice(
                             "after": tts_provider,
                         },
                         {
-                            "field": "voice_id",
-                            "before": row.get("voice_id"),
-                            "after": voice_id,
+                            "field": "voice",
+                            "before": _voice_name_for_id(row.get("voice_id"), catalog),
+                            "after": _voice_name_for_id(voice_id, catalog),
                         },
                     ],
                 }
@@ -196,15 +236,22 @@ async def list_voices(
     db_client,
     tts_provider: str,
 ) -> Dict[str, Any]:
-    """List available voices (name + id) for a TTS provider so the assistant
-    can pick one for apply_campaign_voice. tenant_id/db_client are unused (the
-    catalog is provider-global) but kept for the standard tool signature."""
+    """List available voices (name + id + gender/accent/description where the
+    provider exposes them) for a TTS provider so the assistant can pick one for
+    apply_campaign_voice or describe the options to the user by name.
+    tenant_id/db_client are unused (the catalog is provider-global) but kept for
+    the standard tool signature."""
     try:
         catalog = await _voice_catalog_for_provider(tts_provider)
-        return {
-            "provider": tts_provider,
-            "voices": [{"id": v["id"], "name": v["name"]} for v in catalog],
-        }
+        voices = []
+        for v in catalog:
+            entry: Dict[str, str] = {"id": v["id"], "name": v["name"]}
+            # Only carry meta that actually exists — keeps the tool payload lean.
+            for k in ("gender", "accent", "description"):
+                if v.get(k):
+                    entry[k] = v[k]
+            voices.append(entry)
+        return {"provider": tts_provider, "voices": voices}
     except Exception as exc:
         logger.error("list_voices error: %s", exc)
         return {"error": str(exc)}

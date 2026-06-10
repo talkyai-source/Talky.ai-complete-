@@ -392,6 +392,31 @@ async def test_apply_campaign_voice_invalid_voice_no_write(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_apply_campaign_voice_ambiguous_returns_candidates(monkeypatch):
+    """A name matching several voices → ambiguous error with the candidates, no write."""
+    monkeypatch.setattr(
+        "app.infrastructure.assistant.tools.campaign_ai_options._voice_catalog_for_provider",
+        _fake_catalog,
+    )
+
+    db = FakeDbClient()
+    result = await apply_campaign_voice(
+        tenant_id="t1",
+        db_client=db,
+        campaign_ids=["c1"],
+        tts_provider="google",
+        voice_id="valid",  # substring of BOTH "Valid One" and "Valid Two"
+        confirm=False,
+    )
+
+    assert result.get("ambiguous") is True
+    assert "error" in result
+    names = {c["name"] for c in result["candidates"]}
+    assert names == {"Valid One", "Valid Two"}
+    assert db._update_calls == []
+
+
+@pytest.mark.asyncio
 async def test_apply_campaign_voice_valid_preview(monkeypatch):
     """Valid voice, confirm=False → preview diff, no write."""
     monkeypatch.setattr(
@@ -424,13 +449,14 @@ async def test_apply_campaign_voice_valid_preview(monkeypatch):
     assert c["campaign_id"] == "c1"
 
     provider_change = next((ch for ch in c["changes"] if ch["field"] == "tts_provider"), None)
-    voice_change = next((ch for ch in c["changes"] if ch["field"] == "voice_id"), None)
+    voice_change = next((ch for ch in c["changes"] if ch["field"] == "voice"), None)
     assert provider_change is not None
     assert provider_change["before"] == "google"
     assert provider_change["after"] == "google"
     assert voice_change is not None
+    # before voice isn't in the catalog → raw id; after shows "Name (id)"
     assert voice_change["before"] == "voice-old"
-    assert voice_change["after"] == "voice-valid-1"
+    assert voice_change["after"] == "Valid One (voice-valid-1)"
 
     assert "confirm=true" in result.get("note", "").lower()
 
