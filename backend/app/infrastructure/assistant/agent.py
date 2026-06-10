@@ -73,7 +73,8 @@ You help users with:
 **Your Capabilities:**
 - get_dashboard_stats: Get today's call stats (calls made, success rate, etc.)
 - get_usage_info: Get plan usage (minutes used, remaining)
-- get_leads: Get lead information with filters
+- get_leads: List leads/contacts (filters: campaign, status, only_leads=true for just qualified leads). Each includes is_lead + follow_up_note.
+- get_lead_followup: Get the follow-up for ONE lead by lead_id / phone_number / name — the follow-up note/tips and that lead's qualified call summary. Use when asked "how should I follow up with <person>" or "what's the follow-up for <number>".
 - get_campaigns: List all campaigns
 - get_recent_calls: Get recent call history
 - get_actions_today: See what actions have been taken today

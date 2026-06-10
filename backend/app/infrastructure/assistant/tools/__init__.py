@@ -13,7 +13,9 @@ from app.infrastructure.assistant.tools.dashboard import (
 )
 from app.infrastructure.assistant.tools.leads import (
     GetLeadsInput,
+    GetLeadFollowupInput,
     get_leads,
+    get_lead_followup,
 )
 from app.infrastructure.assistant.tools.campaigns import (
     StartCampaignInput,
@@ -77,8 +79,13 @@ QUERY_TOOLS = {
     },
     "get_leads": {
         "function": get_leads,
-        "description": "Get leads list with optional filters by campaign or status",
+        "description": "Get leads/contacts list with optional filters by campaign or status; set only_leads=true for just the qualified leads. Includes is_lead + follow_up_note.",
         "input_schema": GetLeadsInput
+    },
+    "get_lead_followup": {
+        "function": get_lead_followup,
+        "description": "Get the follow-up for ONE lead (by lead_id, phone_number, or name): the follow-up note/tips and the qualified call's summary. Use when the user asks how to follow up with a specific person.",
+        "input_schema": GetLeadFollowupInput
     },
     "get_campaigns": {
         "function": get_campaigns,

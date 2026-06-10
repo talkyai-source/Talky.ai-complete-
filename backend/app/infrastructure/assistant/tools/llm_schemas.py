@@ -37,13 +37,30 @@ GROQ_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "get_leads",
-            "description": "Get leads list with optional filters",
+            "description": "Get leads/contacts list with optional filters. Set only_leads=true to return just the qualified leads. Each lead includes is_lead and follow_up_note.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "campaign_id": {"type": "string", "description": "Filter by campaign ID"},
                     "status": {"type": "string", "description": "Filter by status"},
-                    "limit": {"type": "integer", "description": "Max leads to return", "default": 10}
+                    "only_leads": {"type": "boolean", "description": "Only return contacts flagged as qualified leads", "default": False},
+                    "limit": {"type": "integer", "description": "Max leads to return (max 100)", "default": 25}
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_lead_followup",
+            "description": "Get the follow-up for ONE lead — its follow-up note/tips and the qualified call's summary. Resolve by lead_id, phone_number, or name. Use when the user asks how to follow up with a specific person or wants that lead's call summary.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "lead_id": {"type": "string", "description": "Lead/contact id"},
+                    "phone_number": {"type": "string", "description": "Lead phone number (exact or partial)"},
+                    "name": {"type": "string", "description": "Lead name (first or last, partial match)"}
                 },
                 "required": []
             }
