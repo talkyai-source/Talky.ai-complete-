@@ -8,20 +8,10 @@ import { ArrowLeft, Phone, Clock, FileText, Play, Download, Pause, Loader2 } fro
 import { motion } from "framer-motion";
 import { useCall, useCallTranscript } from "@/lib/api-hooks";
 import { extendedApi } from "@/lib/extended-api";
+import { statusPillClass } from "@/lib/status-colors";
 
-function getStatusStyle(status: string) {
-    switch (status) {
-        case "answered":
-        case "completed":
-            return "bg-background text-emerald-800 border border-emerald-700/40 dark:text-emerald-300 dark:border-emerald-400/50";
-        case "failed":
-        case "no_answer":
-        case "busy":
-            return "bg-background text-red-800 border border-red-700/40 dark:text-red-300 dark:border-red-400/50";
-        default:
-            return "bg-background text-muted-foreground border border-border";
-    }
-}
+// Shared util so call detail agrees with call history + contacts on green/red.
+const getStatusStyle = statusPillClass;
 
 function formatDuration(seconds?: number) {
     if (!seconds) return "--";
@@ -173,7 +163,11 @@ export default function CallDetailPage() {
                                 {call.outcome ? (
                                     <div className="group rounded-2xl border border-border bg-muted/60 p-3 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:bg-background hover:shadow-md">
                                         <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Outcome</div>
-                                        <div className="mt-1 text-sm font-semibold text-foreground">{call.outcome}</div>
+                                        <div className="mt-1">
+                                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${getStatusStyle(call.outcome)}`}>
+                                                {call.outcome.replace(/_/g, " ")}
+                                            </span>
+                                        </div>
                                     </div>
                                 ) : null}
 

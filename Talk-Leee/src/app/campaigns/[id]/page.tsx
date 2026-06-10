@@ -458,7 +458,7 @@ export default function CampaignDetailPage() {
                                     </thead>
                                     <tbody className="divide-y divide-border/60">
                                         {contacts.map((contact) => (
-                                            <tr key={contact.id} className="hover:bg-muted/30 transition-colors">
+                                            <tr key={contact.id} className={`transition-colors hover:bg-muted/30 ${contact.is_lead ? "bg-green-500/5" : ""}`}>
                                                 <td className="px-4 py-3 text-sm text-foreground tabular-nums whitespace-nowrap">{contact.phone_number}</td>
                                                 <td className="px-4 py-3 text-sm text-muted-foreground whitespace-nowrap">
                                                     {contact.first_name || contact.last_name
@@ -466,9 +466,25 @@ export default function CampaignDetailPage() {
                                                         : "--"}
                                                 </td>
                                                 <td className="px-4 py-3 text-sm whitespace-nowrap">
-                                                    <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${getContactStatusStyle(contact.last_call_result)}`}>
-                                                        {contact.last_call_result}
-                                                    </span>
+                                                    {contact.is_lead ? (
+                                                        <div className="flex flex-col gap-0.5">
+                                                            <span
+                                                                className="w-fit rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-400"
+                                                                title={contact.follow_up_note ?? undefined}
+                                                            >
+                                                                Lead — follow up
+                                                            </span>
+                                                            {contact.follow_up_note ? (
+                                                                <span className="max-w-[16rem] truncate text-xs text-muted-foreground" title={contact.follow_up_note}>
+                                                                    {contact.follow_up_note}
+                                                                </span>
+                                                            ) : null}
+                                                        </div>
+                                                    ) : (
+                                                        <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${getContactStatusStyle(contact.last_call_result)}`}>
+                                                            {contact.last_call_result}
+                                                        </span>
+                                                    )}
                                                 </td>
                                                 <td className="px-4 py-3 text-right text-sm text-muted-foreground tabular-nums whitespace-nowrap">{contact.call_attempts}</td>
                                                 <td className="px-4 py-3 text-right whitespace-nowrap">

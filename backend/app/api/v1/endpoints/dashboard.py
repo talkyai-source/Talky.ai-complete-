@@ -46,6 +46,14 @@ class DashboardSummary(BaseModel):
     failed_calls: int
     minutes_used: int
     minutes_remaining: int
+    minutes_included: int = Field(
+        default=0,
+        description=(
+            "The tenant's plan minute allocation (minutes_used + "
+            "minutes_remaining). Drives the dashboard minutes-gauge total so "
+            "the frontend stops defaulting to a hardcoded 5000."
+        ),
+    )
     active_campaigns: int
 
     # New live + aggregate fields
@@ -106,29 +114,35 @@ async def get_dashboard_summary(
         total_resp = total_q.execute()
         total_calls = total_resp.count or 0
 
-        # 2. Answered calls + duration for the CURRENT BILLING MONTH only.
-        #    Plans bill monthly — minutes_used resets to 0 at the 1st UTC of
-        #    each calendar month so a fresh allocation is available without
-        #    any cron job or column update. Lifetime totals (`total_calls`,
-        #    `failed_calls` above/below) intentionally stay unfiltered for
-        #    historical context; only minutes-used is windowed.
+        # 2-3. Month's calls — load (outcome, duration) ONCE and key on
+        #    `outcome`, NOT `status`. Calls finish as status='ended'/'completed'
+        #    with the real result in `outcome`; the old status filters
+        #    (answered/completed/in_progress, failed/no_answer/busy) missed every
+        #    'ended' call, so minutes + answered were a small fraction of reality
+        #    and failed was always 0. Minutes bill monthly (reset at the 1st UTC).
         month_start_iso = _start_of_current_month_utc()
-        answered_q = db_client.table("calls").select("duration_seconds")
-        answered_q = apply_tenant_filter(answered_q, current_user.tenant_id)
-        answered_q = answered_q.in_("status", ["answered", "completed", "in_progress"])
-        answered_q = answered_q.gte("created_at", month_start_iso)
-        answered_resp = answered_q.execute()
-        answered_calls = len(answered_resp.data) if answered_resp.data else 0
-        total_duration_seconds = sum(
-            c.get("duration_seconds", 0) or 0 for c in (answered_resp.data or [])
-        )
+        _ANSWERED_OUTCOMES = {
+            "answered", "customer_hung_up", "agent_hung_up",
+            "goal_achieved", "goal_not_achieved",
+        }
+        _FAILED_OUTCOMES = {
+            "no_answer", "busy", "rejected", "unreachable",
+            "network_failure", "failed", "cancelled", "voicemail",
+        }
+        month_q = db_client.table("calls").select("outcome,duration_seconds")
+        month_q = apply_tenant_filter(month_q, current_user.tenant_id)
+        month_q = month_q.gte("created_at", month_start_iso)
+        month_rows = month_q.execute().data or []
 
-        # 3. Failed calls count (uses PostgreSQL count, no rows transferred)
-        failed_q = db_client.table("calls").select("id", count="exact")
-        failed_q = apply_tenant_filter(failed_q, current_user.tenant_id)
-        failed_q = failed_q.in_("status", ["failed", "no_answer", "busy"])
-        failed_resp = failed_q.execute()
-        failed_calls = failed_resp.count or 0
+        answered_calls = sum(
+            1 for r in month_rows if (r.get("outcome") or "") in _ANSWERED_OUTCOMES
+        )
+        failed_calls = sum(
+            1 for r in month_rows if (r.get("outcome") or "") in _FAILED_OUTCOMES
+        )
+        total_duration_seconds = sum(
+            int(r.get("duration_seconds") or 0) for r in month_rows
+        )
 
         # Convert seconds to minutes
         minutes_used = total_duration_seconds // 60
@@ -159,7 +173,11 @@ async def get_dashboard_summary(
         # for this tenant. Used as the Dashboard's "Active Calls" KPI.
         active_q = db_client.table("calls").select("id", count="exact")
         active_q = apply_tenant_filter(active_q, current_user.tenant_id)
-        active_q = active_q.in_("status", ["initiated", "ringing", "in_progress"])
+        # Live, pre-terminal states (calls terminate as 'ended'/'completed').
+        active_q = active_q.in_("status", [
+            "queued", "initiated", "dialing", "ringing", "answered",
+            "in_call", "in_progress",
+        ])
         active_resp = active_q.execute()
         active_calls = active_resp.count or 0
 
@@ -170,9 +188,9 @@ async def get_dashboard_summary(
         # status='in_progress' before duration is written, and counting
         # those as 0 would drag the mean down for tenants with active calls.
         durations: list[int] = [
-            int(c.get("duration_seconds", 0) or 0)
-            for c in (answered_resp.data or [])
-            if (c.get("duration_seconds") or 0) > 0
+            int(r.get("duration_seconds") or 0)
+            for r in month_rows
+            if (r.get("duration_seconds") or 0) > 0
         ]
         avg_call_duration_seconds = (
             int(round(sum(durations) / len(durations))) if durations else 0
@@ -193,12 +211,8 @@ async def get_dashboard_summary(
         # 7. Outcome breakdown for the current billing month.
         # Used by the dashboard's outcomes pie chart (which previously
         # invented completed/voicemail/callback ratios).
-        outcome_q = db_client.table("calls").select("outcome")
-        outcome_q = apply_tenant_filter(outcome_q, current_user.tenant_id)
-        outcome_q = outcome_q.gte("created_at", month_start_iso)
-        outcome_resp = outcome_q.execute()
         outcome_breakdown: Dict[str, int] = {}
-        for row in outcome_resp.data or []:
+        for row in month_rows:
             key = (row.get("outcome") or "unknown") or "unknown"
             outcome_breakdown[key] = outcome_breakdown.get(key, 0) + 1
 
@@ -208,6 +222,7 @@ async def get_dashboard_summary(
             failed_calls=failed_calls,
             minutes_used=minutes_used,
             minutes_remaining=minutes_remaining,
+            minutes_included=minutes_allocated,
             active_campaigns=active_campaigns,
             active_calls=active_calls,
             avg_call_duration_seconds=avg_call_duration_seconds,

@@ -128,6 +128,13 @@ export interface Contact {
     last_call_result: string;
     call_attempts: number;
     created_at: string;
+    // Lead qualification fields set by the post-call AI. Optional because they
+    // only populate once a call flags this contact as a lead (the contacts
+    // endpoint SELECT *s the leads row, so they arrive at runtime).
+    is_lead?: boolean;
+    follow_up_note?: string | null;
+    qualified_at?: string | null;
+    qualified_call_id?: string | null;
 }
 
 // Internal types for backend responses

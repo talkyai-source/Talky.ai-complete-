@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useCalls, useCallTranscript, useCallSummary } from "@/lib/api-hooks";
 import type { Call } from "@/lib/dashboard-api";
 import { CallSummaryCard } from "@/components/calls/CallSummaryCard";
+import { statusPillClass } from "@/lib/status-colors";
 
 function getStatusIcon(status: string) {
     switch (status) {
@@ -25,21 +26,9 @@ function getStatusIcon(status: string) {
     }
 }
 
-function getStatusStyle(status: string) {
-    switch (status) {
-        case "answered":
-        case "completed":
-            return "bg-background text-emerald-800 border border-emerald-700/50 dark:text-emerald-300 dark:border-emerald-400/50";
-        case "failed":
-        case "no_answer":
-        case "busy":
-            return "bg-background text-red-800 border border-red-700/50 dark:text-red-300 dark:border-red-400/50";
-        case "in_progress":
-            return "bg-background text-blue-800 border border-blue-700/50 dark:text-blue-300 dark:border-blue-400/50";
-        default:
-            return "bg-background text-muted-foreground border border-border";
-    }
-}
+// Delegates to the shared util so call history, detail, and contacts all agree
+// on what green/red mean.
+const getStatusStyle = statusPillClass;
 
 function formatDuration(seconds?: number) {
     if (!seconds) return "--";
@@ -80,7 +69,15 @@ function CallRow({ call }: { call: Call }) {
                         {call.status}
                     </span>
                 </div>
-                <div className="min-w-0 truncate text-sm text-muted-foreground">{humanizeOutcome(call.outcome)}</div>
+                <div className="min-w-0">
+                    {call.outcome ? (
+                        <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${statusPillClass(call.outcome)}`}>
+                            {humanizeOutcome(call.outcome)}
+                        </span>
+                    ) : (
+                        <span className="text-sm text-muted-foreground">--</span>
+                    )}
+                </div>
                 <div className="flex items-center gap-1 text-sm text-muted-foreground tabular-nums">
                     <Clock className="h-4 w-4" />
                     {formatDuration(call.duration_seconds)}

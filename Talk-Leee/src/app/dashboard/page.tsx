@@ -1214,6 +1214,41 @@ export default function DashboardPage() {
         };
     }, []);
 
+    // Fallback polling for when the live stream is down. The WebSocket above is
+    // the primary update path; once it gives up (status "offline") or is between
+    // reconnect attempts ("retrying"), the displayed stats — minutes-used in
+    // particular — would otherwise freeze on the last snapshot. While the stream
+    // is in either state we poll the same summary endpoint loadData() uses and
+    // feed the SAME setter the stream feeds (setLiveSummary), so the KPIs keep
+    // refreshing without a socket. Keyed on streamStatus, so the interval is torn
+    // down the moment the stream reconnects — and on unmount.
+    useEffect(() => {
+        if (streamStatus !== "offline" && streamStatus !== "retrying") return;
+
+        let cancelled = false;
+        let inFlight = false;
+
+        const pollSummary = async () => {
+            if (inFlight) return; // skip if the previous poll hasn't resolved yet
+            inFlight = true;
+            try {
+                const summaryData = await dashboardApi.getDashboardSummary();
+                if (cancelled) return;
+                setLiveSummary(summaryData);
+            } catch {
+                // Transient failure — keep the last good snapshot, retry next tick.
+            } finally {
+                inFlight = false;
+            }
+        };
+
+        const id = window.setInterval(pollSummary, 30_000);
+        return () => {
+            cancelled = true;
+            window.clearInterval(id);
+        };
+    }, [streamStatus]);
+
     const effectiveSummary = liveSummary ?? summary;
 
     const successRate = effectiveSummary
