@@ -605,9 +605,11 @@ async def assistant_chat(
                         proposal["tool"], tenant_id, db_client,
                         current_conversation_id, apply_args,
                     )
+                    # Edit tools return {applied: True}; send_email returns
+                    # {success: True}. Either counts as a successful apply.
                     applied = (
                         isinstance(result, dict)
-                        and result.get("applied") is True
+                        and (result.get("applied") is True or result.get("success") is True)
                         and not result.get("error")
                     )
                     err = result.get("error") if isinstance(result, dict) else "Apply failed"

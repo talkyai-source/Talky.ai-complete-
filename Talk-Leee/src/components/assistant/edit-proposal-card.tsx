@@ -31,6 +31,7 @@ const TOOL_TITLES: Record<string, string> = {
     update_knowledge_node: "Update knowledge",
     manage_lead: "Update contact",
     apply_campaign_voice: "Change voice",
+    send_email: "Send email",
 };
 
 export function EditProposalCard({

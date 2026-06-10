@@ -223,6 +223,9 @@ async def execute_action(
                 template_name=merged_params.get("template"),
                 template_context=template_context,
                 conversation_id=conversation_id,
+                # Plan execution is an already-approved action — send immediately,
+                # not the interactive preview-first path.
+                confirm=True,
             )
 
         elif action_type == AllowedActionType.SEND_SMS.value:

@@ -33,6 +33,7 @@ PROPOSAL_TOOLS = {
     "update_knowledge_node",
     "manage_lead",
     "apply_campaign_voice",
+    "send_email",
 }
 
 # proposal_id -> proposal dict

@@ -27,20 +27,30 @@ export function DiffView({ changes }: { changes: DiffChange[] }) {
     }
     return (
         <div className="space-y-2">
-            {changes.map((c, i) => (
-                <div key={i} className="text-xs">
-                    <div className="mb-0.5 font-semibold text-muted-foreground">{humanizeField(c.field)}</div>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="rounded bg-red-500/10 px-1.5 py-0.5 text-red-700 line-through dark:text-red-300">
-                            {fmt(c.before)}
-                        </span>
-                        <span className="text-muted-foreground">→</span>
-                        <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-emerald-700 dark:text-emerald-300">
-                            {fmt(c.after)}
-                        </span>
+            {changes.map((c, i) => {
+                // A "creation"/"send" preview has no meaningful before — render
+                // just the value (no red strikethrough, no arrow).
+                const hasBefore =
+                    c.before !== null && c.before !== undefined && c.before !== "";
+                return (
+                    <div key={i} className="text-xs">
+                        <div className="mb-0.5 font-semibold text-muted-foreground">{humanizeField(c.field)}</div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                            {hasBefore && (
+                                <>
+                                    <span className="rounded bg-red-500/10 px-1.5 py-0.5 text-red-700 line-through dark:text-red-300">
+                                        {fmt(c.before)}
+                                    </span>
+                                    <span className="text-muted-foreground">→</span>
+                                </>
+                            )}
+                            <span className="whitespace-pre-wrap break-words rounded bg-emerald-500/10 px-1.5 py-0.5 text-emerald-700 dark:text-emerald-300">
+                                {fmt(c.after)}
+                            </span>
+                        </div>
                     </div>
-                </div>
-            ))}
+                );
+            })}
         </div>
     );
 }

@@ -111,17 +111,20 @@ GROQ_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "send_email",
-            "description": "Send an email to recipients. Supports templates: meeting_confirmation, follow_up, reminder. Uses Gmail if connected, SMTP fallback otherwise.",
+            "description": "Email someone. Call with confirm=false first to PREVIEW — the user sees the email with Apply/Reject buttons that send it; do NOT set confirm=true yourself. To email a LEAD/contact, omit 'to' and pass lead_id or phone_number (their email is resolved automatically). Supports templates: meeting_confirmation, follow_up, reminder. Uses Gmail if connected, else SMTP.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "to": {"type": "array", "items": {"type": "string"}, "description": "Email addresses"},
+                    "to": {"type": "array", "items": {"type": "string"}, "description": "Recipient email addresses. Omit when emailing a lead — use lead_id/phone_number."},
+                    "lead_id": {"type": "string", "description": "Resolve the recipient from this lead/contact id"},
+                    "phone_number": {"type": "string", "description": "Resolve the recipient from this lead's phone number"},
                     "subject": {"type": "string", "description": "Email subject (ignored if using template)"},
                     "body": {"type": "string", "description": "Email body (ignored if using template)"},
                     "template_name": {"type": "string", "description": "Template to use: meeting_confirmation, follow_up, or reminder"},
-                    "template_context": {"type": "object", "description": "Variables for template (e.g., attendee_name, title, date, time)"}
+                    "template_context": {"type": "object", "description": "Variables for template (e.g., attendee_name, title, date, time)"},
+                    "confirm": {"type": "boolean", "description": "false = preview only (default); the Apply button sends. Do not set true.", "default": False}
                 },
-                "required": ["to", "subject", "body"]
+                "required": ["subject", "body"]
             }
         }
     },
