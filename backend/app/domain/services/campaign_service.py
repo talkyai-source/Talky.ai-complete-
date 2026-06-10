@@ -282,15 +282,33 @@ class CampaignService:
     # =========================================================================
     
     async def pause_campaign(self, campaign_id: str) -> Dict[str, Any]:
-        """Pause a campaign."""
+        """Pause a campaign.
+
+        Sets status='paused' (so the dialer stops dequeuing new jobs — it
+        re-checks status before originate) AND hangs up calls already in flight.
+        Pending jobs are intentionally LEFT queued so a later resume continues
+        where it left off; only the live calls are dropped. Without the hangup
+        sweep, "Pause" looked like a no-op for 30-60s while ringing/connected
+        calls kept running.
+        """
         # Validate exists
         await self.get_campaign(campaign_id)
-        
+
         response = self.db_client.table("campaigns").update({
             "status": "paused"
         }).eq("id", campaign_id).execute()
-        
-        logger.info(f"Campaign {campaign_id} paused")
+
+        # Hang up live calls now — best-effort, never roll back the status update.
+        hung_up = 0
+        try:
+            from app.api.v1.endpoints.telephony_bridge import (
+                hangup_calls_for_campaign,
+            )
+            hung_up = await hangup_calls_for_campaign(campaign_id)
+        except Exception as exc:
+            logger.warning("pause_campaign hangup sweep failed: %s", exc)
+
+        logger.info(f"Campaign {campaign_id} paused (hung_up={hung_up})")
         return response.data[0]
     
     # =========================================================================

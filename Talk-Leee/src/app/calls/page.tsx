@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Phone, PhoneOff, PhoneIncoming, Clock, ChevronRight, ChevronDown, FileText, Megaphone, Loader2, Sparkles, Play, Pause, Search } from "lucide-react";
 import Link from "next/link";
@@ -57,6 +57,14 @@ function CallRow({ call }: { call: Call }) {
     const [audioUrl, setAudioUrl] = useState<string | null>(null);
     const [audioLoading, setAudioLoading] = useState(false);
     const [playing, setPlaying] = useState(false);
+
+    // Release the blob URL when the row unmounts (page change, filter, collapse)
+    // so repeated inline playback doesn't leak object URLs into memory.
+    useEffect(() => {
+        return () => {
+            if (audioUrl) URL.revokeObjectURL(audioUrl);
+        };
+    }, [audioUrl]);
 
     const togglePlay = async () => {
         const el = audioRef.current;

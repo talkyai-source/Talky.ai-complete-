@@ -8,8 +8,8 @@ Updated to use RecordingService with S3 presigned URLs.
 """
 import os
 
-from fastapi import APIRouter, HTTPException, Depends, Query
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
+from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timezone
@@ -63,7 +63,9 @@ async def list_recordings(
     tenant_id = str(current_user.tenant_id)
     offset = (page - 1) * page_size
 
-    conditions = ["r.tenant_id = $1"]
+    # Only list playable recordings — 'failed'/'deleted'/'uploading' rows would
+    # render a row + play button that 404s on click.
+    conditions = ["r.tenant_id = $1", "r.status = 'uploaded'"]
     params: list = [tenant_id]
     idx = 2
 
@@ -199,16 +201,74 @@ async def delete_recording(
     return Response(status_code=204)
 
 
+def _ranged_file_response(
+    filepath: str,
+    request: Request,
+    media_type: str = "audio/wav",
+    filename: Optional[str] = None,
+) -> Response:
+    """Serve a local file with HTTP Range support so the audio player can seek.
+
+    Starlette 0.35's FileResponse ignores the Range header, so dragging the
+    progress bar did nothing for local-disk recordings. This honors a single
+    `bytes=start-end` range with a 206 + Content-Range, and advertises
+    Accept-Ranges on the full 200 response too.
+    """
+    file_size = os.path.getsize(filepath)
+    headers = {"Accept-Ranges": "bytes"}
+    if filename:
+        headers["Content-Disposition"] = f'inline; filename="{filename}"'
+
+    range_header = request.headers.get("range")
+    start, end, status_code = 0, file_size - 1, 200
+    if range_header and range_header.strip().startswith("bytes="):
+        try:
+            rng = range_header.split("=", 1)[1].split(",")[0].strip()
+            s, _, e = rng.partition("-")
+            start = int(s) if s.strip() else 0
+            end = int(e) if e.strip() else file_size - 1
+            if start > end or start >= file_size:
+                return Response(
+                    status_code=416,
+                    headers={"Content-Range": f"bytes */{file_size}", "Accept-Ranges": "bytes"},
+                )
+            end = min(end, file_size - 1)
+            status_code = 206
+            headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+        except (ValueError, IndexError):
+            start, end, status_code = 0, file_size - 1, 200
+
+    length = end - start + 1
+    headers["Content-Length"] = str(length)
+
+    def _iter():
+        remaining = length
+        with open(filepath, "rb") as f:
+            f.seek(start)
+            while remaining > 0:
+                data = f.read(min(64 * 1024, remaining))
+                if not data:
+                    break
+                remaining -= len(data)
+                yield data
+
+    return StreamingResponse(
+        _iter(), status_code=status_code, media_type=media_type, headers=headers
+    )
+
+
 @router.get("/{recording_id}/stream")
 async def stream_recording(
     recording_id: str,
+    request: Request,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
     """
     Stream a recording.
-    - Local recordings (status='local'): served directly as FileResponse.
-    - S3 recordings (status='uploaded'): 302 redirect to presigned S3 URL.
+    - Local recordings (bucket='local'): served from disk with HTTP Range support.
+    - S3 recordings (status='uploaded'): 302 redirect to presigned S3 URL
+      (S3 honors Range natively, so seeking works there too).
     """
     tenant_id = str(current_user.tenant_id)
 
@@ -230,7 +290,9 @@ async def stream_recording(
         filepath = row["s3_key"]
         if not os.path.isfile(filepath):
             raise HTTPException(status_code=404, detail="Recording file not found on disk")
-        return FileResponse(filepath, media_type="audio/wav", filename=f"{recording_id}.wav")
+        return _ranged_file_response(
+            filepath, request, media_type="audio/wav", filename=f"{recording_id}.wav"
+        )
 
     # S3 path: generate presigned URL and redirect
     service = make_recording_service(db_client.pool)

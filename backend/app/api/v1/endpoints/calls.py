@@ -300,7 +300,7 @@ async def list_calls(
                            c.summary_json->>'outcome' AS lead_outcome,
                            camp.name AS campaign_name,
                            (SELECT r.id FROM recordings_s3 r
-                             WHERE r.call_id = c.id
+                             WHERE r.call_id = c.id AND r.status = 'uploaded'
                              ORDER BY r.created_at DESC LIMIT 1) AS recording_id
                     FROM calls c
                     LEFT JOIN campaigns camp ON camp.id = c.campaign_id

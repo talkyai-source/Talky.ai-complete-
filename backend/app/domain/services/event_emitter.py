@@ -22,6 +22,7 @@ isn't hammered. See `dialer_worker.py` for the canonical example.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any, Optional
@@ -80,6 +81,53 @@ async def emit_event(
             "emit_event.failed tenant=%s category=%s title=%r error=%s",
             tenant_id, category, title, exc,
         )
+
+
+async def cleanup_expired_events_loop(
+    pool: asyncpg.Pool,
+    stop_event: asyncio.Event,
+    interval_seconds: int = 6 * 3600,
+) -> None:
+    """Periodically delete stream_events past their expires_at.
+
+    The table's expires_at defaults to now()+90d, but nothing ever DELETEd the
+    expired rows, so the table grew forever and the /events polling query slowed
+    over time. Runs an indexed delete (idx_se_expires) every ~6h, in bounded
+    batches so a large backlog can't lock the table. Best-effort — never raises.
+    """
+    while not stop_event.is_set():
+        try:
+            total = 0
+            async with pool.acquire() as conn:
+                await conn.execute("SET app.bypass_rls = 'on'")
+                await conn.execute(
+                    "SET app.current_tenant_id = '00000000-0000-0000-0000-000000000000'"
+                )
+                # Delete in bounded batches so a large backlog can't long-lock.
+                for _ in range(200):  # hard cap = 1M rows/run, plenty
+                    status = await conn.execute(
+                        """
+                        DELETE FROM stream_events
+                         WHERE id IN (
+                            SELECT id FROM stream_events
+                             WHERE expires_at < now()
+                             LIMIT 5000
+                         )
+                        """
+                    )
+                    # asyncpg returns a tag like "DELETE 5000"
+                    n = int(status.split()[-1]) if status and status.startswith("DELETE") else 0
+                    total += n
+                    if n < 5000:
+                        break
+            if total:
+                logger.info("stream_events cleanup deleted=%d", total)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("stream_events cleanup failed: %s", exc)
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+        except asyncio.TimeoutError:
+            pass
 
 
 async def emit_event_via_pool(

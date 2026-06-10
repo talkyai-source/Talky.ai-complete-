@@ -45,16 +45,40 @@ class BulkImportResponse(BaseModel):
     errors: List[ImportError]
 
 
+def _normalize_for_user(phone: str, user) -> str:
+    """Normalize a phone number the SAME way the Add-Contact endpoint does, so
+    CSV import and manual add never disagree.
+
+    Uses the canonical domain normalizer (libphonenumber-backed, rejects 6-digit
+    junk), and the lenient passthrough only for accounts whose phone validation
+    is temporarily relaxed — exactly mirroring add_contact_to_campaign. Before
+    this, CSV import had its OWN looser rules (accepted 6-digit numbers for
+    everyone), so a contact imported via CSV could be un-dialable by the
+    campaign path that re-validated with the stricter normalizer.
+    """
+    from app.domain.services.phone_number_normalizer import (
+        normalize_phone_number as _domain_normalize,
+        normalize_phone_number_lenient,
+    )
+    try:
+        from app.api.v1.endpoints.campaigns import _phone_validation_relaxed
+        relaxed = _phone_validation_relaxed(user)
+    except Exception:  # noqa: BLE001 — never let the relaxed check break import
+        relaxed = False
+    return normalize_phone_number_lenient(phone) if relaxed else _domain_normalize(phone)
+
+
 def normalize_phone_number(phone: str) -> str:
     """
+    DEPRECATED legacy normalizer — kept only so nothing breaks if an old import
+    path still references it. New code must use _normalize_for_user so CSV import
+    and Add-Contact share one definition (see Fix #9). Do not add callers.
+
     Normalize phone number to E.164 format.
-    
-    Handles common formats and validates basic structure.
-    For production, consider using the 'phonenumbers' library.
-    
+
     Args:
         phone: Raw phone number string
-        
+
     Returns:
         Normalized phone in E.164 format (+1234567890)
         
@@ -222,7 +246,7 @@ async def upload_campaign_contacts(
                 
                 # Normalize phone
                 try:
-                    normalized_phone = normalize_phone_number(phone_raw.strip())
+                    normalized_phone = _normalize_for_user(phone_raw.strip(), current_user)
                 except ValueError as e:
                     errors.append(ImportError(row=row_num, error=str(e), phone=phone_raw))
                     continue

@@ -272,6 +272,21 @@ async def lifespan(app: FastAPI):
         ]
         logger.info("redis_coordination_listeners_started count=2")
 
+    # Periodic stream_events cleanup — the table's rows expire (expires_at
+    # default now()+90d) but nothing deleted them, so it grew forever and slowed
+    # the /events poll. Reuses the listener stop-event for clean shutdown.
+    _events_pool = getattr(container, "db_pool", None)
+    if _events_pool is not None:
+        from app.domain.services.event_emitter import cleanup_expired_events_loop
+        app.state.redis_listener_tasks.append(
+            asyncio.create_task(
+                cleanup_expired_events_loop(
+                    _events_pool, stop_event=app.state.redis_listener_stop
+                )
+            )
+        )
+        logger.info("stream_events_cleanup_task_started")
+
     # Auto-connect telephony bridge so campaigns can originate calls immediately.
     # Must happen after container startup (needs event loop to be running).
     from app.infrastructure.telephony.adapter_factory import CallControlAdapterFactory

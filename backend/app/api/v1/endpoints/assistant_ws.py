@@ -700,7 +700,9 @@ async def list_conversations(
     response = db_client.table("assistant_conversations").select(
         "id, title, message_count, last_message_at, created_at",
         count="exact"
-    ).order("last_message_at", desc=True).range(offset, offset + page_size - 1).execute()
+    ).eq("tenant_id", current_user.tenant_id).order(
+        "last_message_at", desc=True
+    ).range(offset, offset + page_size - 1).execute()
 
     return {
         "conversations": response.data,
@@ -718,12 +720,13 @@ async def get_conversation(
 ):
     """Get a specific conversation with messages.
 
-    ``get_current_user`` enforces tenant isolation via RLS — without
-    it any authenticated user could read any conversation by ID.
+    Explicit tenant filter — assistant_conversations has RLS DISABLED on prod,
+    so without the .eq("tenant_id") any authenticated user could read any
+    conversation by ID (IDOR). Do NOT rely on RLS here.
     """
     response = db_client.table("assistant_conversations").select(
         "id, title, messages, context, message_count, started_at, last_message_at"
-    ).eq("id", conversation_id).single().execute()
+    ).eq("id", conversation_id).eq("tenant_id", current_user.tenant_id).single().execute()
 
     if not response.data:
         from fastapi import HTTPException
@@ -740,12 +743,13 @@ async def delete_conversation(
 ):
     """Delete a conversation.
 
-    ``get_current_user`` enforces tenant isolation — without it the
-    DELETE would run with no RLS scope.
+    Explicit tenant filter — assistant_conversations has RLS DISABLED on prod,
+    so without the .eq("tenant_id") this DELETE would remove ANY tenant's
+    conversation by ID. Do NOT rely on RLS here.
     """
     db_client.table("assistant_conversations").delete().eq(
         "id", conversation_id
-    ).execute()
+    ).eq("tenant_id", current_user.tenant_id).execute()
 
     return {"success": True, "message": "Conversation deleted"}
 
@@ -764,8 +768,8 @@ async def list_actions(
     query = db_client.table("assistant_actions").select(
         "id, type, status, triggered_by, input_data, output_data, created_at, completed_at",
         count="exact"
-    )
-    
+    ).eq("tenant_id", current_user.tenant_id)
+
     if type:
         query = query.eq("type", type)
     

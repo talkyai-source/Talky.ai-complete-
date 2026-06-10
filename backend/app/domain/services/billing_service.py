@@ -343,9 +343,18 @@ class BillingService:
         
         event_type = event["type"]
         data = event["data"]["object"]
-        
-        logger.info(f"Processing webhook event: {event_type}")
-        
+        event_id = event.get("id")
+
+        # Idempotency: Stripe redelivers events (up to ~3x). Without dedup,
+        # checkout.completed/invoice.paid would re-apply minute resets and
+        # re-send confirmation emails on each redelivery. Claim the event id;
+        # if it was already processed, ack 200 without re-running the handler.
+        if event_id and not await self._claim_webhook_event(event_id, event_type):
+            logger.info("Duplicate Stripe webhook ignored event_id=%s type=%s", event_id, event_type)
+            return {"status": "duplicate", "event_id": event_id, "event_type": event_type}
+
+        logger.info(f"Processing webhook event: {event_type} (id={event_id})")
+
         handlers = {
             "checkout.session.completed": self._handle_checkout_completed,
             "customer.subscription.created": self._handle_subscription_created,
@@ -362,6 +371,34 @@ class BillingService:
         
         return {"status": "ignored", "event_type": event_type}
     
+    async def _claim_webhook_event(self, event_id: str, event_type: str) -> bool:
+        """Atomically claim a Stripe event id for processing.
+
+        Returns True if THIS call claimed it (first time → process), False if it
+        was already processed (duplicate → skip). Fail-OPEN on any error: a
+        missing table or DB hiccup must not drop a real billing event, so we
+        process it (the previous always-process behavior).
+        """
+        try:
+            async with self.db_client.pool.acquire() as conn:
+                await conn.execute("SET app.bypass_rls = 'on'")
+                await conn.execute(
+                    "SET app.current_tenant_id = '00000000-0000-0000-0000-000000000000'"
+                )
+                status = await conn.execute(
+                    """
+                    INSERT INTO processed_webhook_events (event_id, event_type)
+                    VALUES ($1, $2)
+                    ON CONFLICT (event_id) DO NOTHING
+                    """,
+                    event_id, event_type,
+                )
+            # asyncpg tag: "INSERT 0 1" = inserted (claimed); "INSERT 0 0" = conflict
+            return status.strip().endswith(" 1")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("webhook idempotency claim failed (processing anyway): %s", e)
+            return True
+
     async def _handle_checkout_completed(self, session: Dict):
         """Handle checkout.session.completed event"""
         tenant_id = session.get("metadata", {}).get("tenant_id")

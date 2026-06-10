@@ -612,6 +612,12 @@ export function VoiceAgentPopup() {
                 break;
             case "error":
                 setError(typeof data.message === "string" ? data.message : "Unknown voice error");
+                // Leave the "speaking" state immediately so the UI isn't stuck.
+                // The backend also closes the socket on error → onclose runs the
+                // full teardown (endSession) while preserving this message.
+                setAiState("idle");
+                dropIncomingAudioRef.current = true;
+                resetAudioPlayer();
                 break;
             default:
                 break;

@@ -200,6 +200,19 @@ class DialerWorker:
                 await self._update_job_status(job.job_id, JobStatus.SKIPPED, error=reason)
                 return
 
+            # 0.5 Minutes quota gate. Stop originating once the tenant has burned
+            # its plan minutes for the month. Minute tracking was previously
+            # display-only, so tenants could overrun the plan with no cap.
+            if await self._tenant_minutes_exhausted(job.tenant_id):
+                logger.info(
+                    "Skipping job %s — tenant %s is out of plan minutes",
+                    job.job_id, job.tenant_id,
+                )
+                await self._emit_out_of_minutes_event(job)
+                await self.queue_service.mark_skipped(job.job_id, reason="out_of_minutes")
+                await self._update_job_status(job.job_id, JobStatus.SKIPPED, error="out_of_minutes")
+                return
+
             # 1. Get tenant calling rules
             rules = await self._get_tenant_rules(job.tenant_id)
             
@@ -672,6 +685,58 @@ class DialerWorker:
         except Exception as e:
             logger.error(f"Failed to get active tenants: {e}")
             return []
+
+    async def _tenant_minutes_exhausted(self, tenant_id: str) -> bool:
+        """True when the tenant has used >= its plan's monthly minute allocation.
+
+        Mirrors the dashboard's live computation: this month's SUM(duration_seconds)
+        // 60 vs tenants.minutes_allocated. Returns False (do NOT block) when the
+        allocation is unset/<=0 (treated as unlimited) or on any error — a quota
+        lookup failure must never wedge the dialer.
+        """
+        try:
+            async with self._acquire_db() as conn:
+                allocated = await conn.fetchval(
+                    "SELECT minutes_allocated FROM tenants WHERE id = $1", tenant_id
+                )
+                if not allocated or int(allocated) <= 0:
+                    return False
+                used_seconds = await conn.fetchval(
+                    """
+                    SELECT COALESCE(SUM(duration_seconds), 0) FROM calls
+                     WHERE tenant_id = $1
+                       AND created_at >= date_trunc('month', now())
+                    """,
+                    tenant_id,
+                )
+                return (int(used_seconds or 0) // 60) >= int(allocated)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("minutes quota check failed for tenant %s: %s", tenant_id, e)
+            return False
+
+    async def _emit_out_of_minutes_event(self, job) -> None:
+        """Surface an out-of-minutes alert in the UI (throttled 5 min per tenant)."""
+        try:
+            if self._redis is not None and job.tenant_id:
+                key = f"evt:out_of_minutes:{job.tenant_id}"
+                acquired = await self._redis.set(key, "1", nx=True, ex=300)
+                if not acquired:
+                    return  # already alerted within the last 5 minutes
+            from app.domain.services.event_emitter import emit_event_via_pool
+            await emit_event_via_pool(
+                self._db_pool,
+                tenant_id=str(job.tenant_id),
+                category="alert",
+                severity="critical",
+                title="Out of plan minutes",
+                description=(
+                    "Calls are paused — this month's plan minutes are used up. "
+                    "Upgrade your plan or wait for the next billing cycle."
+                ),
+                related_campaign_id=str(job.campaign_id) if job.campaign_id else None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("emit out_of_minutes failed: %s", exc)
 
     async def _get_campaign_status(self, campaign_id: str) -> Optional[str]:
         """Return campaign status so dequeued jobs can be revalidated before originate."""

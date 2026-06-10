@@ -259,6 +259,10 @@ async def ask_ai_websocket(websocket: WebSocket, session_id: str):
             logger.error(f"Ask AI error: {e}", exc_info=True)
             try:
                 await websocket.send_json({"type": "error", "message": str(e)})
+                # Close the socket so the client's onclose fires immediately and
+                # the UI leaves its "speaking" state. Without this the connection
+                # lingered until the 30s idle timeout while the user was stuck.
+                await websocket.close(code=1011, reason="server error")
             except Exception:
                 pass
         finally:
