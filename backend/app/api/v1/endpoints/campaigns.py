@@ -872,21 +872,48 @@ async def add_contact_to_campaign(
         except ValueError as e:
             raise HTTPException(status_code=400, detail=f"Invalid phone number: {str(e)}")
         
-        # 3. Check for duplicate within campaign
-        existing = db_client.table("leads").select("id").eq(
+        # 3. Look up ANY existing row for this phone (including soft-deleted).
+        #    - A live row is a real duplicate -> 409.
+        #    - A soft-deleted row gets REVIVED in place (keeps its id, call
+        #      history and is_lead/qualified_at) instead of inserting a brand-new
+        #      row. Re-adding a previously-deleted contact used to orphan all of
+        #      its prior calls and lead status behind a fresh lead_id.
+        existing = db_client.table("leads").select(
+            "id, status, is_lead"
+        ).eq(
             "campaign_id", campaign_id
         ).eq(
             "phone_number", normalized_phone
-        ).neq(
-            "status", "deleted"
         ).execute()
-        
-        if existing.data:
+
+        live = [r for r in (existing.data or []) if r.get("status") != "deleted"]
+        if live:
             raise HTTPException(
-                status_code=409, 
+                status_code=409,
                 detail=f"Phone number {normalized_phone} already exists in this campaign"
             )
-        
+
+        deleted_rows = [r for r in (existing.data or []) if r.get("status") == "deleted"]
+        if deleted_rows:
+            # Prefer reviving a row that was a qualified lead so we don't lose it.
+            deleted_rows.sort(key=lambda r: (0 if r.get("is_lead") else 1))
+            revive_id = deleted_rows[0]["id"]
+            revived = db_client.table("leads").update({
+                "status": "pending",
+                "first_name": contact.first_name,
+                "last_name": contact.last_name,
+                "email": contact.email,
+                "custom_fields": contact.custom_fields or {},
+            }).eq("id", revive_id).execute()
+            if revived.error or not revived.data:
+                logger.error(f"Error reviving lead {revive_id} for campaign {campaign_id}: {getattr(revived, 'error', None)}")
+                raise HTTPException(status_code=500, detail="Failed to add contact")
+            logger.info(f"Contact revived in campaign {campaign_id}: {normalized_phone} (lead {revive_id})")
+            return {
+                "message": "Contact added successfully",
+                "contact": revived.data[0]
+            }
+
         # 4. Create lead record
         lead_id = str(uuid.uuid4())
         lead_data = {
@@ -903,17 +930,17 @@ async def add_contact_to_campaign(
             "call_attempts": 0,
             "created_at": datetime.utcnow().isoformat()
         }
-        
+
         response = db_client.table("leads").insert(lead_data).execute()
-        
+
         if response.error:
             logger.error(f"Error creating lead for campaign {campaign_id}: {response.error}")
             raise HTTPException(status_code=500, detail=f"Failed to create contact: {response.error}")
         if not response.data:
             raise HTTPException(status_code=500, detail="Failed to create contact")
-        
+
         logger.info(f"Contact added to campaign {campaign_id}: {normalized_phone}")
-        
+
         return {
             "message": "Contact added successfully",
             "contact": response.data[0]

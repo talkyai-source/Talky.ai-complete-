@@ -177,14 +177,24 @@ async def upload_campaign_contacts(
                     detail=f"CSV must have 'phone_number' column. Found: {', '.join(csv_reader.fieldnames)}"
                 )
         
-        # 4. Get existing phone numbers in campaign for duplicate detection
-        existing_phones: Set[str] = set()
-        if skip_duplicates:
-            existing_response = db_client.table("leads").select("phone_number").eq(
-                "campaign_id", campaign_id
-            ).neq("status", "deleted").execute()
-            
-            existing_phones = {row["phone_number"] for row in (existing_response.data or [])}
+        # 4. Map existing phones in the campaign. We always load these (even when
+        #    skip_duplicates is False) so we never create a second LIVE row for a
+        #    phone, and so a phone that matches a SOFT-DELETED row is revived in
+        #    place (keeping its id, call history and is_lead) rather than inserted
+        #    as a fresh row that orphans all of that.
+        existing_phones: Set[str] = set()           # live phones in campaign
+        deleted_lead_by_phone: dict[str, str] = {}  # phone -> deleted lead id to revive
+        existing_response = db_client.table("leads").select(
+            "id, phone_number, status, is_lead"
+        ).eq("campaign_id", campaign_id).execute()
+        for row in (existing_response.data or []):
+            if row.get("status") == "deleted":
+                # Prefer keeping a qualified-lead row to revive; first-write wins otherwise.
+                prev = deleted_lead_by_phone.get(row["phone_number"])
+                if prev is None or row.get("is_lead"):
+                    deleted_lead_by_phone[row["phone_number"]] = row["id"]
+            else:
+                existing_phones.add(row["phone_number"])
         
         # 5. Process rows
         total_rows = 0
@@ -192,6 +202,7 @@ async def upload_campaign_contacts(
         duplicates_skipped = 0
         errors: List[ImportError] = []
         leads_to_insert: List[dict] = []
+        leads_to_revive: List[dict] = []   # {id, first_name, last_name, email, custom_fields}
         seen_phones_in_file: Set[str] = set()  # Track duplicates within file
         
         for row_num, row in enumerate(csv_reader, start=2):  # Row 1 is header
@@ -222,11 +233,12 @@ async def upload_campaign_contacts(
                     continue
                 seen_phones_in_file.add(normalized_phone)
                 
-                # Check for duplicate within campaign (existing contacts)
+                # A live row with this phone already exists -> always skip (never
+                # create a second live row; the DB unique guard enforces this too).
                 if normalized_phone in existing_phones:
                     duplicates_skipped += 1
                     continue
-                
+
                 # Extract other fields (case-insensitive)
                 first_name = None
                 last_name = None
@@ -248,6 +260,20 @@ async def upload_campaign_contacts(
                         if value_clean:
                             custom_fields[key] = value_clean
                 
+                # If a soft-deleted row exists for this phone, revive it in place
+                # (keeps id + call history + is_lead) instead of inserting a new one.
+                revive_id = deleted_lead_by_phone.pop(normalized_phone, None)
+                if revive_id is not None:
+                    leads_to_revive.append({
+                        "id": revive_id,
+                        "first_name": first_name,
+                        "last_name": last_name,
+                        "email": email,
+                        "custom_fields": custom_fields if custom_fields else {},
+                    })
+                    existing_phones.add(normalized_phone)
+                    continue
+
                 # Prepare lead record with tenant_id
                 lead_data = {
                     "id": str(uuid.uuid4()),
@@ -263,7 +289,7 @@ async def upload_campaign_contacts(
                     "call_attempts": 0,
                     "created_at": datetime.utcnow().isoformat()
                 }
-                
+
                 leads_to_insert.append(lead_data)
                 existing_phones.add(normalized_phone)  # Track to prevent duplicates in later rows
                 
@@ -289,10 +315,25 @@ async def upload_campaign_contacts(
                             error=f"Database insert failed: {str(e)}",
                             phone=lead.get("phone_number")
                         ))
-        
+
+        # 7. Revive soft-deleted matches in place (preserves call history + is_lead)
+        for rev in leads_to_revive:
+            try:
+                db_client.table("leads").update({
+                    "status": "pending",
+                    "first_name": rev["first_name"],
+                    "last_name": rev["last_name"],
+                    "email": rev["email"],
+                    "custom_fields": rev["custom_fields"],
+                }).eq("id", rev["id"]).execute()
+                imported += 1
+            except Exception as e:
+                logger.error(f"Failed to revive deleted lead {rev['id']}: {e}")
+                errors.append(ImportError(row=0, error=f"Revive failed: {str(e)}", phone=None))
+
         logger.info(
             f"CSV upload completed for campaign '{campaign_name}': "
-            f"{imported} imported, {duplicates_skipped} duplicates skipped, {len(errors)} errors"
+            f"{imported} imported ({len(leads_to_revive)} revived), {duplicates_skipped} duplicates skipped, {len(errors)} errors"
         )
         
         return BulkImportResponse(
