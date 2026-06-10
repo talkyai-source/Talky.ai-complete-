@@ -1,14 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
-import { Phone, PhoneOff, PhoneIncoming, Clock, ChevronRight, ChevronDown, FileText, Megaphone, Loader2, Sparkles } from "lucide-react";
+import { Phone, PhoneOff, PhoneIncoming, Clock, ChevronRight, ChevronDown, FileText, Megaphone, Loader2, Sparkles, Play, Pause } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { useCalls, useCallTranscript, useCallSummary } from "@/lib/api-hooks";
 import type { Call } from "@/lib/dashboard-api";
 import { CallSummaryCard } from "@/components/calls/CallSummaryCard";
 import { statusPillClass } from "@/lib/status-colors";
+import { extendedApi } from "@/lib/extended-api";
+import { CallIssuesBanner } from "@/components/calls/call-issues-banner";
 
 function getStatusIcon(status: string) {
     switch (status) {
@@ -50,9 +52,34 @@ function CallRow({ call }: { call: Call }) {
     const summaryQuery = useCallSummary(expanded ? call.id : undefined);
     const transcriptQuery = useCallTranscript(showTranscript ? call.id : undefined, "json");
 
+    // Inline recording playback (same auth/refresh path as the detail page).
+    const audioRef = useRef<HTMLAudioElement | null>(null);
+    const [audioUrl, setAudioUrl] = useState<string | null>(null);
+    const [audioLoading, setAudioLoading] = useState(false);
+    const [playing, setPlaying] = useState(false);
+
+    const togglePlay = async () => {
+        const el = audioRef.current;
+        if (!el || !call.recording_id) return;
+        if (playing) { el.pause(); return; }
+        try {
+            if (!audioUrl) {
+                setAudioLoading(true);
+                const url = await extendedApi.fetchRecordingBlob(call.recording_id);
+                setAudioUrl(url);
+                el.src = url;
+            }
+            await el.play();
+        } catch {
+            // Playback failed (e.g. recording gone) — leave the button idle.
+        } finally {
+            setAudioLoading(false);
+        }
+    };
+
     return (
         <div className="rounded-xl border border-border bg-background">
-            <div className="grid min-w-0 grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1.1fr)_auto_auto_auto] items-center gap-3 px-4 py-3">
+            <div className="grid min-w-0 grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1.1fr)_auto_auto_auto_auto] items-center gap-3 px-4 py-3">
                 <div className="flex min-w-0 flex-col gap-0.5">
                     <div className="flex min-w-0 items-center gap-3">
                         {getStatusIcon(call.status)}
@@ -109,6 +136,19 @@ function CallRow({ call }: { call: Call }) {
                 >
                     <FileText className="h-4 w-4" />
                 </button>
+                {call.recording_id ? (
+                    <button
+                        type="button"
+                        onClick={togglePlay}
+                        aria-label={playing ? "Pause recording" : "Play recording"}
+                        title={playing ? "Pause recording" : "Play recording"}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    >
+                        {audioLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                    </button>
+                ) : (
+                    <span aria-hidden className="inline-block h-8 w-8" />
+                )}
                 <Link
                     href={`/calls/${call.id}`}
                     aria-label="Open call details"
@@ -117,6 +157,13 @@ function CallRow({ call }: { call: Call }) {
                     <ChevronRight className="h-4 w-4" />
                 </Link>
             </div>
+            <audio
+                ref={audioRef}
+                hidden
+                onPlay={() => setPlaying(true)}
+                onPause={() => setPlaying(false)}
+                onEnded={() => setPlaying(false)}
+            />
 
             <AnimatePresence initial={false}>
                 {expanded && (
@@ -313,6 +360,7 @@ export default function CallsPage() {
 
     return (
         <DashboardLayout title="Call History" description="Calls grouped by campaign — tap the script icon to view a transcript">
+            <CallIssuesBanner />
             {q.isLoading ? (
                 <div className="flex items-center justify-center h-64">
                     <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-foreground/60" />

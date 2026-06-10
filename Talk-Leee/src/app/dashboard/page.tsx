@@ -2,6 +2,7 @@
 
 import React, { useEffect, useLayoutEffect, useMemo, useState, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { CallIssuesBanner } from "@/components/calls/call-issues-banner";
 import { dashboardApi, DashboardSummary, Campaign } from "@/lib/dashboard-api";
 import { extendedApi, CallSeriesItem } from "@/lib/extended-api";
 import { Clock, Megaphone, ArrowUpRight, Activity, AlertTriangle, PhoneCall, TrendingUp, Bot } from "lucide-react";
@@ -1431,6 +1432,7 @@ export default function DashboardPage() {
 
     return (
         <DashboardLayout title="Dashboard" description="Overview of your voice campaigns">
+            <CallIssuesBanner />
             {loading ? (
                 <div className="flex items-center justify-center h-64">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-800 dark:border-gray-200" />

@@ -90,6 +90,8 @@ export interface Call {
     ended_at?: string;
     /** One-line AI summary headline returned by the call list endpoint. */
     summary?: string;
+    /** Recording id (if a recording exists) — enables inline play in the list. */
+    recording_id?: string | null;
 }
 
 // AI Call Summary Types

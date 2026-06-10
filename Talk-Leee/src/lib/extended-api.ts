@@ -121,6 +121,23 @@ class ExtendedApi {
         });
     }
 
+    // Recent critical call issues (e.g. "TTS out of credits") for the banner.
+    async getRecentCallIssues(): Promise<{
+        items: Array<{
+            id: string;
+            title: string;
+            description?: string | null;
+            severity?: string | null;
+            metadata?: Record<string, unknown> | null;
+        }>;
+    }> {
+        return this.client.request({
+            path: "/events",
+            method: "GET",
+            params: { category: "call", severity: "critical", limit: "8" },
+        });
+    }
+
     // Recordings
     async listRecordings(
         callId?: string,

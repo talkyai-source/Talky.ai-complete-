@@ -293,7 +293,10 @@ async def list_calls(
                     SELECT c.id, c.talklee_call_id, c.created_at, c.phone_number,
                            c.status, c.duration_seconds, c.outcome,
                            c.summary,
-                           camp.name AS campaign_name
+                           camp.name AS campaign_name,
+                           (SELECT r.id FROM recordings_s3 r
+                             WHERE r.call_id = c.id
+                             ORDER BY r.created_at DESC LIMIT 1) AS recording_id
                     FROM calls c
                     LEFT JOIN campaigns camp ON camp.id = c.campaign_id
                     WHERE {where}
@@ -320,6 +323,7 @@ async def list_calls(
                 outcome=row["outcome"],
                 campaign_name=row["campaign_name"],
                 summary=row["summary"],
+                recording_id=str(row["recording_id"]) if row["recording_id"] is not None else None,
             ))
 
         return CallListResponse(
