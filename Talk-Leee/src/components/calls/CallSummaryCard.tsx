@@ -60,6 +60,7 @@ function SummaryBody({ summary }: { summary: CallSummaryObj }) {
     const hasCommitments = summary.commitments.length > 0;
     const hasActionItems = summary.action_items.length > 0;
     const hasNextStep = Boolean(summary.next_step?.trim());
+    const hasFollowUpTips = (summary.follow_up_tips?.length ?? 0) > 0;
     const hasNotableQuotes = summary.notable_quotes.length > 0;
 
     return (
@@ -146,6 +147,23 @@ function SummaryBody({ summary }: { summary: CallSummaryObj }) {
                 <div>
                     <SectionHeading>Next Step</SectionHeading>
                     <p className="text-sm text-foreground leading-relaxed">{summary.next_step}</p>
+                </div>
+            )}
+
+            {/* Follow-up tips — actionable guidance, visually emphasized */}
+            {hasFollowUpTips && (
+                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2.5">
+                    <h4 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+                        Follow-up Tips
+                    </h4>
+                    <ul className="space-y-1">
+                        {summary.follow_up_tips!.map((tip, i) => (
+                            <li key={i} className="flex gap-2 text-sm text-foreground leading-relaxed">
+                                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500/60" />
+                                <span>{tip}</span>
+                            </li>
+                        ))}
+                    </ul>
                 </div>
             )}
 

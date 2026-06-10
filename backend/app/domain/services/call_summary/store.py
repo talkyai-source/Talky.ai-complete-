@@ -156,7 +156,11 @@ async def mark_lead_from_summary(
     try:
         if not _outcome_is_lead(str(summary.get("outcome") or "")):
             return False
-        note = (summary.get("next_step") or summary.get("headline") or "").strip()
+        # Prefer the first concrete follow-up tip; fall back to the next-step,
+        # then the headline. follow_up_tips is a list (may be empty).
+        tips = summary.get("follow_up_tips") or []
+        first_tip = (tips[0].strip() if tips and isinstance(tips[0], str) else "")
+        note = (first_tip or summary.get("next_step") or summary.get("headline") or "").strip()
         async with acquire_with_tenant(pool, tenant_id) as conn:
             result = await conn.execute(
                 """

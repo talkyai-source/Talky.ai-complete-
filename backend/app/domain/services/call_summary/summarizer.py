@@ -42,12 +42,14 @@ The object MUST contain exactly these keys (and no others):
   "action_items": [{"item": "<specific task>", "owner": "<agent|caller|user>"}],
   "sentiment": "<positive|neutral|negative + one-word or short note>",
   "next_step": "<single concrete next action>",
+  "follow_up_tips": ["<actionable tip to follow up effectively — what to say or send, the best timing/channel, which objection to address, how to move them forward>"],
   "notable_quotes": ["<short verbatim line(s) that best capture the call>"]
 }
 
 Rules:
 - Every key MUST be present. If a dimension has nothing (no objections, no commitments, etc.) use an empty list [] or "none" — NEVER omit the key.
 - Be comprehensive: capture every objection, commitment, action item, number, name, and date mentioned. Skip nothing material.
+- next_step is the ONE immediate action; follow_up_tips are 2-4 concrete, practical suggestions for how to actually win the follow-up (timing, what to send, which concern to lead with). Make them specific to THIS call, not generic.
 - Keep each string tight (no waffle, no filler).
 - owner in action_items must be one of: agent, caller, user.
 - Respond ONLY with the JSON object. Any extra text will break parsing."""
@@ -66,13 +68,14 @@ EMPTY_SUMMARY: dict = {
     "action_items": [],
     "sentiment": "",
     "next_step": "",
+    "follow_up_tips": [],
     "notable_quotes": [],
 }
 
 _SCHEMA_KEYS = set(EMPTY_SUMMARY.keys())
 
 # Keys whose values must be lists (coerce scalars → single-element list)
-_LIST_KEYS = {"key_points", "objections", "commitments", "action_items", "notable_quotes"}
+_LIST_KEYS = {"key_points", "objections", "commitments", "action_items", "follow_up_tips", "notable_quotes"}
 
 # Keys whose values must be strings
 _STR_KEYS = {"headline", "outcome", "what_happened", "sentiment", "next_step"}

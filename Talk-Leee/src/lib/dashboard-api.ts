@@ -107,6 +107,8 @@ export interface CallSummaryObj {
     action_items: Array<{ item: string; owner: string }>;
     sentiment: string;
     next_step: string;
+    /** Actionable follow-up suggestions from the post-call AI (timing, what to send, which concern to lead with). */
+    follow_up_tips?: string[];
     notable_quotes: string[];
 }
 
