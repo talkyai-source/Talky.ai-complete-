@@ -30,7 +30,7 @@ from datetime import datetime
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from fastapi.encoders import jsonable_encoder
-from groq import AsyncGroq
+from groq import APIError, AsyncGroq
 
 from app.infrastructure.assistant.agent import SYSTEM_PROMPT
 from app.infrastructure.assistant.tools.dispatch import dispatch_tool
@@ -42,6 +42,19 @@ logger = logging.getLogger(__name__)
 
 # Safety cap on agent<->tools round-trips for a single user message.
 MAX_TOOL_ITERATIONS = 6
+
+# Retries when the model emits a MALFORMED tool call (Groq code
+# "tool_use_failed", e.g. `<function=name({...})`). This is a known
+# intermittent llama failure mode — the same prompt usually succeeds on the
+# next attempt, so we retry the turn instead of killing the conversation.
+MAX_TOOL_USE_RETRIES = 2
+
+
+def _is_tool_use_failed(exc: APIError) -> bool:
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict) and body.get("code") == "tool_use_failed":
+        return True
+    return "tool_use_failed" in str(body or exc)
 
 
 def _dump_json(data: Any) -> str:
@@ -82,46 +95,65 @@ async def stream_assistant_reply(
     resolved_model = normalize_model(model)
 
     try:
-        for _iteration in range(MAX_TOOL_ITERATIONS):
-            stream = await groq.chat.completions.create(
-                model=resolved_model,
-                messages=convo,
-                tools=GROQ_TOOL_SCHEMAS,
-                tool_choice="auto",
-                temperature=0.7,
-                max_tokens=2000,
-                stream=True,
-            )
+        iterations = 0
+        tool_use_retries = 0
+        while iterations < MAX_TOOL_ITERATIONS:
+            iterations += 1
 
             content_parts: List[str] = []
             # index -> {"id", "name", "arguments"} accumulated across deltas
             tool_calls_acc: Dict[int, Dict[str, str]] = {}
 
-            async for chunk in stream:
-                if not chunk.choices:
+            try:
+                stream = await groq.chat.completions.create(
+                    model=resolved_model,
+                    messages=convo,
+                    tools=GROQ_TOOL_SCHEMAS,
+                    tool_choice="auto",
+                    temperature=0.7,
+                    max_tokens=2000,
+                    stream=True,
+                )
+
+                async for chunk in stream:
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta
+
+                    tool_deltas = getattr(delta, "tool_calls", None)
+                    if tool_deltas:
+                        for tcd in tool_deltas:
+                            idx = tcd.index if tcd.index is not None else 0
+                            acc = tool_calls_acc.setdefault(
+                                idx, {"id": "", "name": "", "arguments": ""}
+                            )
+                            if tcd.id:
+                                acc["id"] = tcd.id
+                            fn = getattr(tcd, "function", None)
+                            if fn is not None:
+                                if getattr(fn, "name", None):
+                                    acc["name"] = fn.name
+                                if getattr(fn, "arguments", None):
+                                    acc["arguments"] += fn.arguments
+
+                    content = getattr(delta, "content", None)
+                    if content:
+                        content_parts.append(content)
+                        yield {"type": "token", "delta": content}
+
+            except APIError as api_exc:
+                # The model emitted a syntactically broken tool call — nothing
+                # was appended to convo, so simply re-run the same turn.
+                if _is_tool_use_failed(api_exc) and tool_use_retries < MAX_TOOL_USE_RETRIES:
+                    tool_use_retries += 1
+                    iterations -= 1  # a retry doesn't consume tool budget
+                    logger.warning(
+                        "stream_assistant_reply: malformed tool call from model "
+                        "(tool_use_failed) — retry %d/%d",
+                        tool_use_retries, MAX_TOOL_USE_RETRIES,
+                    )
                     continue
-                delta = chunk.choices[0].delta
-
-                tool_deltas = getattr(delta, "tool_calls", None)
-                if tool_deltas:
-                    for tcd in tool_deltas:
-                        idx = tcd.index if tcd.index is not None else 0
-                        acc = tool_calls_acc.setdefault(
-                            idx, {"id": "", "name": "", "arguments": ""}
-                        )
-                        if tcd.id:
-                            acc["id"] = tcd.id
-                        fn = getattr(tcd, "function", None)
-                        if fn is not None:
-                            if getattr(fn, "name", None):
-                                acc["name"] = fn.name
-                            if getattr(fn, "arguments", None):
-                                acc["arguments"] += fn.arguments
-
-                content = getattr(delta, "content", None)
-                if content:
-                    content_parts.append(content)
-                    yield {"type": "token", "delta": content}
+                raise
 
             # --- turn finished ---
             if tool_calls_acc:
