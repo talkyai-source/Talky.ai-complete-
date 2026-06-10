@@ -14,6 +14,7 @@ arrives is safe. The loop is bounded by ``MAX_TOOL_ITERATIONS``.
 Yields events (dicts):
   {"type": "token",      "delta": str}    incremental answer text
   {"type": "tool_start", "name": str}     a tool is about to run (status/UX)
+  {"type": "proposal",   "tool", "args", "result"}  edit preview → diff card (terminal)
   {"type": "final",      "content": str}  the full final answer text (terminal)
   {"type": "error",      "content": str}  fatal error (terminal)
 
@@ -35,6 +36,7 @@ from app.infrastructure.assistant.agent import SYSTEM_PROMPT
 from app.infrastructure.assistant.tools.dispatch import dispatch_tool
 from app.infrastructure.assistant.tools.llm_schemas import GROQ_TOOL_SCHEMAS
 from app.infrastructure.assistant.model_config import normalize_model
+from app.infrastructure.assistant.proposals import is_preview_result, PROPOSAL_TOOLS
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +156,18 @@ async def stream_assistant_reply(
                     result = await dispatch_tool(
                         name, tenant_id, db_client, conversation_id, args
                     )
+                    # An edit tool's preview becomes a first-class proposal: end
+                    # the turn here and let the UI's Apply/Reject drive the
+                    # confirm=true apply. We do NOT feed the preview back to the
+                    # model (that produced the fragile "type yes" loop).
+                    if name in PROPOSAL_TOOLS and is_preview_result(result):
+                        yield {
+                            "type": "proposal",
+                            "tool": name,
+                            "args": args,
+                            "result": result,
+                        }
+                        return
                     convo.append(
                         {
                             "role": "tool",

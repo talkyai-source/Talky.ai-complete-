@@ -20,6 +20,11 @@ from app.core.config import get_settings
 from app.core.jwt_security import JWTValidationError, decode_and_validate_token
 from app.infrastructure.assistant.agent import assistant_graph, AgentState
 from app.infrastructure.assistant.model_config import get_tenant_assistant_model
+from app.infrastructure.assistant.proposals import (
+    store_proposal,
+    get_proposal,
+    clear_proposal,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -332,6 +337,49 @@ async def assistant_chat(
             except Exception:
                 pass  # Continue with empty history
         
+        async def persist_conversation(title_hint: str = "") -> None:
+            """Upsert the conversation's message history. Reused by the chat turn
+            and by proposal apply/reject so every path keeps history in sync."""
+            nonlocal current_conversation_id
+            try:
+                if current_conversation_id:
+                    db_client.table("assistant_conversations").update({
+                        "messages": messages_history,
+                        "message_count": len(messages_history),
+                        "last_message_at": datetime.utcnow().isoformat()
+                    }).eq("id", current_conversation_id).execute()
+                else:
+                    title = (title_hint or "New conversation")[:50]
+                    if title_hint and len(title_hint) > 50:
+                        title += "..."
+                    new_conv = db_client.table("assistant_conversations").insert({
+                        "tenant_id": tenant_id,
+                        "user_id": user_id,
+                        "messages": messages_history,
+                        "message_count": len(messages_history),
+                        "title": title,
+                        "started_at": datetime.utcnow().isoformat(),
+                        "last_message_at": datetime.utcnow().isoformat()
+                    }).single().execute()
+
+                    created_conv = _first_row(new_conv.data)
+                    if created_conv and created_conv.get("id"):
+                        current_conversation_id = str(created_conv["id"])
+                        await manager.send_json(connection_id, {
+                            "type": "conversation_created",
+                            "conversation_id": current_conversation_id
+                        })
+                    else:
+                        logger.warning(
+                            "Assistant conversation insert returned unexpected payload shape: %r",
+                            new_conv.data,
+                        )
+            except Exception:
+                logger.exception(
+                    "Failed to persist assistant conversation state",
+                    extra={"conversation_id": current_conversation_id},
+                )
+
         # STEP 4: Main message loop (per FastAPI docs)
         while True:
             # Wait for message from client
@@ -457,6 +505,51 @@ async def assistant_chat(
                             current_msg_id = None
                             buf = []
 
+                        elif etype == "proposal":
+                            # An edit tool returned a preview. Close any open
+                            # preamble bubble, register the proposal server-side,
+                            # and send a diff card for the user to Apply/Reject.
+                            if current_msg_id is not None:
+                                text = "".join(buf)
+                                await manager.send_json(connection_id, {
+                                    "type": "assistant_message_end",
+                                    "id": current_msg_id,
+                                    "content": text,
+                                })
+                                if text.strip():
+                                    messages_history.append({
+                                        "role": "assistant",
+                                        "content": text,
+                                        "timestamp": datetime.utcnow().isoformat(),
+                                    })
+                                current_msg_id = None
+                                buf = []
+                            await manager.send_json(connection_id, {
+                                "type": "assistant_typing", "content": False
+                            })
+                            proposal = store_proposal(
+                                tool=ev.get("tool", ""),
+                                args=ev.get("args") or {},
+                                result=ev.get("result") or {},
+                                tenant_id=tenant_id,
+                                conversation_id=current_conversation_id,
+                            )
+                            await manager.send_json(connection_id, {
+                                "type": "edit_proposal",
+                                "proposal_id": proposal["proposal_id"],
+                                "tool": proposal["tool"],
+                                "note": proposal["note"],
+                                "warnings": proposal["warnings"],
+                                "changes": proposal["changes"],
+                                "campaigns": proposal["campaigns"],
+                            })
+                            # Record a marker so reloading the thread stays coherent.
+                            messages_history.append({
+                                "role": "assistant",
+                                "content": "_Proposed changes — awaiting your approval._",
+                                "timestamp": datetime.utcnow().isoformat(),
+                            })
+
                         elif etype == "error":
                             err_text = ev.get("content", "Sorry, I encountered an error.")
                             await manager.send_json(connection_id, {
@@ -472,42 +565,8 @@ async def assistant_chat(
                             })
 
                     # Persist chat state without breaking the already-sent assistant reply.
-                    try:
-                        if current_conversation_id:
-                            db_client.table("assistant_conversations").update({
-                                "messages": messages_history,
-                                "message_count": len(messages_history),
-                                "last_message_at": datetime.utcnow().isoformat()
-                            }).eq("id", current_conversation_id).execute()
-                        else:
-                            new_conv = db_client.table("assistant_conversations").insert({
-                                "tenant_id": tenant_id,
-                                "user_id": user_id,
-                                "messages": messages_history,
-                                "message_count": len(messages_history),
-                                "title": user_content[:50] + ("..." if len(user_content) > 50 else ""),
-                                "started_at": datetime.utcnow().isoformat(),
-                                "last_message_at": datetime.utcnow().isoformat()
-                            }).single().execute()
+                    await persist_conversation(user_content)
 
-                            created_conv = _first_row(new_conv.data)
-                            if created_conv and created_conv.get("id"):
-                                current_conversation_id = str(created_conv["id"])
-                                await manager.send_json(connection_id, {
-                                    "type": "conversation_created",
-                                    "conversation_id": current_conversation_id
-                                })
-                            else:
-                                logger.warning(
-                                    "Assistant conversation insert returned unexpected payload shape: %r",
-                                    new_conv.data,
-                                )
-                    except Exception:
-                        logger.exception(
-                            "Failed to persist assistant conversation state",
-                            extra={"conversation_id": current_conversation_id},
-                        )
-                
                 except WebSocketDisconnect:
                     # Client disconnected during processing - just exit cleanly
                     logger.info(f"Client {connection_id} disconnected during agent processing")
@@ -528,6 +587,80 @@ async def assistant_chat(
                         "content": False
                     })
             
+            elif data.get("type") == "apply_proposal":
+                proposal_id = data.get("proposal_id")
+                proposal = get_proposal(proposal_id, tenant_id) if isinstance(proposal_id, str) else None
+                if not proposal:
+                    await manager.send_json(connection_id, {
+                        "type": "proposal_result",
+                        "proposal_id": proposal_id,
+                        "applied": False,
+                        "error": "This proposal is no longer available — please ask again.",
+                    })
+                    continue
+                try:
+                    from app.infrastructure.assistant.tools.dispatch import dispatch_tool
+                    apply_args = {**proposal["args"], "confirm": True}
+                    result = await dispatch_tool(
+                        proposal["tool"], tenant_id, db_client,
+                        current_conversation_id, apply_args,
+                    )
+                    applied = (
+                        isinstance(result, dict)
+                        and result.get("applied") is True
+                        and not result.get("error")
+                    )
+                    err = result.get("error") if isinstance(result, dict) else "Apply failed"
+                    clear_proposal(proposal_id)
+                    await manager.send_json(connection_id, {
+                        "type": "proposal_result",
+                        "proposal_id": proposal_id,
+                        "applied": applied,
+                        "changes": proposal["changes"],
+                        "campaigns": proposal["campaigns"],
+                        "error": None if applied else (err or "Could not apply the changes."),
+                    })
+                    note = (
+                        "✓ Applied the proposed changes."
+                        if applied
+                        else f"Could not apply the changes: {err or 'unknown error'}"
+                    )
+                    messages_history.append({
+                        "role": "assistant",
+                        "content": note,
+                        "timestamp": datetime.utcnow().isoformat(),
+                    })
+                    logger.info(
+                        "assistant_proposal_apply tool=%s applied=%s tenant=%s conv=%s",
+                        proposal["tool"], applied, tenant_id, current_conversation_id,
+                    )
+                    await persist_conversation()
+                except Exception as apply_err:
+                    logger.error("apply_proposal failed: %s", apply_err, exc_info=True)
+                    clear_proposal(proposal_id)
+                    await manager.send_json(connection_id, {
+                        "type": "proposal_result",
+                        "proposal_id": proposal_id,
+                        "applied": False,
+                        "error": "Something went wrong applying the changes.",
+                    })
+
+            elif data.get("type") == "reject_proposal":
+                proposal_id = data.get("proposal_id")
+                if isinstance(proposal_id, str):
+                    clear_proposal(proposal_id)
+                await manager.send_json(connection_id, {
+                    "type": "proposal_result",
+                    "proposal_id": proposal_id,
+                    "applied": False,
+                })
+                messages_history.append({
+                    "role": "assistant",
+                    "content": "Okay — I won't make those changes.",
+                    "timestamp": datetime.utcnow().isoformat(),
+                })
+                await persist_conversation()
+
             elif data.get("type") == "ping":
                 await manager.send_json(connection_id, {"type": "pong"})
     

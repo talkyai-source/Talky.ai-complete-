@@ -33,6 +33,13 @@ import { useAuth } from "@/lib/auth-context";
 import { getAssistantWsToken } from "@/lib/assistant-model-api";
 import { AssistantModelPicker } from "./assistant-model-picker";
 import { MarkdownMessage } from "./markdown-message";
+import {
+    EditProposalCard,
+    type ProposalData,
+    type ProposalStatus,
+    type ProposalCampaign,
+} from "./edit-proposal-card";
+import type { DiffChange } from "./diff-view";
 
 /*
  * NOTE on the sidebar offset: this component used to import
@@ -54,6 +61,8 @@ interface ChatMessage {
     role: "user" | "assistant" | "system";
     content: string;
     ts: number;
+    /** Present when this message is an edit-proposal diff card (not text). */
+    proposal?: ProposalData;
 }
 
 type WsStatus = "idle" | "connecting" | "open" | "closed" | "error";
@@ -287,6 +296,13 @@ export function FloatingAssistant() {
                 conversation_id?: string;
                 id?: unknown;
                 delta?: unknown;
+                proposal_id?: string;
+                tool?: string;
+                warnings?: string[];
+                changes?: DiffChange[];
+                campaigns?: ProposalCampaign[];
+                applied?: boolean;
+                error?: string;
             };
             try {
                 payload = JSON.parse(event.data);
@@ -354,6 +370,48 @@ export function FloatingAssistant() {
                         },
                     ]);
                     break;
+                // --- edit proposal (diff accept/reject) ---
+                case "edit_proposal": {
+                    const pid = typeof payload.proposal_id === "string" ? payload.proposal_id : uid();
+                    setTyping(false);
+                    setMessages((prev) => [
+                        ...prev,
+                        {
+                            id: pid,
+                            role: "assistant",
+                            content: "",
+                            ts: Date.now(),
+                            proposal: {
+                                proposalId: pid,
+                                tool: typeof payload.tool === "string" ? payload.tool : "",
+                                warnings: Array.isArray(payload.warnings) ? payload.warnings : undefined,
+                                changes: Array.isArray(payload.changes) ? payload.changes : undefined,
+                                campaigns: Array.isArray(payload.campaigns) ? payload.campaigns : undefined,
+                                status: "pending",
+                            },
+                        },
+                    ]);
+                    break;
+                }
+                case "proposal_result": {
+                    setTyping(false);
+                    const pid = typeof payload.proposal_id === "string" ? payload.proposal_id : null;
+                    if (!pid) break;
+                    const applied = Boolean(payload.applied);
+                    const errText = typeof payload.error === "string" ? payload.error : undefined;
+                    setMessages((prev) =>
+                        prev.map((m) => {
+                            if (m.id !== pid || !m.proposal) return m;
+                            const status: ProposalStatus = applied
+                                ? "applied"
+                                : errText
+                                    ? "error"
+                                    : "rejected";
+                            return { ...m, proposal: { ...m.proposal, status, error: errText } };
+                        }),
+                    );
+                    break;
+                }
                 case "error":
                     setTyping(false);
                     setMessages((prev) => [
@@ -477,6 +535,39 @@ export function FloatingAssistant() {
         }
     }, [connect, input]);
 
+    const sendProposalAction = useCallback(
+        (proposalId: string, action: "apply" | "reject") => {
+            const ws = wsRef.current;
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                // Socket dropped — the proposal lives server-side (in-process),
+                // so a reconnect lets the user try again. Surface a hint.
+                setMessages((prev) => [
+                    ...prev,
+                    {
+                        id: uid(),
+                        role: "system",
+                        content: "Not connected — reconnecting. Try Apply again in a moment.",
+                        ts: Date.now(),
+                    },
+                ]);
+                connect();
+                return;
+            }
+            if (action === "apply") setTyping(true);
+            try {
+                ws.send(
+                    JSON.stringify({
+                        type: action === "apply" ? "apply_proposal" : "reject_proposal",
+                        proposal_id: proposalId,
+                    }),
+                );
+            } catch {
+                setTyping(false);
+            }
+        },
+        [connect],
+    );
+
     const onInputKeyDown = useCallback(
         (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
             if (e.key === "Enter" && !e.shiftKey) {
@@ -551,7 +642,7 @@ export function FloatingAssistant() {
                     {/* Messages */}
                     <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
                         {messages.map((msg) => (
-                            <MessageRow key={msg.id} msg={msg} />
+                            <MessageRow key={msg.id} msg={msg} onProposalAction={sendProposalAction} />
                         ))}
                         {!isAuthed && (
                             <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-3 text-[12px] text-foreground">
@@ -612,7 +703,26 @@ export function FloatingAssistant() {
     );
 }
 
-function MessageRow({ msg }: { msg: ChatMessage }) {
+function MessageRow({
+    msg,
+    onProposalAction,
+}: {
+    msg: ChatMessage;
+    onProposalAction: (id: string, action: "apply" | "reject") => void;
+}) {
+    if (msg.proposal) {
+        return (
+            <div className="flex justify-start">
+                <div className="max-w-[92%]">
+                    <EditProposalCard
+                        proposal={msg.proposal}
+                        onApply={(id) => onProposalAction(id, "apply")}
+                        onReject={(id) => onProposalAction(id, "reject")}
+                    />
+                </div>
+            </div>
+        );
+    }
     if (msg.role === "system") {
         return (
             <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-700 dark:text-amber-300">
