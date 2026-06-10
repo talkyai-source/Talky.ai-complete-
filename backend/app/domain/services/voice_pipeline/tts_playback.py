@@ -154,6 +154,14 @@ class TtsPlayback:
                         "text=%r — ending turn cleanly to avoid pipeline freeze",
                         call_id[:12], _TTS_INTER_CHUNK_TIMEOUT_S, text[:60],
                     )
+                    # Close the provider stream so the Cartesia/ElevenLabs socket
+                    # is released now instead of waiting for GC (the first-stall
+                    # retry path above already does this; the terminal path must
+                    # too, or stalled streams briefly accumulate under load).
+                    try:
+                        await _tts_iter.aclose()
+                    except Exception:
+                        pass
                     break
                 if barge_in_event and barge_in_event.is_set():
                     logger.info(f"Barge-in interrupted TTS for call {call_id}")

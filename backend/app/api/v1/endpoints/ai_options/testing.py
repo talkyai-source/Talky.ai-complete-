@@ -14,7 +14,9 @@ import os
 import time
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from app.api.v1.dependencies import get_current_user
 
 from app.domain.models.ai_config import (
     GEMINI_MODELS,
@@ -47,7 +49,7 @@ router = APIRouter(tags=["AI Options"])
 
 
 @router.post("/test/llm", response_model=LLMTestResponse)
-async def test_llm(request: LLMTestRequest):
+async def test_llm(request: LLMTestRequest, current_user=Depends(get_current_user)):
     """
     Test LLM with a message and measure latency.
 
@@ -132,7 +134,7 @@ async def test_llm(request: LLMTestRequest):
 
 
 @router.post("/test/tts", response_model=TTSTestResponse)
-async def test_tts(request: TTSTestRequest):
+async def test_tts(request: TTSTestRequest, current_user=Depends(get_current_user)):
     """
     Test TTS with text and measure latency.
 

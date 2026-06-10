@@ -6,9 +6,10 @@ import os
 import time
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
+from app.api.v1.dependencies import get_current_user
 from app.domain.models.ai_config import AIProviderConfig, GEMINI_MODELS
 from app.domain.models.conversation import Message, MessageRole
 from app.infrastructure.llm.gemini import GeminiLLMProvider
@@ -32,7 +33,7 @@ class LatencyBenchmarkResponse(BaseModel):
 
 
 @router.post("/benchmark", response_model=LatencyBenchmarkResponse)
-async def run_benchmark(config: AIProviderConfig):
+async def run_benchmark(config: AIProviderConfig, current_user=Depends(get_current_user)):
     """
     Run a full pipeline latency benchmark.
 
