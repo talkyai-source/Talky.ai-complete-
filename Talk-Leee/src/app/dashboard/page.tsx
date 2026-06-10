@@ -507,7 +507,7 @@ function CampaignLinesChart({
     events = [],
 }: {
     buckets: LiveTimeBucket[];
-    campaigns: Array<{ id: string; label: string; color: string; weight: number }>;
+    campaigns: Array<{ id: string; label: string; color: string; byDate: Record<string, number> }>;
     enabled: Record<string, boolean>;
     height?: number;
     peakBands?: Array<{ startMs: number; endMs: number; label: string }>;
@@ -531,15 +531,15 @@ function CampaignLinesChart({
 
     const series = useMemo(() => {
         const active = campaigns.filter((c) => enabled[c.id] !== false);
-        const points = active.map((c) => {
-            return {
-                ...c,
-                values: data.map((b) => {
-                    const total = typeof b.total === "number" ? b.total : 0;
-                    return Math.max(0, total * c.weight);
-                }),
-            };
-        });
+        const points = active.map((c) => ({
+            ...c,
+            // Real per-day count for each bucket (aligned by UTC date), not an
+            // estimate.
+            values: data.map((b) => {
+                const key = new Date(b.startMs).toISOString().slice(0, 10);
+                return Math.max(0, c.byDate[key] ?? 0);
+            }),
+        }));
         const maxVal = Math.max(1, ...points.flatMap((p) => p.values));
         return { active, points, maxVal };
     }, [campaigns, data, enabled]);
@@ -685,6 +685,9 @@ export default function DashboardPage() {
     const [liveSummary, setLiveSummary] = useState<DashboardSummary | null>(null);
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
     const [series, setSeries] = useState<CallSeriesItem[]>([]);
+    // Real hourly buckets (heatmap) + real per-campaign series (campaign lines).
+    const [hourSeries, setHourSeries] = useState<CallSeriesItem[]>([]);
+    const [campaignSeries, setCampaignSeries] = useState<Array<{ campaign_id: string; name: string; series: CallSeriesItem[] }>>([]);
     const [liveBars, setLiveBars] = useState<DualSeriesPoint[]>([]);
     const [streamStatus, setStreamStatus] = useState<"connecting" | "connected" | "retrying" | "offline">("connecting");
     const [, setStreamFailures] = useState(0);
@@ -862,19 +865,15 @@ export default function DashboardPage() {
         const windowStart = activeRange.startMs;
         const rangeMs = Math.max(1, now - windowStart);
 
-        const baseMarkers: LiveChartMarker[] = [
-            { ms: now - Math.round(rangeMs * 0.82), label: "Campaign A start", kind: "campaign-start" },
-            { ms: now - Math.round(rangeMs * 0.46), label: "Campaign A end", kind: "campaign-end" },
-            { ms: now - Math.round(rangeMs * 0.68), label: "Campaign B start", kind: "campaign-start" },
-            { ms: now - Math.round(rangeMs * 0.22), label: "Campaign B end", kind: "campaign-end" },
-            { ms: now - Math.round(rangeMs * 0.12), label: "Deploy", kind: "event" },
-        ];
-        const noteMarkers: LiveChartMarker[] = notes.map((n) => ({ ms: n.ms, label: n.label, kind: "note" }));
-        const markers: LiveChartMarker[] = [...baseMarkers, ...noteMarkers].filter((m) => m.ms >= windowStart && m.ms <= now);
+        // Only real user-placed notes mark the chart now. The old hardcoded
+        // "Campaign A/B start/end", "Deploy", and "Maintenance" markers were
+        // fixed percentages of the visible window — decoration, not real
+        // events — so they're removed.
+        const markers: LiveChartMarker[] = notes
+            .map((n) => ({ ms: n.ms, label: n.label, kind: "note" as const }))
+            .filter((m) => m.ms >= windowStart && m.ms <= now);
 
-        const maintenanceWindows: LiveWindow[] = [
-            { startMs: now - Math.round(rangeMs * 0.6), endMs: now - Math.round(rangeMs * 0.55), label: "Maintenance" },
-        ].filter((w) => w.endMs >= windowStart && w.startMs <= now);
+        const maintenanceWindows: LiveWindow[] = [];
 
         const peaks = liveBuckets
             .map((b) => ({ b, v: typeof b.total === "number" ? b.total : -1 }))
@@ -986,15 +985,22 @@ export default function DashboardPage() {
     async function loadData() {
         try {
             setLoading(true);
-            const [summaryData, campaignsData, analytics] = await Promise.all([
+            // Last 7 days for the hourly heatmap (real time-of-day distribution).
+            const hourFrom = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000)
+                .toISOString().slice(0, 10);
+            const [summaryData, campaignsData, analytics, hourly, byCampaign] = await Promise.all([
                 dashboardApi.getDashboardSummary(),
                 dashboardApi.listCampaigns(),
                 extendedApi.getCallAnalytics(),
+                extendedApi.getCallAnalytics(hourFrom, undefined, "hour"),
+                extendedApi.getCallAnalyticsByCampaign(undefined, undefined, "day"),
             ]);
             setSummary(summaryData);
             setLiveSummary(summaryData);
             setCampaigns(campaignsData.campaigns ?? []);
             setSeries(analytics.series ?? []);
+            setHourSeries(hourly.series ?? []);
+            setCampaignSeries(byCampaign.campaigns ?? []);
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to load dashboard");
         } finally {
@@ -1333,39 +1339,36 @@ export default function DashboardPage() {
 
     const heatRows = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     const heatCols = ["0–3", "3–6", "6–9", "9–12", "12–15", "15–18", "18–21", "21–24"];
-    const seedTotals = safeSeries.length > 0 ? safeSeries.map((s) => s.total_calls) : [0, 0, 0, 0, 0, 0, 0];
-    // Heatmap spreads each day's total evenly across the 8 hour-buckets.
-    // Honest representation given the backend doesn't yet expose hourly
-    // call distribution — flat average rather than a synthesised
-    // sine-wave peak/trough pattern. A real /analytics/calls?group_by=hour
-    // endpoint is tracked in API_CONNECTIVITY_GAP_ANALYSIS.md.
-    const heatValues = heatRows.map((_, ri) =>
-        heatCols.map(() => {
-            const base = seedTotals[ri % seedTotals.length] ?? 0;
-            return Math.max(0, Math.round(base / heatCols.length));
-        })
-    );
+    // Real time-of-day grid from hourly buckets (date = "YYYY-MM-DDTHH:00", UTC).
+    // Row = weekday (Mon..Sun), col = 3-hour band. No more even-spread estimate.
+    const heatValues = heatRows.map(() => heatCols.map(() => 0));
+    for (const h of hourSeries) {
+        const dt = new Date(h.date.endsWith("Z") ? h.date : `${h.date}Z`);
+        if (Number.isNaN(dt.getTime())) continue;
+        const row = (dt.getUTCDay() + 6) % 7; // JS Sun=0 -> Mon=0..Sun=6
+        const col = Math.min(heatCols.length - 1, Math.floor(dt.getUTCHours() / 3));
+        heatValues[row][col] += h.total_calls || 0;
+    }
     const heatMax = Math.max(1, ...heatValues.flat());
 
     const campaignLineSeries = useMemo(() => {
-        const safeCampaigns = campaigns ?? [];
         const palette = ["#2563EB", "#10B981", "#F59E0B", "#A855F7"];
-        const base = safeCampaigns.length > 0
-            ? safeCampaigns.slice(0, 4).map((c, i) => ({
-                id: c.id,
+        // Real per-campaign daily counts, keyed by date for bucket alignment.
+        // No more max_concurrent weight estimate or "Campaign A/B/C" demo rows.
+        const base = campaignSeries.slice(0, 4).map((c, i) => {
+            const byDate: Record<string, number> = {};
+            for (const s of c.series) byDate[s.date] = s.total_calls;
+            return {
+                id: c.campaign_id,
                 label: c.name,
-                weight: Math.max(0.35, Math.min(1.5, (c.max_concurrent_calls ?? 10) / 12)),
                 color: palette[i % palette.length],
-            }))
-            : [
-                { id: "camp-a", label: "Campaign A", weight: 1, color: palette[0] },
-                { id: "camp-b", label: "Campaign B", weight: 0.8, color: palette[1] },
-                { id: "camp-c", label: "Campaign C", weight: 0.6, color: palette[2] },
-            ];
+                byDate,
+            };
+        });
         const enabled: Record<string, boolean> = {};
         for (const c of base) enabled[c.id] = true;
         return { campaigns: base, enabled };
-    }, [campaigns]);
+    }, [campaignSeries]);
 
     const [campaignEnabled, setCampaignEnabled] = useState<Record<string, boolean>>({});
 

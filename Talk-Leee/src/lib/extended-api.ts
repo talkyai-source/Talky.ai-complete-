@@ -91,7 +91,7 @@ class ExtendedApi {
     async getCallAnalytics(
         fromDate?: string,
         toDate?: string,
-        groupBy: "day" | "week" | "month" = "day"
+        groupBy: "hour" | "day" | "week" | "month" = "day"
     ): Promise<CallAnalyticsResponse> {
         const params: Record<string, string> = { group_by: groupBy };
         if (fromDate) params.from = fromDate;
@@ -99,6 +99,23 @@ class ExtendedApi {
 
         return this.client.request({
             path: "/analytics/calls",
+            method: "GET",
+            params,
+        });
+    }
+
+    // Real per-campaign call series (powers the dashboard campaign-lines chart).
+    async getCallAnalyticsByCampaign(
+        fromDate?: string,
+        toDate?: string,
+        groupBy: "hour" | "day" | "week" | "month" = "day"
+    ): Promise<{ campaigns: Array<{ campaign_id: string; name: string; series: Array<{ date: string; total_calls: number; answered: number; failed: number; goal_achieved?: number }> }> }> {
+        const params: Record<string, string> = { group_by: groupBy };
+        if (fromDate) params.from = fromDate;
+        if (toDate) params.to = toDate;
+
+        return this.client.request({
+            path: "/analytics/calls/by-campaign",
             method: "GET",
             params,
         });
