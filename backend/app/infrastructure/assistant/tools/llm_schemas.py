@@ -146,6 +146,23 @@ GROQ_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "report_issue",
+            "description": "File a technical-issue report to the support team. Use when the user is stuck on a technical problem (e.g. calls not going through, voice/provider errors, login/billing/dashboard issues). Gather a clear description first; tenant id, account email and timestamp are added automatically, then it emails support immediately.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string", "description": "Clear description of the problem in the user's words plus any specifics/error text"},
+                    "category": {"type": "string", "description": "calls | voice | billing | login | dashboard | other"},
+                    "severity": {"type": "string", "description": "low | normal | high"},
+                    "contact_email": {"type": "string", "description": "Reporter email for follow-up; omit to use the account email on file"}
+                },
+                "required": ["description"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "initiate_call",
             "description": "Start an outbound call to a phone number",
             "parameters": {

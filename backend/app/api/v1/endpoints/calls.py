@@ -276,22 +276,26 @@ async def list_call_issues(
         None, description="If set, restrict to this campaign."
     ),
     window_minutes: int = Query(
-        180, ge=1, le=1440,
+        60, ge=1, le=1440,
         description="How far back to look for stuck/failed dial attempts.",
     ),
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
-    """Recent dial attempts that DIDN'T place a call, each explained.
+    """Recent dial attempts that DIDN'T place a call, each explained — and
+    only while the problem is STILL true.
 
-    The live-calls panel only shows rows in ``calls`` — but the gates that
-    stop a call (out of minutes, outside hours, campaign stopped, caller-ID
+    The live-calls panel only shows rows in ``calls``; the gates that stop a
+    call (out of minutes, outside hours, campaign stopped, caller-ID
     unverified, TTS warmup failure, rate limits) all fire in the dialer
-    before a ``calls`` row exists. This reads those from ``dialer_jobs`` and
-    maps each reason to a human title + actionable suggestion so the
-    operator can see WHY nothing dialed and how to fix it.
+    before a ``calls`` row exists. This reads those from ``dialer_jobs``.
 
-    One card per phone number (the latest issue), tenant-scoped.
+    Staleness guards — a fixed problem must disappear, not linger:
+      * A later successful call for the same lead supersedes the issue
+        (``NOT EXISTS`` newer ``calls`` row).
+      * ``out_of_minutes`` is dropped if the tenant now has minutes again.
+      * ``campaign_stopped`` is dropped if the campaign is now running.
+    One card per phone number (the latest unresolved attempt), tenant-scoped.
     """
     from datetime import datetime, timezone
     from app.domain.services.call_issue_advice import advise
@@ -306,26 +310,27 @@ async def list_call_issues(
         args.append(campaign_id)
         where_campaign = f" AND dj.campaign_id = ${len(args)}"
 
-    # DISTINCT ON (phone_number) → one (latest) issue per number. Exclude
-    # statuses that mean the call DID go through or is actively running, so
-    # a since-resolved job doesn't linger as a phantom issue.
+    # DISTINCT ON (phone_number) → one (latest) issue per number. The
+    # NOT EXISTS drops any number that has since placed a real call (the
+    # dialer only writes a `calls` row on a successful originate), so
+    # "the call is going through now" never shows a stale failure.
     sql = f"""
         SELECT DISTINCT ON (dj.phone_number)
-               dj.id, dj.phone_number, dj.campaign_id, dj.status,
+               dj.id, dj.phone_number, dj.campaign_id, dj.lead_id, dj.status,
                dj.last_outcome, dj.last_error, dj.failure_category,
                dj.failure_reason, dj.attempt_number, dj.updated_at,
-               camp.name AS campaign_name
+               camp.name AS campaign_name, camp.status AS campaign_status
         FROM   dialer_jobs dj
         LEFT   JOIN campaigns camp ON camp.id = dj.campaign_id
         WHERE  dj.tenant_id = $1
           AND  dj.updated_at >= NOW() - make_interval(mins => $2)
-          -- Only exclude terminal-SUCCESS states. We deliberately keep
-          -- 'processing' etc.: a job stuck there WITH a failure_reason is
-          -- exactly a problem to surface. Healthy in-flight calls have no
-          -- failure_reason (cleared on successful originate) so the filter
-          -- below excludes them anyway.
           AND  dj.status NOT IN ('completed', 'goal_achieved')
           AND  (dj.failure_reason IS NOT NULL OR dj.last_error IS NOT NULL)
+          AND  NOT EXISTS (
+                 SELECT 1 FROM calls c2
+                 WHERE c2.lead_id = dj.lead_id
+                   AND c2.created_at > dj.updated_at
+               )
           {where_campaign}
         ORDER BY dj.phone_number, dj.updated_at DESC
     """
@@ -337,9 +342,25 @@ async def list_call_issues(
         logger.error("list_call_issues failed: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to list call issues")
 
+    # Re-validate the two account-level conditions LIVE so a fixed problem
+    # (added minutes, started the campaign) clears immediately instead of
+    # waiting out the window. Minutes is one cheap lookup for the tenant.
+    minutes_ok = True
+    try:
+        from app.domain.services.minutes_quota import tenant_minutes_status
+        minutes_ok = not (await tenant_minutes_status(current_user.tenant_id)).exhausted
+    except Exception:
+        minutes_ok = True  # fail open — never hide a real issue on a lookup glitch
+
     items: List[CallIssueItem] = []
     for r in rows:
         reason = r["failure_reason"] or r["last_error"] or r["status"]
+        low = (reason or "").lower()
+        # Drop resolved account-level conditions.
+        if "out_of_minutes" in low and minutes_ok:
+            continue
+        if "campaign_stopped" in low and (r["campaign_status"] in ("running", "active")):
+            continue
         category = r["failure_category"]
         adv = advise(reason, category=category)
         items.append(CallIssueItem(

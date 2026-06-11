@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 # Tools that accept a ``conversation_id`` kwarg (for action attribution /
 # audit). Every other tool is called with just (tenant_id, db_client, **args).
-_CONVO_AWARE = {"send_email", "send_sms", "initiate_call", "start_campaign"}
+_CONVO_AWARE = {"send_email", "send_sms", "initiate_call", "start_campaign", "report_issue"}
 
 
 async def dispatch_tool(

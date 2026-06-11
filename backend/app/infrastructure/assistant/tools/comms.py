@@ -2,12 +2,144 @@
 Email and SMS communication tools for the assistant agent.
 """
 import logging
+import os
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic import BaseModel, Field
 from app.core.postgres_adapter import Client
 
 logger = logging.getLogger(__name__)
+
+
+# Where assistant-filed technical-issue reports go. Override per-deploy with
+# SUPPORT_REPORT_EMAIL. Default is the operator's account email (chosen over a
+# look-alike address to avoid leaking tenant data to the wrong inbox).
+_DEFAULT_SUPPORT_EMAIL = "allestateestimation@gmail.com"
+
+
+def _support_report_email() -> str:
+    return (os.getenv("SUPPORT_REPORT_EMAIL") or _DEFAULT_SUPPORT_EMAIL).strip()
+
+
+class ReportIssueInput(BaseModel):
+    """Input for the report_issue tool — files a technical-issue report to support."""
+    description: str = Field(
+        ...,
+        description="Clear description of the technical problem the user is facing, in their words plus any specifics (what they were doing, what failed, error text).",
+    )
+    category: Optional[str] = Field(
+        None,
+        description="Coarse area: calls | voice | billing | login | dashboard | other.",
+    )
+    severity: str = Field(
+        "normal",
+        description="How blocking it is: low | normal | high.",
+    )
+    contact_email: Optional[str] = Field(
+        None,
+        description="The reporter's email for follow-up. Omit to use the account's email on file.",
+    )
+
+
+async def _resolve_reporter_email(tenant_id: str, db_client: Client) -> Optional[str]:
+    """Best-effort: the tenant's account email (prefers a tenant_admin)."""
+    try:
+        rows = (
+            db_client.table("user_profiles")
+            .select("email, role")
+            .eq("tenant_id", tenant_id)
+            .limit(10)
+            .execute()
+            .data
+        ) or []
+        if not rows:
+            return None
+        admin = next((r for r in rows if (r.get("role") or "") == "tenant_admin"), None)
+        chosen = admin or rows[0]
+        return (chosen.get("email") or "").strip() or None
+    except Exception as e:  # noqa: BLE001
+        logger.warning("resolve reporter email failed: %s", e)
+        return None
+
+
+async def report_issue(
+    tenant_id: str,
+    db_client: Client,
+    description: str,
+    category: Optional[str] = None,
+    severity: str = "normal",
+    contact_email: Optional[str] = None,
+    conversation_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """File a technical-issue report to the support inbox.
+
+    Sends IMMEDIATELY (this is a support ticket the user is asking us to log,
+    not a mutation of their data). Auto-includes the tenant id, the reporter's
+    email (explicit or resolved from the account), category, severity, a
+    timestamp, and the description. Goes to ``SUPPORT_REPORT_EMAIL``.
+    """
+    if not (description or "").strip():
+        return {"success": False, "error": "Need a description of the issue before I can report it."}
+
+    reporter = (contact_email or "").strip() or await _resolve_reporter_email(tenant_id, db_client)
+    sev = (severity or "normal").strip().lower()
+    cat = (category or "other").strip().lower()
+    support_to = _support_report_email()
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    subject = f"[Talky issue] {sev.upper()} · {cat} · tenant {str(tenant_id)[:8]}"
+    body = (
+        "A technical issue was reported via the in-app assistant.\n\n"
+        f"Severity:    {sev}\n"
+        f"Category:    {cat}\n"
+        f"Tenant ID:   {tenant_id}\n"
+        f"Reporter:    {reporter or 'unknown (no email on file)'}\n"
+        f"Conversation:{conversation_id or '-'}\n"
+        f"Reported at: {ts}\n\n"
+        "Description:\n"
+        f"{description.strip()}\n"
+    )
+
+    try:
+        from app.services.email_service import get_email_service, EmailNotConnectedError
+        from app.infrastructure.connectors.email.smtp import SMTPConnector
+
+        service = get_email_service(db_client)
+        try:
+            await service.send_email(
+                tenant_id=tenant_id,
+                to=[support_to],
+                subject=subject,
+                body=body,
+                triggered_by="assistant_report_issue",
+                conversation_id=conversation_id,
+            )
+        except EmailNotConnectedError:
+            if not SMTPConnector.is_configured():
+                return {
+                    "success": False,
+                    "error": "Support email isn't configured on the server, so I couldn't file the report. Please contact support directly.",
+                }
+            smtp = SMTPConnector()
+            await smtp.send_email(to=[support_to], subject=subject, body=body)
+
+        logger.info(
+            "assistant report_issue filed tenant=%s sev=%s cat=%s -> %s",
+            tenant_id, sev, cat, support_to,
+        )
+        return {
+            "success": True,
+            "message": (
+                "Thanks — I've sent your issue to our support team. "
+                "They'll follow up"
+                + (f" at {reporter}." if reporter else ".")
+            ),
+            "severity": sev,
+            "category": cat,
+        }
+    except Exception as e:  # noqa: BLE001
+        logger.error("report_issue failed: %s", e)
+        return {"success": False, "error": "I couldn't file the report just now. Please try again, or contact support directly."}
 
 
 class SendEmailInput(BaseModel):

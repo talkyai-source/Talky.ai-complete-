@@ -30,8 +30,10 @@ from app.infrastructure.assistant.tools.calls import (
 from app.infrastructure.assistant.tools.comms import (
     SendEmailInput,
     SendSMSInput,
+    ReportIssueInput,
     send_email,
     send_sms,
+    report_issue,
 )
 from app.infrastructure.assistant.tools.meetings import (
     CheckAvailabilityInput,
@@ -149,6 +151,17 @@ ACTION_TOOLS = {
         "description": "Send an SMS to specified phone numbers",
         "input_schema": SendSMSInput
     },
+    "report_issue": {
+        "function": report_issue,
+        "description": (
+            "File a technical-issue report to the support team when the user is "
+            "stuck on a technical problem (calls not going through, voice/provider "
+            "errors, login/billing/dashboard problems). Gather a clear description "
+            "first; it auto-includes the tenant id, the account email, and a "
+            "timestamp, then emails support immediately."
+        ),
+        "input_schema": ReportIssueInput
+    },
     "initiate_call": {
         "function": initiate_call,
         "description": "Start an outbound call to a phone number",
@@ -260,6 +273,8 @@ __all__ = [
     # Action tool functions
     "send_email",
     "send_sms",
+    "report_issue",
+    "ReportIssueInput",
     "initiate_call",
     "start_campaign",
     "check_availability",
