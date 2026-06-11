@@ -922,6 +922,11 @@ class DialerWorker:
                 if call_id:
                     data["call_id"] = call_id
                     data["processed_at"] = datetime.now(timezone.utc)
+                    # A successful originate supersedes any earlier failure on
+                    # this job — clear the stale reason so the Call Issues
+                    # panel doesn't show a phantom problem for a now-live call.
+                    data["failure_reason"] = None
+                    data["last_error"] = None
                 if error:
                     data["last_error"] = error
                 # Persist the skip/block reason too (was previously dropped),

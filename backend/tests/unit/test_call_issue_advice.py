@@ -14,6 +14,7 @@ from app.domain.services.call_issue_advice import advise
     ("outside_time_window_09:00_19:00", "schedule", "warning"),
     ("max_concurrent_calls_reached_10/10", "concurrency", "warning"),
     ("pre_originate_warmup_timeout", "voice", "error"),
+    ("voice_pipeline_unavailable", "voice", "error"),
     ("service_unavailable", "voice", "error"),
     ("call_guard_blocked", "safety", "error"),
     ("call_guard_throttled", "safety", "warning"),

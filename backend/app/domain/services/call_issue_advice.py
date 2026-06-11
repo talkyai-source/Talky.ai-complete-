@@ -94,6 +94,11 @@ _RULES: list[tuple[str, IssueAdvice]] = [
         "error", "voice",
     )),
     # Generic pre-warm fallbacks (no provider named).
+    ("voice_pipeline_unavailable", IssueAdvice(
+        "Voice provider not ready",
+        "The voice pipeline (text-to-speech / speech-to-text) wasn't ready in time, so the call was held back to avoid dead air on pickup. Check the campaign's voice-provider API key/health, or switch the provider (e.g. to Cartesia). It will keep retrying automatically.",
+        "error", "voice",
+    )),
     ("pre_originate_warmup", IssueAdvice(
         "Voice provider not ready",
         "The voice pipeline (text-to-speech / speech-to-text) didn't become ready in time, so the call was held back to avoid dead air on pickup. Check the campaign's voice-provider API key/health, or switch the provider (e.g. to Cartesia).",

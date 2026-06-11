@@ -319,9 +319,12 @@ async def list_call_issues(
         LEFT   JOIN campaigns camp ON camp.id = dj.campaign_id
         WHERE  dj.tenant_id = $1
           AND  dj.updated_at >= NOW() - make_interval(mins => $2)
-          AND  dj.status NOT IN (
-                 'completed', 'goal_achieved', 'processing', 'in_progress', 'dialing'
-               )
+          -- Only exclude terminal-SUCCESS states. We deliberately keep
+          -- 'processing' etc.: a job stuck there WITH a failure_reason is
+          -- exactly a problem to surface. Healthy in-flight calls have no
+          -- failure_reason (cleared on successful originate) so the filter
+          -- below excludes them anyway.
+          AND  dj.status NOT IN ('completed', 'goal_achieved')
           AND  (dj.failure_reason IS NOT NULL OR dj.last_error IS NOT NULL)
           {where_campaign}
         ORDER BY dj.phone_number, dj.updated_at DESC
