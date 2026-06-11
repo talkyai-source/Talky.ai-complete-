@@ -108,6 +108,30 @@ class Direction(str, enum.Enum):
 # Configuration dataclass — passed by each endpoint
 # ---------------------------------------------------------------------------
 
+# Cached providers.yaml flux keyterms — read once. Used as the default for any
+# session that doesn't set stt_keyterms explicitly, so the configured list is
+# live on both telephony and ask-AI. The env var DEEPGRAM_FLUX_KEYTERMS still
+# overrides at provider initialize() time.
+_FLUX_KEYTERMS_CACHE: Optional[list] = None
+
+
+def _default_flux_keyterms() -> list:
+    """Load Flux keyterms from providers.yaml (cached). Fail-open to []."""
+    global _FLUX_KEYTERMS_CACHE
+    if _FLUX_KEYTERMS_CACHE is None:
+        try:
+            from app.core.config import ConfigManager
+
+            stt_cfg = ConfigManager().get_provider_config("stt") or {}
+            raw = stt_cfg.get("keyterms") or []
+            _FLUX_KEYTERMS_CACHE = [
+                str(t).strip() for t in raw if str(t).strip()
+            ]
+        except Exception as exc:  # config missing/malformed — no biasing
+            logger.warning("flux keyterms load failed: %s", exc)
+            _FLUX_KEYTERMS_CACHE = []
+    return _FLUX_KEYTERMS_CACHE
+
 
 @dataclass
 class VoiceSessionConfig:
@@ -125,6 +149,11 @@ class VoiceSessionConfig:
     stt_eot_threshold: float = 0.7
     stt_eager_eot_threshold: Optional[float] = None
     stt_eot_timeout_ms: int = 5000
+    # Keyterm prompting — biases Flux toward expected vocabulary (email
+    # domains, spelling connector words). Empty = fall back to the
+    # providers.yaml flux keyterms (see _default_flux_keyterms). Applies to
+    # BOTH telephony and ask-AI since both build STT via _create_stt_provider.
+    stt_keyterms: list[str] = field(default_factory=list)
 
     # Turn-0 floor — see voice_pipeline_service._should_reject_turn_0.
     # Per-tenant overrides come through the voice_tuning resolver at
@@ -785,6 +814,10 @@ class VoiceOrchestrator:
             "eot_threshold": config.stt_eot_threshold,
             "eager_eot_threshold": config.stt_eager_eot_threshold,
             "eot_timeout_ms": config.stt_eot_timeout_ms,
+            # Per-session keyterms win; otherwise fall back to the configured
+            # providers.yaml list. Env DEEPGRAM_FLUX_KEYTERMS overrides both
+            # inside initialize(). Covers telephony AND ask-AI (shared path).
+            "keyterms": config.stt_keyterms or _default_flux_keyterms(),
         }
         await primary.initialize(primary_init)
 

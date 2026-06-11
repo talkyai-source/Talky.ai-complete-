@@ -47,3 +47,21 @@ async def test_keyterm_params_are_url_encoded():
     params = p._keyterm_params()
     # spaces must be percent-encoded so the query string stays valid
     assert params == [("keyterm", "dot%20com"), ("keyterm", "at%20sign")]
+
+
+def test_orchestrator_loads_keyterms_from_providers_yaml():
+    """The orchestrator default (used by BOTH telephony and ask-AI) is sourced
+    from providers.yaml, so the configured list is live on every session."""
+    from app.domain.services import voice_orchestrator as vo
+
+    vo._FLUX_KEYTERMS_CACHE = None  # force a fresh read
+    terms = vo._default_flux_keyterms()
+    assert isinstance(terms, list) and terms, "expected non-empty keyterms"
+    assert any("gmail.com" == t.lower() for t in terms)
+
+
+def test_voice_session_config_defaults_to_empty_keyterms():
+    """Per-session keyterms default empty so the providers.yaml list is used."""
+    from app.domain.services.voice_orchestrator import VoiceSessionConfig
+
+    assert VoiceSessionConfig().stt_keyterms == []
