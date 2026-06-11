@@ -22,6 +22,17 @@ export interface DashboardSummary {
     outcome_breakdown?: Record<string, number>;
 }
 
+// Tenant monthly call-minute quota — drives the remaining-minutes display
+// and the disabled state of the Start button. `unlimited` (allocated 0)
+// is the field to branch on; remaining_minutes is 0 in that case.
+export interface MinutesStatus {
+    allocated: number;
+    used_minutes: number;
+    remaining_minutes: number;
+    unlimited: boolean;
+    exhausted: boolean;
+}
+
 // Campaign Types
 export interface Campaign {
     id: string;
@@ -263,6 +274,13 @@ class DashboardApi {
             path: `/campaigns/${id}/start`,
             method: "POST",
             body: { first_speaker: opts?.first_speaker ?? "agent" },
+        });
+    }
+
+    async getMinutesStatus(): Promise<MinutesStatus> {
+        return this.client.request({
+            path: `/campaigns/minutes/status`,
+            method: "GET",
         });
     }
 

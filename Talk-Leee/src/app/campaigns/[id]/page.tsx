@@ -6,7 +6,7 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { dashboardApi, Campaign, Contact } from "@/lib/dashboard-api";
+import { dashboardApi, Campaign, Contact, MinutesStatus } from "@/lib/dashboard-api";
 import { SmartCsvImport } from "@/components/campaigns/smart-csv-import";
 import { ScriptCard } from "@/components/campaigns/script-card";
 import { LiveCallsPanel } from "@/components/campaigns/live-calls-panel";
@@ -27,6 +27,8 @@ import {
     Loader2,
     Trash2,
     Search,
+    Clock,
+    AlertTriangle,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -73,6 +75,11 @@ export default function CampaignDetailPage() {
     const [loading, setLoading] = useState(true);
     const [actionLoading, setActionLoading] = useState(false);
     const [error, setError] = useState("");
+    const [minutes, setMinutes] = useState<MinutesStatus | null>(null);
+
+    // Out of plan minutes ⇒ the backend will 402 a Start, so we disable the
+    // button up front and explain why. `unlimited` plans are never blocked.
+    const outOfMinutes = !!minutes && !minutes.unlimited && minutes.exhausted;
 
     // CSV Upload (smart import modal)
     const [csvModalOpen, setCsvModalOpen] = useState(false);
@@ -110,14 +117,17 @@ export default function CampaignDetailPage() {
     const loadData = useCallback(async () => {
         try {
             setLoading(true);
-            const [campaignData, contactsData, statsData] = await Promise.all([
+            const [campaignData, contactsData, statsData, minutesData] = await Promise.all([
                 dashboardApi.getCampaign(campaignId),
                 dashboardApi.listContacts(campaignId),
                 dashboardApi.getCampaignStats(campaignId),
+                // Best-effort — a quota hiccup must not blank the whole page.
+                dashboardApi.getMinutesStatus().catch(() => null),
             ]);
             setCampaign(campaignData.campaign);
             setContacts(contactsData.items);
             setStats(statsData);
+            setMinutes(minutesData);
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to load campaign");
         } finally {
@@ -132,6 +142,15 @@ export default function CampaignDetailPage() {
     }, [campaignId, loadData]);
 
     function handleStartClick() {
+        // Out of plan minutes — don't even open the modal; the backend
+        // would 402 anyway. The banner above the button explains why.
+        if (outOfMinutes) {
+            alert(
+                `You're out of plan minutes (${minutes?.used_minutes}/${minutes?.allocated} used this month). ` +
+                "Add minutes or upgrade your plan to start campaigns.",
+            );
+            return;
+        }
         // Default back to "agent" every time so a previous choice doesn't
         // silently carry over into the next Start.
         setFirstSpeaker("agent");
@@ -145,7 +164,15 @@ export default function CampaignDetailPage() {
             await dashboardApi.startCampaign(campaignId, { first_speaker: firstSpeaker });
             await loadData();
         } catch (err) {
-            alert(err instanceof Error ? err.message : "Failed to start campaign");
+            // The backend's out-of-minutes 402 ships a structured detail
+            // ({ message, ... }) the http client exposes as `.details`.
+            const detail = (err as { details?: { message?: string } })?.details;
+            const msg =
+                (detail && typeof detail.message === "string" && detail.message) ||
+                (err instanceof Error ? err.message : "Failed to start campaign");
+            alert(msg);
+            // Refresh quota so the button/banner reflect reality after a 402.
+            void loadData();
         } finally {
             setActionLoading(false);
         }
@@ -270,13 +297,34 @@ export default function CampaignDetailPage() {
                             )}
                         </div>
 
-                        <div className="flex gap-2">
+                        <div className="flex items-center gap-2">
+                            {/* Live minutes remaining — visible right next to the
+                                control that consumes them. Amber when low, red at 0. */}
+                            {minutes && !minutes.unlimited && (
+                                <span
+                                    title={`${minutes.used_minutes} of ${minutes.allocated} plan minutes used this month`}
+                                    className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium border ${
+                                        outOfMinutes
+                                            ? "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20"
+                                            : minutes.remaining_minutes <= 30
+                                              ? "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/20"
+                                              : "bg-muted/40 text-muted-foreground border-border"
+                                    }`}
+                                >
+                                    <Clock className="w-3.5 h-3.5" />
+                                    {minutes.remaining_minutes} min left
+                                </span>
+                            )}
                             <Button variant="outline" onClick={() => router.push(`/campaigns/${campaignId}/edit`)} disabled={actionLoading}>
                                 <Pencil className="w-4 h-4" />
                                 Edit
                             </Button>
                             {campaign.status === "draft" || campaign.status === "paused" || campaign.status === "stopped" ? (
-                                <Button onClick={handleStartClick} disabled={actionLoading}>
+                                <Button
+                                    onClick={handleStartClick}
+                                    disabled={actionLoading || outOfMinutes}
+                                    title={outOfMinutes ? "Out of plan minutes — add minutes to start" : undefined}
+                                >
                                     <Play className="w-4 h-4" />
                                     Start
                                 </Button>
@@ -294,6 +342,23 @@ export default function CampaignDetailPage() {
                             ) : null}
                         </div>
                     </motion.div>
+
+                    {/* Out-of-minutes banner — the campaign can't be started
+                        until the tenant has plan minutes again. */}
+                    {outOfMinutes && (
+                        <div className="content-card border-red-500/30 bg-red-500/5 flex items-start gap-3">
+                            <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                            <div className="text-sm">
+                                <p className="font-medium text-red-600 dark:text-red-400">
+                                    Out of plan minutes
+                                </p>
+                                <p className="text-muted-foreground mt-0.5">
+                                    You&apos;ve used {minutes?.used_minutes} of your {minutes?.allocated} monthly
+                                    minutes. Campaigns can&apos;t be started until you add minutes or upgrade your plan.
+                                </p>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Stats */}
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">

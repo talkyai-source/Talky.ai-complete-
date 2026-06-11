@@ -34,6 +34,15 @@ export default function CampaignsPage() {
             );
             notificationsStore.create({ type: "success", title: "Campaign resumed", message: "Campaign started successfully." });
         },
+        onError: (err) => {
+            // The out-of-minutes 402 ships a structured detail the http
+            // client exposes as `.details`; fall back to the plain message.
+            const detail = (err as { details?: { message?: string } })?.details;
+            const message =
+                (detail && typeof detail.message === "string" && detail.message) ||
+                (err instanceof Error ? err.message : "Could not start the campaign.");
+            notificationsStore.create({ type: "error", title: "Can't start campaign", message });
+        },
     });
 
     const stop = useMutation({
@@ -49,7 +58,13 @@ export default function CampaignsPage() {
     }
 
     async function handleResume(id: string) {
-        await resume.mutateAsync(id);
+        // onError already shows the toast (e.g. out-of-minutes 402); swallow
+        // the rejection so it doesn't bubble as an unhandled promise error.
+        try {
+            await resume.mutateAsync(id);
+        } catch {
+            /* handled in mutation onError */
+        }
     }
 
     async function handleDelete(id: string) {
