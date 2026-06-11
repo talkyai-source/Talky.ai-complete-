@@ -11,9 +11,43 @@ restarts.
 from __future__ import annotations
 
 import random
-from typing import Sequence
+from typing import Mapping, Optional, Sequence
 
 MAX_POOL_SIZE = 3
+
+
+def pick_agent_name_for_voice(
+    pool: Sequence[str],
+    genders: Optional[Mapping[str, str]],
+    voice_gender: Optional[str],
+) -> str:
+    """Pick an agent name whose gender matches the selected voice.
+
+    Resolution order:
+      1. If we know the voice gender AND have name→gender tags, pick at
+         random from the pool names tagged with that gender.
+      2. If the pool has no name of that gender (or no tags), fall back to a
+         built-in name of the voice's gender — so the voice never speaks a
+         clearly-mismatched name.
+      3. If the voice gender is unknown, fall back to the legacy random pick
+         over the whole pool.
+
+    Never raises — on any inconsistency it degrades to a plain pool pick.
+    """
+    vg = (voice_gender or "").strip().lower()
+    if vg in ("male", "female"):
+        gmap = {str(k).strip().lower(): str(v).strip().lower() for k, v in (genders or {}).items()}
+        matching = [n for n in pool if n and gmap.get(str(n).strip().lower()) == vg]
+        if matching:
+            return random.choice(matching)
+        # No matching-gender name configured — use a built-in gendered name.
+        try:
+            from app.domain.services.global_ai_config import get_random_agent_name
+            return get_random_agent_name(vg)
+        except Exception:
+            pass
+    # Unknown voice gender (or fallback failed) → legacy behaviour.
+    return pick_agent_name(pool)
 
 
 def pick_agent_name(pool: Sequence[str]) -> str:

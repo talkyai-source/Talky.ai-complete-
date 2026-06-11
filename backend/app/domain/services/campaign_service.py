@@ -232,11 +232,26 @@ class CampaignService:
             # rotator itself is provider-agnostic (see
             # app.services.scripts.prompts.pick_agent_name).
             agent_names_pool: List[str] = []
+            agent_name_genders: Dict[str, str] = {}
             script_cfg = campaign.get("script_config") if isinstance(campaign, dict) else None
             if isinstance(script_cfg, dict):
                 raw_pool = script_cfg.get("agent_names") or []
                 if isinstance(raw_pool, list):
                     agent_names_pool = [str(n).strip() for n in raw_pool if str(n).strip()]
+                raw_genders = script_cfg.get("agent_name_genders") or {}
+                if isinstance(raw_genders, dict):
+                    agent_name_genders = {str(k): str(v) for k, v in raw_genders.items()}
+
+            # Resolve the campaign voice's gender ONCE so each picked agent
+            # name matches the voice (male voice → male name, etc.).
+            voice_gender = None
+            try:
+                from app.domain.services.global_ai_config import resolve_voice_gender
+                voice_gender = resolve_voice_gender(
+                    campaign.get("voice_id") if isinstance(campaign, dict) else None
+                )
+            except Exception as exc:
+                logger.debug("voice gender resolve failed campaign=%s err=%s", campaign_id, exc)
 
             for lead in leads:
                 job, job_record = self._create_job_for_lead(
@@ -246,6 +261,8 @@ class CampaignService:
                     priority_override=priority_override,
                     first_speaker=first_speaker,
                     agent_names_pool=agent_names_pool,
+                    agent_name_genders=agent_name_genders,
+                    voice_gender=voice_gender,
                 )
 
                 await queue_service.enqueue_job(job)
@@ -433,6 +450,8 @@ class CampaignService:
         priority_override: Optional[int] = None,
         first_speaker: Literal["agent", "user"] = "agent",
         agent_names_pool: Optional[List[str]] = None,
+        agent_name_genders: Optional[Dict[str, str]] = None,
+        voice_gender: Optional[str] = None,
     ) -> tuple:
         """
         Create a DialerJob and database record for a lead.
@@ -454,8 +473,10 @@ class CampaignService:
         agent_name: Optional[str] = None
         if agent_names_pool:
             try:
-                from app.services.scripts.prompts import pick_agent_name
-                agent_name = pick_agent_name(agent_names_pool)
+                from app.services.scripts.prompts import pick_agent_name_for_voice
+                agent_name = pick_agent_name_for_voice(
+                    agent_names_pool, agent_name_genders, voice_gender,
+                )
             except Exception as exc:
                 logger.warning(
                     "agent_name_pick_failed campaign=%s pool=%s err=%s",

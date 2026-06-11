@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -30,6 +30,14 @@ class CampaignCreateRequest(BaseModel):
     goal: Optional[str] = None
     persona_type: Literal["lead_gen", "customer_support", "receptionist"]
     agent_names: List[str] = Field(..., min_length=1)
+    agent_name_genders: Optional[Dict[str, str]] = Field(
+        default=None,
+        description=(
+            "Optional map of agent name -> 'male'|'female'. Used to pick a "
+            "name matching the selected voice's gender on each call. Names "
+            "without an entry are treated as unknown gender."
+        ),
+    )
     company_name: str = Field(..., min_length=1)
     campaign_slots: dict = Field(default_factory=dict)
     knowledge_driven: bool = Field(
@@ -55,6 +63,19 @@ class CampaignCreateRequest(BaseModel):
         from app.services.scripts.prompts import validate_pool
 
         return validate_pool(v)
+
+    @field_validator("agent_name_genders")
+    @classmethod
+    def _validate_agent_name_genders(cls, v: Optional[Dict[str, str]]) -> Optional[Dict[str, str]]:
+        if not v:
+            return v
+        out: Dict[str, str] = {}
+        for name, gender in v.items():
+            g = str(gender).strip().lower()
+            if g not in ("male", "female"):
+                raise ValueError(f"agent_name_genders[{name!r}] must be 'male' or 'female'.")
+            out[str(name).strip()] = g
+        return out
 
 
 class CampaignUpdateRequest(BaseModel):
@@ -71,6 +92,14 @@ class CampaignUpdateRequest(BaseModel):
     goal: Optional[str] = None
     persona_type: Literal["lead_gen", "customer_support", "receptionist"]
     agent_names: List[str] = Field(..., min_length=1)
+    agent_name_genders: Optional[Dict[str, str]] = Field(
+        default=None,
+        description=(
+            "Optional map of agent name -> 'male'|'female'. Used to pick a "
+            "name matching the selected voice's gender on each call. Names "
+            "without an entry are treated as unknown gender."
+        ),
+    )
     company_name: str = Field(..., min_length=1)
     campaign_slots: dict = Field(default_factory=dict)
     knowledge_driven: bool = Field(
@@ -96,6 +125,19 @@ class CampaignUpdateRequest(BaseModel):
         from app.services.scripts.prompts import validate_pool
 
         return validate_pool(v)
+
+    @field_validator("agent_name_genders")
+    @classmethod
+    def _validate_agent_name_genders(cls, v: Optional[Dict[str, str]]) -> Optional[Dict[str, str]]:
+        if not v:
+            return v
+        out: Dict[str, str] = {}
+        for name, gender in v.items():
+            g = str(gender).strip().lower()
+            if g not in ("male", "female"):
+                raise ValueError(f"agent_name_genders[{name!r}] must be 'male' or 'female'.")
+            out[str(name).strip()] = g
+        return out
 
 
 class CampaignPromptPreviewRequest(BaseModel):

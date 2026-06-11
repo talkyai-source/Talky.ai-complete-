@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { dashboardApi, PersonaType } from "@/lib/dashboard-api";
 import { PERSONAS, parseAgentNames } from "@/lib/campaign-personas";
 import { VoiceProviderPicker } from "@/components/campaigns/voice-provider-picker";
+import { AgentNameGender, pruneGenders } from "@/components/campaigns/agent-name-gender";
 
 export type CampaignBasicsEditorInitial = {
     name: string;
@@ -26,6 +27,7 @@ export type CampaignBasicsEditorInitial = {
     companyName: string;
     personaType: PersonaType;
     agentNames: string[];
+    agentNameGenders?: Record<string, string>;
     voiceId: string;
     ttsProvider?: string | null;
     goal: string;
@@ -40,6 +42,7 @@ export function CampaignBasicsEditor({
     const [companyName, setCompanyName] = useState(initial.companyName);
     const [personaType, setPersonaType] = useState<PersonaType>(initial.personaType);
     const [agentNamesRaw, setAgentNamesRaw] = useState(initial.agentNames.join(", "));
+    const [agentGenders, setAgentGenders] = useState<Record<string, string>>(initial.agentNameGenders ?? {});
     const [voiceId, setVoiceId] = useState(initial.voiceId);
     const [provider, setProvider] = useState(initial.ttsProvider ?? "");
     const [goal, setGoal] = useState(initial.goal);
@@ -64,6 +67,7 @@ export function CampaignBasicsEditor({
                 persona_type: personaType,
                 company_name: companyName.trim(),
                 agent_names: agentNames,
+                agent_name_genders: pruneGenders(agentGenders, agentNames),
                 campaign_slots: {},
                 knowledge_driven: true,
             });
@@ -121,6 +125,7 @@ export function CampaignBasicsEditor({
                         1–3 names, comma-separated.
                         {agentNames.length > 0 && <span className="ml-1 text-emerald-600 dark:text-emerald-400">{agentNames.length} name{agentNames.length > 1 ? "s" : ""}.</span>}
                     </p>
+                    <AgentNameGender names={agentNames} value={agentGenders} onChange={setAgentGenders} />
                 </div>
 
                 <div>

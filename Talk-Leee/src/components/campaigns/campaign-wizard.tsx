@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { dashboardApi, PersonaType } from "@/lib/dashboard-api";
 import { api } from "@/lib/api";
+import { AgentNameGender, pruneGenders } from "@/components/campaigns/agent-name-gender";
 import { PERSONAS, parseAgentNames } from "@/lib/campaign-personas";
 import { VoiceProviderPicker } from "@/components/campaigns/voice-provider-picker";
 
@@ -45,6 +46,7 @@ export function CampaignWizard() {
     const [companyName, setCompanyName] = useState("");
     const [personaType, setPersonaType] = useState<PersonaType>("lead_gen");
     const [agentNamesRaw, setAgentNamesRaw] = useState("");
+    const [agentGenders, setAgentGenders] = useState<Record<string, string>>({});
     const [voiceId, setVoiceId] = useState("");
     const [voiceName, setVoiceName] = useState("");
     const [provider, setProvider] = useState("");
@@ -113,6 +115,7 @@ export function CampaignWizard() {
                 persona_type: personaType,
                 company_name: companyName.trim(),
                 agent_names: agentNames,
+                agent_name_genders: pruneGenders(agentGenders, agentNames),
                 campaign_slots: {},
                 knowledge_driven: true,
             });
@@ -198,6 +201,7 @@ export function CampaignWizard() {
                                 1–3 names, comma-separated. The agent introduces itself with one (rotated per call).
                                 {agentNames.length > 0 && <span className="ml-1 text-emerald-600 dark:text-emerald-400">{agentNames.length} name{agentNames.length > 1 ? "s" : ""}.</span>}
                             </p>
+                            <AgentNameGender names={agentNames} value={agentGenders} onChange={setAgentGenders} />
                         </div>
 
                         <div>

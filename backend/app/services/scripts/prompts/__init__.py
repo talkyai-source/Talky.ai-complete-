@@ -11,6 +11,7 @@ from __future__ import annotations
 from app.services.scripts.prompts.agent_name_rotator import (
     MAX_POOL_SIZE,
     pick_agent_name,
+    pick_agent_name_for_voice,
     validate_pool,
 )
 from app.services.scripts.prompts.composer import (
@@ -31,5 +32,6 @@ __all__ = [
     "REQUIRED_SLOTS_BY_PERSONA",
     "compose_prompt",
     "pick_agent_name",
+    "pick_agent_name_for_voice",
     "validate_pool",
 ]

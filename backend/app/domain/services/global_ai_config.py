@@ -123,6 +123,35 @@ def get_selected_voice_info() -> dict:
     }
 
 
+def resolve_voice_gender(voice_id: Optional[str]) -> Optional[str]:
+    """Return 'male' | 'female' for a given voice id, or None if unknown.
+
+    Looks the id up in the combined provider catalogs (Cartesia, Google,
+    Deepgram, ElevenLabs cache); falls back to the Google name heuristic.
+    Read-only over the static catalogs — does NOT touch the process-global
+    config, so it's safe to call per-call/per-tenant.
+    """
+    if not voice_id:
+        return None
+    try:
+        from app.infrastructure.tts.elevenlabs_catalog import _elevenlabs_voices_cache
+        el_voices = list(_elevenlabs_voices_cache) if _elevenlabs_voices_cache else []
+    except Exception:
+        el_voices = []
+
+    for voice in [*CARTESIA_VOICES, *GOOGLE_CHIRP3_VOICES, *DEEPGRAM_AURA2_VOICES, *el_voices]:
+        if voice.id == voice_id:
+            g = (getattr(voice, "gender", "") or "").strip().lower()
+            return g if g in ("male", "female") else None
+
+    low = voice_id.lower()
+    if any(f in low for f in ("kore", "aoede", "leda", "zephyr")):
+        return "female"
+    if any(m in low for m in ("orus", "charon", "fenrir", "puck")):
+        return "male"
+    return None
+
+
 def get_random_agent_name(gender: str = None) -> str:
     """
     Get a random agent name based on gender.

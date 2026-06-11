@@ -96,6 +96,7 @@ export default function EditCampaignPage() {
                     persona_type: (scriptConfig.persona_type ?? "lead_gen") as PersonaType,
                     company_name: scriptConfig.company_name ?? "",
                     agent_names: scriptConfig.agent_names ?? [],
+                    agent_name_genders: scriptConfig.agent_name_genders ?? {},
                     slots,
                 });
                 setKnowledgeDriven(
@@ -154,6 +155,7 @@ export default function EditCampaignPage() {
                             companyName: initial.company_name,
                             personaType: initial.persona_type,
                             agentNames: initial.agent_names,
+                            agentNameGenders: initial.agent_name_genders,
                             voiceId: initial.voice_id,
                             ttsProvider,
                             goal: initial.goal,

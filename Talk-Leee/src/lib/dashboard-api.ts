@@ -53,6 +53,7 @@ export interface Campaign {
         persona_type?: PersonaType;
         company_name?: string;
         agent_names?: string[];
+        agent_name_genders?: Record<string, string>;
         campaign_slots?: Record<string, unknown>;
         additional_instructions?: string;
     };
@@ -74,6 +75,9 @@ export interface CampaignCreate {
     persona_type: PersonaType;
     company_name: string;
     agent_names: string[];      // 1..3 names — rotated per call
+    // Optional per-name gender ("male"|"female") so each call picks a name
+    // matching the selected voice's gender.
+    agent_name_genders?: Record<string, string>;
     campaign_slots: Record<string, unknown>;
     // Knowledge-first campaign (vectorless-RAG wizard): content comes from the
     // uploaded knowledge base, so per-persona content slots are not required and

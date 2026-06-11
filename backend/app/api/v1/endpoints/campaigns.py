@@ -265,6 +265,10 @@ async def create_campaign(
             additional_instructions=campaign_data.system_prompt,
             knowledge_driven=campaign_data.knowledge_driven,
         )
+        # Persist per-name gender tags so each call picks a name matching the
+        # selected voice's gender. Backward compatible: absent ⇒ legacy pick.
+        if campaign_data.agent_name_genders:
+            script_config["agent_name_genders"] = campaign_data.agent_name_genders
 
         insert_payload = {
             "tenant_id": current_user.tenant_id,
@@ -417,6 +421,8 @@ async def update_campaign(
             additional_instructions=campaign_data.system_prompt,
             knowledge_driven=campaign_data.knowledge_driven,
         )
+        if campaign_data.agent_name_genders:
+            script_config["agent_name_genders"] = campaign_data.agent_name_genders
 
         update_payload = {
             "name": campaign_data.name.strip(),

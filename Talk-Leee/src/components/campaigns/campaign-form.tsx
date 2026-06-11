@@ -47,6 +47,8 @@ export interface CampaignFormInitial {
     persona_type: PersonaType;
     company_name: string;
     agent_names: string[];
+    /** Optional per-name gender ("male"|"female") to match the voice. */
+    agent_name_genders?: Record<string, string>;
     /** Persona-specific slot values — keyed by slot.key. */
     slots: Record<string, string>;
 }
