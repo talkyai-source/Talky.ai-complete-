@@ -375,6 +375,27 @@ async def make_call(request: Request, body: MakeCallRequest):
     first_speaker = body.first_speaker
     agent_name = body.agent_name
 
+    # Single-owner guard. Only the process holding the ARI owner lock may
+    # originate — its the only one with a live Asterisk connection and the
+    # per-call state lives in its memory. A non-owner (stray worker / bad
+    # deploy / --workers >1) returns a RETRYABLE 503 so the dialer bounces
+    # the job to the owner, rather than the 400 the adapter check below
+    # would give (which the dialer treats as a permanent failure). On the
+    # in-memory backend is_telephony_owner() is always True — no change to
+    # single-worker behaviour.
+    _sb = get_state_backend()
+    if not _sb.is_telephony_owner():
+        owner = await _sb.telephony_owner_id()
+        logger.warning(
+            "make_call_not_owner dest=%s owner=%s — refusing on non-owner process",
+            destination, owner or "?",
+        )
+        raise HTTPException(
+            status_code=503,
+            headers={"Retry-After": "2"},
+            detail={"error": "telephony_not_active_on_node", "owner": owner},
+        )
+
     if not _adapter or not _adapter.connected:
         raise HTTPException(status_code=400, detail="Telephony adapter not connected")
 

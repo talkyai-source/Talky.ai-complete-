@@ -227,6 +227,29 @@ class TelephonyStateBackend(Protocol):
         no-op."""
         ...
 
+    # ── Single-owner telephony lock ─────────────────────────────────
+    #
+    # Exactly one process may hold the ARI connection and serve
+    # telephony. ``acquire_telephony_ownership`` is called once at
+    # startup BEFORE connecting ARI; only the winner connects.
+    # ``is_telephony_owner`` is a cheap sync read used by the originate
+    # path to 503 non-owner workers. ``LocalOnlyStateBackend`` is always
+    # the owner (it's a single process with no coordination peer).
+
+    async def acquire_telephony_ownership(self) -> bool:
+        """Claim the single telephony-owner slot for this process.
+        Returns True iff this process should connect ARI / serve calls."""
+        ...
+
+    def is_telephony_owner(self) -> bool:
+        """Cheap sync check: may this process serve telephony right now?"""
+        ...
+
+    async def telephony_owner_id(self) -> Optional[str]:
+        """The incarnation id currently holding the owner lock (for the
+        503 message / diagnostics). ``None`` when not applicable."""
+        ...
+
 
 # ─────────────────────────────────────────────────────────────────────
 # Local-only implementation
@@ -439,6 +462,17 @@ class LocalOnlyStateBackend:
     async def shutdown(self) -> None:
         return None
 
+    # ── Ownership (single process ⇒ always the owner) ───────────────
+
+    async def acquire_telephony_ownership(self) -> bool:
+        return True
+
+    def is_telephony_owner(self) -> bool:
+        return True
+
+    async def telephony_owner_id(self) -> Optional[str]:
+        return None
+
 
 # ─────────────────────────────────────────────────────────────────────
 # Redis-backed implementation (write-through mirror)
@@ -476,6 +510,14 @@ class SessionRegistryProto(Protocol):
     async def write_heartbeat(self, ttl_seconds: int) -> None: ...
 
     async def clear_heartbeat(self) -> None: ...
+
+    async def try_acquire_ari_ownership(self, ttl_seconds: int) -> bool: ...
+
+    async def renew_ari_ownership(self, ttl_seconds: int) -> bool: ...
+
+    async def release_ari_ownership(self) -> None: ...
+
+    async def current_ari_owner(self) -> Optional[str]: ...
 
 
 class RedisBackedStateBackend:
@@ -535,6 +577,11 @@ class RedisBackedStateBackend:
         self._heartbeat_task: Optional[Any] = None
         # call_id -> last monotonic time we actually hit Redis for a touch.
         self._last_touch: dict[str, float] = {}
+        # Single-owner telephony flag. Default True (fail-safe toward
+        # availability) — set definitively by acquire_telephony_ownership()
+        # at startup, which every process runs before any call arrives. A
+        # loser of the startup race flips this False and 503s telephony.
+        self._is_owner: bool = True
 
     # ── Fire-and-forget helper ──────────────────────────────────────
 
@@ -793,6 +840,22 @@ class RedisBackedStateBackend:
             while True:
                 await asyncio.sleep(self._HEARTBEAT_INTERVAL_S)
                 await self._registry.write_heartbeat(self._HEARTBEAT_TTL_S)
+                # Renew the owner lock on the same cadence so it never
+                # lapses under a live owner. If renew reports we no longer
+                # hold it (another process took over after our heartbeat
+                # lapsed — only possible under a long Redis stall), flip to
+                # non-owner so new originates 503 instead of two processes
+                # both driving ARI. In-flight calls are left alone.
+                if self._is_owner:
+                    still_ours = await self._registry.renew_ari_ownership(self._HEARTBEAT_TTL_S)
+                    if not still_ours:
+                        self._is_owner = False
+                        logger.critical(
+                            "telephony ownership LOST pod=%s — another process "
+                            "holds the ARI lock; refusing new originates on this "
+                            "process. Investigate duplicate telephony workers.",
+                            self._registry.pod_id,
+                        )
         except asyncio.CancelledError:
             return
         except Exception as exc:  # never let the loop die silently
@@ -811,9 +874,31 @@ class RedisBackedStateBackend:
                 pass
             self._heartbeat_task = None
         await self._registry.clear_heartbeat()
+        # Release the owner lock (only if it's ours) so the successor
+        # process can serve telephony immediately instead of waiting out
+        # the TTL. Pairs with the heartbeat clear above.
+        if self._is_owner:
+            await self._registry.release_ari_ownership()
         pending = list(self._tasks)
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
+
+    # ── Single-owner telephony lock ─────────────────────────────────
+
+    async def acquire_telephony_ownership(self) -> bool:
+        """Claim the owner slot at startup. Sets and returns the owner
+        flag. Idempotent: re-acquiring when we already hold it returns
+        True. Fails OPEN (True) on a Redis error — see registry."""
+        self._is_owner = await self._registry.try_acquire_ari_ownership(
+            self._HEARTBEAT_TTL_S,
+        )
+        return self._is_owner
+
+    def is_telephony_owner(self) -> bool:
+        return self._is_owner
+
+    async def telephony_owner_id(self) -> Optional[str]:
+        return await self._registry.current_ari_owner()
 
 
 # ─────────────────────────────────────────────────────────────────────

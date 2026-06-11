@@ -287,43 +287,85 @@ async def lifespan(app: FastAPI):
         )
         logger.info("stream_events_cleanup_task_started")
 
-    # Auto-connect telephony bridge so campaigns can originate calls immediately.
-    # Must happen after container startup (needs event loop to be running).
+    # Single-owner telephony lock. Exactly ONE process may hold the ARI
+    # event connection to Asterisk and serve calls — all per-call live
+    # state (VoiceSession, WebSockets, asyncio tasks) is process-local
+    # and cannot be shared. We claim the lock BEFORE connecting ARI: only
+    # the winner connects; a loser (a stray second worker / bad deploy /
+    # --workers >1) skips ARI and 503s telephony routes instead of
+    # silently splitting calls across processes. On the in-memory backend
+    # this always returns True (single process), so behaviour is
+    # unchanged when TELEPHONY_STATE_BACKEND=memory.
     from app.infrastructure.telephony.adapter_factory import CallControlAdapterFactory
     from app.api.v1.endpoints import telephony_bridge as _tb
+    from app.domain.services.telephony.state_backend import get_state_backend
 
+    _state_backend = get_state_backend()
     try:
-        if not (_tb._adapter and _tb._adapter.connected):
-            adapter_type = os.getenv("TELEPHONY_ADAPTER", "auto")
-            _tb._adapter = await CallControlAdapterFactory.create(adapter_type)
-            _tb._adapter.register_call_event_handlers(
-                on_new_call=_tb._on_new_call,
-                on_call_ended=_tb._on_call_ended,
-                on_audio_received=_tb._on_audio_received,
-            )
-            if hasattr(_tb._adapter, "set_global_session_start_callback"):
-                _tb._adapter.set_global_session_start_callback(_tb._on_ws_session_start)
-            await _tb._adapter.connect()
-            logger.info(f"Telephony bridge auto-connected: {_tb._adapter.name}")
-        else:
-            logger.info("Telephony bridge already connected — skipping auto-connect")
+        _is_owner = await _state_backend.acquire_telephony_ownership()
     except Exception as e:
-        logger.warning(f"Telephony bridge auto-connect failed (non-fatal): {e}")
+        # acquire is meant to fail open; if it somehow raises, default to
+        # owning (single-worker is the norm) so we never self-inflict an
+        # outage. The lock still protects against the multi-worker case
+        # whenever Redis is reachable.
+        logger.warning(f"Telephony ownership acquire raised (assuming owner): {e}")
+        _is_owner = True
 
-    # Phase 1 item 1 — telephony state recovery. Start this process's
-    # heartbeat, then reclaim any calls a dead predecessor left in the
-    # Redis ledger (hang them up + record the terminal state). Both are
-    # no-ops on the in-memory backend, so this is safe regardless of
-    # TELEPHONY_STATE_BACKEND. Best-effort — never block startup.
+    # Heartbeat renews both this process's liveness marker and the owner
+    # lock; start it regardless of role (harmless for a non-owner) so an
+    # owner's lock never lapses under a live call. No-op on memory backend.
     try:
-        from app.domain.services.telephony.state_backend import get_state_backend
-        from app.domain.services.telephony.lifecycle import recover_orphaned_calls
-        await get_state_backend().start_heartbeat()
-        recovered = await recover_orphaned_calls()
-        if recovered:
-            logger.info("telephony startup recovery: reclaimed %d orphaned call(s)", recovered)
+        await _state_backend.start_heartbeat()
     except Exception as e:
-        logger.warning(f"Telephony state recovery failed (non-fatal): {e}")
+        logger.warning(f"Telephony heartbeat start failed (non-fatal): {e}")
+
+    if not _is_owner:
+        owner = None
+        try:
+            owner = await _state_backend.telephony_owner_id()
+        except Exception:
+            pass
+        logger.critical(
+            "TELEPHONY NOT ACTIVE on this process — the ARI owner lock is held "
+            "by %s. This process will NOT connect ARI and will 503 telephony "
+            "routes. Expected with --workers >1 / a second pod; if you see this "
+            "on a single-worker deploy, a previous owner's lock has not yet "
+            "expired (clears within ~60s).",
+            owner or "another process",
+        )
+    else:
+        # Auto-connect telephony bridge so campaigns can originate calls
+        # immediately. Must happen after container startup (needs the loop).
+        try:
+            if not (_tb._adapter and _tb._adapter.connected):
+                adapter_type = os.getenv("TELEPHONY_ADAPTER", "auto")
+                _tb._adapter = await CallControlAdapterFactory.create(adapter_type)
+                _tb._adapter.register_call_event_handlers(
+                    on_new_call=_tb._on_new_call,
+                    on_call_ended=_tb._on_call_ended,
+                    on_audio_received=_tb._on_audio_received,
+                )
+                if hasattr(_tb._adapter, "set_global_session_start_callback"):
+                    _tb._adapter.set_global_session_start_callback(_tb._on_ws_session_start)
+                await _tb._adapter.connect()
+                logger.info(f"Telephony bridge auto-connected: {_tb._adapter.name}")
+            else:
+                logger.info("Telephony bridge already connected — skipping auto-connect")
+        except Exception as e:
+            logger.warning(f"Telephony bridge auto-connect failed (non-fatal): {e}")
+
+        # Phase 1 item 1 — telephony state recovery. Reclaim any calls a
+        # dead predecessor left in the Redis ledger (hang them up + record
+        # the terminal state). Only the owner does this — it's the only
+        # process with an ARI connection to issue the hangups. No-op on the
+        # in-memory backend. Best-effort — never block startup.
+        try:
+            from app.domain.services.telephony.lifecycle import recover_orphaned_calls
+            recovered = await recover_orphaned_calls()
+            if recovered:
+                logger.info("telephony startup recovery: reclaimed %d orphaned call(s)", recovered)
+        except Exception as e:
+            logger.warning(f"Telephony state recovery failed (non-fatal): {e}")
 
     yield
 

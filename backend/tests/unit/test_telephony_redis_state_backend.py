@@ -98,6 +98,20 @@ class FakeRegistry:
     async def clear_heartbeat(self):
         self.calls.append(("clear_heartbeat",))
 
+    async def try_acquire_ari_ownership(self, ttl_seconds):
+        self.calls.append(("acquire_owner", ttl_seconds))
+        return True
+
+    async def renew_ari_ownership(self, ttl_seconds):
+        self.calls.append(("renew_owner", ttl_seconds))
+        return True
+
+    async def release_ari_ownership(self):
+        self.calls.append(("release_owner",))
+
+    async def current_ari_owner(self):
+        return self.pod_id
+
 
 async def _drain(backend):
     """Let the backend's fire-and-forget mirror tasks run to completion."""
@@ -344,8 +358,31 @@ class FakeRedis:
     async def expire(self, key, ttl):
         return True
 
-    async def set(self, key, value, ex=None):
+    async def set(self, key, value, ex=None, nx=False):
+        if nx and key in self.strings:
+            return None
         self.strings[key] = value
+        return True
+
+    async def get(self, key):
+        return self.strings.get(key)
+
+    async def eval(self, script, numkeys, *args):
+        # Only the two owner-lock Lua scripts are used: a compare-and-
+        # expire (renew) and a compare-and-del (release). Dispatch on a
+        # distinguishing keyword rather than interpreting Lua.
+        keys = args[:numkeys]
+        argv = args[numkeys:]
+        key = keys[0]
+        current = self.strings.get(key)
+        if "expire" in script:           # renew: extend iff still ours
+            return 1 if current == argv[0] else 0
+        if "del" in script:              # release: delete iff ours
+            if current == argv[0]:
+                self.strings.pop(key, None)
+                return 1
+            return 0
+        return 0
 
     async def delete(self, key):
         self.hashes.pop(key, None)
@@ -485,3 +522,102 @@ async def test_registry_none_redis_is_safe():
     await reg.write_heartbeat(60)
     await reg.clear_heartbeat()
     assert await reg.list_own_calls() == []
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Single-owner ARI lock — the core of the --workers >1 safety guarantee
+# ─────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_local_backend_is_always_owner(sb_module, fake_bridge_module):
+    """Single-process (memory) backend has no coordination peer, so it
+    always owns telephony — preserving today's --workers 1 behaviour."""
+    backend = sb_module.LocalOnlyStateBackend()
+    assert await backend.acquire_telephony_ownership() is True
+    assert backend.is_telephony_owner() is True
+    assert await backend.telephony_owner_id() is None
+
+
+@pytest.mark.asyncio
+async def test_registry_ownership_single_winner():
+    """Two processes race; exactly one wins. The loser sees the winner's
+    id as the current owner."""
+    from app.domain.services.telephony.session_registry import SessionRegistry
+    shared = FakeRedis()
+    a = SessionRegistry(shared, "host:aaaa")
+    b = SessionRegistry(shared, "host:bbbb")
+
+    assert await a.try_acquire_ari_ownership(60) is True
+    assert await b.try_acquire_ari_ownership(60) is False
+    assert await b.current_ari_owner() == "host:aaaa"
+
+
+@pytest.mark.asyncio
+async def test_registry_ownership_reacquire_is_idempotent():
+    from app.domain.services.telephony.session_registry import SessionRegistry
+    shared = FakeRedis()
+    a = SessionRegistry(shared, "host:aaaa")
+    assert await a.try_acquire_ari_ownership(60) is True
+    # Same process re-acquiring still reads as owner (value matches).
+    assert await a.try_acquire_ari_ownership(60) is True
+
+
+@pytest.mark.asyncio
+async def test_registry_renew_only_while_owner():
+    from app.domain.services.telephony.session_registry import SessionRegistry
+    shared = FakeRedis()
+    a = SessionRegistry(shared, "host:aaaa")
+    b = SessionRegistry(shared, "host:bbbb")
+    await a.try_acquire_ari_ownership(60)
+
+    assert await a.renew_ari_ownership(60) is True       # owner renews
+    assert await b.renew_ari_ownership(60) is False      # non-owner can't
+
+
+@pytest.mark.asyncio
+async def test_registry_release_only_own_then_successor_acquires():
+    from app.domain.services.telephony.session_registry import SessionRegistry
+    shared = FakeRedis()
+    a = SessionRegistry(shared, "host:aaaa")
+    b = SessionRegistry(shared, "host:bbbb")
+    await a.try_acquire_ari_ownership(60)
+
+    # A non-owner release is a no-op — it must not steal/clear the lock.
+    await b.release_ari_ownership()
+    assert await b.try_acquire_ari_ownership(60) is False
+
+    # The owner releasing frees the lock so the successor can acquire.
+    await a.release_ari_ownership()
+    assert await b.try_acquire_ari_ownership(60) is True
+
+
+@pytest.mark.asyncio
+async def test_registry_ownership_none_redis_fails_open():
+    """No Redis ⇒ no coordination layer ⇒ this is the only process ⇒
+    own telephony (refusing it would be a worse failure)."""
+    from app.domain.services.telephony.session_registry import SessionRegistry
+    reg = SessionRegistry(None, "pod-A")
+    assert await reg.try_acquire_ari_ownership(60) is True
+    assert await reg.renew_ari_ownership(60) is True
+    await reg.release_ari_ownership()          # no-op, never raises
+    assert await reg.current_ari_owner() is None
+
+
+@pytest.mark.asyncio
+async def test_backend_acquire_sets_owner_flag_and_loser_is_blocked(sb_module):
+    """End-to-end through RedisBackedStateBackend + real registries on a
+    shared FakeRedis: the first backend owns, the second is blocked."""
+    from app.domain.services.telephony.session_registry import SessionRegistry
+    shared = FakeRedis()
+    reg1 = SessionRegistry(shared, "host:first")
+    reg2 = SessionRegistry(shared, "host:second")
+    b1 = sb_module.RedisBackedStateBackend(reg1)
+    b2 = sb_module.RedisBackedStateBackend(reg2)
+
+    assert await b1.acquire_telephony_ownership() is True
+    assert b1.is_telephony_owner() is True
+
+    assert await b2.acquire_telephony_ownership() is False
+    assert b2.is_telephony_owner() is False
+    assert await b2.telephony_owner_id() == "host:first"
