@@ -35,6 +35,26 @@ providers:
       # the final 200ms of silence detection).
       eager_eot_threshold: 0.45
 
+      # ACCURACY TEST: keyterm prompting (biases recognition toward these).
+      # Aimed at the weak spot — spelled-out emails & sensitive data. Common
+      # email domains + the connector words callers say when spelling. These
+      # are KNOWN terms; arbitrary local-parts still need spell-back confirm.
+      # Override live (no redeploy) with env DEEPGRAM_FLUX_KEYTERMS="a,b,c".
+      # Deepgram caps the total at 500 tokens across all keyterms.
+      keyterms:
+        - "gmail.com"
+        - "yahoo.com"
+        - "outlook.com"
+        - "hotmail.com"
+        - "icloud.com"
+        - "proton.me"
+        - "dot com"
+        - "at sign"
+        - "dot"
+        - "underscore"
+        - "hyphen"
+        - "dash"
+
   # ──────────────────────────────────────────────────────────────
   # TTS — Cartesia Sonic 3
   # ──────────────────────────────────────────────────────────────

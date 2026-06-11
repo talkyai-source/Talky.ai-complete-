@@ -32,6 +32,7 @@ import random
 import websockets
 import logging
 from collections import deque
+from urllib.parse import quote
 from typing import AsyncIterator, Optional, Callable, Deque
 from dataclasses import dataclass
 
@@ -153,6 +154,9 @@ class DeepgramFluxSTTProvider(STTProvider):
         self._eot_threshold: float = 0.7
         self._eager_eot_threshold: Optional[float] = _env_eager_default()
         self._eot_timeout_ms: int = _env_timeout_default()
+
+        # Keyterm prompting list (set in initialize()); empty = no biasing.
+        self._keyterms: list[str] = []
         
         # Echo suppression: mute microphone during TTS playback
         # This prevents the agent's voice from triggering StartOfTurn
@@ -233,12 +237,49 @@ class DeepgramFluxSTTProvider(STTProvider):
         self._eager_eot_threshold = float(eager) if eager is not None else None
         self._eot_timeout_ms = int(config.get("eot_timeout_ms", 5000))
         self._validate_turn_config()
-        
+
+        # Keyterm prompting — biases recognition toward expected vocabulary
+        # (email domains, the words "dot"/"at", company/product names, etc.).
+        # Helps Flux on spelled-out / sensitive data without switching STT.
+        # Env override (comma-separated) wins over config so we can tune live
+        # without a redeploy. Deepgram caps the total at 500 tokens across all
+        # keyterms; we keep the list small and well under that.
+        self._keyterms = self._parse_keyterms(
+            os.getenv("DEEPGRAM_FLUX_KEYTERMS") or config.get("keyterms")
+        )
+
         logger.info(
             f"DeepgramFlux initialized: model={self._model}, sample_rate={self._sample_rate}, "
             f"eot_threshold={self._eot_threshold}, eager_eot_threshold={self._eager_eot_threshold}, "
-            f"eot_timeout_ms={self._eot_timeout_ms}"
+            f"eot_timeout_ms={self._eot_timeout_ms}, keyterms={len(self._keyterms)}"
         )
+
+    @staticmethod
+    def _parse_keyterms(raw) -> list[str]:
+        """Normalise keyterms from a list or a comma-separated string.
+
+        Accepts either a YAML list (``["gmail.com", "dot"]``) or a single
+        comma-separated string (env var form). Trims blanks and dedupes while
+        preserving order.
+        """
+        if not raw:
+            return []
+        if isinstance(raw, str):
+            items = raw.split(",")
+        else:
+            items = list(raw)
+        out: list[str] = []
+        seen: set[str] = set()
+        for item in items:
+            term = str(item).strip()
+            if term and term.lower() not in seen:
+                seen.add(term.lower())
+                out.append(term)
+        return out
+
+    def _keyterm_params(self) -> list[tuple[str, str]]:
+        """Build URL-encoded ``keyterm`` query params (one per term)."""
+        return [("keyterm", quote(term, safe="")) for term in self._keyterms]
     
     async def pre_connect(self, call_id: str) -> None:
         """
@@ -264,6 +305,7 @@ class DeepgramFluxSTTProvider(STTProvider):
         ]
         if self._eager_eot_threshold is not None:
             params.append(("eager_eot_threshold", str(self._eager_eot_threshold)))
+        params.extend(self._keyterm_params())
         query = "&".join(f"{k}={v}" for k, v in params)
         url = f"wss://api.deepgram.com/v2/listen?{query}"
         headers = {
@@ -341,6 +383,7 @@ class DeepgramFluxSTTProvider(STTProvider):
         ]
         if self._eager_eot_threshold is not None:
             params.append(("eager_eot_threshold", str(self._eager_eot_threshold)))
+        params.extend(self._keyterm_params())
         query = "&".join(f"{k}={v}" for k, v in params)
         url = f"wss://api.deepgram.com/v2/listen?{query}"
         
