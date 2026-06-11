@@ -526,6 +526,30 @@ async def start_campaign(
         priority_override = (start_request.priority_override if start_request else None)
         first_speaker = (start_request.first_speaker if start_request else "agent")
 
+        # Refuse to START a campaign when the tenant is already out of plan
+        # minutes. The dialer also skips individual jobs when exhausted, but
+        # blocking here means we never enqueue work that can't run and the
+        # user gets an immediate, clear reason instead of a campaign that
+        # silently dials nothing. 402 Payment Required is the precise code.
+        if tenant_id:
+            from app.domain.services.minutes_quota import tenant_minutes_status
+            minutes = await tenant_minutes_status(tenant_id)
+            if minutes.exhausted:
+                raise HTTPException(
+                    status_code=402,
+                    detail={
+                        "error": "out_of_minutes",
+                        "message": (
+                            f"You've used all {minutes.allocated} of your plan "
+                            f"minutes this month ({minutes.used_minutes} used). "
+                            "Add minutes or upgrade your plan to start campaigns."
+                        ),
+                        "allocated": minutes.allocated,
+                        "used_minutes": minutes.used_minutes,
+                        "remaining_minutes": minutes.remaining_minutes,
+                    },
+                )
+
         result = await service.start_campaign(
             campaign_id=campaign_id,
             tenant_id=tenant_id,
@@ -571,6 +595,13 @@ async def start_campaign(
             await release_idempotency_lock(request)
         logger.error(f"Campaign service error for {campaign_id}: {e}")
         raise HTTPException(status_code=e.status_code, detail="Failed to start campaign")
+    except HTTPException:
+        # Our own deliberate HTTP errors (e.g. the 402 out-of-minutes gate
+        # above) must propagate with their real status code, not be masked
+        # as a 500 by the catch-all below.
+        if idempotency_key:
+            await release_idempotency_lock(request)
+        raise
     except Exception as e:
         if idempotency_key:
             await release_idempotency_lock(request)
@@ -704,6 +735,29 @@ async def get_campaign_jobs(
     except Exception as e:
         logger.error(f"Error fetching jobs for campaign {campaign_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch campaign jobs")
+
+
+@router.get("/minutes/status")
+async def get_minutes_status(
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """This tenant's monthly call-minute quota.
+
+    Drives the frontend's remaining-minutes display and the disabled
+    state of the Start button. Same figure the dialer and the
+    start-campaign gate use (shared ``minutes_quota`` helper), so the UI
+    never says "go" when the backend will say "out of minutes". A static
+    two-segment path so it can't be shadowed by ``/{campaign_id}``.
+    """
+    from app.domain.services.minutes_quota import tenant_minutes_status
+    tenant_id = current_user.tenant_id
+    if not tenant_id:
+        return {
+            "allocated": 0, "used_minutes": 0, "remaining_minutes": 0,
+            "unlimited": True, "exhausted": False,
+        }
+    status = await tenant_minutes_status(tenant_id)
+    return status.as_dict()
 
 
 @router.get("/{campaign_id}/stats")

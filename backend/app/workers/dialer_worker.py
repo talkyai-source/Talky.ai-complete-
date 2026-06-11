@@ -689,27 +689,17 @@ class DialerWorker:
     async def _tenant_minutes_exhausted(self, tenant_id: str) -> bool:
         """True when the tenant has used >= its plan's monthly minute allocation.
 
-        Mirrors the dashboard's live computation: this month's SUM(duration_seconds)
-        // 60 vs tenants.minutes_allocated. Returns False (do NOT block) when the
-        allocation is unset/<=0 (treated as unlimited) or on any error — a quota
-        lookup failure must never wedge the dialer.
+        Delegates to the shared ``minutes_quota`` helper — the single source
+        of truth also used by the start-campaign endpoint and the frontend
+        quota display — so the per-job skip and the start-block can never
+        disagree. Returns False (do NOT block) on any error: a quota lookup
+        failure must never wedge the dialer.
         """
         try:
+            from app.domain.services.minutes_quota import compute_minutes_status
             async with self._acquire_db() as conn:
-                allocated = await conn.fetchval(
-                    "SELECT minutes_allocated FROM tenants WHERE id = $1", tenant_id
-                )
-                if not allocated or int(allocated) <= 0:
-                    return False
-                used_seconds = await conn.fetchval(
-                    """
-                    SELECT COALESCE(SUM(duration_seconds), 0) FROM calls
-                     WHERE tenant_id = $1
-                       AND created_at >= date_trunc('month', now())
-                    """,
-                    tenant_id,
-                )
-                return (int(used_seconds or 0) // 60) >= int(allocated)
+                status = await compute_minutes_status(conn, tenant_id)
+                return status.exhausted
         except Exception as e:  # noqa: BLE001
             logger.warning("minutes quota check failed for tenant %s: %s", tenant_id, e)
             return False
