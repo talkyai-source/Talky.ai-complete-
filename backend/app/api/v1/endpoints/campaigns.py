@@ -805,7 +805,7 @@ async def get_campaign_stats(
 # "phone_validation_relaxed_temp"). Accounts in this set may add contacts with
 # short/odd test numbers that the strict validator would reject. Scoped by login
 # email so it only affects these accounts and never other tenants.
-_RELAXED_PHONE_EMAILS = {"uzairdevelops@gmail.com"}
+_RELAXED_PHONE_EMAILS = {"uzairdevelops@gmail.com", "allestateestimation@gmail.com"}
 
 
 def _phone_validation_relaxed(user) -> bool:
