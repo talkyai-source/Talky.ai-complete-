@@ -58,6 +58,33 @@ class CallListResponse(BaseModel):
     total: int
 
 
+class CallIssueItem(BaseModel):
+    """One stuck/failed dial attempt, explained for the operator.
+
+    These come from ``dialer_jobs`` (NOT ``calls``) because the gates that
+    stop a call — out of minutes, outside hours, caller-ID unverified, TTS
+    warmup failure, rate limits — all fire before a ``calls`` row exists.
+    """
+    job_id: str
+    phone_number: str
+    campaign_id: Optional[str] = None
+    campaign_name: Optional[str] = None
+    status: str
+    reason_code: Optional[str] = None
+    category: Optional[str] = None
+    title: str
+    suggestion: str
+    severity: str   # error | warning | info
+    stage: str
+    attempts: int = 0
+    updated_at: Optional[str] = None
+
+
+class CallIssuesResponse(BaseModel):
+    items: List[CallIssueItem]
+    server_time: str
+
+
 class LiveCallItem(BaseModel):
     """Snapshot of one currently-in-flight call for the live panel.
 
@@ -241,6 +268,96 @@ async def list_live_calls(
         items=items,
         server_time=datetime.now(timezone.utc).isoformat(),
     )
+
+
+@router.get("/issues", response_model=CallIssuesResponse)
+async def list_call_issues(
+    campaign_id: Optional[str] = Query(
+        None, description="If set, restrict to this campaign."
+    ),
+    window_minutes: int = Query(
+        180, ge=1, le=1440,
+        description="How far back to look for stuck/failed dial attempts.",
+    ),
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """Recent dial attempts that DIDN'T place a call, each explained.
+
+    The live-calls panel only shows rows in ``calls`` — but the gates that
+    stop a call (out of minutes, outside hours, campaign stopped, caller-ID
+    unverified, TTS warmup failure, rate limits) all fire in the dialer
+    before a ``calls`` row exists. This reads those from ``dialer_jobs`` and
+    maps each reason to a human title + actionable suggestion so the
+    operator can see WHY nothing dialed and how to fix it.
+
+    One card per phone number (the latest issue), tenant-scoped.
+    """
+    from datetime import datetime, timezone
+    from app.domain.services.call_issue_advice import advise
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if not current_user.tenant_id:
+        return CallIssuesResponse(items=[], server_time=now_iso)
+
+    args: list = [current_user.tenant_id, window_minutes]
+    where_campaign = ""
+    if campaign_id:
+        args.append(campaign_id)
+        where_campaign = f" AND dj.campaign_id = ${len(args)}"
+
+    # DISTINCT ON (phone_number) → one (latest) issue per number. Exclude
+    # statuses that mean the call DID go through or is actively running, so
+    # a since-resolved job doesn't linger as a phantom issue.
+    sql = f"""
+        SELECT DISTINCT ON (dj.phone_number)
+               dj.id, dj.phone_number, dj.campaign_id, dj.status,
+               dj.last_outcome, dj.last_error, dj.failure_category,
+               dj.failure_reason, dj.attempt_number, dj.updated_at,
+               camp.name AS campaign_name
+        FROM   dialer_jobs dj
+        LEFT   JOIN campaigns camp ON camp.id = dj.campaign_id
+        WHERE  dj.tenant_id = $1
+          AND  dj.updated_at >= NOW() - make_interval(mins => $2)
+          AND  dj.status NOT IN (
+                 'completed', 'goal_achieved', 'processing', 'in_progress', 'dialing'
+               )
+          AND  (dj.failure_reason IS NOT NULL OR dj.last_error IS NOT NULL)
+          {where_campaign}
+        ORDER BY dj.phone_number, dj.updated_at DESC
+    """
+
+    try:
+        async with db_client.pool.acquire() as conn:
+            rows = await conn.fetch(sql, *args)
+    except Exception as exc:
+        logger.error("list_call_issues failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to list call issues")
+
+    items: List[CallIssueItem] = []
+    for r in rows:
+        reason = r["failure_reason"] or r["last_error"] or r["status"]
+        category = r["failure_category"]
+        adv = advise(reason, category=category)
+        items.append(CallIssueItem(
+            job_id=str(r["id"]),
+            phone_number=r["phone_number"] or "",
+            campaign_id=str(r["campaign_id"]) if r["campaign_id"] else None,
+            campaign_name=r["campaign_name"],
+            status=r["status"] or "unknown",
+            reason_code=reason,
+            category=category,
+            title=adv.title,
+            suggestion=adv.suggestion,
+            severity=adv.severity,
+            stage=adv.stage,
+            attempts=r["attempt_number"] or 0,
+            updated_at=r["updated_at"].isoformat() if r["updated_at"] else None,
+        ))
+
+    # Newest first across all numbers (DISTINCT ON forced phone_number order).
+    items.sort(key=lambda it: it.updated_at or "", reverse=True)
+    return CallIssuesResponse(items=items[:50], server_time=now_iso)
 
 
 @router.get("/", response_model=CallListResponse)

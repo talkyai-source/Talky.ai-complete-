@@ -924,7 +924,14 @@ class DialerWorker:
                     data["processed_at"] = datetime.now(timezone.utc)
                 if error:
                     data["last_error"] = error
-                
+                # Persist the skip/block reason too (was previously dropped),
+                # so the Call Issues panel can explain WHY a job didn't dial
+                # — campaign_stopped, call_guard_blocked/throttled/queued,
+                # max_concurrent_calls_reached, outside_time_window, etc.
+                if reason:
+                    data["failure_reason"] = reason
+                    data["last_error"] = data.get("last_error") or reason
+
                 if status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.GOAL_ACHIEVED]:
                     data["completed_at"] = datetime.now(timezone.utc)
                     

@@ -181,6 +181,23 @@ export function sharedHttpClient() {
 
 export type KnowledgeMode = "none" | "inline" | "map_retrieve" | "retrieve";
 
+/** A stuck/failed dial attempt, explained for the operator (GET /calls/issues). */
+export interface CallIssue {
+    job_id: string;
+    phone_number: string;
+    campaign_id?: string | null;
+    campaign_name?: string | null;
+    status: string;
+    reason_code?: string | null;
+    category?: string | null;
+    title: string;
+    suggestion: string;
+    severity: "error" | "warning" | "info";
+    stage: string;
+    attempts: number;
+    updated_at?: string | null;
+}
+
 export interface KnowledgeNode {
     id: string;
     parent_id: string | null;
@@ -670,6 +687,29 @@ class ApiClient {
             timeoutMs: 8_000,
         });
         return data as { status: string; call_id: string };
+    }
+
+    /**
+     * Recent dial attempts that DIDN'T place a call, each explained with a
+     * title + actionable suggestion. These come from the dialer (out of
+     * minutes, outside hours, caller-ID unverified, TTS warmup failure, rate
+     * limits) — failures that never create a `calls` row, so the live panel
+     * can't show them. This is what tells the operator WHY nothing dialed.
+     */
+    async listCallIssues(input?: { campaignId?: string; windowMinutes?: number }): Promise<{
+        items: CallIssue[];
+        server_time: string;
+    }> {
+        const query: Record<string, string | number> = {};
+        if (input?.campaignId) query.campaign_id = input.campaignId;
+        if (input?.windowMinutes !== undefined) query.window_minutes = input.windowMinutes;
+        const data = await this.client().request({
+            path: "/calls/issues",
+            method: "GET",
+            query,
+            timeoutMs: 8_000,
+        });
+        return data as { items: CallIssue[]; server_time: string };
     }
 
     /* ---------- Campaign knowledge (vectorless RAG) ---------- */

@@ -10,6 +10,7 @@ import { dashboardApi, Campaign, Contact, MinutesStatus } from "@/lib/dashboard-
 import { SmartCsvImport } from "@/components/campaigns/smart-csv-import";
 import { ScriptCard } from "@/components/campaigns/script-card";
 import { LiveCallsPanel } from "@/components/campaigns/live-calls-panel";
+import { CallIssuesPanel } from "@/components/campaigns/call-issues-panel";
 import { KnowledgePanel } from "@/components/campaigns/knowledge-panel";
 import { Modal } from "@/components/ui/modal";
 import {
@@ -455,6 +456,16 @@ export default function CampaignDetailPage() {
                         transition={{ delay: 0.3 }}
                     >
                         <LiveCallsPanel campaignId={campaignId} />
+                    </motion.div>
+
+                    {/* Call issues — why calls aren't going through (only
+                        renders when there's something to surface). */}
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.35 }}
+                    >
+                        <CallIssuesPanel campaignId={campaignId} />
                     </motion.div>
 
                     {/* Contacts */}
