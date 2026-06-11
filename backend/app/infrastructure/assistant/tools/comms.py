@@ -11,14 +11,12 @@ from app.core.postgres_adapter import Client
 logger = logging.getLogger(__name__)
 
 
-# Where assistant-filed technical-issue reports go. Override per-deploy with
-# SUPPORT_REPORT_EMAIL. Default is the operator's account email (chosen over a
-# look-alike address to avoid leaking tenant data to the wrong inbox).
-_DEFAULT_SUPPORT_EMAIL = "allestateestimation@gmail.com"
-
-
-def _support_report_email() -> str:
-    return (os.getenv("SUPPORT_REPORT_EMAIL") or _DEFAULT_SUPPORT_EMAIL).strip()
+# Where assistant-filed technical-issue reports go. Set per-deploy via
+# SUPPORT_REPORT_EMAIL. Deliberately NO hardcoded default — reports carry
+# tenant data, so we fail closed rather than ship a baked-in recipient that
+# could send to the wrong inbox if the env is ever unset.
+def _support_report_email() -> Optional[str]:
+    return (os.getenv("SUPPORT_REPORT_EMAIL") or "").strip() or None
 
 
 class ReportIssueInput(BaseModel):
@@ -81,10 +79,17 @@ async def report_issue(
     if not (description or "").strip():
         return {"success": False, "error": "Need a description of the issue before I can report it."}
 
+    support_to = _support_report_email()
+    if not support_to:
+        logger.warning("report_issue called but SUPPORT_REPORT_EMAIL is not configured")
+        return {
+            "success": False,
+            "error": "Support reporting isn't configured on the server, so I couldn't file the report. Please contact support directly.",
+        }
+
     reporter = (contact_email or "").strip() or await _resolve_reporter_email(tenant_id, db_client)
     sev = (severity or "normal").strip().lower()
     cat = (category or "other").strip().lower()
-    support_to = _support_report_email()
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     subject = f"[Talky issue] {sev.upper()} · {cat} · tenant {str(tenant_id)[:8]}"

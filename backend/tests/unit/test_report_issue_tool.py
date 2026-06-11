@@ -29,11 +29,20 @@ def _install_fake_email_service(monkeypatch, sink: dict):
     monkeypatch.setitem(sys.modules, "app.services.email_service", mod)
 
 
-def test_support_email_default_and_override(monkeypatch):
+def test_support_email_fails_closed_without_env(monkeypatch):
+    # No hardcoded default — unset env returns None (report_issue then refuses).
     monkeypatch.delenv("SUPPORT_REPORT_EMAIL", raising=False)
-    assert "@" in comms._support_report_email()
+    assert comms._support_report_email() is None
     monkeypatch.setenv("SUPPORT_REPORT_EMAIL", "ops@example.com")
     assert comms._support_report_email() == "ops@example.com"
+
+
+@pytest.mark.asyncio
+async def test_report_issue_refuses_when_support_email_unset(monkeypatch):
+    monkeypatch.delenv("SUPPORT_REPORT_EMAIL", raising=False)
+    res = await comms.report_issue(tenant_id="t1", db_client=None, description="x broke")
+    assert res["success"] is False
+    assert "configured" in res["error"].lower()
 
 
 @pytest.mark.asyncio
