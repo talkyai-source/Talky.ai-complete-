@@ -96,6 +96,7 @@ function createAppQueryClient(onUnauthorized: () => void) {
 
 import { ThemeProvider } from "./theme-provider";
 import { AuthProvider } from "@/lib/auth-context";
+import { PrefetchOnAuth } from "./prefetch-on-auth";
 import dynamic from "next/dynamic";
 
 // Keep notification toaster lazy + client-only (Next 15 SSR safety).
@@ -172,6 +173,7 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
         <QueryClientProvider client={client}>
             <ThemeProvider>
                 <AuthProvider>
+                    <PrefetchOnAuth />
                     {children}
                     <NotificationToaster />
                 </AuthProvider>

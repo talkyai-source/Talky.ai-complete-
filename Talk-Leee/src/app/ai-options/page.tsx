@@ -34,6 +34,13 @@ import {
     ACCENT,
     type AccentBucket,
 } from "@/components/ai-options/controls";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+    useProvidersQuery,
+    useVoicesQuery,
+    useConfigQuery,
+    aiOptionsKeys,
+} from "@/lib/queries/ai-options-queries";
 
 interface LatencyMetrics {
     llm_first_token_ms?: number;
@@ -47,7 +54,6 @@ const GOOGLE_TTS_MODEL = "Chirp3-HD";
 const DEEPGRAM_TTS_MODEL = "aura-2";
 const ELEVENLABS_TTS_MODEL = "eleven_flash_v2_5";
 const CARTESIA_TTS_MODEL = "sonic-3";
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function getFallbackDefaultTtsModel(provider: string): string {
     if (provider === "cartesia") return CARTESIA_TTS_MODEL;
@@ -118,8 +124,19 @@ function SectionHeader({ icon, title, subtitle, right }: { icon: React.ReactNode
 }
 
 export default function AIOptionsPage() {
-    const [providers, setProviders] = useState<ProviderListResponse | null>(null);
-    const [voices, setVoices] = useState<VoiceInfo[]>([]);
+    // Cached, deduped, stale-while-revalidate queries (global cache → instant
+    // on revisit, warmed by the post-login prefetch). Catalogs are read-only;
+    // the config is fetched here but EDITED via a local draft (below).
+    const queryClient = useQueryClient();
+    const providersQuery = useProvidersQuery();
+    const voicesQuery = useVoicesQuery();
+    const configQuery = useConfigQuery();
+
+    const providers = providersQuery.data ?? null;
+    const voices = useMemo(() => dedupeVoicesById(voicesQuery.data?.voices ?? []), [voicesQuery.data]);
+
+    // Local editable DRAFT of the config (server state → form state). Seeded
+    // once from the config query; a background refetch never clobbers edits.
     const [config, setConfig] = useState<AIProviderConfig | null>(null);
 
     function updateVoiceTuningField<K extends keyof NonNullable<AIProviderConfig["voice_tuning"]>>(
@@ -141,12 +158,15 @@ export default function AIOptionsPage() {
             return { ...prev, voice_tuning: current };
         });
     }
-    const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
-    const [voicesNote, setVoicesNote] = useState("");
     const [saveSuccess, setSaveSuccess] = useState(false);
     const [latencyWarnings, setLatencyWarnings] = useState<string[]>([]);
-    const [elevenLabsError, setElevenLabsError] = useState<string | null>(null);
+
+    // Derived from the cached queries (no local mirror to drift out of sync).
+    const elevenLabsError = voicesQuery.data?.elevenlabs_error ?? null;
+    const voicesNote = voicesQuery.isError ? "Voices took too long to load. Reload to fetch them." : "";
+    const loadFailed = providersQuery.isError || configQuery.isError;
+    const loading = providersQuery.isLoading || configQuery.isLoading;
 
     const [testMessage, setTestMessage] = useState("");
     const [testResponse, setTestResponse] = useState("");
@@ -162,71 +182,43 @@ export default function AIOptionsPage() {
 
     const voicePreviewAudioRef = useRef<HTMLAudioElement | null>(null);
 
+    // Seed the editable draft exactly ONCE — after providers + config load and
+    // voices have settled (success or failure), so the picked voice/model are
+    // validated against the real voice list. React Query owns fetching/retry/
+    // caching; this just derives the initial form state.
+    const seededRef = useRef(false);
     useEffect(() => {
-        loadData();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+        if (seededRef.current) return;
+        if (!providersQuery.data || !configQuery.data) return;
+        if (voicesQuery.isLoading) return; // let voices finish (or error) first
 
-    async function loadData(attempt = 0) {
-        try {
-            setLoading(true);
-            setError("");
-            setVoicesNote("");
+        const providersData = providersQuery.data;
+        const configData = configQuery.data;
+        const uniqueVoices = dedupeVoicesById(voicesQuery.data?.voices ?? []);
+        const providerVoices = uniqueVoices.filter((v) => v.provider === configData.tts_provider);
+        const providerModels = getProviderTtsModels(configData.tts_provider, providersData);
+        const normalizedConfig: AIProviderConfig = {
+            ...configData,
+            tts_model: providerModels.some((m) => m.id === configData.tts_model)
+                ? configData.tts_model
+                : getDefaultTtsModel(configData.tts_provider, providersData),
+            tts_sample_rate: getDefaultTtsSampleRate(configData.tts_provider),
+            tts_voice_id: providerVoices.some((v) => v.id === configData.tts_voice_id)
+                ? configData.tts_voice_id
+                : (providerVoices[0]?.id ?? configData.tts_voice_id),
+        };
+        const providerOptions = new Set([
+            ...providersData.tts.providers,
+            ...uniqueVoices.map((v) => v.provider),
+        ]);
+        const initialProvider = providerOptions.has(normalizedConfig.tts_provider)
+            ? normalizedConfig.tts_provider
+            : (uniqueVoices[0]?.provider ?? normalizedConfig.tts_provider);
 
-            // Providers + config are critical; voices is slow (hits ElevenLabs
-            // live) and may time out — don't let it sink the whole page.
-            const [pRes, vRes, cRes] = await Promise.allSettled([
-                aiOptionsApi.getProviders(),
-                aiOptionsApi.getVoices(),
-                aiOptionsApi.getConfig(),
-            ]);
-
-            if ((pRes.status === "rejected" || cRes.status === "rejected") && attempt < 2) {
-                await sleep(500 * (attempt + 1));
-                return loadData(attempt + 1);
-            }
-            if (pRes.status === "rejected") throw pRes.reason;
-            if (cRes.status === "rejected") throw cRes.reason;
-
-            const providersData = pRes.value;
-            const configData = cRes.value;
-            const voicesResult = vRes.status === "fulfilled" ? vRes.value : { voices: [] as VoiceInfo[], elevenlabs_error: undefined };
-            if (vRes.status === "rejected") {
-                setVoicesNote("Voices took too long to load. Click Reload to fetch them.");
-            }
-
-            setElevenLabsError(voicesResult.elevenlabs_error ?? null);
-            const uniqueVoices = dedupeVoicesById(voicesResult.voices);
-            const providerVoices = uniqueVoices.filter((voice) => voice.provider === configData.tts_provider);
-            const providerModels = getProviderTtsModels(configData.tts_provider, providersData);
-            const normalizedConfig: AIProviderConfig = {
-                ...configData,
-                tts_model: providerModels.some((model) => model.id === configData.tts_model)
-                    ? configData.tts_model
-                    : getDefaultTtsModel(configData.tts_provider, providersData),
-                tts_sample_rate: getDefaultTtsSampleRate(configData.tts_provider),
-                tts_voice_id: providerVoices.some((voice) => voice.id === configData.tts_voice_id)
-                    ? configData.tts_voice_id
-                    : (providerVoices[0]?.id ?? configData.tts_voice_id),
-            };
-
-            setProviders(providersData);
-            setVoices(uniqueVoices);
-            setConfig(normalizedConfig);
-            const providerOptions = new Set([
-                ...providersData.tts.providers,
-                ...uniqueVoices.map((voice) => voice.provider),
-            ]);
-            const initialProvider = providerOptions.has(normalizedConfig.tts_provider)
-                ? normalizedConfig.tts_provider
-                : (uniqueVoices[0]?.provider ?? normalizedConfig.tts_provider);
-            setTtsProvider(initialProvider);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to load AI options");
-        } finally {
-            setLoading(false);
-        }
-    }
+        setConfig(normalizedConfig);
+        setTtsProvider(initialProvider);
+        seededRef.current = true;
+    }, [providersQuery.data, configQuery.data, voicesQuery.data, voicesQuery.isLoading]);
 
     async function handleSaveConfig() {
         if (!config) return;
@@ -238,6 +230,9 @@ export default function AIOptionsPage() {
                 tts_sample_rate: getDefaultTtsSampleRate(config.tts_provider),
             };
             const { config: saved, latency_warnings } = await aiOptionsApi.saveConfig(normalizedConfig);
+            // Keep the query cache authoritative so other surfaces + a revisit
+            // see the saved config without a refetch.
+            queryClient.setQueryData(aiOptionsKeys.config(), saved);
             setConfig({
                 ...saved,
                 tts_model: saved.tts_model || getDefaultTtsModel(saved.tts_provider, providers),
@@ -383,7 +378,7 @@ export default function AIOptionsPage() {
 
     return (
         <DashboardLayout title="AI Options" description="Configure LLM, STT, and TTS providers">
-            {loading ? (
+            {loading || (!config && !loadFailed) ? (
                 <div className="flex items-center justify-center h-64">
                     <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-500 border-b-transparent" />
                 </div>
@@ -392,7 +387,7 @@ export default function AIOptionsPage() {
                     <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-5">
                         <div className="flex items-center gap-3 text-red-500"><AlertCircle className="h-5 w-5" /><span>{error || "AI options failed to load from the backend."}</span></div>
                     </div>
-                    <button onClick={() => loadData()} className="flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 font-medium text-white hover:bg-emerald-600">
+                    <button onClick={() => { providersQuery.refetch(); voicesQuery.refetch(); configQuery.refetch(); }} className="flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 font-medium text-white hover:bg-emerald-600">
                         <RefreshCw className="h-4 w-4" /> Retry
                     </button>
                 </div>
