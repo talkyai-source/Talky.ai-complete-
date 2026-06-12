@@ -51,6 +51,13 @@ FLUX_OPTIMAL_CHUNK_MS = 40
 FLUX_HEARTBEAT_INTERVAL_SEC = 4.0
 FLUX_HEARTBEAT_SILENCE_MS = 100
 
+# Capture mode (spelled emails / sensitive data): while active, Flux waits
+# longer through the pauses between spelled letters and needs higher
+# confidence before declaring the turn over — so it doesn't cut the caller
+# off mid-spell. Env-overridable for live tuning.
+CAPTURE_EOT_TIMEOUT_MS = int(os.getenv("FLUX_CAPTURE_EOT_TIMEOUT_MS", "3000"))
+CAPTURE_EOT_THRESHOLD = float(os.getenv("FLUX_CAPTURE_EOT_THRESHOLD", "0.85"))
+
 # WebSocket reconnection configuration
 FLUX_MAX_RECONNECTS = 3          # Maximum mid-call reconnect attempts
 FLUX_RECONNECT_BASE_DELAY = 0.5  # Initial backoff (seconds)
@@ -165,6 +172,12 @@ class DeepgramFluxSTTProvider(STTProvider):
         # Session tags (tenant/campaign) for per-tenant usage + debugging in
         # Deepgram's dashboard. call_id is appended per-connection.
         self._tags: list[str] = []
+
+        # Mid-stream Configure: external code (capture mode) stashes a desired
+        # Configure payload here; the streaming loop — the single writer that
+        # owns the ws — flushes it on its next iteration. Avoids concurrent
+        # ws.send() races. Keyed by call_id.
+        self._pending_config: dict[str, dict] = {}
         
         # Echo suppression: mute microphone during TTS playback
         # This prevents the agent's voice from triggering StartOfTurn
@@ -309,6 +322,58 @@ class DeepgramFluxSTTProvider(STTProvider):
         # Keep ':' readable (tenant:x) but encode spaces/other unsafe chars.
         params.extend(("tag", quote(t, safe=":")) for t in tags)
         return params
+
+    # ── Mid-stream Configure (capture mode) ───────────────────────
+    def request_configure(
+        self,
+        call_id: str,
+        *,
+        keyterms: Optional[list] = None,
+        eot_threshold: Optional[float] = None,
+        eager_eot_threshold: Optional[float] = None,
+        eot_timeout_ms: Optional[int] = None,
+    ) -> None:
+        """Queue a mid-stream Configure for this call.
+
+        The streaming loop (single ws writer) flushes it on its next
+        iteration — see the drain in stream_transcribe. No-op if call_id is
+        falsy. Only the provided fields are sent.
+        """
+        if not call_id:
+            return
+        thresholds: dict = {}
+        if eot_threshold is not None:
+            thresholds["eot_threshold"] = eot_threshold
+        if eager_eot_threshold is not None:
+            thresholds["eager_eot_threshold"] = eager_eot_threshold
+        if eot_timeout_ms is not None:
+            thresholds["eot_timeout_ms"] = eot_timeout_ms
+        payload: dict = {"type": "Configure"}
+        if thresholds:
+            payload["thresholds"] = thresholds
+        if keyterms is not None:
+            payload["keyterms"] = list(keyterms)
+        self._pending_config[call_id] = payload
+
+    def enter_capture_mode(self, call_id: str) -> None:
+        """Relax turn-detection so the caller can spell an email/number without
+        being cut off mid-spell. Keeps the current keyterms active."""
+        self.request_configure(
+            call_id,
+            keyterms=self._keyterms,
+            eot_timeout_ms=CAPTURE_EOT_TIMEOUT_MS,
+            eot_threshold=CAPTURE_EOT_THRESHOLD,
+        )
+
+    def reset_capture_mode(self, call_id: str) -> None:
+        """Restore this session's normal turn-detection after capture."""
+        self.request_configure(
+            call_id,
+            keyterms=self._keyterms,
+            eot_timeout_ms=self._eot_timeout_ms,
+            eot_threshold=self._eot_threshold,
+            eager_eot_threshold=self._eager_eot_threshold,
+        )
     
     async def pre_connect(self, call_id: str) -> None:
         """
@@ -482,7 +547,27 @@ class DeepgramFluxSTTProvider(STTProvider):
                 async for audio_chunk in audio_stream:
                     if stop_event.is_set():
                         break
-                    
+
+                    # Flush any pending mid-stream Configure (capture mode).
+                    # We are the single ws writer, so sending here avoids a
+                    # concurrent ws.send() race. Applied within ~one chunk.
+                    if call_id and call_id in self._pending_config:
+                        _cfg = self._pending_config.pop(call_id, None)
+                        if _cfg:
+                            try:
+                                await ws.send(json.dumps(_cfg))
+                                logger.info(
+                                    "flux Configure applied call_id=%s thresholds=%s keyterms=%d",
+                                    call_id[:12],
+                                    _cfg.get("thresholds"),
+                                    len(_cfg.get("keyterms", [])),
+                                )
+                            except Exception as _cfg_exc:
+                                logger.warning(
+                                    "flux Configure send failed call_id=%s: %s",
+                                    call_id[:12], _cfg_exc,
+                                )
+
                     # Skip audio when muted (during TTS to prevent echo)
                     if stream_stats:
                         stream_stats.frames_in_total += 1
@@ -929,6 +1014,7 @@ class DeepgramFluxSTTProvider(STTProvider):
                 self._eager_states.pop(call_id, None)
                 self._stream_stats.pop(call_id, None)
                 self._reconnect_buffers.pop(call_id, None)
+                self._pending_config.pop(call_id, None)
     
     def detect_turn_end(self, transcript_chunk: TranscriptChunk) -> bool:
         """Detect if user finished speaking (empty final chunk = EndOfTurn)"""

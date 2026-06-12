@@ -20,6 +20,7 @@ from fastapi import WebSocket
 from app.domain.models.conversation import Message, MessageRole
 from app.domain.models.session import CallSession
 from app.domain.services.end_session_action import parse_end_session_action
+from app.domain.services.voice_pipeline import capture_mode
 from app.services.scripts import (
     CallState as CapturedSlotsState,
     update_state_from_user_turn,
@@ -56,6 +57,10 @@ class TurnRunner:
         session.conversation_history.append(
             Message(role=MessageRole.USER, content=full_transcript)
         )
+
+        # This user turn is the one we may have relaxed STT for (e.g. they just
+        # spelled an email). It has arrived, so revert to normal turn-detection.
+        capture_mode.maybe_exit(getattr(self._p, "stt_provider", None), call_id)
 
         captured_slots = getattr(session, "captured_slots", None)
         if captured_slots is None or not is_dataclass(captured_slots):
@@ -100,6 +105,11 @@ class TurnRunner:
                     event_type="assistant_response",
                     is_final=True,
                     include_in_plaintext=True,
+                )
+                # If the agent just asked for an email / to spell something,
+                # relax STT for the caller's upcoming spell-out turn.
+                capture_mode.maybe_enter(
+                    getattr(self._p, "stt_provider", None), call_id, response_text
                 )
             else:
                 logger.warning(
