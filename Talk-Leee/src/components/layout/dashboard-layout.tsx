@@ -39,6 +39,14 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
     const [isDesktop, setIsDesktop] = useState(false);
     const mainContentRef = useRef<HTMLDivElement | null>(null);
 
+    // Flips true the first time we have an authenticated user, and never back.
+    // Gates the blocking auth spinner so it only shows on the first cold load,
+    // not on every background re-auth (the "refresh-from-fresh" fix).
+    const [hasAuthedOnce, setHasAuthedOnce] = useState(false);
+    useEffect(() => {
+        if (user) setHasAuthedOnce(true);
+    }, [user]);
+
     useEffect(() => {
         if (!requireAuth) return;
         if (authLoading) return;
@@ -96,23 +104,20 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
         el.removeAttribute("aria-disabled");
     }, [suspensionState.suspended]);
 
-    if (requireAuth) {
-        if (authLoading) {
-            return (
-                <div className="flex min-h-screen items-center justify-center bg-background text-foreground" role="status" aria-live="polite" aria-busy="true">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-foreground/60" aria-hidden />
-                    <span className="sr-only">Loading…</span>
-                </div>
-            );
-        }
-        if (!user) {
-            return (
-                <div className="flex min-h-screen items-center justify-center bg-background text-foreground" role="status" aria-live="polite" aria-busy="true">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-foreground/60" aria-hidden />
-                    <span className="sr-only">Loading…</span>
-                </div>
-            );
-        }
+    // Persistent shell: only BLOCK on the very first authentication of the
+    // session. Once we've shown an authenticated page, a later background
+    // re-auth (token rotation, a /auth/me re-check, a transient null user)
+    // must NOT blank the whole page back to a spinner — that's the
+    // "refresh-from-fresh" flash. We keep the page mounted and let the
+    // redirect effect above handle a *settled* logout (it has its own
+    // fresh-login grace handling), so security is unchanged.
+    if (requireAuth && !hasAuthedOnce && (authLoading || !user)) {
+        return (
+            <div className="flex min-h-screen items-center justify-center bg-background text-foreground" role="status" aria-live="polite" aria-busy="true">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-foreground/60" aria-hidden />
+                <span className="sr-only">Loading…</span>
+            </div>
+        );
     }
 
     return (

@@ -2,6 +2,7 @@
 
 import { useState, useId } from "react";
 import { LogOut, Loader2 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
 import { logoutCurrentSession } from "@/lib/session-utils";
@@ -26,6 +27,7 @@ export default function LogoutButton({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const router = useRouter();
+  const queryClient = useQueryClient();
   const errorId = useId();
 
   async function handleLogout() {
@@ -40,6 +42,11 @@ export default function LogoutButton({
       // keys were never properly written, so scrubbing them is dead
       // ceremony that misled readers into thinking the keys were live.
       await logoutCurrentSession(token);
+
+      // Security: wipe the React Query cache so the next person on a shared
+      // device can't read the previous user's cached data (the cache is
+      // in-memory and per-user — clearing it on logout is mandatory).
+      queryClient.clear();
 
       // Call success callback if provided
       onLogoutComplete?.();
