@@ -157,6 +157,14 @@ class DeepgramFluxSTTProvider(STTProvider):
 
         # Keyterm prompting list (set in initialize()); empty = no biasing.
         self._keyterms: list[str] = []
+
+        # Privacy: opt this stream out of Deepgram's Model Improvement Program
+        # so caller audio/PII (spelled emails, numbers) isn't retained for
+        # training. Default ON — we handle sensitive data. Override via config.
+        self._mip_opt_out: bool = True
+        # Session tags (tenant/campaign) for per-tenant usage + debugging in
+        # Deepgram's dashboard. call_id is appended per-connection.
+        self._tags: list[str] = []
         
         # Echo suppression: mute microphone during TTS playback
         # This prevents the agent's voice from triggering StartOfTurn
@@ -248,10 +256,15 @@ class DeepgramFluxSTTProvider(STTProvider):
             os.getenv("DEEPGRAM_FLUX_KEYTERMS") or config.get("keyterms")
         )
 
+        # Privacy + observability (see __init__). mip_opt_out defaults ON.
+        self._mip_opt_out = bool(config.get("mip_opt_out", True))
+        self._tags = self._parse_keyterms(config.get("tags"))  # same parse: list|csv
+
         logger.info(
             f"DeepgramFlux initialized: model={self._model}, sample_rate={self._sample_rate}, "
             f"eot_threshold={self._eot_threshold}, eager_eot_threshold={self._eager_eot_threshold}, "
-            f"eot_timeout_ms={self._eot_timeout_ms}, keyterms={len(self._keyterms)}"
+            f"eot_timeout_ms={self._eot_timeout_ms}, keyterms={len(self._keyterms)}, "
+            f"mip_opt_out={self._mip_opt_out}, tags={len(self._tags)}"
         )
 
     @staticmethod
@@ -280,6 +293,22 @@ class DeepgramFluxSTTProvider(STTProvider):
     def _keyterm_params(self) -> list[tuple[str, str]]:
         """Build URL-encoded ``keyterm`` query params (one per term)."""
         return [("keyterm", quote(term, safe="")) for term in self._keyterms]
+
+    def _meta_params(self, call_id: Optional[str] = None) -> list[tuple[str, str]]:
+        """Privacy + observability params: mip_opt_out and session tags.
+
+        Static tags come from config (tenant/campaign); the per-connection
+        call_id is appended here so each Deepgram request is traceable.
+        """
+        params: list[tuple[str, str]] = []
+        if self._mip_opt_out:
+            params.append(("mip_opt_out", "true"))
+        tags = list(self._tags)
+        if call_id:
+            tags.append(f"call:{call_id}")
+        # Keep ':' readable (tenant:x) but encode spaces/other unsafe chars.
+        params.extend(("tag", quote(t, safe=":")) for t in tags)
+        return params
     
     async def pre_connect(self, call_id: str) -> None:
         """
@@ -306,6 +335,7 @@ class DeepgramFluxSTTProvider(STTProvider):
         if self._eager_eot_threshold is not None:
             params.append(("eager_eot_threshold", str(self._eager_eot_threshold)))
         params.extend(self._keyterm_params())
+        params.extend(self._meta_params(call_id))
         query = "&".join(f"{k}={v}" for k, v in params)
         url = f"wss://api.deepgram.com/v2/listen?{query}"
         headers = {
@@ -384,6 +414,7 @@ class DeepgramFluxSTTProvider(STTProvider):
         if self._eager_eot_threshold is not None:
             params.append(("eager_eot_threshold", str(self._eager_eot_threshold)))
         params.extend(self._keyterm_params())
+        params.extend(self._meta_params(call_id))
         query = "&".join(f"{k}={v}" for k, v in params)
         url = f"wss://api.deepgram.com/v2/listen?{query}"
         

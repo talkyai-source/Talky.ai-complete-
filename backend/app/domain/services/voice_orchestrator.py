@@ -818,6 +818,13 @@ class VoiceOrchestrator:
             # providers.yaml list. Env DEEPGRAM_FLUX_KEYTERMS overrides both
             # inside initialize(). Covers telephony AND ask-AI (shared path).
             "keyterms": config.stt_keyterms or _default_flux_keyterms(),
+            # Privacy: keep caller PII out of Deepgram's training set.
+            "mip_opt_out": True,
+            # Observability: tag each STT session for per-tenant usage + debug.
+            "tags": [
+                f"tenant:{config.tenant_id or 'none'}",
+                f"campaign:{config.campaign_id}",
+            ],
         }
         await primary.initialize(primary_init)
 

@@ -65,3 +65,30 @@ def test_voice_session_config_defaults_to_empty_keyterms():
     from app.domain.services.voice_orchestrator import VoiceSessionConfig
 
     assert VoiceSessionConfig().stt_keyterms == []
+
+
+@pytest.mark.asyncio
+async def test_mip_opt_out_default_on():
+    p = DeepgramFluxSTTProvider()
+    await p.initialize({"api_key": "k"})
+    assert p._mip_opt_out is True
+    assert ("mip_opt_out", "true") in p._meta_params()
+
+
+@pytest.mark.asyncio
+async def test_mip_opt_out_can_be_disabled():
+    p = DeepgramFluxSTTProvider()
+    await p.initialize({"api_key": "k", "mip_opt_out": False})
+    assert all(k != "mip_opt_out" for k, _ in p._meta_params())
+
+
+@pytest.mark.asyncio
+async def test_tags_include_static_and_per_call():
+    p = DeepgramFluxSTTProvider()
+    await p.initialize({"api_key": "k", "tags": ["tenant:t1", "campaign:c1"]})
+    params = p._meta_params(call_id="abc 123")
+    tags = [v for k, v in params if k == "tag"]
+    assert "tenant:t1" in tags
+    assert "campaign:c1" in tags
+    # per-call tag appended and URL-encoded
+    assert "call:abc%20123" in tags
