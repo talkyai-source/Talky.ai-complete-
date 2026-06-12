@@ -1201,10 +1201,28 @@ async def remove_contact_from_campaign(
         response = db_client.table("leads").update({
             "status": "deleted"
         }).eq("id", contact_id).execute()
-        
-        logger.info(f"Contact {contact_id} removed from campaign {campaign_id}")
-        
-        return {"message": "Contact removed successfully"}
+
+        # Soft-delete leaves the leads row, so the FK cascade does NOT remove
+        # this lead's dialer jobs — they'd keep dialing a number you just
+        # removed. Cancel its active jobs so the number truly vanishes.
+        cancelled = 0
+        try:
+            from app.domain.services.dialer.job_lifecycle import (
+                cancel_active_jobs_for_lead,
+                REASON_LEAD_REMOVED,
+            )
+            cancelled = cancel_active_jobs_for_lead(
+                db_client, contact_id, reason=REASON_LEAD_REMOVED,
+            )
+        except Exception as exc:
+            logger.warning("remove_contact: job cancel failed for %s: %s", contact_id, exc)
+
+        logger.info(
+            f"Contact {contact_id} removed from campaign {campaign_id} "
+            f"(cancelled {cancelled} active job(s))"
+        )
+
+        return {"message": "Contact removed successfully", "cancelled_jobs": cancelled}
         
     except HTTPException:
         raise

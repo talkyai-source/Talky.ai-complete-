@@ -253,7 +253,31 @@ class CampaignService:
             except Exception as exc:
                 logger.debug("voice gender resolve failed campaign=%s err=%s", campaign_id, exc)
 
+            # De-dupe: never enqueue a second concurrent dial for a lead that
+            # already has an active job. The unique index
+            # uq_dialer_jobs_one_active_per_lead is the DB backstop; this
+            # app-level pre-filter keeps the Redis queue + batch insert clean.
+            from app.domain.services.dialer.job_states import ACTIVE_STATUSES
+            active_lead_ids: set[str] = set()
+            try:
+                lead_ids_all = [str(l["id"]) for l in leads]
+                if lead_ids_all:
+                    res = (
+                        self.db_client.table("dialer_jobs")
+                        .select("lead_id")
+                        .in_("lead_id", lead_ids_all)
+                        .in_("status", list(ACTIVE_STATUSES))
+                        .execute()
+                    )
+                    active_lead_ids = {str(r["lead_id"]) for r in (getattr(res, "data", None) or [])}
+            except Exception as exc:
+                logger.warning("active-lead dedup pre-check failed: %s", exc)
+
+            skipped_active = 0
             for lead in leads:
+                if str(lead["id"]) in active_lead_ids:
+                    skipped_active += 1
+                    continue
                 job, job_record = self._create_job_for_lead(
                     campaign_id=campaign_id,
                     lead=lead,
@@ -268,6 +292,12 @@ class CampaignService:
                 await queue_service.enqueue_job(job)
                 jobs_data.append(job_record)
                 jobs_created += 1
+
+            if skipped_active:
+                logger.info(
+                    "campaign %s: skipped %d lead(s) that already had an active job",
+                    campaign_id, skipped_active,
+                )
 
             # 7. Store jobs in database (batch insert)
             await self._store_jobs_batch(jobs_data)
@@ -353,17 +383,26 @@ class CampaignService:
             "completed_at": datetime.utcnow().isoformat()
         }).eq("id", campaign_id).execute()
         
-        cleared_jobs = 0
-        if clear_queue:
-            # Mark queued/scheduled jobs as skipped in the database.
-            self.db_client.table("dialer_jobs").update({
-                "status": "skipped",
-                "last_error": "Campaign stopped"
-            }).eq("campaign_id", campaign_id).in_("status", ["pending", "retry_scheduled"]).execute()
+        # Stop = stop now. Cancel EVERY active job for this campaign so nothing
+        # lingers in the pipeline. The previous logic only cleared 'pending'/
+        # 'retry_scheduled', and only when clear_queue was set — which left
+        # 'processing'/'calling' jobs as zombies that kept showing as "dialing".
+        from app.domain.services.dialer.job_lifecycle import (
+            cancel_active_jobs_for_campaign,
+            REASON_CAMPAIGN_STOPPED,
+        )
 
+        cleared_jobs = cancel_active_jobs_for_campaign(
+            self.db_client, campaign_id, reason=REASON_CAMPAIGN_STOPPED,
+        )
+        # Drain the Redis queue too so jobs already dequeued into Redis don't
+        # get processed after the stop. Best-effort — never block the stop.
+        try:
             queue_service = await self._get_queue_service()
-            cleared_jobs = await queue_service.clear_campaign_jobs(campaign_id)
+            await queue_service.clear_campaign_jobs(campaign_id)
             await self._cleanup_queue_service()
+        except Exception as exc:
+            logger.warning("stop_campaign: Redis queue clear failed: %s", exc)
 
         # Always hang up live calls for the campaign, regardless of whether
         # the operator chose to clear the pending queue. Stop = stop now,

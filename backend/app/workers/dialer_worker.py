@@ -80,6 +80,8 @@ class DialerWorker:
         self._jobs_failed = 0
         # Set to epoch so the very first loop iteration runs the scheduled check
         self._last_scheduled_check = datetime(2000, 1, 1, tzinfo=timezone.utc)
+        # Stuck-job reaper cadence (epoch → run on first iteration).
+        self._last_reap_check = datetime(2000, 1, 1, tzinfo=timezone.utc)
 
     async def initialize(self) -> None:
         """Initialize connections to Redis and PostgreSQL."""
@@ -136,6 +138,14 @@ class DialerWorker:
                     if moved > 0:
                         logger.info(f"Moved {moved} scheduled jobs to queue")
                     self._last_scheduled_check = now_utc
+
+                # 1b. Reap stuck in-flight jobs (zombies) every 30s so they
+                # don't linger as "dialing" forever and free the lead.
+                if self._last_reap_check.tzinfo is None:
+                    self._last_reap_check = self._last_reap_check.replace(tzinfo=timezone.utc)
+                if (now_utc - self._last_reap_check).total_seconds() > 30:
+                    await self._reap_stuck_jobs_tick()
+                    self._last_reap_check = now_utc
                 
                 # 2. Get active tenants
                 tenant_ids = await self._get_active_tenant_ids()
@@ -672,6 +682,17 @@ class DialerWorker:
                 "SET app.current_tenant_id = '00000000-0000-0000-0000-000000000000'"
             )
             yield conn
+
+    async def _reap_stuck_jobs_tick(self) -> None:
+        """Mark in-flight jobs hung past the timeout as failed, so zombie
+        'dialing' rows don't accumulate and the lead is freed for a fresh
+        attempt. Logic lives in dialer.stuck_job_reaper; best-effort."""
+        try:
+            from app.domain.services.dialer.stuck_job_reaper import reap_stuck_jobs
+            async with self._acquire_db() as conn:
+                await reap_stuck_jobs(conn)
+        except Exception as exc:
+            logger.warning("reaper tick failed: %s", exc)
 
     async def _get_active_tenant_ids(self) -> List[str]:
         """Get list of tenants with active/running campaigns."""
