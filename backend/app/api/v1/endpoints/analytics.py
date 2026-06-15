@@ -112,6 +112,167 @@ def _to_series(buckets: Dict[str, dict]) -> List[CallSeriesItem]:
     ]
 
 
+class HourStat(BaseModel):
+    """Answer/goal performance for one hour-of-day (0–23)."""
+    hour: int
+    total: int
+    answered: int
+    answer_rate: float
+    goal_achieved: int
+    goal_rate: float
+
+
+class BestTimeResponse(BaseModel):
+    timezone: str
+    hours: List[HourStat]
+    best_hour: Optional[int] = None  # highest answer_rate among hours with enough volume
+
+
+class AttemptStat(BaseModel):
+    """Performance of the Nth dial attempt to a lead (1 = first call)."""
+    attempt: int
+    total: int
+    answered: int
+    answer_rate: float
+    goal_achieved: int
+    goal_rate: float
+
+
+class RetryEffectivenessResponse(BaseModel):
+    attempts: List[AttemptStat]
+
+
+# Minimum calls in an hour before it's eligible to be the "best hour" — keeps
+# a single lucky answer from a dead hour winning the recommendation.
+_BEST_HOUR_MIN_VOLUME = 5
+
+
+def _rate(numerator: int, denominator: int) -> float:
+    return round(numerator / denominator, 4) if denominator else 0.0
+
+
+@router.get("/best-time", response_model=BestTimeResponse)
+async def get_best_time_to_call(
+    from_date: Optional[str] = Query(None, alias="from", description="Start date (YYYY-MM-DD)"),
+    to_date: Optional[str] = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
+    tz: str = Query("UTC", description="IANA timezone the hours are reported in"),
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """Answer + goal rate by hour-of-day so the user knows WHEN to dial.
+
+    Each call is bucketed by the hour-of-day of its ``created_at`` in the
+    requested timezone; we report total/answered/goal and the rates, plus
+    the single best hour (highest answer rate among hours with enough
+    volume to be trustworthy)."""
+    import pytz
+    try:
+        zone = pytz.timezone(tz)
+    except Exception:
+        zone = pytz.UTC
+
+    try:
+        start_dt, end_dt_excl = _resolve_range(from_date, to_date)
+        query = db_client.table("calls").select("created_at, outcome")
+        query = query.gte("created_at", start_dt).lt("created_at", end_dt_excl)
+        query = apply_tenant_filter(query, current_user.tenant_id)
+        response = query.execute()
+        if getattr(response, "error", None):
+            raise HTTPException(status_code=500, detail=f"Failed to fetch analytics: {response.error}")
+
+        buckets: Dict[int, dict] = {
+            h: {"total": 0, "answered": 0, "failed": 0, "goal": 0} for h in range(24)
+        }
+        for call in response.data or []:
+            dt = _parse_dt(call.get("created_at"))
+            if dt is None:
+                continue
+            hour = dt.astimezone(zone).hour
+            _classify(call.get("outcome"), buckets[hour])
+
+        hours = [
+            HourStat(
+                hour=h,
+                total=g["total"],
+                answered=g["answered"],
+                answer_rate=_rate(g["answered"], g["total"]),
+                goal_achieved=g["goal"],
+                goal_rate=_rate(g["goal"], g["total"]),
+            )
+            for h, g in sorted(buckets.items())
+        ]
+        eligible = [h for h in hours if h.total >= _BEST_HOUR_MIN_VOLUME]
+        best_hour = max(eligible, key=lambda h: h.answer_rate).hour if eligible else None
+        return BestTimeResponse(timezone=str(zone), hours=hours, best_hour=best_hour)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid date format: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch analytics: {str(e)}")
+
+
+@router.get("/retry-effectiveness", response_model=RetryEffectivenessResponse)
+async def get_retry_effectiveness(
+    from_date: Optional[str] = Query(None, alias="from", description="Start date (YYYY-MM-DD)"),
+    to_date: Optional[str] = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """Does retrying actually pay off? Answer/goal rate by attempt ordinal.
+
+    We order every lead's calls by time and label them 1st, 2nd, 3rd…
+    attempt, then report the answer + goal rate at each ordinal. A sharp
+    drop after attempt 1 tells you the retries aren't converting; a flat
+    line says they are."""
+    try:
+        start_dt, end_dt_excl = _resolve_range(from_date, to_date)
+        query = db_client.table("calls").select("lead_id, created_at, outcome")
+        query = query.gte("created_at", start_dt).lt("created_at", end_dt_excl)
+        query = apply_tenant_filter(query, current_user.tenant_id)
+        response = query.execute()
+        if getattr(response, "error", None):
+            raise HTTPException(status_code=500, detail=f"Failed to fetch analytics: {response.error}")
+
+        # Group calls per lead, then order each lead's calls by time so we can
+        # assign a 1-based attempt ordinal.
+        per_lead: Dict[str, list] = {}
+        for call in response.data or []:
+            lead_id = call.get("lead_id")
+            dt = _parse_dt(call.get("created_at"))
+            if not lead_id or dt is None:
+                continue
+            per_lead.setdefault(str(lead_id), []).append((dt, call.get("outcome")))
+
+        attempts: Dict[int, dict] = {}
+        for calls in per_lead.values():
+            calls.sort(key=lambda c: c[0])
+            for idx, (_dt, outcome) in enumerate(calls, start=1):
+                bucket = attempts.setdefault(
+                    idx, {"total": 0, "answered": 0, "failed": 0, "goal": 0}
+                )
+                _classify(outcome, bucket)
+
+        result = [
+            AttemptStat(
+                attempt=n,
+                total=g["total"],
+                answered=g["answered"],
+                answer_rate=_rate(g["answered"], g["total"]),
+                goal_achieved=g["goal"],
+                goal_rate=_rate(g["goal"], g["total"]),
+            )
+            for n, g in sorted(attempts.items())
+        ]
+        return RetryEffectivenessResponse(attempts=result)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid date format: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch analytics: {str(e)}")
+
+
 @router.get("/calls", response_model=CallAnalyticsResponse)
 async def get_call_analytics(
     from_date: Optional[str] = Query(None, alias="from", description="Start date (YYYY-MM-DD)"),

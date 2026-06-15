@@ -1190,6 +1190,34 @@ async def _on_call_ended(call_id: str) -> None:
                 "call_outcome_persist_failed call_id=%s err=%s", call_id[:12], m_err,
             )
 
+        # --- Compliance: honor an in-call opt-out (Phase 3d) ---------------
+        # If the live agent flagged a "never call me again" request, purge
+        # the lead now: DNC the number, cancel its scheduled jobs, mark the
+        # lead DNC. Runs once, at teardown, and never blocks the rest of it.
+        try:
+            _cs = getattr(voice_session, "call_session", None)
+            opted_out = bool(
+                getattr(voice_session, "_caller_opted_out", False)
+                or getattr(_cs, "_caller_opted_out", False)
+            )
+            if opted_out:
+                from app.core.container import get_container as _gc3
+                _c3 = _gc3()
+                if _c3.is_initialized:
+                    from app.domain.services.dialer.opt_out import purge_lead_on_opt_out
+                    await purge_lead_on_opt_out(
+                        db_pool=_c3.db_pool,
+                        db_client=_c3.db_client,
+                        tenant_id=getattr(voice_session, "_dialer_tenant_id", None),
+                        lead_id=getattr(voice_session, "_dialer_lead_id", None),
+                        phone_number=getattr(voice_session, "_dialer_phone", None),
+                        call_id=getattr(voice_session, "_dialer_call_id", None),
+                    )
+        except Exception as oo_err:
+            logger.warning(
+                "opt_out_purge_failed call_id=%s err=%s", call_id[:12], oo_err,
+            )
+
         # --- Save recording BEFORE session teardown ---
         try:
             await _save_call_recording(voice_session, call_id)

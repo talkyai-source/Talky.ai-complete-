@@ -28,12 +28,20 @@ def build_end_session_tool_instructions(*, action_name: str = END_SESSION_ACTION
         "Set farewell to one short natural sentence that matches the user's goodbye "
         "style: if they say goodbye, say goodbye; if they say see you, say see you; "
         "if they say take care, answer in that same friendly closing style. "
+        "If — and only if — the user asks NOT to be called again (\"stop calling me\", "
+        "\"remove me from your list\", \"take me off\", \"do not call me\", \"unsubscribe\"), "
+        'add "do_not_call":true to the same JSON and set the farewell to a brief, '
+        "respectful confirmation that they won't be contacted again, e.g. "
+        f'{{"action":"{action_name}","reason":"user_done","farewell":"Understood — I\'ll '
+        'remove you from our list. Sorry to bother you, take care.","do_not_call":true}}. '
+        "Do NOT set do_not_call for ordinary goodbyes, objections, or \"I\'m busy right "
+        "now\" — only a genuine request never to be called again. "
         "For all other messages, answer normally. Do not use this action when the "
         "user is asking a question about ending, goodbye handling, calls, or sessions."
     )
 
 
-def parse_end_session_action(text: str) -> Optional[dict[str, str]]:
+def parse_end_session_action(text: str) -> Optional[dict[str, object]]:
     """Parse the provider-agnostic structured action envelope emitted by the LLM."""
     raw = (text or "").strip()
     if not raw:
@@ -61,4 +69,15 @@ def parse_end_session_action(text: str) -> Optional[dict[str, str]]:
     if not isinstance(farewell, str) or not farewell.strip():
         farewell = DEFAULT_FAREWELL
 
-    return {"reason": reason, "farewell": farewell.strip()}
+    # Opt-out flag — accept real booleans and the common string spellings an
+    # LLM might emit. Defaults to False so ordinary end-sessions are unaffected.
+    raw_dnc = payload.get("do_not_call")
+    do_not_call = raw_dnc is True or (
+        isinstance(raw_dnc, str) and raw_dnc.strip().lower() in {"true", "yes", "1"}
+    )
+
+    return {
+        "reason": reason,
+        "farewell": farewell.strip(),
+        "do_not_call": do_not_call,
+    }

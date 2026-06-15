@@ -84,6 +84,19 @@ class TurnRunner:
                 else None
             )
             if ask_ai_end_action:
+                # Compliance: caller asked never to be contacted again. Flag
+                # the session so the call-end teardown runs the opt-out purge
+                # (DNC + cancel scheduled jobs + mark lead DNC). We only set
+                # the flag here; the side effects run once, at hangup.
+                if ask_ai_end_action.get("do_not_call"):
+                    try:
+                        session._caller_opted_out = True
+                    except Exception:
+                        pass
+                    logger.info(
+                        "caller_opt_out_detected call_id=%s — will purge at hangup",
+                        getattr(session, "call_id", "?"),
+                    )
                 await self._p._shutdown_session_for_end_action(
                     session,
                     websocket,

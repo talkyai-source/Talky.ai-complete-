@@ -20,11 +20,12 @@ import { ArrowLeft, ArrowRight, BookOpen, Check, FileText, Loader2, Upload, X } 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { dashboardApi, PersonaType } from "@/lib/dashboard-api";
+import { dashboardApi, PersonaType, CampaignCallingSchedule } from "@/lib/dashboard-api";
 import { api } from "@/lib/api";
 import { AgentNameGender, pruneGenders } from "@/components/campaigns/agent-name-gender";
 import { PERSONAS, parseAgentNames } from "@/lib/campaign-personas";
 import { VoiceProviderPicker } from "@/components/campaigns/voice-provider-picker";
+import { CallingScheduleEditor } from "@/components/campaigns/calling-schedule-editor";
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const STEPS = ["Basics", "Knowledge", "Review"] as const;
@@ -51,6 +52,7 @@ export function CampaignWizard() {
     const [voiceName, setVoiceName] = useState("");
     const [provider, setProvider] = useState("");
     const [goal, setGoal] = useState("");
+    const [schedule, setSchedule] = useState<CampaignCallingSchedule>({});
 
     // Step 2 — knowledge
     const [file, setFile] = useState<File | null>(null);
@@ -118,6 +120,7 @@ export function CampaignWizard() {
                 agent_name_genders: pruneGenders(agentGenders, agentNames),
                 campaign_slots: {},
                 knowledge_driven: true,
+                calling_schedule: schedule,
             });
             if (file) {
                 try {
@@ -219,6 +222,10 @@ export function CampaignWizard() {
                             onVoiceChange={(id, nm) => { setVoiceId(id); setVoiceName(nm ?? ""); }}
                             onProviderChange={setProvider}
                         />
+
+                        <div className="rounded-lg border border-border bg-background/50 p-4">
+                            <CallingScheduleEditor value={schedule} onChange={setSchedule} />
+                        </div>
 
                         <div className="flex justify-end pt-1">
                             <Button onClick={() => { setError(null); setStep(1); }} disabled={!basicsValid}>

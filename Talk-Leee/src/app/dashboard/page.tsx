@@ -24,6 +24,7 @@ import {
     type TimelineItem,
 } from "@/components/ui/dashboard-charts";
 import { HoverTooltip, useHoverTooltip } from "@/components/ui/hover-tooltip";
+import { DialerInsights } from "@/components/dashboard/dialer-insights";
 import { computeMinutesUsageFontPx, MINUTES_USAGE_LAYOUT_SPEC } from "@/lib/minutes-usage-layout.mjs";
 
 function Counter({ value }: { value: number }) {
@@ -1883,6 +1884,15 @@ export default function DashboardPage() {
                         >
                             <h3 className="text-xl font-bold text-gray-900 dark:text-foreground uppercase tracking-wide mb-4">Event Stream</h3>
                             <ActivityFeed items={feedItems} />
+                        </motion.div>
+
+                        <motion.div
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.62 }}
+                            className="lg:col-span-3"
+                        >
+                            <DialerInsights />
                         </motion.div>
 
                         <motion.div

@@ -57,9 +57,22 @@ export interface Campaign {
         campaign_slots?: Record<string, unknown>;
         additional_instructions?: string;
     };
+    // Per-campaign calling hours + timezone (Phase 3c-v2). Null/absent = tenant default.
+    calling_config?: CampaignCallingSchedule | null;
 }
 
 export type PersonaType = "lead_gen" | "customer_support" | "receptionist";
+
+/** Per-campaign calling hours + timezone. All fields optional; the dialer
+ *  overlays whatever is set onto the tenant default. `ignore_schedule` is the
+ *  client's "call anytime" override — the UI still warns out-of-hours. */
+export interface CampaignCallingSchedule {
+    timezone?: string | null;
+    time_window_start?: string | null;   // "HH:MM"
+    time_window_end?: string | null;     // "HH:MM"
+    allowed_days?: number[] | null;      // 0=Mon … 6=Sun
+    ignore_schedule?: boolean;
+}
 
 export interface CampaignCreate {
     name: string;
@@ -86,6 +99,8 @@ export interface CampaignCreate {
     // Per-campaign TTS provider (cartesia|google|deepgram|elevenlabs). Omit to
     // use the tenant global. The voice_id is validated against this provider.
     tts_provider?: string;
+    // Per-campaign calling hours + timezone (Phase 3c-v2).
+    calling_schedule?: CampaignCallingSchedule;
 }
 
 // Call Types

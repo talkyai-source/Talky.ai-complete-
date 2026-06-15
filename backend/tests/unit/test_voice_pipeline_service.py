@@ -73,13 +73,13 @@ def test_ask_ai_end_session_action_parser():
         VoicePipelineService._parse_ask_ai_end_session_action(
             '{"action":"end_session","reason":"user_goodbye","farewell":"See you soon."}'
         )
-        == {"reason": "user_goodbye", "farewell": "See you soon."}
+        == {"reason": "user_goodbye", "farewell": "See you soon.", "do_not_call": False}
     )
     assert (
         VoicePipelineService._parse_ask_ai_end_session_action(
             'Here is the action: {"action":"end_ask_ai_session","reason":"user_done"}'
         )
-        == {"reason": "user_done", "farewell": "Goodbye, take care."}
+        == {"reason": "user_done", "farewell": "Goodbye, take care.", "do_not_call": False}
     )
     assert VoicePipelineService._parse_ask_ai_end_session_action(
         '{"action":"continue"}'

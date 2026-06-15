@@ -15,6 +15,49 @@ class CampaignStartRequest(BaseModel):
     first_speaker: Literal["agent", "user"] = "agent"
 
 
+class CampaignCallingSchedule(BaseModel):
+    """Per-campaign calling hours + timezone, set by the client.
+
+    These overlay the tenant's default calling rules for this campaign:
+    the dialer evaluates the calling window in ``timezone`` and only dials
+    within ``time_window_start``–``time_window_end`` on ``allowed_days`` —
+    UNLESS ``ignore_schedule`` is on, in which case the window is treated
+    as advisory only (the UI still warns, but calls go out anyway). This
+    is the "give the client the power, warn but don't block" behavior.
+    All fields optional; anything omitted falls back to the tenant default.
+    """
+    timezone: Optional[str] = Field(default=None, description="IANA timezone, e.g. America/New_York")
+    time_window_start: Optional[str] = Field(default=None, description="HH:MM")
+    time_window_end: Optional[str] = Field(default=None, description="HH:MM")
+    allowed_days: Optional[List[int]] = Field(default=None, description="0=Mon … 6=Sun")
+    ignore_schedule: bool = Field(
+        default=False,
+        description="When true, dial regardless of the window (override). The UI still shows out-of-hours warnings.",
+    )
+
+    @field_validator("time_window_start", "time_window_end")
+    @classmethod
+    def _validate_hhmm(cls, v: Optional[str]) -> Optional[str]:
+        if v in (None, ""):
+            return None
+        try:
+            h, m = v.split(":")
+            if not (0 <= int(h) <= 23 and 0 <= int(m) <= 59):
+                raise ValueError
+        except Exception:
+            raise ValueError("time must be HH:MM (24h)")
+        return v
+
+    @field_validator("allowed_days")
+    @classmethod
+    def _validate_days(cls, v: Optional[List[int]]) -> Optional[List[int]]:
+        if v is None:
+            return None
+        if any(d < 0 or d > 6 for d in v):
+            raise ValueError("allowed_days entries must be 0–6 (Mon–Sun)")
+        return sorted(set(v))
+
+
 class CampaignCreateRequest(BaseModel):
     """Request body for creating a campaign.
 
@@ -55,6 +98,10 @@ class CampaignCreateRequest(BaseModel):
             "NULL uses the tenant global. The campaign's voice_id is validated "
             "against this provider and the call runs on it."
         ),
+    )
+    calling_schedule: Optional[CampaignCallingSchedule] = Field(
+        default=None,
+        description="Per-campaign calling hours + timezone (overlays tenant defaults).",
     )
 
     @field_validator("agent_names")
@@ -117,6 +164,10 @@ class CampaignUpdateRequest(BaseModel):
             "NULL uses the tenant global. The campaign's voice_id is validated "
             "against this provider and the call runs on it."
         ),
+    )
+    calling_schedule: Optional[CampaignCallingSchedule] = Field(
+        default=None,
+        description="Per-campaign calling hours + timezone (overlays tenant defaults).",
     )
 
     @field_validator("agent_names")

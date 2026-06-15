@@ -16,10 +16,11 @@ import { BookOpen, Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { dashboardApi, PersonaType } from "@/lib/dashboard-api";
+import { dashboardApi, PersonaType, CampaignCallingSchedule } from "@/lib/dashboard-api";
 import { PERSONAS, parseAgentNames } from "@/lib/campaign-personas";
 import { VoiceProviderPicker } from "@/components/campaigns/voice-provider-picker";
 import { AgentNameGender, pruneGenders } from "@/components/campaigns/agent-name-gender";
+import { CallingScheduleEditor } from "@/components/campaigns/calling-schedule-editor";
 
 export type CampaignBasicsEditorInitial = {
     name: string;
@@ -31,6 +32,7 @@ export type CampaignBasicsEditorInitial = {
     voiceId: string;
     ttsProvider?: string | null;
     goal: string;
+    callingSchedule?: CampaignCallingSchedule | null;
 };
 
 export function CampaignBasicsEditor({
@@ -46,6 +48,7 @@ export function CampaignBasicsEditor({
     const [voiceId, setVoiceId] = useState(initial.voiceId);
     const [provider, setProvider] = useState(initial.ttsProvider ?? "");
     const [goal, setGoal] = useState(initial.goal);
+    const [schedule, setSchedule] = useState<CampaignCallingSchedule>(initial.callingSchedule ?? {});
 
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -70,6 +73,7 @@ export function CampaignBasicsEditor({
                 agent_name_genders: pruneGenders(agentGenders, agentNames),
                 campaign_slots: {},
                 knowledge_driven: true,
+                calling_schedule: schedule,
             });
             router.push(`/campaigns/${campaignId}`);
         } catch (err) {
@@ -143,6 +147,10 @@ export function CampaignBasicsEditor({
                     onVoiceChange={(id) => setVoiceId(id)}
                     onProviderChange={setProvider}
                 />
+
+                <div className="rounded-lg border border-border bg-background/50 p-4">
+                    <CallingScheduleEditor value={schedule} onChange={setSchedule} />
+                </div>
 
                 <div className="flex items-start gap-2 rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/5 px-3 py-2.5 text-xs text-muted-foreground">
                     <BookOpen className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />

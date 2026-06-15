@@ -87,6 +87,34 @@ class ExtendedApi {
         return (await response.json()) as BulkImportResponse;
     }
 
+    // Paste-a-blob bulk import (Phase 3a). Same normalize/dedup/insert
+    // pipeline as the CSV upload, but the input is free-form pasted text
+    // (one number per line or comma/semicolon separated).
+    async pasteContacts(campaignId: string, text: string): Promise<BulkImportResponse> {
+        return this.client.request({
+            path: `/contacts/campaigns/${campaignId}/paste`,
+            method: "POST",
+            body: { text },
+        });
+    }
+
+    // Dialer insights (Phase 3e) — best time to call + retry effectiveness.
+    async getBestTimeToCall(tz?: string): Promise<{
+        timezone: string;
+        best_hour: number | null;
+        hours: Array<{ hour: number; total: number; answered: number; answer_rate: number; goal_achieved: number; goal_rate: number }>;
+    }> {
+        const params: Record<string, string> = {};
+        if (tz) params.tz = tz;
+        return this.client.request({ path: "/analytics/best-time", method: "GET", params });
+    }
+
+    async getRetryEffectiveness(): Promise<{
+        attempts: Array<{ attempt: number; total: number; answered: number; answer_rate: number; goal_achieved: number; goal_rate: number }>;
+    }> {
+        return this.client.request({ path: "/analytics/retry-effectiveness", method: "GET" });
+    }
+
     // Analytics
     async getCallAnalytics(
         fromDate?: string,

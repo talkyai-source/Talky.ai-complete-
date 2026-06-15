@@ -122,7 +122,7 @@ async def bind_telephony_call(
                 await conn.execute("SET LOCAL app.bypass_rls = 'true'")
                 row = await conn.fetchrow(
                     """
-                    SELECT id, tenant_id, campaign_id
+                    SELECT id, tenant_id, campaign_id, lead_id, phone_number
                     FROM   calls
                     WHERE  external_call_uuid = $1
                     LIMIT  1
@@ -158,6 +158,18 @@ async def bind_telephony_call(
     voice_session._dialer_call_id = internal_call_id
     voice_session._dialer_tenant_id = tenant_id
     voice_session._dialer_campaign_id = campaign_id
+    # Lead + number are needed by the in-call opt-out purge (Phase 3d) so
+    # it can DNC the number and cancel the lead's scheduled jobs at hangup.
+    # Access defensively — a row without these columns (older callers /
+    # test fakes) must never break the core call binding.
+    def _rget(key):
+        try:
+            return row[key]
+        except (KeyError, IndexError, TypeError):
+            return None
+    _lead_raw = _rget("lead_id")
+    voice_session._dialer_lead_id = str(_lead_raw) if _lead_raw else None
+    voice_session._dialer_phone = _rget("phone_number") or None
 
     logger.info(
         "bind_telephony_call voice_session=%s -> calls.id=%s pbx=%s",

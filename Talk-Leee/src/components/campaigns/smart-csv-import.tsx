@@ -86,11 +86,34 @@ export function SmartCsvImport({
     const [parseError, setParseError] = useState<string | null>(null);
     const [importing, setImporting] = useState(false);
     const [result, setResult] = useState<BulkImportResponse | null>(null);
+    const [tab, setTab] = useState<"csv" | "paste">("csv");
+    const [pasteText, setPasteText] = useState("");
     const fileRef = useRef<HTMLInputElement>(null);
 
     const reset = () => {
         setRows([]); setFileName(""); setParseError(null); setResult(null);
+        setPasteText("");
         if (fileRef.current) fileRef.current.value = "";
+    };
+
+    // Count the non-empty lines/tokens in the paste box for the button label.
+    const pasteCount = useMemo(
+        () => pasteText.split(/[\n\r;,|\t]+/).map((s) => s.trim()).filter(Boolean).length,
+        [pasteText],
+    );
+
+    const doPasteImport = async () => {
+        setImporting(true);
+        setParseError(null);
+        try {
+            const res = await extendedApi.pasteContacts(campaignId, pasteText);
+            setResult(res);
+            onImported?.();
+        } catch (err) {
+            setParseError(err instanceof Error ? err.message : "Import failed");
+        } finally {
+            setImporting(false);
+        }
     };
 
     const onFile = async (f: File | null) => {
@@ -185,8 +208,8 @@ export function SmartCsvImport({
         <Modal
             open={open}
             onOpenChange={(o) => { if (!o) { reset(); onClose(); } }}
-            title="Import contacts from CSV"
-            description="We check every phone number, flag the bad ones, and let you fix them before importing."
+            title="Import contacts"
+            description="Upload a CSV or paste a list of numbers. We check every phone number, flag the bad ones, and dedupe before importing."
             size="xl"
             footer={footer}
         >
@@ -215,16 +238,57 @@ export function SmartCsvImport({
                 </div>
             ) : rows.length === 0 ? (
                 <div>
-                    <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden"
-                        onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
-                    <button
-                        type="button" onClick={() => fileRef.current?.click()}
-                        className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 dark:border-white/15 px-4 py-12 text-center hover:border-emerald-400 hover:bg-emerald-50/40 dark:hover:bg-emerald-950/20"
-                    >
-                        <FileUp className="h-8 w-8 text-muted-foreground" />
-                        <span className="text-sm font-medium text-gray-900 dark:text-zinc-100">Choose a .csv file</span>
-                        <span className="text-xs text-muted-foreground">Needs a phone column; first_name / last_name / email optional</span>
-                    </button>
+                    {/* CSV ↔ Paste switcher */}
+                    <div className="mb-3 inline-flex rounded-lg border border-border p-0.5 text-sm">
+                        <button
+                            type="button"
+                            onClick={() => { setTab("csv"); setParseError(null); }}
+                            className={`rounded-md px-3 py-1 font-medium ${tab === "csv" ? "bg-emerald-600 text-white" : "text-muted-foreground hover:text-foreground"}`}
+                        >
+                            Upload CSV
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => { setTab("paste"); setParseError(null); }}
+                            className={`rounded-md px-3 py-1 font-medium ${tab === "paste" ? "bg-emerald-600 text-white" : "text-muted-foreground hover:text-foreground"}`}
+                        >
+                            Paste numbers
+                        </button>
+                    </div>
+
+                    {tab === "csv" ? (
+                        <>
+                            <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden"
+                                onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
+                            <button
+                                type="button" onClick={() => fileRef.current?.click()}
+                                className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 dark:border-white/15 px-4 py-12 text-center hover:border-emerald-400 hover:bg-emerald-50/40 dark:hover:bg-emerald-950/20"
+                            >
+                                <FileUp className="h-8 w-8 text-muted-foreground" />
+                                <span className="text-sm font-medium text-gray-900 dark:text-zinc-100">Choose a .csv file</span>
+                                <span className="text-xs text-muted-foreground">Needs a phone column; first_name / last_name / email optional</span>
+                            </button>
+                        </>
+                    ) : (
+                        <div className="space-y-3">
+                            <textarea
+                                value={pasteText}
+                                onChange={(e) => setPasteText(e.target.value)}
+                                placeholder={"Paste phone numbers — one per line, or comma/semicolon separated.\n\n+1 415 555 1234\n4155559999\n(212) 555-0000"}
+                                rows={10}
+                                className="w-full rounded-xl border border-gray-300 dark:border-white/15 bg-white dark:bg-zinc-900 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            />
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs text-muted-foreground">
+                                    {pasteCount > 0 ? `${pasteCount} number${pasteCount === 1 ? "" : "s"} detected · normalized & deduped server-side` : "One per line, or comma/semicolon separated. Normalized and deduped automatically."}
+                                </span>
+                                <Button onClick={doPasteImport} disabled={importing || pasteCount === 0}>
+                                    {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                                    {importing ? "Importing…" : `Import ${pasteCount || ""} contact${pasteCount === 1 ? "" : "s"}`}
+                                </Button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             ) : (
                 <div className="overflow-x-auto">

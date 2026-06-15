@@ -20,19 +20,15 @@ from app.domain.repositories.lead_repository import LeadRepository
 logger = logging.getLogger(__name__)
 
 
-# Retry configuration (shared with webhooks.py constants)
-RETRY_DELAY_SECONDS = 7200   # 2 hours between retries
-MAX_RETRY_ATTEMPTS = 3       # Maximum retry attempts per job
+# Retry timing + per-disposition caps now live in
+# ``app.workers.disposition_policy`` (the single source of truth for
+# post-answer retry cadence). The old flat RETRY_DELAY_SECONDS /
+# MAX_RETRY_ATTEMPTS / RETRYABLE_OUTCOMES constants were removed when
+# that brain took over — keeping them here would invite the same
+# "treats every outcome identically" drift they used to cause.
 
-# Outcomes that should trigger retry
-RETRYABLE_OUTCOMES = {
-    CallOutcome.BUSY,
-    CallOutcome.NO_ANSWER,
-    CallOutcome.FAILED,
-    CallOutcome.VOICEMAIL,
-}
-
-# Outcomes that should NOT retry
+# Outcomes that should NOT retry (still used for lead DNC marking,
+# campaign-counter routing, and the terminal job status).
 NON_RETRYABLE_OUTCOMES = {
     CallOutcome.SPAM,
     CallOutcome.INVALID,
@@ -295,61 +291,77 @@ class CallService:
     ) -> None:
         """
         Handle dialer job completion — decide retry or finalize.
-        
-        Retry rules:
-        - Retry if: busy, no_answer, voicemail, failed AND under max attempts
-        - Don't retry if: spam, invalid, unavailable, goal_achieved, max attempts
-        - Retry delay: RETRY_DELAY_SECONDS (2 hours)
-        - Max attempts: MAX_RETRY_ATTEMPTS (3)
+
+        Retry policy is owned by ``disposition_policy.decide`` (the single
+        source of truth for post-answer outcomes). It replaced the old
+        flat ``RETRY_DELAY_SECONDS`` (2h for everything) + ``MAX_RETRY_
+        ATTEMPTS`` (3 for everything) logic, which treated busy,
+        no-answer and voicemail identically. Each disposition now has its
+        own cadence and attempt cap:
+
+            Busy      5m → 15m → 45m   (cap 4)
+            No-answer 2h → next-day    (cap 3)
+            Voicemail 4h once          (cap 2)
+            Rejected  no retry — stop
+            Failed    30s → 2m → 10m   (cap 3)
         """
         try:
             # Get job details
             job_response = self._db_client.table("dialer_jobs").select("*").eq("id", job_id).execute()
-            
+
             if not job_response.data:
                 logger.warning(f"Dialer job not found: {job_id}")
                 return
-            
+
             job_data = job_response.data[0]
             attempt_number = job_data.get("attempt_number", 1)
             tenant_id = job_data.get("tenant_id", "default-tenant")
-            
-            # Determine final status and whether to retry
-            goal_achieved = outcome == CallOutcome.GOAL_ACHIEVED
-            should_retry = False
-            
-            if goal_achieved:
-                final_status = JobStatus.GOAL_ACHIEVED
+
+            # Disposition-based decision — see module docstring for the
+            # cadence table. Pure logic, no side effects; we own the
+            # writes below.
+            from app.workers.disposition_policy import decide as decide_disposition
+            decision = decide_disposition(outcome, attempt_number)
+
+            if decision.is_success:
+                final_status = (
+                    JobStatus.GOAL_ACHIEVED
+                    if outcome == CallOutcome.GOAL_ACHIEVED
+                    else JobStatus.COMPLETED
+                )
+            elif decision.should_retry:
+                final_status = JobStatus.RETRY_SCHEDULED
             elif outcome in NON_RETRYABLE_OUTCOMES:
                 final_status = JobStatus.NON_RETRYABLE
-            elif outcome in RETRYABLE_OUTCOMES and attempt_number < MAX_RETRY_ATTEMPTS:
-                should_retry = True
-                final_status = JobStatus.RETRY_SCHEDULED
             else:
                 final_status = JobStatus.FAILED
-            
+
             # Update job in database
             job_update = {
                 "status": final_status.value if hasattr(final_status, 'value') else str(final_status),
                 "last_outcome": outcome.value if hasattr(outcome, 'value') else str(outcome),
+                "failure_reason": decision.reason,
                 "updated_at": datetime.utcnow().isoformat()
             }
-            
-            if not should_retry:
+
+            if not decision.should_retry:
                 job_update["completed_at"] = datetime.utcnow().isoformat()
-            
+
             self._db_client.table("dialer_jobs").update(job_update).eq("id", job_id).execute()
-            
+
             # Schedule retry if needed
-            if should_retry:
-                await self._schedule_retry(job_id, job_data, outcome, campaign_id, lead_id,
-                                           tenant_id, attempt_number)
-            
+            if decision.should_retry:
+                await self._schedule_retry(
+                    job_id, job_data, outcome, campaign_id, lead_id,
+                    tenant_id, attempt_number, decision.delay_seconds,
+                )
+
             logger.info(
-                f"Job {job_id} completed: outcome={outcome}, "
-                f"final_status={final_status}, retry={should_retry}"
+                "job_completion job=%s final=%s %s",
+                job_id, final_status.value if hasattr(final_status, 'value') else final_status,
+                decision.log_message,
             )
-            
+
         except Exception as e:
             logger.error(f"Error handling job completion for {job_id}: {e}", exc_info=True)
     
@@ -361,25 +373,42 @@ class CallService:
         campaign_id: str,
         lead_id: str,
         tenant_id: str,
-        attempt_number: int
+        attempt_number: int,
+        delay_seconds: int,
     ) -> None:
-        """Schedule a retry for a failed dialer job."""
-        logger.info(f"Scheduling retry for job {job_id} (attempt {attempt_number + 1})")
-        
+        """Schedule a retry for a dialer job after ``delay_seconds``.
+
+        Fresh-first sequencing: a *recycled* (retry) job must never jump
+        ahead of a never-tried lead. We clamp its priority below the
+        high-priority lane so a retry can't preempt fresh traffic via the
+        priority queue; combined with the delayed re-enqueue (which
+        RPUSHes to the back of the tenant FIFO when due), fresh leads
+        always drain before recycled ones.
+        """
+        logger.info(
+            f"Scheduling retry for job {job_id} (attempt {attempt_number + 1}) "
+            f"in {delay_seconds}s"
+        )
+
+        fresh_priority = job_data.get("priority", 5)
+        retry_priority = min(
+            fresh_priority, DialerQueueService.HIGH_PRIORITY_THRESHOLD - 1,
+        )
+
         retry_job = DialerJob(
             job_id=job_id,
             campaign_id=campaign_id,
             lead_id=lead_id,
             tenant_id=tenant_id,
             phone_number=job_data.get("phone_number", ""),
-            priority=job_data.get("priority", 5),
+            priority=retry_priority,
             status=JobStatus.RETRY_SCHEDULED,
             attempt_number=attempt_number + 1,
             last_outcome=outcome
         )
-        
+
         if self._queue_service:
-            await self._queue_service.schedule_retry(retry_job, delay_seconds=RETRY_DELAY_SECONDS)
+            await self._queue_service.schedule_retry(retry_job, delay_seconds=delay_seconds)
         else:
             logger.error(f"Cannot schedule retry for job {job_id}: queue service unavailable")
     

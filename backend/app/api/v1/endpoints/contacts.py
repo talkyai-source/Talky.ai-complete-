@@ -31,7 +31,7 @@ router = APIRouter(prefix="/contacts", tags=["contacts"])
 
 class ImportError(BaseModel):
     """Single import error"""
-    row: int
+    row: Optional[int] = None
     error: str
     phone: Optional[str] = None
 
@@ -43,6 +43,13 @@ class BulkImportResponse(BaseModel):
     failed: int
     duplicates_skipped: int = 0
     errors: List[ImportError]
+
+
+class BulkPasteRequest(BaseModel):
+    """Pasted-text bulk import payload — a blob of phone numbers, one per
+    line or separated by commas/semicolons. Names are not parsed from a
+    paste (use CSV for that); every token is treated as a phone number."""
+    text: str
 
 
 def _normalize_for_user(phone: str, user) -> str:
@@ -201,171 +208,64 @@ async def upload_campaign_contacts(
                     detail=f"CSV must have 'phone_number' column. Found: {', '.join(csv_reader.fieldnames)}"
                 )
         
-        # 4. Map existing phones in the campaign. We always load these (even when
-        #    skip_duplicates is False) so we never create a second LIVE row for a
-        #    phone, and so a phone that matches a SOFT-DELETED row is revived in
-        #    place (keeping its id, call history and is_lead) rather than inserted
-        #    as a fresh row that orphans all of that.
-        existing_phones: Set[str] = set()           # live phones in campaign
-        deleted_lead_by_phone: dict[str, str] = {}  # phone -> deleted lead id to revive
-        existing_response = db_client.table("leads").select(
-            "id, phone_number, status, is_lead"
-        ).eq("campaign_id", campaign_id).execute()
-        for row in (existing_response.data or []):
-            if row.get("status") == "deleted":
-                # Prefer keeping a qualified-lead row to revive; first-write wins otherwise.
-                prev = deleted_lead_by_phone.get(row["phone_number"])
-                if prev is None or row.get("is_lead"):
-                    deleted_lead_by_phone[row["phone_number"]] = row["id"]
-            else:
-                existing_phones.add(row["phone_number"])
-        
-        # 5. Process rows
-        total_rows = 0
-        imported = 0
-        duplicates_skipped = 0
-        errors: List[ImportError] = []
-        leads_to_insert: List[dict] = []
-        leads_to_revive: List[dict] = []   # {id, first_name, last_name, email, custom_fields}
-        seen_phones_in_file: Set[str] = set()  # Track duplicates within file
-        
+        # 4. Parse CSV rows into LeadRecords (CSV-specific field mapping).
+        #    Dedup / revive / chunk-insert is handled by the shared
+        #    bulk-ingest core so CSV and pasted-text imports behave
+        #    identically.
+        from app.domain.services.dialer.bulk_ingest import (
+            LeadRecord, ingest_lead_records,
+        )
+        records: List[LeadRecord] = []
         for row_num, row in enumerate(csv_reader, start=2):  # Row 1 is header
-            total_rows += 1
-            
-            try:
-                # Get phone number (case-insensitive column match)
-                phone_raw = None
-                for key in row:
-                    if key.lower().strip() == 'phone_number':
-                        phone_raw = row[key]
-                        break
-                
-                if not phone_raw or not phone_raw.strip():
-                    errors.append(ImportError(row=row_num, error="Missing phone_number", phone=None))
-                    continue
-                
-                # Normalize phone
-                try:
-                    normalized_phone = _normalize_for_user(phone_raw.strip(), current_user)
-                except ValueError as e:
-                    errors.append(ImportError(row=row_num, error=str(e), phone=phone_raw))
-                    continue
-                
-                # Check for duplicate within this file
-                if normalized_phone in seen_phones_in_file:
-                    duplicates_skipped += 1
-                    continue
-                seen_phones_in_file.add(normalized_phone)
-                
-                # A live row with this phone already exists -> always skip (never
-                # create a second live row; the DB unique guard enforces this too).
-                if normalized_phone in existing_phones:
-                    duplicates_skipped += 1
-                    continue
+            phone_raw = None
+            first_name = last_name = email = None
+            custom_fields: dict = {}
+            for key, value in row.items():
+                key_lower = (key or "").lower().strip()
+                value_clean = value.strip() if value else None
+                if key_lower == 'phone_number':
+                    phone_raw = value_clean
+                elif key_lower == 'first_name':
+                    first_name = value_clean
+                elif key_lower == 'last_name':
+                    last_name = value_clean
+                elif key_lower == 'email':
+                    email = value_clean
+                elif value_clean:
+                    custom_fields[key] = value_clean
+            records.append(LeadRecord(
+                phone_raw=phone_raw or "",
+                first_name=first_name,
+                last_name=last_name,
+                email=email,
+                custom_fields=custom_fields,
+                source_row=row_num,
+            ))
 
-                # Extract other fields (case-insensitive)
-                first_name = None
-                last_name = None
-                email = None
-                custom_fields = {}
-                
-                for key, value in row.items():
-                    key_lower = key.lower().strip()
-                    value_clean = value.strip() if value else None
-                    
-                    if key_lower == 'first_name':
-                        first_name = value_clean
-                    elif key_lower == 'last_name':
-                        last_name = value_clean
-                    elif key_lower == 'email':
-                        email = value_clean
-                    elif key_lower not in ('phone_number',):
-                        # Store additional columns as custom fields
-                        if value_clean:
-                            custom_fields[key] = value_clean
-                
-                # If a soft-deleted row exists for this phone, revive it in place
-                # (keeps id + call history + is_lead) instead of inserting a new one.
-                revive_id = deleted_lead_by_phone.pop(normalized_phone, None)
-                if revive_id is not None:
-                    leads_to_revive.append({
-                        "id": revive_id,
-                        "first_name": first_name,
-                        "last_name": last_name,
-                        "email": email,
-                        "custom_fields": custom_fields if custom_fields else {},
-                    })
-                    existing_phones.add(normalized_phone)
-                    continue
-
-                # Prepare lead record with tenant_id
-                lead_data = {
-                    "id": str(uuid.uuid4()),
-                    "tenant_id": campaign_tenant_id or current_user.tenant_id,
-                    "campaign_id": campaign_id,
-                    "phone_number": normalized_phone,
-                    "first_name": first_name,
-                    "last_name": last_name,
-                    "email": email,
-                    "custom_fields": custom_fields if custom_fields else {},
-                    "status": "pending",
-                    "last_call_result": "pending",
-                    "call_attempts": 0,
-                    "created_at": datetime.utcnow().isoformat()
-                }
-
-                leads_to_insert.append(lead_data)
-                existing_phones.add(normalized_phone)  # Track to prevent duplicates in later rows
-                
-            except Exception as e:
-                errors.append(ImportError(row=row_num, error=str(e), phone=str(row.get('phone_number', ''))))
-        
-        # 6. Batch insert leads
-        if leads_to_insert:
-            # PostgreSQL supports batch insert - insert all at once for performance
-            # Split into chunks of 500 to avoid request size limits
-            chunk_size = 500
-            for i in range(0, len(leads_to_insert), chunk_size):
-                chunk = leads_to_insert[i:i + chunk_size]
-                try:
-                    db_client.table("leads").insert(chunk).execute()
-                    imported += len(chunk)
-                except Exception as e:
-                    logger.error(f"Batch insert failed for chunk {i}-{i+len(chunk)}: {e}")
-                    # Mark all in this chunk as failed
-                    for j, lead in enumerate(chunk):
-                        errors.append(ImportError(
-                            row=i + j + 2,  # Approximate row number
-                            error=f"Database insert failed: {str(e)}",
-                            phone=lead.get("phone_number")
-                        ))
-
-        # 7. Revive soft-deleted matches in place (preserves call history + is_lead)
-        for rev in leads_to_revive:
-            try:
-                db_client.table("leads").update({
-                    "status": "pending",
-                    "first_name": rev["first_name"],
-                    "last_name": rev["last_name"],
-                    "email": rev["email"],
-                    "custom_fields": rev["custom_fields"],
-                }).eq("id", rev["id"]).execute()
-                imported += 1
-            except Exception as e:
-                logger.error(f"Failed to revive deleted lead {rev['id']}: {e}")
-                errors.append(ImportError(row=0, error=f"Revive failed: {str(e)}", phone=None))
+        # 5. Normalize, dedup, revive, chunk-insert via the shared core.
+        result = ingest_lead_records(
+            db_client,
+            campaign_id=campaign_id,
+            tenant_id=campaign_tenant_id or current_user.tenant_id,
+            records=records,
+            normalize=lambda p: _normalize_for_user(p, current_user),
+        )
 
         logger.info(
             f"CSV upload completed for campaign '{campaign_name}': "
-            f"{imported} imported ({len(leads_to_revive)} revived), {duplicates_skipped} duplicates skipped, {len(errors)} errors"
+            f"{result.imported} imported ({result.revived} revived), "
+            f"{result.duplicates_skipped} duplicates skipped, {len(result.errors)} errors"
         )
-        
+
         return BulkImportResponse(
-            total_rows=total_rows,
-            imported=imported,
-            failed=len(errors),
-            duplicates_skipped=duplicates_skipped,
-            errors=errors[:100]  # Limit errors returned to first 100
+            total_rows=result.total,
+            imported=result.imported,
+            failed=len(result.errors),
+            duplicates_skipped=result.duplicates_skipped,
+            errors=[
+                ImportError(row=e.row, error=e.error, phone=e.phone)
+                for e in result.errors[:100]
+            ],
         )
     
     except HTTPException:
@@ -376,6 +276,74 @@ async def upload_campaign_contacts(
             status_code=500,
             detail=f"Failed to import contacts: {str(e)}"
         )
+
+
+# =============================================================================
+# Phase 3a: Paste-a-blob bulk import
+# =============================================================================
+
+@router.post("/campaigns/{campaign_id}/paste", response_model=BulkImportResponse)
+async def paste_campaign_contacts(
+    campaign_id: str,
+    body: BulkPasteRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """Bulk import contacts by pasting a list of numbers.
+
+    Accepts a free-form blob (one number per line, or comma/semicolon
+    separated), extracts the numbers, then runs the same normalize →
+    dedup → revive → chunk-insert pipeline as the CSV upload. Built for
+    the "I have 100+ numbers to drop in" case without making a CSV.
+    """
+    from app.domain.services.dialer.bulk_ingest import (
+        LeadRecord, ingest_lead_records, parse_pasted_numbers,
+    )
+
+    # 1. Validate campaign exists AND belongs to the caller's tenant.
+    campaign_query = db_client.table("campaigns").select("id, name, tenant_id").eq("id", campaign_id)
+    campaign_query = apply_tenant_filter(campaign_query, current_user.tenant_id)
+    campaign_response = campaign_query.execute()
+    if not campaign_response.data:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    campaign_tenant_id = campaign_response.data[0].get("tenant_id")
+
+    # 2. Parse the blob into raw tokens.
+    tokens = parse_pasted_numbers(body.text)
+    if not tokens:
+        raise HTTPException(status_code=400, detail="No phone numbers found in the pasted text")
+
+    records = [
+        LeadRecord(phone_raw=tok, source_row=i)
+        for i, tok in enumerate(tokens, start=1)
+    ]
+
+    # 3. Shared ingest core.
+    result = ingest_lead_records(
+        db_client,
+        campaign_id=campaign_id,
+        tenant_id=campaign_tenant_id or current_user.tenant_id,
+        records=records,
+        normalize=lambda p: _normalize_for_user(p, current_user),
+    )
+
+    logger.info(
+        "Paste import for campaign %s: %d imported (%d revived), %d duplicates, "
+        "%d invalid",
+        campaign_id, result.imported, result.revived,
+        result.duplicates_skipped, result.invalid,
+    )
+
+    return BulkImportResponse(
+        total_rows=result.total,
+        imported=result.imported,
+        failed=len(result.errors),
+        duplicates_skipped=result.duplicates_skipped,
+        errors=[
+            ImportError(row=e.row, error=e.error, phone=e.phone)
+            for e in result.errors[:100]
+        ],
+    )
 
 
 # =============================================================================

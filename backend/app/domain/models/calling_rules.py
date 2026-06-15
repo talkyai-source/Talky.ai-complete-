@@ -79,28 +79,59 @@ class CallingRules(BaseModel):
         le=24,
         description="Minimum hours between calls to same lead (0 = no cooldown)"
     )
-    
+    max_calls_per_lead_per_day: int = Field(
+        default=0,
+        ge=0,
+        le=20,
+        description=(
+            "Hard ceiling on dial attempts to the same lead within one "
+            "calendar day (tenant timezone). Defense-in-depth above the "
+            "per-disposition caps: even if busy/no-answer retries stack up, "
+            "a lead is never dialled more than this many times per day. "
+            "0 = disabled (rely on per-disposition caps only)."
+        )
+    )
+
     # Caller ID
     caller_id: Optional[str] = Field(
         default=None,
         description="Default caller ID for this tenant"
     )
     
-    def is_within_time_window(self, check_time: Optional[datetime] = None) -> tuple[bool, str]:
+    def _resolve_tz(self, tz_override: Optional[str] = None):
+        """Pick the timezone to evaluate the window in: the per-lead
+        override (Phase 3c — derived from the prospect's phone number)
+        when supplied and valid, otherwise the tenant's configured tz,
+        falling back to UTC. Keeps TCPA windows anchored to the person
+        being called, not the account's home timezone."""
+        for candidate in (tz_override, self.timezone):
+            if not candidate:
+                continue
+            try:
+                return pytz.timezone(candidate)
+            except pytz.exceptions.UnknownTimeZoneError:
+                continue
+        return pytz.UTC
+
+    def is_within_time_window(
+        self,
+        check_time: Optional[datetime] = None,
+        tz_override: Optional[str] = None,
+    ) -> tuple[bool, str]:
         """
         Check if current time is within the calling window.
-        
+
         Args:
             check_time: Time to check (default: now)
-            
+            tz_override: per-lead IANA timezone; when set, the window is
+                evaluated in the prospect's local time instead of the
+                tenant's configured timezone.
+
         Returns:
             (is_allowed, reason)
         """
-        try:
-            tz = pytz.timezone(self.timezone)
-        except pytz.exceptions.UnknownTimeZoneError:
-            tz = pytz.UTC
-        
+        tz = self._resolve_tz(tz_override)
+
         if check_time is None:
             check_time = datetime.now(tz)
         elif check_time.tzinfo is None:
@@ -131,21 +162,23 @@ class CallingRules(BaseModel):
         else:
             return False, f"outside_time_window_{self.time_window_start}_{self.time_window_end}"
     
-    def get_next_window_start(self, from_time: Optional[datetime] = None) -> datetime:
+    def get_next_window_start(
+        self,
+        from_time: Optional[datetime] = None,
+        tz_override: Optional[str] = None,
+    ) -> datetime:
         """
         Get the next time the calling window opens.
-        
+
         Args:
             from_time: Start checking from this time (default: now)
-            
+            tz_override: per-lead IANA timezone (see is_within_time_window).
+
         Returns:
             datetime when next window opens
         """
-        try:
-            tz = pytz.timezone(self.timezone)
-        except pytz.exceptions.UnknownTimeZoneError:
-            tz = pytz.UTC
-        
+        tz = self._resolve_tz(tz_override)
+
         if from_time is None:
             from_time = datetime.now(tz)
         elif from_time.tzinfo is None:

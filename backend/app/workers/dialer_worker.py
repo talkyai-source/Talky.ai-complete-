@@ -11,7 +11,7 @@ import os
 import signal
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 
 from contextlib import asynccontextmanager
@@ -223,8 +223,18 @@ class DialerWorker:
                 await self._update_job_status(job.job_id, JobStatus.SKIPPED, error="out_of_minutes")
                 return
 
-            # 1. Get tenant calling rules
-            rules = await self._get_tenant_rules(job.tenant_id)
+            # 1. Calling rules: tenant defaults overlaid with the campaign's
+            # per-campaign schedule (timezone/window/days). The window is
+            # evaluated in the CAMPAIGN's timezone (Phase 3c-v2). If the
+            # client enabled the "call anytime" override we skip the window
+            # gate entirely — the UI still warns, but we never block.
+            tenant_rules = await self._get_tenant_rules(job.tenant_id)
+            campaign_cfg = await self._get_campaign_calling_config(job.campaign_id)
+            from app.domain.services.dialer.campaign_schedule import (
+                effective_rules, schedule_ignored,
+            )
+            rules = effective_rules(tenant_rules, campaign_cfg)
+            ignore_schedule = schedule_ignored(campaign_cfg)
             
             # 2. Get lead info for cooldown check
             lead_last_called = await self._get_lead_last_called(job.lead_id)
@@ -244,12 +254,20 @@ class DialerWorker:
                 logger.debug("dialer_active_count_failed err=%s", exc)
                 active_override = None
 
+            # Daily per-lead cap: only pay the COUNT query when the tenant
+            # actually enabled the ceiling (default off → zero overhead).
+            lead_attempts_today = None
+            if getattr(rules, "max_calls_per_lead_per_day", 0):
+                lead_attempts_today = await self._get_lead_attempts_today(job.lead_id)
+
             can_call, reason = await self.rules_engine.can_make_call(
                 tenant_id=job.tenant_id,
                 campaign_id=job.campaign_id,
                 rules=rules,
                 lead_last_called=lead_last_called,
                 active_calls_override=active_override,
+                lead_attempts_today=lead_attempts_today,
+                enforce_window=not ignore_schedule,
             )
             
             if not can_call:
@@ -278,6 +296,21 @@ class DialerWorker:
                     await self.queue_service.enqueue_job(job)
                     await self._update_job_status(job.job_id, JobStatus.SKIPPED, reason=reason)
                     return
+                elif "daily_lead_cap" in reason:
+                    # The per-day ceiling resets at UTC midnight. Reschedule
+                    # the lead for just after the day rolls over; the
+                    # calling-window gate then holds it until the tenant's
+                    # allowed hours. Avoids burning retries hammering the cap.
+                    now = datetime.now(timezone.utc)
+                    next_midnight = (now + timedelta(days=1)).replace(
+                        hour=0, minute=5, second=0, microsecond=0,
+                    )
+                    delay = max(300, int((next_midnight - now).total_seconds()))
+                    logger.info(
+                        "Daily per-lead cap hit for lead %s (%s) — retrying after "
+                        "midnight in %ds (~%.1fh)",
+                        job.lead_id, reason, delay, delay / 3600,
+                    )
                 else:
                     delay = 300  # 5 minutes for other reasons (concurrent limit, etc.)
 
@@ -782,6 +815,25 @@ class DialerWorker:
         
         return CallingRules.default()
     
+    async def _get_campaign_calling_config(self, campaign_id: str) -> Optional[dict]:
+        """Load a campaign's per-campaign calling schedule (timezone, window,
+        days, ignore_schedule override). Returns None when unset so the
+        worker falls back to tenant defaults."""
+        try:
+            async with self._acquire_db() as conn:
+                cfg = await conn.fetchval(
+                    "SELECT calling_config FROM campaigns WHERE id = $1",
+                    campaign_id,
+                )
+            if cfg:
+                if isinstance(cfg, str):
+                    cfg = json.loads(cfg)
+                if isinstance(cfg, dict):
+                    return cfg
+        except Exception as e:
+            logger.warning(f"Failed to load campaign calling_config for {campaign_id}: {e}")
+        return None
+
     async def _get_lead_last_called(self, lead_id: str) -> Optional[datetime]:
         """Get the last time a lead was called."""
         try:
@@ -794,9 +846,30 @@ class DialerWorker:
             
         except Exception as e:
             logger.warning(f"Failed to get lead last_called_at: {e}")
-        
+
         return None
-    
+
+    async def _get_lead_attempts_today(self, lead_id: str) -> int:
+        """Count dial attempts already made to a lead since UTC midnight.
+
+        Used only when the tenant has a daily per-lead cap configured
+        (``max_calls_per_lead_per_day`` > 0); otherwise this is never
+        called, so it adds zero overhead to the default path. Counts
+        ``calls`` rows rather than the cumulative ``leads.call_attempts``
+        because the cap is a *per-day* ceiling.
+        """
+        try:
+            async with self._acquire_db() as conn:
+                val = await conn.fetchval(
+                    "SELECT COUNT(*) FROM calls "
+                    "WHERE lead_id = $1 AND created_at >= date_trunc('day', now())",
+                    lead_id,
+                )
+                return int(val or 0)
+        except Exception as e:
+            logger.warning(f"Failed to count lead attempts today: {e}")
+        return 0
+
     async def _create_call_record(self, job: DialerJob, provider_call_id: str) -> tuple[str, str, str]:
         """
         Create a call record in the database with separate internal and provider IDs.

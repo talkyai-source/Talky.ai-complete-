@@ -221,6 +221,21 @@ async def preview_prompt(
     )
 
 
+def _calling_config_from_schedule(schedule) -> Optional[dict]:
+    """Build the ``campaigns.calling_config`` payload from a client-supplied
+    calling schedule. Returns None when no schedule was sent so update never
+    clobbers an existing config. Only fields the client actually set are
+    written; the worker overlays them onto the tenant defaults at dial time."""
+    if schedule is None:
+        return None
+    cfg: dict = {"ignore_schedule": bool(getattr(schedule, "ignore_schedule", False))}
+    for key in ("timezone", "time_window_start", "time_window_end", "allowed_days"):
+        val = getattr(schedule, key, None)
+        if val not in (None, ""):
+            cfg[key] = val
+    return cfg
+
+
 @router.post("/", dependencies=[Depends(rate_limit_dependency)])
 async def create_campaign(
     campaign_data: CampaignCreateRequest,
@@ -280,6 +295,9 @@ async def create_campaign(
             "goal": campaign_data.goal.strip() if campaign_data.goal else None,
             "script_config": script_config,
         }
+        _sched = _calling_config_from_schedule(campaign_data.calling_schedule)
+        if _sched is not None:
+            insert_payload["calling_config"] = _sched
 
         response = db_client.table("campaigns").insert(insert_payload).execute()
         if response.error:
@@ -433,6 +451,9 @@ async def update_campaign(
             "goal": campaign_data.goal.strip() if campaign_data.goal else None,
             "script_config": script_config,
         }
+        _sched = _calling_config_from_schedule(campaign_data.calling_schedule)
+        if _sched is not None:
+            update_payload["calling_config"] = _sched
 
         response = (
             db_client.table("campaigns")

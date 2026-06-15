@@ -33,6 +33,9 @@ class SchedulingRuleEngine:
         rules: CallingRules,
         lead_last_called: Optional[datetime] = None,
         active_calls_override: Optional[int] = None,
+        lead_attempts_today: Optional[int] = None,
+        lead_timezone: Optional[str] = None,
+        enforce_window: bool = True,
     ) -> Tuple[bool, str]:
         """
         Check if a call can be made now.
@@ -46,11 +49,16 @@ class SchedulingRuleEngine:
         Returns:
             (can_call, reason)
         """
-        # Rule 1: Time window check
-        in_window, window_reason = rules.is_within_time_window()
-        if not in_window:
-            logger.debug(f"Time window check failed: {window_reason}")
-            return False, window_reason
+        # Rule 1: Time window check — evaluated in the campaign's timezone
+        # (Phase 3c-v2, via the effective rules' tz) or an explicit
+        # lead_timezone override. Skipped entirely when enforce_window is
+        # False — that's the client's "call anytime" override; the UI still
+        # warns, but we never block the dial here.
+        if enforce_window:
+            in_window, window_reason = rules.is_within_time_window(tz_override=lead_timezone)
+            if not in_window:
+                logger.debug(f"Time window check failed: {window_reason}")
+                return False, window_reason
         
         # Rule 2: Concurrent call limit check.
         # Prefer the authoritative live-call count the caller passes in (the
@@ -82,7 +90,18 @@ class SchedulingRuleEngine:
                 reason = f"lead_cooldown_{hours_since_last_call:.1f}h_of_{rules.min_hours_between_calls}h"
                 logger.debug(f"Lead cooldown active: {reason}")
                 return False, reason
-        
+
+        # Rule 4: Daily per-lead attempt ceiling. Defense-in-depth above
+        # the per-disposition caps — even if busy/no-answer retries stack
+        # up, a single lead is never dialled more than the configured
+        # number of times within one calendar day. Disabled when the cap
+        # is 0 or the caller didn't supply today's count.
+        daily_cap = getattr(rules, "max_calls_per_lead_per_day", 0)
+        if daily_cap and lead_attempts_today is not None and lead_attempts_today >= daily_cap:
+            reason = f"daily_lead_cap_reached_{lead_attempts_today}/{daily_cap}"
+            logger.debug(f"Daily per-lead cap reached: {reason}")
+            return False, reason
+
         # All rules passed
         return True, "all_rules_passed"
     
@@ -112,21 +131,25 @@ class SchedulingRuleEngine:
         """Get current active call count for a campaign."""
         return self._campaign_calls.get(campaign_id, 0)
     
-    def get_delay_until_next_window(self, rules: CallingRules) -> int:
+    def get_delay_until_next_window(
+        self, rules: CallingRules, lead_timezone: Optional[str] = None,
+    ) -> int:
         """
         Calculate seconds until next calling window opens.
-        
+
         Args:
             rules: Tenant's calling rules
-            
+            lead_timezone: per-lead IANA tz (Phase 3c); the delay is
+                computed against the prospect's local window when set.
+
         Returns:
             Seconds until next window (0 if currently in window)
         """
-        in_window, _ = rules.is_within_time_window()
+        in_window, _ = rules.is_within_time_window(tz_override=lead_timezone)
         if in_window:
             return 0
-        
-        next_window = rules.get_next_window_start()
+
+        next_window = rules.get_next_window_start(tz_override=lead_timezone)
         delay = (next_window - datetime.now(timezone.utc)).total_seconds()
         return max(0, int(delay))
     

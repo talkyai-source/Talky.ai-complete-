@@ -13,6 +13,7 @@ import { LiveCallsPanel } from "@/components/campaigns/live-calls-panel";
 import { CallIssuesPanel } from "@/components/campaigns/call-issues-panel";
 import { KnowledgePanel } from "@/components/campaigns/knowledge-panel";
 import { Modal } from "@/components/ui/modal";
+import { checkCallingWindow } from "@/lib/calling-window";
 import {
     ArrowLeft,
     Play,
@@ -706,6 +707,23 @@ export default function CampaignDetailPage() {
                 }
             >
                 <div className="space-y-2">
+                    {(() => {
+                        const sched = campaign?.calling_config;
+                        if (!sched) return null;
+                        const win = checkCallingWindow(sched);
+                        if (!win.outside) return null;
+                        return (
+                            <div className="mb-2 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+                                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                                <span>
+                                    {win.message}{" "}
+                                    {sched.ignore_schedule
+                                        ? "“Call anytime” is on, so calls will go out now."
+                                        : "Calls will wait until the window opens. You can start anyway — turn on “call anytime” in the campaign’s calling hours to dial immediately."}
+                                </span>
+                            </div>
+                        );
+                    })()}
                     <label
                         className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
                             firstSpeaker === "agent"

@@ -39,11 +39,30 @@ function formatDuration(seconds?: number) {
     return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
+// Friendly, first-class labels for each call disposition so the history
+// reads like a human's notes ("No Answer", "Voicemail") rather than raw
+// enum values. Unknown values fall back to Title-Cased words.
+const OUTCOME_LABELS: Record<string, string> = {
+    goal_achieved: "Qualified",
+    goal_not_achieved: "Disqualified",
+    answered: "Answered",
+    no_answer: "No Answer",
+    busy: "Busy",
+    voicemail: "Voicemail",
+    rejected: "Rejected",
+    failed: "Failed",
+    timeout: "Timed Out",
+    unavailable: "Unavailable",
+    disconnected: "Disconnected",
+};
+
 function humanizeOutcome(outcome?: string) {
     if (!outcome) return "--";
-    if (outcome === "goal_achieved") return "Qualified";
-    if (outcome === "goal_not_achieved") return "Disqualified";
-    return outcome.replace(/_/g, " ");
+    const key = outcome.trim().toLowerCase();
+    if (OUTCOME_LABELS[key]) return OUTCOME_LABELS[key];
+    return key
+        .replace(/_/g, " ")
+        .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function CallRow({ call }: { call: Call }) {
