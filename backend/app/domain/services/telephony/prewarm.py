@@ -34,6 +34,11 @@ from app.domain.services.telephony.modes.caller_first import (
 
 logger = logging.getLogger(__name__)
 
+# TTS models that load/first-synth too slowly for the default 5s warmup gate
+# (expressive, non-realtime engines). They get TELEPHONY_PREWARM_TIMEOUT_SLOW_S
+# instead so the call still rings on the chosen voice.
+_SLOW_TTS_MODELS = {"eleven_v3"}
+
 
 @dataclass
 class PrewarmResult:
@@ -238,9 +243,27 @@ async def prepare_prewarmed_session(
         #    modes lands on a fully-streamed-end-to-end LLM path.
         warmup_coros.append(warm_llm_stream(pre_warm_session))
 
+        # Most TTS engines warm up well within 5s. The expressive ElevenLabs
+        # models (eleven_v3) load + first-synth much slower and were being
+        # refused at the gate ("pipeline not ready within 5s"). Give those a
+        # longer window so the call still rings on the chosen high-quality
+        # voice instead of failing. Fast models keep the tight 5s.
         prewarm_timeout_s = float(
             os.getenv("TELEPHONY_PREWARM_TIMEOUT_S", "5.0")
         )
+        try:
+            _provider = (getattr(config, "tts_provider_type", "") or "").lower()
+            _model = (getattr(config, "tts_model", "") or "").lower()
+            if _provider == "elevenlabs" and _model in _SLOW_TTS_MODELS:
+                prewarm_timeout_s = float(
+                    os.getenv("TELEPHONY_PREWARM_TIMEOUT_SLOW_S", "20.0")
+                )
+                logger.info(
+                    "prewarm: slow TTS model %s — extended warmup window %.1fs",
+                    _model, prewarm_timeout_s,
+                )
+        except Exception:
+            pass
         try:
             results = await asyncio.wait_for(
                 asyncio.gather(*warmup_coros, return_exceptions=True),
