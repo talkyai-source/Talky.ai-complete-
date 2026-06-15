@@ -36,6 +36,7 @@ from app.domain.services.end_session_action import (
     parse_end_session_action,
 )
 from app.domain.services.llm_guardrails import get_guardrails
+from app.domain.services.voice_pipeline import expressive_caps
 from app.services.scripts.prompts.guardrails import ELEVEN_V3_AUDIO_TAGS_INSTRUCTIONS
 from app.infrastructure.llm.groq import LLMTimeoutError
 from app.services.scripts import compose_system_prompt
@@ -190,13 +191,14 @@ class TurnStreamer:
         if self._p._supports_llm_end_session_action(session):
             system_prompt = system_prompt + "\n\n" + _END_SESSION_TOOL_INSTRUCTIONS
 
-        # Emotional audio tags — ONLY when this call's voice is ElevenLabs
-        # eleven_v3 (the expressive engine that performs [laughs]/[sighs]/etc.).
-        # For any other model we never add this, so tags can't leak as spoken
-        # words. The LLM emits tags inline; eleven_v3 (with stability < Robust)
-        # acts them out.
-        _tts = getattr(self._p, "tts_provider", None)
-        if (getattr(_tts, "_model_id", "") or "").lower() == "eleven_v3":
+        # Emotional audio tags — driven by the capability registry (single
+        # source of truth). Only voices that actually PERFORM bracket tags
+        # ([laughs]/[sighs]/[pause]) get told they may use them; every other
+        # voice both (a) isn't instructed to use them and (b) has any stray tag
+        # physically stripped in clean_response below. So tags can never leak as
+        # spoken words on a non-supporting engine.
+        tags_ok = expressive_caps.supports_audio_tags(expressive_caps.model_id_of(self._p))
+        if tags_ok:
             system_prompt = system_prompt + "\n\n" + ELEVEN_V3_AUDIO_TAGS_INSTRUCTIONS
 
         if session.captured_slots is not None:
@@ -271,7 +273,7 @@ class TurnStreamer:
                     if idx < 0:
                         break
 
-                    sentence = guardrails.clean_response(buf[:idx + 1].strip())
+                    sentence = guardrails.clean_response(buf[:idx + 1].strip(), preserve_audio_tags=tags_ok)
                     buf = buf[idx + 2:] if idx + 2 <= len(buf) else ""
 
                     if not sentence or len(sentence) < 6:
@@ -343,7 +345,7 @@ class TurnStreamer:
         if not ask_ai_end_action and not tts_was_interrupted and buf.strip():
             if not (barge_in_event and barge_in_event.is_set()):
                 if not max_sentences or sentences_done < max_sentences:
-                    sentence = guardrails.clean_response(buf.strip())
+                    sentence = guardrails.clean_response(buf.strip(), preserve_audio_tags=tags_ok)
                     if sentence:
                         if t_tts_first is None:
                             t_tts_first = time.monotonic()
@@ -366,7 +368,7 @@ class TurnStreamer:
         if ask_ai_end_action:
             full_text = raw_response_text.strip()
         else:
-            full_text = guardrails.clean_response(raw_response_text)
+            full_text = guardrails.clean_response(raw_response_text, preserve_audio_tags=tags_ok)
 
         if not ask_ai_end_action and max_sentences and full_text:
             parts = re.split(r'(?<=[.!?])\s+', full_text.strip())
