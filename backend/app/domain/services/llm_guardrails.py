@@ -281,8 +281,15 @@ class LLMGuardrails:
         # the voice can perform them. This is the production safety net — the
         # prompt also gates them, but a disobedient LLM must never leak a tag as
         # spoken text on a non-supporting engine (Cartesia/Google/Deepgram/flash).
+        from app.domain.services.voice_pipeline.expressive_caps import (
+            strip_audio_tags, strip_stage_directions,
+        )
+        # Always remove *asterisk*/(paren)-wrapped stage directions ("*laughs*",
+        # "(sighs)") — wrong format on every engine, and the markdown pass below
+        # would otherwise leave the bare word "laughs" to be read aloud.
+        cleaned = strip_stage_directions(cleaned)
+        # Bracket audio tags ([laughs]) stay only for tag-capable voices.
         if not preserve_audio_tags:
-            from app.domain.services.voice_pipeline.expressive_caps import strip_audio_tags
             cleaned = strip_audio_tags(cleaned)
         cleaned = re.sub(r'```[\s\S]*?```', ' ', cleaned)
         cleaned = re.sub(r'`([^`]+)`', r'\1', cleaned)

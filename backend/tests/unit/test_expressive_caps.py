@@ -54,6 +54,24 @@ def test_clean_response_keeps_fillers_either_way():
         assert "Hmm" in out and "yeah" in out and "got it" in out
 
 
+def test_stage_directions_stripped_any_voice():
+    g = get_guardrails()
+    assert g.clean_response("*laughs* That's great!").strip() == "That's great!"
+    assert "sighs" not in g.clean_response("(sighs softly) I understand.")
+    # even on a tag-capable voice, the *asterisk* form is wrong → stripped,
+    # while the proper [bracket] tag is kept.
+    out = g.clean_response("[laughs] *sighs* okay.", preserve_audio_tags=True)
+    assert "[laughs]" in out and "sighs" not in out
+
+
+def test_bare_action_word_and_emphasis_kept():
+    g = get_guardrails()
+    # bare word in a real sentence must survive (not wrapped)
+    assert "laughs" in g.clean_response("She laughs a lot at his jokes.")
+    # markdown emphasis on a real word: asterisks go, word stays
+    assert "really important" in g.clean_response("That is *really* important.")
+
+
 def test_clean_response_markdown_links_still_collapse():
     # Links must become plain text (not be treated as / stripped like tags).
     g = get_guardrails()

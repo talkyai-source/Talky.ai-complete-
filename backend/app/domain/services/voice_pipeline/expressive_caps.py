@@ -62,3 +62,31 @@ def strip_audio_tags(text: str) -> str:
     if not text or "[" not in text:
         return text
     return AUDIO_TAG_RE.sub("", text)
+
+
+# Stage-direction action words. When wrapped in *asterisks* or (parens) — the
+# notation models reflexively fall back to — these must be removed ENTIRELY,
+# on every voice: it's never a valid performed format (v3 uses [brackets]), and
+# left alone the markdown pass would turn "*laughs*" into the spoken word
+# "laughs". Bare words in normal speech ("she laughs a lot") are NOT touched —
+# only the wrapped form is.
+_ACTION_WORDS = (
+    r"laugh(?:s|ing|ed)?|sigh(?:s|ing|ed)?|chuckl(?:e|es|ing)|giggl(?:e|es|ing)|"
+    r"clears?\s+throat|cough(?:s|ing)?|gasp(?:s|ing)?|exhal(?:e|es|ing)|"
+    r"inhal(?:e|es|ing)|breath(?:e|es|ing)|sniff(?:s|ing)?|whisper(?:s|ing)?|"
+    r"pause(?:s|ing)?|smil(?:e|es|ing)|grin(?:s|ning)?|scoff(?:s|ing)?|"
+    r"clearing\s+throat|throat\s+clear"
+)
+_STAGE_ASTERISK_RE = re.compile(r"\*[^*\n]*\b(?:" + _ACTION_WORDS + r")\b[^*\n]*\*", re.IGNORECASE)
+_STAGE_PAREN_RE = re.compile(r"\([^)\n]*\b(?:" + _ACTION_WORDS + r")\b[^)\n]*\)", re.IGNORECASE)
+
+
+def strip_stage_directions(text: str) -> str:
+    """Remove *asterisk*- or (paren)-wrapped action words ("*laughs*",
+    "(sighs softly)") on any voice — wrong format, and would otherwise be read
+    aloud. Targeted: only wrapped action words, never bare words in a sentence."""
+    if not text or ("*" not in text and "(" not in text):
+        return text
+    text = _STAGE_ASTERISK_RE.sub("", text)
+    text = _STAGE_PAREN_RE.sub("", text)
+    return text
