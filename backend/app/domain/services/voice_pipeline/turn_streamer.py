@@ -36,6 +36,7 @@ from app.domain.services.end_session_action import (
     parse_end_session_action,
 )
 from app.domain.services.llm_guardrails import get_guardrails
+from app.services.scripts.prompts.guardrails import ELEVEN_V3_AUDIO_TAGS_INSTRUCTIONS
 from app.infrastructure.llm.groq import LLMTimeoutError
 from app.services.scripts import compose_system_prompt
 
@@ -188,6 +189,15 @@ class TurnStreamer:
 
         if self._p._supports_llm_end_session_action(session):
             system_prompt = system_prompt + "\n\n" + _END_SESSION_TOOL_INSTRUCTIONS
+
+        # Emotional audio tags — ONLY when this call's voice is ElevenLabs
+        # eleven_v3 (the expressive engine that performs [laughs]/[sighs]/etc.).
+        # For any other model we never add this, so tags can't leak as spoken
+        # words. The LLM emits tags inline; eleven_v3 (with stability < Robust)
+        # acts them out.
+        _tts = getattr(self._p, "tts_provider", None)
+        if (getattr(_tts, "_model_id", "") or "").lower() == "eleven_v3":
+            system_prompt = system_prompt + "\n\n" + ELEVEN_V3_AUDIO_TAGS_INSTRUCTIONS
 
         if session.captured_slots is not None:
             system_prompt = compose_system_prompt(system_prompt, session.captured_slots)

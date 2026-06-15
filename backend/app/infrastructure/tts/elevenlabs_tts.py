@@ -130,6 +130,18 @@ class ElevenLabsTTSProvider(TTSProvider):
             "text": text,
             "model_id": model_id,
         }
+        # Eleven v3 performs inline audio tags ([laughs], [sighs], [whispers],
+        # [pause], emotions) — but ONLY when stability is below "Robust". The
+        # stability slider gates expressiveness: Creative(0.0) follows tags most
+        # (can hallucinate), Natural(0.5) balanced, Robust(1.0) ignores tags.
+        # Default to Natural so calls are expressive but reliable; tunable via
+        # ELEVENLABS_V3_STABILITY. Only sent for v3 so fast models are untouched.
+        if str(model_id).lower() == "eleven_v3":
+            try:
+                _stab = float(os.getenv("ELEVENLABS_V3_STABILITY", "0.5"))
+            except (TypeError, ValueError):
+                _stab = 0.5
+            payload["voice_settings"] = {"stability": max(0.0, min(1.0, _stab))}
         url = f"{self.API_BASE_URL}/v1/text-to-speech/{selected_voice_id}/stream"
 
         # Concurrency guard wraps the entire call (incl. retries) so 50
