@@ -120,7 +120,7 @@ class AIProviderConfig(BaseModel):
     llm_provider: LLMProvider = LLMProvider.GROQ
     llm_model: str = GroqModel.LLAMA_3_1_8B.value  # llama-3.1-8b-instant — Groq's recommended voice model (560 t/s, ~90ms TTFT)
     llm_temperature: float = Field(default=0.6, ge=0.0, le=2.0)
-    llm_max_tokens: int = Field(default=90, ge=1, le=1000)  # 90 tokens ≈ 2 sentences; voice guideline for low latency
+    llm_max_tokens: int = Field(default=90, ge=1, le=5000)  # ceiling raised for consultative replies; per-turn length still governed by the persona + sentence cap
     
     # STT Configuration
     stt_provider: STTProvider = STTProvider.DEEPGRAM
@@ -166,7 +166,7 @@ class LLMTestRequest(BaseModel):
     model: str = GroqModel.LLAMA_3_3_70B.value
     message: str
     temperature: float = Field(default=0.6, ge=0.0, le=2.0)
-    max_tokens: int = Field(default=150, ge=1, le=1000)
+    max_tokens: int = Field(default=150, ge=1, le=5000)
 
 
 class LLMTestResponse(BaseModel):

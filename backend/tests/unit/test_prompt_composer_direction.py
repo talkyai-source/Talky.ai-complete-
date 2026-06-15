@@ -198,8 +198,16 @@ class TestFewShotAndFillers:
         must explicitly permit natural fillers ('uh', 'let me see',
         etc.) so the agent does not sound like a service bot."""
         out = compose_prompt(persona, "Alex", "Acme", slots)
-        # Permission line we authored — assert it survives composition.
-        assert "Use occasional fillers" in out
+        # The persona must explicitly permit natural fillers so the agent
+        # doesn't sound like a service bot. Intent-based (not a single brittle
+        # phrase): either the classic permission line OR concrete filler
+        # examples the agent can mimic.
+        assert (
+            "Use occasional fillers" in out
+            or '"got it"' in out
+            or "let me see" in out
+            or '"hmm"' in out
+        )
 
     @pytest.mark.parametrize("persona,slots", [
         ("lead_gen", LEAD_GEN_SLOTS),

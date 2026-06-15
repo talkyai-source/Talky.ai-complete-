@@ -707,7 +707,12 @@ def build_telephony_session_config(
             ]
         ),
         flow=ConversationFlow(max_objection_attempts=2),
-        response_max_sentences=2,
+        # Per-turn ceiling (not a target). 2 forced every reply terse — no room
+        # for consultative discovery, mood-matching, or natural expressiveness.
+        # 5 lets the agent open up when it earns it; the persona prompt keeps it
+        # SHORT by default and only fuller when warranted, so this is headroom,
+        # not a mandate to monologue.
+        response_max_sentences=5,
     )
 
     # Audio sample-rate strategy:

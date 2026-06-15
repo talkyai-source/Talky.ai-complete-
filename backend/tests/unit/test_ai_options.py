@@ -71,20 +71,22 @@ class TestAIConfig:
             AIProviderConfig(llm_temperature=2.1)
     
     def test_max_tokens_validation(self):
-        """Test max_tokens must be between 1 and 1000"""
+        """Test max_tokens must be between 1 and 5000 (ceiling raised for
+        consultative replies; per-turn length still capped by the persona +
+        sentence budget)."""
         # Valid values
         config = AIProviderConfig(llm_max_tokens=1)
         assert config.llm_max_tokens == 1
-        
-        config = AIProviderConfig(llm_max_tokens=1000)
-        assert config.llm_max_tokens == 1000
-        
+
+        config = AIProviderConfig(llm_max_tokens=5000)
+        assert config.llm_max_tokens == 5000
+
         # Invalid values should raise validation error
         with pytest.raises(Exception):
             AIProviderConfig(llm_max_tokens=0)
-        
+
         with pytest.raises(Exception):
-            AIProviderConfig(llm_max_tokens=1001)
+            AIProviderConfig(llm_max_tokens=5001)
 
 
 class TestModelInfo:
