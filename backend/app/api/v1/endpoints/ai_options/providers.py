@@ -10,8 +10,11 @@ from __future__ import annotations
 import logging
 import os
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
+
+from app.api.v1.dependencies import get_current_user, get_db_client
+from app.core.postgres_adapter import Client
 
 from app.domain.models.ai_config import (
     CARTESIA_MODELS,
@@ -85,13 +88,38 @@ async def list_providers():
 
 
 @router.get("/voices")
-async def list_voices():
+async def list_voices(
+    current_user=Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
     """
     Get all available TTS voices.  Returns a JSON object with a `voices` list
     and an optional `elevenlabs_error` string when the ElevenLabs API key is
     invalid or the API returned an error.
+
+    Voice clones live in one shared ElevenLabs account, so we filter the list
+    to this tenant: shared/library voices for everyone, but a cloned voice
+    only for the tenant that created it (other tenants' clones are hidden).
     """
     voices = await _get_all_tts_voices()
+
+    try:
+        from app.domain.services import voice_clone_service as vcs
+        tenant_id = getattr(current_user, "tenant_id", None)
+        if tenant_id:
+            owned = await vcs.owned_voice_ids(db_client.pool, str(tenant_id))
+            all_clones = await vcs.all_platform_voice_ids(db_client.pool)
+            hidden = all_clones - owned
+            if hidden:
+                voices = [
+                    v for v in voices
+                    if not (v.provider == "elevenlabs" and v.id in hidden)
+                ]
+    except Exception as exc:
+        # Never let scoping break the catalog — worst case the user just
+        # doesn't see clones; log and serve the unfiltered library voices.
+        logger.warning("voice clone scoping failed: %s", exc)
+
     el_error = get_elevenlabs_last_error() if elevenlabs_enabled() else None
     response: dict = {"voices": [v.model_dump() for v in voices]}
     if el_error:

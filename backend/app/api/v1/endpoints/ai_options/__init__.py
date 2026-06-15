@@ -22,6 +22,7 @@ load_dotenv()
 
 # Sub-modules
 from . import benchmark as _benchmark_mod
+from . import clone as _clone_mod
 from . import config as _config_mod
 from . import preview as _preview_mod
 from . import providers as _providers_mod
@@ -43,6 +44,7 @@ router.include_router(_preview_mod.router)
 router.include_router(_testing_mod.router)
 router.include_router(_config_mod.router)
 router.include_router(_benchmark_mod.router)
+router.include_router(_clone_mod.router)
 
 
 __all__ = [

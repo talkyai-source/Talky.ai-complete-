@@ -98,6 +98,39 @@ class ExtendedApi {
         });
     }
 
+    // Voice cloning (ElevenLabs Instant Voice Cloning).
+    async listClonedVoices(): Promise<{
+        items: Array<{ id: string; voice_id: string; name: string; created_at: string }>;
+        max_per_tenant: number;
+        used: number;
+    }> {
+        return this.client.request({ path: "/ai-options/voices/cloned", method: "GET" });
+    }
+
+    async cloneVoice(name: string, consent: boolean, file: File | Blob): Promise<{ id: string; voice_id: string; name: string }> {
+        const form = new FormData();
+        form.append("name", name);
+        form.append("consent", consent ? "true" : "false");
+        // Give a blob a filename so the backend's extension check passes.
+        const named = file instanceof File ? file : new File([file], "sample.webm", { type: (file as Blob).type || "audio/webm" });
+        form.append("file", named);
+        const res = await this.client.requestRaw({
+            path: "/ai-options/voices/clone",
+            method: "POST",
+            body: form,
+        });
+        if (!res.ok) {
+            let msg = `Clone failed (${res.status})`;
+            try { const j = await res.json(); if (j?.detail) msg = j.detail; } catch { /* ignore */ }
+            throw new Error(msg);
+        }
+        return (await res.json()) as { id: string; voice_id: string; name: string };
+    }
+
+    async deleteClonedVoice(id: string): Promise<{ deleted: boolean }> {
+        return this.client.request({ path: `/ai-options/voices/cloned/${id}`, method: "DELETE" });
+    }
+
     // Dialer insights (Phase 3e) — best time to call + retry effectiveness.
     async getBestTimeToCall(tz?: string): Promise<{
         timezone: string;

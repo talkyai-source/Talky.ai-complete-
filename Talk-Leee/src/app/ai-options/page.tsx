@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { ApplyToCampaignsModal } from "@/components/campaigns/apply-to-campaigns-modal";
+import { VoiceCloneModal } from "@/components/ai-options/voice-clone-modal";
 import {
     aiOptionsApi,
     AIProviderConfig,
@@ -131,6 +132,7 @@ export default function AIOptionsPage() {
     const providersQuery = useProvidersQuery();
     const voicesQuery = useVoicesQuery();
     const configQuery = useConfigQuery();
+    const [cloneOpen, setCloneOpen] = useState(false);
 
     const providers = providersQuery.data ?? null;
     const voices = useMemo(() => dedupeVoicesById(voicesQuery.data?.voices ?? []), [voicesQuery.data]);
@@ -469,8 +471,19 @@ export default function AIOptionsPage() {
                             title={`TTS Voice · ${filteredVoices.length}`}
                             subtitle="Pick a provider, accent, and voice"
                             right={
-                                <Segmented size="sm" value={ttsProvider} onChange={selectProvider}
-                                    options={availableTtsProviders.map((p) => ({ value: p, label: <span className="capitalize">{p} <span className="opacity-60">({voices.filter((v) => v.provider === p).length})</span></span> }))} />
+                                <div className="flex items-center gap-2">
+                                    {ttsProvider === "elevenlabs" && (
+                                        <button
+                                            onClick={() => setCloneOpen(true)}
+                                            className="flex items-center gap-1 rounded-lg border border-emerald-600/40 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
+                                            title="Clone a voice with ElevenLabs"
+                                        >
+                                            <Sparkles className="h-3.5 w-3.5" /> Clone a voice
+                                        </button>
+                                    )}
+                                    <Segmented size="sm" value={ttsProvider} onChange={selectProvider}
+                                        options={availableTtsProviders.map((p) => ({ value: p, label: <span className="capitalize">{p} <span className="opacity-60">({voices.filter((v) => v.provider === p).length})</span></span> }))} />
+                                </div>
                             }
                         />
 
@@ -668,6 +681,11 @@ export default function AIOptionsPage() {
                 </div>
             )}
             <ApplyToCampaignsModal open={!!applyModal} provider={applyModal?.provider ?? ""} voiceId={applyModal?.voiceId ?? ""} voiceLabel={applyModal?.voiceLabel} onClose={() => setApplyModal(null)} />
+            <VoiceCloneModal
+                open={cloneOpen}
+                onClose={() => setCloneOpen(false)}
+                onCloned={() => { void queryClient.invalidateQueries({ queryKey: aiOptionsKeys.voices() }); }}
+            />
         </DashboardLayout>
     );
 }

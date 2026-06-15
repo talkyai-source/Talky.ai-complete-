@@ -273,6 +273,15 @@ async def get_elevenlabs_tts_models_for_current_key() -> list[ModelInfo]:
         return list(_elevenlabs_models_cache)
 
 
+def invalidate_elevenlabs_voices_cache() -> None:
+    """Force the next voices fetch to hit the ElevenLabs API. Called after a
+    clone/delete so the new (or removed) voice shows up immediately instead
+    of waiting out the 5-minute cache TTL."""
+    global _elevenlabs_voices_cache, _elevenlabs_voices_cache_expires_at
+    _elevenlabs_voices_cache = None
+    _elevenlabs_voices_cache_expires_at = 0.0
+
+
 async def get_elevenlabs_voices_for_current_key() -> list[VoiceInfo]:
     global _elevenlabs_voices_cache, _elevenlabs_voices_cache_expires_at
     now = time.time()
