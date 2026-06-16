@@ -272,6 +272,27 @@ _BLOCKS: dict[str, str] = {
 }
 
 
+# Short "thinking" phrases played when a reply is slow to produce its first
+# audio, so the caller hears a natural hesitation instead of dead air. Matched
+# to the accent so they reinforce the dialect. Kept very short (<~1s of speech).
+_THINKING_FILLERS: dict[str, tuple] = {
+    AMERICAN: ("Let me see...", "Sure, one sec...", "Okay, let me check...", "Mm, let me see..."),
+    BRITISH: ("Right, let me see...", "Erm, one sec...", "Let me have a look...", "Okay, just a moment..."),
+    AUSTRALIAN: ("Yeah, let me check...", "No worries, one sec...", "Righto, let me see..."),
+    IRISH: ("Right, let me see now...", "Em, one sec...", "Let me have a look there..."),
+    INDIAN: ("Okay, let me check...", "One moment, please...", "Let me see..."),
+    NEUTRAL: ("Let me see...", "One moment...", "Okay, let me check..."),
+}
+
+
+def thinking_filler(accent: str) -> str:
+    """A short accent-matched 'thinking' phrase to cover a slow first-audio gap.
+    Random within the accent so it doesn't sound canned on repeat."""
+    import random
+    pool = _THINKING_FILLERS.get(accent or NEUTRAL) or _THINKING_FILLERS[NEUTRAL]
+    return random.choice(pool)
+
+
 def accent_filler_block(accent: str) -> str:
     """Return the prompt block for a normalized accent key, or "" for neutral/
     unknown (no override — generic guardrails apply)."""

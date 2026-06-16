@@ -38,7 +38,11 @@ from app.domain.services.end_session_action import (
 from app.domain.services.llm_guardrails import get_guardrails
 from app.domain.services.voice_pipeline import expressive_caps
 from app.services.scripts.prompts.guardrails import ELEVEN_V3_AUDIO_TAGS_INSTRUCTIONS
-from app.services.scripts.prompts.accent_fillers import resolve_accent, accent_filler_block
+from app.services.scripts.prompts.accent_fillers import (
+    resolve_accent,
+    accent_filler_block,
+    thinking_filler,
+)
 from app.infrastructure.llm.groq import LLMTimeoutError
 from app.services.scripts import compose_system_prompt
 
@@ -152,6 +156,38 @@ class TurnStreamer:
     def __init__(self, pipeline) -> None:
         self._p = pipeline
 
+    async def _maybe_speak_filler(
+        self, session: CallSession, websocket, accent: str, delay: float
+    ) -> None:
+        """If the real reply hasn't started producing audio within ``delay``
+        seconds, speak a short accent-matched 'thinking' phrase so the caller
+        hears a natural hesitation instead of dead air. Serialized against the
+        real reply by the caller (which awaits this task before sending its
+        first sentence), so the two never overlap on the audio channel."""
+        try:
+            await asyncio.sleep(delay)
+            # Real audio already started, caller barged in, or the turn is
+            # emitting a structured (JSON) action — do nothing.
+            if getattr(session, "_turn_first_audio", False):
+                return
+            be = self._p._barge_in_events.get(session.call_id)
+            if be and be.is_set():
+                return
+            phrase = thinking_filler(accent)
+            if not phrase:
+                return
+            session._filler_playing = True
+            session.tts_active = True
+            await self._p.synthesize_and_send_audio(
+                session, phrase, websocket, track_latency=False
+            )
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:  # never let a filler failure affect the turn
+            logger.debug("thinking-filler skipped for %s: %s", session.call_id, exc)
+        finally:
+            session._filler_playing = False
+
     async def stream(
         self,
         session: CallSession,
@@ -230,6 +266,44 @@ class TurnStreamer:
             has_custom_prompt=bool(session.system_prompt),
         )
 
+        # Thinking-filler: cover a slow first-audio gap with a short spoken
+        # hesitation instead of dead air. Launched concurrently; cancelled (or
+        # awaited if mid-utterance) right before the first real sentence so the
+        # two never overlap. Tunable via TELEPHONY_FILLER_DELAY_MS (0 disables).
+        session._turn_first_audio = False
+        session._filler_playing = False
+        filler_task = None
+        try:
+            _filler_delay = float(os.getenv("TELEPHONY_FILLER_DELAY_MS", "700")) / 1000.0
+        except (TypeError, ValueError):
+            _filler_delay = 0.7
+        # Skip for ask-AI/end-session-action turns (may emit a JSON envelope).
+        if _filler_delay > 0 and not self._p._supports_llm_end_session_action(session):
+            filler_task = asyncio.create_task(
+                self._maybe_speak_filler(session, websocket, accent, _filler_delay)
+            )
+
+        async def _settle_filler() -> None:
+            """Stop the thinking-filler before real audio plays. If the filler
+            is mid-utterance, wait for it to finish (so it never overlaps the
+            real reply); if it's still waiting, cancel it. Idempotent."""
+            if getattr(session, "_turn_first_audio", False):
+                return
+            session._turn_first_audio = True
+            if filler_task is None or filler_task.done():
+                return
+            if getattr(session, "_filler_playing", False):
+                try:
+                    await filler_task          # let it finish, then real audio
+                except Exception:
+                    pass
+            else:
+                filler_task.cancel()
+                try:
+                    await filler_task
+                except Exception:
+                    pass
+
         all_tokens: list[str] = []
         buf = ""
         first_token = True
@@ -299,6 +373,10 @@ class TurnStreamer:
                         tts_was_interrupted = True
                         break
 
+                    # Settle the thinking-filler before the first real sentence
+                    # so they never overlap on the audio channel.
+                    await _settle_filler()
+
                     if t_tts_first is None:
                         t_tts_first = time.monotonic()
                         self._p.latency_tracker.mark_tts_start(call_id)
@@ -363,6 +441,7 @@ class TurnStreamer:
                 if not max_sentences or sentences_done < max_sentences:
                     sentence = guardrails.clean_response(buf.strip(), preserve_audio_tags=tags_ok)
                     if sentence:
+                        await _settle_filler()
                         if t_tts_first is None:
                             t_tts_first = time.monotonic()
                             self._p.latency_tracker.mark_tts_start(call_id)
@@ -372,6 +451,10 @@ class TurnStreamer:
                         )
                         first_sentence = False
                         t_tts_end = time.monotonic()
+
+        # Cleanup: ensure the thinking-filler task is never left dangling (e.g.
+        # an early barge-in or an action turn produced no real audio).
+        await _settle_filler()
 
         llm_latency_ms = (t_llm_done - t_llm_start) * 1000
         tts_latency_ms = (

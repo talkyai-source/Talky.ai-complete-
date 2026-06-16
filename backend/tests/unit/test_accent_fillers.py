@@ -4,6 +4,7 @@ import pytest
 from app.services.scripts.prompts.accent_fillers import (
     AMERICAN, BRITISH, AUSTRALIAN, IRISH, INDIAN, NEUTRAL,
     normalize_accent, resolve_accent, accent_filler_block, filler_block_for_voice,
+    thinking_filler,
 )
 
 
@@ -150,3 +151,18 @@ async def test_resolve_accent_async_no_network_for_known_voice(monkeypatch):
 def test_filler_block_for_voice_end_to_end():
     assert "British" in filler_block_for_voice("en-GB-Chirp3-HD-Aoede")
     assert filler_block_for_voice("unknown-xyz") == ""
+
+
+@pytest.mark.parametrize("accent", [AMERICAN, BRITISH, AUSTRALIAN, IRISH, INDIAN, NEUTRAL])
+def test_thinking_filler_returns_short_phrase(accent):
+    phrase = thinking_filler(accent)
+    assert isinstance(phrase, str) and phrase
+    assert len(phrase) <= 40          # short — must not be a long sentence
+
+
+def test_thinking_filler_unknown_accent_falls_back():
+    phrase = thinking_filler("klingon")
+    assert phrase in [p for p in __import__(
+        "app.services.scripts.prompts.accent_fillers",
+        fromlist=["_THINKING_FILLERS"]
+    )._THINKING_FILLERS[NEUTRAL]]
