@@ -162,6 +162,18 @@ class DeepgramFluxSTTProvider(STTProvider):
         self._eager_eot_threshold: Optional[float] = _env_eager_default()
         self._eot_timeout_ms: int = _env_timeout_default()
 
+        # Min-words barge-in guard: a StartOfTurn whose transcript has fewer
+        # than this many words (and is not a hard interrupt like "stop"/"no")
+        # does NOT immediately interrupt the agent — it defers to the EndOfTurn
+        # grow-case. Filters coughs/fillers/STT mishears from cutting the agent
+        # off mid-sentence (LiveKit/Pipecat MinWords pattern). 1 = disabled.
+        try:
+            self._min_interrupt_words: int = max(
+                1, int(os.getenv("DEEPGRAM_MIN_INTERRUPT_WORDS", "2"))
+            )
+        except (TypeError, ValueError):
+            self._min_interrupt_words = 2
+
         # Keyterm prompting list (set in initialize()); empty = no biasing.
         self._keyterms: list[str] = []
 
@@ -687,19 +699,42 @@ class DeepgramFluxSTTProvider(STTProvider):
                                 logger.debug(f"Ignoring StartOfTurn - microphone muted for call {call_id} (echo suppression)")
                                 continue
 
-                            # Backchannel guard (Deepgram leaves this to the app):
-                            # StartOfTurn carries a transcript, so if it's just a
-                            # short acknowledgement ("yeah", "ok", "mhm") we do NOT
-                            # interrupt the agent. If it grows into real speech, the
-                            # later EndOfTurn carries the full text and the pipeline
-                            # barges in then (transcript_handler grow-case guard).
-                            from app.domain.services.voice_pipeline.backchannel import is_backchannel
-                            if is_backchannel(transcript_text):
-                                logger.info(
-                                    "Flux StartOfTurn backchannel %r — barge-in suppressed",
-                                    (transcript_text or "")[:24],
-                                )
-                                continue
+                            # Barge-in gating (Deepgram leaves this to the app).
+                            # StartOfTurn carries a transcript, so we decide here
+                            # whether it should interrupt the agent NOW. If we
+                            # suppress it and the caller is really taking the
+                            # floor, the later EndOfTurn carries the full text and
+                            # the pipeline barges in then (transcript_handler
+                            # grow-case) — only ~eot_timeout later. The turn itself
+                            # is always processed regardless; this only gates the
+                            # immediate TTS interruption.
+                            from app.domain.services.voice_pipeline.backchannel import (
+                                is_backchannel,
+                                is_hard_interrupt,
+                            )
+                            # Hard interrupts ("stop", "wait", "no") always cut in,
+                            # even as a single word — never defer these.
+                            if not is_hard_interrupt(transcript_text):
+                                # (a) short acknowledgement ("yeah", "ok", "mhm")
+                                if is_backchannel(transcript_text):
+                                    logger.info(
+                                        "Flux StartOfTurn backchannel %r — barge-in suppressed",
+                                        (transcript_text or "")[:24],
+                                    )
+                                    continue
+                                # (b) min-words guard: a single short, non-backchannel
+                                # word during agent speech is usually a cough, filler,
+                                # or STT mishear — not a real interruption. Defer to
+                                # the EndOfTurn grow-case so the agent isn't cut off
+                                # by noise. (LiveKit/Pipecat MinWords pattern.)
+                                word_count = len((transcript_text or "").split())
+                                if word_count < self._min_interrupt_words:
+                                    logger.info(
+                                        "Flux StartOfTurn short %r (<%d words) — barge-in deferred",
+                                        (transcript_text or "")[:24],
+                                        self._min_interrupt_words,
+                                    )
+                                    continue
 
                             logger.info("Flux StartOfTurn - User started speaking, barge-in detected")
                             # Cancel any speculative processing

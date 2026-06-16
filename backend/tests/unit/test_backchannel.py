@@ -1,7 +1,10 @@
 """Unit tests for backchannel detection (turn-taking guard)."""
 import pytest
 
-from app.domain.services.voice_pipeline.backchannel import is_backchannel
+from app.domain.services.voice_pipeline.backchannel import (
+    is_backchannel,
+    is_hard_interrupt,
+)
 
 
 @pytest.mark.parametrize("text", [
@@ -35,3 +38,29 @@ def test_word_cap():
     # 3 words max for the all-tokens path
     assert is_backchannel("yeah ok sure") is True
     assert is_backchannel("yeah ok sure right") is False
+
+
+@pytest.mark.parametrize("text", [
+    "stop", "Stop.", "wait", "Wait!", "no", "nope", "nah",
+    "hold on", "hang on", "no no", "stop stop", "hey", "hello",
+    "excuse me", "no thanks", "stop please",
+])
+def test_hard_interrupts_detected(text):
+    # These must always cut in, bypassing the min-words guard.
+    assert is_hard_interrupt(text) is True
+
+
+@pytest.mark.parametrize("text", [
+    "yeah", "ok", "mhm", "sure", "right",          # backchannels, not hard interrupts
+    "what is the price", "tell me more",            # real turns (handled by min-words/EndOfTurn)
+    "", "   ",
+])
+def test_non_hard_interrupts(text):
+    assert is_hard_interrupt(text) is False
+
+
+def test_hard_interrupt_disjoint_from_backchannel():
+    # A word can't be both a backchannel AND a hard interrupt.
+    for w in ["stop", "wait", "no", "nope"]:
+        assert is_hard_interrupt(w) is True
+        assert is_backchannel(w) is False

@@ -35,6 +35,37 @@ _NON_WORD = re.compile(r"[^a-z\s]")
 _MAX_WORDS = 3
 
 
+# Short utterances that MUST interrupt the agent immediately, even though
+# they are only one or two words — disagreement, stop signals, and
+# attention-getters. These bypass the min-words barge-in guard so the caller
+# can always cut the agent off when they need to. Kept disjoint from the
+# backchannel set above (which deliberately excludes no/nope/stop/wait).
+_HARD_INTERRUPTS = frozenset({
+    "no", "nope", "nah", "stop", "wait", "hold on", "hang on", "hold",
+    "pause", "enough", "quiet", "shut up", "hey", "hello", "excuse me",
+    "sorry", "actually no", "wait wait", "stop stop", "no no",
+})
+
+
+def is_hard_interrupt(text: str) -> bool:
+    """True if ``text`` is a short utterance that must barge in regardless of
+    the min-words guard (e.g. "stop", "wait", "no"). Empty → False."""
+    if not text:
+        return False
+    cleaned = _NON_WORD.sub(" ", text.strip().lower())
+    cleaned = " ".join(cleaned.split())
+    if not cleaned:
+        return False
+    if cleaned in _HARD_INTERRUPTS:
+        return True
+    # A single critical token anywhere in a 1-2 word utterance ("no thanks",
+    # "stop please") should still interrupt.
+    words = cleaned.split()
+    if len(words) <= 2 and any(w in {"no", "nope", "nah", "stop", "wait"} for w in words):
+        return True
+    return False
+
+
 def is_backchannel(text: str) -> bool:
     """True if ``text`` is a short pure acknowledgement (a listener cue), not a
     real turn. Empty/garbage → False (let the normal path handle it)."""
