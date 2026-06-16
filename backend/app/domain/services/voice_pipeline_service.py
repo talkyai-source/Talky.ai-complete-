@@ -466,6 +466,29 @@ class VoicePipelineService:
         websocket: Optional[WebSocket] = None,
     ) -> None:
         call_id = session.call_id
+
+        # Protect an in-flight FINAL answer that has not started playing yet.
+        # A StartOfTurn here means the caller began a NEW utterance before we
+        # finished answering the previous (completed) one — it is NOT an
+        # interruption of audio they can hear. Cancelling it would delete the
+        # answer and leave the caller in silence. Per Deepgram/LiveKit/Pipecat,
+        # a barge-in targets PLAYBACK, never a committed "thinking" turn: the
+        # final answer must finish and speak; the caller's new words become the
+        # next turn. (Speculative tasks, and any task while TTS is actually
+        # playing, fall through below and are cancelled as before.)
+        pending = self._pending_llm_tasks.get(call_id)
+        if (
+            pending is not None
+            and not pending.done()
+            and getattr(pending, "_turn_type", "final") == "final"
+            and not session.tts_active
+        ):
+            logger.info(
+                "barge_in_ignored_final_pre_tts call=%s — protecting in-flight answer",
+                call_id[:12],
+            )
+            return
+
         logger.info(
             "barge_in_detected",
             extra={
@@ -478,23 +501,29 @@ class VoicePipelineService:
         if call_id in self._barge_in_events:
             self._barge_in_events[call_id].set()
 
-        # Cancel any in-flight speculative LLM task (EagerEndOfTurn fired before
-        # the user finished speaking).  Without this, the speculative task keeps
-        # running until TurnResumed arrives — wasting LLM compute and potentially
-        # writing a stale user+assistant message pair to conversation history.
-        speculative_task = self._pending_llm_tasks.pop(call_id, None)
-        if speculative_task:
-            if not speculative_task.done():
-                speculative_task.cancel()
-            await self._await_task_after_cancel(speculative_task, call_id, "speculative_llm")
-            # Roll back any history the speculative task may have appended
-            # before being cancelled (mirrors the TurnResumed rollback path).
+        # Cancel the in-flight turn task. Reaching here means it is either a
+        # SPECULATIVE task (tentative — user may still be talking) or a task
+        # whose TTS is actively playing (a genuine interruption of audible
+        # speech). Both are correct to cancel. A final task that has NOT begun
+        # playing was already protected by the early-return guard above.
+        cancelled_task = self._pending_llm_tasks.pop(call_id, None)
+        if cancelled_task:
+            if not cancelled_task.done():
+                cancelled_task.cancel()
+            await self._await_task_after_cancel(cancelled_task, call_id, "barge_in_llm")
+            # asyncio cancellation is cooperative — the task's finally block
+            # (which resets llm_active) may not have run yet. Clear it now so a
+            # follow-up EndOfTurn is not skipped by turn_ender's llm_active
+            # guard, which would silently drop the caller's next utterance.
+            session.llm_active = False
+            # Roll back any history the cancelled task may have appended before
+            # being cancelled (mirrors the TurnResumed rollback path).
             restore_len = getattr(session, "_speculative_history_len", None)
             if restore_len is not None and len(session.conversation_history) > restore_len:
                 session.conversation_history = session.conversation_history[:restore_len]
             session._speculative_history_len = None
             logger.debug(
-                "barge_in: cancelled speculative LLM task for %s", call_id[:12]
+                "barge_in: cancelled in-flight turn task for %s", call_id[:12]
             )
 
         # Annotate the last assistant message so the LLM knows the caller

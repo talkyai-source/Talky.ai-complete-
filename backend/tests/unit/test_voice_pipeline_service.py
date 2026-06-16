@@ -291,6 +291,101 @@ async def test_telephony_llm_end_session_action_says_farewell_then_hangs_up():
     assert session.state == CallState.ENDED
 
 
+def _make_service_for_bargein() -> VoicePipelineService:
+    service = VoicePipelineService(
+        stt_provider=AsyncMock(),
+        llm_provider=AsyncMock(),
+        tts_provider=AsyncMock(),
+        media_gateway=AsyncMock(),
+        mute_during_tts=False,
+    )
+    service.latency_tracker = MagicMock()
+    return service
+
+
+@pytest.mark.asyncio
+async def test_handle_barge_in_protects_final_task_before_tts_starts():
+    """A confirmed FINAL answer still in the LLM phase (no audio playing yet)
+    must NOT be cancelled by a StartOfTurn — that was the silent-call bug.
+    The caller's new words become the next turn; the answer finishes & speaks."""
+    service = _make_service_for_bargein()
+    session = _make_session()
+    session.tts_active = False  # answer has not begun playing
+
+    started = asyncio.Event()
+
+    async def _running_final():
+        started.set()
+        await asyncio.sleep(10)
+
+    turn_task = asyncio.create_task(_running_final())
+    turn_task._turn_type = "final"
+    service._register_active_turn_task(session.call_id, turn_task)
+    await asyncio.wait_for(started.wait(), timeout=1)
+
+    await service.handle_barge_in(session, AsyncMock())
+
+    # The final task must survive and remain registered.
+    assert not turn_task.done()
+    assert service._pending_llm_tasks.get(session.call_id) is turn_task
+    turn_task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_handle_barge_in_cancels_speculative_task_before_tts():
+    """A SPECULATIVE task (user may still be talking) IS cancelled by a
+    barge-in even before TTS — it is tentative."""
+    service = _make_service_for_bargein()
+    session = _make_session()
+    session.tts_active = False
+
+    cancelled = asyncio.Event()
+
+    async def _running_spec():
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    turn_task = asyncio.create_task(_running_spec())
+    turn_task._turn_type = "speculative"
+    service._register_active_turn_task(session.call_id, turn_task)
+    await asyncio.sleep(0)
+
+    await service.handle_barge_in(session, AsyncMock())
+    await asyncio.wait_for(cancelled.wait(), timeout=1)
+    assert service._pending_llm_tasks.get(session.call_id) is None
+
+
+@pytest.mark.asyncio
+async def test_handle_barge_in_cancels_final_task_when_tts_playing():
+    """When TTS is actively playing, interrupting a FINAL answer IS a real
+    barge-in and must cancel it (the caller is cutting off audible speech)."""
+    service = _make_service_for_bargein()
+    session = _make_session()
+    session.tts_active = True  # answer is being spoken
+
+    cancelled = asyncio.Event()
+
+    async def _running_final():
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    turn_task = asyncio.create_task(_running_final())
+    turn_task._turn_type = "final"
+    service._register_active_turn_task(session.call_id, turn_task)
+    await asyncio.sleep(0)
+
+    await service.handle_barge_in(session, AsyncMock())
+    await asyncio.wait_for(cancelled.wait(), timeout=1)
+    assert service._pending_llm_tasks.get(session.call_id) is None
+    assert session.tts_active is False
+
+
 @pytest.mark.asyncio
 async def test_handle_barge_in_cancels_active_turn_task_immediately():
     media_gateway = AsyncMock()

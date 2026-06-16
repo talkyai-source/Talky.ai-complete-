@@ -44,6 +44,17 @@ class TranscriptHandler:
             return
 
         if transcript.metadata and transcript.metadata.get("resumed"):
+            # TurnResumed cancels SPECULATIVE work only. If a confirmed final
+            # answer is already in flight (a speculative task promoted on
+            # EndOfTurn), it must NOT be killed — doing so leaves the caller in
+            # silence. (Per Deepgram: TurnResumed targets the in-progress
+            # speculative response, not a committed turn.)
+            existing = self._p._pending_llm_tasks.get(call_id)
+            if existing is not None and getattr(existing, "_turn_type", "speculative") == "final":
+                logger.info(
+                    "TurnResumed ignored — final answer in flight for %s", call_id[:12]
+                )
+                return
             logger.info(f"TurnResumed for call {call_id} — cancelling speculative LLM")
             session.llm_active = False
             if call_id in self._p._pending_llm_tasks:
@@ -134,16 +145,29 @@ class TranscriptHandler:
             # across two EndOfTurns, producing a totally off-topic answer.
             existing = self._p._pending_llm_tasks.get(call_id)
             if existing and not existing.done():
-                # A speculative or prior final task is still in flight — skip.
+                # A task is already in flight for this call. Two cases:
+                #  * speculative (started on EagerEndOfTurn) — Deepgram
+                #    guarantees this EndOfTurn's transcript matches that
+                #    eager turn, so the in-flight task IS the answer. PROMOTE
+                #    it to "final" (protects it from a later StartOfTurn
+                #    cancelling it) and let it finish — restarting would throw
+                #    away the eager-EOT latency head start.
+                #  * final — a duplicate EndOfTurn; the promotion is a no-op
+                #    and we simply skip the duplicate.
+                # Either way we must NOT drop the turn into silence.
+                existing._turn_type = "final"
                 logger.debug(
-                    "final turn_end skipped: pending task already running for %s",
-                    call_id[:12],
+                    "turn_end: existing task kept as final for %s", call_id[:12]
                 )
                 return
             session._speculative_history_len = len(session.conversation_history)
             task = asyncio.create_task(
                 self._p.handle_turn_end(session, websocket, source="final")
             )
+            # Tag: a FINAL task answers a confirmed, completed utterance. It is
+            # protected — a bare StartOfTurn must never cancel it (only an
+            # interruption of audio that is actually playing may).
+            task._turn_type = "final"
             self._p._pending_llm_tasks[call_id] = task
             return
 
@@ -164,6 +188,9 @@ class TranscriptHandler:
                 task = asyncio.create_task(
                     self._p.handle_turn_end(session, websocket, source="speculative")
                 )
+                # Tag: a SPECULATIVE task is tentative (the user may keep
+                # talking). It is cancellable by TurnResumed or a barge-in.
+                task._turn_type = "speculative"
                 self._p._pending_llm_tasks[call_id] = task
             return
 
