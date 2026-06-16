@@ -300,17 +300,18 @@ class LLMGuardrails:
         cleaned = re.sub(r'<[^>]+>', ' ', cleaned)
 
         # Remove common filler starts.
-        # Multi-word phrases (e.g. "Sure thing!") must come before single-word
-        # patterns so the longer match wins.
+        # Strip ONLY the corporate / assistant-y canned openers that make an
+        # agent sound like a bot. We deliberately DO NOT strip natural human
+        # discourse markers ("Well,", "So,", "Okay,", "Alright,", "Actually,")
+        # anymore — those are exactly the conversational openers the persona now
+        # asks for. Removing them was deleting the very naturalness we want, so
+        # "So, I'm calling because..." was reaching TTS as "I'm calling
+        # because..." (the filler vanished). Keep the canned-politeness strips.
+        # Multi-word phrases must come before single-word so the longer match wins.
         filler_starts = [
             r'^Sure thing[!,]?\s*',     # "Sure thing!" / "Sure thing," / "Sure thing"
             r'^No problem[!,]?\s+',     # "No problem!" / "No problem,"
             r'^Happy to help[!,]?\s+',  # "Happy to help!"
-            r'^(Well,?\s+)',
-            r'^(So,?\s+)',
-            r'^(Actually,?\s+)',
-            r'^(Okay,?\s+)',
-            r'^(Alright,?\s+)',
             r'^Sure[!,]?\s+',           # "Sure!" / "Sure," / bare "Sure "
             r'^(Of course[!,]?\s+)',
             r'^(Absolutely[!,]?\s+)',
@@ -318,7 +319,7 @@ class LLMGuardrails:
             r'^(Definitely[!,]?\s+)',
             r'^(Great[!,]\s+)',         # "Great!" or "Great," as opener only
         ]
-        
+
         for pattern in filler_starts:
             cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
         

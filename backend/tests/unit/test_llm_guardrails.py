@@ -237,19 +237,24 @@ class TestResponseCleaning:
     """Test response cleaning of LLM artifacts"""
 
     def test_clean_filler_words(self):
-        """Test removal of common filler starts"""
+        """Strip canned/assistant-y openers, but KEEP natural human discourse
+        markers (Well/So/Okay/Actually) — those are the conversational fillers
+        we want spoken, not removed."""
         guardrails = LLMGuardrails()
 
-        test_cases = [
-            ("Well, I can help with that.", "I can help with that."),
-            ("So, let me check on that.", "let me check on that."),
-            ("Actually, that works.", "that works."),
+        # Canned politeness → stripped.
+        stripped = [
             ("Sure! I'll do that.", "I'll do that."),
+            ("Sure thing! On it.", "On it."),
+            ("Of course! Happy to help.", "Happy to help."),
         ]
+        for input_text, expected in stripped:
+            assert guardrails.clean_response(input_text) == expected, f"Failed: {input_text}"
 
-        for input_text, expected in test_cases:
-            cleaned = guardrails.clean_response(input_text)
-            assert cleaned == expected, f"Failed for input: {input_text}"
+        # Natural discourse markers → preserved (reach TTS).
+        for kept in ("Well, I can help with that.", "So, let me check on that.",
+                     "Actually, that works.", "Okay, here we go."):
+            assert guardrails.clean_response(kept) == kept, f"Should keep: {kept}"
 
     def test_clean_whitespace(self):
         """Test cleanup of excessive whitespace"""
@@ -367,14 +372,14 @@ def test_sure_comma_filler_is_stripped(guardrails):
 
 # ── Other filler patterns must still work ────────────────────────────────────
 
-def test_well_filler_stripped(guardrails):
-    result = guardrails.clean_response("Well, that sounds great.")
-    assert result == "that sounds great."
-
-
-def test_okay_filler_stripped(guardrails):
-    result = guardrails.clean_response("Okay, let me look that up.")
-    assert result == "let me look that up."
+def test_natural_discourse_markers_preserved(guardrails):
+    """Natural human openers ("Well,", "So,", "Okay,", "Alright,", "Actually,")
+    are KEPT now — they're the conversational fillers the persona asks for, and
+    stripping them was deleting the very naturalness we want before TTS."""
+    assert guardrails.clean_response("Well, that sounds great.") == "Well, that sounds great."
+    assert guardrails.clean_response("Okay, let me look that up.") == "Okay, let me look that up."
+    assert guardrails.clean_response("So, here's the thing.") == "So, here's the thing."
+    assert guardrails.clean_response("Hmm, good question.") == "Hmm, good question."
 
 
 def test_of_course_filler_stripped(guardrails):
