@@ -11,6 +11,7 @@ for the exact production migration steps. Every hardcoded value is marked with
 import logging
 import os
 import random
+import re
 from typing import Any, Optional
 
 from app.domain.models.agent_config import AgentConfig, AgentGoal, ConversationFlow, ConversationRule
@@ -391,6 +392,37 @@ def _telephony_mute_during_tts_default() -> bool:
     return get_telephony_settings().mute_during_tts
 
 
+def _build_call_keyterms(company_name: str, agent_name: str) -> list:
+    """Bias Deepgram Flux toward the words it most often mis-hears on a call:
+    the company/brand name and the agent's name.
+
+    Flux keyterm prompting only biases toward terms it's told about. The static
+    providers.yaml list is generic, so a campaign brand like "Dojo" gets
+    transcribed as "Dodge". This prepends the campaign's own company + agent
+    names (plus the significant single words of a multi-word brand) to the
+    static defaults, deduped case-insensitively and capped."""
+    from app.domain.services.voice_orchestrator import _default_flux_keyterms
+
+    terms: list[str] = []
+    seen: set[str] = set()
+
+    def _add(t: Optional[str]) -> None:
+        t = (t or "").strip()
+        if t and t.lower() not in seen:
+            seen.add(t.lower())
+            terms.append(t)
+
+    # Campaign-specific terms first (highest recognition value).
+    _add(company_name)
+    for word in re.findall(r"[A-Za-z][A-Za-z0-9'&-]{2,}", company_name or ""):
+        _add(word)  # e.g. "Dojo" out of "Dojo Payments Ltd"
+    _add(agent_name)
+    # Then the static defaults from providers.yaml.
+    for t in (_default_flux_keyterms() or []):
+        _add(t)
+    return terms[:60]
+
+
 def build_telephony_inbound_greeting(agent_name: str, company_name: str) -> str:
     """
     Canonical first-utterance for genuine INBOUND calls (a customer
@@ -764,6 +796,9 @@ def build_telephony_session_config(
         stt_eot_threshold=_tuning.stt_eot_threshold,
         stt_eot_timeout_ms=_tuning.stt_eot_timeout_ms,
         stt_eager_eot_threshold=_tuning.stt_eager_eot_threshold,
+        # Per-call keyterm prompting: bias Flux toward the campaign's brand and
+        # agent name so "Dojo" isn't heard as "Dodge". Merged with defaults.
+        stt_keyterms=_build_call_keyterms(company_name, agent_name),
         turn_0_min_confidence=_tuning.turn_0_min_confidence,
         turn_0_min_alpha_chars=_tuning.turn_0_min_alpha_chars,
         llm_model=global_config.llm_model,

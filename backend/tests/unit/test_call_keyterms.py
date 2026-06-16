@@ -1,0 +1,53 @@
+"""Unit tests for per-call Deepgram Flux keyterm building."""
+from app.domain.services.telephony_session_config import _build_call_keyterms
+
+
+def test_company_and_agent_included():
+    terms = _build_call_keyterms("Dojo", "Alex")
+    lower = [t.lower() for t in terms]
+    assert "dojo" in lower
+    assert "alex" in lower
+
+
+def test_multiword_brand_split_into_words():
+    # "Dojo" must appear as its own keyterm even inside a longer legal name,
+    # because that's the word the caller actually says (and Flux mis-hears).
+    terms = _build_call_keyterms("Dojo Payments Ltd", "Sam")
+    lower = [t.lower() for t in terms]
+    assert "dojo payments ltd" in lower   # full name
+    assert "dojo" in lower                 # significant word
+    assert "payments" in lower
+
+
+def test_dedup_case_insensitive():
+    terms = _build_call_keyterms("Dojo", "dojo")
+    # "Dojo" and "dojo" collapse to one entry.
+    assert sum(1 for t in terms if t.lower() == "dojo") == 1
+
+
+def test_defaults_are_merged(monkeypatch):
+    monkeypatch.setattr(
+        "app.domain.services.voice_orchestrator._default_flux_keyterms",
+        lambda: ["estimating", "contractor"],
+    )
+    terms = _build_call_keyterms("Dojo", "Alex")
+    lower = [t.lower() for t in terms]
+    assert "dojo" in lower            # campaign term
+    assert "estimating" in lower      # static default merged in
+
+
+def test_empty_inputs_safe():
+    # No company/agent -> still returns the defaults without crashing.
+    terms = _build_call_keyterms("", "")
+    assert isinstance(terms, list)
+
+
+def test_capped_length(monkeypatch):
+    monkeypatch.setattr(
+        "app.domain.services.voice_orchestrator._default_flux_keyterms",
+        lambda: [f"term{i}" for i in range(200)],
+    )
+    terms = _build_call_keyterms("Dojo", "Alex")
+    assert len(terms) <= 60
+    # Campaign terms are kept (prepended before the cap).
+    assert "Dojo" in terms

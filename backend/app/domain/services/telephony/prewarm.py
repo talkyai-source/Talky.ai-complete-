@@ -65,6 +65,25 @@ def _resolve_first_speaker(first_speaker: Optional[str]) -> str:
     return effective if effective in ("agent", "user") else "agent"
 
 
+async def _resolve_session_accent(call_session, provider: Optional[str]) -> None:
+    """Resolve the selected voice's accent (warming the ElevenLabs catalog if
+    needed) and cache it on the session, so accent-matched fillers/dialect are
+    reliably applied from the first turn — including ElevenLabs voices, whose
+    accent isn't derivable from the id. Best-effort: never raises."""
+    try:
+        from app.services.scripts.prompts.accent_fillers import resolve_accent_async
+        accent = await resolve_accent_async(
+            getattr(call_session, "voice_id", None), provider
+        )
+        call_session._voice_accent = accent
+        logger.info(
+            "prewarm: resolved voice accent=%s for call %s",
+            accent, getattr(call_session, "call_id", "?"),
+        )
+    except Exception:
+        pass
+
+
 def _lookup_campaign_row(container, campaign_id: Optional[str]):
     """Best-effort campaign fetch for the layered prompt composer.
 
@@ -279,6 +298,19 @@ async def prepare_prewarmed_session(
             raise RuntimeError(
                 f"pre_originate_warmup_handshake_failed: {failed[0]!r}"
             )
+
+        # Resolve the voice accent in the background (non-gating). Warms the
+        # ElevenLabs catalog if cold so an EL British voice reliably gets its
+        # British dialect from turn 0. Never blocks or fails the call.
+        try:
+            asyncio.create_task(
+                _resolve_session_accent(
+                    pre_warm_session.call_session,
+                    getattr(config, "tts_provider_type", None),
+                )
+            )
+        except Exception:
+            pass
 
         # Greeting pre-synth (only when audio will actually be played).
         # By now the TTS voice model is already loaded by step 4 above,

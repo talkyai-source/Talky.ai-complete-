@@ -98,6 +98,55 @@ def test_neutral_block_is_empty():
     assert accent_filler_block("nonsense") == ""
 
 
+@pytest.mark.asyncio
+async def test_resolve_accent_async_warms_elevenlabs_cache(monkeypatch):
+    """For an EL voice with a cold cache, the async resolver warms the catalog
+    then resolves the accent."""
+    import app.services.scripts.prompts.accent_fillers as af
+    from app.domain.models.ai_config import VoiceInfo
+
+    warmed = {"called": False}
+    fake = [VoiceInfo(id="el-george", name="George", accent="British", provider="elevenlabs")]
+
+    async def fake_fetch():
+        warmed["called"] = True
+        # Simulate the fetch populating the cache that _accent_from_catalogs reads.
+        monkeypatch.setattr(
+            "app.infrastructure.tts.elevenlabs_catalog.get_cached_elevenlabs_voices",
+            lambda: fake,
+        )
+        return fake
+
+    monkeypatch.setattr(
+        "app.infrastructure.tts.elevenlabs_catalog.get_elevenlabs_voices_for_current_key",
+        fake_fetch,
+    )
+    # cold cache initially
+    monkeypatch.setattr(
+        "app.infrastructure.tts.elevenlabs_catalog.get_cached_elevenlabs_voices",
+        lambda: None,
+    )
+
+    acc = await af.resolve_accent_async("el-george", provider="elevenlabs")
+    assert warmed["called"] is True
+    assert acc == BRITISH
+
+
+@pytest.mark.asyncio
+async def test_resolve_accent_async_no_network_for_known_voice(monkeypatch):
+    """A locale-coded id resolves without touching the EL catalog."""
+    import app.services.scripts.prompts.accent_fillers as af
+
+    def boom():
+        raise AssertionError("should not fetch EL catalog for a locale-coded id")
+
+    monkeypatch.setattr(
+        "app.infrastructure.tts.elevenlabs_catalog.get_elevenlabs_voices_for_current_key",
+        boom,
+    )
+    assert await af.resolve_accent_async("en-GB-Chirp3-HD-Aoede", provider="google") == BRITISH
+
+
 def test_filler_block_for_voice_end_to_end():
     assert "British" in filler_block_for_voice("en-GB-Chirp3-HD-Aoede")
     assert filler_block_for_voice("unknown-xyz") == ""

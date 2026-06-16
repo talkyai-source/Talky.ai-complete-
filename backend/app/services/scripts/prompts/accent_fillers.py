@@ -32,6 +32,7 @@ Sources:
 """
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Optional
 
@@ -145,19 +146,52 @@ def _accent_from_catalogs(voice_id: str) -> Optional[str]:
 
 
 def resolve_accent(voice_id: Optional[str]) -> str:
-    """Resolve the selected voice to a normalized accent key. Falls back to
-    ``NEUTRAL`` when the accent can't be determined (safe default — generic
-    guardrails apply)."""
+    """Resolve the selected voice to a normalized accent key (SYNC, hot-path
+    safe — never makes a network call). Falls back to ``NEUTRAL`` when the
+    accent can't be determined (safe default — generic guardrails apply).
+
+    For ElevenLabs voices this depends on the voice catalog already being
+    cached; when it might be cold (e.g. call setup), prefer
+    :func:`resolve_accent_async`, which can warm it."""
     if not voice_id:
         return NEUTRAL
     # 1) locale baked into the id (cheap, no imports)
     acc = _accent_from_locale_in_id(voice_id)
     if acc:
         return acc
-    # 2) provider catalogs (static + EL cache)
+    # 2) provider catalogs (static + EL cache, cache-only)
     acc = _accent_from_catalogs(voice_id)
     if acc:
         return acc
+    return NEUTRAL
+
+
+async def resolve_accent_async(
+    voice_id: Optional[str], provider: Optional[str] = None
+) -> str:
+    """Like :func:`resolve_accent`, but may warm the ElevenLabs voice catalog
+    (one allowed network call) so EL accents resolve reliably even on a cold
+    cache. Used at call pre-warm. Always best-effort — returns ``NEUTRAL`` on
+    any failure."""
+    if not voice_id:
+        return NEUTRAL
+    acc = resolve_accent(voice_id)  # cheap paths + EL cache if already warm
+    if acc != NEUTRAL:
+        return acc
+    # EL voice ids aren't locale-coded and aren't in the static catalogs, so a
+    # cold EL cache is the one case that needs a fetch. Gate on provider to
+    # avoid pointless EL calls for other providers.
+    if (provider or "").lower() in ("elevenlabs", "eleven"):
+        try:
+            from app.infrastructure.tts.elevenlabs_catalog import (
+                get_elevenlabs_voices_for_current_key,
+            )
+            await asyncio.wait_for(get_elevenlabs_voices_for_current_key(), timeout=4.0)
+            acc = _accent_from_catalogs(voice_id)
+            if acc:
+                return acc
+        except Exception:
+            pass
     return NEUTRAL
 
 
