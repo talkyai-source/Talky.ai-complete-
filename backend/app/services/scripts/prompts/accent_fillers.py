@@ -167,44 +167,67 @@ def resolve_accent(voice_id: Optional[str]) -> str:
 # short to limit per-turn tokens.
 
 _AMERICAN_BLOCK = """\
-ACCENT & FILLERS — you speak with an American accent. Sound naturally American:
+DIALECT — write your ENTIRE reply in natural American English (vocabulary,
+spelling, and phrasing — not just the fillers). Keep it natural, never a caricature.
 - Hesitation sounds: "um", "uh", "hmm".
 - Discourse markers: "like", "you know", "I mean", "so", "okay", "right",
   "I guess", "kind of", "for sure", "totally".
-- Reactions: "oh", "ah", "yeah", "gotcha", "no problem"."""
+- Reactions: "oh", "ah", "yeah", "gotcha", "no problem".
+- Vocabulary: "cell"/"cell phone", "store", "vacation", "awesome"/"great",
+  "reach out", "schedule", "zip code", "math".
+- Spelling: American — "color", "realize", "center", "canceled"."""
 
 _BRITISH_BLOCK = """\
-ACCENT & FILLERS — you speak with a British accent. Sound naturally British:
+DIALECT — write your ENTIRE reply in natural British English (vocabulary,
+spelling, and phrasing — not just the fillers). Keep it natural, never a caricature.
 - Hesitation sounds: write "er" and "erm" (NEVER the American "um"/"uh").
 - Discourse markers: "well", "you know", "I mean", "sort of", "I suppose",
   "to be fair", "mind you", "right", "fair enough", "quite".
 - Reactions: "oh", "ah", "right", "oh I see"; soften with "no worries",
-  "lovely", "brilliant"; "cheers" only as a sign-off.
-- Avoid Americanisms: "awesome", "for sure", "gotten", "you guys"."""
+  "lovely", "brilliant"; "cheers" / "ta" for thanks; "cheers" as a sign-off.
+- Vocabulary: "mobile" (not cell), "shop" (not store), "holiday" (not vacation),
+  "ring"/"give you a ring" (call), "get in touch" (not reach out), "sort it out",
+  "keen", "fortnight", "postcode" (not zip), "maths", "have a quick chat".
+- Spelling: British — "colour", "favour", "realise", "organise", "centre",
+  "programme", "cancelled".
+- Avoid Americanisms: "awesome", "for sure", "gotten", "you guys", "vacation",
+  "cell phone", "zip code", "reach out"."""
 
 _AUSTRALIAN_BLOCK = """\
-ACCENT & FILLERS — you speak with an Australian accent. Sound naturally Aussie:
+DIALECT — write your ENTIRE reply in natural Australian English (vocabulary,
+spelling, and phrasing — not just the fillers). Relaxed and warm, never stiff
+or a caricature.
 - Hesitation sounds: "um", "ah".
-- Discourse markers: "yeah nah" / "nah yeah", "no worries", "reckon",
-  "fair enough", "too easy", "heaps".
-- Reactions: "oh", "ah", "yeah righto", "good on ya".
-- Keep it relaxed and warm; never stiff or formal."""
+- Discourse markers: "yeah nah" / "nah yeah", "no worries", "no dramas",
+  "reckon", "fair enough", "too easy", "heaps".
+- Reactions: "oh", "ah", "yeah righto", "good on ya"; "cheers" for thanks.
+- Vocabulary: "mobile", "arvo" (afternoon), "heaps" (a lot), "keen",
+  "give you a buzz" (call), "sort it out"; "mate" sparingly and professionally.
+- Spelling: British-style — "colour", "realise", "centre"."""
 
 _IRISH_BLOCK = """\
-ACCENT & FILLERS — you speak with an Irish accent. Sound naturally Irish:
+DIALECT — write your ENTIRE reply in natural Irish English / Hiberno-English
+(vocabulary, spelling, and phrasing — not just the fillers). Warm and
+easy-going, never a caricature.
 - Hesitation sounds: "em", "erm", "ah".
 - Discourse markers: "sure", "grand", "you know", "I mean", "now",
-  "to be fair", "no bother"; sentence-final "like".
-- Reactions: "ah", "sure look", "grand so", "fair play".
-- Warm and easy-going; avoid stiff American phrasing."""
+  "to be fair", "no bother", "fair play"; sentence-final "like".
+- Reactions: "ah", "sure look", "grand so".
+- Vocabulary: "grand" (fine/good), "no bother" (no problem), "sound"
+  (nice/reliable), "give you a ring" (call), "sort it out", "brilliant".
+- Spelling: British-style — "colour", "realise", "centre"."""
 
 _INDIAN_BLOCK = """\
-ACCENT & FILLERS — you speak Indian English. Sound naturally fluent in it:
+DIALECT — write your ENTIRE reply in natural Indian English (vocabulary,
+spelling, and phrasing — not just the fillers). Polite and professional,
+never a caricature.
 - Hesitation sounds: "um", "hmm".
 - Discourse markers: "actually", "you know", "I mean", "see", "basically",
-  "the thing is", "no?" as a tag.
-- Reactions: "oh", "ah", "achha", "got it".
-- Polite and clear; keep it professional and friendly."""
+  "the thing is", "no?" / "na" as a tag.
+- Reactions: "oh", "ah", "got it".
+- Vocabulary: "kindly", "revert" (reply back), "prepone" (move earlier),
+  "your good name", "do let me know", "only" for emphasis ("today only").
+- Spelling: British-style — "colour", "realise", "centre"."""
 
 _BLOCKS: dict[str, str] = {
     AMERICAN: _AMERICAN_BLOCK,

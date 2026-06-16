@@ -72,6 +72,26 @@ def test_american_block_uses_um():
     assert '"um"' in block and '"uh"' in block
 
 
+def test_blocks_instruct_full_dialect_not_just_fillers():
+    # The LLM must write the WHOLE reply in-dialect, not only the fillers.
+    for acc in (AMERICAN, BRITISH, AUSTRALIAN, IRISH, INDIAN):
+        block = accent_filler_block(acc)
+        assert "ENTIRE reply" in block, f"{acc} block must mandate full-dialect output"
+
+
+def test_british_block_has_vocab_and_spelling():
+    block = accent_filler_block(BRITISH)
+    assert "mobile" in block            # vocabulary swap
+    assert "colour" in block            # British spelling
+    assert "cell phone" in block        # listed as something to AVOID
+
+
+def test_american_block_has_vocab_and_spelling():
+    block = accent_filler_block(AMERICAN)
+    assert "color" in block             # American spelling
+    assert "cell" in block              # American vocabulary
+
+
 def test_neutral_block_is_empty():
     # Neutral / unknown -> no override (generic guardrails apply).
     assert accent_filler_block(NEUTRAL) == ""
