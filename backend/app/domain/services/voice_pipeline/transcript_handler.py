@@ -20,6 +20,7 @@ from fastapi import WebSocket
 
 from app.domain.models.conversation import BargeInSignal
 from app.domain.models.session import CallSession
+from app.domain.services.voice_pipeline.backchannel import is_backchannel
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +98,28 @@ class TranscriptHandler:
             except Exception as e:
                 logger.warning(f"Failed to send transcript to websocket: {e}")
 
+        # Backchannel guard (Deepgram leaves this to the app). If the agent is
+        # currently speaking and the user only made a short acknowledgement
+        # ("yeah", "ok", "mhm"), that's a backchannel — NOT a turn. Don't reply
+        # and don't end the agent's turn; it keeps going, like a human would.
+        # (StartOfTurn already suppressed the audio barge-in for this; this stops
+        # the spurious reply.) Only while the agent is talking — a "yeah" when
+        # it's the caller's turn is a real answer and falls through normally.
+        if getattr(session, "tts_active", False) and is_backchannel(transcript.text):
+            logger.info(
+                "backchannel %r during agent speech — ignored (no interrupt, no reply)",
+                (transcript.text or "")[:24],
+            )
+            return
+
         if self._p.stt_provider.detect_turn_end(transcript):
+            # Grow case: a turn that began as a backchannel (so the StartOfTurn
+            # audio barge-in was suppressed) but turned into real speech. The
+            # agent's TTS may still be playing — stop it now before we respond.
+            # No-op if it already stopped (normal interruptions clear it).
+            if getattr(session, "tts_active", False):
+                await self._p.handle_barge_in(session, websocket)
+
             # Run as a task (not awaited) so the consumer stays unblocked and
             # can process a TurnResumed that arrives before the LLM completes.
             #

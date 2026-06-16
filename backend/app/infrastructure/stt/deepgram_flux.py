@@ -686,7 +686,21 @@ class DeepgramFluxSTTProvider(STTProvider):
                             if call_id and self.is_muted(call_id):
                                 logger.debug(f"Ignoring StartOfTurn - microphone muted for call {call_id} (echo suppression)")
                                 continue
-                            
+
+                            # Backchannel guard (Deepgram leaves this to the app):
+                            # StartOfTurn carries a transcript, so if it's just a
+                            # short acknowledgement ("yeah", "ok", "mhm") we do NOT
+                            # interrupt the agent. If it grows into real speech, the
+                            # later EndOfTurn carries the full text and the pipeline
+                            # barges in then (transcript_handler grow-case guard).
+                            from app.domain.services.voice_pipeline.backchannel import is_backchannel
+                            if is_backchannel(transcript_text):
+                                logger.info(
+                                    "Flux StartOfTurn backchannel %r — barge-in suppressed",
+                                    (transcript_text or "")[:24],
+                                )
+                                continue
+
                             logger.info("Flux StartOfTurn - User started speaking, barge-in detected")
                             # Cancel any speculative processing
                             if eager_state:
