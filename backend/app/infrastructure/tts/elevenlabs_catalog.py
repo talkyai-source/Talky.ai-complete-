@@ -49,6 +49,17 @@ def get_elevenlabs_last_error() -> Optional[str]:
     return _elevenlabs_last_error
 
 
+def get_cached_elevenlabs_voices() -> Optional[list[VoiceInfo]]:
+    """Return the in-memory ElevenLabs voice catalog if it is already cached,
+    WITHOUT triggering a network fetch. Returns None when the cache is cold.
+
+    Used on the hot call path (accent detection) where a blocking API call is
+    not acceptable — callers fall back gracefully when this is None. The cache
+    is normally warmed during call setup / voice listing.
+    """
+    return list(_elevenlabs_voices_cache) if _elevenlabs_voices_cache else None
+
+
 def elevenlabs_api_key() -> Optional[str]:
     api_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
     return api_key or None

@@ -1,0 +1,83 @@
+"""Unit tests for accent-aware filler selection."""
+import pytest
+
+from app.services.scripts.prompts.accent_fillers import (
+    AMERICAN, BRITISH, AUSTRALIAN, IRISH, INDIAN, NEUTRAL,
+    normalize_accent, resolve_accent, accent_filler_block, filler_block_for_voice,
+)
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("British", BRITISH),
+    ("Received Pronunciation", BRITISH),
+    ("en-GB", BRITISH),
+    ("American", AMERICAN),
+    ("en-US", AMERICAN),
+    ("Australian", AUSTRALIAN),
+    ("Irish", IRISH),
+    ("Indian", INDIAN),
+    ("Global", NEUTRAL),
+    ("", NEUTRAL),
+    (None, NEUTRAL),
+    ("klingon", NEUTRAL),
+])
+def test_normalize_accent(raw, expected):
+    assert normalize_accent(raw) == expected
+
+
+@pytest.mark.parametrize("voice_id,expected", [
+    ("en-GB-Chirp3-HD-Aoede", BRITISH),
+    ("en-US-Chirp3-HD-Orus", AMERICAN),
+    ("en-AU-Chirp3-HD-Puck", AUSTRALIAN),
+    ("en-IN-Wavenet-A", INDIAN),
+])
+def test_resolve_accent_from_locale_in_id(voice_id, expected):
+    assert resolve_accent(voice_id) == expected
+
+
+def test_resolve_accent_from_cartesia_static_catalog():
+    # James is a hardcoded British Cartesia voice.
+    from app.domain.models.ai_config import CARTESIA_VOICES
+    james = next((v for v in CARTESIA_VOICES if (v.accent or "").lower() == "british"), None)
+    assert james is not None, "expected a British Cartesia voice in the catalog"
+    assert resolve_accent(james.id) == BRITISH
+
+
+def test_resolve_accent_from_elevenlabs_cache(monkeypatch):
+    from app.domain.models.ai_config import VoiceInfo
+    import app.services.scripts.prompts.accent_fillers as af
+
+    fake = [VoiceInfo(id="el-british-123", name="Sloane", accent="British", provider="elevenlabs")]
+    monkeypatch.setattr(
+        "app.infrastructure.tts.elevenlabs_catalog.get_cached_elevenlabs_voices",
+        lambda: fake,
+    )
+    assert af.resolve_accent("el-british-123") == BRITISH
+
+
+def test_resolve_accent_unknown_is_neutral():
+    assert resolve_accent("totally-unknown-voice-xyz") == NEUTRAL
+    assert resolve_accent(None) == NEUTRAL
+
+
+def test_british_block_uses_er_not_um():
+    block = accent_filler_block(BRITISH)
+    assert "er" in block and "erm" in block
+    # British must steer away from the American spelling.
+    assert "NEVER the American" in block
+
+
+def test_american_block_uses_um():
+    block = accent_filler_block(AMERICAN)
+    assert '"um"' in block and '"uh"' in block
+
+
+def test_neutral_block_is_empty():
+    # Neutral / unknown -> no override (generic guardrails apply).
+    assert accent_filler_block(NEUTRAL) == ""
+    assert accent_filler_block("nonsense") == ""
+
+
+def test_filler_block_for_voice_end_to_end():
+    assert "British" in filler_block_for_voice("en-GB-Chirp3-HD-Aoede")
+    assert filler_block_for_voice("unknown-xyz") == ""

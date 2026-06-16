@@ -38,6 +38,7 @@ from app.domain.services.end_session_action import (
 from app.domain.services.llm_guardrails import get_guardrails
 from app.domain.services.voice_pipeline import expressive_caps
 from app.services.scripts.prompts.guardrails import ELEVEN_V3_AUDIO_TAGS_INSTRUCTIONS
+from app.services.scripts.prompts.accent_fillers import resolve_accent, accent_filler_block
 from app.infrastructure.llm.groq import LLMTimeoutError
 from app.services.scripts import compose_system_prompt
 
@@ -200,6 +201,21 @@ class TurnStreamer:
         tags_ok = expressive_caps.supports_audio_tags(expressive_caps.model_id_of(self._p))
         if tags_ok:
             system_prompt = system_prompt + "\n\n" + ELEVEN_V3_AUDIO_TAGS_INSTRUCTIONS
+
+        # Accent-matched fillers: a British voice should say "er"/"erm" and
+        # British discourse markers; an American voice "um"/"uh"; etc. Resolved
+        # once per call from the selected voice and memoized on the session.
+        # Neutral / unknown voices return "" (the generic guardrails apply).
+        accent = getattr(session, "_voice_accent", None)
+        if accent is None:
+            accent = resolve_accent(getattr(session, "voice_id", None))
+            try:
+                session._voice_accent = accent
+            except Exception:
+                pass
+        accent_block = accent_filler_block(accent)
+        if accent_block:
+            system_prompt = system_prompt + "\n\n" + accent_block
 
         if session.captured_slots is not None:
             system_prompt = compose_system_prompt(system_prompt, session.captured_slots)
