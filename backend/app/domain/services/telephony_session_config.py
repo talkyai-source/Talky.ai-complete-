@@ -392,15 +392,94 @@ def _telephony_mute_during_tts_default() -> bool:
     return get_telephony_settings().mute_during_tts
 
 
-def _build_call_keyterms(company_name: str, agent_name: str) -> list:
+# Common words that survive the proper-noun heuristic but aren't product names
+# (sentence-initial capitals, persona boilerplate). Kept lowercase for compare.
+_PRODUCT_TERM_STOPWORDS = frozenset({
+    "the", "you", "your", "our", "we", "they", "this", "that", "these", "those",
+    "please", "when", "make", "always", "never", "call", "caller", "agent",
+    "company", "customer", "client", "team", "hello", "hi", "yes", "no", "i",
+    "if", "do", "don", "be", "is", "are", "and", "or", "for", "with", "to",
+    "from", "on", "at", "in", "of", "a", "an", "it", "as", "ai", "ask",
+})
+
+
+def _extract_product_terms(script_config: dict, company_name: str) -> list:
+    """Pull likely product / brand names out of the campaign's free-text config
+    so Flux recognises them instead of garbling (e.g. "Dojo Go" → "Dodge go").
+
+    Conservative, zero-setup heuristic over ``additional_instructions`` (and an
+    optional explicit ``products`` list if a campaign ever sets one):
+      * multi-word Title-Case phrases  ("Dojo Go", "Pocket Card Reader")
+      * quoted phrases                 ('the "Pocket" reader')
+      * single tokens with internal caps / digits / ALL-CAPS  (iZettle, G2, SMB)
+    Single ordinary Capitalized words (sentence starts like "Please") are
+    deliberately NOT matched — that keeps noise out of the keyterm budget.
+    """
+    if not isinstance(script_config, dict):
+        return []
+
+    company_lower = (company_name or "").lower()
+    found: list[str] = []
+    seen: set[str] = set()
+
+    def _add(term: str) -> None:
+        term = (term or "").strip(" \"'.,;:!?()[]{}")
+        if len(term) < 2 or len(term) > 40:
+            return
+        low = term.lower()
+        # Skip stopwords, the brand itself (already added), and phrases that are
+        # entirely ordinary words.
+        if low in seen or low in _PRODUCT_TERM_STOPWORDS or low in company_lower:
+            return
+        if all(w.lower() in _PRODUCT_TERM_STOPWORDS for w in term.split()):
+            return
+        seen.add(low)
+        found.append(term)
+
+    # Explicit products list (if a campaign ever sets one) — added verbatim,
+    # one entry per item; NOT run through the free-text heuristic.
+    explicit = script_config.get("products")
+    if isinstance(explicit, (list, tuple)):
+        for p in explicit:
+            _add(str(p))
+    elif isinstance(explicit, str):
+        _add(explicit)
+
+    # Free-text heuristic over additional_instructions.
+    extra = script_config.get("additional_instructions")
+    text = extra.strip() if isinstance(extra, str) else ""
+    if text:
+        # 1) Quoted phrases — users often quote a product name.
+        for m in re.findall(r"[\"'“”‘’]([^\"'“”‘’]{2,40})[\"'“”‘’]", text):
+            _add(m)
+        # 2) Multi-word Title-Case phrases (2+ consecutive capitalised words).
+        #    [^\S\n] = a space/tab but NOT a newline, so phrases never span lines.
+        for m in re.findall(
+            r"\b([A-Z][A-Za-z0-9'&]+(?:[^\S\n]+[A-Z][A-Za-z0-9'&]+)+)\b", text
+        ):
+            _add(m)
+        # 3) Single tokens with internal caps, digits, or ALL-CAPS acronyms.
+        for m in re.findall(r"\b([A-Za-z0-9'&]{2,})\b", text):
+            has_internal_cap = bool(re.search(r"[a-z][A-Z]|[A-Z][A-Z]", m))
+            has_digit = bool(re.search(r"\d", m))
+            if has_internal_cap or has_digit:
+                _add(m)
+
+    return found[:10]
+
+
+def _build_call_keyterms(
+    company_name: str, agent_name: str, product_terms: Optional[list] = None
+) -> list:
     """Bias Deepgram Flux toward the words it most often mis-hears on a call:
-    the company/brand name and the agent's name.
+    the company/brand name, the agent's name, and the campaign's product names.
 
     Flux keyterm prompting only biases toward terms it's told about. The static
-    providers.yaml list is generic, so a campaign brand like "Dojo" gets
-    transcribed as "Dodge". This prepends the campaign's own company + agent
-    names (plus the significant single words of a multi-word brand) to the
-    static defaults, deduped case-insensitively and capped."""
+    providers.yaml base list is empty (email-spelling terms moved to capture
+    mode), so a campaign brand like "Dojo" or product "Dojo Go" gets
+    transcribed as "Dodge" without this. We add the campaign's own company +
+    agent + product names (plus the significant single words of a multi-word
+    brand), deduped case-insensitively and capped."""
     from app.domain.services.voice_orchestrator import _default_flux_keyterms
 
     terms: list[str] = []
@@ -417,7 +496,10 @@ def _build_call_keyterms(company_name: str, agent_name: str) -> list:
     for word in re.findall(r"[A-Za-z][A-Za-z0-9'&-]{2,}", company_name or ""):
         _add(word)  # e.g. "Dojo" out of "Dojo Payments Ltd"
     _add(agent_name)
-    # Then the static defaults from providers.yaml.
+    for t in (product_terms or []):
+        _add(t)
+    # Then any base defaults from providers.yaml (empty today; email-spelling
+    # terms are capture-mode only).
     for t in (_default_flux_keyterms() or []):
         _add(t)
     return terms[:60]
@@ -816,9 +898,12 @@ def build_telephony_session_config(
         stt_eot_threshold=_tuning.stt_eot_threshold,
         stt_eot_timeout_ms=_tuning.stt_eot_timeout_ms,
         stt_eager_eot_threshold=_tuning.stt_eager_eot_threshold,
-        # Per-call keyterm prompting: bias Flux toward the campaign's brand and
-        # agent name so "Dojo" isn't heard as "Dodge". Merged with defaults.
-        stt_keyterms=_build_call_keyterms(company_name, agent_name),
+        # Per-call keyterm prompting: bias Flux toward the campaign's brand,
+        # agent name, and product names so "Dojo"/"Dojo Go" isn't heard as
+        # "Dodge". Email-spelling terms are gated to capture mode separately.
+        stt_keyterms=_build_call_keyterms(
+            company_name, agent_name, _extract_product_terms(script_config, company_name)
+        ),
         turn_0_min_confidence=_tuning.turn_0_min_confidence,
         turn_0_min_alpha_chars=_tuning.turn_0_min_alpha_chars,
         llm_model=global_config.llm_model,

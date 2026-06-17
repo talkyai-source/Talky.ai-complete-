@@ -49,15 +49,44 @@ async def test_keyterm_params_are_url_encoded():
     assert params == [("keyterm", "dot%20com"), ("keyterm", "at%20sign")]
 
 
-def test_orchestrator_loads_keyterms_from_providers_yaml():
-    """The orchestrator default (used by BOTH telephony and ask-AI) is sourced
-    from providers.yaml, so the configured list is live on every session."""
+def test_orchestrator_base_keyterms_have_no_email_terms():
+    """Base (always-on) keyterms must NOT carry the email-spelling terms — those
+    moved to capture mode so they can't bias ordinary speech. The base list is
+    empty in providers.yaml (brand/agent/product are added per-call)."""
     from app.domain.services import voice_orchestrator as vo
 
     vo._FLUX_KEYTERMS_CACHE = None  # force a fresh read
     terms = vo._default_flux_keyterms()
-    assert isinstance(terms, list) and terms, "expected non-empty keyterms"
+    assert isinstance(terms, list)
+    assert not any("gmail.com" == t.lower() for t in terms)
+    assert not any(t.lower() in {"dot", "at sign", "dash"} for t in terms)
+
+
+def test_orchestrator_loads_capture_keyterms_from_providers_yaml():
+    """Email-spelling terms live under capture_keyterms (capture-mode only)."""
+    from app.domain.services import voice_orchestrator as vo
+
+    vo._FLUX_CAPTURE_KEYTERMS_CACHE = None  # force a fresh read
+    terms = vo._default_flux_capture_keyterms()
+    assert isinstance(terms, list) and terms, "expected non-empty capture keyterms"
     assert any("gmail.com" == t.lower() for t in terms)
+    assert any("dot" == t.lower() for t in terms)
+
+
+@pytest.mark.asyncio
+async def test_capture_keyterms_initialize_and_gating():
+    """initialize() loads capture_keyterms separately; capture mode folds them
+    into the active set, normal mode keeps them out."""
+    p = DeepgramFluxSTTProvider()
+    await p.initialize({
+        "api_key": "k",
+        "keyterms": ["Dojo"],
+        "capture_keyterms": ["dot", "gmail.com"],
+    })
+    assert p._keyterms == ["Dojo"]
+    assert p._capture_keyterms == ["dot", "gmail.com"]
+    active = [t.lower() for t in p._capture_active_keyterms()]
+    assert "dojo" in active and "dot" in active and "gmail.com" in active
 
 
 def test_voice_session_config_defaults_to_empty_keyterms():

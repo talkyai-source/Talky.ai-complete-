@@ -113,10 +113,13 @@ class Direction(str, enum.Enum):
 # live on both telephony and ask-AI. The env var DEEPGRAM_FLUX_KEYTERMS still
 # overrides at provider initialize() time.
 _FLUX_KEYTERMS_CACHE: Optional[list] = None
+_FLUX_CAPTURE_KEYTERMS_CACHE: Optional[list] = None
 
 
 def _default_flux_keyterms() -> list:
-    """Load Flux keyterms from providers.yaml (cached). Fail-open to []."""
+    """Load base (always-on) Flux keyterms from providers.yaml (cached).
+    Fail-open to []. Email-spelling terms are NOT here — see
+    _default_flux_capture_keyterms (capture-mode only)."""
     global _FLUX_KEYTERMS_CACHE
     if _FLUX_KEYTERMS_CACHE is None:
         try:
@@ -131,6 +134,26 @@ def _default_flux_keyterms() -> list:
             logger.warning("flux keyterms load failed: %s", exc)
             _FLUX_KEYTERMS_CACHE = []
     return _FLUX_KEYTERMS_CACHE
+
+
+def _default_flux_capture_keyterms() -> list:
+    """Load capture-only Flux keyterms (email domains + spell connectors) from
+    providers.yaml (cached). These are injected ONLY during email/spell capture
+    mode so words like "dot"/"at"/"dash" never bias ordinary speech."""
+    global _FLUX_CAPTURE_KEYTERMS_CACHE
+    if _FLUX_CAPTURE_KEYTERMS_CACHE is None:
+        try:
+            from app.core.config import ConfigManager
+
+            stt_cfg = ConfigManager().get_provider_config("stt") or {}
+            raw = stt_cfg.get("capture_keyterms") or []
+            _FLUX_CAPTURE_KEYTERMS_CACHE = [
+                str(t).strip() for t in raw if str(t).strip()
+            ]
+        except Exception as exc:  # config missing/malformed — no capture biasing
+            logger.warning("flux capture keyterms load failed: %s", exc)
+            _FLUX_CAPTURE_KEYTERMS_CACHE = []
+    return _FLUX_CAPTURE_KEYTERMS_CACHE
 
 
 @dataclass
@@ -827,6 +850,11 @@ class VoiceOrchestrator:
             # providers.yaml list. Env DEEPGRAM_FLUX_KEYTERMS overrides both
             # inside initialize(). Covers telephony AND ask-AI (shared path).
             "keyterms": config.stt_keyterms or _default_flux_keyterms(),
+            # Capture-only keyterms (email domains + spell connectors). Static
+            # across campaigns; injected only during email/spell capture mode so
+            # they never bias ordinary speech. Env DEEPGRAM_FLUX_CAPTURE_KEYTERMS
+            # overrides inside initialize().
+            "capture_keyterms": _default_flux_capture_keyterms(),
             # Privacy: keep caller PII out of Deepgram's training set.
             "mip_opt_out": True,
             # Observability: tag each STT session for per-tenant usage + debug.

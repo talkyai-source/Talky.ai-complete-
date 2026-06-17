@@ -117,6 +117,70 @@ def _emit_usage_log(usage_obj, *, model: str) -> None:
         logger.debug("voice_metrics_cache_record_failed err=%s", exc)
 
 
+def _accumulate_tool_call_frags(acc: Dict[int, dict], frags) -> None:
+    """Merge streamed tool-call delta fragments into ``acc`` keyed by index.
+
+    Groq (OpenAI-compatible) streams a tool call across many chunks: the id +
+    function name arrive once, the JSON ``arguments`` come as a string in
+    pieces. We accumulate per call index until the stream ends.
+    """
+    for frag in frags:
+        idx = getattr(frag, "index", 0) or 0
+        slot = acc.setdefault(idx, {"id": None, "name": None, "arguments": ""})
+        if getattr(frag, "id", None):
+            slot["id"] = frag.id
+        fn = getattr(frag, "function", None)
+        if fn is not None:
+            if getattr(fn, "name", None):
+                slot["name"] = fn.name
+            if getattr(fn, "arguments", None):
+                slot["arguments"] += fn.arguments
+
+
+def _finalize_tool_calls(acc: Dict[int, dict]) -> List[dict]:
+    """Turn accumulated fragments into clean call dicts with parsed arguments.
+
+    Each entry: {id, name, arguments_raw (str for the echo-back assistant msg),
+    arguments (parsed dict for the tool runner)}.
+    """
+    import json
+
+    out: List[dict] = []
+    for idx in sorted(acc.keys()):
+        slot = acc[idx]
+        if not slot.get("name"):
+            continue
+        raw_args = slot.get("arguments") or "{}"
+        try:
+            parsed = json.loads(raw_args)
+        except Exception:
+            parsed = {}
+        out.append({
+            "id": slot.get("id") or f"call_{idx}",
+            "name": slot["name"],
+            "arguments_raw": raw_args,
+            "arguments": parsed if isinstance(parsed, dict) else {},
+        })
+    return out
+
+
+def _assistant_tool_call_message(calls: List[dict]) -> dict:
+    """Build the assistant message that echoes the model's tool call(s) back,
+    required by the API before the matching tool-result messages."""
+    return {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": c["id"],
+                "type": "function",
+                "function": {"name": c["name"], "arguments": c["arguments_raw"]},
+            }
+            for c in calls
+        ],
+    }
+
+
 class LLMTimeoutError(Exception):
     """Raised when LLM response times out"""
     pass
@@ -448,6 +512,74 @@ class GroqLLMProvider(LLMProvider):
         finally:
             await gen.aclose()
     
+    async def stream_chat_with_tools(
+        self,
+        messages: List[Message],
+        system_prompt: Optional[str] = None,
+        tools: Optional[List[dict]] = None,
+        tool_runner=None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        timeout_seconds: float = DEFAULT_LLM_TIMEOUT,
+        **kwargs,
+    ) -> AsyncIterator[str]:
+        """Stream a turn that MAY call a function tool, yielding only spoken
+        content (same str contract as stream_chat_with_timeout, so the voice
+        pipeline's streaming loop is unchanged).
+
+        Round 0: the model decides — it either answers directly (the fast,
+        common path: zero retrieval, small prompt) or emits a tool call.
+        Round 1 (only if it called the tool): run ``tool_runner`` for the
+        requested fact(s), append the tool result, and stream the grounded
+        answer. No tools are offered in round 1, so the model cannot loop.
+
+        ``tool_runner`` is an async callable ``(name, arguments_dict) -> str``.
+        With no tools/runner this degrades to the normal timeout-guarded stream.
+        """
+        if not tools or tool_runner is None:
+            async for tok in self.stream_chat_with_timeout(
+                messages, timeout_seconds=timeout_seconds, system_prompt=system_prompt,
+                temperature=temperature, max_tokens=max_tokens, **kwargs,
+            ):
+                yield tok
+            return
+
+        sink: List[dict] = []
+        produced_content = False
+        # Round 0 — let the model decide. A clean tool-only response ends via
+        # StopAsyncIteration (no content), so the TTFT guard does NOT misfire.
+        async for tok in self.stream_chat_with_timeout(
+            messages, timeout_seconds=timeout_seconds, system_prompt=system_prompt,
+            temperature=temperature, max_tokens=max_tokens,
+            tools=tools, tool_choice="auto", tool_calls_sink=sink, **kwargs,
+        ):
+            produced_content = True
+            yield tok
+
+        # Answered directly, or nothing to look up → done.
+        if produced_content or not sink:
+            return
+
+        # Round 1 — execute the tool(s) and stream the grounded answer.
+        extra: List[dict] = [_assistant_tool_call_message(sink)]
+        for call in sink:
+            try:
+                result = await tool_runner(call["name"], call["arguments"])
+            except Exception as exc:  # never let a tool failure stall the turn
+                logger.warning("tool_runner failed name=%s: %s", call.get("name"), exc)
+                result = "No specific information found."
+            extra.append({
+                "role": "tool",
+                "tool_call_id": call["id"],
+                "content": result or "No specific information found.",
+            })
+
+        async for tok in self.stream_chat_with_timeout(
+            messages, timeout_seconds=timeout_seconds, system_prompt=system_prompt,
+            temperature=temperature, max_tokens=max_tokens, extra_messages=extra, **kwargs,
+        ):
+            yield tok
+
     async def stream_chat(
         self,
         messages: List[Message],
@@ -489,6 +621,18 @@ class GroqLLMProvider(LLMProvider):
         # Get model from kwargs or use configured default
         model = kwargs.get("model", self._model)
 
+        # On-demand tool-calling (opt-in, see voice_pipeline/knowledge_tool.py).
+        # All default None → the normal non-tool path is byte-for-byte unchanged.
+        #   tools/tool_choice  — passed straight to the Groq request.
+        #   tool_calls_sink    — a list the caller owns; assembled tool calls are
+        #                        appended to it (content is NOT yielded for them).
+        #   extra_messages     — raw role dicts (assistant tool_calls + tool
+        #                        results) appended after history for the 2nd round.
+        tools = kwargs.get("tools")
+        tool_choice = kwargs.get("tool_choice")
+        tool_calls_sink = kwargs.get("tool_calls_sink")
+        extra_messages = kwargs.get("extra_messages")
+
         # Build messages array for Groq API using role channels
         groq_messages = []
         
@@ -517,7 +661,12 @@ class GroqLLMProvider(LLMProvider):
                 system_prompt=system_prompt,
                 messages=groq_messages,
             )
-        
+
+        # Tool round-2: append the assistant tool_call turn + tool result(s) so
+        # the model answers grounded in what the tool returned.
+        if extra_messages:
+            groq_messages.extend(extra_messages)
+
         # Validate temperature (Groq accepts 0.0-2.0)
         if not 0.0 <= temperature <= 2.0:
             raise ValueError(f"Temperature must be between 0.0 and 2.0, got {temperature}")
@@ -557,6 +706,12 @@ class GroqLLMProvider(LLMProvider):
                 # returns `usage` on the final non-empty chunk for some
                 # models, which the loop below picks up via getattr().
             }
+
+            # Function tools (opt-in). When present the model may answer
+            # directly OR emit a tool call; tool_choice="auto" lets it decide.
+            if tools:
+                request_kwargs["tools"] = tools
+                request_kwargs["tool_choice"] = tool_choice or "auto"
 
             reasoning_format = kwargs.get("reasoning_format")
             include_reasoning = kwargs.get("include_reasoning")
@@ -635,6 +790,7 @@ class GroqLLMProvider(LLMProvider):
                                 # is enabled — record it and skip yielding.
                                 token_count = 0
                                 final_usage = None
+                                tc_acc: Dict[int, dict] = {}
                                 async for chunk in stream:
                                     if chunk.choices:
                                         delta = chunk.choices[0].delta
@@ -642,14 +798,26 @@ class GroqLLMProvider(LLMProvider):
                                             token_count += 1
                                             tokens_yielded += 1
                                             yield delta.content
+                                        # Assemble streamed tool-call fragments
+                                        # (name + arguments arrive in pieces).
+                                        if tool_calls_sink is not None:
+                                            frags = getattr(delta, "tool_calls", None)
+                                            if frags:
+                                                _accumulate_tool_call_frags(tc_acc, frags)
                                     chunk_usage = getattr(chunk, "usage", None)
                                     if chunk_usage is not None:
                                         final_usage = chunk_usage
 
+                                # Surface any assembled tool calls to the caller.
+                                # Only reached on a fully-successful stream, so a
+                                # retry (tokens_yielded==0) can never double-fill.
+                                if tool_calls_sink is not None and tc_acc:
+                                    tool_calls_sink.extend(_finalize_tool_calls(tc_acc))
+
                                 logger.debug(
                                     f"Stream completed, yielded {token_count} tokens"
                                 )
-                                if token_count == 0:
+                                if token_count == 0 and not (tool_calls_sink is not None and tc_acc):
                                     logger.warning("Zero tokens received from Groq")
                                 if final_usage is not None:
                                     _emit_usage_log(final_usage, model=model)

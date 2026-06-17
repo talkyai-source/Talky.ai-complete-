@@ -176,6 +176,7 @@ class DeepgramFluxSTTProvider(STTProvider):
 
         # Keyterm prompting list (set in initialize()); empty = no biasing.
         self._keyterms: list[str] = []
+        self._capture_keyterms: list[str] = []
 
         # Privacy: opt this stream out of Deepgram's Model Improvement Program
         # so caller audio/PII (spelled emails, numbers) isn't retained for
@@ -280,6 +281,12 @@ class DeepgramFluxSTTProvider(STTProvider):
         self._keyterms = self._parse_keyterms(
             os.getenv("DEEPGRAM_FLUX_KEYTERMS") or config.get("keyterms")
         )
+        # Capture-only keyterms (email domains + spell connectors). Held
+        # separately and merged into the active set ONLY in capture mode, so
+        # short words like "dot"/"at"/"dash" never bias ordinary conversation.
+        self._capture_keyterms = self._parse_keyterms(
+            os.getenv("DEEPGRAM_FLUX_CAPTURE_KEYTERMS") or config.get("capture_keyterms")
+        )
 
         # Privacy + observability (see __init__). mip_opt_out defaults ON.
         self._mip_opt_out = bool(config.get("mip_opt_out", True))
@@ -367,18 +374,32 @@ class DeepgramFluxSTTProvider(STTProvider):
             payload["keyterms"] = list(keyterms)
         self._pending_config[call_id] = payload
 
+    def _capture_active_keyterms(self) -> list[str]:
+        """Base keyterms + the email/spell terms, deduped case-insensitively.
+        Used only while in capture mode."""
+        out: list[str] = list(self._keyterms)
+        seen = {t.lower() for t in out}
+        for t in self._capture_keyterms:
+            if t.lower() not in seen:
+                seen.add(t.lower())
+                out.append(t)
+        return out
+
     def enter_capture_mode(self, call_id: str) -> None:
         """Relax turn-detection so the caller can spell an email/number without
-        being cut off mid-spell. Keeps the current keyterms active."""
+        being cut off mid-spell, AND fold in the email-spelling keyterms (dot /
+        at sign / domains) just for this stretch so they're recognised — they
+        stay OFF the rest of the call so they can't garble ordinary speech."""
         self.request_configure(
             call_id,
-            keyterms=self._keyterms,
+            keyterms=self._capture_active_keyterms(),
             eot_timeout_ms=CAPTURE_EOT_TIMEOUT_MS,
             eot_threshold=CAPTURE_EOT_THRESHOLD,
         )
 
     def reset_capture_mode(self, call_id: str) -> None:
-        """Restore this session's normal turn-detection after capture."""
+        """Restore this session's normal turn-detection after capture and drop
+        the email-spelling keyterms back to the base set."""
         self.request_configure(
             call_id,
             keyterms=self._keyterms,

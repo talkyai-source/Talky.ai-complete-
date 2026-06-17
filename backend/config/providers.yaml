@@ -35,13 +35,22 @@ providers:
       # the final 200ms of silence detection).
       eager_eot_threshold: 0.45
 
-      # ACCURACY TEST: keyterm prompting (biases recognition toward these).
-      # Aimed at the weak spot — spelled-out emails & sensitive data. Common
-      # email domains + the connector words callers say when spelling. These
-      # are KNOWN terms; arbitrary local-parts still need spell-back confirm.
-      # Override live (no redeploy) with env DEEPGRAM_FLUX_KEYTERMS="a,b,c".
-      # Deepgram caps the total at 500 tokens across all keyterms.
-      keyterms:
+      # Base (always-on) keyterms. Brand / agent / product names are added
+      # per-call (see telephony_session_config._build_call_keyterms); this
+      # static list stays EMPTY on purpose. The email-spelling terms used to
+      # live here and biased every single turn — short words like "dot" / "at"
+      # / "dash" pulled normal speech toward them. They now live under
+      # capture_keyterms and are only injected while the caller is actually
+      # spelling an email (capture mode). Override live with env
+      # DEEPGRAM_FLUX_KEYTERMS="a,b,c". Deepgram caps the total at 500 tokens.
+      keyterms: []
+
+      # Capture-only keyterms — injected ONLY during email/spell capture mode
+      # (DeepgramFlux.enter_capture_mode), then removed on reset. Common email
+      # domains + the connector words callers say when spelling. Keeping these
+      # off the always-on path stops them biasing ordinary conversation.
+      # Override live with env DEEPGRAM_FLUX_CAPTURE_KEYTERMS="a,b,c".
+      capture_keyterms:
         - "gmail.com"
         - "yahoo.com"
         - "outlook.com"

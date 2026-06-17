@@ -45,6 +45,11 @@ from app.services.scripts.prompts.accent_fillers import (
 )
 from app.infrastructure.llm.groq import LLMTimeoutError
 from app.services.scripts import compose_system_prompt
+from app.domain.services.voice_pipeline.knowledge_tool import (
+    knowledge_tools_for,
+    run_knowledge_lookup,
+    tool_system_addendum,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,33 +69,16 @@ def _truncate_history(history: list, max_pairs: int = _MAX_HISTORY_PAIRS) -> lis
     return history[-(max_pairs * 2):]
 
 
-# Hard cap on the per-turn knowledge lookup so a slow/contended DB can never add
-# more than this to time-to-first-token. On timeout we just skip knowledge for
-# the turn — the agent still answers from its persona + history.
-# 500ms: retrieval runs CONCURRENTLY with the LLM's first-token latency, so a
-# larger budget here adds ~0 perceived delay but sharply cuts silent
-# "timed-out → answered without knowledge" turns under DB load.
-_KNOWLEDGE_RETRIEVE_TIMEOUT_S = float(os.getenv("KNOWLEDGE_RETRIEVE_TIMEOUT_MS", "500")) / 1000.0
-
-# Per-turn knowledge-injection budget. Injecting the full body of k=5 nodes
-# (e.g. whole product feature-lists) ballooned the prompt to ~11-12k tokens,
-# which pushed Groq llama-3.3-70b to ~7s/turn and made the agent stall
-# mid-reply. Best practice (Vapi/LiveKit + general RAG) is to inject only a few
-# SHORT, relevant chunks. These caps bound the block to ~1.5k chars (~400
-# tokens): top-3 nodes, each trimmed to ~350 chars, total ≤ ~1500 chars.
-_KB_MAX_CHUNKS = int(os.getenv("VOICE_KB_MAX_CHUNKS", "3"))
-_KB_CHUNK_CHARS = int(os.getenv("VOICE_KB_CHUNK_CHARS", "350"))
-_KB_TOTAL_CHARS = int(os.getenv("VOICE_KB_TOTAL_CHARS", "1500"))
-
-
-def _trim_kb_body(text: str, limit: int) -> str:
-    """Trim a knowledge body to ~limit chars on a word boundary (keeps it a
-    clean spoken fact, not a cut-off word)."""
-    text = (text or "").strip().replace("\n", " ")
-    if len(text) <= limit:
-        return text
-    cut = text[:limit].rsplit(" ", 1)[0].rstrip(" ,;:-")
-    return (cut or text[:limit]).rstrip() + "…"
+# Per-turn knowledge sizing (budget + trim) is shared with the on-demand tool
+# path; it lives in kb_budget so the two modes stay identical. Re-exported here
+# so existing references (and tests) resolve via this module.
+from app.domain.services.voice_pipeline.kb_budget import (  # noqa: E402
+    _KB_MAX_CHUNKS,
+    _KB_CHUNK_CHARS,
+    _KB_TOTAL_CHARS,
+    _KNOWLEDGE_RETRIEVE_TIMEOUT_S,
+    _trim_kb_body,
+)
 
 
 async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str:
@@ -246,15 +234,24 @@ class TurnStreamer:
             if any(kw in last_user_text for kw in _ASK_AI_PRODUCT_KEYWORDS):
                 system_prompt = system_prompt + "\n\n" + _ASK_AI_PRODUCT_INFO
 
-        # Campaign knowledge (vectorless RAG): for retrieve / map_retrieve
-        # campaigns, fetch the node(s) matching the caller's latest message and
-        # inject them for THIS turn only. inline campaigns already baked the
-        # whole tree into session.system_prompt at pre-warm, so they skip this.
-        # The lookup is bounded + fail-soft (see _knowledge_block_for_turn).
+        # Campaign knowledge (vectorless RAG). Two modes for retrieve /
+        # map_retrieve campaigns (inline baked the whole tree at pre-warm):
+        #   inject (default) — fetch the node(s) matching the caller's latest
+        #     message and inject them for THIS turn (bounded + fail-soft).
+        #   tool (VOICE_KB_MODE=tool) — expose a lookup tool so the model
+        #     fetches facts ONLY when it needs them; most turns carry zero KB.
+        # Tool mode is skipped on end-session-action turns (their JSON envelope
+        # would clash with function tools) → those fall back to inject.
+        kb_tools = None
         if session.knowledge_mode in ("retrieve", "map_retrieve") and messages:
-            kb_block = await _knowledge_block_for_turn(session, messages)
-            if kb_block:
-                system_prompt = system_prompt + "\n\n" + kb_block
+            if not self._p._supports_llm_end_session_action(session):
+                kb_tools = knowledge_tools_for(session, self._p.llm_provider)
+            if kb_tools:
+                system_prompt = system_prompt + "\n\n" + tool_system_addendum()
+            else:
+                kb_block = await _knowledge_block_for_turn(session, messages)
+                if kb_block:
+                    system_prompt = system_prompt + "\n\n" + kb_block
 
         if self._p._supports_llm_end_session_action(session):
             system_prompt = system_prompt + "\n\n" + _END_SESSION_TOOL_INSTRUCTIONS
@@ -347,15 +344,35 @@ class TurnStreamer:
         t_tts_first: Optional[float] = None
         t_tts_end: Optional[float] = None
 
-        try:
-            async for token in self._p.llm_provider.stream_chat_with_timeout(
+        # On-demand KB: the model may fetch facts via a tool mid-turn. The
+        # method yields the same str token stream, so the loop below is
+        # unchanged — only the iterator differs. Falls back to the normal
+        # timeout-guarded stream when tools aren't active.
+        if kb_tools:
+            async def _kb_runner(_name: str, _args: dict) -> str:
+                q = (_args or {}).get("query") or last_user_text_for_limit
+                return await run_knowledge_lookup(session, q)
+
+            _token_iter = self._p.llm_provider.stream_chat_with_tools(
+                messages,
+                system_prompt=system_prompt,
+                tools=kb_tools,
+                tool_runner=_kb_runner,
+                temperature=getattr(session, "llm_temperature", None),
+                max_tokens=getattr(session, "llm_max_tokens", None),
+            )
+        else:
+            _token_iter = self._p.llm_provider.stream_chat_with_timeout(
                 messages,
                 system_prompt=system_prompt,
                 # Honor the tenant's AI-Options settings per turn. None falls
                 # back to the provider's configured default inside stream_chat.
                 temperature=getattr(session, "llm_temperature", None),
                 max_tokens=getattr(session, "llm_max_tokens", None),
-            ):
+            )
+
+        try:
+            async for token in _token_iter:
                 if first_token:
                     self._p.latency_tracker.mark_llm_first_token(call_id)
                     # Unblock the frontend audio player immediately on first token
