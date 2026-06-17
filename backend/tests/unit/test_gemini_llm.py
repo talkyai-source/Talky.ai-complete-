@@ -285,14 +285,32 @@ async def test_thinking_budget_disabled_attaches_thinking_config():
 
 
 @pytest.mark.asyncio
-async def test_thinking_budget_unset_omits_thinking_config():
-    """Default (None) path must not send a ThinkingConfig — let Gemini decide."""
+async def test_thinking_budget_defaults_to_off():
+    """Default path DISABLES thinking (this is a real-time voice agent). On the
+    2.5 family that means ThinkingConfig(thinking_budget=0)."""
     provider = GeminiLLMProvider()
-    # _thinking_budget stays None (default)
+    # _thinking_budget defaults to 0 (OFF); model defaults to gemini-2.5-flash
     create = _wire_mock_client(provider, [_fake_chunk("hi")])
 
     async for _ in provider.stream_chat(
         messages=[Message(role=MessageRole.USER, content="hello")],
+    ):
+        pass
+
+    cfg = create.await_args.kwargs["config"]
+    assert cfg.thinking_config is not None
+    assert cfg.thinking_config.thinking_budget == 0
+
+
+@pytest.mark.asyncio
+async def test_thinking_budget_none_opts_into_dynamic():
+    """Explicit None re-enables dynamic thinking (no ThinkingConfig sent)."""
+    provider = GeminiLLMProvider()
+    create = _wire_mock_client(provider, [_fake_chunk("hi")])
+
+    async for _ in provider.stream_chat(
+        messages=[Message(role=MessageRole.USER, content="hello")],
+        thinking_budget=None,
     ):
         pass
 

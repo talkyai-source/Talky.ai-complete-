@@ -62,13 +62,18 @@ class GeminiLLMProvider(LLMProvider):
         # configs typically override to ~0.6 via VoiceSessionConfig.
         self._temperature: float = 0.7
         self._max_tokens: int = 150
-        # Thinking budget for Gemini 2.5 family:
-        #   None  -> omit config entirely, let Gemini decide dynamically.
-        #   0     -> disable thinking (fastest, recommended for voice agents;
-        #            "reasoning tokens" are wasted latency when you just want
-        #            a short conversational reply).
-        #   N > 0 -> cap thinking at N tokens.
-        self._thinking_budget: Optional[int] = None
+        # Thinking budget:
+        #   0     -> disable thinking (DEFAULT — this is a real-time voice
+        #            agent; "reasoning tokens" are pure latency when you just
+        #            want a short spoken reply). Truly disables thinking on the
+        #            Gemini 2.5 family.
+        #   N > 0 -> cap thinking at N tokens (2.5 family).
+        #   None  -> let Gemini decide dynamically (thinking ON) — opt-in only.
+        # NOTE: Gemini 3.x (e.g. gemini-3.x-flash-lite) IGNORES this — it has a
+        # "minimal" thinking floor that cannot be turned off, so it still
+        # reasons mid-stream and is slow for voice. Use a 2.5 model for true
+        # thinking-off. See _build_thinking_config.
+        self._thinking_budget: Optional[int] = 0
         # Circuit breaker mirrors Groq settings for behavioural symmetry. If
         # Gemini-specific tuning becomes needed later, adjust here only.
         self._circuit = CircuitBreaker(
@@ -110,7 +115,10 @@ class GeminiLLMProvider(LLMProvider):
         self._model = config.get("model", "gemini-2.5-flash")
         self._temperature = float(config.get("temperature", 0.7))
         self._max_tokens = int(config.get("max_tokens", 150))
-        raw_thinking = config.get("thinking_budget")
+        # Default to 0 (thinking OFF) when the caller doesn't specify — voice
+        # wants the lowest latency. Pass thinking_budget=None explicitly to opt
+        # back into dynamic thinking.
+        raw_thinking = config.get("thinking_budget", 0)
         self._thinking_budget = (
             int(raw_thinking) if raw_thinking is not None else None
         )
