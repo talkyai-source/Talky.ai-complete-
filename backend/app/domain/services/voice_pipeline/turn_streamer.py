@@ -72,6 +72,26 @@ def _truncate_history(history: list, max_pairs: int = _MAX_HISTORY_PAIRS) -> lis
 # "timed-out → answered without knowledge" turns under DB load.
 _KNOWLEDGE_RETRIEVE_TIMEOUT_S = float(os.getenv("KNOWLEDGE_RETRIEVE_TIMEOUT_MS", "500")) / 1000.0
 
+# Per-turn knowledge-injection budget. Injecting the full body of k=5 nodes
+# (e.g. whole product feature-lists) ballooned the prompt to ~11-12k tokens,
+# which pushed Groq llama-3.3-70b to ~7s/turn and made the agent stall
+# mid-reply. Best practice (Vapi/LiveKit + general RAG) is to inject only a few
+# SHORT, relevant chunks. These caps bound the block to ~1.5k chars (~400
+# tokens): top-3 nodes, each trimmed to ~350 chars, total ≤ ~1500 chars.
+_KB_MAX_CHUNKS = int(os.getenv("VOICE_KB_MAX_CHUNKS", "3"))
+_KB_CHUNK_CHARS = int(os.getenv("VOICE_KB_CHUNK_CHARS", "350"))
+_KB_TOTAL_CHARS = int(os.getenv("VOICE_KB_TOTAL_CHARS", "1500"))
+
+
+def _trim_kb_body(text: str, limit: int) -> str:
+    """Trim a knowledge body to ~limit chars on a word boundary (keeps it a
+    clean spoken fact, not a cut-off word)."""
+    text = (text or "").strip().replace("\n", " ")
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rsplit(" ", 1)[0].rstrip(" ,;:-")
+    return (cut or text[:limit]).rstrip() + "…"
+
 
 async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str:
     """Top-k campaign knowledge for the caller's latest message, formatted for
@@ -105,7 +125,7 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
         _t0 = time.monotonic()
         try:
             hits = await asyncio.wait_for(
-                retrieve_knowledge(pool, session.tenant_id, session.campaign_id, query, k=5),
+                retrieve_knowledge(pool, session.tenant_id, session.campaign_id, query, k=_KB_MAX_CHUNKS),
                 timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
@@ -139,11 +159,22 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
             "official company answer. Do not contradict it or invent details "
             "beyond it:",
         ]
+        # Budget the block: prefer the concise voice_answer, trim each node, and
+        # stop once the total budget is hit. Keeps the per-turn prompt small so
+        # the LLM answers fast instead of stalling on a 10k-token dump.
+        used = 0
         for h in hits:
-            body = (h.get("voice_answer") or h.get("summary") or h.get("content") or "")
-            body = body.strip().replace("\n", " ")
-            if body:
-                lines.append(f"- {h['heading']}: {body}")
+            # voice_answer is authored for speech (short); summary next; only
+            # fall back to full content if neither exists, and trim hard.
+            raw = h.get("voice_answer") or h.get("summary") or h.get("content") or ""
+            body = _trim_kb_body(raw, _KB_CHUNK_CHARS)
+            if not body:
+                continue
+            entry = f"- {h['heading']}: {body}"
+            if used + len(entry) > _KB_TOTAL_CHARS and used > 0:
+                break  # budget reached — drop the rest (already ranked best-first)
+            lines.append(entry)
+            used += len(entry)
         return "\n".join(lines) if len(lines) > 2 else ""
     except Exception as exc:
         logger.warning("KB_DEBUG call=%s error: %s", getattr(session, "call_id", "?")[:8], exc)
