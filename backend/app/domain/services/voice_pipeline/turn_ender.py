@@ -313,6 +313,12 @@ class TurnEnder:
                             logger.debug(
                                 "voice_metrics_turn_observe_failed err=%s", exc,
                             )
+                        # Feed the rolling-P95 alerter: emits a WARNING log +
+                        # gauge when cross-call P95 latency degrades. Fail-soft.
+                        from app.domain.services.voice_pipeline.latency_alerter import (
+                            record_turn_latency_ms,
+                        )
+                        record_turn_latency_ms(tracked.total_latency_ms)
 
                 logger.info(
                     "turn_complete",

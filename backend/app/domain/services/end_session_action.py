@@ -2,10 +2,65 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 from typing import Optional
 
 END_SESSION_ACTION = "end_session"
 LEGACY_ASK_AI_END_SESSION_ACTION = "end_ask_ai_session"
+
+# Phantom-goodbye guard. The LLM sometimes emits the end-session action when
+# the caller did NOT actually signal they were done ("triggers goodbye while I
+# haven't asked"). We honor the hangup only when the caller's own words show
+# end-intent, OR (for an agent-judged conversation_complete) after enough real
+# exchange. Opt-out ("do not call me") is ALWAYS honored — compliance wins.
+_MIN_COMPLETE_USER_TURNS = int(os.getenv("VOICE_MIN_END_USER_TURNS", "3"))
+
+# Caller utterances that genuinely mean "I'm ending this." Tight on purpose —
+# we'd rather keep a call alive on a false-negative than hang up on a phantom.
+_CALLER_END_INTENT = re.compile(
+    r"""\b(
+        bye | good\s?bye | good\s?night | see\s+(?:ya|you) | take\s+care |
+        talk\s+(?:to\s+you\s+)?later | catch\s+you\s+later | gotta\s+go |
+        got\s+to\s+go | have\s+to\s+go | need\s+to\s+go | i'?m\s+done |
+        we'?re\s+done | that'?s\s+(?:all|it) | that\s+is\s+all | nothing\s+else |
+        no\s+thank(?:s|\s+you) | not\s+interested | hang\s+up | stop\s+calling |
+        remove\s+me | take\s+me\s+off | do\s+not\s+call | don'?t\s+call | unsubscribe |
+        leave\s+me\s+alone | lose\s+my\s+number
+    )\b""",
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def caller_signaled_end(text: Optional[str]) -> bool:
+    """True if the caller's own words clearly signal ending the call."""
+    return bool(text and _CALLER_END_INTENT.search(text))
+
+
+def should_honor_end_session(
+    action: Optional[dict],
+    last_user_text: Optional[str],
+    user_turn_count: int,
+) -> bool:
+    """Decide whether to actually hang up on an LLM end-session action, or treat
+    it as a phantom goodbye and keep the call going.
+
+    Honor when:
+      * the caller asked never to be called again (do_not_call) — always, and
+      * the caller's words actually signal an end, or
+      * the model reports the task finished (conversation_complete) AND the call
+        has had real back-and-forth (>= _MIN_COMPLETE_USER_TURNS user turns).
+    Otherwise it's a phantom — suppress the hangup.
+    """
+    if not action:
+        return False
+    if action.get("do_not_call"):
+        return True
+    if caller_signaled_end(last_user_text):
+        return True
+    if action.get("reason") == "conversation_complete" and user_turn_count >= _MIN_COMPLETE_USER_TURNS:
+        return True
+    return False
 
 END_SESSION_REASONS = {
     "user_goodbye",

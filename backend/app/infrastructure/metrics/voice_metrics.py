@@ -111,6 +111,22 @@ _prompt_cache_hit_ratio = _gauge(
     labelnames=("mode", "persona"),
 )
 
+_turn_latency_p95 = _gauge(
+    "voice_turn_latency_p95_ms",
+    "Rolling cross-call P95 of per-turn speech-to-audio latency (ms), "
+    "computed in-process over a sliding window. The paging signal for "
+    "gradual latency regressions (provider slowdown, prompt bloat, "
+    "contention) that per-turn logs alone make easy to miss.",
+    labelnames=(),
+)
+
+_p95_latency_alert = _counter(
+    "voice_p95_latency_alert_total",
+    "Transitions of the rolling-P95 latency alert. state=firing when "
+    "P95 crosses the alert threshold; state=cleared when it recovers.",
+    labelnames=("state",),
+)
+
 
 # ---------------------------------------------------------------------
 # Public observation API — call sites stay simple and typed.
@@ -197,3 +213,16 @@ def record_prompt_cache_hit_ratio(
         mode=_mode_label(mode),
         persona=_persona_label(persona),
     ).set(ratio)
+
+
+def set_turn_latency_p95_ms(ms: float) -> None:
+    """Publish the current rolling-window P95 turn latency (ms)."""
+    if ms is None or ms < 0:
+        return
+    _turn_latency_p95.set(ms)
+
+
+def record_p95_alert(state: str) -> None:
+    """Count a rolling-P95 alert transition. ``state`` ∈ {firing, cleared}."""
+    safe = state if state in ("firing", "cleared") else "unknown"
+    _p95_latency_alert.labels(state=safe).inc()
