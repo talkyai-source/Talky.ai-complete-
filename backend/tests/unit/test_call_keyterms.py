@@ -1,5 +1,8 @@
-"""Unit tests for per-call Deepgram Flux keyterm building."""
-from app.domain.services.telephony_session_config import _build_call_keyterms
+"""Unit tests for per-call Deepgram Flux keyterm building + brand correction."""
+from app.domain.services.telephony_session_config import (
+    _build_call_keyterms,
+    _brand_correction_line,
+)
 
 
 def test_company_and_agent_included():
@@ -51,3 +54,23 @@ def test_capped_length(monkeypatch):
     assert len(terms) <= 60
     # Campaign terms are kept (prepended before the cap).
     assert "Dojo" in terms
+
+
+# --- brand-correction guardrail -------------------------------------------
+
+def test_brand_correction_includes_company_name():
+    line = _brand_correction_line("Dojo")
+    assert "Dojo" in line
+    assert "BRAND ACCURACY" in line
+
+
+def test_brand_correction_is_per_campaign():
+    # Different campaigns -> different correction text, no hardcoding.
+    assert "Acme Roofing" in _brand_correction_line("Acme Roofing")
+    assert "Dojo" not in _brand_correction_line("Acme Roofing")
+
+
+def test_brand_correction_empty_company_is_blank():
+    assert _brand_correction_line("") == ""
+    assert _brand_correction_line("   ") == ""
+    assert _brand_correction_line(None) == ""  # type: ignore[arg-type]

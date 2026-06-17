@@ -703,6 +703,15 @@ class VoiceOrchestrator:
             except asyncio.CancelledError:
                 pass
 
+        # Cancel any in-flight turn task BEFORE tearing down the gateway, so a
+        # reply still streaming TTS stops sending audio to a channel that's
+        # gone (otherwise it logs "no gateway session" and wastes synthesis).
+        if session.pipeline is not None:
+            try:
+                await session.pipeline.cancel_active_turn(call_id)
+            except Exception:
+                pass
+
         # Log session end event
         if session.event_repo and session.call_session:
             try:

@@ -304,6 +304,37 @@ def _make_service_for_bargein() -> VoicePipelineService:
 
 
 @pytest.mark.asyncio
+async def test_cancel_active_turn_cancels_in_flight_task():
+    """On hangup/teardown, an in-flight turn task must be cancelled so it stops
+    streaming TTS to a gone channel."""
+    service = _make_service_for_bargein()
+    session = _make_session()
+    cancelled = asyncio.Event()
+
+    async def _running():
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    task = asyncio.create_task(_running())
+    service._register_active_turn_task(session.call_id, task)
+    await asyncio.sleep(0)
+
+    await service.cancel_active_turn(session.call_id)
+    await asyncio.wait_for(cancelled.wait(), timeout=1)
+    assert service._pending_llm_tasks.get(session.call_id) is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_active_turn_noop_when_nothing_running():
+    service = _make_service_for_bargein()
+    # No registered task — must not raise.
+    await service.cancel_active_turn("no-such-call")
+
+
+@pytest.mark.asyncio
 async def test_handle_barge_in_protects_final_task_before_tts_starts():
     """A confirmed FINAL answer still in the LLM phase (no audio playing yet)
     must NOT be cancelled by a StartOfTurn — that was the silent-call bug.

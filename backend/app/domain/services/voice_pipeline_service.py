@@ -245,6 +245,16 @@ class VoicePipelineService:
     def _register_active_turn_task(self, call_id: str, task: asyncio.Task) -> None:
         self._pending_llm_tasks[call_id] = task
 
+    async def cancel_active_turn(self, call_id: str) -> None:
+        """Cancel any in-flight turn task for a call. Called on hangup/teardown
+        so a reply still streaming TTS stops sending audio to a gateway/channel
+        that's already gone (otherwise: 'no gateway session' warnings + wasted
+        synthesis on a dead call)."""
+        task = self._pending_llm_tasks.pop(call_id, None)
+        if task and not task.done():
+            task.cancel()
+            await self._await_task_after_cancel(task, call_id, "teardown")
+
     # Implementation extracted to voice_pipeline.transcript_heuristics
     # (item 2). Kept as a static method so the existing public interface
     # and call sites are unchanged.
