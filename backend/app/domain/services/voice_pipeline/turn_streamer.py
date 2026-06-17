@@ -456,6 +456,32 @@ class TurnStreamer:
         # an early barge-in or an action turn produced no real audio).
         await _settle_filler()
 
+        # Anti-silence safety net: the LLM stream completed WITHOUT error but
+        # produced no spoken content at all (e.g. a reasoning model burned its
+        # whole token budget on internal thinking, or an empty completion).
+        # That is NOT an error path, so nothing above caught it — without this
+        # the caller just hears dead air. Speak a short recovery line instead.
+        if (
+            not tts_was_interrupted
+            and sentences_done == 0
+            and t_tts_first is None
+            and not ask_ai_end_action
+            and not suppressed_for_action
+            and not (barge_in_event and barge_in_event.is_set())
+        ):
+            recovery = "Sorry, I didn't quite catch that — could you say it again?"
+            logger.warning(
+                "zero_token_turn call=%s — LLM produced no speech; spoke recovery line",
+                call_id,
+            )
+            session.tts_active = True
+            t_tts_first = time.monotonic()
+            self._p.latency_tracker.mark_tts_start(call_id)
+            tts_was_interrupted = await self._p.synthesize_and_send_audio(
+                session, recovery, websocket, track_latency=False,
+            )
+            t_tts_end = time.monotonic()
+
         llm_latency_ms = (t_llm_done - t_llm_start) * 1000
         tts_latency_ms = (
             (t_tts_end - t_tts_first) * 1000

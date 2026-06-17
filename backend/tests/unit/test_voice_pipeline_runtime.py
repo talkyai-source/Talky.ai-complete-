@@ -78,6 +78,52 @@ async def test_process_audio_stream_does_not_start_turn_before_user_speech():
 
 
 @pytest.mark.asyncio
+async def test_zero_token_turn_speaks_recovery_line(monkeypatch):
+    """If the LLM stream completes with NO spoken tokens (e.g. a reasoning model
+    burned its budget), the turn must speak a recovery line, not go silent."""
+    monkeypatch.setenv("TELEPHONY_FILLER_DELAY_MS", "0")  # disable filler for the test
+    service = VoicePipelineService(
+        stt_provider=AsyncMock(),
+        llm_provider=StreamingLLMProvider([]),  # empty -> zero tokens
+        tts_provider=AsyncMock(),
+        media_gateway=AsyncMock(),
+    )
+    service.latency_tracker = MagicMock()
+    service.synthesize_and_send_audio = AsyncMock(return_value=False)
+
+    session = _make_session()
+    service._barge_in_events[session.call_id] = session.barge_in_event
+
+    await service._stream_llm_and_tts(session)
+
+    assert service.synthesize_and_send_audio.await_count >= 1
+    spoken = service.synthesize_and_send_audio.await_args.args[1].lower()
+    assert "catch that" in spoken or "say it again" in spoken
+
+
+@pytest.mark.asyncio
+async def test_normal_turn_does_not_trigger_recovery_line():
+    """A normal reply must NOT also append the recovery line."""
+    service = VoicePipelineService(
+        stt_provider=AsyncMock(),
+        llm_provider=StreamingLLMProvider(["Hello there."]),
+        tts_provider=AsyncMock(),
+        media_gateway=AsyncMock(),
+    )
+    service.latency_tracker = MagicMock()
+    service.synthesize_and_send_audio = AsyncMock(return_value=False)
+
+    session = _make_session()
+    service._barge_in_events[session.call_id] = session.barge_in_event
+
+    await service._stream_llm_and_tts(session)
+
+    spoken = [c.args[1].lower() for c in service.synthesize_and_send_audio.await_args_list]
+    assert any("hello there" in s for s in spoken)
+    assert not any("catch that" in s for s in spoken)
+
+
+@pytest.mark.asyncio
 async def test_get_llm_response_marks_first_token_latency():
     service = VoicePipelineService(
         stt_provider=AsyncMock(),
