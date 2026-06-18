@@ -13,8 +13,8 @@ self-authors a focused query (robust to STT mishears in the raw transcript)
 and the answer round-trip is covered by the existing thinking-filler.
 
 Gated behind ``VOICE_KB_MODE=tool`` (default ``inject``) so it ships dark and
-can be flipped per-environment without a redeploy. Groq-only for now (the only
-provider wired with ``stream_chat_with_tools``); non-Groq / gpt-oss campaigns
+can be flipped per-environment without a redeploy. Wired for Groq (OpenAI-style
+tool calls) and Gemini (native function calling); gpt-oss and any other provider
 fall back to the inject path automatically.
 """
 from __future__ import annotations
@@ -97,13 +97,16 @@ def knowledge_tools_for(session: CallSession, provider) -> list | None:
         return None
     if getattr(session, "knowledge_mode", None) not in ("retrieve", "map_retrieve"):
         return None
-    # Groq is the only provider with stream_chat_with_tools today. gpt-oss uses
-    # a reasoning request contract (instructions moved to a user message) that
-    # we don't drive tools through — fall back to inject for it.
-    if getattr(provider, "name", "") != "groq":
+    # Providers wired with stream_chat_with_tools: Groq (OpenAI-style tool
+    # calls) and Gemini (native function calling). Any other provider falls
+    # back to the inject path.
+    provider_name = getattr(provider, "name", "")
+    if provider_name not in ("groq", "gemini"):
         return None
+    # gpt-oss on Groq uses a reasoning request contract (instructions moved to a
+    # user message) that we don't drive tools through — inject for it.
     model = str(getattr(provider, "_model", "") or "")
-    if model.startswith("openai/gpt-oss-"):
+    if provider_name == "groq" and model.startswith("openai/gpt-oss-"):
         return None
     return [KNOWLEDGE_TOOL_SPEC]
 

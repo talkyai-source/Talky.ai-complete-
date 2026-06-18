@@ -45,9 +45,21 @@ def test_tools_on_when_flag_set(monkeypatch):
     assert tools and tools[0]["function"]["name"] == "lookup_company_knowledge"
 
 
-def test_tools_skip_non_groq(monkeypatch):
+def test_tools_on_for_gemini(monkeypatch):
+    # Gemini now has native function calling wired (stream_chat_with_tools).
     monkeypatch.setenv("VOICE_KB_MODE", "tool")
-    assert kt.knowledge_tools_for(_Session(), _GeminiProvider()) is None
+    tools = kt.knowledge_tools_for(_Session(), _GeminiProvider())
+    assert tools and tools[0]["function"]["name"] == "lookup_company_knowledge"
+
+
+def test_tools_skip_unsupported_provider(monkeypatch):
+    monkeypatch.setenv("VOICE_KB_MODE", "tool")
+
+    class _Other:
+        name = "anthropic"
+        _model = "claude"
+
+    assert kt.knowledge_tools_for(_Session(), _Other()) is None
 
 
 def test_tools_skip_gpt_oss(monkeypatch):

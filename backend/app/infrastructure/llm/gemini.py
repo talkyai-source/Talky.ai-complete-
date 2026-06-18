@@ -367,6 +367,164 @@ class GeminiLLMProvider(LLMProvider):
                     logger.error("Gemini LLM streaming failed after retries: %s", e)
                     raise RuntimeError(f"Gemini LLM streaming failed: {e}")
 
+    async def stream_chat_with_tools(
+        self,
+        messages: List[Message],
+        system_prompt: Optional[str] = None,
+        tools: Optional[List[dict]] = None,
+        tool_runner=None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        timeout_seconds: float = DEFAULT_LLM_TIMEOUT,
+        **kwargs,
+    ) -> AsyncIterator[str]:
+        """Stream a turn that MAY call a function tool, using Gemini function
+        calling. Mirrors GroqLLMProvider.stream_chat_with_tools so the voice
+        pipeline drives on-demand KB on either provider through the same
+        str-yield contract.
+
+        Round 0: offer the tool and stream. If the model answers directly it
+        streams immediately (the common, fast path). If it emits a function_call
+        instead, Round 1: run ``tool_runner`` for the fact(s), feed the
+        function_response back, and stream the grounded answer with NO tools (so
+        it cannot loop). ``tool_runner`` is async ``(name, args_dict) -> str``.
+        With no tools/runner this degrades to the normal timeout-guarded stream.
+        """
+        if not tools or tool_runner is None:
+            async for tok in self.stream_chat_with_timeout(
+                messages, timeout_seconds=timeout_seconds, system_prompt=system_prompt,
+                temperature=temperature, max_tokens=max_tokens, **kwargs,
+            ):
+                yield tok
+            return
+
+        if not self._client:
+            raise RuntimeError("Gemini client not initialized. Call initialize() first.")
+        from google.genai import types as genai_types
+
+        temperature = temperature if temperature is not None else self._temperature
+        max_tokens = max_tokens if max_tokens is not None else self._max_tokens
+        model = kwargs.get("model", self._model)
+
+        # Gemini contents (user/model roles; system passed via config, not here).
+        contents: list = []
+        for msg in messages:
+            if not msg.content or not msg.content.strip():
+                continue
+            role = "model" if msg.role == MessageRole.ASSISTANT else "user"
+            contents.append(genai_types.Content(
+                role=role, parts=[genai_types.Part(text=msg.content)]))
+        if not contents:
+            contents.append(genai_types.Content(
+                role="user", parts=[genai_types.Part(text=" ")]))
+
+        # OpenAI-style tool spec -> Gemini Tool(function_declarations). The raw
+        # JSON schema goes through parameters_json_schema (no Schema conversion).
+        fdecls = []
+        for spec in tools:
+            fn = spec.get("function", spec)
+            fdecls.append(genai_types.FunctionDeclaration(
+                name=fn["name"],
+                description=fn.get("description", ""),
+                parameters_json_schema=fn.get("parameters"),
+            ))
+        gemini_tools = [genai_types.Tool(function_declarations=fdecls)]
+
+        base_cfg = dict(
+            temperature=temperature,
+            max_output_tokens=max_tokens,
+            stop_sequences=kwargs.get("stop", self.DEFAULT_STOP_SEQUENCES),
+            system_instruction=system_prompt or None,
+        )
+        tc = self._build_thinking_config(
+            model, kwargs.get("thinking_budget", self._thinking_budget))
+        if tc is not None:
+            base_cfg["thinking_config"] = tc
+
+        def _chunk_text(chunk) -> Optional[str]:
+            # Read text from parts directly (chunk.text can raise on mixed
+            # text+function_call parts in some SDK versions).
+            try:
+                cand = (chunk.candidates or [None])[0]
+                parts = getattr(getattr(cand, "content", None), "parts", None) or []
+                txt = "".join(p.text for p in parts if getattr(p, "text", None))
+                return txt or None
+            except Exception:
+                return None
+
+        async def _stream(cfg, fcalls_out):
+            t0 = asyncio.get_event_loop().time()
+            ntok = 0
+            async with self._circuit:
+                stream = await self._client.aio.models.generate_content_stream(
+                    model=model, contents=contents, config=cfg)
+                agen = stream.__aiter__()
+                while True:
+                    remaining = timeout_seconds - (asyncio.get_event_loop().time() - t0)
+                    if remaining <= 0:
+                        if ntok == 0:
+                            raise LLMTimeoutError(
+                                f"Gemini tool turn timed out after {timeout_seconds}s")
+                        break
+                    tt = remaining if ntok == 0 else min(remaining, 2.0)
+                    try:
+                        chunk = await asyncio.wait_for(agen.__anext__(), timeout=tt)
+                    except StopAsyncIteration:
+                        break
+                    except asyncio.TimeoutError:
+                        if ntok == 0:
+                            raise LLMTimeoutError(
+                                f"Gemini tool turn timed out after {timeout_seconds}s")
+                        break
+                    txt = _chunk_text(chunk)
+                    if txt:
+                        ntok += 1
+                        yield txt
+                    try:
+                        for fc in (chunk.function_calls or []):
+                            if fc and fc.name:
+                                fcalls_out.append(fc)
+                    except Exception:
+                        pass
+
+        # Round 0 — offer the tool; the model answers directly or calls it.
+        round0_cfg = genai_types.GenerateContentConfig(tools=gemini_tools, **base_cfg)
+        fcalls: list = []
+        produced = False
+        async for tok in _stream(round0_cfg, fcalls):
+            produced = True
+            yield tok
+
+        # Answered directly, or nothing to look up → done.
+        if produced or not fcalls:
+            return
+
+        # Round 1 — execute the tool(s), feed responses back (role="user", as the
+        # SDK's own auto-FC path does), stream the grounded answer with no tools.
+        model_parts = []
+        resp_parts = []
+        for fc in fcalls:
+            model_parts.append(genai_types.Part(function_call=fc))
+            try:
+                args = dict(fc.args) if fc.args else {}
+            except Exception:
+                args = {}
+            try:
+                result = await tool_runner(fc.name, args)
+            except Exception as exc:  # never let a tool failure stall the turn
+                logger.warning("gemini tool_runner failed name=%s: %s", fc.name, exc)
+                result = "No specific information found."
+            resp_parts.append(genai_types.Part.from_function_response(
+                name=fc.name,
+                response={"result": result or "No specific information found."},
+            ))
+        contents.append(genai_types.Content(role="model", parts=model_parts))
+        contents.append(genai_types.Content(role="user", parts=resp_parts))
+
+        round1_cfg = genai_types.GenerateContentConfig(**base_cfg)  # no tools
+        async for tok in _stream(round1_cfg, []):
+            yield tok
+
     async def stream_chat_with_timeout(
         self,
         messages: List[Message],
