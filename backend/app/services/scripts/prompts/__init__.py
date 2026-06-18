@@ -20,6 +20,7 @@ from app.services.scripts.prompts.composer import (
     brand_correction_line,
     compose_prompt,
 )
+from app.services.scripts.prompts.live_state import build_live_state_block
 from app.services.scripts.prompts.personas import (
     PERSONAS,
     PersonaType,
@@ -33,6 +34,7 @@ __all__ = [
     "PromptCompositionError",
     "REQUIRED_SLOTS_BY_PERSONA",
     "brand_correction_line",
+    "build_live_state_block",
     "build_turn_prompt",
     "compose_prompt",
     "pick_agent_name",

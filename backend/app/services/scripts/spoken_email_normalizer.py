@@ -101,3 +101,25 @@ def extract_email_from_speech(utterance: str) -> Optional[str]:
     if not match:
         return None
     return match.group(0).lower()
+
+
+def spell_out_email(email: Optional[str]) -> str:
+    """Render a canonical email as a letter-by-letter spoken read-back string.
+
+    "bob@gmail.com" -> "b-o-b at gmail dot com".
+
+    The local part is spelled character by character (hyphen-joined so TTS reads
+    each letter distinctly); "@" becomes "at" and "." becomes "dot". This gives
+    the LLM the EXACT words to say when confirming an email, so it never
+    re-derives a messy version from the raw transcript (the #1 lead-capture bug:
+    gluing carrier words in, or dropping/adding letters). Returns "" for a
+    missing or malformed address.
+    """
+    if not email or "@" not in email:
+        return ""
+    local, _, domain = email.partition("@")
+    if not local or not domain:
+        return ""
+    local_spelled = "-".join(local)
+    domain_spoken = domain.replace(".", " dot ")
+    return f"{local_spelled} at {domain_spoken}".strip()

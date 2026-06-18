@@ -56,3 +56,17 @@ def test_empty_state_adds_no_captured_header():
     out = build_turn_prompt("BASE", captured_slots=CallState())
     assert out == "BASE"
     assert "CAPTURED" not in out
+
+
+def test_live_state_prepended_above_captured_and_base():
+    state = CallState(email="bob@acme.com")
+    out = build_turn_prompt(
+        "BASE", live_state_block="LIVESTATE", accent_block="ACCENT", captured_slots=state,
+    )
+    # Top-of-prompt order: LIVE STATE -> CAPTURED -> BASE -> accent.
+    assert out.index("LIVESTATE") < out.index("CAPTURED") < out.index("BASE") < out.index("ACCENT")
+
+
+def test_no_live_state_block_leaves_output_unchanged():
+    assert build_turn_prompt("BASE", live_state_block=None) == "BASE"
+    assert build_turn_prompt("BASE", live_state_block="") == "BASE"

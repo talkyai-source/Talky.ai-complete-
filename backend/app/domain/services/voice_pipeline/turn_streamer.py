@@ -45,6 +45,7 @@ from app.services.scripts.prompts.accent_fillers import (
 )
 from app.infrastructure.llm.groq import LLMTimeoutError
 from app.services.scripts.prompts.build import build_turn_prompt
+from app.services.scripts.prompts.live_state import build_live_state_block
 from app.domain.services.voice_pipeline.knowledge_tool import (
     knowledge_tools_for,
     run_knowledge_lookup,
@@ -282,10 +283,22 @@ class TurnStreamer:
             except Exception:
                 pass
 
+        # LIVE STATE: a per-turn fact re-anchoring identity + the already-
+        # introduced flag (set in turn_runner after the first real reply). This
+        # is what stops weaker models re-introducing / drifting their title over
+        # a long call. Identity comes off the session's agent_config.
+        _agent_cfg = getattr(session, "agent_config", None)
+        live_state_block = build_live_state_block(
+            agent_name=(getattr(_agent_cfg, "agent_name", "") or ""),
+            company_name=(getattr(_agent_cfg, "company_name", "") or ""),
+            has_introduced=bool(getattr(session, "_has_introduced", False)),
+        )
+
         # Single assembler (prompts folder) owns the block ORDER + the
         # CAPTURED-facts prepend. turn_streamer only feeds it resolved blocks.
         system_prompt = build_turn_prompt(
             session.system_prompt,
+            live_state_block=live_state_block,
             ask_ai_block=ask_ai_block,
             knowledge_block=knowledge_block,
             end_session_block=end_session_block,

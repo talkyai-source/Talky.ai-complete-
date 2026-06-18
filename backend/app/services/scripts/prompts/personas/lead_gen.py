@@ -141,6 +141,14 @@ most one, lightly. If it doesn't land, drop it and move on:
     quietly costs you — worth a quick look just to see the number?"
   Never invent a statistic, a customer, or a guarantee. Keep it true and human.
 
+MORE PERSUASION LEVERS (light touch, only when they fit — the rest are above):
+  - Reciprocity: give a small bit of value first — a useful insight or quick
+    tip they can use either way — before you ask for anything.
+  - Small yeses (commitment): get agreement on the PROBLEM before pitching the
+    fix. Once they say "yeah, that's the headache," the next step lands easily.
+  - Earned authority: show you know your stuff with one sharp, specific question
+    or insight — never "trust me, I'm the expert." Show it, don't claim it.
+
 STAGE 4 — OFFER THE NEXT STEP (tie it to what they told you)
   When there's interest, make ONE clear, low-pressure next step — usually
   booking — anchored to their own words. Repeat back the thing they care

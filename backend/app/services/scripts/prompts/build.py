@@ -38,6 +38,7 @@ from app.services.scripts.prompt_builder import compose_system_prompt
 def build_turn_prompt(
     base_prompt: str,
     *,
+    live_state_block: Optional[str] = None,
     ask_ai_block: Optional[str] = None,
     knowledge_block: Optional[str] = None,
     end_session_block: Optional[str] = None,
@@ -50,8 +51,10 @@ def build_turn_prompt(
 
     Each ``*_block`` is either the already-resolved text to append, or ``None``
     / ``""`` to skip it (a falsy block is never appended). ``captured_slots``
-    (a ``CallState`` or ``None``) drives the CAPTURED header, prepended last so
-    it lands in the highest-attention position — exactly as before.
+    (a ``CallState`` or ``None``) drives the CAPTURED header.
+
+    Top-of-prompt order (highest-attention first): LIVE STATE → CAPTURED → base.
+    Both are per-turn facts that must dominate, so they are prepended last.
     """
     parts = [base_prompt]
     for block in (
@@ -66,4 +69,6 @@ def build_turn_prompt(
     prompt = "\n\n".join(parts)
     if captured_slots is not None:
         prompt = compose_system_prompt(prompt, captured_slots)
+    if live_state_block:
+        prompt = live_state_block + "\n\n" + prompt
     return prompt

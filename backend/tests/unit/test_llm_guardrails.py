@@ -265,6 +265,20 @@ class TestResponseCleaning:
 
         assert "  " not in cleaned
 
+    def test_clean_strips_parenthetical_stage_direction(self):
+        """A multi-word parenthetical aside the model narrates about itself must
+        never reach TTS (real bug: '(waiting for the number to be provided)')."""
+        guardrails = LLMGuardrails()
+        out = guardrails.clean_response("It's... (waiting for the number to be provided)")
+        assert "waiting for the number" not in out
+        assert "(" not in out and ")" not in out
+
+    def test_clean_keeps_numeric_parentheses(self):
+        """A phone area code in parens has no 3+ letter word, so it survives."""
+        guardrails = LLMGuardrails()
+        out = guardrails.clean_response("Call me on (077) 894 231.")
+        assert "077" in out
+
     def test_clean_reasoning_and_markdown_artifacts(self):
         """Raw reasoning and markdown should not survive into spoken/display text."""
         guardrails = LLMGuardrails()

@@ -20,6 +20,7 @@ from app.core.telemetry import pipeline_span, voice_span
 from app.domain.models.conversation import MessageRole
 from app.domain.models.session import CallSession, CallState
 from app.services.scripts.interruption_filter import is_backchannel as _is_backchannel
+from app.services.scripts.echo_guard import strip_self_echo
 from app.domain.services.voice_pipeline.turn_helpers import (
     _first_speaker_label,
     _persona_label,
@@ -194,6 +195,38 @@ class TurnEnder:
                 },
             )
             return
+
+        # Self-echo guard: if the agent's own recent words were transcribed back
+        # into this caller turn (carrier echo + open mic during TTS), strip them.
+        # If nothing real remains, skip the turn — answering our own echo derails
+        # the call (observed in production). Short backchannels never match the
+        # 5+ word run, so they pass through untouched.
+        _agent_last = next(
+            (m.content for m in reversed(session.conversation_history)
+             if m.role == MessageRole.ASSISTANT),
+            "",
+        )
+        _deechoed = strip_self_echo(full_transcript, _agent_last)
+        if _deechoed != full_transcript:
+            if not _deechoed.strip():
+                logger.info(
+                    "turn_skipped_self_echo",
+                    extra={
+                        "call_id": call_id,
+                        "turn_id": session.turn_id,
+                        "transcript": full_transcript[:120],
+                    },
+                )
+                return
+            logger.info(
+                "self_echo_stripped",
+                extra={
+                    "call_id": call_id,
+                    "before": full_transcript[:120],
+                    "after": _deechoed[:120],
+                },
+            )
+            full_transcript = _deechoed
 
         logger.info(
             "turn_end",

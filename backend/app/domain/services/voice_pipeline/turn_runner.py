@@ -141,6 +141,10 @@ class TurnRunner:
                 session.conversation_history.append(
                     Message(role=MessageRole.ASSISTANT, content=response_text)
                 )
+                # The agent has now delivered a real reply (its opening on turn 1).
+                # Flip the LIVE STATE flag so later turns are told NOT to
+                # re-introduce (see prompts/live_state.py).
+                session._has_introduced = True
                 self._p.transcript_service.accumulate_turn(
                     call_id=call_id,
                     role="assistant",
@@ -176,6 +180,9 @@ class TurnRunner:
                 session.conversation_history.append(
                     Message(role=MessageRole.ASSISTANT, content=spoken + " [interrupted by caller]")
                 )
+                # The agent spoke a partial reply (possibly its opening), so it
+                # counts as introduced — don't make it re-introduce next turn.
+                session._has_introduced = True
                 # Tell handle_barge_in we already committed the correct partial,
                 # so it does NOT roll it back or double-annotate.
                 session._speculative_history_len = None

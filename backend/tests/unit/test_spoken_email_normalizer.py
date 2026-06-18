@@ -6,7 +6,29 @@ import pytest
 
 from app.services.scripts.spoken_email_normalizer import (
     extract_email_from_speech,
+    spell_out_email,
 )
+
+
+def test_spell_out_email_basic():
+    assert spell_out_email("bob@gmail.com") == "b-o-b at gmail dot com"
+
+
+def test_spell_out_email_long_local():
+    assert (
+        spell_out_email("allstateestimation@gmail.com")
+        == "a-l-l-s-t-a-t-e-e-s-t-i-m-a-t-i-o-n at gmail dot com"
+    )
+
+
+def test_spell_out_email_multi_dot_domain():
+    assert spell_out_email("x@mail.co.uk") == "x at mail dot co dot uk"
+
+
+def test_spell_out_email_invalid_returns_blank():
+    assert spell_out_email("") == ""
+    assert spell_out_email("notanemail") == ""
+    assert spell_out_email(None) == ""
 
 
 @pytest.mark.parametrize("speech,expected", [

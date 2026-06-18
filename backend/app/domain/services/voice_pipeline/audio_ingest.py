@@ -250,6 +250,25 @@ class AudioIngest:
                     call_id[:12], consecutive, session.stt_active,
                 )
 
+                # Gave up after MAX unanswered check-ins while the call is still
+                # live → the caller is gone. Close politely with a brief goodbye
+                # instead of leaving a silent line open until the session timeout
+                # (reuses the proven end-session teardown: farewell + hangup).
+                if session.stt_active and consecutive >= _MAX_CONSECUTIVE:
+                    logger.info(
+                        "[SilenceMonitor] %s — no response after %d check-ins, closing call",
+                        call_id[:12], consecutive,
+                    )
+                    try:
+                        await self._p._shutdown_session_for_end_action(
+                            session,
+                            websocket,
+                            "silence_timeout",
+                            "I'll let you go for now — feel free to give us a call back anytime. Take care.",
+                        )
+                    except Exception as _close_exc:
+                        logger.debug("[SilenceMonitor] close-on-silence failed: %s", _close_exc)
+
             # Start silence monitor only for telephony (not Ask AI browser sessions)
             _silence_task: Optional[asyncio.Task] = None
             if getattr(session, "campaign_id", "ask-ai") != "ask-ai":

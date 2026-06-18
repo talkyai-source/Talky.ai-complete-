@@ -288,6 +288,12 @@ class LLMGuardrails:
         # "(sighs)") — wrong format on every engine, and the markdown pass below
         # would otherwise leave the bare word "laughs" to be read aloud.
         cleaned = strip_stage_directions(cleaned)
+        # Also drop parenthetical ASIDES the model narrates about itself — e.g.
+        # "(waiting for the number to be provided)" leaked to TTS in a real call.
+        # Require a 3+ letter word inside, so numeric groups like a phone area
+        # code "(077)" survive; word-containing parens are never meant to be
+        # spoken on a voice call.
+        cleaned = re.sub(r'\([^)]*[A-Za-z]{3,}[^)]*\)', ' ', cleaned)
         # Bracket audio tags ([laughs]) stay only for tag-capable voices.
         if not preserve_audio_tags:
             cleaned = strip_audio_tags(cleaned)

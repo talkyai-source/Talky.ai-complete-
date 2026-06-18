@@ -129,6 +129,34 @@ def test_composed_prompt_has_voice_safe_output_rules():
     assert "conversation history to understand where the call is" in out
 
 
+def test_communication_frameworks_and_persuasion_present():
+    out = compose_prompt("lead_gen", "Alex", "Acme", LEAD_GEN_SLOTS)
+    # Universal 7 C's + Grice maxims (from the system guardrails layer).
+    assert "COMMUNICATION PRINCIPLES" in out
+    assert "The 7 C's" in out
+    assert "The 4 maxims of conversation" in out
+    for maxim in ("Quantity", "Quality", "Relation", "Manner"):
+        assert maxim in out
+    # The duplicated "acknowledge then ask" line was trimmed from the engine.
+    assert "First acknowledge, then ask the next useful question" not in out
+    # Persuasion levers added to the lead_gen persona (no duplication of the
+    # social-proof / cost-of-inaction levers already present).
+    assert "MORE PERSUASION LEVERS" in out
+    for lever in ("Reciprocity", "Small yeses", "Earned authority"):
+        assert lever in out
+
+
+def test_communication_principles_universal_across_personas():
+    for persona, slots in (
+        ("customer_support", SUPPORT_SLOTS),
+        ("receptionist", RECEPTIONIST_SLOTS),
+    ):
+        out = compose_prompt(persona, "Sam", "Acme", slots)
+        assert "COMMUNICATION PRINCIPLES" in out  # 7 C's + maxims apply to all
+        # Persuasion levers are lead_gen-only (sales-specific).
+        assert "MORE PERSUASION LEVERS" not in out
+
+
 def test_prompt_identity_is_honest_not_deceptive():
     out = compose_prompt("lead_gen", "Alex", "Acme", LEAD_GEN_SLOTS)
     # Honest-disclosure stance: never claim to be human, never volunteer it,
