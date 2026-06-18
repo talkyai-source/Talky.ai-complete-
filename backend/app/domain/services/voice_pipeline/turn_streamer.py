@@ -340,6 +340,27 @@ class TurnStreamer:
         tts_was_interrupted = False
         suppressed_for_action = False
 
+        # P3: track sentences ACTUALLY delivered to TTS, so on a barge-in we
+        # commit to history only what the caller really heard — not the full
+        # (longer) LLM response. Committing unheard text makes the model think
+        # it already said things it never spoke → garbled "absurd" replies after
+        # a few interruptions.
+        session._spoken_sentences = []
+        # P1: this turn's epoch. A barge-in event that targeted an OLDER turn
+        # (stale signal from a previous interruption) must not kill this fresh
+        # reply. _barged() below ignores such stale events.
+        _my_epoch = getattr(session, "_current_turn_epoch", 0)
+
+        def _barged() -> bool:
+            if not (barge_in_event and barge_in_event.is_set()):
+                return False
+            tgt = self._p._barge_in_epoch.get(call_id)
+            # Suppress ONLY a barge-in that demonstrably targeted an older turn;
+            # otherwise honor it (fail open so the caller can always interrupt).
+            if tgt is not None and _my_epoch and tgt < _my_epoch:
+                return False
+            return True
+
         t_llm_start = time.monotonic()
         t_tts_first: Optional[float] = None
         t_tts_end: Optional[float] = None
@@ -384,7 +405,7 @@ class TurnStreamer:
                             pass
                     first_token = False
 
-                if barge_in_event and barge_in_event.is_set():
+                if _barged():
                     tts_was_interrupted = True
                     break
 
@@ -417,7 +438,7 @@ class TurnStreamer:
                     if not sentence or len(sentence) < 6:
                         continue
 
-                    if barge_in_event and barge_in_event.is_set():
+                    if _barged():
                         tts_was_interrupted = True
                         break
 
@@ -436,6 +457,8 @@ class TurnStreamer:
                     first_sentence = False
                     t_tts_end = time.monotonic()
                     sentences_done += 1
+                    if not tts_was_interrupted:
+                        session._spoken_sentences.append(sentence)
 
                     if tts_was_interrupted:
                         break
@@ -485,7 +508,7 @@ class TurnStreamer:
 
         # TTS any trailing buffer (final sentence without terminal punctuation).
         if not ask_ai_end_action and not tts_was_interrupted and buf.strip():
-            if not (barge_in_event and barge_in_event.is_set()):
+            if not _barged():
                 if not max_sentences or sentences_done < max_sentences:
                     sentence = guardrails.clean_response(buf.strip(), preserve_audio_tags=tags_ok)
                     if sentence:
@@ -499,6 +522,8 @@ class TurnStreamer:
                         )
                         first_sentence = False
                         t_tts_end = time.monotonic()
+                        if not tts_was_interrupted:
+                            session._spoken_sentences.append(sentence)
 
         # Cleanup: ensure the thinking-filler task is never left dangling (e.g.
         # an early barge-in or an action turn produced no real audio).
@@ -515,7 +540,7 @@ class TurnStreamer:
             and t_tts_first is None
             and not ask_ai_end_action
             and not suppressed_for_action
-            and not (barge_in_event and barge_in_event.is_set())
+            and not _barged()
         ):
             recovery = "Sorry, I didn't quite catch that — could you say it again?"
             logger.warning(
@@ -546,5 +571,16 @@ class TurnStreamer:
         if not ask_ai_end_action and max_sentences and full_text:
             parts = re.split(r'(?<=[.!?])\s+', full_text.strip())
             full_text = " ".join(parts[:max_sentences])
+
+        # P3: if the caller actually BARGED IN, the history entry must be ONLY
+        # what they heard (delivered sentences) + an interruption marker — never
+        # the full (longer) response, which is what made the model think it said
+        # things it never spoke. Gated on _barged() so the LLM-error fallback
+        # path (synthesize failure, no real barge-in) still commits normally.
+        # The marker (even with no spoken text) preserves user→assistant
+        # alternation. The cancellation path is handled in turn_runner.
+        if tts_was_interrupted and _barged():
+            spoken = " ".join(session._spoken_sentences).strip()
+            full_text = (spoken + " [interrupted by caller]") if spoken else "[interrupted by caller]"
 
         return full_text, llm_latency_ms, tts_latency_ms

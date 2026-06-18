@@ -223,6 +223,11 @@ class TurnEnder:
         ) as turn_span:
             session.state = CallState.PROCESSING
             session.llm_active = True
+            # P1: bump the turn epoch so a barge-in that targeted a PREVIOUS turn
+            # (stale signal from an earlier interruption) can't silence this one.
+            _epoch = self._p._turn_epochs.get(call_id, 0) + 1
+            self._p._turn_epochs[call_id] = _epoch
+            session._current_turn_epoch = _epoch
             self._p.latency_tracker.mark_speech_end(call_id)
             self._p.latency_tracker.mark_llm_start(call_id)
 

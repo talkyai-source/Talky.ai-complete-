@@ -163,7 +163,24 @@ class TurnRunner:
                 session.conversation_history = session.conversation_history[:history_snapshot]
 
         except asyncio.CancelledError:
-            session.conversation_history = session.conversation_history[:history_snapshot]
+            # P3: a barge-in cancels the turn mid-reply. If the agent actually
+            # spoke some sentences before the interrupt, KEEP the user turn and
+            # commit ONLY what the caller heard (+ marker) so the model has
+            # correct context. Discarding it (or committing the full unheard
+            # reply) is what produced "absurd" replies after a few interrupts.
+            spoken = " ".join(getattr(session, "_spoken_sentences", []) or []).strip()
+            if spoken:
+                # Keep the user message (at history_snapshot), drop anything the
+                # cancelled task appended after it, then add the spoken partial.
+                session.conversation_history = session.conversation_history[:history_snapshot + 1]
+                session.conversation_history.append(
+                    Message(role=MessageRole.ASSISTANT, content=spoken + " [interrupted by caller]")
+                )
+                # Tell handle_barge_in we already committed the correct partial,
+                # so it does NOT roll it back or double-annotate.
+                session._speculative_history_len = None
+            else:
+                session.conversation_history = session.conversation_history[:history_snapshot]
             raise
         except Exception as e:
             logger.error(f"Turn error for call {call_id}: {e}", exc_info=True)

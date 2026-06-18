@@ -127,6 +127,12 @@ class VoicePipelineService:
         # builds the service via __new__ (bypassing __init__).
         self._barge_in_events: dict[str, asyncio.Event] = {}
         self._pending_llm_tasks: dict[str, asyncio.Task] = {}
+        # P1 (barge-in epoch): a monotonic per-call turn counter. Each new turn
+        # bumps it; a barge-in records which turn-epoch it targeted. The streamer
+        # ignores a barge-in that targeted an OLDER turn (a stale signal left over
+        # from a previous interruption) so it can't silence a fresh reply.
+        self._turn_epochs: dict[str, int] = {}
+        self._barge_in_epoch: dict[str, int] = {}
         self._tracer = get_tracer()
 
     @property
@@ -421,6 +427,8 @@ class VoicePipelineService:
                     await self._await_task_after_cancel(pending_task, call_id, "orphaned_llm")
                 # Remove barge-in event so a future session cannot inherit stale state.
                 self._barge_in_events.pop(call_id, None)
+                self._turn_epochs.pop(call_id, None)
+                self._barge_in_epoch.pop(call_id, None)
                 session.stt_active = False
                 self.latency_tracker.cleanup_call(call_id)
                 logger.info("pipeline_end", extra={"call_id": call_id})
@@ -510,6 +518,9 @@ class VoicePipelineService:
         )
         if call_id in self._barge_in_events:
             self._barge_in_events[call_id].set()
+            # P1: stamp which turn-epoch this barge-in targets so the streamer
+            # can ignore it if a newer turn has already superseded that one.
+            self._barge_in_epoch[call_id] = getattr(session, "_current_turn_epoch", 0)
 
         # Cancel the in-flight turn task. Reaching here means it is either a
         # SPECULATIVE task (tentative — user may still be talking) or a task
