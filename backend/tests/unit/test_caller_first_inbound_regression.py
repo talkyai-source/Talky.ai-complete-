@@ -39,7 +39,6 @@ from app.domain.services.telephony.modes.caller_first import (
     select_inbound_base_prompt,
 )
 from app.domain.services.telephony_session_config import (
-    TELEPHONY_ESTIMATION_SYSTEM_PROMPT,
     build_telephony_inbound_greeting,
 )
 
@@ -53,21 +52,6 @@ _INBOUND_OPENER_PATTERN = re.compile(
     r"\s+--\s+how\s+can\s+i\s+help\s+you\??",
     flags=re.IGNORECASE,
 )
-
-
-def _legacy_session(agent: str = "Adam", company: str = "All States Estimation"):
-    """Build a session that mirrors what build_telephony_session_config
-    produces for the legacy estimation campaign — the prompt with the
-    triple sniff markers (HARD RULES + Business Development Specialist
-    + GREETING RESPONSE)."""
-    legacy_prompt = TELEPHONY_ESTIMATION_SYSTEM_PROMPT.format(
-        agent_name=agent, company_name=company,
-    )
-    call_session = SimpleNamespace(
-        system_prompt=legacy_prompt,
-        agent_config=SimpleNamespace(agent_name=agent, company_name=company),
-    )
-    return SimpleNamespace(call_session=call_session, call_id="legacy-test")
 
 
 def _persona_session(agent: str = "Sarah", company: str = "Acme"):
@@ -89,43 +73,6 @@ def _persona_session(agent: str = "Sarah", company: str = "Acme"):
 
 class TestActivePromptCarriesInboundContract:
     """The minimum contract the LLM relies on for caller-first calls."""
-
-    def test_legacy_path_active_prompt_has_inbound_directive(self):
-        """Legacy outbound prompt → full swap to inbound base. The active
-        prompt must announce 'INBOUND CALL' at position 0 (early-token
-        weighting) and contain the canonical opener phrase verbatim."""
-        voice_session = _legacy_session()
-
-        select_inbound_base_prompt(voice_session)
-
-        active = voice_session.call_session.system_prompt
-        assert active.startswith(INBOUND_DIRECTIVE_SENTINEL), (
-            "Caller-first sentinel must lead the prompt so early-token "
-            "attention dominates the persona below it."
-        )
-        assert "this is Adam from All States Estimation" in active, (
-            "Outbound opener missing — LLM lacks the explicit introduce-"
-            "yourself-and-purpose phrasing it should follow on turn 0."
-        )
-
-    def test_legacy_path_does_not_leak_outbound_persona(self):
-        """The legacy swap removes the outbound persona block; otherwise
-        the LLM sees both 'you answered the phone' and 'you call
-        contractors' and tends to mash them together. We use the two
-        structural markers that uniquely identify the outbound persona —
-        the role title and the GREETING RESPONSE flow header. Both must
-        be gone after the swap."""
-        voice_session = _legacy_session()
-
-        select_inbound_base_prompt(voice_session)
-
-        active = voice_session.call_session.system_prompt
-        assert "Business Development Specialist" not in active
-        assert "GREETING RESPONSE" not in active
-        # The legacy outbound flow tells the AI to "call contractors"; the
-        # inbound prompt mentions providing services TO contractors. The
-        # active-voice "You call contractors" phrase is a clean tell.
-        assert "You call contractors" not in active
 
     def test_persona_path_directive_dominates_persona(self):
         """Persona-composed prompt → directive prepended at top. The
@@ -176,13 +123,6 @@ class TestCallerFirstFailureModes:
         assert voice_session.call_session.system_prompt.count(
             INBOUND_DIRECTIVE_SENTINEL
         ) == 1
-
-    def test_legacy_path_idempotent(self):
-        voice_session = _legacy_session()
-        select_inbound_base_prompt(voice_session)
-        first_pass = voice_session.call_session.system_prompt
-        select_inbound_base_prompt(voice_session)
-        assert voice_session.call_session.system_prompt == first_pass
 
     def test_missing_agent_config_uses_grammatical_defaults(self):
         """An undercooked campaign (no agent_config at all) must still

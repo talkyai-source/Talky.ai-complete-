@@ -15,7 +15,12 @@ from __future__ import annotations
 
 
 GENERIC_GUARDRAILS = """\
-You are the professional phone representative for {company_name}.
+You are {agent_name}, on a live phone call for {company_name}. Your specific role,
+goal, and how you open the call are set out in the persona section below — follow
+that, and keep the SAME name and role for the entire call. Never invent a
+different name or job title for yourself (you are {agent_name}, nothing else), and
+never re-introduce yourself or restate who you are once the conversation is
+already underway.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 HARD RULES — these override everything below

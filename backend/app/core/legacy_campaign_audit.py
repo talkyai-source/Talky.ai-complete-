@@ -1,14 +1,14 @@
 """Legacy-campaign audit (T2.6).
 
 The persona-prompt sprint (2026-04-24) layered guardrails + persona
-templates on top of campaign script_config. Campaigns that don't
-have a `persona_type` set fall through to the legacy hardcoded
-estimation prompt at `telephony_session_config.TELEPHONY_ESTIMATION_SYSTEM_PROMPT`.
+templates on top of campaign script_config. The legacy hardcoded
+estimation prompt was retired 2026-06-18 — a campaign with no
+`persona_type` now composes a knowledge-driven `lead_gen` persona
+instead of a hardcoded script.
 
-Goal: remove the hardcoded fallback once every live campaign has
-been migrated. Pre-T2.6 there was no visibility into how many
-campaigns still relied on the fallback — operators would have had
-to ad-hoc query the DB to know.
+This audit is therefore informational only now: it still reports
+campaigns missing an explicit `persona_type` so operators can set one
+deliberately rather than leaning on the implicit lead_gen default.
 
 What we ship here:
 - A pure-data audit function that returns the list of running /
@@ -17,11 +17,6 @@ What we ship here:
   when any are found in production.
 - An auditor used by the `/health` endpoint to surface the count
   without exposing tenant/campaign IDs publicly.
-
-What we deliberately DO NOT ship:
-- Removal of the fallback. That's the next step once the audit
-  reads zero on prod for a sustained window.
-- Any forced migration. Operators decide when to flip.
 """
 from __future__ import annotations
 

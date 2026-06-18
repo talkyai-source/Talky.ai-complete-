@@ -5,27 +5,19 @@ like the person who answered the phone, not like an outbound caller. The
 persona prompts the rest of the system was built around assume an outbound
 opener, so something has to re-frame the call before the first LLM call.
 
-There are two ways the active prompt arrives here:
+Every active prompt is now produced by
+:func:`app.services.scripts.prompts.compose_prompt` (the legacy hardcoded
+estimation prompt was retired 2026-06-18). We do *not* want to throw away the
+persona's voice, objection handling, slot-collection rules, etc. — those are
+the customer's configuration. Instead we prepend a short, dominant directive
+block that re-frames the call direction. The LLM weighs early tokens most
+heavily, so a top-anchored directive beats anything below it that says "you
+are calling them".
 
-1. **Legacy estimation prompt** — the original hardcoded
-   ``TELEPHONY_ESTIMATION_SYSTEM_PROMPT``. This is end-to-end outbound (the
-   persona, the GREETING RESPONSE block, the consent-gating, all of it). A
-   surgical patch would leave conflicting outbound framing in the body, so
-   we replace it with a dedicated inbound base.
-
-2. **Persona-composed prompt** — produced by
-   :func:`app.services.scripts.prompts.compose_prompt` for campaigns whose
-   ``script_config.persona_type`` is set. We do *not* want to throw away the
-   persona's voice, objection handling, slot-collection rules, etc. — those
-   are the customer's configuration. Instead we prepend a short, dominant
-   directive block that re-frames the call direction. The LLM weighs early
-   tokens most heavily (the same reason the legacy prompt's HARD RULES sit
-   at the top), so a top-anchored directive beats anything below it that
-   says "you are calling them".
-
-Both paths share the same end-state visible to the LLM: the model knows it
-answered the phone, knows how to open the call, and otherwise behaves like
-the persona the campaign owner configured.
+Persona-composed prompts built with ``direction=INBOUND`` already carry the
+directive (and its sentinel) from compose time, so this runtime pass is a
+no-op for them — it only fires for caller-first OUTBOUND calls, where the
+prompt was composed outbound and needs re-framing before the first LLM call.
 """
 from __future__ import annotations
 
@@ -52,9 +44,9 @@ __all__ = [
 def select_inbound_base_prompt(voice_session) -> None:
     """Re-frame ``voice_session.call_session.system_prompt`` for caller-first.
 
-    Idempotent — safe to call multiple times. The legacy outbound prompt is
-    swapped wholesale; every other prompt receives a top-anchored directive
-    block that overrides outbound framing while preserving persona voice.
+    Idempotent — safe to call multiple times. Every prompt receives a
+    top-anchored directive block that overrides outbound framing while
+    preserving the persona's voice below it.
     """
     session = getattr(voice_session, "call_session", None)
     if session is None:
@@ -69,28 +61,14 @@ def select_inbound_base_prompt(voice_session) -> None:
     agent_name, company_name = _resolve_agent_context(session)
     call_label = _short_call_id(voice_session)
 
-    if _is_legacy_outbound(current):
-        from app.domain.services.telephony_session_config import (
-            TELEPHONY_INBOUND_SYSTEM_PROMPT,
-        )
-
-        session.system_prompt = TELEPHONY_INBOUND_SYSTEM_PROMPT.format(
-            agent_name=agent_name,
-            company_name=company_name,
-        )
-        logger.info(
-            "caller_first_inbound_prompt_swapped call=%s agent=%s company=%s",
-            call_label, agent_name, company_name,
-        )
-        return
-
     # Persona-composed or any other custom prompt — keep the body, prepend
     # an inbound directive that the LLM cannot ignore. Persona-composed
     # prompts produced by `compose_prompt(direction=INBOUND)` already
-    # carry the sentinel, so the early-return at the top of this
-    # function short-circuits before we get here. This branch handles:
-    # 1. Custom user-provided prompts that don't use compose_prompt.
-    # 2. Persona-composed prompts whose direction wasn't propagated by an
+    # carry the sentinel, so the early-return above short-circuits before we
+    # get here. This branch handles:
+    # 1. Caller-first OUTBOUND calls — composed outbound, re-framed at runtime.
+    # 2. Custom user-provided prompts that don't use compose_prompt.
+    # 3. Persona-composed prompts whose direction wasn't propagated by an
     #    older code path (e.g. retries / migration windows).
     directive = inbound_directive_block(
         agent_name=agent_name,
@@ -114,22 +92,6 @@ def select_inbound_base_prompt(voice_session) -> None:
         record_inbound_directive_applied("runtime")
     except Exception as exc:  # noqa: BLE001
         logger.debug("voice_metrics_directive_record_failed err=%s", exc)
-
-
-def _is_legacy_outbound(prompt: str) -> bool:
-    """Triple-marker sniff for the legacy estimation prompt.
-
-    All three substrings appear together only in the legacy hardcoded prompt
-    in telephony_session_config.py. Persona-composed prompts share none of
-    them. False positives here would replace a customer's persona prompt
-    with our generic inbound base — much worse than a false negative, which
-    just means the directive-prepend path runs instead.
-    """
-    return (
-        "HARD RULES" in prompt
-        and "Business Development Specialist" in prompt
-        and "GREETING RESPONSE" in prompt
-    )
 
 
 def _resolve_agent_context(call_session) -> Tuple[str, str]:

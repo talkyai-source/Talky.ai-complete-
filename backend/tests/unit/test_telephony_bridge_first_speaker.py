@@ -46,42 +46,6 @@ class TestOutboundFirstSpeaker:
         assert not hasattr(user_first, "_user_first_greet_on_pickup_enabled")
         assert not hasattr(user_first, "_user_first_open_seconds")
 
-    def test_caller_first_swaps_legacy_outbound_for_inbound_base(self):
-        """When the session has the legacy outbound prompt, caller-first must
-        replace it with the dedicated inbound base — not append on top."""
-        from app.api.v1.endpoints.telephony_bridge import (
-            _apply_caller_first_inbound_prompt,
-        )
-        from app.domain.services.telephony_session_config import (
-            TELEPHONY_ESTIMATION_SYSTEM_PROMPT,
-        )
-
-        legacy_prompt = TELEPHONY_ESTIMATION_SYSTEM_PROMPT.format(
-            agent_name="Sarah",
-            company_name="All States Estimation",
-        )
-        call_session = SimpleNamespace(
-            system_prompt=legacy_prompt,
-            agent_config=SimpleNamespace(
-                agent_name="Sarah",
-                company_name="All States Estimation",
-            ),
-        )
-        voice_session = SimpleNamespace(call_session=call_session, call_id="abc123")
-
-        _apply_caller_first_inbound_prompt(voice_session)
-
-        # The old outbound estimation persona block must be gone (the
-        # legacy swap replaces it wholesale with the caller-first base).
-        assert "Business Development Specialist" not in call_session.system_prompt
-        assert "GREETING RESPONSE" not in call_session.system_prompt
-        # Caller-first OUTBOUND framing must be present and parameterized:
-        # the agent calls on behalf of the company and leads with its own
-        # introduction after the callee speaks — it must NOT play receptionist.
-        assert "calling on behalf of All States Estimation" in call_session.system_prompt
-        assert "this is Sarah from All States Estimation" in call_session.system_prompt
-        assert "YOU called THEM on behalf of All States Estimation" in call_session.system_prompt
-
     def test_caller_first_prepends_directive_to_non_legacy_prompt(self):
         """Persona-composed and other custom prompts must receive a
         top-anchored inbound directive so the LLM picks up as the receiver.
@@ -146,30 +110,6 @@ class TestOutboundFirstSpeaker:
         voice_session = SimpleNamespace(call_session=None, call_id="abc123")
         # Must not raise.
         _apply_caller_first_inbound_prompt(voice_session)
-
-    def test_caller_first_prompt_is_idempotent(self):
-        from app.api.v1.endpoints.telephony_bridge import (
-            _apply_caller_first_inbound_prompt,
-        )
-        from app.domain.services.telephony_session_config import (
-            TELEPHONY_ESTIMATION_SYSTEM_PROMPT,
-        )
-
-        legacy_prompt = TELEPHONY_ESTIMATION_SYSTEM_PROMPT.format(
-            agent_name="Sarah", company_name="Acme",
-        )
-        call_session = SimpleNamespace(
-            system_prompt=legacy_prompt,
-            agent_config=SimpleNamespace(agent_name="Sarah", company_name="Acme"),
-        )
-        voice_session = SimpleNamespace(call_session=call_session, call_id="abc123")
-
-        _apply_caller_first_inbound_prompt(voice_session)
-        first_swap = call_session.system_prompt
-        _apply_caller_first_inbound_prompt(voice_session)
-        # The first swap leaves the inbound directive sentinel in the
-        # prompt; the second call detects it and returns without mutating.
-        assert call_session.system_prompt == first_swap
 
     def test_ringing_alias_moves_caller_first_prewarm_state(self):
         """Asterisk trunk channel IDs must consume the planned caller-first session."""

@@ -184,15 +184,16 @@ class TestDirectionEnum:
 
 
 class TestBuildTelephonySessionConfigDirection:
-    """build_telephony_session_config must pick the inbound base prompt
-    for INBOUND calls so the LLM never sees outbound framing on the
-    legacy estimation path. Persona-composed prompts are handled by
-    the runtime directive-prepend (caller_first), out of scope here."""
+    """A campaign-less / persona-less call now composes through the single
+    layered persona system (knowledge-driven lead_gen) — the legacy hardcoded
+    estimation prompt was retired. INBOUND calls get the canonical inbound
+    directive at compose time so the LLM never sees outbound framing."""
 
-    def test_outbound_uses_estimation_prompt(self):
+    def test_outbound_campaign_less_uses_lead_gen_prompt(self):
         from app.domain.services.voice_orchestrator import Direction
         from app.domain.services.telephony_session_config import (
             build_telephony_session_config,
+            TELEPHONY_COMPANY_NAME,
         )
         cfg = build_telephony_session_config(
             gateway_type="telephony",
@@ -200,9 +201,14 @@ class TestBuildTelephonySessionConfigDirection:
             direction=Direction.OUTBOUND,
         )
         assert cfg.direction == Direction.OUTBOUND
-        # Outbound persona markers present.
-        assert "Business Development Specialist" in cfg.system_prompt
-        assert "GREETING RESPONSE" in cfg.system_prompt
+        # No hardcoded fallback anymore — defaults to lead_gen, composed via
+        # the layered persona system (guardrails always present).
+        assert cfg.persona_type == "lead_gen"
+        assert "HARD RULES" in cfg.system_prompt
+        assert TELEPHONY_COMPANY_NAME in cfg.system_prompt
+        # Retired legacy markers must be gone for good.
+        assert "Business Development Specialist" not in cfg.system_prompt
+        assert "GREETING RESPONSE" not in cfg.system_prompt
 
     def test_inbound_uses_inbound_prompt(self):
         from app.domain.services.voice_orchestrator import Direction
@@ -541,48 +547,6 @@ class TestBuildCallGreeting:
             assert result == build_telephony_greeting("Sarah", "Acme")
 
 
-class TestSystemPromptGreetingResponseFlow:
-    """The consent-first opener delegates the 'what happens next' logic
-    to the system prompt. Lock in the two branches we care about."""
-
-    def test_prompt_has_greeting_response_block(self):
-        from app.domain.services.telephony_session_config import TELEPHONY_ESTIMATION_SYSTEM_PROMPT
-        assert "GREETING RESPONSE" in TELEPHONY_ESTIMATION_SYSTEM_PROMPT
-
-    def test_prompt_has_refuse_close_line(self):
-        from app.domain.services.telephony_session_config import TELEPHONY_ESTIMATION_SYSTEM_PROMPT
-        assert "Sorry to disturb, have a nice day." in TELEPHONY_ESTIMATION_SYSTEM_PROMPT
-
-    def test_prompt_defers_company_intro_to_post_consent(self):
-        from app.domain.services.telephony_session_config import TELEPHONY_ESTIMATION_SYSTEM_PROMPT
-        # The pitch must be scoped to the 'after they agreed' branch.
-        assert "only after they agreed" in TELEPHONY_ESTIMATION_SYSTEM_PROMPT
-
-
-class TestEstimationSystemPrompt:
-    def test_system_prompt_template_has_agent_name_slot(self):
-        from app.domain.services.telephony_session_config import TELEPHONY_ESTIMATION_SYSTEM_PROMPT
-        assert "{agent_name}" in TELEPHONY_ESTIMATION_SYSTEM_PROMPT
-
-    def test_system_prompt_template_has_company_name_slot(self):
-        from app.domain.services.telephony_session_config import TELEPHONY_ESTIMATION_SYSTEM_PROMPT
-        assert "{company_name}" in TELEPHONY_ESTIMATION_SYSTEM_PROMPT
-
-    def test_system_prompt_forbids_ai_reveal(self):
-        from app.domain.services.telephony_session_config import TELEPHONY_ESTIMATION_SYSTEM_PROMPT
-        prompt_lower = TELEPHONY_ESTIMATION_SYSTEM_PROMPT.lower()
-        assert "ai" in prompt_lower or "robot" in prompt_lower
-
-    def test_system_prompt_formats_cleanly(self):
-        from app.domain.services.telephony_session_config import TELEPHONY_ESTIMATION_SYSTEM_PROMPT
-        rendered = TELEPHONY_ESTIMATION_SYSTEM_PROMPT.format(
-            agent_name="John", company_name="All States Estimation"
-        )
-        assert "John" in rendered
-        assert "All States Estimation" in rendered
-        assert "{" not in rendered  # no unfilled slots
-
-
 class TestBuildTelephonySessionConfig:
     def _mock_global_config(self):
         cfg = MagicMock()
@@ -697,18 +661,21 @@ class TestBuildTelephonySessionConfig:
             with pytest.raises(PromptCompositionError):
                 build_telephony_session_config(campaign=campaign)
 
-    def test_persona_campaign_can_opt_into_legacy_fallback_for_migration(self, monkeypatch):
+    def test_persona_missing_slots_non_strict_retries_knowledge_driven(self, monkeypatch):
+        """Non-strict mode: a slot-based persona with incomplete slots no
+        longer drops to a hardcoded legacy script — it retries the SAME
+        persona in knowledge-driven (slot-free) mode, which always composes."""
         from app.domain.services.telephony_session_config import build_telephony_session_config
 
         campaign = {
-            "id": "legacy-migration-campaign",
+            "id": "incomplete-slots-campaign",
             "script_config": {
                 "persona_type": "lead_gen",
                 "company_name": "Acme",
                 "agent_names": ["Alex"],
                 "campaign_slots": {
                     "industry": "roofing",
-                    # pricing_info intentionally missing
+                    # required slots intentionally missing
                 },
             },
         }
@@ -720,5 +687,10 @@ class TestBuildTelephonySessionConfig:
         ):
             config = build_telephony_session_config(campaign=campaign)
 
-        assert "ROLE — LEAD GENERATION" not in config.system_prompt
-        assert "GREETING RESPONSE" in config.system_prompt
+        assert config.persona_type == "lead_gen"
+        assert "Acme" in config.system_prompt
+        assert "Alex" in config.system_prompt
+        assert "HARD RULES" in config.system_prompt
+        # Retired legacy markers must never reappear.
+        assert "Business Development Specialist" not in config.system_prompt
+        assert "GREETING RESPONSE" not in config.system_prompt

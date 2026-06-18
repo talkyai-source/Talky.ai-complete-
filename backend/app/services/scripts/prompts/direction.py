@@ -30,8 +30,9 @@ from __future__ import annotations
 
 
 # First line of the caller-speaks-first directive AND the idempotency
-# marker. Must stay byte-for-byte in sync with the first line of
-# ``TELEPHONY_INBOUND_SYSTEM_PROMPT`` (telephony_session_config.py).
+# marker. This is the single canonical definition — the legacy
+# TELEPHONY_INBOUND_SYSTEM_PROMPT that once had to mirror it was retired
+# (2026-06-18), so nothing else needs to be kept in sync with it now.
 INBOUND_DIRECTIVE_SENTINEL = "OUTBOUND CALL — CALLEE SPEAKS FIRST"
 
 
