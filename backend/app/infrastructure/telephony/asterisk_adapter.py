@@ -35,6 +35,13 @@ from app.domain.interfaces.call_control_adapter import CallControlAdapter
 
 logger = logging.getLogger(__name__)
 
+# Max lifetime of a C++ gateway media session. This was hardcoded to 300000 ms
+# (5 min), which silently killed the agent's audio at exactly 5 minutes on every
+# real call while the SIP channel + caller RTP stayed perfectly healthy — the
+# caller heard dead air. There is no reason to cap a live answered call at 5 min;
+# default to 2 hours (the gateway's own default) and make it env-tunable.
+_SESSION_FINAL_TIMEOUT_MS = int(os.getenv("TELEPHONY_SESSION_FINAL_TIMEOUT_MS", "7200000"))
+
 
 @dataclass
 class _UnicastRtpCacheEntry:
@@ -832,7 +839,7 @@ class AsteriskAdapter(CallControlAdapter):
                     "echo_enabled": False,
                     "startup_no_rtp_timeout_ms": 10000,   # 10s — call is live
                     "active_no_rtp_timeout_ms": 15000,    # 15s silence timeout
-                    "session_final_timeout_ms": 300000,   # 5-minute hard cap
+                    "session_final_timeout_ms": _SESSION_FINAL_TIMEOUT_MS,  # max call lifetime (2h default)
                     "jitter_buffer_prefetch_frames": 1,   # was default 3 (60ms) — loopback has no jitter; 1 frame = 20ms
                     # 2 frames = 40ms = Deepgram Flux's optimal chunk size. Was 4 (80ms) when
                     # we re-batched downstream; now we hand off frames at Flux's native rate so
@@ -973,7 +980,7 @@ class AsteriskAdapter(CallControlAdapter):
                     # Increase timeouts for AI pipeline initialization
                     "startup_no_rtp_timeout_ms": 30000,  # 30 seconds (was 5s default)
                     "active_no_rtp_timeout_ms": 15000,   # 15 seconds (was 8s default)
-                    "session_final_timeout_ms": 300000,  # 5 minutes (was 2 hours default)
+                    "session_final_timeout_ms": _SESSION_FINAL_TIMEOUT_MS,  # max call lifetime (2h default)
                     "jitter_buffer_prefetch_frames": 1,   # was default 3 (60ms) — loopback has no jitter; 1 frame = 20ms
                     # 2 frames = 40ms = Deepgram Flux's optimal chunk size. Was 4 (80ms) when
                     # we re-batched downstream; now we hand off frames at Flux's native rate so
