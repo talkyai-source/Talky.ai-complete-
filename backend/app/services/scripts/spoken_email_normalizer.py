@@ -39,6 +39,30 @@ _EMAIL_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Carrier / lead-in words that precede a SPOKEN email ("you can send me on
+# <email> at gmail dot com", "my email is …", "reach me at …"). Without
+# stripping these, the spoken-path local-part becomes
+# "youcansendmeonallstateestimation" — the #1 spoken-email bug. These are
+# words that essentially never appear in a real local part, so dropping a
+# leading run of them is safe.
+_LEADIN_WORDS: frozenset[str] = frozenset({
+    "you", "can", "could", "would", "please", "send", "sent", "me", "my",
+    "mine", "it", "it's", "its", "is", "the", "a", "an", "on", "to", "at",
+    "email", "e-mail", "mail", "address", "reach", "write", "down", "so",
+    "well", "okay", "ok", "yeah", "yes", "here", "i", "i'll", "you'll",
+    "and", "of", "for", "give", "get", "got", "have", "use", "using", "that",
+    "this", "just", "sure", "alright", "right", "um", "uh", "er", "erm",
+})
+
+
+def _strip_leadin(local: str) -> str:
+    """Drop a leading run of carrier words, then join the rest into a local
+    part. 'you can send me on all state estimation' -> 'allstateestimation'."""
+    tokens = local.split()
+    while tokens and tokens[0].strip(".,;:!?").lower() in _LEADIN_WORDS:
+        tokens.pop(0)
+    return "".join(tokens)
+
 
 def extract_email_from_speech(utterance: str) -> Optional[str]:
     """Return a canonical email if the utterance contains one; else None.
@@ -66,9 +90,9 @@ def extract_email_from_speech(utterance: str) -> Optional[str]:
             tokens = local.split()
             local = tokens[-1] if tokens else ""
         else:
-            # Spoken email — "all state estimation at gmail dot com".
-            # The whole multi-word left side is the intended local part.
-            local = re.sub(r"\s+", "", local)
+            # Spoken email — "you can send me on all state estimation at gmail
+            # dot com". Drop the leading carrier phrase, then stitch the rest.
+            local = _strip_leadin(local)
         rest = re.sub(r"\s+", "", rest)
         rest = rest.rstrip(".?!,;:")
         s = f"{local}@{rest}"

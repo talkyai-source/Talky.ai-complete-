@@ -61,11 +61,13 @@ def update_state_from_user_turn(state: CallState, utterance: str) -> CallState:
     if not utterance or not utterance.strip():
         return state
 
+    # Email is sticky, but a CORRECTION must win: if the caller restates a
+    # (different) email — e.g. after the agent read it back wrong — re-capture
+    # the latest one. Turns with no email leave the stored value untouched.
     email = state.email
-    if email is None:
-        parsed_email = extract_email_from_speech(utterance)
-        if parsed_email:
-            email = parsed_email
+    parsed_email = extract_email_from_speech(utterance)
+    if parsed_email and parsed_email != email:
+        email = parsed_email
 
     follow_up = state.follow_up
     if follow_up is None:

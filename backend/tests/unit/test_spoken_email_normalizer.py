@@ -55,3 +55,14 @@ def test_extract_email_positive(speech, expected):
 ])
 def test_extract_email_negative(speech):
     assert extract_email_from_speech(speech) is None
+
+
+# Regression: carrier/lead-in phrase before a spoken email must be stripped,
+# not glued into the local part (the "youcansendmeon…" bug from a live call).
+def test_strips_leadin_carrier_phrase():
+    from app.services.scripts.spoken_email_normalizer import extract_email_from_speech as e
+    assert e("You can send me on all state estimation at g mail dot com.") == "allstateestimation@gmail.com"
+    assert e("it is john at gmail dot com") == "john@gmail.com"
+    assert e("reach me at sarah underscore jones at outlook dot com") == "sarah_jones@outlook.com"
+    # No carrier phrase — unchanged.
+    assert e("all state estimation at gmail dot com") == "allstateestimation@gmail.com"

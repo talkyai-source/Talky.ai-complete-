@@ -92,3 +92,16 @@ def test_2026_04_22_regression_sequence():
     assert st.email.endswith("@gmail.com")
     assert st.follow_up and "sunday" in st.follow_up.lower()
     assert st.bidding_active is True
+
+
+def test_email_correction_updates_state():
+    """A restated (different) email must overwrite the earlier capture; a turn
+    with no email leaves it untouched (sticky)."""
+    from app.services.scripts.call_state_tracker import CallState, update_state_from_user_turn as u
+    s = CallState()
+    s = u(s, "you can send me on wrong address at gmail dot com")
+    assert s.email == "wrongaddress@gmail.com"
+    s = u(s, "okay great")                      # no email -> sticky
+    assert s.email == "wrongaddress@gmail.com"
+    s = u(s, "all state estimation at gmail dot com")  # correction wins
+    assert s.email == "allstateestimation@gmail.com"
