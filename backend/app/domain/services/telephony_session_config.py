@@ -192,22 +192,6 @@ def _build_call_keyterms(
     return terms[:60]
 
 
-def _brand_correction_line(company_name: str) -> str:
-    """A per-campaign instruction so the agent always says the real company
-    name even when STT mis-hears it ("Dojo" -> "Dodge"). Driven by the same
-    ``company_name`` as the persona + keyterms, so it's correct for every
-    campaign with zero per-tenant setup. Empty company -> no line."""
-    name = (company_name or "").strip()
-    if not name:
-        return ""
-    return (
-        f"\n\nBRAND ACCURACY — your company name is \"{name}\". Speech-to-text "
-        f"may garble it into a similar-sounding word. Whenever the caller "
-        f"clearly means your company, treat it as \"{name}\" and always say and "
-        f"spell it correctly — never repeat a mis-heard version back to them."
-    )
-
-
 def build_telephony_inbound_greeting(agent_name: str, company_name: str) -> str:
     """
     Canonical first-utterance for genuine INBOUND calls (a customer
@@ -496,9 +480,8 @@ def build_telephony_session_config(
         )
         system_prompt = _compose(True)
 
-    # Brand accuracy: keep the agent saying the campaign's real company name
-    # even when STT mis-hears it. Per-campaign, same source as keyterms.
-    system_prompt = system_prompt + _brand_correction_line(company_name)
+    # (Brand-accuracy line is now part of the composed base prompt — see
+    # prompts.composer.brand_correction_line, appended inside compose_prompt.)
 
     # AgentConfig mirrors the persona so downstream code (greeting
     # builder, logs, analytics) sees the right business_type / tone.

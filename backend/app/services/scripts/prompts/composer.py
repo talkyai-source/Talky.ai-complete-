@@ -120,6 +120,24 @@ the hard rules above.
 """
 
 
+def brand_correction_line(company_name: str) -> str:
+    """A per-call instruction so the agent always says the real company name
+    even when STT mis-hears it ("Dojo" -> "Dodge"). Driven by the same
+    ``company_name`` as the persona + keyterms, so it's correct for every
+    campaign with zero per-tenant setup. Empty company -> no line. Returned
+    with a leading blank line so it appends cleanly after the composed prompt.
+    """
+    name = (company_name or "").strip()
+    if not name:
+        return ""
+    return (
+        f"\n\nBRAND ACCURACY — your company name is \"{name}\". Speech-to-text "
+        f"may garble it into a similar-sounding word. Whenever the caller "
+        f"clearly means your company, treat it as \"{name}\" and always say and "
+        f"spell it correctly — never repeat a mis-heard version back to them."
+    )
+
+
 # Applied to EVERY composed prompt (every persona, slot-based or
 # knowledge-driven). Makes the campaign's vectorless-RAG knowledge base the
 # single source of truth and resolves any prompt-vs-knowledge conflict in the
@@ -160,13 +178,10 @@ class PromptCompositionError(ValueError):
 # prompt is a lean identity + tone shell and the substance is supplied by the
 # injected knowledge tree (see app/services/scripts/knowledge). Slot-free by
 # design — that's the whole point of the simplified creation flow.
+# lead_gen is intentionally absent here — it composes from LEAD_GEN_KD_BODY
+# (personas/lead_gen.py) via the early return in _compose_knowledge_driven_body.
+# This dict only holds the lean identity shells for the other personas.
 _KNOWLEDGE_DRIVEN_BODIES: dict[str, str] = {
-    "lead_gen": (
-        "You are {agent_name}, an outbound representative for {company_name}. "
-        "Start a natural conversation with the person you've called, spark "
-        "interest, answer their questions accurately, and guide them toward the "
-        "next step (booking, a follow-up, or a clear yes/no)."
-    ),
     "customer_support": (
         "You are {agent_name}, a customer-support agent for {company_name}. "
         "Help the caller resolve their issue and answer their questions "
@@ -206,7 +221,7 @@ def _compose_knowledge_driven_body(
             agent_name=agent_name, company_name=company_name
         )
     base = _KNOWLEDGE_DRIVEN_BODIES.get(
-        persona_type, _KNOWLEDGE_DRIVEN_BODIES["lead_gen"]
+        persona_type, _KNOWLEDGE_DRIVEN_BODIES["customer_support"]
     )
     return base.format(agent_name=agent_name, company_name=company_name) + _KNOWLEDGE_DRIVEN_SUFFIX
 
@@ -374,6 +389,10 @@ def compose_prompt(
     parts.append(FINAL_RESPONSE_CONTRACT)
 
     composed = "\n\n".join(parts)
+    # Brand accuracy: keep the agent saying the campaign's real company name
+    # even when STT mis-hears it. Appended after the response contract — the
+    # same position telephony used before this moved into the composer.
+    composed += brand_correction_line(company_name)
     logger.debug(
         "compose_prompt persona=%s direction=%s agent=%s company=%s chars=%d",
         persona_type, direction_key, agent_name, company_name, len(composed),

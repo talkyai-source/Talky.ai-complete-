@@ -14,8 +14,10 @@ from app.services.scripts.prompts.agent_name_rotator import (
     pick_agent_name_for_voice,
     validate_pool,
 )
+from app.services.scripts.prompts.build import build_turn_prompt
 from app.services.scripts.prompts.composer import (
     PromptCompositionError,
+    brand_correction_line,
     compose_prompt,
 )
 from app.services.scripts.prompts.personas import (
@@ -30,6 +32,8 @@ __all__ = [
     "PersonaType",
     "PromptCompositionError",
     "REQUIRED_SLOTS_BY_PERSONA",
+    "brand_correction_line",
+    "build_turn_prompt",
     "compose_prompt",
     "pick_agent_name",
     "pick_agent_name_for_voice",

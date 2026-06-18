@@ -44,7 +44,7 @@ from app.services.scripts.prompts.accent_fillers import (
     thinking_filler,
 )
 from app.infrastructure.llm.groq import LLMTimeoutError
-from app.services.scripts import compose_system_prompt
+from app.services.scripts.prompts.build import build_turn_prompt
 from app.domain.services.voice_pipeline.knowledge_tool import (
     knowledge_tools_for,
     run_knowledge_lookup,
@@ -222,17 +222,21 @@ class TurnStreamer:
         guardrails = get_guardrails()
 
         messages = _truncate_history(session.conversation_history)
-        system_prompt = session.system_prompt
+        # Resolve the per-turn blocks (runtime work: keyword gate, KB fetch,
+        # voice-capability + accent resolution). The ORDER they stack in lives
+        # in prompts.build.build_turn_prompt — this section only RESOLVES them,
+        # then hands them to the single assembler at the end.
 
-        # Ask AI: inject product/pricing info only when the user's message
-        # contains relevant keywords (keeps the non-product system prompt small).
+        # Ask AI: product/pricing info only when the user's message contains
+        # relevant keywords (keeps the non-product system prompt small).
+        ask_ai_block = None
         if session.campaign_id == "ask-ai" and messages:
             last_user_text = next(
                 (m.content.lower() for m in reversed(messages) if m.role == MessageRole.USER),
                 "",
             )
             if any(kw in last_user_text for kw in _ASK_AI_PRODUCT_KEYWORDS):
-                system_prompt = system_prompt + "\n\n" + _ASK_AI_PRODUCT_INFO
+                ask_ai_block = _ASK_AI_PRODUCT_INFO
 
         # Campaign knowledge (vectorless RAG). Two modes for retrieve /
         # map_retrieve campaigns (inline baked the whole tree at pre-warm):
@@ -243,18 +247,20 @@ class TurnStreamer:
         # Tool mode is skipped on end-session-action turns (their JSON envelope
         # would clash with function tools) → those fall back to inject.
         kb_tools = None
+        knowledge_block = None
         if session.knowledge_mode in ("retrieve", "map_retrieve") and messages:
             if not self._p._supports_llm_end_session_action(session):
                 kb_tools = knowledge_tools_for(session, self._p.llm_provider)
             if kb_tools:
-                system_prompt = system_prompt + "\n\n" + tool_system_addendum()
+                knowledge_block = tool_system_addendum()
             else:
-                kb_block = await _knowledge_block_for_turn(session, messages)
-                if kb_block:
-                    system_prompt = system_prompt + "\n\n" + kb_block
+                knowledge_block = await _knowledge_block_for_turn(session, messages) or None
 
-        if self._p._supports_llm_end_session_action(session):
-            system_prompt = system_prompt + "\n\n" + _END_SESSION_TOOL_INSTRUCTIONS
+        end_session_block = (
+            _END_SESSION_TOOL_INSTRUCTIONS
+            if self._p._supports_llm_end_session_action(session)
+            else None
+        )
 
         # Emotional audio tags — driven by the capability registry (single
         # source of truth). Only voices that actually PERFORM bracket tags
@@ -263,8 +269,6 @@ class TurnStreamer:
         # physically stripped in clean_response below. So tags can never leak as
         # spoken words on a non-supporting engine.
         tags_ok = expressive_caps.supports_audio_tags(expressive_caps.model_id_of(self._p))
-        if tags_ok:
-            system_prompt = system_prompt + "\n\n" + ELEVEN_V3_AUDIO_TAGS_INSTRUCTIONS
 
         # Accent-matched fillers: a British voice should say "er"/"erm" and
         # British discourse markers; an American voice "um"/"uh"; etc. Resolved
@@ -277,12 +281,18 @@ class TurnStreamer:
                 session._voice_accent = accent
             except Exception:
                 pass
-        accent_block = accent_filler_block(accent)
-        if accent_block:
-            system_prompt = system_prompt + "\n\n" + accent_block
 
-        if session.captured_slots is not None:
-            system_prompt = compose_system_prompt(system_prompt, session.captured_slots)
+        # Single assembler (prompts folder) owns the block ORDER + the
+        # CAPTURED-facts prepend. turn_streamer only feeds it resolved blocks.
+        system_prompt = build_turn_prompt(
+            session.system_prompt,
+            ask_ai_block=ask_ai_block,
+            knowledge_block=knowledge_block,
+            end_session_block=end_session_block,
+            audio_tags_block=ELEVEN_V3_AUDIO_TAGS_INSTRUCTIONS if tags_ok else None,
+            accent_block=accent_filler_block(accent),
+            captured_slots=session.captured_slots,
+        )
 
         last_user_text_for_limit = next(
             (m.content for m in reversed(messages) if m.role == MessageRole.USER),
