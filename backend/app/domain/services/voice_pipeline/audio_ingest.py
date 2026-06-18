@@ -269,10 +269,10 @@ class AudioIngest:
                     except Exception as _close_exc:
                         logger.debug("[SilenceMonitor] close-on-silence failed: %s", _close_exc)
 
-            # Start silence monitor only for telephony (not Ask AI browser sessions)
-            _silence_task: Optional[asyncio.Task] = None
-            if getattr(session, "campaign_id", "ask-ai") != "ask-ai":
-                _silence_task = asyncio.create_task(_silence_monitor())
+            # Silence monitor runs for ALL voice sessions (telephony + Ask AI).
+            # It only arms after the first AI reply, so the natural silence at the
+            # start of a call never trips it.
+            _silence_task: Optional[asyncio.Task] = asyncio.create_task(_silence_monitor())
 
             try:
                 async for transcript in self._p.stt_provider.stream_transcribe(

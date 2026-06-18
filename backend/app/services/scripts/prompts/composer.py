@@ -40,7 +40,10 @@ from app.services.scripts.prompts.direction import (
     INBOUND_DIRECTIVE_SENTINEL,
     inbound_directive_block,
 )
-from app.services.scripts.prompts.guardrails import GENERIC_GUARDRAILS
+from app.services.scripts.prompts.guardrails import (
+    COMMUNICATION_PRINCIPLES,
+    GENERIC_GUARDRAILS,
+)
 from app.services.scripts.prompts.personas import (
     PERSONA_BODIES,
     PERSONA_OPENINGS,
@@ -356,6 +359,9 @@ def compose_prompt(
         except Exception as exc:  # noqa: BLE001
             logger.debug("voice_metrics_directive_record_failed err=%s", exc)
     parts.append(guardrails_block)
+    # Communication-quality rules (7 C's + Grice) — shared with Ask AI via the
+    # COMMUNICATION_PRINCIPLES constant, placed right after the guardrails.
+    parts.append(COMMUNICATION_PRINCIPLES)
     # Knowledge base is the single source of truth — placed right after the
     # hard guardrails so it outranks any facts the persona body may mention
     # and resolves prompt-vs-knowledge conflicts in the knowledge's favour.
