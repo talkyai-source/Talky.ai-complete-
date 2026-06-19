@@ -72,6 +72,42 @@ def _normalize_trunk(row: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
+_DTMF_MODES = {"rfc2833", "sip-info", "inband", "auto"}
+
+
+def _trunk_runtime_options(trunk: Mapping[str, Any]) -> Dict[str, Any]:
+    """Project a trunk's validated metadata into the per-trunk SIP options the
+    edge (OpenSIPS / FreeSWITCH) needs when bridging a call.
+
+    Defaults mirror the settings UI so the compiled artifact is complete and
+    deterministic even when a tenant only set a subset of the advanced fields.
+    Only meaningful keys are emitted (e.g. ``register_interval`` is omitted
+    when the trunk does not register), keeping the artifact minimal and the
+    source hash stable.
+    """
+    meta = trunk.get("metadata") or {}
+    opts: Dict[str, Any] = {
+        "dtmf_mode": meta["dtmf_mode"] if meta.get("dtmf_mode") in _DTMF_MODES else "rfc2833",
+        "srtp": bool(meta.get("srtp", False)),
+        "register": bool(meta.get("register", False)),
+    }
+    caller_id = meta.get("caller_id")
+    if isinstance(caller_id, str) and caller_id.strip():
+        opts["caller_id"] = caller_id.strip()
+    proxy = meta.get("outbound_proxy")
+    if isinstance(proxy, str) and proxy.strip():
+        opts["outbound_proxy"] = proxy.strip()
+    realm = meta.get("auth_realm")
+    if isinstance(realm, str) and realm.strip():
+        opts["auth_realm"] = realm.strip()
+    if opts["register"]:
+        interval = meta.get("register_interval")
+        opts["register_interval"] = (
+            interval if isinstance(interval, int) and not isinstance(interval, bool) else 3600
+        )
+    return opts
+
+
 def _normalize_codec(row: Mapping[str, Any]) -> Dict[str, Any]:
     allowed = [str(codec).strip().upper() for codec in (row.get("allowed_codecs") or [])]
     return {
@@ -158,11 +194,30 @@ def _render_freeswitch_dialplan_xml(tenant_id: str, routes: List[Dict[str, Any]]
     ]
     for route in routes:
         route_name = f"{route['policy_name']}-{route['id'][:8]}"
+        opts = _trunk_runtime_options(route["target"])
         bridge_target = (
             "sofia/external/${destination_number}@"
             f"{route['target']['sip_domain']}:{route['target']['port']};"
             f"transport={route['target']['transport']}"
         )
+        # Route via the trunk's outbound proxy when configured (fs_path keeps the
+        # request-URI host intact while sending the packet to the proxy).
+        if opts.get("outbound_proxy"):
+            bridge_target += f";fs_path=sip:{opts['outbound_proxy']}"
+
+        pre_bridge_actions: List[str] = []
+        # Caller ID presented to the PBX on outbound calls.
+        if opts.get("caller_id"):
+            pre_bridge_actions.append(
+                "          <action application=\"set\" "
+                f"data=\"effective_caller_id_number={xml_escape(opts['caller_id'])}\"/>"
+            )
+        # SRTP media encryption (standard FreeSWITCH channel variable).
+        if opts.get("srtp"):
+            pre_bridge_actions.append(
+                "          <action application=\"set\" data=\"rtp_secure_media=mandatory\"/>"
+            )
+
         lines.extend(
             [
                 f"      <extension name=\"{xml_escape(route_name)}\">",
@@ -175,6 +230,7 @@ def _render_freeswitch_dialplan_xml(tenant_id: str, routes: List[Dict[str, Any]]
                     "          <action application=\"set\" "
                     f"data=\"talky_route_id={xml_escape(route['id'])}\"/>"
                 ),
+                *pre_bridge_actions,
                 (
                     "          <action application=\"bridge\" "
                     f"data=\"{xml_escape(bridge_target)}\"/>"
@@ -326,6 +382,7 @@ def compile_tenant_runtime_policy(
                 "codec_policy_id": route["codec_policy_id"],
                 "strip_digits": route["strip_digits"],
                 "prepend_digits": route["prepend_digits"],
+                "sip_options": _trunk_runtime_options(route["target"]),
             }
         )
 

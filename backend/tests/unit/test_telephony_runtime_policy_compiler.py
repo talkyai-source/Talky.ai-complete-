@@ -133,6 +133,78 @@ def test_compiler_rejects_route_direction_mismatch():
     assert "trunk_direction_mismatch" in codes
 
 
+def test_compiler_emits_trunk_sip_options_with_defaults():
+    """A trunk with no advanced metadata still yields complete, default
+    sip_options in the dispatcher entry (deterministic artifact)."""
+    trunks, codecs, routes, trust_policies = _sample_snapshot()
+    compiled = compile_tenant_runtime_policy(
+        tenant_id="00000000-0000-0000-0000-000000000001",
+        trunks=trunks,
+        codec_policies=codecs,
+        route_policies=routes,
+        trust_policies=trust_policies,
+    )
+    entry = compiled.artifact["opensips"]["dispatcher"]["sets"]["1"][0]
+    assert entry["sip_options"] == {
+        "dtmf_mode": "rfc2833",
+        "srtp": False,
+        "register": False,
+    }
+
+
+def test_compiler_propagates_trunk_advanced_metadata():
+    """caller_id / DTMF / SRTP / registration / proxy set on the trunk land in
+    both the OpenSIPS dispatcher options and the FreeSWITCH dialplan."""
+    trunks, codecs, routes, trust_policies = _sample_snapshot()
+    trunks[0]["metadata"] = {
+        "caller_id": "+15551230000",
+        "outbound_proxy": "proxy.example.com:5060",
+        "auth_realm": "sip.example.com",
+        "register": True,
+        "register_interval": 1800,
+        "dtmf_mode": "sip-info",
+        "srtp": True,
+    }
+    compiled = compile_tenant_runtime_policy(
+        tenant_id="00000000-0000-0000-0000-000000000001",
+        trunks=trunks,
+        codec_policies=codecs,
+        route_policies=routes,
+        trust_policies=trust_policies,
+    )
+
+    # OpenSIPS dispatcher carries the structured options.
+    opts = compiled.artifact["opensips"]["dispatcher"]["sets"]["1"][0]["sip_options"]
+    assert opts["caller_id"] == "+15551230000"
+    assert opts["outbound_proxy"] == "proxy.example.com:5060"
+    assert opts["auth_realm"] == "sip.example.com"
+    assert opts["register"] is True
+    assert opts["register_interval"] == 1800
+    assert opts["dtmf_mode"] == "sip-info"
+    assert opts["srtp"] is True
+
+    # FreeSWITCH dialplan applies caller ID, SRTP, and proxy routing.
+    xml = compiled.artifact["freeswitch"]["xml_curl"]["dialplan_xml"]
+    assert "effective_caller_id_number=+15551230000" in xml
+    assert "rtp_secure_media=mandatory" in xml
+    assert "fs_path=sip:proxy.example.com:5060" in xml
+
+
+def test_compiler_omits_register_interval_when_not_registering():
+    trunks, codecs, routes, trust_policies = _sample_snapshot()
+    trunks[0]["metadata"] = {"register": False, "register_interval": 1800}
+    compiled = compile_tenant_runtime_policy(
+        tenant_id="00000000-0000-0000-0000-000000000001",
+        trunks=trunks,
+        codec_policies=codecs,
+        route_policies=routes,
+        trust_policies=trust_policies,
+    )
+    opts = compiled.artifact["opensips"]["dispatcher"]["sets"]["1"][0]["sip_options"]
+    assert opts["register"] is False
+    assert "register_interval" not in opts
+
+
 def test_compiler_maps_trust_policies_into_kamailio_permissions():
     trunks, codecs, routes, trust_policies = _sample_snapshot()
     compiled = compile_tenant_runtime_policy(

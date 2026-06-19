@@ -44,6 +44,82 @@ class SIPDirection(str, Enum):
     BOTH = "both"
 
 
+class DTMFMode(str, Enum):
+    RFC2833 = "rfc2833"
+    SIP_INFO = "sip-info"
+    INBAND = "inband"
+    AUTO = "auto"
+
+
+def normalize_trunk_metadata(meta: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Validate + canonicalise the advanced SIP-trunk options carried in the
+    trunk's free-form ``metadata`` JSON.
+
+    These options (caller_id, outbound_proxy, auth_realm, register,
+    register_interval, dtmf_mode, srtp) live in the existing JSONB ``metadata``
+    column — no migration — but we still validate them here so a bad value is
+    a 422 at write time instead of a surprise when the runtime policy is
+    compiled. Keys we don't recognise are preserved untouched so other
+    features can keep using ``metadata`` freely.
+    """
+    if meta is None:
+        return {}
+    if not isinstance(meta, dict):
+        raise ValueError("metadata must be an object")
+
+    out: Dict[str, Any] = dict(meta)
+
+    def _opt_str(key: str, max_len: int) -> None:
+        if key not in out:
+            return
+        val = out[key]
+        if val is None or (isinstance(val, str) and not val.strip()):
+            out.pop(key, None)
+            return
+        if not isinstance(val, str):
+            raise ValueError(f"{key} must be a string")
+        val = val.strip()
+        if len(val) > max_len:
+            raise ValueError(f"{key} must be at most {max_len} characters")
+        out[key] = val
+
+    def _opt_bool(key: str) -> None:
+        if key in out and not isinstance(out[key], bool):
+            raise ValueError(f"{key} must be a boolean")
+
+    # caller_id — number presented as the From on outbound calls.
+    if "caller_id" in out:
+        cid = out["caller_id"]
+        if cid is None or (isinstance(cid, str) and not cid.strip()):
+            out.pop("caller_id", None)
+        else:
+            if not isinstance(cid, str):
+                raise ValueError("caller_id must be a string")
+            cid = cid.strip()
+            if len(cid) > 64:
+                raise ValueError("caller_id must be at most 64 characters")
+            if not re.fullmatch(r"\+?[0-9][0-9\s().\-]{1,}", cid):
+                raise ValueError("caller_id must be a phone number (digits, optional leading +)")
+            out["caller_id"] = cid
+
+    _opt_str("outbound_proxy", 255)
+    _opt_str("auth_realm", 255)
+    _opt_bool("register")
+    _opt_bool("srtp")
+
+    if "dtmf_mode" in out and out["dtmf_mode"] not in {m.value for m in DTMFMode}:
+        raise ValueError("dtmf_mode must be one of: " + ", ".join(m.value for m in DTMFMode))
+
+    if "register_interval" in out:
+        ri = out["register_interval"]
+        if isinstance(ri, bool) or not isinstance(ri, int):
+            raise ValueError("register_interval must be an integer")
+        if ri < 60 or ri > 86400:
+            raise ValueError("register_interval must be between 60 and 86400 seconds")
+
+    return out
+
+
 class SIPRouteType(str, Enum):
     INBOUND = "inbound"
     OUTBOUND = "outbound"
@@ -69,6 +145,11 @@ class SIPTrunkCreateRequest(BaseModel):
             raise ValueError("auth_username and auth_password must both be provided")
         return self
 
+    @model_validator(mode="after")
+    def normalize_metadata(self) -> "SIPTrunkCreateRequest":
+        self.metadata = normalize_trunk_metadata(self.metadata)
+        return self
+
 
 class SIPTrunkUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -82,6 +163,12 @@ class SIPTrunkUpdateRequest(BaseModel):
     auth_password: Optional[str] = Field(default=None, max_length=255)
     clear_auth: bool = False
     metadata: Optional[Dict[str, Any]] = None
+
+    @model_validator(mode="after")
+    def normalize_metadata(self) -> "SIPTrunkUpdateRequest":
+        if self.metadata is not None:
+            self.metadata = normalize_trunk_metadata(self.metadata)
+        return self
 
 
 class SIPTrunkResponse(BaseModel):
