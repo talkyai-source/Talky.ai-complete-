@@ -294,7 +294,9 @@ class TestPrewarmAskAIProviders:
 
         assert len(captured) == 4
         config = captured[0]
-        assert config.stt_eager_eot_threshold is None
+        # Eager EOT is enabled (0.5) for parity with telephony — gives Ask AI the
+        # same ~150-250ms speculative-start head start instead of feeling slower.
+        assert config.stt_eager_eot_threshold == 0.5
         assert config.stt_eot_timeout_ms == 5000
         assert config.mute_during_tts is False
         assert config.llm_max_tokens == 90
