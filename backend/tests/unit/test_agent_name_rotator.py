@@ -50,3 +50,17 @@ def test_validate_pool_rejects_oversized():
 def test_validate_pool_rejects_empty():
     with pytest.raises(ValueError, match="at least one"):
         validate_pool([])
+
+
+def test_seed_makes_pick_deterministic():
+    pool = ["Alex", "Sam", "Jordan"]
+    # Same seed → same name every time (stable across a retried call).
+    first = pick_agent_name(pool, seed="lead-123")
+    for _ in range(50):
+        assert pick_agent_name(pool, seed="lead-123") == first
+
+
+def test_different_seeds_still_spread_across_pool():
+    pool = ["Alex", "Sam", "Jordan"]
+    picks = {pick_agent_name(pool, seed=f"lead-{i}") for i in range(200)}
+    assert picks == set(pool)

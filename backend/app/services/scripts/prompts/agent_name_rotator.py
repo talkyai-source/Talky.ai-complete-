@@ -20,6 +20,8 @@ def pick_agent_name_for_voice(
     pool: Sequence[str],
     genders: Optional[Mapping[str, str]],
     voice_gender: Optional[str],
+    *,
+    seed: Optional[str] = None,
 ) -> str:
     """Pick an agent name whose gender matches the selected voice.
 
@@ -32,14 +34,20 @@ def pick_agent_name_for_voice(
       3. If the voice gender is unknown, fall back to the legacy random pick
          over the whole pool.
 
+    ``seed`` (optional): when given, the pick is DETERMINISTIC for that seed —
+    pass a stable per-call value (e.g. the lead or call id) so a retried or
+    restarted call keeps the same agent name instead of re-rolling. When None,
+    selection is uniformly random as before.
+
     Never raises — on any inconsistency it degrades to a plain pool pick.
     """
+    chooser = random.Random(seed) if seed is not None else random
     vg = (voice_gender or "").strip().lower()
     if vg in ("male", "female"):
         gmap = {str(k).strip().lower(): str(v).strip().lower() for k, v in (genders or {}).items()}
         matching = [n for n in pool if n and gmap.get(str(n).strip().lower()) == vg]
         if matching:
-            return random.choice(matching)
+            return chooser.choice(matching)
         # No matching-gender name configured — use a built-in gendered name.
         try:
             from app.domain.services.global_ai_config import get_random_agent_name
@@ -47,15 +55,19 @@ def pick_agent_name_for_voice(
         except Exception:
             pass
     # Unknown voice gender (or fallback failed) → legacy behaviour.
-    return pick_agent_name(pool)
+    return pick_agent_name(pool, seed=seed)
 
 
-def pick_agent_name(pool: Sequence[str]) -> str:
-    """Return one agent name from the pool, uniformly at random.
+def pick_agent_name(pool: Sequence[str], *, seed: Optional[str] = None) -> str:
+    """Return one agent name from the pool.
 
     The pool is passed through light validation — an empty pool or one
     larger than MAX_POOL_SIZE is a configuration error the campaign
     creation form should have caught.
+
+    ``seed`` (optional): when given, the pick is DETERMINISTIC for that seed
+    (pass a stable per-call value so a retry keeps the same name); when None,
+    the pick is uniformly random as before.
 
     Raises
     ------
@@ -78,7 +90,8 @@ def pick_agent_name(pool: Sequence[str]) -> str:
         if not name:
             raise ValueError("agent-name entry is blank")
         cleaned.append(name)
-    return random.choice(cleaned)
+    chooser = random.Random(seed) if seed is not None else random
+    return chooser.choice(cleaned)
 
 
 def validate_pool(pool: Sequence[str]) -> list[str]:

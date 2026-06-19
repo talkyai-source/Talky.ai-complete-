@@ -80,7 +80,19 @@ async def apply_campaign_knowledge(call_session, campaign_row: Any, *, pool) -> 
             return
 
         if tree and tree.strip():
-            call_session.system_prompt = f"{call_session.system_prompt}\n\n{header}\n{tree}"
+            # The baked-in tree is tenant data, so delimit it (Microsoft
+            # "Spotlighting" / OWASP LLM01) and tell the model it's data, not
+            # instructions — same fence the per-turn retrieve path uses.
+            from app.services.scripts.prompts.prompt_safety import (
+                DATA_ONLY_NOTE,
+                fence_untrusted,
+            )
+            _KB_TAG = "company_knowledge"
+            fenced = fence_untrusted(tree, tag=_KB_TAG)
+            call_session.system_prompt = (
+                f"{call_session.system_prompt}\n\n{header}\n"
+                f"{DATA_ONLY_NOTE(_KB_TAG)}\n{fenced}"
+            )
             logger.info(
                 "campaign_knowledge_injected campaign=%s mode=%s chars=%d",
                 campaign_id[:12], mode, len(tree),

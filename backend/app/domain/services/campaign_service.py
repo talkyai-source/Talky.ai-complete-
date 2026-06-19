@@ -513,8 +513,11 @@ class CampaignService:
         if agent_names_pool:
             try:
                 from app.services.scripts.prompts import pick_agent_name_for_voice
+                # Seed on lead_id so a retried/re-created job for the same lead
+                # keeps the same agent name instead of re-rolling.
                 agent_name = pick_agent_name_for_voice(
                     agent_names_pool, agent_name_genders, voice_gender,
+                    seed=lead_id,
                 )
             except Exception as exc:
                 logger.warning(

@@ -340,7 +340,17 @@ class LLMGuardrails:
         # which makes "1." / "2." look like sentence endings and truncates
         # package answers incorrectly. Strip those inline list markers here.
         cleaned = re.sub(r'(?:(?<=\s)|^)\d+[.)]\s+(?=[A-Za-z])', '', cleaned)
-        
+
+        # Output-side safety net (OWASP LLM02 — treat model output as untrusted):
+        # a disobedient or jailbroken model must never speak the technical
+        # disclosure the prompt forbids (model/vendor names, system prompt,
+        # infra). Redact the offending sentence(s) before TTS. The honest
+        # "I'm an AI assistant for {company}" admission is intentionally allowed.
+        from app.services.scripts.prompts.prompt_safety import scan_output_for_leakage
+        leaked, cleaned = scan_output_for_leakage(cleaned)
+        if leaked:
+            logger.warning("Redacted technical disclosure from agent reply before TTS")
+
         return cleaned
 
     @staticmethod

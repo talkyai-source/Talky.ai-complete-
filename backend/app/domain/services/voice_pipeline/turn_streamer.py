@@ -141,17 +141,23 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
             [h.get("heading") for h in hits],
         )
 
-        lines = [
-            "## Company knowledge — official answers (authoritative)",
-            "Use the facts below to answer the caller. Speak naturally and "
-            "conversationally, but stay faithful to this information — it is the "
-            "official company answer. Do not contradict it or invent details "
-            "beyond it:",
-        ]
+        # Retrieved knowledge is tenant/3rd-party data, not a trusted authored
+        # prompt, so it is delimited (Microsoft "Spotlighting") and each node is
+        # run through the content-integrity scan (OWASP LLM01) before it enters
+        # the context window.
+        from app.services.scripts.prompts.prompt_safety import (
+            DATA_ONLY_NOTE,
+            fence_untrusted,
+            scan_for_injection,
+        )
+
+        _KB_TAG = "company_knowledge"
         # Budget the block: prefer the concise voice_answer, trim each node, and
         # stop once the total budget is hit. Keeps the per-turn prompt small so
         # the LLM answers fast instead of stalling on a 10k-token dump.
+        entries: list[str] = []
         used = 0
+        dropped_injection = 0
         for h in hits:
             # voice_answer is authored for speech (short); summary next; only
             # fall back to full content if neither exists, and trim hard.
@@ -159,12 +165,32 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
             body = _trim_kb_body(raw, _KB_CHUNK_CHARS)
             if not body:
                 continue
-            entry = f"- {h['heading']}: {body}"
+            heading = h.get("heading") or ""
+            # Drop a retrieved node that is shaped like an instruction to the
+            # model (poisoned KB entry) rather than ordinary knowledge.
+            if scan_for_injection(f"{heading} {body}"):
+                dropped_injection += 1
+                continue
+            entry = f"- {heading}: {body}"
             if used + len(entry) > _KB_TOTAL_CHARS and used > 0:
                 break  # budget reached — drop the rest (already ranked best-first)
-            lines.append(entry)
+            entries.append(entry)
             used += len(entry)
-        return "\n".join(lines) if len(lines) > 2 else ""
+        if dropped_injection:
+            logger.warning(
+                "KB_DEBUG call=%s dropped %d knowledge node(s) flagged as injection",
+                session.call_id[:8], dropped_injection,
+            )
+        if not entries:
+            return ""
+        fenced = fence_untrusted("\n".join(entries), tag=_KB_TAG)
+        return (
+            "COMPANY KNOWLEDGE — official answers for this caller's question.\n"
+            + DATA_ONLY_NOTE(_KB_TAG)
+            + "\nAnswer naturally and stay faithful to it; don't invent details "
+            "beyond it.\n"
+            + fenced
+        )
     except Exception as exc:
         logger.warning("KB_DEBUG call=%s error: %s", getattr(session, "call_id", "?")[:8], exc)
         return ""
