@@ -64,6 +64,8 @@ def test_knowledge_block_respects_total_budget(monkeypatch):
 
     # The whole block must stay near the budget, NOT ~100k chars of raw dump.
     assert len(block) <= ts._KB_TOTAL_CHARS + 600   # header + a little slack
-    assert "Company knowledge" in block
+    assert "company knowledge" in block.lower()
+    # Untrusted KB is delimited (Spotlighting fence) — guard against regression.
+    assert "<company_knowledge>" in block and "</company_knowledge>" in block
     # Each injected fact is trimmed (ellipsis present on the huge bodies).
     assert "…" in block

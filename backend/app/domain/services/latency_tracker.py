@@ -357,6 +357,21 @@ class LatencyTracker:
             }
         )
 
+        # Mirror per-component latencies to Prometheus so operators can alert on
+        # TTFT vs TTS-first-chunk separately (not just the total). Fail-soft;
+        # local import keeps the tracker usable without the metric registry.
+        try:
+            from app.infrastructure.metrics.voice_metrics import (
+                observe_llm_ttft_seconds,
+                observe_tts_first_chunk_seconds,
+            )
+            if metrics.llm_first_token_ms is not None:
+                observe_llm_ttft_seconds(metrics.llm_first_token_ms / 1000.0)
+            if metrics.tts_first_chunk_ms is not None:
+                observe_tts_first_chunk_seconds(metrics.tts_first_chunk_ms / 1000.0)
+        except Exception as exc:  # noqa: BLE001 — metrics must never break a call
+            logger.debug("voice_component_metrics_observe_failed err=%s", exc)
+
     def log_first_turn_if_applicable(
         self,
         call_id: str,

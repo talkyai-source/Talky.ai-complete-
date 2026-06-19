@@ -132,7 +132,11 @@ def build_ask_ai_session_config() -> VoiceSessionConfig:
         stt_sample_rate=16000,
         stt_encoding="linear16",
         stt_eot_threshold=0.7,
-        stt_eager_eot_threshold=None,
+        # Eager EOT enables a speculative LLM start ~150–250ms before the final
+        # end-of-turn — telephony already runs this; the web demo had it off
+        # (config drift), making the demo feel slower than the real phone agent.
+        # 0.5 matches the telephony default.
+        stt_eager_eot_threshold=0.5,
         stt_eot_timeout_ms=5000,
         llm_model=ASK_AI_CONFIG["llm_model"],
         llm_temperature=ASK_AI_CONFIG["llm_temperature"],

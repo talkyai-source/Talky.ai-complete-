@@ -79,6 +79,7 @@ from app.domain.services.voice_pipeline.kb_budget import (  # noqa: E402
     _KB_TOTAL_CHARS,
     _KNOWLEDGE_RETRIEVE_TIMEOUT_S,
     _trim_kb_body,
+    should_retrieve_knowledge,
 )
 
 
@@ -96,6 +97,11 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
         user_msgs = [m.content for m in reversed(messages) if m.role == MessageRole.USER]
         last_user = user_msgs[0] if user_msgs else ""
         if not last_user.strip():
+            return ""
+        # Intent gate: a bare "okay"/"yeah" doesn't need a KB lookup, and the
+        # query latency would land before first token. Skip those turns so the
+        # agent replies instantly; real questions still retrieve.
+        if not should_retrieve_knowledge(last_user):
             return ""
         query = last_user
         if len(user_msgs) > 1 and user_msgs[1].strip():

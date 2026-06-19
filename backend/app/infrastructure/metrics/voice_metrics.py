@@ -86,6 +86,21 @@ _turn_latency = _histogram(
     labelnames=("mode", "prompt_kind", "persona"),
 )
 
+# Per-component splits of the turn budget. The total-latency alert can't tell a
+# slow LLM from slow TTS — these let operators alert on the right component
+# (e.g. histogram_quantile(0.95, voice_llm_ttft_seconds) > 0.6).
+_llm_ttft = _histogram(
+    "voice_llm_ttft_seconds",
+    "LLM time-to-first-token (LLM start → first streamed token), per turn.",
+    labelnames=(),
+)
+
+_tts_first_chunk = _histogram(
+    "voice_tts_first_chunk_seconds",
+    "TTS time-to-first-chunk (TTS start → first audio chunk), per turn.",
+    labelnames=(),
+)
+
 _turn_0_rejections = _counter(
     "voice_turn_0_rejection_total",
     "Turn-0 transcripts dropped by the T2.4 floor (too short / "
@@ -181,6 +196,20 @@ def observe_turn_latency_seconds(
         prompt_kind=_prompt_kind_label(prompt_kind),
         persona=_persona_label(persona),
     ).observe(seconds)
+
+
+def observe_llm_ttft_seconds(seconds: float) -> None:
+    """Record one turn's LLM time-to-first-token (seconds)."""
+    if seconds is None or seconds < 0:
+        return
+    _llm_ttft.observe(seconds)
+
+
+def observe_tts_first_chunk_seconds(seconds: float) -> None:
+    """Record one turn's TTS time-to-first-chunk (seconds)."""
+    if seconds is None or seconds < 0:
+        return
+    _tts_first_chunk.observe(seconds)
 
 
 def record_turn_0_rejection(reason: str) -> None:

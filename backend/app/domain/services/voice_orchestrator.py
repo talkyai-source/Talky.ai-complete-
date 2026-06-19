@@ -207,7 +207,12 @@ class VoiceSessionConfig:
     gateway_input_sample_rate: Optional[int] = None
     gateway_channels: int = 1
     gateway_bit_depth: int = 16
-    gateway_target_buffer_ms: int = 100
+    # Coalescing buffer before audio is flushed to the gateway. 100ms is a
+    # conservative floor; Vonage telephony runs 40ms cleanly. Env-overridable so
+    # ops can lower it on the box and watch voice_turn_latency_seconds without a
+    # redeploy. (The deeper root fix is an adaptive jitter-aware buffer — do that
+    # on the server where audio smoothness can actually be validated.)
+    gateway_target_buffer_ms: int = int(os.getenv("VOICE_GATEWAY_TARGET_BUFFER_MS", "100"))
     mute_during_tts: bool = True
 
     # Session metadata
