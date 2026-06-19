@@ -19,6 +19,8 @@ import {
     CheckCircle2,
     XCircle,
     AlertCircle,
+    ChevronDown,
+    ChevronUp,
 } from "lucide-react";
 import {
     useSipTrunks,
@@ -33,7 +35,38 @@ import {
 } from "@/lib/telephony-api";
 import { notificationsStore } from "@/lib/notifications";
 
-const EMPTY_FORM: SipTrunkInput = {
+type DtmfMode = "rfc2833" | "sip-info" | "inband" | "auto";
+
+/**
+ * Form state for the Add/Edit trunk modal.
+ *
+ * The first seven fields map 1:1 to top-level columns the backend accepts
+ * (`SIPTrunkCreateRequest`, which is `extra="forbid"`). Everything below
+ * `caller_id` is persisted inside the trunk's free-form `metadata` JSON —
+ * the backend stores/returns it verbatim, so these are added without any
+ * schema migration. Codec selection and dial-prefix/strip-digits are
+ * deliberately NOT here: the backend models those as separate CodecPolicy
+ * and RoutePolicy resources.
+ */
+interface TrunkForm {
+    trunk_name: string;
+    sip_domain: string;
+    port: number;
+    transport: "udp" | "tcp" | "tls";
+    direction: "inbound" | "outbound" | "both";
+    auth_username: string;
+    auth_password: string;
+    // --- advanced (persisted in trunk.metadata) ---
+    caller_id: string;
+    outbound_proxy: string;
+    auth_realm: string;
+    register: boolean;
+    register_interval: number;
+    dtmf_mode: DtmfMode;
+    srtp: boolean;
+}
+
+const EMPTY_FORM: TrunkForm = {
     trunk_name: "",
     sip_domain: "",
     port: 5060,
@@ -41,7 +74,55 @@ const EMPTY_FORM: SipTrunkInput = {
     direction: "both",
     auth_username: "",
     auth_password: "",
+    caller_id: "",
+    outbound_proxy: "",
+    auth_realm: "",
+    register: false,
+    register_interval: 3600,
+    dtmf_mode: "rfc2833",
+    srtp: false,
 };
+
+const DTMF_MODES: DtmfMode[] = ["rfc2833", "sip-info", "inband", "auto"];
+
+/** Pull the metadata-backed fields off an existing trunk row into form shape. */
+function metaToForm(meta: Record<string, unknown>): Pick<
+    TrunkForm,
+    "caller_id" | "outbound_proxy" | "auth_realm" | "register" | "register_interval" | "dtmf_mode" | "srtp"
+> {
+    const str = (v: unknown) => (typeof v === "string" ? v : "");
+    return {
+        caller_id: str(meta.caller_id),
+        outbound_proxy: str(meta.outbound_proxy),
+        auth_realm: str(meta.auth_realm),
+        register: typeof meta.register === "boolean" ? meta.register : false,
+        register_interval: typeof meta.register_interval === "number" ? meta.register_interval : 3600,
+        dtmf_mode: DTMF_MODES.includes(meta.dtmf_mode as DtmfMode) ? (meta.dtmf_mode as DtmfMode) : "rfc2833",
+        srtp: typeof meta.srtp === "boolean" ? meta.srtp : false,
+    };
+}
+
+/**
+ * Build the metadata payload from the form, merged over the row's existing
+ * metadata so keys this UI doesn't own (set elsewhere) are preserved.
+ * Empty optional strings are removed rather than written as "".
+ */
+function formToMeta(form: TrunkForm, base: Record<string, unknown>): Record<string, unknown> {
+    const meta: Record<string, unknown> = { ...base };
+    const setOrDel = (key: string, val: string) => {
+        const t = val.trim();
+        if (t) meta[key] = t;
+        else delete meta[key];
+    };
+    setOrDel("caller_id", form.caller_id);
+    setOrDel("outbound_proxy", form.outbound_proxy);
+    setOrDel("auth_realm", form.auth_realm);
+    meta.register = form.register;
+    meta.register_interval = form.register_interval;
+    meta.dtmf_mode = form.dtmf_mode;
+    meta.srtp = form.srtp;
+    return meta;
+}
 
 type ModalMode = "create" | "edit";
 
@@ -86,10 +167,14 @@ export function SipTrunksList() {
     const [isOpen, setIsOpen] = useState(false);
     const [mode, setMode] = useState<ModalMode>("create");
     const [editingId, setEditingId] = useState<string | null>(null);
-    const [form, setForm] = useState<SipTrunkInput>(EMPTY_FORM);
+    const [form, setForm] = useState<TrunkForm>(EMPTY_FORM);
     const [formError, setFormError] = useState<string | null>(null);
     const [clearAuth, setClearAuth] = useState(false);
     const [testingId, setTestingId] = useState<string | null>(null);
+    const [showAdvanced, setShowAdvanced] = useState(false);
+    // Existing metadata of the row being edited, so we preserve keys this
+    // form doesn't own when we PATCH.
+    const [baseMeta, setBaseMeta] = useState<Record<string, unknown>>({});
 
     const trunks: SipTrunkRow[] = trunksQuery.data ?? [];
 
@@ -97,14 +182,18 @@ export function SipTrunksList() {
         setMode("create");
         setEditingId(null);
         setForm(EMPTY_FORM);
+        setBaseMeta({});
         setFormError(null);
         setClearAuth(false);
+        setShowAdvanced(false);
         setIsOpen(true);
     }
 
     function openEdit(t: SipTrunkRow) {
         setMode("edit");
         setEditingId(t.id);
+        const meta = t.metadata ?? {};
+        const advanced = metaToForm(meta);
         setForm({
             trunk_name: t.trunk_name,
             sip_domain: t.sip_domain,
@@ -113,9 +202,15 @@ export function SipTrunksList() {
             direction: t.direction,
             auth_username: t.auth_username || "",
             auth_password: "", // never returned from backend; user must re-enter to overwrite
+            ...advanced,
         });
+        setBaseMeta(meta);
         setFormError(null);
         setClearAuth(false);
+        // Auto-expand Advanced if this trunk already has any advanced values set.
+        setShowAdvanced(
+            Boolean(advanced.caller_id || advanced.outbound_proxy || advanced.auth_realm || advanced.register || advanced.srtp),
+        );
         setIsOpen(true);
     }
 
@@ -129,10 +224,23 @@ export function SipTrunksList() {
             setFormError("Port must be between 1 and 65535.");
             return;
         }
+        if (form.register && (form.register_interval < 60 || form.register_interval > 86400)) {
+            setFormError("Register interval must be between 60 and 86400 seconds.");
+            return;
+        }
 
         try {
             if (mode === "create") {
-                const payload: SipTrunkInput = { ...form };
+                const payload: SipTrunkInput = {
+                    trunk_name: form.trunk_name,
+                    sip_domain: form.sip_domain,
+                    port: form.port,
+                    transport: form.transport,
+                    direction: form.direction,
+                    auth_username: form.auth_username,
+                    auth_password: form.auth_password,
+                    metadata: formToMeta(form, {}),
+                };
                 if (!payload.auth_username && !payload.auth_password) {
                     delete payload.auth_username;
                     delete payload.auth_password;
@@ -154,6 +262,7 @@ export function SipTrunksList() {
                     port: form.port,
                     transport: form.transport,
                     direction: form.direction,
+                    metadata: formToMeta(form, baseMeta),
                 };
                 if (clearAuth) {
                     patch.clear_auth = true;
@@ -250,8 +359,10 @@ export function SipTrunksList() {
                             <ServerCog className="h-5 w-5" aria-hidden /> Local PBX / SIP Trunks
                         </CardTitle>
                         <CardDescription>
-                            Point Talky at your own Asterisk / FreeSWITCH / Kamailio trunk. Run <strong>Test</strong> to
-                            verify reachability — activation is blocked until at least one successful test.
+                            Point Talky at your own Asterisk / FreeSWITCH / Kamailio trunk. Set a caller ID and tune
+                            DTMF, registration, proxy and SRTP under <strong>Advanced options</strong>. Run{" "}
+                            <strong>Test</strong> to verify reachability — activation is blocked until at least one
+                            successful test.
                         </CardDescription>
                     </div>
                     <Button onClick={openCreate} size="sm">
@@ -285,7 +396,14 @@ export function SipTrunksList() {
                             <tbody>
                                 {trunks.map((t) => (
                                     <tr key={t.id} className="border-b border-border last:border-b-0">
-                                        <td className="px-4 py-3 font-semibold text-foreground">{t.trunk_name}</td>
+                                        <td className="px-4 py-3 font-semibold text-foreground">
+                                            {t.trunk_name}
+                                            {typeof t.metadata?.caller_id === "string" && t.metadata.caller_id ? (
+                                                <div className="text-[10px] font-normal text-muted-foreground">
+                                                    CID {t.metadata.caller_id as string}
+                                                </div>
+                                            ) : null}
+                                        </td>
                                         <td className="px-4 py-3 text-muted-foreground font-mono text-xs">
                                             {t.transport.toUpperCase()}://{t.sip_domain}:{t.port}
                                         </td>
@@ -370,6 +488,7 @@ export function SipTrunksList() {
                     if (!next) {
                         setFormError(null);
                         setClearAuth(false);
+                        setShowAdvanced(false);
                     }
                 }}
                 title={mode === "create" ? "Add SIP trunk" : "Edit SIP trunk"}
@@ -480,6 +599,117 @@ export function SipTrunksList() {
                             </div>
                         </div>
                     )}
+
+                    <div>
+                        <Label htmlFor="caller_id">Caller ID / From number</Label>
+                        <Input
+                            id="caller_id"
+                            value={form.caller_id}
+                            onChange={(e) => setForm({ ...form, caller_id: e.target.value })}
+                            placeholder="+15551234567"
+                        />
+                        <p className="mt-1 text-xs text-muted-foreground">
+                            Number presented on outbound calls. Many PBXs reject calls with no valid caller ID.
+                        </p>
+                    </div>
+
+                    <div className="border-t border-border pt-2">
+                        <button
+                            type="button"
+                            onClick={() => setShowAdvanced((s) => !s)}
+                            className="flex w-full items-center justify-between text-sm font-medium text-foreground"
+                            aria-expanded={showAdvanced}
+                        >
+                            <span>Advanced options</span>
+                            {showAdvanced ? (
+                                <ChevronUp className="h-4 w-4" aria-hidden />
+                            ) : (
+                                <ChevronDown className="h-4 w-4" aria-hidden />
+                            )}
+                        </button>
+                    </div>
+
+                    {showAdvanced && (
+                        <div className="space-y-3 rounded-md border border-border bg-muted/20 p-3">
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <Label htmlFor="outbound_proxy">Outbound proxy</Label>
+                                    <Input
+                                        id="outbound_proxy"
+                                        value={form.outbound_proxy}
+                                        onChange={(e) => setForm({ ...form, outbound_proxy: e.target.value })}
+                                        placeholder="proxy.example.com:5060"
+                                    />
+                                </div>
+                                <div>
+                                    <Label htmlFor="auth_realm">Auth ID / realm</Label>
+                                    <Input
+                                        id="auth_realm"
+                                        value={form.auth_realm}
+                                        onChange={(e) => setForm({ ...form, auth_realm: e.target.value })}
+                                        placeholder="(if different from username)"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <Label htmlFor="dtmf_mode">DTMF mode</Label>
+                                    <Select
+                                        ariaLabel="DTMF mode"
+                                        value={form.dtmf_mode}
+                                        onChange={(next) => setForm({ ...form, dtmf_mode: next as DtmfMode })}
+                                    >
+                                        <option value="rfc2833">RFC 2833 (recommended)</option>
+                                        <option value="sip-info">SIP INFO</option>
+                                        <option value="inband">In-band</option>
+                                        <option value="auto">Auto</option>
+                                    </Select>
+                                </div>
+                                <div>
+                                    <Label htmlFor="register_interval">
+                                        Register interval (s)
+                                    </Label>
+                                    <Input
+                                        id="register_interval"
+                                        type="number"
+                                        value={form.register_interval}
+                                        disabled={!form.register}
+                                        onChange={(e) =>
+                                            setForm({ ...form, register_interval: Number(e.target.value) || 3600 })
+                                        }
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                                <input
+                                    id="register"
+                                    type="checkbox"
+                                    checked={form.register}
+                                    onChange={(e) => setForm({ ...form, register: e.target.checked })}
+                                    className="h-4 w-4"
+                                />
+                                <Label htmlFor="register" className="cursor-pointer">
+                                    Register with the PBX (leave off for IP-based trunks)
+                                </Label>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                                <input
+                                    id="srtp"
+                                    type="checkbox"
+                                    checked={form.srtp}
+                                    onChange={(e) => setForm({ ...form, srtp: e.target.checked })}
+                                    className="h-4 w-4"
+                                />
+                                <Label htmlFor="srtp" className="cursor-pointer">
+                                    Enable SRTP media encryption (typically with TLS transport)
+                                </Label>
+                            </div>
+                        </div>
+                    )}
+
                     <div className="flex justify-end gap-2 pt-2">
                         <Button variant="outline" onClick={() => setIsOpen(false)} disabled={createMutation.isPending || updateMutation.isPending}>
                             Cancel
