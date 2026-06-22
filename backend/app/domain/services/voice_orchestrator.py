@@ -909,6 +909,16 @@ class VoiceOrchestrator:
         "gemini": "GEMINI_API_KEY",
     }
 
+    # Default secondary model per provider for LLM_FAILOVER_ENABLED. Same-vendor
+    # different-model by default (mirrors the STT secondary choice): a Groq stall
+    # is usually model / rate-limit specific, and llama-3.1-8b-instant is the
+    # fastest Groq model — a clean low-latency fallback. Operators can point the
+    # secondary at another vendor (LLM_SECONDARY_PROVIDER=gemini) for true vendor
+    # isolation, or override the model with LLM_SECONDARY_MODEL.
+    _LLM_DEFAULT_SECONDARY_MODEL = {
+        "groq": "llama-3.1-8b-instant",
+    }
+
     # Map TTS primary provider name → secondary provider config tuple
     # (provider_name, env_var). Used by T1.3 failover wiring. Keep small
     # and explicit; operators override per-deploy via env.
@@ -956,7 +966,96 @@ class VoiceOrchestrator:
         if config.llm_thinking_budget is not None:
             init_config["thinking_budget"] = config.llm_thinking_budget
         await provider.initialize(init_config)
-        return provider
+
+        # T1.3 follow-on — first-token deadline + secondary-provider failover.
+        # Opt-in; with the flag off (or no distinct secondary) the bare primary
+        # is returned, so behaviour is byte-for-byte unchanged.
+        if not _failover_enabled("LLM_FAILOVER_ENABLED"):
+            return provider
+
+        secondary = await self._build_secondary_llm_provider(
+            config, primary_provider_type=provider_type,
+        )
+        if secondary is None:
+            return provider
+
+        from app.domain.services.resilient_llm import (
+            LLMFailoverPolicy,
+            ResilientLLMProvider,
+        )
+        deadline_ms = float(os.getenv("LLM_FIRST_TOKEN_DEADLINE_MS", "2500"))
+        wrapper = ResilientLLMProvider(
+            primary=provider,
+            secondary=secondary,
+            policy=LLMFailoverPolicy(
+                first_token_deadline_seconds=max(0.3, deadline_ms / 1000.0),
+            ),
+        )
+        logger.info(
+            "llm_resilient_wrapper_active primary=%s/%s secondary=%s deadline_ms=%.0f",
+            provider_type, config.llm_model, secondary.name, deadline_ms,
+        )
+        return wrapper
+
+    async def _build_secondary_llm_provider(
+        self, config: VoiceSessionConfig, *, primary_provider_type: str
+    ):
+        """Build + initialise the secondary LLM for ``LLM_FAILOVER_ENABLED``.
+
+        Returns ``None`` (failover silently disabled) when no distinct secondary
+        is configured or it can't initialise — never breaks the primary path.
+        Secondary selection: ``LLM_SECONDARY_PROVIDER`` (default = primary's
+        provider) + ``LLM_SECONDARY_MODEL`` (default per ``_LLM_DEFAULT_SECONDARY_MODEL``).
+        """
+        sec_provider = (
+            os.getenv("LLM_SECONDARY_PROVIDER") or primary_provider_type
+        ).strip()
+        sec_model = (
+            os.getenv("LLM_SECONDARY_MODEL")
+            or self._LLM_DEFAULT_SECONDARY_MODEL.get(sec_provider)
+        )
+        if not sec_model:
+            logger.warning(
+                "llm_secondary_no_model provider=%s — set LLM_SECONDARY_MODEL "
+                "to enable failover", sec_provider,
+            )
+            return None
+        if sec_provider == primary_provider_type and sec_model == config.llm_model:
+            logger.info(
+                "llm_secondary_same_as_primary model=%s — skipping (no benefit)",
+                sec_model,
+            )
+            return None
+
+        try:
+            from app.infrastructure.llm.factory import LLMFactory
+            from app.domain.services.credential_resolver import (
+                get_credential_resolver,
+            )
+
+            api_key = await get_credential_resolver().resolve(
+                sec_provider,
+                tenant_id=config.tenant_id,
+                env_var=self._LLM_API_KEY_ENV.get(sec_provider),
+            )
+            secondary = LLMFactory.create(sec_provider, config={})
+            sec_init: dict = {
+                "api_key": api_key,
+                "model": sec_model,
+                "temperature": config.llm_temperature,
+                "max_tokens": config.llm_max_tokens,
+            }
+            if config.llm_thinking_budget is not None:
+                sec_init["thinking_budget"] = config.llm_thinking_budget
+            await secondary.initialize(sec_init)
+            return secondary
+        except Exception as exc:
+            logger.warning(
+                "llm_secondary_init_failed provider=%s model=%s err=%s — "
+                "failover disabled for this session",
+                sec_provider, sec_model, exc,
+            )
+            return None
 
     async def _create_tts_provider(self, config: VoiceSessionConfig):
         """Initialise and return the TTS provider.

@@ -124,6 +124,39 @@ class TurnEnder:
         _has_prior_user_turn = any(
             m.role == MessageRole.USER for m in session.conversation_history
         )
+
+        # Interruption lifecycle (gap #2). If the caller cut off ACTIVE agent
+        # speech (flagged by tts_playback when it silenced the agent), classify
+        # what they did and record it. Pure observability — the suppress / echo
+        # decisions below are unchanged. A "false" interruption (we stopped
+        # speaking for a backchannel / noise) is the signal operators alert on
+        # that the barge-in guard is too eager.
+        if getattr(session, "_agent_was_interrupted", False):
+            session._agent_was_interrupted = False  # consume per-turn
+            try:
+                from app.services.scripts.interruption_classifier import (
+                    classify_interruption,
+                    is_false_interruption,
+                    InterruptionType,
+                )
+                from app.infrastructure.metrics.voice_metrics import (
+                    record_interruption,
+                )
+
+                _itype = classify_interruption(full_transcript)
+                record_interruption(
+                    _itype.value, false_interrupt=is_false_interruption(_itype),
+                )
+                if _itype == InterruptionType.ESCALATION:
+                    # Surface so the top-interrupted-calls review (Hamming) and
+                    # any future human-handoff can find these fast.
+                    logger.info(
+                        "interruption_escalation transcript=%r call=%s",
+                        full_transcript[:80], call_id[:12],
+                    )
+            except Exception as exc:  # metrics must never break a turn
+                logger.debug("interruption_classify_failed err=%s", exc)
+
         if _is_backchannel(full_transcript) and _has_prior_user_turn:
             logger.info(
                 "backchannel_suppressed transcript=%r call=%s",

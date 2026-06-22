@@ -135,6 +135,11 @@ class AudioIngest:
             def _on_barge_in_direct() -> None:
                 event = self._p._barge_in_events.get(call_id)
                 if event:
+                    # Stamp the moment of the barge-in signal so tts_playback can
+                    # measure how fast we actually silence the caller (target
+                    # <60ms). Overwrite (not first-wins) so a never-consumed
+                    # stamp from an earlier turn can't skew a later measurement.
+                    session._barge_in_set_monotonic = time.monotonic()
                     event.set()
                 current_metrics = self._p.latency_tracker.get_metrics(call_id)
                 if not current_metrics or current_metrics.turn_id != session.turn_id:

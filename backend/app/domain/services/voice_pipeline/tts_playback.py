@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Optional
 
 from fastapi import WebSocket
@@ -39,6 +40,27 @@ class TtsPlayback:
         # runtime reconfiguration) patch those attributes after construction —
         # snapshotting them here would silently ignore such changes.
         self._p = pipeline
+
+    def _record_barge_in_stop(self, session: CallSession) -> None:
+        """Observe how long after the barge-in signal we actually silenced the
+        caller (output-buffer clear). Called only at active-speech stop points;
+        always resets the per-fire stamp so it can't bleed into a later turn.
+
+        Also flags that the agent's speech WAS interrupted this turn, so
+        turn_ender can classify the interrupting utterance and record whether
+        the stop was warranted (interruption-quality metrics, gap #2)."""
+        session._agent_was_interrupted = True
+        t0 = getattr(session, "_barge_in_set_monotonic", None)
+        session._barge_in_set_monotonic = None
+        if t0 is None:
+            return
+        try:
+            from app.infrastructure.metrics.voice_metrics import (
+                observe_barge_in_stop_ms,
+            )
+            observe_barge_in_stop_ms((time.monotonic() - t0) * 1000.0)
+        except Exception:  # metrics must never break playback
+            pass
 
     async def synthesize_and_send(
         self,
@@ -77,6 +99,9 @@ class TtsPlayback:
                     await self._p.media_gateway.clear_output_buffer(call_id)
                 except Exception as _e:
                     logger.debug("barge_in_clear_buffer_failed call_id=%s: %s", call_id[:8], _e)
+                # Barge-in landed before this sentence started speaking — not an
+                # active-speech stop, so drop the stamp without recording it.
+                session._barge_in_set_monotonic = None
                 if websocket:
                     try:
                         await websocket.send_json({"type": "tts_interrupted", "reason": "barge_in"})
@@ -171,6 +196,9 @@ class TtsPlayback:
                         await self._p.media_gateway.clear_output_buffer(call_id)
                     except Exception as _exc:
                         logger.debug("clear_output_buffer mid-TTS failed: %s", _exc)
+                    # Caller interrupted active speech — measure how fast we went
+                    # silent (target <60ms).
+                    self._record_barge_in_stop(session)
                     # Tell the browser to stop playing immediately — don't wait for
                     # handle_barge_in to do it after handle_turn_end completes.
                     if websocket:
@@ -234,6 +262,7 @@ class TtsPlayback:
                         await self._p.media_gateway.clear_output_buffer(call_id)
                     except Exception as _exc:
                         logger.debug("clear_output_buffer post-send failed: %s", _exc)
+                    self._record_barge_in_stop(session)
                     if websocket:
                         try:
                             await websocket.send_json({"type": "tts_interrupted", "reason": "barge_in"})

@@ -57,6 +57,16 @@ def _histogram(name: str, doc: str, labelnames: tuple[str, ...]) -> Histogram:
     return Histogram(name, doc, labelnames=labelnames, buckets=_LATENCY_BUCKETS_S)
 
 
+def _histogram_buckets(
+    name: str, doc: str, labelnames: tuple[str, ...], buckets: tuple[float, ...]
+) -> Histogram:
+    """Histogram with caller-chosen buckets (for metrics whose scale differs
+    from the per-turn latency buckets — e.g. barge-in stop time in ms)."""
+    if (existing := _existing(name)) is not None:
+        return existing  # type: ignore[return-value]
+    return Histogram(name, doc, labelnames=labelnames, buckets=buckets)
+
+
 def _counter(name: str, doc: str, labelnames: tuple[str, ...]) -> Counter:
     if (existing := _existing(name)) is not None:
         return existing  # type: ignore[return-value]
@@ -101,6 +111,22 @@ _tts_first_chunk = _histogram(
     labelnames=(),
 )
 
+# Barge-in responsiveness, in MILLISECONDS (not the seconds latency buckets —
+# this is a tens-of-ms signal). 2026 best practice: TTS must go silent within
+# ~60ms of the caller interrupting, or the agent feels like it ignored them.
+_BARGE_IN_STOP_BUCKETS_MS: tuple[float, ...] = (
+    10.0, 25.0, 50.0, 60.0, 100.0, 200.0, 400.0, 800.0,
+)
+_barge_in_stop_ms = _histogram_buckets(
+    "voice_barge_in_stop_ms",
+    "Time from barge-in detection to the caller's audio actually being "
+    "silenced (output buffer cleared) while the agent was speaking. Target "
+    "<60ms; the p95 climbing past that means the agent talks over callers "
+    "after they interrupt.",
+    labelnames=(),
+    buckets=_BARGE_IN_STOP_BUCKETS_MS,
+)
+
 _turn_0_rejections = _counter(
     "voice_turn_0_rejection_total",
     "Turn-0 transcripts dropped by the T2.4 floor (too short / "
@@ -140,6 +166,27 @@ _p95_latency_alert = _counter(
     "Transitions of the rolling-P95 latency alert. state=firing when "
     "P95 crosses the alert threshold; state=cleared when it recovers.",
     labelnames=("state",),
+)
+
+_interruption = _counter(
+    "voice_interruption_total",
+    "Caller interruptions of ACTIVE agent speech, by classified type "
+    "(backchannel/correction/question/escalation/dtmf/noise/statement) and "
+    "whether the interruption was 'false' — the agent was stopped for a "
+    "backchannel/noise that didn't need a stop. A rising false_interrupt=true "
+    "share means the barge-in guard is too eager; escalation>0 means callers "
+    "are asking for a human mid-call.",
+    labelnames=("type", "false_interrupt"),
+)
+
+_llm_failover = _counter(
+    "voice_llm_failover_total",
+    "LLM first-token failover events on the voice path. outcome="
+    "primary_missed (primary missed the first-token deadline → secondary "
+    "took the turn), primary_circuit_open (primary skipped, breaker open → "
+    "secondary), secondary_missed (secondary also missed → fallback line "
+    "spoken). A non-zero rate means the primary LLM is stalling first tokens.",
+    labelnames=("outcome",),
 )
 
 
@@ -212,6 +259,14 @@ def observe_tts_first_chunk_seconds(seconds: float) -> None:
     _tts_first_chunk.observe(seconds)
 
 
+def observe_barge_in_stop_ms(ms: float) -> None:
+    """Record how long after a barge-in the agent's audio was silenced (ms).
+    Only meaningful while the agent was actively speaking."""
+    if ms is None or ms < 0:
+        return
+    _barge_in_stop_ms.observe(ms)
+
+
 def record_turn_0_rejection(reason: str) -> None:
     """Increment the turn-0 rejection counter. ``reason`` is the small
     set returned by ``_should_reject_turn_0``: ``"too_short"`` or
@@ -255,3 +310,30 @@ def record_p95_alert(state: str) -> None:
     """Count a rolling-P95 alert transition. ``state`` ∈ {firing, cleared}."""
     safe = state if state in ("firing", "cleared") else "unknown"
     _p95_latency_alert.labels(state=safe).inc()
+
+
+_INTERRUPTION_TYPES = (
+    "backchannel", "correction", "question", "escalation",
+    "dtmf", "noise", "statement",
+)
+
+
+def record_interruption(itype: str, *, false_interrupt: bool) -> None:
+    """Count one interruption of active agent speech. ``itype`` is an
+    ``InterruptionType`` value; unknown values coerce to ``"other"`` to keep
+    the label set bounded. ``false_interrupt`` flags backchannel/noise stops."""
+    safe_type = itype if itype in _INTERRUPTION_TYPES else "other"
+    _interruption.labels(
+        type=safe_type,
+        false_interrupt="true" if false_interrupt else "false",
+    ).inc()
+
+
+def record_llm_failover(outcome: str) -> None:
+    """Count an LLM first-token failover event. ``outcome`` ∈
+    {primary_missed, primary_circuit_open, secondary_missed}; anything else
+    is coerced to ``"other"`` to keep the label set bounded."""
+    safe = outcome if outcome in (
+        "primary_missed", "primary_circuit_open", "secondary_missed",
+    ) else "other"
+    _llm_failover.labels(outcome=safe).inc()
