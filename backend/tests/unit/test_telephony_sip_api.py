@@ -203,6 +203,10 @@ class FakeTelephonyConn:
                 "updated_at": now,
                 "created_by": created_by,
                 "updated_by": created_by,
+                # Connectivity-probe state (real schema default = NULL). The
+                # activation gate reads these; a trunk starts unverified.
+                "last_tested_at": None,
+                "last_test_result": None,
             }
             self.trunks[trunk_id] = row
             return row
@@ -486,6 +490,18 @@ class FakeTelephonyConn:
             )
             return policy
 
+        if normalized.startswith("SELECT last_tested_at, last_test_result"):
+            # Activation gate: refuse to flip a trunk live until a probe proved
+            # the host reachable. WHERE id = $1 AND tenant_id = $2.
+            trunk_id, tenant_id = args
+            trunk = self.trunks.get(str(trunk_id))
+            if not trunk or trunk["tenant_id"] != tenant_id:
+                return None
+            return {
+                "last_tested_at": trunk.get("last_tested_at"),
+                "last_test_result": trunk.get("last_test_result"),
+            }
+
         raise AssertionError(f"Unexpected fetchrow query: {normalized}")
 
     async def execute(self, query: str, *args):
@@ -754,6 +770,11 @@ async def test_activate_and_deactivate_trunk(wsf_context):
     )
     trunk_id = _json_body(created)["id"]
 
+    # Activation gate: a trunk only goes live after a successful connectivity
+    # probe. Simulate one having passed (real flow: POST /trunks/{id}/test).
+    _conn.trunks[trunk_id]["last_test_result"] = {"ok": True}
+    _conn.trunks[trunk_id]["last_tested_at"] = datetime.now(timezone.utc)
+
     active = await activate_sip_trunk(
         trunk_id=trunk_id,
         request=_make_request(f"/api/v1/telephony/sip/trunks/{trunk_id}/activate"),
@@ -771,6 +792,34 @@ async def test_activate_and_deactivate_trunk(wsf_context):
         db_pool=pool,
     )
     assert inactive.is_active is False
+
+
+@pytest.mark.asyncio
+async def test_activate_blocked_until_successful_test(wsf_context):
+    """The activation gate refuses to flip a trunk live until a connectivity
+    probe has proven the host reachable (last_test_result.ok == true)."""
+    _conn, pool, user = wsf_context
+    created = await create_sip_trunk(
+        payload=_create_payload("unverified-trunk"),
+        request=_make_request("/api/v1/telephony/sip/trunks"),
+        idempotency_key="k-unverified-create",
+        current_user=user,
+        db_pool=pool,
+    )
+    trunk_id = _json_body(created)["id"]
+
+    # No successful test recorded → activation must be refused with a 400.
+    blocked = await activate_sip_trunk(
+        trunk_id=trunk_id,
+        request=_make_request(f"/api/v1/telephony/sip/trunks/{trunk_id}/activate"),
+        idempotency_key="k-unverified-activate",
+        current_user=user,
+        db_pool=pool,
+    )
+    assert blocked.status_code == 400
+    assert _json_body(blocked)["title"] == "Activation Blocked"
+    # And the trunk stayed inactive.
+    assert _conn.trunks[trunk_id]["is_active"] is False
 
 
 @pytest.mark.asyncio
