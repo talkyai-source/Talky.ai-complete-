@@ -28,6 +28,7 @@ from typing import Optional
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
+from app.core.security.telephony_webhook_auth import verify_vonage_signature
 from app.domain.models.voice_contract import map_vonage_status
 
 logger = logging.getLogger(__name__)
@@ -90,6 +91,9 @@ async def vonage_answer(request: Request):
     Returns an NCCO that connects the call audio to our WebSocket endpoint.
     This is the official pattern per Vonage Voice API documentation.
     """
+    if not verify_vonage_signature(authorization=request.headers.get("Authorization")):
+        logger.warning("vonage_answer rejected: bad signature")
+        return JSONResponse(content={"error": "unauthorized"}, status_code=403)
     body = await request.json()
     call_uuid = body.get("uuid", body.get("conversation_uuid", "unknown"))
     from_number = body.get("from", "unknown")
@@ -137,6 +141,9 @@ async def vonage_event(request: Request):
     Maps Vonage-specific statuses to the canonical VoiceCallState via
     ``map_vonage_status()``.
     """
+    if not verify_vonage_signature(authorization=request.headers.get("Authorization")):
+        logger.warning("vonage_event rejected: bad signature")
+        return JSONResponse(content={"error": "unauthorized"}, status_code=403)
     body = await request.json()
     call_uuid = body.get("uuid", "")
     status = body.get("status", "")

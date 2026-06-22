@@ -50,6 +50,7 @@ from app.api.v1.endpoints.tenant_ai_credentials import (
 )
 from app.api.v1.endpoints.tenant_phone_numbers import router as tenant_phone_numbers_router
 from app.api.v1.endpoints.vonage_bridge import router as vonage_bridge_router
+from app.api.v1.endpoints.twilio_bridge import router as twilio_bridge_router
 from app.api.v1.endpoints.webhooks import router as webhooks_router
 from app.api.v1.endpoints.webhooks_secure import router as webhooks_secure_router
 
@@ -85,6 +86,7 @@ api_router.include_router(ask_ai_ws_router)
 api_router.include_router(ai_options_router)
 api_router.include_router(telephony_bridge_router)
 api_router.include_router(vonage_bridge_router)
+api_router.include_router(twilio_bridge_router)
 api_router.include_router(telephony_sip_router)
 api_router.include_router(telephony_providers_router)
 api_router.include_router(telephony_runtime_router)

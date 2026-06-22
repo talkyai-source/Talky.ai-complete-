@@ -282,3 +282,30 @@ def map_vonage_status(vonage_status: str) -> Optional[VoiceCallState]:
     return _MAP.get(vonage_status)
 
 
+def map_twilio_status(twilio_status: str) -> Optional[VoiceCallState]:
+    """
+    Map raw Twilio call-status strings to ``VoiceCallState``.
+
+    Used by the Twilio webhook bridge to normalise provider-specific statuses
+    into the canonical state machine. Returns ``None`` for informational
+    statuses that do not require processing.
+
+    Twilio statuses: queued, initiated, ringing, in-progress, completed,
+    busy, failed, no-answer, canceled.
+    """
+    _MAP = {
+        "queued":       VoiceCallState.INITIATED,
+        "initiated":    VoiceCallState.INITIATED,
+        "ringing":      VoiceCallState.RINGING,
+        "in-progress":  VoiceCallState.ANSWERED,
+        "answered":     VoiceCallState.ANSWERED,
+        "completed":    VoiceCallState.COMPLETED,
+        "busy":         VoiceCallState.BUSY,
+        "failed":       VoiceCallState.FAILED,
+        "no-answer":    VoiceCallState.NO_ANSWER,
+        "canceled":     VoiceCallState.FAILED,
+        "cancelled":    VoiceCallState.FAILED,
+    }
+    return _MAP.get((twilio_status or "").strip().lower())
+
+

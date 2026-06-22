@@ -40,10 +40,13 @@ class MediaGatewayFactory:
         elif gateway_type == "telephony":
             from app.infrastructure.telephony.telephony_media_gateway import TelephonyMediaGateway
             gateway = TelephonyMediaGateway()
+        elif gateway_type == "twilio":
+            from app.infrastructure.telephony.twilio_media_gateway import TwilioMediaGateway
+            gateway = TwilioMediaGateway()
         else:
             raise ValueError(
                 f"Unknown media gateway type: {gateway_type}. "
-                f"Available: browser, telephony"
+                f"Available: browser, telephony, twilio"
             )
 
         return gateway
@@ -51,4 +54,4 @@ class MediaGatewayFactory:
     @classmethod
     def list_gateways(cls) -> list[str]:
         """List available media gateway types"""
-        return ["browser", "telephony"]
+        return ["browser", "telephony", "twilio"]
