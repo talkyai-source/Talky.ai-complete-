@@ -104,3 +104,10 @@ test-output/
 *.bak
 *.orig
 .vercel
+
+# local SSH keys / one-off helpers (never commit secrets)
+id_rsa.ppk
+id_rsa_openssh
+id_rsa
+*.ppk
+convert_ppk.py
