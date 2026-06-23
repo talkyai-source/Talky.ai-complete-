@@ -101,8 +101,15 @@ class ResilientLLMProvider(LLMProvider):
             failure_threshold=self._policy.failure_threshold,
             recovery_timeout=self._policy.recovery_timeout_seconds,
             success_threshold=self._policy.success_threshold,
-            # A secondary's own timeout must not trip the PRIMARY breaker.
-            excluded_exceptions={LLMTimeoutError},
+            # No excluded_exceptions (audit #7): the PRIMARY runs under this
+            # breaker, so a primary first-token timeout (LLMTimeoutError /
+            # asyncio.TimeoutError) MUST count — otherwise the breaker never
+            # opens and EVERY turn keeps paying the full first-token deadline
+            # before failing over (the exact outage the breaker exists to spare
+            # callers). The SECONDARY runs with use_breaker=False, so its own
+            # timeouts can never reach this breaker. Control-flow exceptions
+            # (CancelledError / GeneratorExit) remain excluded inside
+            # CircuitBreaker itself (_CONTROL_FLOW_EXC).
         )
 
     @property

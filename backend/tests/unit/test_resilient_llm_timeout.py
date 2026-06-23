@@ -169,3 +169,21 @@ async def test_failover_outcomes_are_recorded(monkeypatch):
     r = ResilientLLMProvider(primary, secondary, policy=_fast_policy())
     await _drain(r)
     assert "primary_missed" in seen
+
+
+@pytest.mark.asyncio
+async def test_primary_llm_timeout_opens_breaker():
+    # audit #7: a primary that raises LLMTimeoutError (its own wall-clock stall —
+    # the common real-world degradation) MUST count toward the breaker. Before the
+    # fix LLMTimeoutError sat in the breaker's excluded set, so the breaker never
+    # opened and every turn kept paying the full first-token deadline before
+    # failing over. failure_threshold=2 → after 2 such misses the breaker is OPEN
+    # and the primary body is skipped entirely on the next turn.
+    primary = _TimeoutStub("groq", raise_before_first=LLMTimeoutError("primary stalled"))
+    secondary = _TimeoutStub("backup", tokens=["x"])
+    r = ResilientLLMProvider(primary, secondary, policy=_fast_policy(failure_threshold=2))
+    for _ in range(2):
+        assert await _drain(r) == ["x"]
+    calls_before = primary.calls
+    assert await _drain(r) == ["x"]       # 3rd turn served by secondary
+    assert primary.calls == calls_before  # breaker open → primary body never ran
