@@ -141,6 +141,14 @@ class AudioIngest:
                     # stamp from an earlier turn can't skew a later measurement.
                     session._barge_in_set_monotonic = time.monotonic()
                     event.set()
+                    # P1 (audit #13): stamp the turn-epoch this barge-in targets,
+                    # mirroring handle_barge_in. Without it the epoch kept a STALE
+                    # value from a previous turn's handle_barge_in, so the streamer's
+                    # _barged() could compare a freshly-set event against an old
+                    # epoch and wrongly SUPPRESS a genuine interruption — i.e. the
+                    # agent keeps talking over the caller. Single writer for both
+                    # the event and the epoch closes the race.
+                    self._p._barge_in_epoch[call_id] = getattr(session, "_current_turn_epoch", 0)
                 current_metrics = self._p.latency_tracker.get_metrics(call_id)
                 if not current_metrics or current_metrics.turn_id != session.turn_id:
                     self._p.latency_tracker.start_turn(call_id, session.turn_id)
