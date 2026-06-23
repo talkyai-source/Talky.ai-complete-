@@ -171,6 +171,31 @@ from app.domain.services.telephony.lifecycle import (  # noqa: E402
 # REST endpoints
 # ---------------------------------------------------------------------------
 
+def ensure_session_management_started() -> None:
+    """Arm the session inactivity watchdog + pod-capacity readiness wiring.
+
+    Idempotent. Must be called by EVERY path that brings telephony up — both
+    the REST ``/start`` endpoint and the boot-time auto-connect in the
+    ``main.py`` lifespan. Previously this logic lived only inside
+    ``start_telephony``, so a normal systemd deploy (which boots via the
+    lifespan, not the REST endpoint) left the pod-capacity drain gate and the
+    zombie-session watchdog permanently disarmed. (audit #9)
+    """
+    global _watchdog_task
+    # GAP 5 — session inactivity watchdog (also does zombie reconcile,
+    # ringing-warmup GC, global-concurrency lease refresh, dead-pod recovery).
+    if _watchdog_task is None or _watchdog_task.done():
+        _watchdog_task = asyncio.create_task(_session_watchdog())
+        logger.info("telephony_watchdog: started (inactivity=%ds)", _SESSION_INACTIVITY_TIMEOUT_S)
+    # Phase 1.4 — wire pod capacity into the readiness probe so the k8s/LB
+    # readiness gate can drain a saturated pod without touching internals.
+    from app.core import readiness as _readiness
+    _readiness.set_capacity_providers(
+        active_count=lambda: get_state_backend().voice_session_count(),
+        max_capacity=lambda: _MAX_TELEPHONY_SESSIONS,
+    )
+
+
 @router.post("/start")
 async def start_telephony(
     adapter_type: str = Query(
@@ -219,19 +244,9 @@ async def start_telephony(
 
         await _adapter.connect()
 
-        # GAP 5 — Start session inactivity watchdog (cancels itself on stop).
-        if _watchdog_task is None or _watchdog_task.done():
-            _watchdog_task = asyncio.create_task(_session_watchdog())
-            logger.info("telephony_watchdog: started (inactivity=%ds)", _SESSION_INACTIVITY_TIMEOUT_S)
-
-        # Phase 1.4 — wire pod capacity into the readiness probe so the
-        # k8s/LB readiness gate can drain a saturated pod without
-        # touching telephony internals.
-        from app.core import readiness as _readiness
-        _readiness.set_capacity_providers(
-            active_count=lambda: get_state_backend().voice_session_count(),
-            max_capacity=lambda: _MAX_TELEPHONY_SESSIONS,
-        )
+        # Arm the inactivity watchdog + pod-capacity readiness wiring
+        # (idempotent; now shared with the boot-time auto-connect path).
+        ensure_session_management_started()
 
         return JSONResponse({
             "status": "connected",

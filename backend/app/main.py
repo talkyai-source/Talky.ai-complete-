@@ -351,6 +351,11 @@ async def lifespan(app: FastAPI):
                 logger.info(f"Telephony bridge auto-connected: {_tb._adapter.name}")
             else:
                 logger.info("Telephony bridge already connected — skipping auto-connect")
+            # Arm the inactivity watchdog + pod-capacity readiness wiring.
+            # Without this, a normal lifespan boot left the capacity gate and
+            # the zombie-session watchdog disarmed — only a manual POST to
+            # /sip/telephony/start turned them on. (audit #9)
+            _tb.ensure_session_management_started()
         except Exception as e:
             logger.warning(f"Telephony bridge auto-connect failed (non-fatal): {e}")
 
