@@ -14,7 +14,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, field_validator
 
-from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool
+from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool, require_admin
 from app.domain.services.credential_resolver import env_var_for_provider
 from app.infrastructure.connectors.encryption import get_encryption_service
 
@@ -108,7 +108,7 @@ async def list_credentials(
 @router.post("/", response_model=CredentialResponse, status_code=201)
 async def create_credential(
     payload: CredentialCreateRequest,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin),  # audit #16: tenant-admin only
     db_pool: asyncpg.Pool = Depends(get_db_pool),
 ) -> CredentialResponse:
     """Register (or rotate) a tenant's API key for a provider.
@@ -163,7 +163,7 @@ async def create_credential(
 @router.delete("/{credential_id}", status_code=204, response_class=Response)
 async def disable_credential(
     credential_id: str,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin),  # audit #16: tenant-admin only
     db_pool: asyncpg.Pool = Depends(get_db_pool),
 ):
     """Disable a credential. Row kept for audit; resolver ignores

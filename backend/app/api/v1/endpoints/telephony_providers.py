@@ -19,7 +19,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool
+from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool, require_admin
 from app.infrastructure.connectors.encryption import get_encryption_service
 
 logger = logging.getLogger(__name__)
@@ -187,7 +187,7 @@ async def list_providers(
 async def save_provider(
     provider: str,
     body: ProviderSaveRequest,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin),  # audit #16: tenant-admin only
     db_pool=Depends(get_db_pool),
 ):
     """
@@ -243,7 +243,7 @@ async def save_provider(
 @router.delete("/{provider}")
 async def delete_provider(
     provider: str,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin),  # audit #16: tenant-admin only
     db_pool=Depends(get_db_pool),
 ):
     """
@@ -281,7 +281,7 @@ async def delete_provider(
 @router.post("/{provider}/test", response_model=TestResult)
 async def test_provider(
     provider: str,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin),  # audit #16: tenant-admin only
     db_pool=Depends(get_db_pool),
 ):
     """
@@ -378,7 +378,7 @@ async def test_provider(
 @router.post("/activate")
 async def activate_provider(
     body: ProviderActivateRequest,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin),  # audit #16: tenant-admin only
     db_pool=Depends(get_db_pool),
 ):
     """
