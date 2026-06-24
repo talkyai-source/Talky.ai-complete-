@@ -27,6 +27,7 @@ and both layers light up automatically.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Any
 
 # Model ids (lowercased) whose engine actually PERFORMS inline bracket audio
@@ -90,3 +91,65 @@ def strip_stage_directions(text: str) -> str:
     text = _STAGE_ASTERISK_RE.sub("", text)
     text = _STAGE_PAREN_RE.sub("", text)
     return text
+
+
+# ── Per-provider expressive profiles ────────────────────────────────────────
+# The old binary model ("eleven_v3 = tags, everything else = strip ALL") threw
+# away every other engine's NATIVE expressiveness. This makes it per-provider:
+# each engine keeps ONLY the inline cues it actually performs, default-deny on
+# everything else, so a cue can never be read aloud on an engine that can't do it.
+
+@dataclass(frozen=True)
+class ExpressiveProfile:
+    name: str
+    allow_all_tags: bool                        # True → keep every [bracket] tag
+    allowed_tag_words: frozenset = frozenset()  # specific [word …] tags to KEEP
+
+
+# eleven_v3 — the only ElevenLabs model that performs the full inline tag surface.
+_PROFILE_ELEVEN_V3 = ExpressiveProfile("eleven_v3", allow_all_tags=True)
+
+# Cartesia sonic-* — performs [laughter] inline (its one inline non-verbal).
+# Emotion is an OUT-OF-BAND API field (generation_config), not inline, so emotion
+# words stay stripped here (out-of-band emotion routing is a separate adapter job).
+_PROFILE_CARTESIA = ExpressiveProfile(
+    "cartesia", allow_all_tags=False,
+    allowed_tag_words=frozenset({"laughter", "laugh", "laughs"}),
+)
+
+# Default — Deepgram Aura, ElevenLabs flash/turbo, Google Chirp, unknown: perform
+# NO inline bracket tags → strip all (they would be read aloud otherwise).
+_PROFILE_NONE = ExpressiveProfile("none", allow_all_tags=False)
+
+
+def expressive_profile(model_id: Any) -> ExpressiveProfile:
+    """Map a TTS model id to its expressive profile (default-deny)."""
+    m = str(model_id or "").strip().lower()
+    if m in _AUDIO_TAG_MODELS:          # {"eleven_v3"}
+        return _PROFILE_ELEVEN_V3
+    if m.startswith("sonic"):           # cartesia sonic / sonic-2 / sonic-3
+        return _PROFILE_CARTESIA
+    return _PROFILE_NONE
+
+
+def strip_unsupported_audio_tags(text: str, model_id: Any) -> str:
+    """Strip bracket audio tags the live engine can't perform, keeping ONLY the
+    ones it does (default-deny). eleven_v3 keeps all; cartesia keeps [laughter];
+    every other engine keeps none. A kept tag gets performed; a stripped one can
+    never be read aloud. Plain-word fillers (um/hmm/ah) are never bracketed, so
+    they are always left untouched."""
+    if not text or "[" not in text:
+        return text
+    profile = expressive_profile(model_id)
+    if profile.allow_all_tags:
+        return text
+    if not profile.allowed_tag_words:
+        return AUDIO_TAG_RE.sub("", text)
+    allowed = profile.allowed_tag_words
+
+    def _keep(m: "re.Match[str]") -> str:
+        inner = m.group(0)[1:-1].strip().lower()
+        first = inner.split()[0] if inner else ""
+        return m.group(0) if first in allowed else ""
+
+    return AUDIO_TAG_RE.sub(_keep, text)

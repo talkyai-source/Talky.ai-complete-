@@ -37,7 +37,10 @@ from app.domain.services.end_session_action import (
 )
 from app.domain.services.llm_guardrails import get_guardrails
 from app.domain.services.voice_pipeline import expressive_caps
-from app.services.scripts.prompts.guardrails import ELEVEN_V3_AUDIO_TAGS_INSTRUCTIONS
+from app.services.scripts.prompts.guardrails import (
+    ELEVEN_V3_AUDIO_TAGS_INSTRUCTIONS,
+    CARTESIA_LAUGHTER_INSTRUCTIONS,
+)
 from app.services.scripts.prompts.accent_fillers import (
     resolve_accent,
     accent_filler_block,
@@ -301,7 +304,8 @@ class TurnStreamer:
         # voice both (a) isn't instructed to use them and (b) has any stray tag
         # physically stripped in clean_response below. So tags can never leak as
         # spoken words on a non-supporting engine.
-        tags_ok = expressive_caps.supports_audio_tags(expressive_caps.model_id_of(self._p))
+        _tts_model_id = expressive_caps.model_id_of(self._p)
+        _expr_profile = expressive_caps.expressive_profile(_tts_model_id)
 
         # Accent-matched fillers: a British voice should say "er"/"erm" and
         # British discourse markers; an American voice "um"/"uh"; etc. Resolved
@@ -334,7 +338,11 @@ class TurnStreamer:
             ask_ai_block=ask_ai_block,
             knowledge_block=knowledge_block,
             end_session_block=end_session_block,
-            audio_tags_block=ELEVEN_V3_AUDIO_TAGS_INSTRUCTIONS if tags_ok else None,
+            audio_tags_block=(
+                ELEVEN_V3_AUDIO_TAGS_INSTRUCTIONS if _expr_profile.name == "eleven_v3"
+                else CARTESIA_LAUGHTER_INSTRUCTIONS if _expr_profile.name == "cartesia"
+                else None
+            ),
             accent_block=accent_filler_block(accent),
             captured_slots=session.captured_slots,
         )
@@ -487,7 +495,7 @@ class TurnStreamer:
                     if idx < 0:
                         break
 
-                    sentence = guardrails.clean_response(buf[:idx + 1].strip(), preserve_audio_tags=tags_ok)
+                    sentence = guardrails.clean_response(buf[:idx + 1].strip(), tts_model_id=_tts_model_id)
                     buf = buf[idx + 2:] if idx + 2 <= len(buf) else ""
 
                     if not sentence or len(sentence) < 6:
@@ -565,7 +573,7 @@ class TurnStreamer:
         if not ask_ai_end_action and not tts_was_interrupted and buf.strip():
             if not _barged():
                 if not max_sentences or sentences_done < max_sentences:
-                    sentence = guardrails.clean_response(buf.strip(), preserve_audio_tags=tags_ok)
+                    sentence = guardrails.clean_response(buf.strip(), tts_model_id=_tts_model_id)
                     if sentence:
                         await _settle_filler()
                         if t_tts_first is None:
@@ -621,7 +629,7 @@ class TurnStreamer:
         if ask_ai_end_action:
             full_text = raw_response_text.strip()
         else:
-            full_text = guardrails.clean_response(raw_response_text, preserve_audio_tags=tags_ok)
+            full_text = guardrails.clean_response(raw_response_text, tts_model_id=_tts_model_id)
 
         if not ask_ai_end_action and max_sentences and full_text:
             parts = re.split(r'(?<=[.!?])\s+', full_text.strip())

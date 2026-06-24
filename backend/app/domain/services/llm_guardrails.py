@@ -246,7 +246,7 @@ class LLMGuardrails:
         
         return True, None
     
-    def clean_response(self, response: str, *, preserve_audio_tags: bool = False) -> str:
+    def clean_response(self, response: str, *, preserve_audio_tags: bool = False, tts_model_id=None) -> str:
         """
         Clean LLM response by removing common artifacts.
 
@@ -282,7 +282,7 @@ class LLMGuardrails:
         # prompt also gates them, but a disobedient LLM must never leak a tag as
         # spoken text on a non-supporting engine (Cartesia/Google/Deepgram/flash).
         from app.domain.services.voice_pipeline.expressive_caps import (
-            strip_audio_tags, strip_stage_directions,
+            strip_audio_tags, strip_stage_directions, strip_unsupported_audio_tags,
         )
         # Always remove *asterisk*/(paren)-wrapped stage directions ("*laughs*",
         # "(sighs)") — wrong format on every engine, and the markdown pass below
@@ -294,8 +294,12 @@ class LLMGuardrails:
         # code "(077)" survive; word-containing parens are never meant to be
         # spoken on a voice call.
         cleaned = re.sub(r'\([^)]*[A-Za-z]{3,}[^)]*\)', ' ', cleaned)
-        # Bracket audio tags ([laughs]) stay only for tag-capable voices.
-        if not preserve_audio_tags:
+        # Bracket audio tags ([laughs]) — keep only the ones the LIVE engine
+        # performs (per-provider, default-deny). tts_model_id is the precise path;
+        # preserve_audio_tags is the legacy binary fallback for callers without it.
+        if tts_model_id is not None:
+            cleaned = strip_unsupported_audio_tags(cleaned, tts_model_id)
+        elif not preserve_audio_tags:
             cleaned = strip_audio_tags(cleaned)
         cleaned = re.sub(r'```[\s\S]*?```', ' ', cleaned)
         cleaned = re.sub(r'`([^`]+)`', r'\1', cleaned)
