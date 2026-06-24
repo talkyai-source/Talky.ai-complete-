@@ -195,6 +195,30 @@ class VoicePipelineService:
             self.__dict__["_turn_ender_inst"] = inst
         return inst
 
+    async def _cancel_turn_task(self, task: asyncio.Task, call_id: str, label: str) -> None:
+        """Cancel an in-flight turn task and wait BRIEFLY for it to unwind —
+        WITHOUT ever freezing the single STT consumer loop.
+
+        A cancelled turn parked in a TTS send can take 100s of ms to fully
+        unwind; awaiting it unboundedly on the consumer (the old behaviour) let
+        rapid back-to-back barge-ins pile up and every queued turn got dropped →
+        ~20-30s of dead air (the multi-barge-in silence bug). We wait at most
+        BARGE_IN_CANCEL_WAIT_S; if the task is slower it finishes in the
+        background (shielded) while the consumer stays responsive."""
+        if not task.done():
+            task.cancel()
+        timeout = float(os.getenv("BARGE_IN_CANCEL_WAIT_S", "0.25"))
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(self._await_task_after_cancel(task, call_id, label)),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.info(
+                "barge_in_cancel_slow call=%s label=%s — detached, consumer not blocked",
+                call_id[:12], label,
+            )
+
     async def _await_task_after_cancel(self, task: asyncio.Task, call_id: str, label: str) -> None:
         try:
             await task
@@ -468,13 +492,20 @@ class VoicePipelineService:
         session: CallSession,
         websocket: Optional[WebSocket] = None,
         source: str = "final",
+        user_text: Optional[str] = None,
     ) -> None:
         """Run the end-of-turn LLM+TTS cycle.
 
         Implementation extracted to voice_pipeline.turn_ender (item 2,
         slice 8). Kept as a method so transcript dispatch can schedule it.
+
+        ``user_text`` carries the transcript captured at SCHEDULE time so a
+        concurrent barge-in resetting session.current_user_input can't strand
+        this turn (the dropped-turn half of the silence bug).
         """
-        return await self._turn_ender.handle(session, websocket, source)
+        return await self._turn_ender.handle(
+            session, websocket, source, user_text=user_text
+        )
 
     # ── Barge-in ──────────────────────────────────────────────────
 
@@ -529,9 +560,11 @@ class VoicePipelineService:
         # playing was already protected by the early-return guard above.
         cancelled_task = self._pending_llm_tasks.pop(call_id, None)
         if cancelled_task:
-            if not cancelled_task.done():
-                cancelled_task.cancel()
-            await self._await_task_after_cancel(cancelled_task, call_id, "barge_in_llm")
+            # Bounded, NON-blocking cancel: never freeze the single STT consumer
+            # waiting for the cancelled turn to unwind. Unbounded awaiting here let
+            # rapid barge-ins pile up and dropped every backlogged turn → seconds
+            # of dead air (multi-barge-in silence bug). Detaches if the task is slow.
+            await self._cancel_turn_task(cancelled_task, call_id, "barge_in_llm")
             # asyncio cancellation is cooperative — the task's finally block
             # (which resets llm_active) may not have run yet. Clear it now so a
             # follow-up EndOfTurn is not skipped by turn_ender's llm_active

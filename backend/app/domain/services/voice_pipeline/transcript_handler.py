@@ -59,9 +59,9 @@ class TranscriptHandler:
             session.llm_active = False
             if call_id in self._p._pending_llm_tasks:
                 task = self._p._pending_llm_tasks.pop(call_id)
-                if not task.done():
-                    task.cancel()
-                await self._p._await_task_after_cancel(task, call_id, "speculative_llm")
+                # Bounded, non-blocking cancel (see _cancel_turn_task) so the
+                # consumer keeps draining events instead of freezing here.
+                await self._p._cancel_turn_task(task, call_id, "speculative_llm")
             # Roll back any messages the speculative handle_turn_end appended
             # before being cancelled.  Without this, orphaned user/assistant
             # messages corrupt the conversation context for subsequent turns.
@@ -161,8 +161,15 @@ class TranscriptHandler:
                 )
                 return
             session._speculative_history_len = len(session.conversation_history)
+            # Capture the transcript NOW and carry it into the turn. A barge-in
+            # can reset session.current_user_input to "" before this task reads
+            # it, which would strand the turn ("Empty transcript, skipping") and
+            # drop the caller's words — the dropped-turn half of the silence bug.
+            _user_text = session.current_user_input
             task = asyncio.create_task(
-                self._p.handle_turn_end(session, websocket, source="final")
+                self._p.handle_turn_end(
+                    session, websocket, source="final", user_text=_user_text
+                )
             )
             # Tag: a FINAL task answers a confirmed, completed utterance. It is
             # protected — a bare StartOfTurn must never cancel it (only an
@@ -186,7 +193,10 @@ class TranscriptHandler:
                 # the handle_transcript "resumed" branch above (session.llm_active=False
                 # + task.cancel()).
                 task = asyncio.create_task(
-                    self._p.handle_turn_end(session, websocket, source="speculative")
+                    self._p.handle_turn_end(
+                        session, websocket, source="speculative",
+                        user_text=transcript.text,
+                    )
                 )
                 # Tag: a SPECULATIVE task is tentative (the user may keep
                 # talking). It is cancellable by TurnResumed or a barge-in.

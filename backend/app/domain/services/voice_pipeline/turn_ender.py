@@ -43,9 +43,18 @@ class TurnEnder:
         session: CallSession,
         websocket: Optional[WebSocket] = None,
         source: str = "final",
+        user_text: Optional[str] = None,
     ) -> None:
         call_id = session.call_id
-        full_transcript = session.current_user_input.strip()
+        # Prefer the transcript captured at SCHEDULE time. A barge-in can reset
+        # session.current_user_input to "" before this (detached) task reads it,
+        # which would strand the turn as "Empty transcript, skipping" and
+        # silently drop the caller's utterance. Carrying the text makes the turn
+        # immune to that reset. Falls back to the session field for callers that
+        # don't pass it.
+        full_transcript = (
+            user_text if user_text is not None else session.current_user_input
+        ).strip()
         tenant_id = getattr(session, "tenant_id", None)
 
         if not full_transcript:
@@ -474,11 +483,22 @@ class TurnEnder:
                     pass
             finally:
                 pending_task = self._p._pending_llm_tasks.get(call_id)
+                # Does THIS task still own the call's turn slot? If a newer turn
+                # has already claimed it (this task was cancelled by a barge-in
+                # and superseded), we must NOT touch the shared turn state below —
+                # clobbering the new turn's llm_active / snapshot / counter is how
+                # a just-started turn gets dropped or double-run.
+                _owns_slot = (
+                    pending_task is None
+                    or pending_task is current_task
+                    or pending_task.done()
+                )
                 if pending_task is current_task or (pending_task and pending_task.done()):
                     self._p._pending_llm_tasks.pop(call_id, None)
-                session.llm_active = False
-                # Clear speculative snapshot — turn completed normally so
-                # the messages it appended are valid and must not be rolled back.
-                session._speculative_history_len = None
-                session.increment_turn()
+                if _owns_slot:
+                    session.llm_active = False
+                    # Clear speculative snapshot — turn completed normally so
+                    # the messages it appended are valid and must not be rolled back.
+                    session._speculative_history_len = None
+                    session.increment_turn()
 
