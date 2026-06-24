@@ -25,12 +25,20 @@ def test_captures_email_once():
     assert st.email == "john@gmail.com"
 
 
-def test_captures_spoken_email():
+def test_captures_single_token_spoken_email():
+    st = CallState()
+    st = update_state_from_user_turn(st, "bob at gmail dot com")
+    assert st.email == "bob@gmail.com"
+
+
+def test_multiword_spoken_email_deferred_to_llm():
+    # Hybrid (2026-06-24): a multi-word spoken local is NOT regex-joined here; the
+    # LLM assembles + reads it back, so the deterministic tracker leaves it unset.
     st = CallState()
     st = update_state_from_user_turn(
         st, "all state estimation at the rate gmail dot com"
     )
-    assert st.email == "allstateestimation@gmail.com"
+    assert st.email is None
 
 
 def test_does_not_overwrite_previously_captured_email_with_garbage():
@@ -70,8 +78,10 @@ def test_decline_increments():
 
 
 def test_2026_04_22_regression_sequence():
-    """Replays the real call's user turns in order; email must be captured
-    by turn 4 and NEVER lost."""
+    """Replays the real call's user turns in order. follow_up + bidding are
+    captured deterministically. The email here is spoken as MULTIPLE words
+    ("Cloud/all state estimation"), which the hybrid design (2026-06-24) now
+    leaves for the LLM to assemble + confirm — so the tracker does NOT pin it."""
     turns = [
         "Yes. You can proceed.",
         "do you have something for the estimation?",
@@ -88,20 +98,19 @@ def test_2026_04_22_regression_sequence():
     st = CallState()
     for utterance in turns:
         st = update_state_from_user_turn(st, utterance)
-    assert st.email is not None
-    assert st.email.endswith("@gmail.com")
+    assert st.email is None          # multi-word spoken email -> the LLM's job now
     assert st.follow_up and "sunday" in st.follow_up.lower()
     assert st.bidding_active is True
 
 
 def test_email_correction_updates_state():
-    """A restated (different) email must overwrite the earlier capture; a turn
-    with no email leaves it untouched (sticky)."""
+    """A restated (different) single-token email overwrites the earlier capture;
+    a turn with no email leaves it untouched (sticky)."""
     from app.services.scripts.call_state_tracker import CallState, update_state_from_user_turn as u
     s = CallState()
-    s = u(s, "you can send me on wrong address at gmail dot com")
-    assert s.email == "wrongaddress@gmail.com"
+    s = u(s, "bob at gmail dot com")
+    assert s.email == "bob@gmail.com"
     s = u(s, "okay great")                      # no email -> sticky
-    assert s.email == "wrongaddress@gmail.com"
-    s = u(s, "all state estimation at gmail dot com")  # correction wins
-    assert s.email == "allstateestimation@gmail.com"
+    assert s.email == "bob@gmail.com"
+    s = u(s, "rob at gmail dot com")            # correction wins
+    assert s.email == "rob@gmail.com"

@@ -46,11 +46,13 @@ def test_compose_two_declines_mentions_close_politely():
     assert "close" in out.lower() or "end" in out.lower()
 
 
-def test_compose_email_gives_exact_spelled_readback():
-    # The model must be handed the exact letter-by-letter form so it never
-    # re-derives a messy spelling from the raw transcript (lead-capture bug).
+def test_compose_email_pins_value_with_natural_readback():
+    # Hybrid (2026-06-24): the model gets the EXACT pinned value and is told to
+    # read it back NATURALLY + confirm — no more robotic letter-by-letter form on
+    # the live path (the caller-facing read-back must sound human).
     state = CallState(email="allstateestimation@gmail.com")
     out = compose_system_prompt(BASE, state)
-    assert "a-l-l-s-t-a-t-e-e-s-t-i-m-a-t-i-o-n at gmail dot com" in out
-    assert "read EXACTLY" in out
+    assert "allstateestimation@gmail.com" in out
     assert "never re-transcribe" in out.lower()
+    assert "naturally" in out.lower()
+    assert "a-l-l-s-t-a-t-e" not in out          # robotic spell-out is gone

@@ -1,13 +1,18 @@
-"""Deterministic "spoken email -> canonical email" normalizer.
+"""Deterministic spoken-email *syntax* normalizer (the small half of the hybrid).
 
 Voice transcripts say things like:
-  "allstateestimation at the rate gmail dot com"
-  "bob one two three at yahoo period co dot uk"
+  "bob at gmail dot com"                      -> bob@gmail.com         (pinned)
+  "mary underscore smith at gmail dot com"    -> mary_smith@gmail.com  (pinned)
+  "you can send me on all state estimation at gmail dot com" -> None   (LLM's job)
 
-Without this helper, an 8B LLM has to (a) notice the caller said an
-email, (b) stitch the tokens together. Small models miss (a) or (b)
-often enough to loop. So we normalize *before* the model sees the turn
-and inject the canonical form into the system prompt's CAPTURED block.
+Design (2026-06-24): this layer owns ONLY the fixed email syntax — "at" / "at the
+rate" -> @, "dot" -> ., "underscore" -> _, and gluing the domain. It pins an
+address ONLY when the local part is a single, unambiguous token. The instant the
+local part is several spoken words that must be *joined* ("all state estimation"),
+or is preceded by carrier words ("you can send me on …"), it returns None and the
+LLM assembles it and reads it back to confirm. We deliberately keep NO hand-written
+carrier-word list — it mangled real local parts ("me@", "iphone@", "yes2024@").
+Email is a core field; correctness lives in the read-back loop, not in a guess.
 
 Pure function — no I/O. Safe to call per-turn.
 """
@@ -39,35 +44,22 @@ _EMAIL_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Carrier / lead-in words that precede a SPOKEN email ("you can send me on
-# <email> at gmail dot com", "my email is …", "reach me at …"). Without
-# stripping these, the spoken-path local-part becomes
-# "youcansendmeonallstateestimation" — the #1 spoken-email bug. These are
-# words that essentially never appear in a real local part, so dropping a
-# leading run of them is safe.
-_LEADIN_WORDS: frozenset[str] = frozenset({
-    "you", "can", "could", "would", "please", "send", "sent", "me", "my",
-    "mine", "it", "it's", "its", "is", "the", "a", "an", "on", "to", "at",
-    "email", "e-mail", "mail", "address", "reach", "write", "down", "so",
-    "well", "okay", "ok", "yeah", "yes", "here", "i", "i'll", "you'll",
-    "and", "of", "for", "give", "get", "got", "have", "use", "using", "that",
-    "this", "just", "sure", "alright", "right", "um", "uh", "er", "erm",
-})
-
-
-def _strip_leadin(local: str) -> str:
-    """Drop a leading run of carrier words, then join the rest into a local
-    part. 'you can send me on all state estimation' -> 'allstateestimation'."""
-    tokens = local.split()
-    while tokens and tokens[0].strip(".,;:!?").lower() in _LEADIN_WORDS:
-        tokens.pop(0)
-    return "".join(tokens)
-
-
 def extract_email_from_speech(utterance: str) -> Optional[str]:
-    """Return a canonical email if the utterance contains one; else None.
+    """Pin a canonical email ONLY when it is unambiguous; else return None and
+    let the LLM assemble it.
 
-    Idempotent for utterances that already contain a written email.
+    The hybrid split (see the module docstring): this layer converts the spoken
+    email *syntax* and pins the address only when the local part is a single,
+    unambiguous token —
+
+      * a written address ("my email is john@gmail.com"), or
+      * a clean spoken local ("bob at gmail dot com",
+        "mary underscore smith at gmail dot com", "john dot smith at gmail dot com").
+
+    When the local part is several spoken words that would have to be *joined*
+    ("all state estimation"), or is preceded by carrier words ("you can send me
+    on …"), we DO NOT guess a boundary — we return None and let the LLM
+    understand it and read it back to confirm. Idempotent for written emails.
     """
     if not utterance or not utterance.strip():
         return None
@@ -82,22 +74,27 @@ def extract_email_from_speech(utterance: str) -> Optional[str]:
     s = re.sub(r"\s*_\s*", "_", s)
     s = re.sub(r"\s*-\s*", "-", s)
 
-    if "@" in s:
-        local, _, rest = s.partition("@")
-        if original_had_at:
-            # Written email — "my email is john@gmail.com". The last
-            # whitespace-separated token before @ is the local part.
-            tokens = local.split()
-            local = tokens[-1] if tokens else ""
-        else:
-            # Spoken email — "you can send me on all state estimation at gmail
-            # dot com". Drop the leading carrier phrase, then stitch the rest.
-            local = _strip_leadin(local)
-        rest = re.sub(r"\s+", "", rest)
-        rest = rest.rstrip(".?!,;:")
-        s = f"{local}@{rest}"
+    if "@" not in s:
+        return None
 
-    match = _EMAIL_RE.search(s)
+    local, _, rest = s.partition("@")
+    local_tokens = local.split()
+    if original_had_at:
+        # Written email — the literal "@" is the anchor; the token immediately
+        # before it is the local part. Unambiguous, so pin it.
+        local = local_tokens[-1] if local_tokens else ""
+    else:
+        # Spoken email — the "@" came from "at"/"at the rate". Pin ONLY a single
+        # unambiguous token. Multi-word locals and carrier words are the LLM's
+        # job (it joins them and reads the result back to confirm).
+        if len(local_tokens) != 1:
+            return None
+        local = local_tokens[0]
+
+    rest = re.sub(r"\s+", "", rest).rstrip(".?!,;:")
+    candidate = f"{local}@{rest}"
+
+    match = _EMAIL_RE.search(candidate)
     if not match:
         return None
     return match.group(0).lower()
@@ -123,3 +120,40 @@ def spell_out_email(email: Optional[str]) -> str:
     local_spelled = "-".join(local)
     domain_spoken = domain.replace(".", " dot ")
     return f"{local_spelled} at {domain_spoken}".strip()
+
+
+def _is_pronounceable(word: str) -> bool:
+    """A letter run is 'sayable as a word' if it's >=2 chars and has a vowel;
+    otherwise it's a random run that should be spelled (e.g. 'xq', 'bcdf')."""
+    return len(word) >= 2 and any(v in word.lower() for v in "aeiou")
+
+
+def natural_email_readback(email: Optional[str]) -> str:
+    """A HUMAN read-back of an email: pronounceable letter-runs are said as a
+    WORD, digit-runs are read individually, and only a non-word run is spelled
+    letter-by-letter. The domain is always said as words.
+
+      "allstateestimation@gmail.com" -> "allstateestimation at gmail dot com"
+      "john7890@gmail.com"            -> "john 7 8 9 0 at gmail dot com"
+      "xq7@gmail.com"                 -> "x-q 7 at gmail dot com"
+
+    Replaces the old letter-by-letter ``spell_out_email`` on the read-back path so
+    the agent doesn't sound like a robot spelling every character. The LLM is
+    separately instructed to tag-question ONLY genuinely-variable names.
+    """
+    if not email or "@" not in email:
+        return ""
+    local, _, domain = email.partition("@")
+    if not local or not domain:
+        return ""
+    chunks: list[str] = []
+    for run in re.findall(r"[A-Za-z]+|[0-9]+|[^A-Za-z0-9]+", local):
+        if run.isdigit():
+            chunks.append(" ".join(run))            # "7890" -> "7 8 9 0"
+        elif run.isalpha():
+            chunks.append(run if _is_pronounceable(run) else "-".join(run))
+        else:
+            chunks.append(run.strip())              # stray separators
+    local_spoken = " ".join(c for c in chunks if c)
+    domain_spoken = domain.replace(".", " dot ")
+    return f"{local_spoken} at {domain_spoken}".strip()

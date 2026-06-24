@@ -9,7 +9,6 @@ its own system message.
 from __future__ import annotations
 
 from app.services.scripts.call_state_tracker import CallState
-from app.services.scripts.spoken_email_normalizer import spell_out_email
 
 
 def compose_system_prompt(base_prompt: str, state: CallState) -> str:
@@ -23,15 +22,10 @@ def compose_system_prompt(base_prompt: str, state: CallState) -> str:
     if state.email:
         lines.append(
             "- Caller email (confirmed — use this EXACT value, never re-transcribe "
-            f"what you heard): {state.email}"
+            f"what you heard): {state.email}. When you read it back, say it "
+            "naturally and confirm; do not spell it letter by letter unless the "
+            "caller asks."
         )
-        spelled = spell_out_email(state.email)
-        if spelled:
-            lines.append(
-                f'  To say or spell it back, read EXACTLY: "{spelled}" — letter '
-                "for letter, no added or dropped letters, and never include any "
-                "words the caller said before the address."
-            )
     if state.follow_up:
         lines.append(
             f"- Follow-up time (already agreed): {state.follow_up}"

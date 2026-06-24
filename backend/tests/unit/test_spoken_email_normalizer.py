@@ -31,6 +31,8 @@ def test_spell_out_email_invalid_returns_blank():
     assert spell_out_email(None) == ""
 
 
+# PINNED deterministically: written emails, and SINGLE-TOKEN spoken locals
+# (incl. separator-glued ones like "mary underscore smith" -> "mary_smith").
 @pytest.mark.parametrize("speech,expected", [
     # --- plain written form passes through ---
     ("my email is john@gmail.com", "john@gmail.com"),
@@ -45,22 +47,14 @@ def test_spell_out_email_invalid_returns_blank():
     ("bob at yahoo dot co dot uk", "bob@yahoo.co.uk"),
     ("bob at yahoo period com", "bob@yahoo.com"),
 
-    # --- punctuation / separators spoken ---
+    # --- spoken separators glue the local into ONE token ---
     ("mary underscore smith at gmail dot com", "mary_smith@gmail.com"),
     ("mary dash smith at gmail dot com", "mary-smith@gmail.com"),
     ("mary hyphen smith at gmail dot com", "mary-smith@gmail.com"),
-
-    # --- digits spoken out ---
-    ("bob one two three at gmail dot com", "bob123@gmail.com"),
+    ("john dot smith at gmail dot com", "john.smith@gmail.com"),
 
     # --- capitalization and whitespace tolerance ---
     ("  JOHN  AT  GMAIL  DOT  COM  ", "john@gmail.com"),
-
-    # --- the 2026-04-22 regression case verbatim ---
-    ("Cloud State estimation at g mail dot com.",
-     "cloudstateestimation@gmail.com"),
-    ("all state estimation at the rate Gmail dot com.",
-     "allstateestimation@gmail.com"),
 ])
 def test_extract_email_positive(speech, expected):
     assert extract_email_from_speech(speech) == expected
@@ -74,17 +68,28 @@ def test_extract_email_positive(speech, expected):
     "yeah",
     "gmail dot com",  # domain only — no local part
     "john at",        # no domain
+
+    # 2026-06-24 hybrid: multi-word / carrier-prefixed / spoken-digit locals are
+    # NO LONGER joined by regex — they return None and the LLM assembles them.
+    "all state estimation at the rate gmail dot com",   # multi-word local
+    "Cloud State estimation at g mail dot com.",          # multi-word local
+    "you can send me on bob at gmail dot com",            # carrier phrase
+    "bob one two three at gmail dot com",                 # spoken digits, multi-token
 ])
 def test_extract_email_negative(speech):
     assert extract_email_from_speech(speech) is None
 
 
-# Regression: carrier/lead-in phrase before a spoken email must be stripped,
-# not glued into the local part (the "youcansendmeon…" bug from a live call).
-def test_strips_leadin_carrier_phrase():
+# 2026-06-24 hybrid design: the deterministic layer no longer strips carrier
+# words or joins multi-word spoken locals — that is the LLM's job (it assembles
+# the address and reads it back to confirm). Only an unambiguous single-token
+# local is pinned. We never keep a carrier-word list again.
+def test_multiword_and_carrier_spoken_locals_defer_to_llm():
     from app.services.scripts.spoken_email_normalizer import extract_email_from_speech as e
-    assert e("You can send me on all state estimation at g mail dot com.") == "allstateestimation@gmail.com"
-    assert e("it is john at gmail dot com") == "john@gmail.com"
-    assert e("reach me at sarah underscore jones at outlook dot com") == "sarah_jones@outlook.com"
-    # No carrier phrase — unchanged.
-    assert e("all state estimation at gmail dot com") == "allstateestimation@gmail.com"
+    # would need word-joining / carrier-stripping -> deferred to the LLM
+    assert e("You can send me on all state estimation at g mail dot com.") is None
+    assert e("all state estimation at gmail dot com") is None
+    assert e("it is john at gmail dot com") is None
+    # unambiguous single-token spoken locals are still pinned deterministically
+    assert e("john at gmail dot com") == "john@gmail.com"
+    assert e("sarah underscore jones at outlook dot com") == "sarah_jones@outlook.com"

@@ -55,8 +55,11 @@ FLUX_HEARTBEAT_SILENCE_MS = 100
 # longer through the pauses between spelled letters and needs higher
 # confidence before declaring the turn over — so it doesn't cut the caller
 # off mid-spell. Env-overridable for live tuning.
-CAPTURE_EOT_TIMEOUT_MS = int(os.getenv("FLUX_CAPTURE_EOT_TIMEOUT_MS", "3000"))
-CAPTURE_EOT_THRESHOLD = float(os.getenv("FLUX_CAPTURE_EOT_THRESHOLD", "0.85"))
+# Per Deepgram: for spelled emails / numbers raise eot_timeout to 7000-10000ms
+# and eot_threshold ~0.9 so the pauses between spelled letters don't force a
+# premature EndOfTurn that splits the address. (Was 3000 / 0.85 — too tight.)
+CAPTURE_EOT_TIMEOUT_MS = int(os.getenv("FLUX_CAPTURE_EOT_TIMEOUT_MS", "8000"))
+CAPTURE_EOT_THRESHOLD = float(os.getenv("FLUX_CAPTURE_EOT_THRESHOLD", "0.9"))
 
 # WebSocket reconnection configuration
 FLUX_MAX_RECONNECTS = 3          # Maximum mid-call reconnect attempts
@@ -395,6 +398,10 @@ class DeepgramFluxSTTProvider(STTProvider):
             keyterms=self._capture_active_keyterms(),
             eot_timeout_ms=CAPTURE_EOT_TIMEOUT_MS,
             eot_threshold=CAPTURE_EOT_THRESHOLD,
+            # Disable eager EOT during capture so the speculative path can't
+            # answer a HALF-spelled email/number. eager == eot → no early
+            # commit; reset_capture_mode restores the normal eager value.
+            eager_eot_threshold=CAPTURE_EOT_THRESHOLD,
         )
 
     def reset_capture_mode(self, call_id: str) -> None:
@@ -408,6 +415,27 @@ class DeepgramFluxSTTProvider(STTProvider):
             eager_eot_threshold=self._eager_eot_threshold,
         )
     
+    def _build_connection_params(self, call_id: str) -> list:
+        """The /v2/listen query params for a Flux connection — single source of
+        truth used by BOTH pre_connect and stream_transcribe (was duplicated)."""
+        params = [
+            ("model", self._model),
+            ("encoding", self._encoding),
+            ("sample_rate", str(self._sample_rate)),
+            ("eot_threshold", str(self._eot_threshold)),
+            ("eot_timeout_ms", str(self._eot_timeout_ms)),
+        ]
+        if self._eager_eot_threshold is not None:
+            params.append(("eager_eot_threshold", str(self._eager_eot_threshold)))
+        # numerals: format spoken numbers as digits ("two three" -> "23") so phone
+        # numbers and numeric email parts come through as digits, not words.
+        # Env-gateable (FLUX_NUMERALS=false) in case it needs turning off live.
+        if os.getenv("FLUX_NUMERALS", "true").strip().lower() in ("1", "true", "yes", "on"):
+            params.append(("numerals", "true"))
+        params.extend(self._keyterm_params())
+        params.extend(self._meta_params(call_id))
+        return params
+
     async def pre_connect(self, call_id: str) -> None:
         """
         Establish the Deepgram Flux WebSocket connection before audio starts.
@@ -423,17 +451,7 @@ class DeepgramFluxSTTProvider(STTProvider):
             logger.warning("pre_connect called before initialize() — skipping")
             return
 
-        params = [
-            ("model", self._model),
-            ("encoding", self._encoding),
-            ("sample_rate", str(self._sample_rate)),
-            ("eot_threshold", str(self._eot_threshold)),
-            ("eot_timeout_ms", str(self._eot_timeout_ms)),
-        ]
-        if self._eager_eot_threshold is not None:
-            params.append(("eager_eot_threshold", str(self._eager_eot_threshold)))
-        params.extend(self._keyterm_params())
-        params.extend(self._meta_params(call_id))
+        params = self._build_connection_params(call_id)
         query = "&".join(f"{k}={v}" for k, v in params)
         url = f"wss://api.deepgram.com/v2/listen?{query}"
         headers = {
@@ -502,17 +520,7 @@ class DeepgramFluxSTTProvider(STTProvider):
         
         # Build WebSocket URL with Flux turn-detection parameters.
         # eager_eot_threshold is optional and only added when explicitly configured.
-        params = [
-            ("model", self._model),
-            ("encoding", self._encoding),
-            ("sample_rate", str(self._sample_rate)),
-            ("eot_threshold", str(self._eot_threshold)),
-            ("eot_timeout_ms", str(self._eot_timeout_ms)),
-        ]
-        if self._eager_eot_threshold is not None:
-            params.append(("eager_eot_threshold", str(self._eager_eot_threshold)))
-        params.extend(self._keyterm_params())
-        params.extend(self._meta_params(call_id))
+        params = self._build_connection_params(call_id)
         query = "&".join(f"{k}={v}" for k, v in params)
         url = f"wss://api.deepgram.com/v2/listen?{query}"
         
