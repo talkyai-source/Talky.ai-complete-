@@ -864,8 +864,14 @@ class ApiClient {
 
     // The backend returns a bare array for /admin/users (not the wrapped
     // UsersResponse), so this is the shape the page actually consumes.
+    // Build the query manually — passing undefined values through
+    // URLSearchParams would serialize them as the literal "undefined" and the
+    // backend's ILIKE filter would then match nothing.
     async getUsersList(params?: UserQueryParams) {
-        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
+        const sp = new URLSearchParams();
+        if (params?.search) sp.append('search', params.search);
+        if (params?.role) sp.append('role', params.role);
+        const query = sp.toString() ? `?${sp.toString()}` : '';
         return this.request<AdminUserItem[]>(`/admin/users${query}`);
     }
 
