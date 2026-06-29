@@ -131,7 +131,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         try {
             const res = await api.login(email, password);
-            if (res.error || !res.data?.access_token) {
+            if (res.error) {
                 setState((prev) => ({
                     ...prev,
                     isLoading: false,
@@ -139,9 +139,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 }));
                 return false;
             }
+            // MFA-enabled accounts get an empty token + mfa_required flag. The
+            // admin panel doesn't carry the second factor yet, so surface it.
+            if (res.data?.mfa_required) {
+                setState((prev) => ({
+                    ...prev,
+                    isLoading: false,
+                    error: 'This account requires MFA, which the admin panel does not support yet. Use a non-MFA admin account.',
+                }));
+                return false;
+            }
+            if (!res.data?.access_token) {
+                setState((prev) => ({
+                    ...prev,
+                    isLoading: false,
+                    error: 'Login failed',
+                }));
+                return false;
+            }
             localStorage.setItem(TOKEN_KEY, res.data.access_token);
+            // /auth/login returns flat fields (no nested user object).
             setState({
-                user: res.data.user,
+                user: {
+                    id: res.data.user_id,
+                    email: res.data.email,
+                    name: res.data.name ?? res.data.email,
+                    role: res.data.role,
+                },
                 isLoading: false,
                 isAuthenticated: true,
                 error: null,

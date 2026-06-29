@@ -6,12 +6,49 @@
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
 // Types - Define before usage
+// Backend roles (RBAC): platform_admin > partner_admin > tenant_admin > user > readonly.
+// 'admin' | 'super_admin' kept only for legacy/dummy-auth compatibility.
+export type BackendRole =
+    | 'platform_admin'
+    | 'partner_admin'
+    | 'tenant_admin'
+    | 'user'
+    | 'readonly'
+    | 'admin'
+    | 'super_admin';
+
 export interface AdminUser {
     id: string;
     email: string;
     name: string;
-    role: 'admin' | 'super_admin';
+    role: BackendRole | string;
     tenant_id?: string;
+}
+
+// Flat shape actually returned by POST /auth/login on the live backend.
+export interface LoginResponse {
+    access_token: string;
+    token_type: string;
+    user_id: string;
+    email: string;
+    role: string;
+    name?: string | null;
+    business_name?: string | null;
+    minutes_remaining: number;
+    message: string;
+    mfa_required?: boolean;
+    mfa_challenge_token?: string;
+}
+
+// Flat shape returned by GET /auth/me.
+export interface MeResponse {
+    id: string;
+    email: string;
+    name: string | null;
+    role: string;
+    tenant_id?: string | null;
+    business_name?: string | null;
+    minutes_remaining?: number;
 }
 
 export interface AuthResponse {
@@ -714,14 +751,32 @@ class ApiClient {
 
     // Auth Endpoints
     async login(email: string, password: string) {
-        return this.request<{ access_token: string; user: AdminUser }>('/auth/login', {
+        return this.request<LoginResponse>('/auth/login', {
             method: 'POST',
             body: { email, password },
         });
     }
 
-    async verifyToken() {
-        return this.request<{ valid: boolean; user: AdminUser }>('/auth/verify');
+    // The backend has no /auth/verify — the current user is read from /auth/me.
+    // We normalise it into the { valid, user } shape the AuthProvider expects.
+    async verifyToken(): Promise<ApiResponse<{ valid: boolean; user: AdminUser }>> {
+        const res = await this.request<MeResponse>('/auth/me');
+        if (res.error || !res.data) {
+            return { error: res.error ?? { code: 'AUTH_FAILED', message: 'Not authenticated' } };
+        }
+        const me = res.data;
+        return {
+            data: {
+                valid: true,
+                user: {
+                    id: me.id,
+                    email: me.email,
+                    name: me.name ?? me.email,
+                    role: me.role,
+                    tenant_id: me.tenant_id ?? undefined,
+                },
+            },
+        };
     }
 
     async logout() {
@@ -753,17 +808,21 @@ class ApiClient {
     }
 
     // Audit Endpoints
+    // Backend mounts audit logs at /admin/audit/logs (the bare /admin/audit 404s).
     async getAuditLog(params?: AuditQueryParams) {
         const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
-        return this.request<AuditResponse>(`/admin/audit${query}`);
+        return this.request<AuditResponse>(`/admin/audit/logs${query}`);
     }
 
+    // Backend router prefix is /admin/security-events (hyphenated), not /admin/security/events.
     async getSecurityEvents(params?: SecurityQueryParams) {
         const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
-        return this.request<SecurityEventsResponse>(`/admin/security/events${query}`);
+        return this.request<SecurityEventsResponse>(`/admin/security-events${query}`);
     }
 
     // Configuration Endpoints
+    // NOTE: there is no /admin/configuration endpoint on the backend yet, so these
+    // will 404 until one is added. SystemConfigPage is not currently routed in App.tsx.
     async getConfiguration() {
         return this.request<SystemConfiguration>('/admin/configuration');
     }

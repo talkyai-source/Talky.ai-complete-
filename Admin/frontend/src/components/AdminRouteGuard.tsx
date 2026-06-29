@@ -40,8 +40,17 @@ export function AdminRouteGuard({ children }: AdminRouteGuardProps) {
         return <Navigate to="/login" state={{ from: location }} replace />;
     }
 
-    // Double-check admin role (defense in depth)
-    if (user?.role !== 'admin' && user?.role !== 'super_admin') {
+    // Double-check admin role (defense in depth). Mirrors the backend's
+    // require_admin allow-list: tenant_admin | partner_admin | platform_admin.
+    // ('admin'/'super_admin' retained for legacy/dummy-auth.)
+    const ADMIN_ROLES = [
+        'platform_admin',
+        'partner_admin',
+        'tenant_admin',
+        'admin',
+        'super_admin',
+    ];
+    if (!user || !ADMIN_ROLES.includes(user.role)) {
         return (
             <div className="access-denied">
                 <h1>Access Denied</h1>
