@@ -295,7 +295,7 @@ body {
 /* Stats Cards */
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 16px;
   margin-bottom: 24px;
 }
@@ -309,6 +309,7 @@ body {
   gap: 12px;
   box-shadow: var(--shadow-sm);
   border: 1px solid var(--border-color);
+  min-width: 0;
 }
 
 .stat-icon {
@@ -348,6 +349,7 @@ body {
 .stat-content {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .stat-label {
@@ -2972,10 +2974,16 @@ body {
   border-radius: var(--border-radius);
 }
 
+/* Usage card gets real inner padding (global .card-body is padding:0 for
+   edge-to-edge tables, so scope it here). */
+.usage-card .card-body {
+  padding: 20px;
+}
+
 /* Usage Summary Grid */
 .usage-summary-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 16px;
   margin-bottom: 24px;
 }
@@ -2987,6 +2995,21 @@ body {
   padding: 16px;
   background: var(--bg-main);
   border-radius: var(--border-radius);
+  min-width: 0;
+}
+
+.usage-stat .stat-content {
+  min-width: 0;
+}
+
+.usage-stat .stat-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-stat .stat-icon {
+  flex-shrink: 0;
 }
 
 .usage-stat .stat-icon {
