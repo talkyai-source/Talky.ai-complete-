@@ -429,8 +429,12 @@ class DeepgramFluxSTTProvider(STTProvider):
             params.append(("eager_eot_threshold", str(self._eager_eot_threshold)))
         # numerals: format spoken numbers as digits ("two three" -> "23") so phone
         # numbers and numeric email parts come through as digits, not words.
-        # Env-gateable (FLUX_NUMERALS=false) in case it needs turning off live.
-        if os.getenv("FLUX_NUMERALS", "true").strip().lower() in ("1", "true", "yes", "on"):
+        # DEFAULT OFF since 2026-06-29: Deepgram's Flux beta (/v2/listen) started
+        # REJECTING `numerals=true` with HTTP 400 — it broke every call's STT
+        # connection. Re-enable per-environment with FLUX_NUMERALS=true ONLY once
+        # Deepgram accepts it again (or use their replacement param). Until then
+        # the LLM read-back + spoken_email_normalizer handle spoken-word numbers.
+        if os.getenv("FLUX_NUMERALS", "false").strip().lower() in ("1", "true", "yes", "on"):
             params.append(("numerals", "true"))
         params.extend(self._keyterm_params())
         params.extend(self._meta_params(call_id))

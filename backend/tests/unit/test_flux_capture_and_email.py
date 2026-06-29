@@ -111,12 +111,15 @@ def test_reset_capture_mode_restores_normal_config():
 
 # ── 3. numerals param ────────────────────────────────────────────────────────
 
-def test_numerals_sent_by_default():
-    params = _flux()._build_connection_params("call-1")
-    assert ("numerals", "true") in params
-
-
-def test_numerals_can_be_disabled_via_env(monkeypatch):
-    monkeypatch.setenv("FLUX_NUMERALS", "false")
+def test_numerals_off_by_default(monkeypatch):
+    # Default OFF since 2026-06-29: Deepgram Flux beta rejects numerals=true with
+    # HTTP 400 (broke every call's STT). Must not be sent unless explicitly opted in.
+    monkeypatch.delenv("FLUX_NUMERALS", raising=False)
     params = _flux()._build_connection_params("call-1")
     assert ("numerals", "true") not in params
+
+
+def test_numerals_can_be_enabled_via_env(monkeypatch):
+    monkeypatch.setenv("FLUX_NUMERALS", "true")
+    params = _flux()._build_connection_params("call-1")
+    assert ("numerals", "true") in params
