@@ -398,17 +398,12 @@ export default function AIOptionsPage() {
                     </button>
                 </div>
             ) : (
-                <div className="space-y-5">
-                    {/* Hero */}
-                    <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="relative overflow-hidden rounded-2xl border border-emerald-500/20 bg-gradient-to-r from-emerald-600 to-emerald-500 p-5 text-white">
-                        <motion.div aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-44 w-44 rounded-full bg-white/15 blur-3xl" animate={{ scale: [1, 1.15, 1], opacity: [0.4, 0.7, 0.4] }} transition={{ duration: 9, repeat: Infinity, ease: "easeInOut" }} />
-                        <div className="relative flex items-center gap-3">
-                            <div className="grid h-11 w-11 place-items-center rounded-2xl border border-white/25 bg-white/15"><Sparkles className="h-5 w-5" /></div>
-                            <div>
-                                <h2 className="text-lg font-bold sm:text-xl">AI Options</h2>
-                                <p className="text-sm text-white/80">Tune the brain, the voice, and the rhythm of every call.</p>
-                            </div>
-                        </div>
+                <div className="space-y-4">
+                    {/* Slim brand strip — the page title/description already live in the
+                        DashboardLayout header, so this stays compact instead of a tall hero. */}
+                    <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-3 overflow-hidden rounded-xl border border-emerald-500/20 bg-gradient-to-r from-emerald-600 to-emerald-500 px-4 py-2.5 text-white">
+                        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-white/25 bg-white/15"><Sparkles className="h-4 w-4" /></div>
+                        <p className="text-sm font-medium text-white/90">Tune the brain, the voice, and the rhythm of every call.</p>
                     </motion.div>
 
                     {/* Banners */}
@@ -436,8 +431,11 @@ export default function AIOptionsPage() {
                         )}
                     </AnimatePresence>
 
+                    {/* Configuration grid — balanced 12-col so small cards pair up
+                        instead of each taking a full-width row. */}
+                    <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
                     {/* LLM */}
-                    <Card delay={0.05}>
+                    <Card delay={0.05} className="xl:col-span-7">
                         <SectionHeader icon={<Cpu className="h-5 w-5" />} title="LLM Model" subtitle={providers?.llm.providers?.join(" / ") || "Groq"} />
                         <div className="grid gap-5 lg:grid-cols-[1fr_auto]">
                             <div className="space-y-3">
@@ -486,7 +484,7 @@ export default function AIOptionsPage() {
                     </Card>
 
                     {/* STT engine */}
-                    <Card delay={0.08}>
+                    <Card delay={0.08} className="xl:col-span-5">
                         <SectionHeader icon={<Mic className="h-5 w-5" />} title="Speech-to-Text" subtitle="The engine that hears the caller" />
                         <div className="space-y-3">
                             <label className="block text-sm font-medium text-muted-foreground">Engine</label>
@@ -510,7 +508,7 @@ export default function AIOptionsPage() {
                     </Card>
 
                     {/* TTS */}
-                    <Card delay={0.1}>
+                    <Card delay={0.1} className="xl:col-span-12">
                         <SectionHeader
                             icon={<Volume2 className="h-5 w-5" />}
                             title={`TTS Voice · ${filteredVoices.length}`}
@@ -631,7 +629,7 @@ export default function AIOptionsPage() {
                     </Card>
 
                     {/* Latency */}
-                    <Card delay={0.15}>
+                    <Card delay={0.15} className="xl:col-span-5">
                         <SectionHeader icon={<Zap className="h-5 w-5" />} title="Latency Metrics" subtitle="Real-time pipeline performance"
                             right={
                                 <button onClick={handleRunBenchmark} disabled={benchmarking} className="flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 font-medium text-white transition hover:bg-emerald-600 disabled:opacity-50">
@@ -639,7 +637,7 @@ export default function AIOptionsPage() {
                                 </button>
                             }
                         />
-                        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-2 2xl:grid-cols-3">
                             {([
                                 ["LLM First Token", latencyMetrics.llm_first_token_ms],
                                 ["LLM Total", latencyMetrics.llm_total_ms],
@@ -656,7 +654,7 @@ export default function AIOptionsPage() {
                     </Card>
 
                     {/* Voice tuning */}
-                    <Card delay={0.2}>
+                    <Card delay={0.2} className="xl:col-span-7">
                         <SectionHeader icon={<SlidersHorizontal className="h-5 w-5" />} title="Voice tuning" subtitle="Optional · falls back to defaults when unset" />
                         <p className="mb-4 text-xs text-muted-foreground">Conversational rhythm tuning for this tenant. Each field is optional — “Reset to default” clears the override. Changes apply on the next call after Save.</p>
                         {config && (() => {
@@ -706,7 +704,7 @@ export default function AIOptionsPage() {
                     </Card>
 
                     {/* Test LLM */}
-                    <Card delay={0.25}>
+                    <Card delay={0.25} className="xl:col-span-12">
                         <SectionHeader icon={<MessageSquare className="h-5 w-5" />} title="Test LLM" subtitle="Send a message to the selected model" />
                         <div className="space-y-4">
                             <div className="flex flex-col gap-3 sm:flex-row">
@@ -716,6 +714,7 @@ export default function AIOptionsPage() {
                             {testResponse && <div className="rounded-lg border border-border bg-muted/40 p-4"><p className="whitespace-pre-wrap text-sm text-foreground">{testResponse}</p></div>}
                         </div>
                     </Card>
+                    </div>
 
                     {/* Save */}
                     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="sticky bottom-4 z-10 flex justify-end">
