@@ -873,11 +873,21 @@ class VoiceOrchestrator:
         if not _failover_enabled("STT_FAILOVER_ENABLED"):
             return primary
 
-        # Secondary — same vendor, different model. Cheap to set up
-        # because the auth + WS shape are identical.
-        secondary = DeepgramFluxSTTProvider()
-        secondary_init = dict(primary_init)
-        secondary_init["model"] = os.getenv("STT_SECONDARY_MODEL") or "flux-general-en"
+        # Secondary — Deepgram **nova-3** on /v1/listen (a DIFFERENT model AND a
+        # different endpoint from Flux's /v2/listen). This is the real fix for the
+        # 2026-06-29 outage: a Flux-side failure (it rejected `numerals=true` with
+        # HTTP 400) now fails over to a working STT instead of going silent —
+        # whereas the old secondary was just another Flux (useless when Flux's API
+        # itself breaks). nova-3 contract matches Flux (verified). Same Deepgram
+        # auth. Override the secondary model via STT_SECONDARY_MODEL.
+        from app.infrastructure.stt.deepgram_nova import DeepgramNovaSTTProvider
+        secondary = DeepgramNovaSTTProvider()
+        secondary_init = {
+            "api_key": api_key,
+            "model": os.getenv("STT_SECONDARY_MODEL") or "nova-3",
+            "sample_rate": config.stt_sample_rate,
+            "encoding": config.stt_encoding,
+        }
         try:
             await secondary.initialize(secondary_init)
         except Exception as exc:
@@ -897,7 +907,7 @@ class VoiceOrchestrator:
             policy=ReconnectPolicy(),
         )
         logger.info(
-            "stt_resilient_wrapper_active primary=flux-%s secondary=flux-%s",
+            "stt_resilient_wrapper_active primary=flux-%s secondary=nova-%s",
             config.stt_model, secondary_init["model"],
         )
         return wrapper

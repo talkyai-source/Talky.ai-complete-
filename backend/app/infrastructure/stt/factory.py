@@ -64,3 +64,14 @@ try:
 except ImportError:
     pass  # Deepgram not available
 
+try:
+    # nova-3 streaming on /v1/listen (acoustic VAD/endpointing). The failover
+    # secondary for Flux, and a selectable primary engine. Verified 2026-06-29.
+    from app.infrastructure.stt.deepgram_nova import DeepgramNovaSTTProvider
+    STTFactory.register("deepgram-nova", DeepgramNovaSTTProvider)
+    STTFactory.register("deepgram_nova", DeepgramNovaSTTProvider)
+    STTFactory.register("nova-3", DeepgramNovaSTTProvider)
+    STTFactory.register("nova", DeepgramNovaSTTProvider)
+except ImportError:
+    pass  # Deepgram nova not available
+
