@@ -8,6 +8,7 @@ from typing import List, Optional
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, require_admin, CurrentUser
+from ._serialization import AdminResponseModel
 
 router = APIRouter()
 
@@ -16,7 +17,7 @@ router = APIRouter()
 # Response Models
 # =============================================================================
 
-class TenantListItem(BaseModel):
+class TenantListItem(AdminResponseModel):
     """Enhanced tenant list item with counts and status"""
     id: str
     business_name: str
@@ -31,7 +32,7 @@ class TenantListItem(BaseModel):
     created_at: Optional[str] = None
 
 
-class TenantDetailResponse(BaseModel):
+class TenantDetailResponse(AdminResponseModel):
     """Full tenant details response"""
     id: str
     business_name: str
@@ -54,7 +55,7 @@ class QuotaUpdateRequest(BaseModel):
     max_concurrent_calls: Optional[int] = None
 
 
-class UserResponse(BaseModel):
+class UserResponse(AdminResponseModel):
     """User response model"""
     id: str
     email: str

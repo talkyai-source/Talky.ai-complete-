@@ -9,6 +9,7 @@ from datetime import datetime
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, require_admin, CurrentUser
+from ._serialization import AdminResponseModel
 
 router = APIRouter()
 
@@ -24,7 +25,7 @@ class TimelineEvent(BaseModel):
     status: Optional[str] = None
 
 
-class LiveCallItem(BaseModel):
+class LiveCallItem(AdminResponseModel):
     """Active call item for live calls table"""
     id: str
     tenant_id: str
@@ -36,7 +37,7 @@ class LiveCallItem(BaseModel):
     duration_seconds: int = 0
 
 
-class CallHistoryItem(BaseModel):
+class CallHistoryItem(AdminResponseModel):
     """Call history item with tenant info"""
     id: str
     tenant_id: str
@@ -59,7 +60,7 @@ class CallHistoryResponse(BaseModel):
     total: int
 
 
-class AdminCallDetail(BaseModel):
+class AdminCallDetail(AdminResponseModel):
     """Full call detail for admin view"""
     id: str
     tenant_id: str

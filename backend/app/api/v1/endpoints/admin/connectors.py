@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, require_admin, CurrentUser
+from ._serialization import AdminResponseModel
 
 router = APIRouter()
 
@@ -17,7 +18,7 @@ router = APIRouter()
 # Response Models
 # =============================================================================
 
-class AdminConnectorItem(BaseModel):
+class AdminConnectorItem(AdminResponseModel):
     """Admin connector list item with token status"""
     id: str
     tenant_id: str

@@ -9,6 +9,7 @@ from datetime import datetime
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, require_admin, CurrentUser
+from ._serialization import AdminResponseModel
 
 router = APIRouter()
 
@@ -21,7 +22,7 @@ RETRYABLE_ACTION_TYPES = {"send_email", "send_sms", "set_reminder"}
 # Response Models
 # =============================================================================
 
-class ActionItem(BaseModel):
+class ActionItem(AdminResponseModel):
     """Action list item for table display"""
     id: str
     tenant_id: str
@@ -47,7 +48,7 @@ class ActionListResponse(BaseModel):
     page_size: int
 
 
-class ActionDetail(BaseModel):
+class ActionDetail(AdminResponseModel):
     """Full action detail with payload"""
     id: str
     tenant_id: str
