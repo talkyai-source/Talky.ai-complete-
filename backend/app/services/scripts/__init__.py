@@ -38,6 +38,7 @@ from app.services.scripts.prompts import (
     PERSONAS,
     PromptCompositionError,
     compose_prompt,
+    model_prompt_addendum,
     pick_agent_name,
     validate_pool,
 )
@@ -57,6 +58,7 @@ __all__ = [
     "compose_system_prompt",
     "is_backchannel",
     "compose_prompt",
+    "model_prompt_addendum",
     "pick_agent_name",
     "validate_pool",
     "PromptCompositionError",

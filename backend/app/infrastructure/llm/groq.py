@@ -34,6 +34,15 @@ DEFAULT_LLM_TIMEOUT = 10.0
 _LLM_MAX_RETRIES = 2
 _LLM_RETRY_BASE_DELAY = 0.3  # 300ms — fast first retry for voice latency budget
 
+# Reasoning tokens count against max_completion_tokens, so on models whose
+# thinking can't be fully disabled (GPT-OSS floors at reasoning_effort="low";
+# Qwen3 only when run with effort != "none") a tight cap can be eaten by
+# reasoning, leaving zero answer tokens. Mirror the Gemini fix: reserve thinking
+# headroom ON TOP of the answer budget so reasoning never starves the reply.
+# Models with thinking fully OFF (llama/kimi, or Qwen3 effort="none") get NO
+# reserve — their max_tokens is purely the answer. Env-tunable.
+_THINKING_RESERVE_TOKENS = int(os.getenv("GROQ_THINKING_RESERVE_TOKENS", "1024"))
+
 
 def _coerce_int(value) -> int:
     """Best-effort int coercion for SDK fields whose shape may vary by
@@ -193,14 +202,12 @@ class GroqLLMProvider(LLMProvider):
     Production Models (available in AI Options):
     - llama-3.3-70b-versatile: 280 t/s - Best quality/speed balance (default)
     - llama-3.1-8b-instant: 560 t/s - Fastest, ideal for real-time
-    - openai/gpt-oss-120b: 500 t/s - OpenAI flagship with reasoning
-    - openai/gpt-oss-20b: 1000 t/s - Fast and efficient
-    
+
     Preview Models (evaluation only):
-    - meta-llama/llama-4-maverick-17b-128e-instruct: 600 t/s - Complex reasoning
-    - meta-llama/llama-4-scout-17b-16e-instruct: 750 t/s - Fast variant
-    - qwen/qwen3-32b: 400 t/s - Multilingual
-    - moonshotai/kimi-k2-instruct-0905: 200 t/s - Large context (262K)
+    - qwen/qwen3.6-27b: ~400 t/s - Multilingual, thinking off for voice
+
+    Not offered (still handled if passed): openai/gpt-oss-* — agentic reasoners
+    that misbehave on conversational voice. See _is_gpt_oss_model.
     
     Model selection is configured via AI Options UI (/ai-options page).
     See app/domain/models/ai_config.py for full model specifications.
@@ -216,8 +223,12 @@ class GroqLLMProvider(LLMProvider):
 
     @staticmethod
     def _is_qwen3_model(model: str) -> bool:
-        """Qwen 3 supports explicit thinking / non-thinking modes on Groq."""
-        return model.startswith("qwen/qwen3-")
+        """Qwen 3 supports explicit thinking / non-thinking modes on Groq.
+
+        Matches the whole Qwen3 family — both ``qwen/qwen3-32b`` (dash) and
+        ``qwen/qwen3.6-27b`` (dot) — so reasoning is driven off by default for
+        all of them via reasoning_effort="none"."""
+        return model.startswith("qwen/qwen3")
 
     @classmethod
     def _default_top_p_for_model(cls, model: str) -> float:
@@ -716,6 +727,10 @@ class GroqLLMProvider(LLMProvider):
             reasoning_format = kwargs.get("reasoning_format")
             include_reasoning = kwargs.get("include_reasoning")
             reasoning_effort = kwargs.get("reasoning_effort")
+            # True when the model still spends reasoning tokens (thinking can't be
+            # fully turned off, or is left on) — those tokens count against
+            # max_completion_tokens, so we reserve headroom for them below.
+            thinking_floored = False
             if self._is_gpt_oss_model(model):
                 if include_reasoning is None:
                     include_reasoning = False
@@ -727,15 +742,19 @@ class GroqLLMProvider(LLMProvider):
                         reasoning_format,
                         model,
                     )
-                # Default to "low" for voice pipelines — the model uses a small
-                # number of reasoning tokens before the first output token, which
-                # cuts TTFT by ~400-1000ms vs "medium" (the Groq default).
-                # Callers can override by passing reasoning_effort= explicitly.
+                # GPT-OSS cannot fully disable reasoning — Groq accepts only
+                # low/medium/high (no "none"). Default to the "low" floor for
+                # voice: a small number of reasoning tokens before the first
+                # output token, which cuts TTFT by ~400-1000ms vs "medium" (the
+                # Groq default). Callers can override by passing reasoning_effort=.
                 if reasoning_effort is None:
                     reasoning_effort = "low"
                 request_kwargs["reasoning_effort"] = reasoning_effort
+                # Floored, never off → always reserve answer headroom.
+                thinking_floored = True
             elif self._is_qwen3_model(model):
-                # Groq recommends non-thinking mode for general dialogue.
+                # Groq recommends non-thinking mode for general dialogue — Qwen3
+                # CAN be turned fully off via reasoning_effort="none".
                 if reasoning_effort is None:
                     reasoning_effort = "none"
                 if reasoning_format is None:
@@ -749,10 +768,22 @@ class GroqLLMProvider(LLMProvider):
                         include_reasoning,
                         model,
                     )
+                # Only reserve headroom if reasoning is actually left on.
+                thinking_floored = reasoning_effort != "none"
             elif reasoning_format is not None:
                 request_kwargs["reasoning_format"] = reasoning_format
                 if reasoning_effort is not None:
                     request_kwargs["reasoning_effort"] = reasoning_effort
+                thinking_floored = reasoning_effort not in (None, "none")
+
+            # Reasoning tokens share the max_completion_tokens ceiling with the
+            # answer. When thinking is on, add a reserve on top so the caller's
+            # max_tokens stays fully available for the visible reply (mirrors the
+            # Gemini additive-budget fix). Non-thinking models keep max_tokens as-is.
+            if thinking_floored:
+                request_kwargs["max_completion_tokens"] = (
+                    max_tokens + _THINKING_RESERVE_TOKENS
+                )
 
             # Stream completion using Groq's ultra-fast LPU
             # Wrapped with circuit breaker + retry for transient failures.

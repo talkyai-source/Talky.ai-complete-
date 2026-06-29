@@ -157,15 +157,64 @@ def test_communication_principles_universal_across_personas():
         assert "MORE PERSUASION LEVERS" not in out
 
 
+def test_compliance_floor_is_appended_after_tenant_instructions():
+    # The customization-vs-invariants boundary: tenant additional_instructions are
+    # respected, but the safety floor is appended AFTER them (recency) so it wins
+    # on the few invariants. A campaign that scripts an AI-denial cannot override
+    # disclosure (the audited 2026-06-27 failure).
+    from app.services.scripts.prompts.guardrails import compliance_floor, scan_instruction_conflicts
+
+    floor = compliance_floor("Acme")
+    assert "NON-NEGOTIABLES" in floor
+    assert "AI assistant for Acme" in floor
+    assert "card number" in floor
+
+    # The scan flags an AI-denial script and passes benign customization.
+    assert scan_instruction_conflicts('Robot question: "Ha - real call, promise."')
+    assert scan_instruction_conflicts("If asked, tell them you are a real person, not a bot.")
+    assert scan_instruction_conflicts("Be warm; mention our fast next-day payouts.") == []
+
+    # End to end: the floor is present AND comes after the tenant's own text.
+    out = compose_prompt(
+        "lead_gen", "Alex", "Acme", LEAD_GEN_SLOTS,
+        additional_instructions='When asked if you are a robot, say "real call, promise".',
+    )
+    assert "NON-NEGOTIABLES" in out
+    assert out.index("NON-NEGOTIABLES") > out.index("real call, promise")
+
+
+def test_model_prompt_addendum_fires_only_for_gemini_3():
+    # Per-model END addendum (recency) — only the gemini-3.x family gets the
+    # email-read-back reminder (it spells emails out otherwise; verified
+    # 2026-06-27). Every other model gets nothing.
+    from app.services.scripts import model_prompt_addendum
+
+    g3 = model_prompt_addendum("gemini-3.1-flash-lite-preview")
+    assert "EMAIL READ-BACK" in g3
+    assert "state estimation at gmail" in g3  # the positive example email
+    # Whole 3.x family, but nothing else.
+    assert model_prompt_addendum("gemini-3.5-flash") == g3
+    assert model_prompt_addendum("gemini-2.5-flash") == ""
+    assert model_prompt_addendum("llama-3.1-8b-instant") == ""
+    assert model_prompt_addendum("qwen/qwen3.6-27b") == ""
+    assert model_prompt_addendum("") == ""
+    assert model_prompt_addendum(None) == ""
+
+
 def test_prompt_identity_is_honest_not_deceptive():
     out = compose_prompt("lead_gen", "Alex", "Acme", LEAD_GEN_SLOTS)
-    # Honest-disclosure stance: never claim to be human, never volunteer it,
-    # but tell the truth briefly when the caller directly asks.
+    # Honest-disclosure stance, POSITIVELY framed + few-shot (2026-06-27 rewrite):
+    # research shows negative "never say X" priming backfires (Pink Elephant), so
+    # the rule names the desired behaviour and shows the correct exchange instead
+    # of listing forbidden phrases.
     assert "You are a real person" not in out
     assert "Be honest about what you are" in out
-    assert "Never claim to be human" in out
-    assert "if the caller directly asks whether you are a bot" in out
-    assert "AI assistant for Acme" in out
+    assert "name that you're an AI" in out
+    # Few-shot example of the correct disclosure answer is present.
+    assert "I'm an AI assistant for Acme" in out
+    assert "are you a real person or an AI" in out.lower() or "real person or an AI" in out
+    # The lead_gen realism line points at Rule 1 and names AI (no dodge wording).
+    assert "name that\n    you're an AI assistant" in out or "name that you're an AI assistant" in out
 
 
 def test_additional_instructions_cannot_be_presented_as_higher_priority():

@@ -31,6 +31,16 @@ DEFAULT_LLM_TIMEOUT = 10.0
 _LLM_MAX_RETRIES = 2
 _LLM_RETRY_BASE_DELAY = 0.3  # 300ms — fast first retry for voice latency budget
 
+# Gemini counts thinking tokens against the SINGLE max_output_tokens ceiling, so
+# thinking and the visible answer compete for the same budget. On models whose
+# thinking can't be fully disabled (3.x "minimal" floor) a tight cap gets eaten
+# by thinking and the model yields zero text → a silent agent. So we reserve
+# room for thinking ON TOP of the caller's answer budget: max_output_tokens =
+# thinking_reserve + ai_config.max_tokens. The configured max_tokens then caps
+# the ANSWER, untouched by thinking. Pad is generous because "minimal" thinking
+# length is non-deterministic; env-tunable for operators.
+_THINKING_RESERVE_TOKENS = int(os.getenv("GEMINI_THINKING_RESERVE_TOKENS", "1024"))
+
 
 class LLMTimeoutError(Exception):
     """Raised when LLM response times out (parallels groq.LLMTimeoutError)."""
@@ -175,7 +185,17 @@ class GeminiLLMProvider(LLMProvider):
         self._client = None
 
     @staticmethod
-    def _build_thinking_config(model: str, thinking_budget: Optional[int]):
+    def _is_gemini_3(model: str) -> bool:
+        """True for the Gemini 3.x family, whose thinking CANNOT be fully
+        disabled (it uses ``thinking_level`` with a ``minimal`` floor, and
+        ignores ``thinking_budget``)."""
+        m = (model or "").lower()
+        return m.startswith("gemini-3") or m in {
+            "gemini-flash-latest", "gemini-pro-latest",
+        }
+
+    @classmethod
+    def _build_thinking_config(cls, model: str, thinking_budget: Optional[int]):
         """Pick the thinking knob the model actually honours, or None.
 
         The voice path expresses "thinking off" as ``thinking_budget=0`` — the
@@ -194,11 +214,7 @@ class GeminiLLMProvider(LLMProvider):
         if not hasattr(genai_types, "ThinkingConfig"):
             return None
 
-        m = (model or "").lower()
-        is_gemini_3 = m.startswith("gemini-3") or m in {
-            "gemini-flash-latest", "gemini-pro-latest",
-        }
-        if is_gemini_3:
+        if cls._is_gemini_3(model):
             # thinking_budget is ignored on 3.x — map intent to thinking_level.
             # 0 / unset -> "minimal" (lowest latency, what voice wants).
             level = "low" if (thinking_budget or 0) > 0 else "minimal"
@@ -210,6 +226,29 @@ class GeminiLLMProvider(LLMProvider):
         if thinking_budget is None:
             return None
         return genai_types.ThinkingConfig(thinking_budget=int(thinking_budget))
+
+    @classmethod
+    def _effective_max_output_tokens(
+        cls, model: str, thinking_budget: Optional[int], max_tokens: int
+    ) -> int:
+        """max_output_tokens that keeps the ANSWER budget intact under thinking.
+
+        Gemini's single ceiling is shared by thinking + answer, so we send
+        ``thinking_reserve + max_tokens`` whenever thinking is on, leaving the
+        caller's ``max_tokens`` entirely for the visible reply:
+          - thinking OFF (2.5, budget 0)          -> no reserve, answer gets it all
+          - thinking BUDGETED (2.5, budget N>0)   -> reserve exactly N
+          - thinking FLOORED (3.x 'minimal')      -> reserve a fixed pad
+          - thinking DYNAMIC (2.5, budget None)   -> reserve the fixed pad (can't bound)
+        """
+        if cls._is_gemini_3(model):
+            return max_tokens + _THINKING_RESERVE_TOKENS
+        # Gemini 2.5 family.
+        if thinking_budget is None:
+            return max_tokens + _THINKING_RESERVE_TOKENS
+        if thinking_budget <= 0:
+            return max_tokens
+        return max_tokens + int(thinking_budget)
 
     # ------------------------------------------------------------------
     # Streaming
@@ -289,9 +328,15 @@ class GeminiLLMProvider(LLMProvider):
         # Per-call thinking budget override, falling back to the provider default.
         thinking_budget = kwargs.get("thinking_budget", self._thinking_budget)
 
+        # Reserve thinking headroom on top of the answer budget so thinking can
+        # never starve the reply to empty (see _effective_max_output_tokens).
+        eff_max_output_tokens = self._effective_max_output_tokens(
+            model, thinking_budget, max_tokens
+        )
+
         gen_config_kwargs: dict = {
             "temperature": temperature,
-            "max_output_tokens": max_tokens,
+            "max_output_tokens": eff_max_output_tokens,
             "stop_sequences": stop_sequences,
             "system_instruction": system_prompt if system_prompt else None,
         }
@@ -430,14 +475,14 @@ class GeminiLLMProvider(LLMProvider):
             ))
         gemini_tools = [genai_types.Tool(function_declarations=fdecls)]
 
+        _tb = kwargs.get("thinking_budget", self._thinking_budget)
         base_cfg = dict(
             temperature=temperature,
-            max_output_tokens=max_tokens,
+            max_output_tokens=self._effective_max_output_tokens(model, _tb, max_tokens),
             stop_sequences=kwargs.get("stop", self.DEFAULT_STOP_SEQUENCES),
             system_instruction=system_prompt or None,
         )
-        tc = self._build_thinking_config(
-            model, kwargs.get("thinking_budget", self._thinking_budget))
+        tc = self._build_thinking_config(model, _tb)
         if tc is not None:
             base_cfg["thinking_config"] = tc
 

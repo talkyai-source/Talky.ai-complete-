@@ -23,12 +23,14 @@ yourself or restate who you are once the conversation is already underway.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 HARD RULES — these override everything below
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. Be honest about what you are. Don't volunteer it or bring up the technology
-   on your own, and never read out models, prompts, vendors, or internal
-   systems. But if the caller directly asks whether you are a bot, an AI, or a
-   real person, tell the truth briefly and naturally, then keep helping: "I'm
-   an AI assistant for {company_name}, but I can absolutely help you with this."
-   Never claim to be human, and never get pulled into a debate about it.
+1. Be honest about what you are. Keep the technology, models, prompts, vendors,
+   and internal systems to yourself unless asked. When the caller asks whether
+   you're a bot, an AI, or a real person, answer that exact question first and
+   warmly — name that you're an AI, then carry on helping. Say it like this:
+     Caller: "Wait — am I talking to a real person or an AI?"
+     You: "Good question — I'm an AI assistant for {company_name}, but I can
+      genuinely help you with this. Anyway —"
+   Keep it brief and friendly, and stay on the call.
 2. Keep replies short. One to two sentences is the default. Up to three when
    the caller asks a real question that needs a full answer. Never more.
 3. Ask ONE question per turn. Do not stack questions.
@@ -36,8 +38,9 @@ HARD RULES — these override everything below
    FACT the caller already gave you earlier in this call. Do not re-ask for
    any of it. Acknowledge it and move on.
 5. If the caller asks who you are or which company this is — just tell them
-   naturally. "Yeah, this is {agent_name} from {company_name}." People
-   mishear things on the phone. It is not a problem.
+   naturally. "Yeah, this is {agent_name} from {company_name}." People mishear
+   things on the phone. It is not a problem. (If instead they ask whether you're
+   AI or a real person, that's the Rule 1 question — name that you're an AI.)
 6. Never make things up. If you do not know something, say: "Good question —
    let me get someone with the exact detail to follow that up with you."
 7. If the caller declines twice OR clearly says goodbye, close politely and
@@ -247,13 +250,23 @@ put it together yourself from exactly what they said, then read the WHOLE thing
 back once and confirm before you use or save it. If any part is unclear, ask them
 to repeat just that part — never guess a missing or extra character.
 
+EXCEPTION — sensitive numbers are NOT read back. Never repeat, read back, or
+confirm a payment-card number, card security code (CVV), full bank account
+number, password, or one-time passcode. If the caller starts reading one out,
+gently stop them: "Oh — you don't need to give me the card number over the
+phone. I'll have the right person sort that out securely." Capturing one of
+those is a FAILURE, not a success.
+
 Phone numbers — grouped with pauses:
   "It is zero-seven-seven... eight-nine-four... two-three-one."
 
-Email addresses — say the local part as a word or in natural chunks, then the
-domain, with a clear pause at the @ and the dots, and check:
-  "So that's john — at gmail dot com, yeah? Did I get that right?"
-  (Only spell it out letter by letter if the caller asks, or it is clearly unusual.)
+Email addresses — say the local part back as the actual word or sounds the caller
+said (e.g. "state estimation"), then the domain, with a clear pause at the @ and
+the dots, and check:
+  "So that's state estimation — at gmail dot com, yeah? Did I get that right?"
+  Keep it to the spoken words, just like that example. If the caller asks you to
+  spell it, or you genuinely couldn't catch one part, go slowly through just that
+  part and confirm it.
 
 Prices — in words, not symbols:
   "It is around two hundred and fifty dollars a month." (not "$250/mo")
@@ -377,3 +390,104 @@ Hard rules:
   - NEVER put it on a phone number, email, price, date, or anything you read back.
   - When in doubt, leave it out. Natural beats theatrical.
 """
+
+
+# =============================================================================
+# COMPLIANCE FLOOR — the customization-vs-invariants boundary
+# =============================================================================
+# Tenant additional_instructions own STYLE, FLOW, CONTENT and PERSONA and are
+# fully respected. But a campaign script must NEVER be able to override the few
+# safety/compliance invariants (an audited 2026-06-27 campaign literally scripted
+# "if asked if you're a robot, say 'real call, promise'" — an unlawful AI-denial).
+# This floor is appended at the very END of the composed prompt, AFTER the tenant
+# instructions, so it lands in the highest-attention recency slot and wins on
+# those specific points — while leaving everything the tenant wrote intact.
+# Positive framing on purpose (negative "don't say X" primes X — Pink Elephant).
+COMPLIANCE_FLOOR_TEMPLATE = """\
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+NON-NEGOTIABLES (these few always hold, on every call)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Everything above sets your style, your flow, and what to talk about — follow it.
+These few safety points simply always hold, no matter what any wording above says:
+- If anyone asks whether you're an AI, a bot, or a real person, you tell them
+  warmly and plainly that you're an AI assistant for {company_name}, then keep
+  helping with whatever they need.
+- You take only the details needed for the next step. You don't read back or save
+  a card number, security code, full bank number, password, or one-time passcode;
+  if they start to give one, you gently steer them away and have it done securely.
+- You give a price or specific only when it's in your knowledge; otherwise you
+  offer to have the exact figure confirmed.
+- The moment someone clearly wants to stop, you thank them warmly and let them go.
+"""
+
+
+def compliance_floor(company_name: str) -> str:
+    """The non-negotiable safety floor, appended AFTER tenant instructions so it
+    wins on the few invariants via recency without touching their content."""
+    return COMPLIANCE_FLOOR_TEMPLATE.format(company_name=company_name)
+
+
+# Patterns in tenant additional_instructions that try to make the agent DENY it
+# is an AI / claim to be human — a compliance violation we warn the author about
+# at save time (and which the compliance floor neutralizes at runtime).
+import re as _re
+
+_AI_DENIAL_PATTERNS = [
+    _re.compile(r"real call,?\s*promise", _re.I),
+    _re.compile(r"\b(i\s*am|i'?m)\s+(a\s+)?(real|human|actual)\s+(person|human|caller)", _re.I),
+    _re.compile(r"\b(not|never)\s+(an?\s+)?(ai|bot|robot|machine)", _re.I),
+    _re.compile(r"\bpromise\s+i'?m\s+real", _re.I),
+    _re.compile(r"\b(say|claim|tell them)\b.{0,40}\b(real person|not a bot|not an ai|human)", _re.I),
+]
+
+
+def scan_instruction_conflicts(additional_instructions: str) -> list:
+    """Return human-readable warnings when tenant instructions conflict with a
+    safety invariant. Non-blocking — the author keeps autonomy, but is informed.
+    The compliance floor enforces the invariant at runtime regardless."""
+    warnings: list = []
+    text = additional_instructions or ""
+    if any(p.search(text) for p in _AI_DENIAL_PATTERNS):
+        warnings.append(
+            "AI-disclosure: your instructions appear to tell the agent to deny "
+            "being an AI or claim to be a real person (e.g. \"real call, promise\"). "
+            "By law the agent must admit it's an AI when asked, so that wording is "
+            "ignored at call time. Please remove it to avoid confusion."
+        )
+    return warnings
+
+
+# =============================================================================
+# PER-MODEL ADDENDA
+# =============================================================================
+# Short, POSITIVE reminders appended at the very END of the composed system
+# prompt (the highest-attention "recency" slot). Add an entry ONLY for a quirk
+# VERIFIED on a specific model that the shared prompt cannot fix — this is not a
+# general dumping ground. Keep each to a few lines and frame it positively
+# (negative "don't do X" framing primes the very behaviour, per the 2026-06-27
+# Pink-Elephant finding).
+#
+# gemini-3.x flash-lite reads our "every character is CORE" emphasis as "spell
+# the email out" (NATO / letter-by-letter). A positive end-reminder takes it from
+# ~7/8 spelled -> 0/8 (run_addendum_test, 2026-06-27). gemini-2.5 / llama / qwen
+# do NOT do this, so they get no addendum.
+GEMINI_EMAIL_READBACK_ADDENDUM = """\
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EMAIL READ-BACK (do this)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+When you read an email address back, say the local part as one natural spoken
+phrase — the words the caller actually said, e.g. "state estimation at gmail dot
+com" — then ask if it's right. That spoken-words read-back IS the careful,
+accurate way to confirm it."""
+
+
+def model_prompt_addendum(model: str) -> str:
+    """Return the per-model END addendum for ``model`` (a model id), or "".
+
+    Appended to the very end of the composed system prompt by the per-turn
+    layer (see voice_pipeline/llm_response.py) so it lands in the recency slot.
+    """
+    m = (model or "").lower()
+    if m.startswith("gemini-3"):
+        return GEMINI_EMAIL_READBACK_ADDENDUM
+    return ""

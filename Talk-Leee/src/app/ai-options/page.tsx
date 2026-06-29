@@ -36,6 +36,7 @@ import {
     type AccentBucket,
 } from "@/components/ai-options/controls";
 import { useQueryClient } from "@tanstack/react-query";
+import { temperatureAdvice } from "@/lib/temperature-advice";
 import {
     useProvidersQuery,
     useVoicesQuery,
@@ -461,6 +462,23 @@ export default function AIOptionsPage() {
                                 <RadialKnob label="Temp" value={config.llm_temperature} min={0} max={2} step={0.1} format={(v) => v.toFixed(1)} hint="creativity" onChange={(v) => setConfig({ ...config, llm_temperature: v })} />
                                 <RadialKnob label="Tokens" value={config.llm_max_tokens} min={50} max={5000} step={50} hint="max length" onChange={(v) => setConfig({ ...config, llm_max_tokens: v })} />
                             </div>
+                            {(() => {
+                                const advice = temperatureAdvice(config.llm_temperature);
+                                const toneCls: Record<string, string> = {
+                                    good: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
+                                    ok: "border-border bg-muted/40 text-muted-foreground",
+                                    warn: "border-amber-500/40 bg-amber-500/10 text-amber-300",
+                                    bad: "border-red-500/40 bg-red-500/10 text-red-300",
+                                };
+                                return (
+                                    <div className={`rounded-lg border p-2.5 text-xs ${toneCls[advice.tone]}`}>
+                                        <span className="font-semibold">
+                                            Temp {config.llm_temperature.toFixed(1)} · {advice.band}{advice.recommended ? " ✓" : ""}
+                                        </span>
+                                        <span className="mt-0.5 block opacity-90">{advice.message}</span>
+                                    </div>
+                                );
+                            })()}
                         </div>
                     </Card>
 

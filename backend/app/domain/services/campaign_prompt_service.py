@@ -6,9 +6,11 @@ that it can render through the production persona prompt composer.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, List
 
 from app.services.scripts.prompts import PromptCompositionError, compose_prompt
+from app.services.scripts.prompts.guardrails import scan_instruction_conflicts
 from app.services.scripts.prompts.prompt_safety import (
     MAX_ADDITIONAL_INSTRUCTIONS,
     MAX_AGENT_NAME,
@@ -17,6 +19,8 @@ from app.services.scripts.prompts.prompt_safety import (
     sanitize_tenant_text,
     too_long,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class CampaignPromptValidationError(ValueError):
@@ -80,6 +84,13 @@ def build_validated_script_config(
     cleaned_instructions = sanitize_tenant_text(
         additional_instructions, max_len=MAX_ADDITIONAL_INSTRUCTIONS
     )
+
+    # Non-blocking safety advisory: respect the author's content, but warn if it
+    # tries to override an invariant (e.g. scripting an AI-denial). The runtime
+    # compliance floor enforces the invariant regardless; this just informs.
+    conflict_warnings = scan_instruction_conflicts(cleaned_instructions)
+    for w in conflict_warnings:
+        logger.warning("campaign_instruction_conflict company=%s: %s", cleaned_company, w)
     try:
         compose_prompt(
             persona_type=persona_type,  # type: ignore[arg-type]

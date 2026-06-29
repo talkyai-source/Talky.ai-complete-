@@ -98,8 +98,7 @@ class TestModelInfo:
 
         assert GroqModel.LLAMA_3_3_70B.value in model_ids
         assert GroqModel.LLAMA_3_1_8B.value in model_ids
-        assert GroqModel.GPT_OSS_120B.value in model_ids
-        assert GroqModel.KIMI_K2.value in model_ids
+        assert GroqModel.QWEN_3_6_27B.value in model_ids
 
         # Verify each model has required fields
         for model in GROQ_MODELS:

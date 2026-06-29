@@ -43,6 +43,7 @@ from app.services.scripts.prompts.direction import (
 from app.services.scripts.prompts.guardrails import (
     COMMUNICATION_PRINCIPLES,
     GENERIC_GUARDRAILS,
+    compliance_floor,
 )
 from app.services.scripts.prompts.personas import (
     PERSONA_BODIES,
@@ -393,6 +394,11 @@ def compose_prompt(
             )
 
     parts.append(FINAL_RESPONSE_CONTRACT)
+
+    # The non-negotiable safety floor goes LAST (after the tenant's own
+    # additional_instructions) so it wins on the few invariants via recency —
+    # without altering anything the campaign author wrote. See compliance_floor.
+    parts.append(compliance_floor(company_name))
 
     composed = "\n\n".join(parts)
     # Brand accuracy: keep the agent saying the campaign's real company name

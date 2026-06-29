@@ -16,7 +16,7 @@ from typing import Optional
 
 from app.domain.services.llm_guardrails import get_guardrails
 from app.infrastructure.llm.groq import LLMTimeoutError
-from app.services.scripts import compose_system_prompt
+from app.services.scripts import compose_system_prompt, model_prompt_addendum
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +59,16 @@ async def generate_llm_response(llm_provider, latency_tracker, session, user_inp
         system_prompt = session.system_prompt
         if session.captured_slots is not None:
             system_prompt = compose_system_prompt(system_prompt, session.captured_slots)
+
+        # Per-model addendum at the very end (recency slot). Only fires for a
+        # model with a verified quirk the shared prompt can't fix — currently
+        # gemini-3.x flash-lite, which otherwise spells emails out letter by
+        # letter (verified 2026-06-27). Falls back to the provider's own model
+        # when the session didn't pin an override.
+        _model_id = getattr(session, "llm_model", None) or getattr(llm_provider, "_model", "") or ""
+        _addendum = model_prompt_addendum(_model_id)
+        if _addendum:
+            system_prompt = f"{system_prompt}\n\n{_addendum}"
 
         max_sentences = response_max_sentences_for_turn(
             session,

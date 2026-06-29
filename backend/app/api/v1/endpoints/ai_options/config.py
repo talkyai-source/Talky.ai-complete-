@@ -268,18 +268,10 @@ async def save_config(
     # Sources: Groq official docs 2025, Cresta voice latency post 2025.
     FAST_MODELS = {
         "llama-3.1-8b-instant",
-        "openai/gpt-oss-20b",
-        "meta-llama/llama-4-scout-17b-16e-instruct",
     }
-    SLOW_MODELS = {
-        "openai/gpt-oss-120b",
-        "moonshotai/kimi-k2-instruct-0905",
-    }
+    SLOW_MODELS: set[str] = set()
     PREVIEW_MODELS = {
-        "meta-llama/llama-4-maverick-17b-128e-instruct",
-        "meta-llama/llama-4-scout-17b-16e-instruct",
-        "qwen/qwen3-32b",
-        "moonshotai/kimi-k2-instruct-0905",
+        "qwen/qwen3.6-27b",
     }
 
     latency_warnings: list[str] = []

@@ -20,6 +20,7 @@ from app.services.scripts.prompts.composer import (
     brand_correction_line,
     compose_prompt,
 )
+from app.services.scripts.prompts.guardrails import model_prompt_addendum
 from app.services.scripts.prompts.live_state import build_live_state_block
 from app.services.scripts.prompts.personas import (
     PERSONAS,
@@ -37,6 +38,7 @@ __all__ = [
     "build_live_state_block",
     "build_turn_prompt",
     "compose_prompt",
+    "model_prompt_addendum",
     "pick_agent_name",
     "pick_agent_name_for_voice",
     "validate_pool",

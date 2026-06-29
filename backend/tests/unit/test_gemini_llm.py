@@ -377,3 +377,42 @@ def test_thinking_config_gemini_3x_positive_budget_maps_to_low():
     tc = GeminiLLMProvider._build_thinking_config("gemini-3.5-flash", 256)
     assert tc is not None
     assert tc.thinking_level == "low"
+
+
+# ---------------------------------------------------------------------------
+# Effective max_output_tokens: thinking tokens share Gemini's single ceiling,
+# so we reserve thinking headroom ON TOP of the answer budget. The configured
+# max_tokens must stay fully available for the visible reply.
+# ---------------------------------------------------------------------------
+
+from app.infrastructure.llm.gemini import _THINKING_RESERVE_TOKENS
+
+
+def test_effective_max_25_thinking_off_no_reserve():
+    # 2.5 + budget 0 (thinking off) → answer keeps the full budget, no reserve.
+    assert GeminiLLMProvider._effective_max_output_tokens(
+        "gemini-2.5-flash", 0, 90) == 90
+
+
+def test_effective_max_25_budget_reserves_exactly_that_budget():
+    # 2.5 + budget N>0 → reserve exactly N on top of the answer.
+    assert GeminiLLMProvider._effective_max_output_tokens(
+        "gemini-2.5-flash", 256, 90) == 90 + 256
+
+
+def test_effective_max_25_dynamic_thinking_reserves_pad():
+    # 2.5 + None (dynamic thinking on) → can't bound, reserve the fixed pad.
+    assert GeminiLLMProvider._effective_max_output_tokens(
+        "gemini-2.5-flash", None, 90) == 90 + _THINKING_RESERVE_TOKENS
+
+
+@pytest.mark.parametrize("model", [
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3.5-flash",
+    "gemini-flash-latest",
+])
+def test_effective_max_3x_floor_reserves_pad(model):
+    # 3.x cannot disable thinking ("minimal" floor) → always reserve the pad so
+    # thinking can never starve the answer to zero chunks.
+    assert GeminiLLMProvider._effective_max_output_tokens(
+        model, 0, 90) == 90 + _THINKING_RESERVE_TOKENS

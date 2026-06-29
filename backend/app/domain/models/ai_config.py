@@ -33,13 +33,17 @@ class GroqModel(str, Enum):
     # Production Models
     LLAMA_3_3_70B = "llama-3.3-70b-versatile"
     LLAMA_3_1_8B = "llama-3.1-8b-instant"
-    GPT_OSS_120B = "openai/gpt-oss-120b"
-    GPT_OSS_20B = "openai/gpt-oss-20b"
+    # GPT-OSS (120B/20B) removed from the menu 2026-06-25: they are agentic
+    # task-completion reasoners that misbehave on conversational voice (stack
+    # questions, NATO-spell). The provider still HANDLES openai/gpt-oss-* if one
+    # is passed (see _is_gpt_oss_model) — they are just not offered.
     # Preview Models
-    LLAMA_4_MAVERICK = "meta-llama/llama-4-maverick-17b-128e-instruct"
-    LLAMA_4_SCOUT = "meta-llama/llama-4-scout-17b-16e-instruct"
-    QWEN_3_32B = "qwen/qwen3-32b"
-    KIMI_K2 = "moonshotai/kimi-k2-instruct-0905"
+    # qwen3-32b removed 2026-06-27: it dodged the AI-disclosure question and
+    # hallucinated prices / leaked a card number in the weakness audit — qwen3.6
+    # behaves strictly better, so we keep only that.
+    # Qwen 3.6 27B — reasoning toggles between "default" and "none"; we run it
+    # with thinking disabled (reasoning_effort="none") for low-latency voice.
+    QWEN_3_6_27B = "qwen/qwen3.6-27b"
 
 
 class GeminiModel(str, Enum):
@@ -49,10 +53,10 @@ class GeminiModel(str, Enum):
     # higher output throughput than 2.5 Flash — the right default for
     # latency-critical voice paths like the Ask AI popup.
     GEMINI_3_1_FLASH_LITE = "gemini-3.1-flash-lite-preview"
-    # Gemini 3.5 Flash — GA (June 2026), Google's most capable Flash model. The
-    # "best" pick for quality on talking + testing. Uses thinking_level (run at
-    # "minimal" for voice); slightly higher TTFT floor than 3.1 Flash-Lite.
-    GEMINI_3_5_FLASH = "gemini-3.5-flash"
+    # gemini-3.5-flash removed from the menu 2026-06-25: it NATO-spells emails
+    # (S for Sierra…) 3/3 even after the read-back guardrail fix — a model-level
+    # quirk that prompt rules don't beat, voice-unsafe for core-field capture.
+    # The provider still handles any gemini-3.x name if one is passed.
     # Reserved for Gemma 4 — uncomment and add a matching GEMINI_MODELS entry
     # once Google AI Studio exposes them. No other code change needed; the
     # GeminiLLMProvider already handles arbitrary model names.
@@ -205,7 +209,7 @@ GROQ_MODELS = [
     ModelInfo(
         id=GroqModel.LLAMA_3_3_70B.value,
         name="Llama 3.3 70B Versatile",
-        description="Best quality/speed balance for voice AI. Recommended for production.",
+        description="Best quality/speed balance for voice AI. Strong all-rounder; for price- or fact-heavy campaigns lean on the knowledge base, as it states specifics confidently.",
         speed="280 tokens/s",
         price="$0.59 input / $0.79 output per 1M tokens",
         context_window=131072,
@@ -222,64 +226,14 @@ GROQ_MODELS = [
         is_preview=False,
         provider="groq",
     ),
-    ModelInfo(
-        id=GroqModel.GPT_OSS_120B.value,
-        name="OpenAI GPT-OSS 120B",
-        description="OpenAI's flagship open-weight model with reasoning capabilities.",
-        speed="500 tokens/s",
-        price="$0.15 input / $0.60 output per 1M tokens",
-        context_window=131072,
-        is_preview=False,
-        provider="groq",
-    ),
-    ModelInfo(
-        id=GroqModel.GPT_OSS_20B.value,
-        name="OpenAI GPT-OSS 20B",
-        description="Fast and efficient OpenAI open-weight model.",
-        speed="1000 tokens/s",
-        price="$0.075 input / $0.30 output per 1M tokens",
-        context_window=131072,
-        is_preview=False,
-        provider="groq",
-    ),
     # Preview Models (for evaluation, may change)
     ModelInfo(
-        id=GroqModel.LLAMA_4_MAVERICK.value,
-        name="Llama 4 Maverick 17B",
-        description="Latest Llama 4 with 128 experts for complex reasoning.",
-        speed="600 tokens/s",
-        price="$0.20 input / $0.60 output per 1M tokens",
-        context_window=131072,
-        is_preview=True,
-        provider="groq",
-    ),
-    ModelInfo(
-        id=GroqModel.LLAMA_4_SCOUT.value,
-        name="Llama 4 Scout 17B",
-        description="Fast Llama 4 variant with 16 experts.",
-        speed="750 tokens/s",
-        price="$0.11 input / $0.34 output per 1M tokens",
-        context_window=131072,
-        is_preview=True,
-        provider="groq",
-    ),
-    ModelInfo(
-        id=GroqModel.QWEN_3_32B.value,
-        name="Qwen 3 32B",
-        description="Alibaba's powerful multilingual model.",
-        speed="400 tokens/s",
+        id=GroqModel.QWEN_3_6_27B.value,
+        name="Qwen 3.6 27B",
+        description="Alibaba's Qwen 3.6 with toggleable reasoning — run with thinking disabled for fast voice replies.",
+        speed="~400 tokens/s",
         price="$0.29 input / $0.59 output per 1M tokens",
         context_window=131072,
-        is_preview=True,
-        provider="groq",
-    ),
-    ModelInfo(
-        id=GroqModel.KIMI_K2.value,
-        name="Kimi K2",
-        description="Moonshot AI's large context model with 262K context.",
-        speed="200 tokens/s",
-        price="$1.00 input / $3.00 output per 1M tokens",
-        context_window=262144,
         is_preview=True,
         provider="groq",
     ),
@@ -293,20 +247,6 @@ GROQ_MODELS = [
 # Google AI Studio exposes those endpoints.
 
 GEMINI_MODELS = [
-    ModelInfo(
-        id=GeminiModel.GEMINI_3_5_FLASH.value,
-        name="Gemini 3.5 Flash",
-        description=(
-            "Google's most capable Flash model (GA, June 2026). Best quality "
-            "for talking and testing. Thinking runs at 'minimal' for low "
-            "latency — slightly higher time-to-first-token than 3.1 Flash-Lite."
-        ),
-        speed="~300 tokens/s",
-        price="Higher than 3.1 Flash-Lite",
-        context_window=1_048_576,
-        is_preview=False,
-        provider="gemini",
-    ),
     ModelInfo(
         id=GeminiModel.GEMINI_3_1_FLASH_LITE.value,
         name="Gemini 3.1 Flash-Lite (preview)",
