@@ -212,6 +212,18 @@ class AuditLogEntry(BaseModel):
             return value
         return str(value)
 
+    @field_validator("metadata", "before_state", "after_state", mode="before")
+    @classmethod
+    def _parse_json_obj(cls, value):
+        # These JSON columns come back from asyncpg as raw JSON strings (not
+        # decoded dicts), which the `Optional[dict]` fields reject. Parse them.
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except (ValueError, TypeError):
+                return None
+        return value
+
 
 class AuditLogger:
     """
