@@ -12,7 +12,7 @@ from typing import Any, Optional
 from uuid import UUID, uuid4
 
 import asyncpg
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +201,16 @@ class AuditLogEntry(BaseModel):
     compliance_tags: list[str] = []
     retention_until: datetime
     created_at: datetime
+
+    @field_validator("ip_address", mode="before")
+    @classmethod
+    def _stringify_inet(cls, value):
+        # The ip_address column is Postgres `inet`, which asyncpg returns as an
+        # IPv4Address/IPv6Address object. Pydantic v2 won't coerce that into the
+        # declared `str`, so audit-log queries 500'd. Stringify it here.
+        if value is None or isinstance(value, str):
+            return value
+        return str(value)
 
 
 class AuditLogger:
