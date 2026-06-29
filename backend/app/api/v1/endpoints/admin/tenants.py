@@ -55,14 +55,6 @@ class QuotaUpdateRequest(BaseModel):
     max_concurrent_calls: Optional[int] = None
 
 
-class UserResponse(AdminResponseModel):
-    """User response model"""
-    id: str
-    email: str
-    role: str
-    tenant_id: Optional[str] = None
-
-
 # =============================================================================
 # Endpoints
 # =============================================================================
@@ -141,39 +133,6 @@ async def list_tenants(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to fetch tenants: {str(e)}"
-        )
-
-
-@router.get("/users", response_model=List[UserResponse])
-async def list_users(
-    admin_user: CurrentUser = Depends(require_admin),
-    db_client: Client = Depends(get_db_client)
-):
-    """
-    List all users (admin only).
-    
-    Used by: /dashboard/admin page (when user.role === 'admin').
-    """
-    try:
-        response = db_client.table("user_profiles").select(
-            "id, email, role, tenant_id"
-        ).order("email").execute()
-        
-        users = []
-        for user in response.data or []:
-            users.append(UserResponse(
-                id=user["id"],
-                email=user["email"],
-                role=user.get("role", "user"),
-                tenant_id=user.get("tenant_id")
-            ))
-        
-        return users
-    
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch users: {str(e)}"
         )
 
 

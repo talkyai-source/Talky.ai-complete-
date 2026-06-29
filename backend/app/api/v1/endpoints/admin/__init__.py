@@ -6,6 +6,7 @@ from fastapi import APIRouter
 
 from .base import router as base_router
 from .tenants import router as tenants_router
+from .users import router as users_router
 from .calls import router as calls_router
 from .actions import router as actions_router
 from .connectors import router as connectors_router
@@ -18,6 +19,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 # Include all sub-routers (they don't have prefix since parent has /admin)
 router.include_router(base_router)
 router.include_router(tenants_router)
+router.include_router(users_router)
 router.include_router(calls_router)
 router.include_router(actions_router)
 router.include_router(connectors_router)
