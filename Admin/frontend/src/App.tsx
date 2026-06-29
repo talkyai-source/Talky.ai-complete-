@@ -7,6 +7,7 @@ import { TenantsPage } from './pages/TenantsPage';
 import { CallsPage } from './pages/CallsPage';
 import { ActionsPage } from './pages/ActionsPage';
 import { ConnectorsPage } from './pages/ConnectorsPage';
+import { UsersPage } from './pages/UsersPage';
 import { UsageCostPage } from './pages/UsageCostPage';
 import { IncidentsPage } from './pages/IncidentsPage';
 import { SystemHealthPage } from './pages/SystemHealthPage';
@@ -66,6 +67,14 @@ function App() {
             element={
               <AdminRouteGuard>
                 <ConnectorsPage />
+              </AdminRouteGuard>
+            }
+          />
+          <Route
+            path="/users"
+            element={
+              <AdminRouteGuard>
+                <UsersPage />
               </AdminRouteGuard>
             }
           />

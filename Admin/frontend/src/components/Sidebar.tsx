@@ -8,6 +8,7 @@ import {
     DollarSign,
     AlertTriangle,
     Activity,
+    Users,
 } from 'lucide-react';
 
 interface NavItem {
@@ -20,6 +21,7 @@ interface NavItem {
 const navItems: NavItem[] = [
     { id: 'command-center', label: 'Command Center', icon: <LayoutDashboard />, path: '/' },
     { id: 'tenants', label: 'Tenants', icon: <Building2 />, path: '/tenants' },
+    { id: 'users', label: 'Users & Roles', icon: <Users />, path: '/users' },
     { id: 'calls', label: 'Calls', icon: <Phone />, path: '/calls' },
     { id: 'actions', label: 'Actions', icon: <FileText />, path: '/actions' },
     { id: 'connectors', label: 'Connectors', icon: <Link2 />, path: '/connectors' },

@@ -369,6 +369,70 @@ export interface UserDetails extends User {
     login_history: LoginHistoryItem[];
 }
 
+// =============================================================================
+// Users & Roles management
+//
+// Backend contract (to be implemented on the API):
+//   GET    /admin/users                 -> AdminUserItem[]   (rich list)
+//   POST   /admin/users                 -> AdminUserItem     (create)
+//   PATCH  /admin/users/{user_id}       -> AdminUserItem     (block/unblock, role, name)
+//   DELETE /admin/users/{user_id}       -> { detail }        (delete)
+//   GET    /rbac/roles                  -> RbacRole[]        (already exists)
+//   GET    /rbac/permissions            -> RbacPermission[]  (already exists)
+// =============================================================================
+
+export type UserRoleName =
+    | 'platform_admin'
+    | 'partner_admin'
+    | 'tenant_admin'
+    | 'user'
+    | 'readonly';
+
+export interface AdminUserItem {
+    id: string;
+    email: string;
+    name: string | null;
+    role: string;
+    tenant_id: string | null;
+    tenant_name?: string | null;
+    is_active?: boolean;        // false => blocked
+    mfa_enabled?: boolean;
+    is_verified?: boolean;
+    last_login_at?: string | null;
+    created_at?: string | null;
+}
+
+export interface CreateUserRequest {
+    name: string;
+    email: string;
+    password: string;
+    role: string;
+    tenant_id?: string | null;
+}
+
+export interface UpdateUserRequest {
+    name?: string;
+    role?: string;
+    is_active?: boolean;
+}
+
+export interface RbacRole {
+    id: string;
+    name: string;
+    description: string | null;
+    level: number;
+    is_system_role: boolean;
+    tenant_scoped: boolean;
+}
+
+export interface RbacPermission {
+    id: string;
+    name: string;
+    description: string | null;
+    resource: string;
+    action: string;
+}
+
 export interface UserSummary {
     id: string;
     email: string;
@@ -794,6 +858,44 @@ class ApiClient {
 
     async getUser(userId: string) {
         return this.request<UserDetails>(`/admin/users/${userId}`);
+    }
+
+    // --- Users & Roles management ---------------------------------------------
+
+    // The backend returns a bare array for /admin/users (not the wrapped
+    // UsersResponse), so this is the shape the page actually consumes.
+    async getUsersList(params?: UserQueryParams) {
+        const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
+        return this.request<AdminUserItem[]>(`/admin/users${query}`);
+    }
+
+    async createUser(payload: CreateUserRequest) {
+        return this.request<AdminUserItem>('/admin/users', {
+            method: 'POST',
+            body: payload,
+        });
+    }
+
+    // Block/unblock (is_active), rename, or change role.
+    async updateUser(userId: string, payload: UpdateUserRequest) {
+        return this.request<AdminUserItem>(`/admin/users/${userId}`, {
+            method: 'PATCH',
+            body: payload,
+        });
+    }
+
+    async deleteUser(userId: string) {
+        return this.request<{ detail: string }>(`/admin/users/${userId}`, {
+            method: 'DELETE',
+        });
+    }
+
+    async getRoles() {
+        return this.request<RbacRole[]>('/rbac/roles');
+    }
+
+    async getPermissions() {
+        return this.request<RbacPermission[]>('/rbac/permissions');
     }
 
     // Analytics Endpoints
