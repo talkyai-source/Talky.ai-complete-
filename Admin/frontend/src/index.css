@@ -3210,3 +3210,62 @@ body {
   background: var(--bg-main);
   color: var(--text-secondary);
 }
+
+/* ── Usage & Cost page ─────────────────────────────────────────── */
+.date-range-filter {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.date-range-filter label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.date-range-filter input[type="date"] {
+  background: var(--bg-main);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  color: var(--text-primary);
+  padding: 7px 10px;
+  font-size: 13px;
+  color-scheme: dark;
+}
+
+.date-range-filter input[type="date"]:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+}
+
+.usage-disclaimer {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--accent-blue);
+  border-radius: var(--border-radius);
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.usage-disclaimer svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--accent-blue);
+}
+
+.data-table tfoot td {
+  border-top: 1px solid var(--border-color);
+  padding-top: 12px;
+  color: var(--text-primary);
+}

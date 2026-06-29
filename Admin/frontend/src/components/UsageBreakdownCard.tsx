@@ -13,6 +13,8 @@ import type { UsageSummaryResponse } from '../lib/api';
 
 interface UsageBreakdownCardProps {
     tenantId?: string;
+    fromDate?: string;
+    toDate?: string;
 }
 
 const providerConfig: Record<string, { icon: React.ReactNode; label: string; color: string }> = {
@@ -29,18 +31,23 @@ const usageTypeLabels: Record<string, string> = {
     sms: 'SMS Messages',
 };
 
-export function UsageBreakdownCard({ tenantId }: UsageBreakdownCardProps) {
+export function UsageBreakdownCard({ tenantId, fromDate, toDate }: UsageBreakdownCardProps) {
     const [summary, setSummary] = useState<UsageSummaryResponse | null>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         fetchUsage();
-    }, [tenantId]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [tenantId, fromDate, toDate]);
 
     const fetchUsage = async () => {
         setLoading(true);
         try {
-            const response = await api.getUsageSummary({ tenant_id: tenantId });
+            const response = await api.getUsageSummary({
+                tenant_id: tenantId,
+                from_date: fromDate,
+                to_date: toDate,
+            });
             if (response.data) {
                 setSummary(response.data);
             }
