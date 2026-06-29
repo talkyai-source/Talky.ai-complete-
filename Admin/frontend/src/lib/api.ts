@@ -814,10 +814,11 @@ class ApiClient {
         return this.request<AuditResponse>(`/admin/audit/logs${query}`);
     }
 
-    // Backend router prefix is /admin/security-events (hyphenated), not /admin/security/events.
+    // Backend route is GET /admin/security-events/events (router prefix
+    // /admin/security-events + /events path), not /admin/security/events.
     async getSecurityEvents(params?: SecurityQueryParams) {
         const query = params ? '?' + new URLSearchParams(params as Record<string, string>).toString() : '';
-        return this.request<SecurityEventsResponse>(`/admin/security-events${query}`);
+        return this.request<SecurityEventsResponse>(`/admin/security-events/events${query}`);
     }
 
     // Configuration Endpoints
