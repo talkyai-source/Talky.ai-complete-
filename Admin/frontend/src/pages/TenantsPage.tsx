@@ -17,11 +17,19 @@ export function TenantsPage() {
         setLoading(true);
         setError(null);
         try {
-            const data = await api.getTenants(
+            // api.getTenants returns the ApiResponse wrapper { data, error } —
+            // unwrap it (every other page does this). The endpoint returns a
+            // bare array, so default to [] to keep TenantsTable iterable.
+            const res = await api.getTenants(
                 searchTerm || undefined,
                 statusFilter || undefined
             );
-            setTenants(data);
+            if (res.error) {
+                setError(res.error.message);
+                setTenants([]);
+            } else {
+                setTenants(res.data ?? []);
+            }
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to fetch tenants');
             console.error('Failed to fetch tenants:', err);
