@@ -13,6 +13,7 @@ import {
 import {
     Cpu,
     Volume2,
+    Mic,
     Zap,
     Play,
     Send,
@@ -376,6 +377,8 @@ export default function AIOptionsPage() {
     }
 
     const llmModelInfo = providers?.llm.models.find((m) => m.id === config?.llm_model);
+    const sttEngines = providers?.stt.engines ?? [];
+    const sttEngineInfo = sttEngines.find((e) => e.id === config?.stt_engine);
     const ttsModelInfo = ttsModelsForSelectedProvider.find((model) => model.id === config?.tts_model);
     const selectCls = "w-full rounded-lg border border-border bg-background px-4 py-2.5 text-sm text-foreground outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40";
 
@@ -479,6 +482,30 @@ export default function AIOptionsPage() {
                                     </div>
                                 );
                             })()}
+                        </div>
+                    </Card>
+
+                    {/* STT engine */}
+                    <Card delay={0.08}>
+                        <SectionHeader icon={<Mic className="h-5 w-5" />} title="Speech-to-Text" subtitle="The engine that hears the caller" />
+                        <div className="space-y-3">
+                            <label className="block text-sm font-medium text-muted-foreground">Engine</label>
+                            <select
+                                value={config.stt_engine}
+                                onChange={(e) => setConfig({ ...config, stt_engine: e.target.value })}
+                                className={selectCls}
+                            >
+                                {sttEngines.length === 0 && <option value={config.stt_engine}>{config.stt_engine}</option>}
+                                {sttEngines.map((eng) => (
+                                    <option key={eng.id} value={eng.id}>{eng.name}{eng.is_preview ? " (beta)" : ""}</option>
+                                ))}
+                            </select>
+                            {sttEngineInfo && (
+                                <div className="rounded-lg border border-border bg-muted/40 p-3">
+                                    <p className="text-sm text-foreground">{sttEngineInfo.description}</p>
+                                    <p className="mt-1 text-xs text-muted-foreground">Turn detection: {sttEngineInfo.speed ?? "n/a"} · automatically fails over to the other engine if one is unavailable</p>
+                                </div>
+                            )}
                         </div>
                     </Card>
 

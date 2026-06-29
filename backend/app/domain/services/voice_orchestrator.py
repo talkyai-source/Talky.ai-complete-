@@ -834,7 +834,6 @@ class VoiceOrchestrator:
         Nova-3 model — same vendor + auth, different model. Operators
         can override the secondary model via `STT_SECONDARY_MODEL`.
         """
-        from app.infrastructure.stt.deepgram_flux import DeepgramFluxSTTProvider
         from app.domain.services.credential_resolver import (
             get_credential_resolver,
         )
@@ -842,52 +841,62 @@ class VoiceOrchestrator:
         api_key = await get_credential_resolver().resolve(
             "deepgram", tenant_id=config.tenant_id,
         )
-        primary = DeepgramFluxSTTProvider()
-        primary_init = {
-            "api_key": api_key,
-            "model": config.stt_model,
-            "sample_rate": config.stt_sample_rate,
-            "encoding": config.stt_encoding,
-            "eot_threshold": config.stt_eot_threshold,
-            "eager_eot_threshold": config.stt_eager_eot_threshold,
-            "eot_timeout_ms": config.stt_eot_timeout_ms,
-            # Per-session keyterms win; otherwise fall back to the configured
-            # providers.yaml list. Env DEEPGRAM_FLUX_KEYTERMS overrides both
-            # inside initialize(). Covers telephony AND ask-AI (shared path).
-            "keyterms": config.stt_keyterms or _default_flux_keyterms(),
-            # Capture-only keyterms (email domains + spell connectors). Static
-            # across campaigns; injected only during email/spell capture mode so
-            # they never bias ordinary speech. Env DEEPGRAM_FLUX_CAPTURE_KEYTERMS
-            # overrides inside initialize().
-            "capture_keyterms": _default_flux_capture_keyterms(),
-            # Privacy: keep caller PII out of Deepgram's training set.
-            "mip_opt_out": True,
-            # Observability: tag each STT session for per-tenant usage + debug.
-            "tags": [
-                f"tenant:{config.tenant_id or 'none'}",
-                f"campaign:{config.campaign_id}",
-            ],
-        }
+
+        def _build_flux(model: str):
+            from app.infrastructure.stt.deepgram_flux import DeepgramFluxSTTProvider
+            init = {
+                "api_key": api_key,
+                "model": model,
+                "sample_rate": config.stt_sample_rate,
+                "encoding": config.stt_encoding,
+                "eot_threshold": config.stt_eot_threshold,
+                "eager_eot_threshold": config.stt_eager_eot_threshold,
+                "eot_timeout_ms": config.stt_eot_timeout_ms,
+                # Per-session keyterms win; else the providers.yaml list (env
+                # DEEPGRAM_FLUX_KEYTERMS overrides inside initialize()).
+                "keyterms": config.stt_keyterms or _default_flux_keyterms(),
+                "capture_keyterms": _default_flux_capture_keyterms(),
+                "mip_opt_out": True,  # keep caller PII out of training
+                "tags": [
+                    f"tenant:{config.tenant_id or 'none'}",
+                    f"campaign:{config.campaign_id}",
+                ],
+            }
+            return DeepgramFluxSTTProvider(), init
+
+        def _build_nova(model: str):
+            from app.infrastructure.stt.deepgram_nova import DeepgramNovaSTTProvider
+            init = {
+                "api_key": api_key,
+                "model": model,
+                "sample_rate": config.stt_sample_rate,
+                "encoding": config.stt_encoding,
+            }
+            return DeepgramNovaSTTProvider(), init
+
+        # PRIMARY = the engine the tenant picked in AI Options (default Flux).
+        engine = (config.stt_provider_type or "deepgram_flux").lower()
+        is_nova_primary = engine in ("deepgram_nova", "deepgram-nova", "nova", "nova-3")
+        if is_nova_primary:
+            primary, primary_init = _build_nova(config.stt_model or "nova-3")
+        else:
+            primary, primary_init = _build_flux(config.stt_model or "flux-general-en")
         await primary.initialize(primary_init)
 
         if not _failover_enabled("STT_FAILOVER_ENABLED"):
             return primary
 
-        # Secondary — Deepgram **nova-3** on /v1/listen (a DIFFERENT model AND a
-        # different endpoint from Flux's /v2/listen). This is the real fix for the
-        # 2026-06-29 outage: a Flux-side failure (it rejected `numerals=true` with
-        # HTTP 400) now fails over to a working STT instead of going silent —
-        # whereas the old secondary was just another Flux (useless when Flux's API
-        # itself breaks). nova-3 contract matches Flux (verified). Same Deepgram
-        # auth. Override the secondary model via STT_SECONDARY_MODEL.
-        from app.infrastructure.stt.deepgram_nova import DeepgramNovaSTTProvider
-        secondary = DeepgramNovaSTTProvider()
-        secondary_init = {
-            "api_key": api_key,
-            "model": os.getenv("STT_SECONDARY_MODEL") or "nova-3",
-            "sample_rate": config.stt_sample_rate,
-            "encoding": config.stt_encoding,
-        }
+        # SECONDARY = the OTHER engine (cross-engine resilience). A Flux-side
+        # failure (e.g. the 2026-06-29 numerals=true HTTP 400) fails over to
+        # Nova-3 and vice-versa, so one provider's outage never silences calls.
+        # Same Deepgram auth. Override the secondary model via STT_SECONDARY_MODEL.
+        sec_override = os.getenv("STT_SECONDARY_MODEL")
+        if is_nova_primary:
+            secondary, secondary_init = _build_flux(sec_override or "flux-general-en")
+            sec_label = f"flux-{secondary_init['model']}"
+        else:
+            secondary, secondary_init = _build_nova(sec_override or "nova-3")
+            sec_label = f"nova-{secondary_init['model']}"
         try:
             await secondary.initialize(secondary_init)
         except Exception as exc:
@@ -907,8 +916,8 @@ class VoiceOrchestrator:
             policy=ReconnectPolicy(),
         )
         logger.info(
-            "stt_resilient_wrapper_active primary=flux-%s secondary=nova-%s",
-            config.stt_model, secondary_init["model"],
+            "stt_resilient_wrapper_active primary=%s-%s secondary=%s",
+            "nova" if is_nova_primary else "flux", primary_init["model"], sec_label,
         )
         return wrapper
 

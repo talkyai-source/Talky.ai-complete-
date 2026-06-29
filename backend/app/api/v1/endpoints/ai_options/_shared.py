@@ -32,7 +32,8 @@ async def _fetch_tenant_config(conn, tenant_id: str) -> Optional[AIProviderConfi
             tts_model,
             tts_voice_id,
             tts_sample_rate,
-            voice_tuning
+            voice_tuning,
+            stt_engine
         FROM tenant_ai_configs
         WHERE tenant_id = $1
         """,
@@ -64,6 +65,7 @@ async def _fetch_tenant_config(conn, tenant_id: str) -> Optional[AIProviderConfi
         llm_max_tokens=row["llm_max_tokens"],
         stt_provider=row["stt_provider"],
         stt_model=row["stt_model"],
+        stt_engine=(dict(row).get("stt_engine") or "deepgram_flux"),
         stt_language=row["stt_language"],
         tts_provider=row["tts_provider"],
         tts_model=row["tts_model"],
@@ -104,10 +106,11 @@ async def _upsert_tenant_config(conn, tenant_id: str, config: AIProviderConfig) 
             tts_model,
             tts_voice_id,
             tts_sample_rate,
-            voice_tuning
+            voice_tuning,
+            stt_engine
         )
         VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14
         )
         ON CONFLICT (tenant_id) DO UPDATE SET
             llm_provider = EXCLUDED.llm_provider,
@@ -122,6 +125,7 @@ async def _upsert_tenant_config(conn, tenant_id: str, config: AIProviderConfig) 
             tts_voice_id = EXCLUDED.tts_voice_id,
             tts_sample_rate = EXCLUDED.tts_sample_rate,
             voice_tuning = EXCLUDED.voice_tuning,
+            stt_engine = EXCLUDED.stt_engine,
             updated_at = NOW()
         """,
         tenant_id,
@@ -137,6 +141,7 @@ async def _upsert_tenant_config(conn, tenant_id: str, config: AIProviderConfig) 
         config.tts_voice_id,
         config.tts_sample_rate,
         voice_tuning_json,
+        config.stt_engine,
     )
 
 

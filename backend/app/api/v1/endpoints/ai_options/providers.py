@@ -25,6 +25,7 @@ from app.domain.models.ai_config import (
     GOOGLE_TTS_MODELS,
     GROQ_MODELS,
     ProviderListResponse,
+    STT_ENGINES,
 )
 from app.infrastructure.tts.elevenlabs_catalog import (
     elevenlabs_enabled,
@@ -78,7 +79,9 @@ async def list_providers():
         },
         stt={
             "providers": ["deepgram"],
-            "models": [model.model_dump() for model in DEEPGRAM_MODELS]
+            "models": [model.model_dump() for model in DEEPGRAM_MODELS],
+            # Selectable speech ENGINES (the Flux-vs-Nova-3 turn-taking choice).
+            "engines": [engine.model_dump() for engine in STT_ENGINES],
         },
         tts={
             "providers": tts_providers,

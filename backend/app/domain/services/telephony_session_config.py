@@ -544,12 +544,21 @@ def build_telephony_session_config(
     else:
         _tuning = get_voice_tuning_resolver().for_tenant(_tenant_id)
 
+    # STT engine choice (AI Options): Flux (semantic turn-detection) vs Nova-3
+    # (acoustic VAD/endpointing). The orchestrator builds the matching primary;
+    # the failover secondary is wired separately. Default = Flux (prior behaviour).
+    _stt_engine = (getattr(global_config, "stt_engine", None) or "deepgram_flux").lower()
+    if _stt_engine in ("deepgram_nova", "deepgram-nova", "nova", "nova-3"):
+        _stt_provider_type, _stt_model = "deepgram_nova", "nova-3"
+    else:
+        _stt_provider_type, _stt_model = "deepgram_flux", "flux-general-en"
+
     return VoiceSessionConfig(
         gateway_type=gateway_type,
-        stt_provider_type="deepgram_flux",
+        stt_provider_type=_stt_provider_type,
         llm_provider_type=_llm_provider_type,
         tts_provider_type=tts_provider_type,
-        stt_model="flux-general-en",
+        stt_model=_stt_model,
         stt_sample_rate=16000,
         stt_encoding="linear16",
         # Conversational-rhythm tunables come from the tenant resolver.

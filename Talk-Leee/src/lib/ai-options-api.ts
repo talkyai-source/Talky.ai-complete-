@@ -35,6 +35,8 @@ export interface ProviderListResponse {
     stt: {
         providers: string[];
         models: ModelInfo[];
+        /** Selectable speech engines (Flux vs Nova-3 turn-taking). */
+        engines?: ModelInfo[];
     };
     tts: {
         providers: string[];
@@ -61,6 +63,8 @@ export interface AIProviderConfig {
     llm_max_tokens: number;
     stt_provider: string;
     stt_model: string;
+    /** Speech engine: "deepgram_flux" (default) or "deepgram_nova". */
+    stt_engine: string;
     stt_language: string;
     tts_provider: string;
     tts_model: string;
@@ -160,6 +164,7 @@ const RawProvidersBucketSchema = z
     .object({
         providers: z.array(z.string()),
         models: z.array(RawModelSchema),
+        engines: z.array(RawModelSchema).optional(),
     })
     .passthrough();
 
@@ -185,6 +190,8 @@ const RawConfigSchema = z
         sttProvider: z.string().optional(),
         stt_model: z.string().optional(),
         sttModel: z.string().optional(),
+        stt_engine: z.string().optional(),
+        sttEngine: z.string().optional(),
         stt_language: z.string().optional(),
         sttLanguage: z.string().optional(),
         tts_provider: z.string().optional(),
@@ -292,7 +299,7 @@ function normalizeVoice(voice: z.infer<typeof RawVoiceSchema>): VoiceInfo {
 function normalizeProviderList(raw: z.infer<typeof RawProviderListSchema>): ProviderListResponse {
     return {
         llm: { providers: raw.llm.providers, models: raw.llm.models.map(normalizeModel) },
-        stt: { providers: raw.stt.providers, models: raw.stt.models.map(normalizeModel) },
+        stt: { providers: raw.stt.providers, models: raw.stt.models.map(normalizeModel), engines: (raw.stt.engines ?? []).map(normalizeModel) },
         tts: { providers: raw.tts.providers, models: raw.tts.models.map(normalizeModel) },
     };
 }
@@ -329,6 +336,8 @@ function normalizeConfig(raw: z.infer<typeof RawConfigSchema>): AIProviderConfig
         llm_max_tokens: requireFiniteNumber("llm_max_tokens", raw.llm_max_tokens, raw.llmMaxTokens),
         stt_provider: requireNonEmptyString("stt_provider", raw.stt_provider, raw.sttProvider),
         stt_model: requireNonEmptyString("stt_model", raw.stt_model, raw.sttModel),
+        // New optional field — older saved configs lack it; default to Flux.
+        stt_engine: pickNonEmptyString(raw.stt_engine, raw.sttEngine) ?? "deepgram_flux",
         stt_language: requireNonEmptyString("stt_language", raw.stt_language, raw.sttLanguage),
         tts_provider: requireNonEmptyString("tts_provider", raw.tts_provider, raw.ttsProvider),
         tts_model: requireNonEmptyString("tts_model", raw.tts_model, raw.ttsModel),

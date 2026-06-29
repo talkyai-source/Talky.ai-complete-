@@ -129,6 +129,11 @@ class AIProviderConfig(BaseModel):
     # STT Configuration
     stt_provider: STTProvider = STTProvider.DEEPGRAM
     stt_model: str = DeepgramModel.NOVA_3.value
+    # STT engine — which Deepgram speech model drives turn-taking:
+    #   "deepgram_flux" — Flux, semantic turn-detection (/v2/listen). Default.
+    #   "deepgram_nova" — Nova-3, acoustic VAD + endpointing (/v1/listen).
+    # Independent of the failover secondary (Flux always falls back to Nova-3).
+    stt_engine: str = "deepgram_flux"
     stt_language: str = "en"
     
     # TTS Configuration - Using Deepgram Aura-2 (fast and high quality)
@@ -290,6 +295,27 @@ DEEPGRAM_MODELS = [
         name="Nova 2",
         description="Fast and cost-effective for batch processing",
         speed="Real-time",
+        provider="deepgram",
+    ),
+]
+
+# Selectable STT engines (the speech model that drives turn-taking). Distinct
+# from DEEPGRAM_MODELS — this is the Flux-vs-Nova choice surfaced in AI Options.
+STT_ENGINES = [
+    ModelInfo(
+        id="deepgram_flux",
+        name="Deepgram Flux",
+        description="Semantic turn-detection — predicts when the caller is conversationally done (confidence-based), for the most natural, low-latency turn-taking. Newest (beta).",
+        speed="Turn-based",
+        is_preview=True,
+        provider="deepgram",
+    ),
+    ModelInfo(
+        id="deepgram_nova",
+        name="Deepgram Nova-3",
+        description="Acoustic VAD + endpointing — proven and stable; formats emails and numbers natively. Also the automatic failover whenever Flux is unavailable.",
+        speed="Streaming",
+        is_preview=False,
         provider="deepgram",
     ),
 ]
