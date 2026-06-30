@@ -443,18 +443,12 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
                             value={formData.goal}
                             onChange={handleChange}
                             disabled={submitting}
-                            rows={4}
-                            maxLength={4000}
-                            className="flex w-full min-h-[110px] resize-y rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
+                            rows={7}
+                            className="flex w-full min-h-[200px] resize-y rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
                         />
-                        <div className="flex items-center justify-between">
-                            <p className="text-xs text-muted-foreground">
-                                Define what success looks like for each call
-                            </p>
-                            <span className="text-xs text-muted-foreground">
-                                {(formData.goal?.length ?? 0).toLocaleString()}/4,000
-                            </span>
-                        </div>
+                        <p className="text-xs text-muted-foreground">
+                            Define what success looks like for each call
+                        </p>
                     </div>
 
                     {/* Voice picker */}

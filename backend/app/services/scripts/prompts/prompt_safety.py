@@ -164,7 +164,11 @@ def scan_output_for_leakage(text: str) -> Tuple[bool, str]:
 MAX_COMPANY_NAME = 120
 MAX_AGENT_NAME = 60
 MAX_SLOT_VALUE = 2_000
-MAX_ADDITIONAL_INSTRUCTIONS = 4_000
+# Goal / additional_instructions becomes part of the agent's system prompt, so
+# this is a safety backstop against pathologically huge prompts (token cost +
+# latency on every call), NOT a usage cap — set well above any real goal so the
+# field is effectively uncapped for normal use.
+MAX_ADDITIONAL_INSTRUCTIONS = 20_000
 
 
 def sanitize_tenant_text(value: str, *, max_len: int) -> str:
