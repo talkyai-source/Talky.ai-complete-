@@ -12,7 +12,6 @@ from typing import Any, List
 from app.services.scripts.prompts import PromptCompositionError, compose_prompt
 from app.services.scripts.prompts.guardrails import scan_instruction_conflicts
 from app.services.scripts.prompts.prompt_safety import (
-    MAX_ADDITIONAL_INSTRUCTIONS,
     MAX_AGENT_NAME,
     MAX_COMPANY_NAME,
     MAX_SLOT_VALUE,
@@ -53,10 +52,9 @@ def build_validated_script_config(
         raise CampaignPromptValidationError(
             f"company_name is too long (max {MAX_COMPANY_NAME} characters)"
         )
-    if too_long(additional_instructions, max_len=MAX_ADDITIONAL_INSTRUCTIONS):
-        raise CampaignPromptValidationError(
-            f"additional_instructions is too long (max {MAX_ADDITIONAL_INSTRUCTIONS} characters)"
-        )
+    # additional_instructions (the campaign Goal) is intentionally uncapped — no
+    # length rejection. It's still sanitised below and bounded by the compliance
+    # floor at runtime.
     for name in agent_names:
         if too_long(name, max_len=MAX_AGENT_NAME):
             raise CampaignPromptValidationError(
@@ -81,9 +79,8 @@ def build_validated_script_config(
         k: (sanitize_tenant_text(v, max_len=MAX_SLOT_VALUE) if isinstance(v, str) else v)
         for k, v in raw_slots.items()
     }
-    cleaned_instructions = sanitize_tenant_text(
-        additional_instructions, max_len=MAX_ADDITIONAL_INSTRUCTIONS
-    )
+    # Uncapped: sanitise (control chars / braces / whitespace) but don't truncate.
+    cleaned_instructions = sanitize_tenant_text(additional_instructions)
 
     # Non-blocking safety advisory: respect the author's content, but warn if it
     # tries to override an invariant (e.g. scripting an AI-denial). The runtime

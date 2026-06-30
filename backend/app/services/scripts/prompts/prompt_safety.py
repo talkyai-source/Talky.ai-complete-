@@ -164,14 +164,12 @@ def scan_output_for_leakage(text: str) -> Tuple[bool, str]:
 MAX_COMPANY_NAME = 120
 MAX_AGENT_NAME = 60
 MAX_SLOT_VALUE = 2_000
-# Goal / additional_instructions becomes part of the agent's system prompt, so
-# this is a safety backstop against pathologically huge prompts (token cost +
-# latency on every call), NOT a usage cap — set well above any real goal so the
-# field is effectively uncapped for normal use.
-MAX_ADDITIONAL_INSTRUCTIONS = 20_000
+# NOTE: additional_instructions (the campaign Goal) is intentionally NOT length-
+# capped — it can be arbitrarily long. It's still defensively sanitised (control
+# chars, braces, whitespace) and the runtime compliance floor still applies.
 
 
-def sanitize_tenant_text(value: str, *, max_len: int) -> str:
+def sanitize_tenant_text(value: str, *, max_len: int | None = None) -> str:
     """Defensively clean an operator-supplied string before it is templated
     into the system prompt.
 
@@ -180,7 +178,8 @@ def sanitize_tenant_text(value: str, *, max_len: int) -> str:
       ``{placeholder}`` can't survive ``str.format`` or be read aloud as a
       literal brace,
     - collapses runs of whitespace,
-    - truncates to ``max_len`` at a word boundary.
+    - truncates to ``max_len`` at a word boundary (``max_len=None`` => no
+      truncation, for fields that are intentionally uncapped).
 
     Never raises — it always returns a safe string. Hard rejection of
     over-long input is done separately at the API boundary (``too_long``).
@@ -191,7 +190,7 @@ def sanitize_tenant_text(value: str, *, max_len: int) -> str:
     cleaned = cleaned.replace("{", "(").replace("}", ")")
     cleaned = re.sub(r"[ \t]+", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
-    if len(cleaned) <= max_len:
+    if max_len is None or len(cleaned) <= max_len:
         return cleaned
     head = cleaned[:max_len]
     # Trim back to the last whitespace so we don't cut a word in half.
