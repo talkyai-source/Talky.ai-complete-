@@ -26,6 +26,9 @@ by tests):
     + end-session tool block   (when the model drives end-of-call)
     + audio-tags block         (expressive voices only)
     + accent block             (accent-matched fillers)
+    + trailing block           (per-model addendum + compliance floor, re-asserted
+                                LAST so the safety invariants keep the recency slot
+                                even after the optional blocks are appended)
     then the CAPTURED facts header is prepended on top.
 """
 from __future__ import annotations
@@ -44,6 +47,7 @@ def build_turn_prompt(
     end_session_block: Optional[str] = None,
     audio_tags_block: Optional[str] = None,
     accent_block: Optional[str] = None,
+    trailing_block: Optional[str] = None,
     captured_slots=None,
 ) -> str:
     """Assemble the final per-turn system prompt from the base + resolved
@@ -63,6 +67,7 @@ def build_turn_prompt(
         end_session_block,
         audio_tags_block,
         accent_block,
+        trailing_block,
     ):
         if block:
             parts.append(block)

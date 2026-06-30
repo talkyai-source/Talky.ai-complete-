@@ -7,7 +7,6 @@ import os
 import time
 from dotenv import load_dotenv
 
-from app.domain.services.prompt_manager import PromptManager
 from app.domain.services.conversation_engine import ConversationEngine
 from app.domain.models.conversation_state import ConversationState, ConversationContext
 from app.domain.models.agent_config import (
@@ -57,7 +56,6 @@ async def test_prompt_with_groq():
     )
     
     # Initialize components
-    prompt_manager = PromptManager()
     conversation_engine = ConversationEngine(agent_config)
     
     # Initialize LLM
@@ -116,11 +114,14 @@ async def test_prompt_with_groq():
         print(f"User: \"{scenario['user_input']}\"")
         print()
         
-        # Generate system prompt
-        system_prompt = prompt_manager.render_system_prompt(
-            agent_config=agent_config,
-            state=scenario['state'],
-            **scenario['context']
+        # Self-contained system prompt (was PromptManager.render_system_prompt,
+        # now removed — the live path uses compose_prompt/build_turn_prompt).
+        system_prompt = (
+            f"You are {getattr(agent_config, 'agent_name', 'Assistant')}, a voice "
+            f"assistant for {getattr(agent_config, 'company_name', 'the company')}. "
+            f"Tone: {getattr(agent_config, 'tone', 'warm, professional')}. "
+            f"Keep replies to {getattr(agent_config, 'response_max_sentences', 2)} sentences. "
+            f"Current state: {scenario['state'].value}."
         )
         
         # Create conversation history
@@ -267,11 +268,12 @@ async def test_different_models():
         response_max_sentences=2
     )
     
-    prompt_manager = PromptManager()
-    system_prompt = prompt_manager.render_system_prompt(
-        agent_config=agent_config,
-        state=ConversationState.GREETING,
-        greeting_context="confirming appointment"
+    system_prompt = (
+        f"You are {getattr(agent_config, 'agent_name', 'Assistant')}, a voice "
+        f"assistant for {getattr(agent_config, 'company_name', 'the company')}. "
+        f"Tone: {getattr(agent_config, 'tone', 'warm, professional')}. "
+        f"Keep replies to {getattr(agent_config, 'response_max_sentences', 2)} sentences. "
+        f"You are confirming an appointment."
     )
     
     messages = [Message(role=MessageRole.USER, content="Hello?")]

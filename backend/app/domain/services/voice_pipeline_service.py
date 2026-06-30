@@ -25,7 +25,6 @@ from app.infrastructure.telephony.browser_media_gateway import SessionGoneError
 from app.domain.interfaces.tts_provider import TTSProvider
 from app.domain.interfaces.media_gateway import MediaGateway
 from app.domain.services.conversation_engine import ConversationEngine
-from app.domain.services.prompt_manager import PromptManager
 from app.domain.services.transcript_service import TranscriptService
 from app.domain.services.llm_guardrails import LLMGuardrails, LLMGuardrailsConfig, get_guardrails
 from app.services.scripts.interruption_filter import is_backchannel as _is_backchannel
@@ -117,7 +116,6 @@ class VoicePipelineService:
         self.tts_sample_rate = tts_sample_rate
         self.mute_during_tts = mute_during_tts
 
-        self.prompt_manager = PromptManager()
         self.transcript_service = TranscriptService()
         self.latency_tracker = get_latency_tracker()
 

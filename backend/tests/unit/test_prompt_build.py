@@ -70,3 +70,30 @@ def test_live_state_prepended_above_captured_and_base():
 def test_no_live_state_block_leaves_output_unchanged():
     assert build_turn_prompt("BASE", live_state_block=None) == "BASE"
     assert build_turn_prompt("BASE", live_state_block="") == "BASE"
+
+
+def test_trailing_block_is_the_final_text():
+    # The trailing block (per-model addendum + compliance floor) must sit AFTER
+    # every optional block so it keeps the recency slot on the live path.
+    out = build_turn_prompt("BASE", accent_block="ACCENT", trailing_block="FLOOR")
+    assert out == "BASE\n\nACCENT\n\nFLOOR"
+
+
+def test_trailing_block_stays_last_under_live_state_and_captured():
+    state = CallState(email="bob@acme.com")
+    out = build_turn_prompt(
+        "BASE",
+        live_state_block="LIVESTATE",
+        accent_block="ACCENT",
+        trailing_block="FLOOR",
+        captured_slots=state,
+    )
+    # LIVE STATE / CAPTURED prepend on top; FLOOR remains the very last text.
+    assert (
+        out.index("LIVESTATE")
+        < out.index("CAPTURED")
+        < out.index("BASE")
+        < out.index("ACCENT")
+        < out.index("FLOOR")
+    )
+    assert out.rstrip().endswith("FLOOR")

@@ -47,7 +47,9 @@ from app.services.scripts.prompts.accent_fillers import (
     thinking_filler,
 )
 from app.infrastructure.llm.groq import LLMTimeoutError
+from app.services.scripts import model_prompt_addendum
 from app.services.scripts.prompts.build import build_turn_prompt
+from app.services.scripts.prompts.guardrails import compliance_floor
 from app.services.scripts.prompts.live_state import build_live_state_block
 from app.domain.services.voice_pipeline.knowledge_tool import (
     knowledge_tools_for,
@@ -330,6 +332,22 @@ class TurnStreamer:
             has_introduced=bool(getattr(session, "_has_introduced", False)),
         )
 
+        # Trailing safety block: re-assert the per-model addendum (e.g. the
+        # Gemini-3 email read-back fix) + the compliance floor LAST, so they keep
+        # the recency slot on the live streaming path. The base prompt's copy of
+        # the floor is no longer last once KB/accent/audio blocks are appended,
+        # and model_prompt_addendum was previously only applied on the dead
+        # non-streaming path — so without this, neither reached a live call.
+        _model_id = (
+            getattr(session, "llm_model", None)
+            or getattr(self._p.llm_provider, "_model", "")
+            or ""
+        )
+        _company = getattr(_agent_cfg, "company_name", "") or ""
+        trailing_block = "\n\n".join(
+            b for b in (model_prompt_addendum(_model_id), compliance_floor(_company)) if b
+        )
+
         # Single assembler (prompts folder) owns the block ORDER + the
         # CAPTURED-facts prepend. turn_streamer only feeds it resolved blocks.
         system_prompt = build_turn_prompt(
@@ -344,6 +362,7 @@ class TurnStreamer:
                 else None
             ),
             accent_block=accent_filler_block(accent),
+            trailing_block=trailing_block,
             captured_slots=session.captured_slots,
         )
 
