@@ -28,6 +28,7 @@ from app.services.scripts import (
     CallState as CapturedSlotsState,
     update_state_from_user_turn,
 )
+from app.services.scripts.spoken_email_normalizer import natural_email_readback
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,23 @@ def _note_unheard_greeting_bargein(session) -> None:
             session._has_introduced = True
     except Exception:  # pragma: no cover - defensive
         pass
+
+
+def _agent_read_back_email(history, email) -> bool:
+    """True if the agent's MOST RECENT turn read the pending email back — so the
+    caller's current turn can safely be interpreted as a confirmation reply.
+
+    Without this gate a stray 'yes'/'no' on an unrelated turn would falsely
+    commit or wipe a captured email (re-audit regressions REG-1/REG-2).
+    """
+    if not email:
+        return False
+    spoken = natural_email_readback(email).lower()
+    for m in reversed(history or []):
+        if m.role == MessageRole.ASSISTANT:
+            c = (m.content or "").lower()
+            return (bool(spoken) and spoken in c) or (email.lower() in c)
+    return False
 
 
 class TurnRunner:
@@ -93,8 +111,14 @@ class TurnRunner:
         captured_slots = getattr(session, "captured_slots", None)
         if captured_slots is None or not is_dataclass(captured_slots):
             session.captured_slots = CapturedSlotsState()
+        # Confirmation (affirm/reject) of a pending email only counts when the
+        # agent's last turn actually read it back — see _agent_read_back_email.
+        _pending_email = getattr(session.captured_slots, "email", None)
+        _readback_issued = _agent_read_back_email(
+            session.conversation_history, _pending_email
+        )
         session.captured_slots = update_state_from_user_turn(
-            session.captured_slots, full_transcript
+            session.captured_slots, full_transcript, readback_issued=_readback_issued
         )
 
         response_text = ""

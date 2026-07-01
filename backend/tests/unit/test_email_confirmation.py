@@ -28,13 +28,14 @@ def test_freshly_parsed_email_is_unconfirmed():
 def test_affirm_after_capture_confirms_email():
     s = update_state_from_user_turn(CallState(), "bob at acme dot com")
     assert s.email == "bob@acme.com" and s.email_confirmed is False
-    s = update_state_from_user_turn(s, "yes that's right")
+    # confirmation only counts once the agent has read it back
+    s = update_state_from_user_turn(s, "yes that's right", readback_issued=True)
     assert s.email_confirmed is True
 
 
 def test_reject_after_capture_reopens_email():
     s = update_state_from_user_turn(CallState(), "bob at acme dot com")
-    s = update_state_from_user_turn(s, "no that's wrong")
+    s = update_state_from_user_turn(s, "no that's wrong", readback_issued=True)
     assert s.email is None
     assert s.email_confirmed is False
 
@@ -50,8 +51,36 @@ def test_corrected_email_recaptures_as_unconfirmed_even_if_previously_confirmed(
 
 def test_unclear_reply_keeps_email_pending():
     s = update_state_from_user_turn(CallState(), "bob at acme dot com")
-    s = update_state_from_user_turn(s, "hmm okay so what's next")
+    s = update_state_from_user_turn(s, "hmm okay so what's next", readback_issued=True)
     assert s.email == "bob@acme.com"
+    assert s.email_confirmed is False
+
+
+# ── regressions caught by the re-audit: incidental words must NOT flip a core value
+
+def test_incidental_negation_does_not_wipe_email():
+    # REG-1: a 'yes' with a follow-up request, and a 'no' about something else,
+    # must NOT clear a correctly-captured email.
+    s = update_state_from_user_turn(CallState(), "bob at acme dot com")
+    s = update_state_from_user_turn(s, "yes, actually can you also email my assistant", readback_issued=True)
+    assert s.email == "bob@acme.com"        # not wiped
+    s2 = update_state_from_user_turn(CallState(), "bob at acme dot com")
+    s2 = update_state_from_user_turn(s2, "no I do not need a callback, the email is fine", readback_issued=True)
+    assert s2.email == "bob@acme.com"       # not wiped
+
+
+def test_incidental_right_does_not_confirm_email():
+    # REG-2: bare mid-sentence 'right' must NOT confirm.
+    s = update_state_from_user_turn(CallState(), "bob at acme dot com")
+    s = update_state_from_user_turn(s, "right, so what happens next", readback_issued=True)
+    assert s.email_confirmed is False
+
+
+def test_confirmation_ignored_without_readback():
+    # REG-2 core: a clean 'yes' when NO read-back was issued (e.g. answering some
+    # other question) must not confirm the email.
+    s = update_state_from_user_turn(CallState(), "bob at acme dot com")
+    s = update_state_from_user_turn(s, "yes", readback_issued=False)
     assert s.email_confirmed is False
 
 

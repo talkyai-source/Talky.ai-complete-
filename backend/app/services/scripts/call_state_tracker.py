@@ -15,7 +15,6 @@ from dataclasses import dataclass, replace
 from typing import Optional
 
 from app.services.scripts.spoken_email_normalizer import extract_email_from_speech
-from app.domain.services.voice_pipeline.capture_confirmation import classify_confirmation
 
 _DAY_RE = re.compile(
     r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
@@ -41,6 +40,47 @@ _DECLINE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# STRICT confirmation classifier for a CORE field (email/number). A wrong verdict
+# here CORRUPTS data (wipes a good value or commits a mis-heard one), so — unlike
+# the general classify_confirmation — only an UNAMBIGUOUS, focused yes/no counts;
+# everything else is 'unclear' (no transition, value stays pending).
+_CORE_AFFIRM_RE = re.compile(
+    r"^\s*(yes|yeah|yep|yup|correct|exactly|perfect|spot\s+on|absolutely|"
+    r"that'?s\s+(right|correct|it|the\s+one))\b",
+    re.IGNORECASE,
+)
+_CORE_REJECT_LEAD_RE = re.compile(r"^\s*(no|nope|nah|wrong|incorrect)\b", re.IGNORECASE)
+# A clear correction intent anywhere in a short reply.
+_CORE_REJECT_ANY_RE = re.compile(
+    r"\b(that'?s\s+(wrong|not\s+right|not\s+correct|incorrect|not\s+it)|"
+    r"not\s+right|not\s+correct|incorrect|got\s+it\s+wrong|mis[\s-]?heard)\b",
+    re.IGNORECASE,
+)
+_HAS_NEG_TOKEN_RE = re.compile(r"\b(no|not|nope|nah|wrong|incorrect)\b", re.IGNORECASE)
+
+
+def _classify_core_confirmation(utterance: str) -> str:
+    """'affirm' | 'reject' | 'unclear' for a caller reply to a CORE-field read-back.
+
+    Deliberately conservative: a bare mid-sentence 'right'/'actually' or a 'no'
+    that's about something else must NOT flip the value. If it isn't a clear,
+    focused confirmation reply, we return 'unclear' and keep the value pending.
+    """
+    t = (utterance or "").strip()
+    if not t:
+        return "unclear"
+    n = len(t.split())
+    # Clear correction intent ("that's wrong / not right / you misheard").
+    if _CORE_REJECT_ANY_RE.search(t):
+        return "reject"
+    # A short, LEADING bare negation ("no", "nope") — not a long unrelated sentence.
+    if n <= 4 and _CORE_REJECT_LEAD_RE.match(t):
+        return "reject"
+    # A short, LEADING affirmation with no competing negation and no question.
+    if n <= 6 and "?" not in t and _CORE_AFFIRM_RE.match(t) and not _HAS_NEG_TOKEN_RE.search(t):
+        return "affirm"
+    return "unclear"
+
 
 @dataclass(frozen=True)
 class CallState:
@@ -57,8 +97,15 @@ class CallState:
     declined_count: int = 0
 
 
-def update_state_from_user_turn(state: CallState, utterance: str) -> CallState:
+def update_state_from_user_turn(
+    state: CallState, utterance: str, *, readback_issued: bool = False
+) -> CallState:
     """Return a new CallState with any new slots captured from `utterance`.
+
+    ``readback_issued`` — True only when the agent's MOST RECENT turn actually
+    read the pending email back. A caller reply is interpreted as a confirmation
+    (affirm/reject) ONLY then, so a stray "yes"/"no" on an unrelated turn can't
+    falsely commit or wipe a captured email.
 
     Sticky semantics:
       - Non-None slots are only updated when we parse a new, non-None value.
@@ -82,8 +129,11 @@ def update_state_from_user_turn(state: CallState, utterance: str) -> CallState:
     if parsed_email and parsed_email != email:
         email = parsed_email
         email_confirmed = False
-    elif email and not email_confirmed:
-        verdict = classify_confirmation(utterance)
+    elif email and not email_confirmed and readback_issued:
+        # Only when the agent actually read the email back this call do we treat
+        # the caller's reply as a confirmation — and only an UNAMBIGUOUS yes/no
+        # transitions (incidental words leave it pending).
+        verdict = _classify_core_confirmation(utterance)
         if verdict == "affirm":
             email_confirmed = True
         elif verdict == "reject":
