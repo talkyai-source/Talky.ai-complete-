@@ -13,7 +13,8 @@ def test_compose_without_slots_returns_base_unchanged():
 
 
 def test_compose_with_email_prepends_captured_block():
-    state = CallState(email="bob@example.com")
+    # A CONFIRMED email is a settled CAPTURED fact (issue #1).
+    state = CallState(email="bob@example.com", email_confirmed=True)
     out = compose_system_prompt(BASE, state)
     assert out.startswith("CAPTURED")
     assert "bob@example.com" in out
@@ -21,7 +22,7 @@ def test_compose_with_email_prepends_captured_block():
 
 
 def test_compose_email_includes_do_not_reask_rule():
-    state = CallState(email="bob@example.com")
+    state = CallState(email="bob@example.com", email_confirmed=True)
     out = compose_system_prompt(BASE, state)
     assert "do not ask" in out.lower() or "do not re-ask" in out.lower()
 

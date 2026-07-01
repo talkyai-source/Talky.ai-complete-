@@ -9,6 +9,7 @@ its own system message.
 from __future__ import annotations
 
 from app.services.scripts.call_state_tracker import CallState
+from app.services.scripts.spoken_email_normalizer import natural_email_readback
 
 
 def compose_system_prompt(base_prompt: str, state: CallState) -> str:
@@ -18,13 +19,30 @@ def compose_system_prompt(base_prompt: str, state: CallState) -> str:
     The header is deterministic and short (<= 120 tokens) so it never
     crowds out the persona rules.
     """
+    # Confirm-before-commit (issue #1): only a CONFIRMED email is a settled
+    # "do not re-ask" CAPTURED fact. An unconfirmed email is surfaced as an
+    # action-this-turn: read it back, confirm, and do NOT save it until the
+    # caller says yes. This stops a first-utterance mishear being locked as truth.
+    pending: list[str] = []
+    if state.email and not state.email_confirmed:
+        readback = natural_email_readback(state.email)
+        say = f' Read it back by saying EXACTLY: "{readback}".' if readback else ""
+        pending.append(
+            "- Caller email HEARD but NOT yet confirmed — this turn, read it back "
+            "to the caller NATURALLY (never re-transcribe what you heard; do not "
+            "spell it letter by letter unless they ask) and ask them to confirm "
+            f"it is correct.{say} Do NOT treat it as final or save it until they "
+            f"say yes; if they correct it, use the new value: {state.email}"
+        )
+
     lines: list[str] = []
-    if state.email:
+    if state.email and state.email_confirmed:
+        readback = natural_email_readback(state.email)
+        say = f' If you read it back, say it naturally as EXACTLY: "{readback}".' if readback else ""
         lines.append(
             "- Caller email (confirmed — use this EXACT value, never re-transcribe "
-            f"what you heard): {state.email}. When you read it back, say it "
-            "naturally and confirm; do not spell it letter by letter unless the "
-            "caller asks."
+            f"what you heard): {state.email}.{say} Do not spell it letter by "
+            "letter unless the caller asks."
         )
     if state.follow_up:
         lines.append(
@@ -39,16 +57,25 @@ def compose_system_prompt(base_prompt: str, state: CallState) -> str:
             "- Caller has declined twice. Close politely and end the call."
         )
 
-    if not lines:
-        return base_prompt
+    blocks: list[str] = []
+    if pending:
+        blocks.append(
+            "ACTION THIS TURN — confirm before you rely on it:\n"
+            + "\n".join(pending)
+            + "\n"
+            + "------------------------------------------------------------\n"
+        )
+    if lines:
+        blocks.append(
+            "CAPTURED (facts from this call — these are TRUE, "
+            "do not re-ask, do not contradict):\n"
+            + "\n".join(lines)
+            + "\n"
+            + "If a CAPTURED fact exists, acknowledge it and move on — never "
+              "ask the same question again.\n"
+            + "------------------------------------------------------------\n"
+        )
 
-    header = (
-        "CAPTURED (facts from this call — these are TRUE, "
-        "do not re-ask, do not contradict):\n"
-        + "\n".join(lines)
-        + "\n"
-        + "If a CAPTURED fact exists, acknowledge it and move on — never "
-          "ask the same question again.\n"
-        + "------------------------------------------------------------\n"
-    )
-    return header + base_prompt
+    if not blocks:
+        return base_prompt
+    return "".join(blocks) + base_prompt

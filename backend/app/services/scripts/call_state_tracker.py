@@ -15,6 +15,7 @@ from dataclasses import dataclass, replace
 from typing import Optional
 
 from app.services.scripts.spoken_email_normalizer import extract_email_from_speech
+from app.domain.services.voice_pipeline.capture_confirmation import classify_confirmation
 
 _DAY_RE = re.compile(
     r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
@@ -45,6 +46,11 @@ _DECLINE_RE = re.compile(
 class CallState:
     """Sticky slot store. Frozen so every update is an explicit `replace()`."""
     email: Optional[str] = None
+    # Confirm-before-commit (issue #1): a freshly captured email is NOT trusted
+    # until the caller confirms the read-back. Only a confirmed email is shown to
+    # the model as a settled "do not re-ask" fact; an unconfirmed one is flagged
+    # for read-back. See prompt_builder.compose_system_prompt.
+    email_confirmed: bool = False
     follow_up: Optional[str] = None
     project_type: Optional[str] = None
     bidding_active: Optional[bool] = None
@@ -64,10 +70,25 @@ def update_state_from_user_turn(state: CallState, utterance: str) -> CallState:
     # Email is sticky, but a CORRECTION must win: if the caller restates a
     # (different) email — e.g. after the agent read it back wrong — re-capture
     # the latest one. Turns with no email leave the stored value untouched.
+    #
+    # Confirm-before-commit (issue #1): a NEW/corrected email starts UNCONFIRMED
+    # (the agent must read it back and the caller must confirm). When the email
+    # is captured-but-unconfirmed and the caller doesn't restate it, this turn is
+    # treated as their reply to the read-back: an affirmation CONFIRMS it, a
+    # rejection RE-OPENS the field. Mirrors the CaptureConfirmation state machine.
     email = state.email
+    email_confirmed = state.email_confirmed
     parsed_email = extract_email_from_speech(utterance)
     if parsed_email and parsed_email != email:
         email = parsed_email
+        email_confirmed = False
+    elif email and not email_confirmed:
+        verdict = classify_confirmation(utterance)
+        if verdict == "affirm":
+            email_confirmed = True
+        elif verdict == "reject":
+            email = None
+            email_confirmed = False
 
     follow_up = state.follow_up
     if follow_up is None:
@@ -89,6 +110,7 @@ def update_state_from_user_turn(state: CallState, utterance: str) -> CallState:
     return replace(
         state,
         email=email,
+        email_confirmed=email_confirmed,
         follow_up=follow_up,
         bidding_active=bidding_active,
         declined_count=declined_count,

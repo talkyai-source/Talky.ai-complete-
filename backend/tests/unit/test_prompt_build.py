@@ -42,7 +42,7 @@ def test_falsy_blocks_are_skipped():
 
 
 def test_captured_block_prepended_on_top():
-    state = CallState(email="bob@acme.com")
+    state = CallState(email="bob@acme.com", email_confirmed=True)
     out = build_turn_prompt("BASE", accent_block="ACCENT", captured_slots=state)
     # CAPTURED header lands ABOVE the base (highest-attention position).
     assert "CAPTURED" in out
@@ -59,7 +59,7 @@ def test_empty_state_adds_no_captured_header():
 
 
 def test_live_state_prepended_above_captured_and_base():
-    state = CallState(email="bob@acme.com")
+    state = CallState(email="bob@acme.com", email_confirmed=True)
     out = build_turn_prompt(
         "BASE", live_state_block="LIVESTATE", accent_block="ACCENT", captured_slots=state,
     )
@@ -80,7 +80,7 @@ def test_trailing_block_is_the_final_text():
 
 
 def test_trailing_block_stays_last_under_live_state_and_captured():
-    state = CallState(email="bob@acme.com")
+    state = CallState(email="bob@acme.com", email_confirmed=True)
     out = build_turn_prompt(
         "BASE",
         live_state_block="LIVESTATE",
