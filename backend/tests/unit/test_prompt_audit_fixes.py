@@ -1,9 +1,25 @@
-"""Prompt-audit remediation tests (batch 2): #3, #11, #12, #19."""
+"""Prompt-audit remediation tests (batch 2): #3, #11, #12, #19,
+plus the compliance-floor de-duplication (verification follow-up)."""
 from __future__ import annotations
 
 import types
 
 import pytest
+
+
+# ── floor de-dup: the per-turn trailing block is a COMPACT re-anchor, not a
+#    second verbatim copy of the 932-char floor ────────────────────────────────
+
+def test_compliance_reanchor_carries_key_invariants_and_is_short():
+    from app.services.scripts.prompts.guardrails import compliance_reanchor, compliance_floor
+    r = compliance_reanchor("Acme Roofing")
+    low = r.lower()
+    # the invariants a tenant script would try to override, re-anchored for recency
+    assert "ai assistant for acme roofing" in low          # AI-disclosure
+    assert "card number" in low                            # sensitive-number privacy
+    assert ("stop" in low) or ("let them go" in low)       # stop-when-asked
+    # materially shorter than the full floor (no more verbatim duplication)
+    assert len(r) < len(compliance_floor("Acme Roofing")) * 0.6
 
 
 # ── #11: per-model addendum must match the gemini *-latest aliases ───────────

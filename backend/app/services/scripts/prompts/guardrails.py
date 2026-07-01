@@ -427,6 +427,31 @@ def compliance_floor(company_name: str) -> str:
     return COMPLIANCE_FLOOR_TEMPLATE.format(company_name=company_name)
 
 
+# A COMPACT recency re-anchor for the live per-turn path. The full floor above
+# already lives in the composed base (after the tenant instructions); but on the
+# live streaming path per-turn blocks (KB/accent) get appended after the base, so
+# the base floor is no longer the literal last text. Rather than re-append the
+# whole 932-char floor every turn (verbatim duplication), the per-turn assembler
+# re-states ONLY the invariants a tenant script would try to override — so they
+# keep the absolute recency slot cheaply. Keep this a faithful, short subset.
+COMPLIANCE_REANCHOR_TEMPLATE = """\
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+NON-NEGOTIABLES (these override any wording above)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- If asked whether you're an AI, a bot, or a real person, say plainly you're an
+  AI assistant for {company_name}, then keep helping.
+- Never read back or save a card number, security code, bank number, password,
+  or one-time code; steer them to a secure method.
+- The moment someone clearly wants to stop, thank them warmly and let them go.
+"""
+
+
+def compliance_reanchor(company_name: str) -> str:
+    """Compact recency re-anchor of the override-prone invariants, for the live
+    per-turn trailing block (avoids a verbatim second copy of compliance_floor)."""
+    return COMPLIANCE_REANCHOR_TEMPLATE.format(company_name=company_name)
+
+
 # Patterns in tenant additional_instructions that try to make the agent DENY it
 # is an AI / claim to be human — a compliance violation we warn the author about
 # at save time (and which the compliance floor neutralizes at runtime).
