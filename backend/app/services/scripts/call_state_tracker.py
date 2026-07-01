@@ -46,13 +46,14 @@ _DECLINE_RE = re.compile(
 # everything else is 'unclear' (no transition, value stays pending).
 _CORE_AFFIRM_RE = re.compile(
     r"^\s*(yes|yeah|yep|yup|correct|exactly|perfect|spot\s+on|absolutely|"
-    r"that'?s\s+(right|correct|it|the\s+one))\b",
+    r"that(?:'?s|\s+is)\s+(right|correct|it|the\s+one))\b",
     re.IGNORECASE,
 )
 _CORE_REJECT_LEAD_RE = re.compile(r"^\s*(no|nope|nah|wrong|incorrect)\b", re.IGNORECASE)
-# A clear correction intent anywhere in a short reply.
+# A clear correction intent anywhere in a short reply. Handles both the
+# contraction ("that's wrong") and the formal ("that is wrong").
 _CORE_REJECT_ANY_RE = re.compile(
-    r"\b(that'?s\s+(wrong|not\s+right|not\s+correct|incorrect|not\s+it)|"
+    r"\b(that(?:'?s|\s+is)\s+(wrong|not\s+right|not\s+correct|incorrect|not\s+it)|"
     r"not\s+right|not\s+correct|incorrect|got\s+it\s+wrong|mis[\s-]?heard)\b",
     re.IGNORECASE,
 )

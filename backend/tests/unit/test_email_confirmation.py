@@ -160,6 +160,15 @@ def test_bare_no_still_rejects():
     assert s.email is None
 
 
+def test_formal_that_is_right_and_wrong():
+    from app.services.scripts.call_state_tracker import _classify_core_confirmation as c
+    # both the contraction and the formal phrasing must be recognized
+    assert c("that is right") == "affirm"
+    assert c("that is correct") == "affirm"
+    assert c("that is wrong") == "reject"
+    assert c("that is not right") == "reject"
+
+
 def test_partial_correction_does_not_commit():
     # CORE-2: an affirm word followed by a partial-correction hedge must NOT commit.
     for reply in ("perfect except the number", "yes that is my old email", "yeah almost, one letter off"):
