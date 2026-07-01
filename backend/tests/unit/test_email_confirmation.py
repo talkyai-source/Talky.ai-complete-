@@ -84,6 +84,43 @@ def test_confirmation_ignored_without_readback():
     assert s.email_confirmed is False
 
 
+# ── re-audit round 2: the read-back GATE must be robust ──────────────────────
+
+def _msg(role, content):
+    from app.domain.models.conversation import Message, MessageRole
+    return Message(role=role, content=content)
+
+
+def test_gate_detects_dotted_and_digit_local_parts():
+    # the agent SPEAKS separators/digits as words; the gate must still detect the
+    # read-back (else common emails never confirm — re-audit CF #2).
+    from app.domain.services.voice_pipeline.turn_runner import _agent_read_back_email
+    from app.domain.models.conversation import MessageRole as R
+    h = [_msg(R.ASSISTANT, "Okay, so that's j dot smith at gmail dot com — did I get that right?")]
+    assert _agent_read_back_email(h, "j.smith@gmail.com") is True
+    h2 = [_msg(R.ASSISTANT, "So that's john seven eight nine zero at gmail dot com, right?")]
+    assert _agent_read_back_email(h2, "john7890@gmail.com") is True
+
+
+def test_gate_skips_interposed_silence_check():
+    # a silence-check must not mask the real read-back (re-audit flow #1).
+    from app.domain.services.voice_pipeline.turn_runner import _agent_read_back_email
+    from app.domain.models.conversation import MessageRole as R
+    h = [
+        _msg(R.ASSISTANT, "So that's bob at acme dot com, did I get that right?"),
+        _msg(R.USER, "..."),
+        _msg(R.ASSISTANT, "Are you still there?"),
+    ]
+    assert _agent_read_back_email(h, "bob@acme.com") is True
+
+
+def test_gate_false_when_last_real_turn_is_unrelated():
+    from app.domain.services.voice_pipeline.turn_runner import _agent_read_back_email
+    from app.domain.models.conversation import MessageRole as R
+    h = [_msg(R.ASSISTANT, "Are you the homeowner?")]
+    assert _agent_read_back_email(h, "bob@acme.com") is False
+
+
 def test_rehearing_same_confirmed_email_keeps_it_confirmed():
     s = CallState(email="bob@acme.com", email_confirmed=True)
     s = update_state_from_user_turn(s, "yeah bob at acme dot com")

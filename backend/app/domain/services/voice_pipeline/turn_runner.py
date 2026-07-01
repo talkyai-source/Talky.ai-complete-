@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import is_dataclass
 from typing import Optional
 
@@ -58,20 +59,42 @@ def _note_unheard_greeting_bargein(session) -> None:
         pass
 
 
-def _agent_read_back_email(history, email) -> bool:
-    """True if the agent's MOST RECENT turn read the pending email back — so the
-    caller's current turn can safely be interpreted as a confirmation reply.
+# The silence monitor speaks these; they are NOT read-backs and must be skipped
+# when looking for the agent's real prior turn (else they mask the read-back).
+_SILENCE_CHECK_RE = re.compile(
+    r"\b(still\s+(there|with\s+me|on\s+the\s+line)|are\s+you\s+(still\s+)?there|"
+    r"you\s+(still\s+)?there|can\s+you\s+hear\s+me|did\s+i\s+lose\s+you|lost\s+you|"
+    r"you\s+on\s+the\s+line)\b",
+    re.IGNORECASE,
+)
 
-    Without this gate a stray 'yes'/'no' on an unrelated turn would falsely
-    commit or wipe a captured email (re-audit regressions REG-1/REG-2).
+
+def _agent_read_back_email(history, email) -> bool:
+    """True if the agent's most recent REAL turn read the pending email back — so
+    the caller's current turn can safely be interpreted as a confirmation reply.
+
+    Robust to how the address is actually spoken: the agent voices separators and
+    digits as words ("j dot smith", "seven eight"), so a literal match of the
+    glyph-laden read-back string fails for dotted/underscored/digit local parts.
+    We therefore also match the domain-as-words (always spoken the same way,
+    e.g. "gmail dot com"). Silence-check turns are skipped so an interposed
+    "are you still there?" can't mask the read-back (re-audit flow #1 / cf #2).
     """
-    if not email:
+    if not email or "@" not in email:
         return False
     spoken = natural_email_readback(email).lower()
+    domain_spoken = email.rsplit("@", 1)[-1].lower().replace(".", " dot ")  # "gmail dot com"
     for m in reversed(history or []):
-        if m.role == MessageRole.ASSISTANT:
-            c = (m.content or "").lower()
-            return (bool(spoken) and spoken in c) or (email.lower() in c)
+        if getattr(m, "role", None) != MessageRole.ASSISTANT:
+            continue
+        c = (m.content or "").lower()
+        if _SILENCE_CHECK_RE.search(c):
+            continue  # a silence-check is not a read-back — keep scanning back
+        return (
+            (bool(spoken) and spoken in c)
+            or (email.lower() in c)
+            or (bool(domain_spoken) and domain_spoken in c)
+        )
     return False
 
 
