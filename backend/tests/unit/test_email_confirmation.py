@@ -169,6 +169,34 @@ def test_formal_that_is_right_and_wrong():
     assert c("that is not right") == "reject"
 
 
+# ── hybrid: a pre-computed verdict (from the LLM fallback) overrides the regex ─
+
+def test_confirmation_verdict_override_affirm():
+    s = update_state_from_user_turn(CallState(), "bob at acme dot com")
+    # text is ambiguous to regex, but the resolved verdict says affirm
+    s = update_state_from_user_turn(
+        s, "close enough i suppose", readback_issued=True, confirmation_verdict="affirm"
+    )
+    assert s.email == "bob@acme.com" and s.email_confirmed is True
+
+
+def test_confirmation_verdict_override_reject():
+    s = update_state_from_user_turn(CallState(), "bob at acme dot com")
+    s = update_state_from_user_turn(
+        s, "eh not really", readback_issued=True, confirmation_verdict="reject"
+    )
+    assert s.email is None
+
+
+def test_confirmation_verdict_override_unclear_stays_pending():
+    s = update_state_from_user_turn(CallState(), "bob at acme dot com")
+    s = update_state_from_user_turn(
+        s, "hmm", readback_issued=True, confirmation_verdict="unclear"
+    )
+    assert s.email == "bob@acme.com" and s.email_confirmed is False
+    assert s.email_readback_attempts == 1
+
+
 def test_partial_correction_does_not_commit():
     # CORE-2: an affirm word followed by a partial-correction hedge must NOT commit.
     for reply in ("perfect except the number", "yes that is my old email", "yeah almost, one letter off"):

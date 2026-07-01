@@ -139,7 +139,11 @@ class CallState:
 
 
 def update_state_from_user_turn(
-    state: CallState, utterance: str, *, readback_issued: bool = False
+    state: CallState,
+    utterance: str,
+    *,
+    readback_issued: bool = False,
+    confirmation_verdict: Optional[str] = None,
 ) -> CallState:
     """Return a new CallState with any new slots captured from `utterance`.
 
@@ -147,6 +151,12 @@ def update_state_from_user_turn(
     read the pending email back. A caller reply is interpreted as a confirmation
     (affirm/reject) ONLY then, so a stray "yes"/"no" on an unrelated turn can't
     falsely commit or wipe a captured email.
+
+    ``confirmation_verdict`` — an optional pre-computed 'affirm'|'reject'|'unclear'
+    (e.g. the hybrid regex+LLM classifier resolved in the async caller). When
+    provided it is used verbatim; otherwise the deterministic regex classifier
+    (_classify_core_confirmation) is used. Either way an unresolved verdict leaves
+    the value PENDING — the gate is fail-closed.
 
     Sticky semantics:
       - Non-None slots are only updated when we parse a new, non-None value.
@@ -174,9 +184,14 @@ def update_state_from_user_turn(
         email_readback_attempts = 0  # a new/corrected value starts a fresh loop
     elif email and not email_confirmed and readback_issued:
         # Only when the agent actually read the email back this call do we treat
-        # the caller's reply as a confirmation — and only an UNAMBIGUOUS yes/no
-        # transitions (incidental words leave it pending).
-        verdict = _classify_core_confirmation(utterance)
+        # the caller's reply as a confirmation. Use the caller-supplied verdict
+        # (hybrid regex+LLM) if given, else the deterministic regex classifier —
+        # and only an UNAMBIGUOUS yes/no transitions (unclear leaves it pending).
+        verdict = (
+            confirmation_verdict
+            if confirmation_verdict is not None
+            else _classify_core_confirmation(utterance)
+        )
         if verdict == "affirm":
             email_confirmed = True
         elif verdict == "reject":

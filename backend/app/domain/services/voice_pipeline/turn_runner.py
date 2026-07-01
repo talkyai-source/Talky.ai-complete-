@@ -29,7 +29,12 @@ from app.services.scripts import (
     CallState as CapturedSlotsState,
     update_state_from_user_turn,
 )
-from app.services.scripts.spoken_email_normalizer import natural_email_readback
+from app.services.scripts.call_state_tracker import _classify_core_confirmation
+from app.services.scripts.spoken_email_normalizer import (
+    extract_email_from_speech,
+    natural_email_readback,
+)
+from app.domain.services.voice_pipeline.confirm_llm import llm_confirmation_verdict
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +72,16 @@ _SILENCE_CHECK_RE = re.compile(
     r"you\s+on\s+the\s+line)\b",
     re.IGNORECASE,
 )
+
+
+def _is_email_correction(utterance, current_email) -> bool:
+    """True if the caller restated a DIFFERENT email — a correction, which the
+    capture path (not the confirmation path) handles. Used to skip the LLM
+    confirmation call when the turn is actually a re-capture."""
+    if not current_email:
+        return False
+    parsed = extract_email_from_speech(utterance)
+    return bool(parsed and parsed != current_email)
 
 
 def _agent_read_back_email(history, email) -> bool:
@@ -134,14 +149,37 @@ class TurnRunner:
         captured_slots = getattr(session, "captured_slots", None)
         if captured_slots is None or not is_dataclass(captured_slots):
             session.captured_slots = CapturedSlotsState()
-        # Confirmation (affirm/reject) of a pending email only counts when the
-        # agent's last turn actually read it back — see _agent_read_back_email.
-        _pending_email = getattr(session.captured_slots, "email", None)
-        _readback_issued = _agent_read_back_email(
-            session.conversation_history, _pending_email
-        )
+        # Confirmation of a pending email only counts when the agent's last turn
+        # actually read it back (see _agent_read_back_email). HYBRID classifier:
+        # the fast deterministic regex resolves the clear cases with zero added
+        # latency; only the ambiguous tail asks a small, tightly-bounded LLM —
+        # fail-closed, so an unresolved verdict leaves the value pending.
+        _pending = session.captured_slots
+        _pending_email = getattr(_pending, "email", None)
+        _readback_issued = _agent_read_back_email(session.conversation_history, _pending_email)
+        _confirm_verdict = None
+        if (
+            _pending_email
+            and not getattr(_pending, "email_confirmed", False)
+            and _readback_issued
+            and not _is_email_correction(full_transcript, _pending_email)
+        ):
+            _confirm_verdict = _classify_core_confirmation(full_transcript)
+            _via_llm = False
+            if _confirm_verdict == "unclear":
+                _via_llm = True
+                _confirm_verdict = await llm_confirmation_verdict(
+                    self._p.llm_provider, full_transcript, _pending_email
+                )
+            logger.info(
+                "email_confirm call=%s via_llm=%s verdict=%s",
+                call_id[:8], _via_llm, _confirm_verdict,
+            )
         session.captured_slots = update_state_from_user_turn(
-            session.captured_slots, full_transcript, readback_issued=_readback_issued
+            _pending,
+            full_transcript,
+            readback_issued=_readback_issued,
+            confirmation_verdict=_confirm_verdict,
         )
 
         response_text = ""
