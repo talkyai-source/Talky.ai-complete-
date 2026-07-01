@@ -185,6 +185,19 @@ class TurnRunner:
                     session.conversation_history.append(
                         Message(role=MessageRole.ASSISTANT, content=_PHANTOM_GOODBYE_RECOVERY)
                     )
+                    # Persist the spoken recovery line too, so the transcript
+                    # matches what the caller heard (re-audit flow #3).
+                    try:
+                        self._p.transcript_service.accumulate_turn(
+                            call_id=call_id, role="assistant",
+                            content=_PHANTOM_GOODBYE_RECOVERY,
+                            talklee_call_id=session.talklee_call_id,
+                            turn_index=session.turn_id,
+                            event_type="assistant_response", is_final=True,
+                            include_in_plaintext=True,
+                        )
+                    except Exception:  # pragma: no cover - defensive
+                        pass
                     return _PHANTOM_GOODBYE_RECOVERY, llm_latency_ms, tts_latency_ms
 
             if ask_ai_end_action:

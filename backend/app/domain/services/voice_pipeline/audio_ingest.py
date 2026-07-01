@@ -24,14 +24,14 @@ from app.domain.models.session import CallSession
 logger = logging.getLogger(__name__)
 
 
-def _record_silence_check(session, phrase: str) -> None:
+def _record_silence_check(pipeline, session, phrase: str) -> None:
     """Record a spoken silence-check as an assistant turn (issue #8).
 
-    The silence monitor speaks straight to TTS; without also writing the phrase
-    into conversation_history the LLM has no record that it just asked "you
-    there?" — so on the caller's next word it can re-ask the same thing or close
-    on a different schedule than the prompt promises. Mirrors turn_runner's
-    assistant-turn append. Never raises — history bookkeeping must not break a call.
+    Writes to BOTH the live conversation_history (so the LLM knows it just asked
+    "you there?" and doesn't re-ask) AND the persisted transcript (so post-call
+    QA/compliance records match what was actually spoken on the line). Mirrors
+    turn_runner's assistant-turn append. Never raises — bookkeeping must not
+    break a call.
     """
     try:
         session.conversation_history.append(
@@ -39,6 +39,21 @@ def _record_silence_check(session, phrase: str) -> None:
         )
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("[SilenceMonitor] history append failed: %s", exc)
+    try:
+        ts = getattr(pipeline, "transcript_service", None)
+        if ts is not None:
+            ts.accumulate_turn(
+                call_id=session.call_id,
+                role="assistant",
+                content=phrase,
+                talklee_call_id=getattr(session, "talklee_call_id", None),
+                turn_index=getattr(session, "turn_id", 0),
+                event_type="assistant_response",
+                is_final=True,
+                include_in_plaintext=True,
+            )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("[SilenceMonitor] transcript accumulate failed: %s", exc)
 
 
 class AudioIngest:
@@ -201,7 +216,10 @@ class AudioIngest:
                 # trigger the monitor.
                 _had_first_exchange: bool = False
                 consecutive = 0
-                _MAX_CONSECUTIVE = 2  # give up after 2 unanswered checks
+                # Give up after this many unanswered check-ins. 3 (not 2) gives a
+                # briefly-quiet caller — thinking, muted, or STT missing them — one
+                # more chance before we auto-close on silence (re-audit flow #5).
+                _MAX_CONSECUTIVE = 3
 
                 while session.stt_active and consecutive < _MAX_CONSECUTIVE:
                     await asyncio.sleep(1.0)  # poll every second
@@ -268,8 +286,9 @@ class AudioIngest:
                     )
                     try:
                         await self._p.synthesize_and_send_audio(session, phrase, websocket)
-                        # Record it so the LLM knows it already asked (issue #8).
-                        _record_silence_check(session, phrase)
+                        # Record it (history + transcript) so the LLM knows it
+                        # already asked and the transcript matches what was spoken.
+                        _record_silence_check(self._p, session, phrase)
                     except Exception as _sm_exc:
                         logger.debug("[SilenceMonitor] TTS failed: %s", _sm_exc)
 

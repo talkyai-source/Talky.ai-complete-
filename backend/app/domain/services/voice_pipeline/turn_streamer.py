@@ -339,14 +339,25 @@ class TurnStreamer:
         # the key invariants here instead of duplicating the whole 932-char floor
         # every turn.) model_prompt_addendum was previously applied only on the
         # dead non-streaming path — so without this, neither reached a live call.
-        _model_id = (
-            getattr(session, "llm_model", None)
-            or getattr(self._p.llm_provider, "_model", "")
-            or ""
-        )
+        # Collect addenda for EVERY model that could serve this turn — the
+        # configured model plus a resilient wrapper's primary/secondary — deduped,
+        # so a cross-family failover (e.g. gemini-3 -> llama, or llama -> gemini-3)
+        # never strips a model's addendum. Addenda are benign for models that
+        # don't need them (re-audit model finding).
+        _prov = self._p.llm_provider
+        _model_ids = {
+            getattr(session, "llm_model", None) or getattr(_prov, "_model", "") or "",
+            getattr(getattr(_prov, "_primary", None), "_model", "") or "",
+            getattr(getattr(_prov, "_secondary", None), "_model", "") or "",
+        }
+        _addenda: list[str] = []
+        for _mid in _model_ids:
+            _a = model_prompt_addendum(_mid)
+            if _a and _a not in _addenda:
+                _addenda.append(_a)
         _company = getattr(_agent_cfg, "company_name", "") or ""
         trailing_block = "\n\n".join(
-            b for b in (model_prompt_addendum(_model_id), compliance_reanchor(_company)) if b
+            b for b in (_addenda + [compliance_reanchor(_company)]) if b
         )
 
         # Single assembler (prompts folder) owns the block ORDER + the

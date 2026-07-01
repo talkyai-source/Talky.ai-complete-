@@ -121,6 +121,28 @@ def test_gate_false_when_last_real_turn_is_unrelated():
     assert _agent_read_back_email(h, "bob@acme.com") is False
 
 
+# ── bounded-attempts safety net (re-audit cf #6): the read-back can't loop forever
+
+def test_readback_attempts_increment_and_trigger_fallback():
+    from app.services.scripts.prompt_builder import compose_system_prompt
+    s = update_state_from_user_turn(CallState(), "bob at acme dot com")
+    assert s.email_readback_attempts == 0
+    # ambiguous replies after a read-back accumulate attempts (never confirming)
+    for _ in range(3):
+        s = update_state_from_user_turn(s, "um hold on let me think", readback_issued=True)
+    assert s.email_readback_attempts >= 3
+    out = compose_system_prompt("BASE", s).lower()
+    assert ("spell it slowly" in out) or ("a different way" in out)
+    assert "bob@acme.com" in out
+
+
+def test_new_email_resets_readback_attempts():
+    s = CallState(email="alice@x.com", email_readback_attempts=5)
+    s = update_state_from_user_turn(s, "bob at acme dot com")  # correction
+    assert s.email == "bob@acme.com"
+    assert s.email_readback_attempts == 0
+
+
 def test_rehearing_same_confirmed_email_keeps_it_confirmed():
     s = CallState(email="bob@acme.com", email_confirmed=True)
     s = update_state_from_user_turn(s, "yeah bob at acme dot com")

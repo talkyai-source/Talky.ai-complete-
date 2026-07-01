@@ -305,12 +305,22 @@ class GeminiLLMProvider(LLMProvider):
                 )
                 continue
             role = "model" if msg.role == MessageRole.ASSISTANT else "user"
-            contents.append(
-                genai_types.Content(
+            # Coalesce consecutive same-role turns into one Content. Gemini expects
+            # alternating user/model; a silence-check (or phantom recovery) can
+            # produce back-to-back assistant turns that otherwise degrade adherence
+            # or trip stricter contents-ordering checks (re-audit flow #4).
+            if contents and contents[-1].role == role:
+                contents[-1] = genai_types.Content(
                     role=role,
-                    parts=[genai_types.Part(text=msg.content)],
+                    parts=list(contents[-1].parts) + [genai_types.Part(text=msg.content)],
                 )
-            )
+            else:
+                contents.append(
+                    genai_types.Content(
+                        role=role,
+                        parts=[genai_types.Part(text=msg.content)],
+                    )
+                )
 
         # If we ended up with no contents (cold start, all empties), Gemini
         # rejects the request. Push a placeholder user turn so the system

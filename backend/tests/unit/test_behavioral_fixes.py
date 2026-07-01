@@ -7,23 +7,32 @@ import types
 
 # ── #8: a spoken silence-check is recorded in conversation history ───────────
 
-def test_silence_check_recorded_to_history():
+def test_silence_check_recorded_to_history_and_transcript():
     from app.domain.services.voice_pipeline.audio_ingest import _record_silence_check
     from app.domain.models.conversation import MessageRole
 
-    sess = types.SimpleNamespace(conversation_history=[])
-    _record_silence_check(sess, "Are you still there?")
+    ts_calls = []
+    ts = types.SimpleNamespace(accumulate_turn=lambda **kw: ts_calls.append(kw))
+    pipeline = types.SimpleNamespace(transcript_service=ts)
+    sess = types.SimpleNamespace(
+        conversation_history=[], call_id="c1", talklee_call_id="t1", turn_id=3
+    )
+    _record_silence_check(pipeline, sess, "Are you still there?")
 
+    # live history
     assert len(sess.conversation_history) == 1
-    msg = sess.conversation_history[0]
-    assert msg.role == MessageRole.ASSISTANT
-    assert msg.content == "Are you still there?"
+    assert sess.conversation_history[0].role == MessageRole.ASSISTANT
+    assert sess.conversation_history[0].content == "Are you still there?"
+    # persisted transcript (re-audit flow #3)
+    assert len(ts_calls) == 1
+    assert ts_calls[0]["role"] == "assistant"
+    assert ts_calls[0]["content"] == "Are you still there?"
 
 
 def test_silence_check_never_raises_on_bad_session():
     from app.domain.services.voice_pipeline.audio_ingest import _record_silence_check
-    # no conversation_history attribute -> must swallow, not raise
-    _record_silence_check(types.SimpleNamespace(), "Still there?")
+    # no conversation_history / no transcript_service -> must swallow, not raise
+    _record_silence_check(types.SimpleNamespace(), types.SimpleNamespace(), "Still there?")
 
 
 # ── #16: end-session is honored after two declines (not treated as phantom) ──

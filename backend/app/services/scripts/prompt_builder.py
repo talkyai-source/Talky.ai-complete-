@@ -26,14 +26,24 @@ def compose_system_prompt(base_prompt: str, state: CallState) -> str:
     pending: list[str] = []
     if state.email and not state.email_confirmed:
         readback = natural_email_readback(state.email)
-        say = f' Read it back by saying EXACTLY: "{readback}".' if readback else ""
-        pending.append(
-            "- Caller email HEARD but NOT yet confirmed — this turn, read it back "
-            "to the caller NATURALLY (never re-transcribe what you heard; do not "
-            "spell it letter by letter unless they ask) and ask them to confirm "
-            f"it is correct.{say} Do NOT treat it as final or save it until they "
-            f"say yes; if they correct it, use the new value: {state.email}"
-        )
+        if state.email_readback_attempts >= 3:
+            # Bounded fallback: don't keep re-reading the same value forever.
+            pending.append(
+                "- You've tried a few times to confirm the caller's email without a "
+                "clear yes. Change tack: offer to take it a different way — ask them "
+                "to spell it slowly one letter at a time, or offer to confirm it by "
+                "text/another channel, or note it and move on to follow up. Do not "
+                f"keep re-reading the same value: {state.email}"
+            )
+        else:
+            say = f' Read it back by saying EXACTLY: "{readback}".' if readback else ""
+            pending.append(
+                "- Caller email HEARD but NOT yet confirmed — this turn, read it back "
+                "to the caller NATURALLY (never re-transcribe what you heard; do not "
+                "spell it letter by letter unless they ask) and ask them to confirm "
+                f"it is correct.{say} Do NOT treat it as final or save it until they "
+                f"say yes; if they correct it, use the new value: {state.email}"
+            )
 
     lines: list[str] = []
     if state.email and state.email_confirmed:

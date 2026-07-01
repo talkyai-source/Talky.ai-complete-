@@ -238,6 +238,32 @@ async def update_campaign_config(
             k: v for k, v in filtered.items() if k in _ALLOWED_SCRIPT_CONFIG_KEYS
         }
 
+        # Sanitize operator-supplied script_config fields exactly like the HTTP
+        # path (campaign_prompt_service) — the assistant-tool path previously wrote
+        # them raw, bypassing sanitize_tenant_text/too_long/scan hardening (re-audit MED).
+        if sc_changes:
+            from app.services.scripts.prompts.prompt_safety import (
+                sanitize_tenant_text as _san,
+                MAX_COMPANY_NAME as _MC,
+                MAX_AGENT_NAME as _MA,
+            )
+            from app.services.scripts.prompts.guardrails import (
+                scan_instruction_conflicts as _scan,
+            )
+            if sc_changes.get("company_name") is not None:
+                sc_changes["company_name"] = _san(str(sc_changes["company_name"]), max_len=_MC)
+            if isinstance(sc_changes.get("agent_names"), list):
+                sc_changes["agent_names"] = [
+                    _san(str(n), max_len=_MA)
+                    for n in sc_changes["agent_names"]
+                    if n and str(n).strip()
+                ]
+            if sc_changes.get("additional_instructions") is not None:
+                _clean = _san(str(sc_changes["additional_instructions"]))  # uncapped, like composer
+                sc_changes["additional_instructions"] = _clean
+                for _w in _scan(_clean):
+                    logger.warning("update_campaign_config instruction conflict: %s", _w)
+
         # Build diff for preview / record
         diff_entries: List[Dict[str, Any]] = []
 

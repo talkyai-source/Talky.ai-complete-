@@ -91,6 +91,10 @@ class CallState:
     # the model as a settled "do not re-ask" fact; an unconfirmed one is flagged
     # for read-back. See prompt_builder.compose_system_prompt.
     email_confirmed: bool = False
+    # How many read-back turns have passed without the caller confirming. Bounds
+    # the confirm loop (issue: never-converging read-back) — after a few the
+    # prompt offers a fallback (spell slowly / take it another way / move on).
+    email_readback_attempts: int = 0
     follow_up: Optional[str] = None
     project_type: Optional[str] = None
     bidding_active: Optional[bool] = None
@@ -125,10 +129,12 @@ def update_state_from_user_turn(
     # rejection RE-OPENS the field. Mirrors the CaptureConfirmation state machine.
     email = state.email
     email_confirmed = state.email_confirmed
+    email_readback_attempts = state.email_readback_attempts
     parsed_email = extract_email_from_speech(utterance)
     if parsed_email and parsed_email != email:
         email = parsed_email
         email_confirmed = False
+        email_readback_attempts = 0  # a new/corrected value starts a fresh loop
     elif email and not email_confirmed and readback_issued:
         # Only when the agent actually read the email back this call do we treat
         # the caller's reply as a confirmation — and only an UNAMBIGUOUS yes/no
@@ -139,6 +145,11 @@ def update_state_from_user_turn(
         elif verdict == "reject":
             email = None
             email_confirmed = False
+            email_readback_attempts = 0
+        else:
+            # A read-back happened but the caller's reply was ambiguous — count it
+            # so the prompt can fall back after too many unresolved attempts.
+            email_readback_attempts = state.email_readback_attempts + 1
 
     follow_up = state.follow_up
     if follow_up is None:
@@ -161,6 +172,7 @@ def update_state_from_user_turn(
         state,
         email=email,
         email_confirmed=email_confirmed,
+        email_readback_attempts=email_readback_attempts,
         follow_up=follow_up,
         bidding_active=bidding_active,
         declined_count=declined_count,
