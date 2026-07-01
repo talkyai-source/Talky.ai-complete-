@@ -435,9 +435,13 @@ import re as _re
 _AI_DENIAL_PATTERNS = [
     _re.compile(r"real call,?\s*promise", _re.I),
     _re.compile(r"\b(i\s*am|i'?m)\s+(a\s+)?(real|human|actual)\s+(person|human|caller)", _re.I),
-    _re.compile(r"\b(not|never)\s+(an?\s+)?(ai|bot|robot|machine)", _re.I),
+    _re.compile(r"\b(not|never)\s+(an?\s+)?(ai|bot|robot|machine|automated|a recording)", _re.I),
     _re.compile(r"\bpromise\s+i'?m\s+real", _re.I),
-    _re.compile(r"\b(say|claim|tell them)\b.{0,40}\b(real person|not a bot|not an ai|human)", _re.I),
+    _re.compile(r"\b(say|claim|tell them|insist|reassure them)\b.{0,50}\b(real person|not a bot|not an ai|not automated|a real human|a live (?:person|agent))", _re.I),
+    # paraphrases that conceal the AI nature without the literal "I'm not an AI"
+    _re.compile(r"\b(don'?t|do not|never|avoid)\s+(say|admit|mention|reveal|tell|disclos\w+)\b.{0,40}\b(ai|bot|robot|automated|a recording|machine)", _re.I),
+    _re.compile(r"\b(pretend|act)\s+(to\s+be\s+|like\s+)?(a\s+)?(real\s+)?(human|person)\b", _re.I),
+    _re.compile(r"\bthis\s+is(?:n'?t|\s+not)\s+(a\s+)?(recording|automated)", _re.I),
 ]
 
 
@@ -488,6 +492,9 @@ def model_prompt_addendum(model: str) -> str:
     layer (see voice_pipeline/llm_response.py) so it lands in the recency slot.
     """
     m = (model or "").lower()
-    if m.startswith("gemini-3"):
+    # Mirror GeminiLLMProvider._is_gemini_3: the rolling "*-latest" aliases are
+    # thinking-floored as 3.x by the provider, so they show the same NATO-
+    # spelling quirk and need the same email read-back reminder. Keep in sync.
+    if m.startswith("gemini-3") or m in {"gemini-flash-latest", "gemini-pro-latest"}:
         return GEMINI_EMAIL_READBACK_ADDENDUM
     return ""

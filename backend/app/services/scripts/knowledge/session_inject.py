@@ -86,7 +86,26 @@ async def apply_campaign_knowledge(call_session, campaign_row: Any, *, pool) -> 
             from app.services.scripts.prompts.prompt_safety import (
                 DATA_ONLY_NOTE,
                 fence_untrusted,
+                scan_for_injection,
             )
+
+            # Content-integrity (issue #3): drop any line shaped like an
+            # instruction to the model (poisoned KB entry) BEFORE baking, mirroring
+            # the per-turn retrieve path (turn_streamer). The fence alone isn't
+            # enough — a model can still act on instruction-shaped fenced text.
+            _all_lines = tree.splitlines()
+            _clean_lines = [ln for ln in _all_lines if not scan_for_injection(ln)]
+            _dropped = len(_all_lines) - len(_clean_lines)
+            tree = "\n".join(_clean_lines).strip()
+            if _dropped:
+                logger.warning(
+                    "campaign_knowledge dropped %d line(s) flagged as injection "
+                    "campaign=%s mode=%s",
+                    _dropped, campaign_id[:12], mode,
+                )
+            if not tree:
+                return  # everything was flagged — bake nothing
+
             _KB_TAG = "company_knowledge"
             fenced = fence_untrusted(tree, tag=_KB_TAG)
             call_session.system_prompt = (
