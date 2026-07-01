@@ -57,28 +57,64 @@ _CORE_REJECT_ANY_RE = re.compile(
     re.IGNORECASE,
 )
 _HAS_NEG_TOKEN_RE = re.compile(r"\b(no|not|nope|nah|wrong|incorrect)\b", re.IGNORECASE)
+# "no problem" / "no worries" LEAD with 'no' but mean YES.
+_AFFIRM_DISCOURSE_RE = re.compile(r"^\s*no\s+(problem|worries)\b", re.IGNORECASE)
+# A positive correctness word (so "no, that's right" reads as affirm, not reject).
+# NB: excludes ambiguous words like "good" ("no good" = bad).
+_CORRECTNESS_RE = re.compile(r"\b(correct|right|perfect|exactly|that'?s\s+it|spot\s+on)\b", re.IGNORECASE)
+# Partial-correction / hedge signals — the value is NOT fully affirmed, so keep
+# it pending rather than committing a wrong/old one.
+_HEDGE_RE = re.compile(
+    r"\b(except|but|apart\s+from|almost|nearly|not\s+quite|old|other|"
+    r"one\s+letter|wrong\s+one|change|instead|actually\s+it'?s)\b",
+    re.IGNORECASE,
+)
 
 
 def _classify_core_confirmation(utterance: str) -> str:
     """'affirm' | 'reject' | 'unclear' for a caller reply to a CORE-field read-back.
 
-    Deliberately conservative: a bare mid-sentence 'right'/'actually' or a 'no'
-    that's about something else must NOT flip the value. If it isn't a clear,
-    focused confirmation reply, we return 'unclear' and keep the value pending.
+    Deliberately conservative — a wrong verdict corrupts data:
+      * an explicit correction ("that's wrong") rejects;
+      * a discourse-marker 'no' that AFFIRMS correctness ("no problem, that's
+        correct", "no that's right") is a YES, not a reject;
+      * a short bare 'no'/'nope' rejects;
+      * a clean leading affirmation with no negation, hedge, or question affirms;
+      * anything hedged/partial ("perfect except the number", "yes, my old email")
+        or otherwise ambiguous stays 'unclear' (pending) so we neither wipe a good
+        value nor commit a wrong one.
     """
     t = (utterance or "").strip()
     if not t:
         return "unclear"
     n = len(t.split())
-    # Clear correction intent ("that's wrong / not right / you misheard").
+    hedged = bool(_HEDGE_RE.search(t))
+    leads_neg = bool(_CORE_REJECT_LEAD_RE.match(t))
+
+    # Explicit correction intent -> reject.
     if _CORE_REJECT_ANY_RE.search(t):
         return "reject"
-    # A short, LEADING bare negation ("no", "nope") — not a long unrelated sentence.
-    if n <= 4 and _CORE_REJECT_LEAD_RE.match(t):
-        return "reject"
-    # A short, LEADING affirmation with no competing negation and no question.
-    if n <= 6 and "?" not in t and _CORE_AFFIRM_RE.match(t) and not _HAS_NEG_TOKEN_RE.search(t):
+
+    # A leading discourse 'no' that affirms correctness ("no problem, that's
+    # correct", "no that's right") is a YES.
+    if leads_neg and _CORRECTNESS_RE.search(t) and not hedged:
         return "affirm"
+
+    # A short, genuine leading bare negation -> reject (but not the affirmative
+    # discourse markers "no problem" / "no worries").
+    if n <= 4 and leads_neg and not _AFFIRM_DISCOURSE_RE.match(t):
+        return "reject"
+
+    # A short, clean LEADING affirmation: no negation token, no hedge, no question.
+    if (
+        n <= 6
+        and "?" not in t
+        and _CORE_AFFIRM_RE.match(t)
+        and not _HAS_NEG_TOKEN_RE.search(t)
+        and not hedged
+    ):
+        return "affirm"
+
     return "unclear"
 
 

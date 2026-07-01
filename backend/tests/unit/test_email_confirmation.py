@@ -143,6 +143,32 @@ def test_new_email_resets_readback_attempts():
     assert s.email_readback_attempts == 0
 
 
+# ── reliability re-audit: affirm/reject classifier edge cases ────────────────
+
+def test_affirmative_no_discourse_marker_does_not_wipe_and_confirms():
+    # CORE-1: a discourse-marker 'no' that AFFIRMS correctness must confirm, not wipe.
+    for reply in ("no problem, that's correct", "no that's right", "no worries, that's correct"):
+        s = update_state_from_user_turn(CallState(), "bob at acme dot com")
+        s = update_state_from_user_turn(s, reply, readback_issued=True)
+        assert s.email == "bob@acme.com", reply     # not wiped
+        assert s.email_confirmed is True, reply      # correctly confirmed
+
+
+def test_bare_no_still_rejects():
+    s = update_state_from_user_turn(CallState(), "bob at acme dot com")
+    s = update_state_from_user_turn(s, "no", readback_issued=True)
+    assert s.email is None
+
+
+def test_partial_correction_does_not_commit():
+    # CORE-2: an affirm word followed by a partial-correction hedge must NOT commit.
+    for reply in ("perfect except the number", "yes that is my old email", "yeah almost, one letter off"):
+        s = update_state_from_user_turn(CallState(), "bob at acme dot com")
+        s = update_state_from_user_turn(s, reply, readback_issued=True)
+        assert s.email == "bob@acme.com", reply      # not wiped
+        assert s.email_confirmed is False, reply      # NOT falsely committed
+
+
 def test_rehearing_same_confirmed_email_keeps_it_confirmed():
     s = CallState(email="bob@acme.com", email_confirmed=True)
     s = update_state_from_user_turn(s, "yeah bob at acme dot com")
