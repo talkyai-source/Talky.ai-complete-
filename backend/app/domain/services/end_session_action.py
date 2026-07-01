@@ -41,13 +41,18 @@ def should_honor_end_session(
     action: Optional[dict],
     last_user_text: Optional[str],
     user_turn_count: int,
+    declined_count: int = 0,
 ) -> bool:
     """Decide whether to actually hang up on an LLM end-session action, or treat
     it as a phantom goodbye and keep the call going.
 
     Honor when:
-      * the caller asked never to be called again (do_not_call) — always, and
+      * the caller asked never to be called again (do_not_call) — always, or
       * the caller's words actually signal an end, or
+      * the caller has DECLINED >= 2 times (issue #16): the persona tells the
+        agent to close politely after two declines, so its end-session there is
+        a legitimate close, not a phantom — honoring it stops the recovery line
+        re-opening a call the agent just ended, or
       * the model reports the task finished (conversation_complete) AND the call
         has had real back-and-forth (>= _MIN_COMPLETE_USER_TURNS user turns).
     Otherwise it's a phantom — suppress the hangup.
@@ -57,6 +62,8 @@ def should_honor_end_session(
     if action.get("do_not_call"):
         return True
     if caller_signaled_end(last_user_text):
+        return True
+    if declined_count >= 2:
         return True
     if action.get("reason") == "conversation_complete" and user_turn_count >= _MIN_COMPLETE_USER_TURNS:
         return True

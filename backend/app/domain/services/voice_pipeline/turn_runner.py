@@ -37,6 +37,26 @@ logger = logging.getLogger(__name__)
 _PHANTOM_GOODBYE_RECOVERY = "Sorry, I'm still here — what else can I help you with?"
 
 
+def _note_unheard_greeting_bargein(session) -> None:
+    """A barge-in cancelled a turn before ANY audio reached the caller (issue #23).
+
+    On the opening turn that leaves ``_has_introduced`` False, so the next turn
+    re-greets from the top — and a caller who keeps talking over the very start
+    makes it loop the intro. Allow one clean re-attempt, then bound it: after a
+    second unheard opening barge-in, mark the agent introduced so it picks up the
+    conversation instead of restarting its greeting forever. No-op once introduced.
+    """
+    if getattr(session, "_has_introduced", False):
+        return
+    n = getattr(session, "_greeting_bargein_count", 0) + 1
+    try:
+        session._greeting_bargein_count = n
+        if n >= 2:
+            session._has_introduced = True
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+
 class TurnRunner:
     """Runs one user turn: append history → stream LLM+TTS → commit/rollback."""
 
@@ -99,7 +119,12 @@ class TurnRunner:
                 user_turns = sum(
                     1 for m in session.conversation_history if m.role == MessageRole.USER
                 )
-                if not should_honor_end_session(ask_ai_end_action, full_transcript, user_turns):
+                # Two declines = the persona legitimately closes (issue #16), so
+                # honor end-session rather than re-opening with the recovery line.
+                _declined = getattr(getattr(session, "captured_slots", None), "declined_count", 0)
+                if not should_honor_end_session(
+                    ask_ai_end_action, full_transcript, user_turns, declined_count=_declined,
+                ):
                     logger.info(
                         "phantom_goodbye_suppressed call_id=%s reason=%s user_turns=%d "
                         "transcript=%r — keeping call alive",
@@ -188,6 +213,9 @@ class TurnRunner:
                 session._speculative_history_len = None
             else:
                 session.conversation_history = session.conversation_history[:history_snapshot]
+                # Nothing was heard. If this keeps happening on the opening, stop
+                # looping the intro (issue #23).
+                _note_unheard_greeting_bargein(session)
             raise
         except Exception as e:
             logger.error(f"Turn error for call {call_id}: {e}", exc_info=True)

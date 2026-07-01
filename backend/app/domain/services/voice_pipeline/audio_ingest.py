@@ -18,10 +18,27 @@ from typing import AsyncIterator, Optional
 from fastapi import WebSocket
 
 from app.core.telemetry import pipeline_span, record_latency
-from app.domain.models.conversation import AudioChunk
+from app.domain.models.conversation import AudioChunk, Message, MessageRole
 from app.domain.models.session import CallSession
 
 logger = logging.getLogger(__name__)
+
+
+def _record_silence_check(session, phrase: str) -> None:
+    """Record a spoken silence-check as an assistant turn (issue #8).
+
+    The silence monitor speaks straight to TTS; without also writing the phrase
+    into conversation_history the LLM has no record that it just asked "you
+    there?" — so on the caller's next word it can re-ask the same thing or close
+    on a different schedule than the prompt promises. Mirrors turn_runner's
+    assistant-turn append. Never raises — history bookkeeping must not break a call.
+    """
+    try:
+        session.conversation_history.append(
+            Message(role=MessageRole.ASSISTANT, content=phrase)
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("[SilenceMonitor] history append failed: %s", exc)
 
 
 class AudioIngest:
@@ -251,6 +268,8 @@ class AudioIngest:
                     )
                     try:
                         await self._p.synthesize_and_send_audio(session, phrase, websocket)
+                        # Record it so the LLM knows it already asked (issue #8).
+                        _record_silence_check(session, phrase)
                     except Exception as _sm_exc:
                         logger.debug("[SilenceMonitor] TTS failed: %s", _sm_exc)
 
