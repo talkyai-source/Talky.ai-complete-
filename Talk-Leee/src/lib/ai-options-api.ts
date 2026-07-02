@@ -27,6 +27,16 @@ export interface VoiceInfo {
     preview_url?: string;
 }
 
+/** A voice offered by the realtime (speech-to-speech) model. Distinct from
+ *  VoiceInfo — realtime voices are provider-fixed (OpenAI) and have no
+ *  preview_url / accent metadata today. */
+export interface RealtimeVoiceInfo {
+    id: string;
+    name: string;
+    description?: string;
+    gender?: string;
+}
+
 export interface ProviderListResponse {
     llm: {
         providers: string[];
@@ -41,6 +51,14 @@ export interface ProviderListResponse {
     tts: {
         providers: string[];
         models: ModelInfo[];
+    };
+    /** Phase 2 — gpt-realtime-2 (speech-to-speech) pipeline catalog. Absent
+     *  when the backend hasn't shipped it yet; callers fall back locally. */
+    realtime?: {
+        model: string;
+        voices: RealtimeVoiceInfo[];
+        turn_detection: string[];
+        noise_reduction: string[];
     };
 }
 
@@ -72,6 +90,13 @@ export interface AIProviderConfig {
     tts_sample_rate: number;
     /** T4-C3 — per-tenant overrides; unset / empty means "use defaults". */
     voice_tuning?: VoiceTuning | null;
+    /** Phase 2 — per-tenant pipeline choice. Missing/undefined == "cascaded"
+     *  (today's LLM+STT+TTS pipeline); "realtime" swaps to gpt-realtime-2
+     *  speech-to-speech and the cascaded fields below are ignored. */
+    pipeline_mode?: "cascaded" | "realtime";
+    realtime_model?: string;
+    realtime_voice?: string;
+    realtime_settings?: { turn_detection?: string; noise_reduction?: string } | null;
 }
 
 export interface LLMTestRequest {
@@ -168,11 +193,30 @@ const RawProvidersBucketSchema = z
     })
     .passthrough();
 
+const RawRealtimeVoiceSchema = z
+    .object({
+        id: z.string(),
+        name: z.string(),
+        description: z.string().optional(),
+        gender: z.string().nullish(),
+    })
+    .passthrough();
+
+const RawRealtimeBucketSchema = z
+    .object({
+        model: z.string(),
+        voices: z.array(RawRealtimeVoiceSchema).optional(),
+        turn_detection: z.array(z.string()).optional(),
+        noise_reduction: z.array(z.string()).optional(),
+    })
+    .passthrough();
+
 const RawProviderListSchema = z
     .object({
         llm: RawProvidersBucketSchema,
         stt: RawProvidersBucketSchema,
         tts: RawProvidersBucketSchema,
+        realtime: RawRealtimeBucketSchema.optional(),
     })
     .passthrough();
 
@@ -202,6 +246,18 @@ const RawConfigSchema = z
         ttsVoiceId: z.string().optional(),
         tts_sample_rate: z.number().optional(),
         ttsSampleRate: z.number().optional(),
+        pipeline_mode: z.enum(["cascaded", "realtime"]).optional(),
+        pipelineMode: z.enum(["cascaded", "realtime"]).optional(),
+        realtime_model: z.string().optional(),
+        realtimeModel: z.string().optional(),
+        realtime_voice: z.string().optional(),
+        realtimeVoice: z.string().optional(),
+        realtime_settings: z
+            .object({ turn_detection: z.string().optional(), noise_reduction: z.string().optional() })
+            .nullish(),
+        realtimeSettings: z
+            .object({ turn_detection: z.string().optional(), noise_reduction: z.string().optional() })
+            .nullish(),
     })
     .passthrough();
 
@@ -280,6 +336,15 @@ function normalizeModel(model: z.infer<typeof RawModelSchema>): ModelInfo {
     };
 }
 
+function normalizeRealtimeVoice(voice: z.infer<typeof RawRealtimeVoiceSchema>): RealtimeVoiceInfo {
+    return {
+        id: voice.id,
+        name: voice.name,
+        description: voice.description ?? undefined,
+        gender: voice.gender ?? undefined,
+    };
+}
+
 function normalizeVoice(voice: z.infer<typeof RawVoiceSchema>): VoiceInfo {
     return {
         id: voice.id,
@@ -301,6 +366,14 @@ function normalizeProviderList(raw: z.infer<typeof RawProviderListSchema>): Prov
         llm: { providers: raw.llm.providers, models: raw.llm.models.map(normalizeModel) },
         stt: { providers: raw.stt.providers, models: raw.stt.models.map(normalizeModel), engines: (raw.stt.engines ?? []).map(normalizeModel) },
         tts: { providers: raw.tts.providers, models: raw.tts.models.map(normalizeModel) },
+        realtime: raw.realtime
+            ? {
+                  model: raw.realtime.model,
+                  voices: (raw.realtime.voices ?? []).map(normalizeRealtimeVoice),
+                  turn_detection: raw.realtime.turn_detection ?? [],
+                  noise_reduction: raw.realtime.noise_reduction ?? [],
+              }
+            : undefined,
     };
 }
 
@@ -343,6 +416,11 @@ function normalizeConfig(raw: z.infer<typeof RawConfigSchema>): AIProviderConfig
         tts_model: requireNonEmptyString("tts_model", raw.tts_model, raw.ttsModel),
         tts_voice_id: requireNonEmptyString("tts_voice_id", raw.tts_voice_id, raw.ttsVoiceId),
         tts_sample_rate: requireFiniteNumber("tts_sample_rate", raw.tts_sample_rate, raw.ttsSampleRate),
+        // Phase 2 — optional; missing means "cascaded" (today's behavior).
+        pipeline_mode: raw.pipeline_mode ?? raw.pipelineMode,
+        realtime_model: pickNonEmptyString(raw.realtime_model, raw.realtimeModel),
+        realtime_voice: pickNonEmptyString(raw.realtime_voice, raw.realtimeVoice),
+        realtime_settings: raw.realtime_settings ?? raw.realtimeSettings ?? undefined,
     };
 }
 

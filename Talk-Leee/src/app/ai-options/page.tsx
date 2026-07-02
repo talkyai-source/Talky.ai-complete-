@@ -9,6 +9,7 @@ import {
     AIProviderConfig,
     ProviderListResponse,
     VoiceInfo,
+    RealtimeVoiceInfo,
 } from "@/lib/ai-options-api";
 import {
     Cpu,
@@ -24,6 +25,7 @@ import {
     Save,
     Sparkles,
     SlidersHorizontal,
+    AudioWaveform,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -93,6 +95,35 @@ function dedupeVoicesById(input: VoiceInfo[]): VoiceInfo[] {
         if (!map.has(voice.id)) map.set(voice.id, voice);
     }
     return Array.from(map.values());
+}
+
+// ── Realtime (gpt-realtime-2) fallback catalog ────────────────
+// Used only when the backend hasn't shipped `providers.realtime` yet, so the
+// card still renders (and is developable) before that lands. Remove once the
+// backend always returns this section.
+const FALLBACK_REALTIME_MODEL = "gpt-realtime-2";
+const FALLBACK_REALTIME_VOICES: RealtimeVoiceInfo[] = [
+    { id: "marin", name: "Marin", description: "Warm, natural, conversational.", gender: "female" },
+    { id: "cedar", name: "Cedar", description: "Calm, grounded, and clear.", gender: "male" },
+];
+const FALLBACK_TURN_DETECTION = ["low", "medium", "high", "auto"];
+const FALLBACK_NOISE_REDUCTION = ["off", "near_field", "far_field"];
+const DEFAULT_TURN_DETECTION = "high";
+const DEFAULT_NOISE_REDUCTION = "far_field";
+
+function getRealtimeCatalog(providers: ProviderListResponse | null): {
+    model: string;
+    voices: RealtimeVoiceInfo[];
+    turn_detection: string[];
+    noise_reduction: string[];
+} {
+    const realtime = providers?.realtime;
+    return {
+        model: realtime?.model || FALLBACK_REALTIME_MODEL,
+        voices: realtime?.voices?.length ? realtime.voices : FALLBACK_REALTIME_VOICES,
+        turn_detection: realtime?.turn_detection?.length ? realtime.turn_detection : FALLBACK_TURN_DETECTION,
+        noise_reduction: realtime?.noise_reduction?.length ? realtime.noise_reduction : FALLBACK_NOISE_REDUCTION,
+    };
 }
 
 // ── theme-aware card / header ─────────────────────────────────
@@ -376,6 +407,38 @@ export default function AIOptionsPage() {
         });
     }
 
+    // Phase 2 — realtime (speech-to-speech) pipeline catalog + mode switch.
+    // Falls back to a small hardcoded catalog until the backend ships
+    // `providers.realtime` (see getRealtimeCatalog above).
+    const realtimeCatalog = useMemo(() => getRealtimeCatalog(providers), [providers]);
+    const pipelineMode = config?.pipeline_mode ?? "cascaded";
+
+    function setPipelineMode(mode: "cascaded" | "realtime") {
+        setConfig((prev) => {
+            if (!prev) return prev;
+            if (mode !== "realtime") return { ...prev, pipeline_mode: mode };
+            // First switch into realtime — seed sensible defaults so an
+            // immediate Save is valid without the user touching anything.
+            return {
+                ...prev,
+                pipeline_mode: mode,
+                realtime_model: prev.realtime_model || realtimeCatalog.model,
+                realtime_voice: prev.realtime_voice || realtimeCatalog.voices[0]?.id || "marin",
+                realtime_settings: {
+                    turn_detection: prev.realtime_settings?.turn_detection || DEFAULT_TURN_DETECTION,
+                    noise_reduction: prev.realtime_settings?.noise_reduction || DEFAULT_NOISE_REDUCTION,
+                },
+            };
+        });
+    }
+
+    function updateRealtimeSetting(field: "turn_detection" | "noise_reduction", value: string) {
+        setConfig((prev) => {
+            if (!prev) return prev;
+            return { ...prev, realtime_settings: { ...(prev.realtime_settings ?? {}), [field]: value } };
+        });
+    }
+
     const llmModelInfo = providers?.llm.models.find((m) => m.id === config?.llm_model);
     const sttEngines = providers?.stt.engines ?? [];
     const sttEngineInfo = sttEngines.find((e) => e.id === config?.stt_engine);
@@ -406,6 +469,31 @@ export default function AIOptionsPage() {
                         <p className="text-sm font-medium text-white/90">Tune the brain, the voice, and the rhythm of every call.</p>
                     </motion.div>
 
+                    {/* Pipeline mode — the single switch that decides which card set
+                        renders below. Prominent, top-of-page, own card so it reads as
+                        a top-level choice rather than a buried setting. */}
+                    <Card delay={0.02}>
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                                <div className="grid h-10 w-10 place-items-center rounded-xl text-emerald-500" style={{ background: `${ACCENT}1a` }}>
+                                    <AudioWaveform className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-semibold text-foreground sm:text-lg">Pipeline Mode</h3>
+                                    <p className="text-xs text-muted-foreground sm:text-sm">Choose how this tenant's calls are processed</p>
+                                </div>
+                            </div>
+                            <Segmented
+                                value={pipelineMode}
+                                onChange={(v) => setPipelineMode(v as "cascaded" | "realtime")}
+                                options={[
+                                    { value: "cascaded", label: "Standard Pipeline" },
+                                    { value: "realtime", label: "Realtime (speech-to-speech)" },
+                                ]}
+                            />
+                        </div>
+                    </Card>
+
                     {/* Banners */}
                     <AnimatePresence>
                         {error && (
@@ -431,6 +519,81 @@ export default function AIOptionsPage() {
                         )}
                     </AnimatePresence>
 
+                    <AnimatePresence mode="wait">
+                    {pipelineMode === "realtime" ? (
+                        <motion.div key="realtime" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25 }}>
+                            {/* Realtime (gpt-realtime-2) — one model listens, thinks, and
+                                speaks. Replaces the LLM / STT / TTS-voice / voice-tuning
+                                cards entirely; only latency + test stay cascaded-only. */}
+                            <Card delay={0.05}>
+                                <SectionHeader
+                                    icon={<AudioWaveform className="h-5 w-5" />}
+                                    title="Realtime 2"
+                                    subtitle="One model listens, thinks, and speaks — lowest latency, most natural"
+                                    right={
+                                        <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                                            {realtimeCatalog.model}
+                                        </span>
+                                    }
+                                />
+
+                                <div className="mb-4 rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+                                    Realtime speaks with its own built-in voice and turn-taking — there is no separate STT/TTS
+                                    step. Campaign compliance and persona still apply, delivered through this model's instructions.
+                                </div>
+
+                                <label className="mb-1.5 block text-sm font-medium text-muted-foreground">Voice</label>
+                                <div className="mb-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                                    {realtimeCatalog.voices.map((voice) => {
+                                        const selected = config.realtime_voice === voice.id;
+                                        return (
+                                            <motion.button
+                                                type="button"
+                                                key={voice.id}
+                                                onClick={() => setConfig({ ...config, realtime_voice: voice.id })}
+                                                whileHover={{ y: -2 }}
+                                                className={`relative rounded-xl border p-2.5 text-left transition-colors ${selected ? "border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/40" : "border-border bg-background hover:border-emerald-500/40 hover:bg-muted/50"}`}
+                                            >
+                                                <p className="truncate text-sm font-medium text-foreground">{voice.name}</p>
+                                                {voice.description && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{voice.description}</p>}
+                                                {voice.gender && (
+                                                    <div className="mt-2 flex flex-wrap gap-1">
+                                                        <span className={`rounded px-1.5 py-0.5 text-[11px] ${voice.gender === "female" ? "bg-pink-500/15 text-pink-500" : "bg-blue-500/15 text-blue-500"}`}>{voice.gender}</span>
+                                                    </div>
+                                                )}
+                                                {selected && <Check className="absolute bottom-2 right-2 h-4 w-4 text-emerald-500" />}
+                                            </motion.button>
+                                        );
+                                    })}
+                                </div>
+                                <p className="mb-5 text-[11px] text-muted-foreground">Preview coming soon — realtime voices can't be sampled yet.</p>
+
+                                <div className="grid gap-4 sm:grid-cols-2">
+                                    <div>
+                                        <label className="mb-1.5 block text-sm font-medium text-muted-foreground">Turn detection</label>
+                                        <select
+                                            value={config.realtime_settings?.turn_detection ?? DEFAULT_TURN_DETECTION}
+                                            onChange={(e) => updateRealtimeSetting("turn_detection", e.target.value)}
+                                            className={selectCls}
+                                        >
+                                            {realtimeCatalog.turn_detection.map((opt) => (<option key={opt} value={opt} className="capitalize">{opt}</option>))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="mb-1.5 block text-sm font-medium text-muted-foreground">Noise reduction</label>
+                                        <select
+                                            value={config.realtime_settings?.noise_reduction ?? DEFAULT_NOISE_REDUCTION}
+                                            onChange={(e) => updateRealtimeSetting("noise_reduction", e.target.value)}
+                                            className={selectCls}
+                                        >
+                                            {realtimeCatalog.noise_reduction.map((opt) => (<option key={opt} value={opt} className="capitalize">{opt}</option>))}
+                                        </select>
+                                    </div>
+                                </div>
+                            </Card>
+                        </motion.div>
+                    ) : (
+                        <motion.div key="cascaded" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25 }}>
                     {/* Configuration grid — balanced 12-col so small cards pair up
                         instead of each taking a full-width row. */}
                     <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
@@ -715,6 +878,9 @@ export default function AIOptionsPage() {
                         </div>
                     </Card>
                     </div>
+                        </motion.div>
+                    )}
+                    </AnimatePresence>
 
                     {/* Save */}
                     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="sticky bottom-4 z-10 flex justify-end">
