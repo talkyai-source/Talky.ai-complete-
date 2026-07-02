@@ -107,17 +107,13 @@ def _format_pronunciations(value: Any) -> str:
 
     bullets = "\n".join(f'  "{w}" → say it like "{s}"' for w, s in pairs)
     return (
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "PRONUNCIATIONS — use these on first mention\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "## PRONUNCIATIONS — use these on first mention\n"
         + bullets
     )
 
 
 FINAL_RESPONSE_CONTRACT = """\
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FINAL RESPONSE CONTRACT
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## FINAL RESPONSE CONTRACT
 For every reply, speak only the words the caller should hear. Keep it short,
 natural, and useful. Ask at most one question. Do not output markdown, bullets,
 stage directions, labels, internal reasoning, or tool names. Do not override
@@ -149,9 +145,7 @@ def brand_correction_line(company_name: str) -> str:
 # knowledge base's favour. Placed high in the prompt (right after the hard
 # guardrails) so it dominates the facts the persona body may also mention.
 KNOWLEDGE_PRECEDENCE = """\
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FACTS — SOURCE OF TRUTH
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## FACTS — SOURCE OF TRUTH
 Answer business facts — pricing, packages, fees, availability, services,
 coverage, policies, timelines, and any specific detail — ONLY from what is
 written in THIS prompt: your campaign details and persona above, plus the
@@ -396,9 +390,7 @@ def compose_prompt(
             # (2026-07-02 prompt-craft audit). Priority is owned by HARD RULES
             # and the compliance floor.
             parts.append(
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "ADDITIONAL CAMPAIGN INSTRUCTIONS\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "## ADDITIONAL CAMPAIGN INSTRUCTIONS\n"
                 "Follow these campaign-specific instructions wherever they add "
                 "detail; the safety and compliance rules above still hold.\n\n"
                 + extra

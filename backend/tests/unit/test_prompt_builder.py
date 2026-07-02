@@ -48,12 +48,12 @@ def test_compose_two_declines_mentions_close_politely():
 
 
 def test_compose_email_pins_value_with_natural_readback():
-    # Hybrid (2026-06-24): the model gets the EXACT pinned value and is told to
-    # read it back NATURALLY + confirm — no more robotic letter-by-letter form on
-    # the live path (the caller-facing read-back must sound human).
+    # Payload-first (2026-07-02 A/B): the model gets the EXACT sentence to say —
+    # the natural spoken read-back + confirm question — and a stop instruction.
+    # No robotic letter-by-letter form on the live path.
     state = CallState(email="allstateestimation@gmail.com")
     out = compose_system_prompt(BASE, state)
     assert "allstateestimation@gmail.com" in out
-    assert "never re-transcribe" in out.lower()
-    assert "naturally" in out.lower()
+    assert 'Say EXACTLY: "So that\'s allstateestimation at gmail dot com' in out
+    assert "did i get that right" in out.lower()
     assert "a-l-l-s-t-a-t-e" not in out          # robotic spell-out is gone

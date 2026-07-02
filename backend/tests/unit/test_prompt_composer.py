@@ -85,7 +85,9 @@ def test_compose_lead_gen_full():
     # FACTS — SOURCE OF TRUTH sits DIRECTLY after the HARD RULES (top-attention
     # window, effectively Hard Rule 11), before the rest of the guardrails.
     assert out.index("HARD RULES") < out.index("FACTS — SOURCE OF TRUTH")
-    assert out.index("FACTS — SOURCE OF TRUTH") < out.index("PRODUCTION SUCCESS / FAILURE")
+    assert out.index("FACTS — SOURCE OF TRUTH") < out.index("PRIVACY AND DATA MINIMIZATION")
+    # the old PRODUCTION SUCCESS / FAILURE mirror of HARD RULES is deleted
+    assert "PRODUCTION SUCCESS / FAILURE" not in out
     # Agent identity + one representative campaign slot are filled in.
     assert "Alex" in out
     assert "Acme" in out
@@ -122,7 +124,9 @@ def test_composed_prompt_has_voice_safe_output_rules():
     assert "Ask ONE question per turn" in out
     assert "Use soft tag questions sparingly" in out
     assert "When the transcript is unclear, do not guess" in out
-    assert "You have failed if" in out
+    # PRODUCTION SUCCESS / FAILURE was deleted 2026-07-02 (mirrored HARD RULES;
+    # A/B showed no regression) — its rules live in HARD RULES + FACTS.
+    assert "You have failed if" not in out
     assert "Regulated or sensitive niches" in out
     assert "SILENT CALL STATE" in out
     assert "HANDOFF AND ESCALATION PACKAGE" in out
@@ -135,12 +139,12 @@ def test_composed_prompt_has_voice_safe_output_rules():
 
 def test_communication_frameworks_and_persuasion_present():
     out = compose_prompt("lead_gen", "Alex", "Acme", LEAD_GEN_SLOTS)
-    # Universal 7 C's + Grice maxims (from the system guardrails layer).
+    # COMMUNICATION PRINCIPLES trimmed 2026-07-02 to the distilled paragraph
+    # (the 7 C's / maxims listing restated HARD RULES; A/B showed no regression).
     assert "COMMUNICATION PRINCIPLES" in out
-    assert "The 7 C's" in out
-    assert "The 4 maxims of conversation" in out
-    for maxim in ("Quantity", "Quality", "Relation", "Manner"):
-        assert maxim in out
+    assert "lead with the answer" in out
+    assert "Say only what's true" in out
+    assert "The 7 C's" not in out
     # The duplicated "acknowledge then ask" line was trimmed from the engine.
     assert "First acknowledge, then ask the next useful question" not in out
     # Persuasion levers added to the lead_gen persona (no duplication of the

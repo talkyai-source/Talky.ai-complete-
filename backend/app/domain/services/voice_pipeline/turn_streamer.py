@@ -195,12 +195,16 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
         if not entries:
             return ""
         fenced = fence_untrusted("\n".join(entries), tag=_KB_TAG)
+        from app.services.scripts.prompts.guardrails import KNOWLEDGE_PRICE_GUARD
+
         return (
             "COMPANY KNOWLEDGE — official answers for this caller's question.\n"
             + DATA_ONLY_NOTE(_KB_TAG)
             + "\nAnswer naturally and stay faithful to it; don't invent details "
             "beyond it.\n"
             + fenced
+            + "\n"
+            + KNOWLEDGE_PRICE_GUARD
         )
     except Exception as exc:
         logger.warning("KB_DEBUG call=%s error: %s", getattr(session, "call_id", "?")[:8], exc)

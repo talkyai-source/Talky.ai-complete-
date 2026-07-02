@@ -36,14 +36,23 @@ def compose_system_prompt(base_prompt: str, state: CallState) -> str:
                 f"keep re-reading the same value: {state.email}"
             )
         else:
-            say = f' Read it back by saying EXACTLY: "{readback}".' if readback else ""
-            pending.append(
-                "- Caller email HEARD but NOT yet confirmed — this turn, read it back "
-                "to the caller NATURALLY (never re-transcribe what you heard; do not "
-                "spell it letter by letter unless they ask) and ask them to confirm "
-                f"it is correct.{say} Do NOT treat it as final or save it until they "
-                f"say yes; if they correct it, use the new value: {state.email}"
-            )
+            # Payload-first single imperative (2026-07-02 A/B: both menu models
+            # reproduced the exact read-back 4/4 with no letter-spelling). The
+            # old 78-word run-on with dueling NATURALLY/EXACTLY sometimes
+            # stalled the confirm loop.
+            if readback:
+                pending.append(
+                    f'- Say EXACTLY: "So that\'s {readback} — did I get that '
+                    f'right?" Then stop and wait for their answer. Treat the '
+                    f"email as final only once they say yes; if they correct it, "
+                    f"capture the new value they give: {state.email}"
+                )
+            else:
+                pending.append(
+                    "- Read the caller's email back to them as natural spoken "
+                    "words and ask if you got it right. Treat it as final only "
+                    f"once they say yes: {state.email}"
+                )
 
     lines: list[str] = []
     if state.email and state.email_confirmed:

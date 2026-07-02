@@ -62,6 +62,12 @@ def test_inline_bakes_full_tree(monkeypatch):
     assert cs.tenant_id == "t1"
     assert cs.system_prompt.startswith("PERSONA")
     assert "FULL_TREE_BODY" in cs.system_prompt
+    # price guard rides ADJACENT to the baked knowledge (2026-07-02 A/B:
+    # knowledge-adjacent placement is what stops llama inventing figures)
+    from app.services.scripts.prompts.guardrails import KNOWLEDGE_PRICE_GUARD
+    assert KNOWLEDGE_PRICE_GUARD in cs.system_prompt
+    assert cs.system_prompt.index("FULL_TREE_BODY") < cs.system_prompt.index(
+        KNOWLEDGE_PRICE_GUARD)
 
 
 def test_map_retrieve_bakes_skeleton_only(monkeypatch):

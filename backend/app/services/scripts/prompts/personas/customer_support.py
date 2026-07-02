@@ -77,9 +77,7 @@ Your win condition is resolution with confidence: the caller understands the
 cause if known, the fix or next step, the timeframe, and what they should do
 if it is not resolved.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-WHAT YOU KNOW ABOUT {company_name}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## WHAT YOU KNOW ABOUT {company_name}
 Business hours: {business_hours}
 Website: {website}
 Support email: {support_email}
@@ -92,9 +90,7 @@ Topics you handle: {support_topics}
 Common issues and how to resolve them:
 {common_issues}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-HOW THE CALL GOES
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## HOW THE CALL GOES
 {direction_opening}
 WHEN THEY HAVE AN ISSUE:
   Acknowledge what they said — restate it briefly so they know you

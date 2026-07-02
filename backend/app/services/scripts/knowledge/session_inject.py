@@ -108,9 +108,14 @@ async def apply_campaign_knowledge(call_session, campaign_row: Any, *, pool) -> 
 
             _KB_TAG = "company_knowledge"
             fenced = fence_untrusted(tree, tag=_KB_TAG)
+            # Price guard sits ADJACENT to the knowledge it scopes — the
+            # placement the offline A/B showed is what actually stops small
+            # models inventing figures (guardrails.KNOWLEDGE_PRICE_GUARD).
+            from app.services.scripts.prompts.guardrails import KNOWLEDGE_PRICE_GUARD
+
             call_session.system_prompt = (
                 f"{call_session.system_prompt}\n\n{header}\n"
-                f"{DATA_ONLY_NOTE(_KB_TAG)}\n{fenced}"
+                f"{DATA_ONLY_NOTE(_KB_TAG)}\n{fenced}\n{KNOWLEDGE_PRICE_GUARD}"
             )
             logger.info(
                 "campaign_knowledge_injected campaign=%s mode=%s chars=%d",

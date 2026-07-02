@@ -219,8 +219,10 @@ def test_prompt_unconfirmed_email_demands_readback_not_confirmed():
     out = compose_system_prompt(BASE, CallState(email="bob@acme.com", email_confirmed=False))
     low = out.lower()
     assert "bob@acme.com" in out
-    assert "read it back" in low
-    assert "confirm" in low
+    # payload-first imperative: the exact spoken read-back + confirm question
+    assert "say exactly" in low
+    assert "did i get that right" in low
+    assert "only once they say yes" in low
     # An unconfirmed email must NOT be presented as a settled do-not-re-ask fact.
     assert "do not re-ask" not in low
 
