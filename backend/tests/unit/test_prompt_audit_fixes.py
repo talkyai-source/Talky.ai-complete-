@@ -18,8 +18,11 @@ def test_compliance_reanchor_carries_key_invariants_and_is_short():
     assert "ai assistant for acme roofing" in low          # AI-disclosure
     assert "card number" in low                            # sensitive-number privacy
     assert ("stop" in low) or ("let them go" in low)       # stop-when-asked
-    # materially shorter than the full floor (no more verbatim duplication)
-    assert len(r) < len(compliance_floor("Acme Roofing")) * 0.6
+    assert "price" in low                                  # facts-from-knowledge
+    # materially shorter than the full floor (no more verbatim duplication).
+    # 0.75 (was 0.6): the reanchor deliberately regained the 4th invariant
+    # (price/facts — the one llama-3.3 most needs in the recency slot).
+    assert len(r) < len(compliance_floor("Acme Roofing")) * 0.75
 
 
 # ── #11: per-model addendum must match the gemini *-latest aliases ───────────

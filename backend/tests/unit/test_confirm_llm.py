@@ -25,13 +25,28 @@ async def test_llm_yes_is_affirm():
 
 @pytest.mark.asyncio
 async def test_llm_no_is_reject():
-    v = await llm_confirmation_verdict(_FakeLLM("no, the domain is off"), "close but wrong", "bob@acme.com")
+    v = await llm_confirmation_verdict(_FakeLLM("No."), "close but wrong", "bob@acme.com")
     assert v == "reject"
 
 
 @pytest.mark.asyncio
 async def test_llm_unclear_stays_unclear():
     v = await llm_confirmation_verdict(_FakeLLM("unclear"), "hmm", "bob@acme.com")
+    assert v == "unclear"
+
+
+@pytest.mark.asyncio
+async def test_not_sure_does_not_alias_to_no():
+    # prefix matching would read "not sure" as "no" and wrongly WIPE a pending
+    # email — exact label match must fail closed to unclear.
+    v = await llm_confirmation_verdict(_FakeLLM("not sure"), "um maybe", "bob@acme.com")
+    assert v == "unclear"
+
+
+@pytest.mark.asyncio
+async def test_multiword_answer_fails_closed():
+    # the model is instructed to reply one word; anything else -> unclear.
+    v = await llm_confirmation_verdict(_FakeLLM("yes it seems correct"), "sure", "bob@acme.com")
     assert v == "unclear"
 
 

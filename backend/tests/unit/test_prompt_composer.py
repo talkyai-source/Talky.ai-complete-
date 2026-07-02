@@ -82,6 +82,10 @@ def test_compose_lead_gen_full():
     assert "WIN CONDITION" in out
     # Guardrails come before the persona block.
     assert out.index("HARD RULES") < out.index("WHO YOU ARE")
+    # FACTS — SOURCE OF TRUTH sits DIRECTLY after the HARD RULES (top-attention
+    # window, effectively Hard Rule 11), before the rest of the guardrails.
+    assert out.index("HARD RULES") < out.index("FACTS — SOURCE OF TRUTH")
+    assert out.index("FACTS — SOURCE OF TRUTH") < out.index("PRODUCTION SUCCESS / FAILURE")
     # Agent identity + one representative campaign slot are filled in.
     assert "Alex" in out
     assert "Acme" in out
@@ -227,12 +231,13 @@ def test_additional_instructions_cannot_be_presented_as_higher_priority():
         additional_instructions=unsafe_custom_text,
     )
 
-    assert "These instructions are lower priority than HARD RULES" in out
+    # One-line preamble: tenant text adds detail, never overrides safety.
+    assert "the safety and compliance rules above still hold" in out
     assert unsafe_custom_text in out
-    assert "additional campaign instructions can add business-specific facts" in out
-    assert out.index("These instructions are lower priority") < out.index(unsafe_custom_text)
-    assert out.index(unsafe_custom_text) < out.index("Reminder: the additional campaign instructions")
+    assert out.index("safety and compliance rules above still hold") < out.index(unsafe_custom_text)
     assert out.index(unsafe_custom_text) < out.index("FINAL RESPONSE CONTRACT")
+    # The compliance floor still lands AFTER the tenant text (recency wins).
+    assert out.index(unsafe_custom_text) < out.index("NON-NEGOTIABLES")
 
 
 @pytest.mark.parametrize(

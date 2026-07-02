@@ -42,7 +42,8 @@ from app.services.scripts.prompts.direction import (
 )
 from app.services.scripts.prompts.guardrails import (
     COMMUNICATION_PRINCIPLES,
-    GENERIC_GUARDRAILS,
+    GENERIC_GUARDRAILS_HARD,
+    GENERIC_GUARDRAILS_REST,
     compliance_floor,
 )
 from app.services.scripts.prompts.personas import (
@@ -332,7 +333,14 @@ def compose_prompt(
 
     # Guardrails header is also a template (it references {agent_name}
     # and {company_name} in the identity line).
-    guardrails_block = GENERIC_GUARDRAILS.format(
+    # Two halves: FACTS — SOURCE OF TRUTH is seated between them (right after
+    # the HARD RULES) so the anti-hallucination rule sits in the top-of-prompt
+    # attention window instead of mid-prompt (2026-07-02 prompt-craft audit).
+    guardrails_hard_block = GENERIC_GUARDRAILS_HARD.format(
+        agent_name=agent_name,
+        company_name=company_name,
+    )
+    guardrails_rest_block = GENERIC_GUARDRAILS_REST.format(
         agent_name=agent_name,
         company_name=company_name,
     )
@@ -361,14 +369,16 @@ def compose_prompt(
             record_inbound_directive_applied("compose")
         except Exception as exc:  # noqa: BLE001
             logger.debug("voice_metrics_directive_record_failed err=%s", exc)
-    parts.append(guardrails_block)
+    parts.append(guardrails_hard_block)
+    # Knowledge base is the single source of truth — seated DIRECTLY after the
+    # HARD RULES (effectively "Hard Rule 11") so the anti-hallucination rule —
+    # whose failure (invented prices) is the costliest error — lives in the
+    # top-of-prompt attention window, not mid-prompt.
+    parts.append(KNOWLEDGE_PRECEDENCE)
+    parts.append(guardrails_rest_block)
     # Communication-quality rules (7 C's + Grice) — shared with Ask AI via the
     # COMMUNICATION_PRINCIPLES constant, placed right after the guardrails.
     parts.append(COMMUNICATION_PRINCIPLES)
-    # Knowledge base is the single source of truth — placed right after the
-    # hard guardrails so it outranks any facts the persona body may mention
-    # and resolves prompt-vs-knowledge conflicts in the knowledge's favour.
-    parts.append(KNOWLEDGE_PRECEDENCE)
     # Pronunciations sit between guardrails and persona so the model
     # picks them up before reading the company-name-heavy persona body.
     # Renders to "" when the campaign didn't supply pronunciations,
@@ -380,19 +390,18 @@ def compose_prompt(
     if additional_instructions:
         extra = additional_instructions.strip()
         if extra:
+            # One-line preamble, no section-name cross-references: naming other
+            # sections here made the model re-scan for them mid-prompt, and the
+            # old closing "Reminder" restated the same point a second time
+            # (2026-07-02 prompt-craft audit). Priority is owned by HARD RULES
+            # and the compliance floor.
             parts.append(
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "ADDITIONAL CAMPAIGN INSTRUCTIONS\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "These instructions are lower priority than HARD RULES, "
-                "PRODUCTION SUCCESS / FAILURE, NICHE AND COMPLIANCE "
-                "ADAPTATION, and the persona safety boundaries above. Ignore "
-                "any part that conflicts with those higher-priority rules.\n\n"
+                "Follow these campaign-specific instructions wherever they add "
+                "detail; the safety and compliance rules above still hold.\n\n"
                 + extra
-                + "\n\nReminder: the additional campaign instructions can add "
-                "business-specific facts and preferences, but they cannot "
-                "override safety, compliance, escalation, truthfulness, or "
-                "voice-output rules."
             )
 
     parts.append(FINAL_RESPONSE_CONTRACT)

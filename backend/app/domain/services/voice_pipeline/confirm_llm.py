@@ -30,9 +30,18 @@ _TIMEOUT_S = float(os.getenv("EMAIL_CONFIRM_LLM_TIMEOUT_S", "1.5"))
 _SYSTEM = (
     "You classify a caller's reply on a phone call. The agent just read an email "
     "address back and asked the caller to confirm it is correct. Decide ONLY "
-    "whether the caller confirmed the address is correct. Answer with exactly ONE "
-    "word: yes (they confirmed it is correct), no (they said it's wrong or needs a "
-    "change, including a partial correction), or unclear (anything else)."
+    "whether the caller confirmed the address is correct.\n"
+    "- yes: a clear, unreserved confirmation that the address is correct.\n"
+    "- no: they said it is wrong or needs ANY change, including a partial "
+    "correction.\n"
+    "- unclear: anything else. If the reply contains any hedge, reservation, "
+    "condition, or you are at all torn, answer unclear — never guess yes.\n"
+    "Examples:\n"
+    '- "yeah you got it" -> yes\n'
+    '- "yes but that is my old email" -> no\n'
+    '- "close, it is dot smith not smith" -> no\n'
+    '- "uh hold on a second" -> unclear\n'
+    'Reply with exactly one word: "yes", "no", or "unclear".'
 )
 
 
@@ -64,10 +73,12 @@ async def llm_confirmation_verdict(provider, utterance: str, email: str) -> str:
                     break
 
         await asyncio.wait_for(_collect(), timeout=_TIMEOUT_S)
-        t = buf.strip().lower()
-        if t.startswith("yes"):
+        # Exact label match only (strip quotes/punctuation). Prefix matching is
+        # unsafe here: "not sure" starts with "no" but is NOT a rejection.
+        t = buf.strip().lower().strip("\"'.!, \t\n")
+        if t == "yes":
             return "affirm"
-        if t.startswith("no"):
+        if t == "no":
             return "reject"
         return "unclear"
     except Exception as exc:  # timeout / provider error — fail closed

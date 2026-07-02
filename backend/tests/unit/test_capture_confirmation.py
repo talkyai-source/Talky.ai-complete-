@@ -112,6 +112,15 @@ def test_natural_readback_multidot_domain():
     assert natural_email_readback("bob@yahoo.co.uk") == "bob at yahoo dot co dot uk"
 
 
+def test_natural_readback_speaks_local_separators():
+    # a literal "." is a silent TTS pause — the caller would hear "j smith" and
+    # could yes-confirm jsmith@ when they meant j.smith@ (prompt-craft audit).
+    assert natural_email_readback("j.smith@gmail.com") == "j dot smith at gmail dot com"
+    assert natural_email_readback("john_smith@acme.com") == "john underscore smith at acme dot com"
+    assert natural_email_readback("a-team@acme.com") == "a dash team at acme dot com"
+    assert natural_email_readback("bob+tag@acme.com") == "bob plus tag at acme dot com"
+
+
 # ── RACE CONDITIONS (the explicit ask) ───────────────────────────────────────
 
 def test_race_no_lost_updates_under_concurrent_capture():

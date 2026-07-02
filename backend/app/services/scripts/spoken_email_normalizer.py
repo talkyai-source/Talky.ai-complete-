@@ -122,6 +122,11 @@ def spell_out_email(email: Optional[str]) -> str:
     return f"{local_spelled} at {domain_spoken}".strip()
 
 
+# Spoken forms for local-part separators (matches how people dictate emails).
+# Unknown symbols render as "" — better a tiny gap than TTS reading a glyph name.
+_SEPARATOR_WORDS = {".": "dot", "_": "underscore", "-": "dash", "+": "plus"}
+
+
 def _is_pronounceable(word: str) -> bool:
     """A letter run is 'sayable as a word' if it's >=2 chars and has a vowel;
     otherwise it's a random run that should be spelled (e.g. 'xq', 'bcdf')."""
@@ -136,6 +141,12 @@ def natural_email_readback(email: Optional[str]) -> str:
       "allstateestimation@gmail.com" -> "allstateestimation at gmail dot com"
       "john7890@gmail.com"            -> "john 7 8 9 0 at gmail dot com"
       "xq7@gmail.com"                 -> "x-q 7 at gmail dot com"
+      "j.smith@gmail.com"             -> "j dot smith at gmail dot com"
+
+    Local-part separators are SPOKEN as words like the domain's: a literal "."
+    is just a silent TTS pause, so the caller would hear "j smith" and could
+    yes-confirm jsmith@ when they meant j.smith@ — the read-back must make the
+    separator audible for the confirmation to mean anything.
 
     Replaces the old letter-by-letter ``spell_out_email`` on the read-back path so
     the agent doesn't sound like a robot spelling every character. The LLM is
@@ -153,7 +164,7 @@ def natural_email_readback(email: Optional[str]) -> str:
         elif run.isalpha():
             chunks.append(run if _is_pronounceable(run) else "-".join(run))
         else:
-            chunks.append(run.strip())              # stray separators
+            chunks.append(" ".join(_SEPARATOR_WORDS.get(ch, "") for ch in run).strip())
     local_spoken = " ".join(c for c in chunks if c)
     domain_spoken = domain.replace(".", " dot ")
     return f"{local_spoken} at {domain_spoken}".strip()
