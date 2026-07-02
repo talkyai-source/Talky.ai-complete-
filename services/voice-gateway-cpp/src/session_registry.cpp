@@ -2,8 +2,25 @@
 
 #include <algorithm>
 #include <cctype>
+#include <utility>
+#include <vector>
 
 namespace voice_gateway {
+
+SessionRegistry::SessionRegistry() {
+    reaper_thread_ = std::thread(&SessionRegistry::reaper_loop, this);
+}
+
+SessionRegistry::~SessionRegistry() {
+    {
+        std::lock_guard<std::mutex> lock(reaper_mutex_);
+        reaper_stop_ = true;
+    }
+    reaper_cv_.notify_all();
+    if (reaper_thread_.joinable()) {
+        reaper_thread_.join();
+    }
+}
 
 StartSessionResult SessionRegistry::start_session(const SessionConfig& config, std::string& error) {
     if (!validate_config(config, error)) {
@@ -22,6 +39,7 @@ StartSessionResult SessionRegistry::start_session(const SessionConfig& config, s
     }
 
     sessions_.emplace(config.session_id, session);
+    stopped_since_.erase(config.session_id);  // defensive: no stale reaper record
     ++sessions_started_total_;
     return StartSessionResult::Started;
 }
@@ -39,6 +57,7 @@ bool SessionRegistry::stop_session(const std::string& session_id, const std::str
         }
         session = it->second;
         sessions_.erase(it);
+        stopped_since_.erase(session_id);
         ++sessions_stopped_total_;
     }
 
@@ -81,6 +100,7 @@ ProcessStatsSnapshot SessionRegistry::snapshot() const {
     std::lock_guard<std::mutex> lock(mutex_);
     snap.sessions_started_total = sessions_started_total_;
     snap.sessions_stopped_total = sessions_stopped_total_;
+    snap.sessions_reaped_total = sessions_reaped_total_;
     snap.active_sessions = 0;
     snap.stopped_sessions = 0;
 
@@ -112,6 +132,65 @@ ProcessStatsSnapshot SessionRegistry::snapshot() const {
     }
 
     return snap;
+}
+
+void SessionRegistry::reaper_loop() {
+    std::unique_lock<std::mutex> lock(reaper_mutex_);
+    while (!reaper_stop_) {
+        reaper_cv_.wait_for(
+            lock,
+            std::chrono::milliseconds(kReapSweepIntervalMs),
+            [this] { return reaper_stop_; });
+        if (reaper_stop_) {
+            break;
+        }
+        lock.unlock();
+        reap_once();
+        lock.lock();
+    }
+}
+
+void SessionRegistry::reap_once() {
+    // Collect the sessions to drop while holding mutex_, then release the lock
+    // BEFORE the shared_ptrs destruct. Dropping the last reference runs
+    // ~RtpSession (which joins the session's threads); doing that outside mutex_
+    // keeps start/stop/snapshot from stalling behind a thread join.
+    std::vector<RtpSessionPtr> to_destroy;
+    const auto now = std::chrono::steady_clock::now();
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (auto it = sessions_.begin(); it != sessions_.end();) {
+            const std::string id = it->first;
+            const RtpSessionPtr& session = it->second;
+
+            if (session->running()) {
+                stopped_since_.erase(id);
+                ++it;
+                continue;
+            }
+
+            auto since = stopped_since_.find(id);
+            if (since == stopped_since_.end()) {
+                stopped_since_.emplace(id, now);
+                ++it;
+                continue;
+            }
+
+            const int64_t stopped_ms =
+                std::chrono::duration_cast<std::chrono::milliseconds>(now - since->second).count();
+            if (stopped_ms < kReapGraceMs) {
+                ++it;
+                continue;
+            }
+
+            to_destroy.push_back(std::move(it->second));
+            stopped_since_.erase(since);
+            it = sessions_.erase(it);
+            ++sessions_reaped_total_;
+        }
+    }
+    // to_destroy destructs here, outside mutex_.
 }
 
 bool SessionRegistry::validate_config(const SessionConfig& config, std::string& error) {

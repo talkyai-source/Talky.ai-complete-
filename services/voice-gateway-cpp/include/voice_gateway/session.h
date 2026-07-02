@@ -188,12 +188,25 @@ private:
     std::atomic<bool> rx_healthy_{true};
     std::atomic<bool> tx_healthy_{true};
 
+    // Latches the join+close teardown epilogue to a SINGLE external caller.
+    // Separate from running_ because the running_ winner may be a worker thread
+    // self-stopping (which must never run the epilogue: it cannot join itself
+    // and could touch this object after ~RtpSession frees it). The epilogue is
+    // instead claimed once by whichever EXTERNAL caller (stop_session, an HTTP
+    // handler, the reaper, or ~RtpSession) reaches it first; later external
+    // callers observe true and skip. This also serializes the concurrent direct
+    // RtpSession::stop() callers exercised by the concurrency stress test.
+    std::atomic<bool> teardown_started_{false};
+
     std::thread receiver_thread_;
     std::thread transmitter_thread_;
     std::thread watchdog_thread_;
 
-    int rx_socket_{-1};
-    int tx_socket_{-1};
+    // Atomic so the stop epilogue can close each fd exactly once via
+    // exchange(-1); prevents a double-close of an fd number the OS may have
+    // recycled to an unrelated live session's socket. See request_stop().
+    std::atomic<int> rx_socket_{-1};
+    std::atomic<int> tx_socket_{-1};
 
     RtpSequencer sequencer_;
 

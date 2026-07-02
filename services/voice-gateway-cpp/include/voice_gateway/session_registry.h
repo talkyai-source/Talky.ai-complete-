@@ -1,9 +1,12 @@
 #pragma once
 
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -21,6 +24,7 @@ enum class StartSessionResult {
 struct ProcessStatsSnapshot {
     uint64_t sessions_started_total{0};
     uint64_t sessions_stopped_total{0};
+    uint64_t sessions_reaped_total{0};
     uint64_t active_sessions{0};
     uint64_t stopped_sessions{0};
     uint64_t packets_in{0};
@@ -45,7 +49,11 @@ struct ProcessStatsSnapshot {
 
 class SessionRegistry {
 public:
-    SessionRegistry() = default;
+    SessionRegistry();
+    ~SessionRegistry();
+
+    SessionRegistry(const SessionRegistry&) = delete;
+    SessionRegistry& operator=(const SessionRegistry&) = delete;
 
     StartSessionResult start_session(const SessionConfig& config, std::string& error);
     bool stop_session(const std::string& session_id, const std::string& reason, bool& already_stopped);
@@ -55,13 +63,37 @@ public:
     [[nodiscard]] bool all_sessions_healthy() const;
     [[nodiscard]] ProcessStatsSnapshot snapshot() const;
 
+    // Erase self-stopped sessions (watchdog timeout / socket_error) that the
+    // backend never explicitly stopped, once they have been stopped longer than
+    // the grace period. Runs periodically on reaper_thread_; exposed for tests.
+    void reap_once();
+
 private:
     static bool validate_config(const SessionConfig& config, std::string& error);
 
+    void reaper_loop();
+
+    // A self-stopped session is reaped once observed not-running for at least
+    // this long. The grace period must comfortably exceed the request_stop()
+    // teardown window so the reaper can never free a session while its own
+    // stop epilogue (socket close + thread joins) is still in flight.
+    static constexpr int64_t kReapGraceMs = 60000;
+    static constexpr int64_t kReapSweepIntervalMs = 10000;
+
     mutable std::mutex mutex_;
     std::unordered_map<std::string, RtpSessionPtr> sessions_;
+    // session_id -> first steady_clock time the reaper observed it not-running.
+    std::unordered_map<std::string, std::chrono::steady_clock::time_point> stopped_since_;
     uint64_t sessions_started_total_{0};
     uint64_t sessions_stopped_total_{0};
+    uint64_t sessions_reaped_total_{0};
+
+    // Reaper lifecycle. reaper_mutex_/reaper_cv_ are separate from mutex_ so the
+    // sweep never holds the sessions lock while sleeping.
+    std::mutex reaper_mutex_;
+    std::condition_variable reaper_cv_;
+    bool reaper_stop_{false};
+    std::thread reaper_thread_;
 };
 
 }  // namespace voice_gateway

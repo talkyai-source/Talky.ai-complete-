@@ -9,10 +9,14 @@
 #include <cerrno>
 #include <cctype>
 #include <chrono>
+#include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <iostream>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -327,6 +331,7 @@ std::string process_stats_json(const ProcessStatsSnapshot& stats) {
     out << "{"
         << "\"sessions_started_total\":" << stats.sessions_started_total << ','
         << "\"sessions_stopped_total\":" << stats.sessions_stopped_total << ','
+        << "\"sessions_reaped_total\":" << stats.sessions_reaped_total << ','
         << "\"active_sessions\":" << stats.active_sessions << ','
         << "\"stopped_sessions\":" << stats.stopped_sessions << ','
         << "\"packets_in\":" << stats.packets_in << ','
@@ -463,7 +468,6 @@ bool http_post(const std::string& url, const std::string& json_body) {
     }
 
     // Resolve and connect
-    bool addr_ok = false;
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
@@ -516,6 +520,92 @@ bool http_post(const std::string& url, const std::string& json_body) {
     close(fd);
     return true;
 }
+
+// One long-lived sender thread per session that drains a bounded FIFO queue of
+// pre-built JSON bodies, POSTing them sequentially. Replaces the old model of
+// spawning a fresh detached thread + new TCP connection per ~40ms audio batch,
+// which let batch N+1 overtake a stalled batch N and deliver caller audio to
+// the STT backend OUT OF ORDER (garbling correctness-critical email/number
+// captures), while churning TIME_WAIT sockets and spawning unbounded threads.
+//
+// Ordering guarantee: a single worker thread performs every POST in strict
+// dequeue (FIFO) order, one connection at a time, so the backend always
+// receives batch N before batch N+1.
+//
+// Overflow policy: DROP-OLDEST once the queue reaches kMaxQueue. For realtime
+// audio a bounded, near-live stream is better than an ever-growing backlog: if
+// the backend stalls, we shed the stalest frames rather than block the RTP
+// receiver thread (enqueue is non-blocking) or grow memory without bound. The
+// tradeoff is a gap in the audio during a stall (some frames lost) instead of
+// mounting latency; for STT this keeps transcription near-real-time.
+class AudioCallbackSender {
+public:
+    // ~5s of buffering at ~50 POST/s before shedding; ~256 * a few hundred
+    // bytes of JSON is tens of KB, safely bounded per session.
+    static constexpr std::size_t kMaxQueue = 256;
+
+    explicit AudioCallbackSender(std::string url)
+        : url_(std::move(url)), worker_([this] { run(); }) {}
+
+    ~AudioCallbackSender() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            stop_ = true;
+        }
+        cv_.notify_all();
+        if (worker_.joinable()) {
+            worker_.join();
+        }
+    }
+
+    AudioCallbackSender(const AudioCallbackSender&) = delete;
+    AudioCallbackSender& operator=(const AudioCallbackSender&) = delete;
+
+    // Called from the RTP receiver thread. Non-blocking: never performs
+    // network I/O and never blocks the receiver loop.
+    void enqueue(std::string body) {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (stop_) {
+                return;
+            }
+            while (queue_.size() >= kMaxQueue) {
+                queue_.pop_front();  // drop-oldest
+            }
+            queue_.push_back(std::move(body));
+        }
+        cv_.notify_one();
+    }
+
+private:
+    void run() {
+        for (;;) {
+            std::string body;
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                cv_.wait(lock, [this] { return stop_ || !queue_.empty(); });
+                if (stop_) {
+                    // Session is going away: discard any remaining audio and
+                    // exit promptly so the destructor's join is bounded to at
+                    // most one in-flight POST (~200ms).
+                    return;
+                }
+                body = std::move(queue_.front());
+                queue_.pop_front();
+            }
+            // Sequential send outside the lock preserves strict FIFO ordering
+            // (single thread, dequeue order) without holding up enqueue().
+            http_post(url_, body);
+        }
+    }
+
+    const std::string url_;
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    std::deque<std::string> queue_;
+    bool stop_{false};
+    std::thread worker_;  // declared last: constructed after the fields run() touches
+};
 
 std::optional<std::string> extract_session_id_from_path(const std::string& path) {
     static const std::string prefix = "/v1/sessions/";
@@ -763,36 +853,41 @@ void HttpServer::handle_client(const int client_fd) {
             if (!config.audio_callback_url.empty()) {
                 const auto session = registry_.get_session(config.session_id);
                 if (session) {
-                    const std::string cb_url = config.audio_callback_url;
                     const std::string cb_session_id = config.session_id;
                     const int batch_frames = config.audio_callback_batch_frames;
 
-                    // Accumulate frames in a thread-local deque; POST when batch is full.
-                    // Each RtpSession gets its own lambda closure (no shared state between sessions).
+                    // Accumulate frames per session; hand each full batch to a
+                    // single long-lived sender thread that POSTs in strict FIFO
+                    // order (see AudioCallbackSender). Each RtpSession gets its
+                    // own closure (no shared state between sessions).
                     struct BatchState {
                         std::vector<uint8_t> buffer;
                         int frame_count{0};
                     };
                     auto state = std::make_shared<BatchState>();
+                    // Owned solely by this callback closure. The closure lives
+                    // inside RtpSession::audio_callback_, so the sender (and its
+                    // worker thread) is destroyed — and cleanly JOINED — when the
+                    // session is destroyed (registry erase via /stop or the
+                    // reaper). No detached thread outlives the session.
+                    auto sender = std::make_shared<AudioCallbackSender>(config.audio_callback_url);
 
                     session->set_audio_callback(
-                        [cb_url, cb_session_id, batch_frames, state](
+                        [cb_session_id, batch_frames, state, sender](
                             const std::string& /*sid*/, const std::vector<uint8_t>& pcmu) {
                             state->buffer.insert(state->buffer.end(), pcmu.begin(), pcmu.end());
                             state->frame_count++;
                             if (state->frame_count >= batch_frames) {
                                 const std::string b64 = base64_encode(state->buffer);
-                                const std::string body =
+                                std::string body =
                                     "{\"session_id\":\"" + escape_json(cb_session_id) +
                                     "\",\"pcmu_base64\":\"" + b64 +
                                     "\",\"codec\":\"pcmu\"}";
                                 state->buffer.clear();
                                 state->frame_count = 0;
-                                // Dispatch HTTP POST on a detached thread so the
-                                // receiver loop is never blocked by network I/O.
-                                std::thread([cb_url, body]() {
-                                    http_post(cb_url, body);
-                                }).detach();
+                                // Non-blocking hand-off; never blocks the RTP
+                                // receiver thread on network I/O.
+                                sender->enqueue(std::move(body));
                             }
                         });
                 }

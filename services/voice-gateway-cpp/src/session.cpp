@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <limits>
@@ -28,6 +29,27 @@ sockaddr_in make_sockaddr(const std::string& ip, const uint16_t port, bool& ok) 
 std::string stop_reason_or_default(const std::string& reason) {
     return reason.empty() ? "stopped_by_request" : reason;
 }
+
+// Per-packet RTP TX logging is extremely high frequency (~50 lines/sec/call)
+// and floods journald under concurrent calls, so it is opt-in only. Set
+// VOICE_GATEWAY_RTP_TX_DEBUG_LOG=1 in the environment to enable it; the
+// value is read once at process start and cached, never per packet.
+bool rtp_tx_debug_logging_enabled() {
+    static const bool enabled = [] {
+        const char* value = std::getenv("VOICE_GATEWAY_RTP_TX_DEBUG_LOG");
+        return value != nullptr && std::string(value) == "1";
+    }();
+    return enabled;
+}
+
+// Identifies, per thread, which RtpSession this thread is a worker loop for.
+// Set as the first statement of each worker loop (before any path can reach
+// request_stop), so a worker stopping its OWN session is detected WITHOUT
+// reading the std::thread member objects — reading their get_id() would itself
+// race an external teardown's join() on the same objects. External callers
+// (HTTP handlers, the reaper, ~RtpSession) never run a worker loop, so their
+// t_owning_session stays nullptr and they take the full-teardown path.
+thread_local RtpSession* t_owning_session = nullptr;
 
 }  // namespace
 
@@ -102,32 +124,38 @@ bool RtpSession::start(std::string& error) {
         return false;
     }
 
-    rx_socket_ = socket(AF_INET, SOCK_DGRAM, 0);
-    if (rx_socket_ < 0) {
+    // Sockets are std::atomic<int> (so request_stop can close each exactly once
+    // via exchange). Every C socket syscall below must take a plain int via
+    // .load(): passing the atomic to an unqualified call would add namespace
+    // std to ADL and resolve e.g. bind() to std::bind.
+    const int rx_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    rx_socket_.store(rx_fd);
+    if (rx_fd < 0) {
         error = std::string("failed to create RX socket: ") + std::strerror(errno);
         return false;
     }
 
-    tx_socket_ = socket(AF_INET, SOCK_DGRAM, 0);
-    if (tx_socket_ < 0) {
+    const int tx_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    tx_socket_.store(tx_fd);
+    if (tx_fd < 0) {
         error = std::string("failed to create TX socket: ") + std::strerror(errno);
-        close(rx_socket_);
-        rx_socket_ = -1;
+        close(rx_fd);
+        rx_socket_.store(-1);
         return false;
     }
 
     int reuse = 1;
-    setsockopt(rx_socket_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+    setsockopt(rx_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
 
     const timeval read_timeout{0, static_cast<suseconds_t>(config_.watchdog_tick_ms * 1000)};
-    setsockopt(rx_socket_, SOL_SOCKET, SO_RCVTIMEO, &read_timeout, sizeof(read_timeout));
+    setsockopt(rx_fd, SOL_SOCKET, SO_RCVTIMEO, &read_timeout, sizeof(read_timeout));
 
-    if (bind(rx_socket_, reinterpret_cast<const sockaddr*>(&listen_addr), sizeof(listen_addr)) < 0) {
+    if (bind(rx_fd, reinterpret_cast<const sockaddr*>(&listen_addr), sizeof(listen_addr)) < 0) {
         error = std::string("failed to bind RX socket: ") + std::strerror(errno);
-        close(rx_socket_);
-        close(tx_socket_);
-        rx_socket_ = -1;
-        tx_socket_ = -1;
+        close(rx_fd);
+        close(tx_fd);
+        rx_socket_.store(-1);
+        tx_socket_.store(-1);
         return false;
     }
 
@@ -305,13 +333,14 @@ void RtpSession::fire_audio_callback(const std::vector<uint8_t>& pcmu_batch) {
 }
 
 void RtpSession::receiver_loop() {
+    t_owning_session = this;
     while (running_.load()) {
         uint8_t buffer[2048]{};
         sockaddr_in from{};
         socklen_t from_len = sizeof(from);
 
         const ssize_t n = recvfrom(
-            rx_socket_,
+            rx_socket_.load(),
             buffer,
             sizeof(buffer),
             0,
@@ -422,6 +451,7 @@ void RtpSession::receiver_loop() {
 }
 
 void RtpSession::transmitter_loop() {
+    t_owning_session = this;
     bool remote_ok = false;
     const sockaddr_in remote_addr = make_sockaddr(config_.remote_ip, config_.remote_port, remote_ok);
     if (!remote_ok) {
@@ -529,7 +559,7 @@ void RtpSession::transmitter_loop() {
         const std::size_t packet_size = kRtpHeaderSize + payload_size;
 
         const ssize_t sent = sendto(
-            tx_socket_,
+            tx_socket_.load(),
             packet_bytes.data(),
             packet_size,
             0,
@@ -562,22 +592,25 @@ void RtpSession::transmitter_loop() {
 
         maybe_send_rtcp_report(remote_addr, std::chrono::steady_clock::now());
 
-        std::cout << "event=rtp_tx"
-                  << " session_id=" << config_.session_id
-                  << " seq=" << outbound.sequence_number
-                  << " ts=" << outbound.timestamp
-                  << " ssrc=" << outbound.ssrc
-                  << " mode=" << (sending_tts ? "tts" : "echo")
-                  << " state=" << session_state_to_string(state())
-                  << " packets_in=" << packets_in_.load()
-                  << " packets_out=" << packets_out_.load()
-                  << std::endl;
+        if (rtp_tx_debug_logging_enabled()) {
+            std::cout << "event=rtp_tx"
+                      << " session_id=" << config_.session_id
+                      << " seq=" << outbound.sequence_number
+                      << " ts=" << outbound.timestamp
+                      << " ssrc=" << outbound.ssrc
+                      << " mode=" << (sending_tts ? "tts" : "echo")
+                      << " state=" << session_state_to_string(state())
+                      << " packets_in=" << packets_in_.load()
+                      << " packets_out=" << packets_out_.load()
+                      << "\n";
+        }
 
         next_send_time += std::chrono::milliseconds(config_.ptime_ms);
     }
 }
 
 void RtpSession::watchdog_loop() {
+    t_owning_session = this;
     const int tick_ms = std::max(50, config_.watchdog_tick_ms);
 
     while (running_.load()) {
@@ -669,74 +702,98 @@ void RtpSession::mark_tts_frame_dropped_locked(const uint32_t segment_id) {
 }
 
 void RtpSession::request_stop(const std::string& reason, const bool timeout_event) {
-    const std::thread::id caller = std::this_thread::get_id();
-    const bool was_running = running_.exchange(false);
+    // request_stop() is reachable from several threads: the session's own worker
+    // loops (watchdog timeout, receiver/transmitter socket_error) and EXTERNAL
+    // callers (POST /stop via stop_session, an HTTP handler, the registry reaper,
+    // and ~RtpSession). Two responsibilities are split:
+    //
+    //  (a) Signal the stop + record state/reason: done ONCE by the caller that
+    //      wins running_.exchange(false). Any caller (self or external) may win.
+    //
+    //  (b) The join+close epilogue: run ONLY by an EXTERNAL caller, never by a
+    //      worker stopping its own session. A self-stopping worker that ran the
+    //      epilogue would (i) have to join itself (impossible) and (ii) keep
+    //      touching this object after ~RtpSession may have freed it once the last
+    //      shared_ptr dropped — the exact use-after-free TSan caught. So a
+    //      self-stop just flips running_ and returns; the worker then exits its
+    //      loop. The epilogue is driven later by an external caller whose join()
+    //      of the now-finished worker threads is the barrier that guarantees the
+    //      object outlives every worker thread. Worker threads hold no shared_ptr
+    //      to the session, so ~RtpSession never runs on a worker thread.
+    const bool is_self = (t_owning_session == this);
 
-    {
+    const bool was_running = running_.exchange(false);
+    if (was_running) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (timeout_event) {
             timeout_events_total_.fetch_add(1);
         }
         clear_tts_queue_locked(reason);
 
-        if (state_ == SessionState::Stopped) {
-            if (stop_reason_ == "running") {
-                stop_reason_ = stop_reason_or_default(reason);
-            }
-        } else {
-            const bool failed_state = (reason == "socket_error" || reason == "internal_error");
-            if (failed_state) {
-                transition_state_locked(SessionState::Failed);
-            }
-
-            if (was_running) {
-                transition_state_locked(SessionState::Stopping);
-            }
-
-            if (stop_reason_ == "running") {
-                stop_reason_ = stop_reason_or_default(reason);
-            }
-
-            transition_state_locked(SessionState::Stopped);
+        // The exchange winner is the first (and only) caller to reach the
+        // transition block, so state_ is never Stopped here.
+        const bool failed_state = (reason == "socket_error" || reason == "internal_error");
+        if (failed_state) {
+            transition_state_locked(SessionState::Failed);
         }
+        transition_state_locked(SessionState::Stopping);
+        if (stop_reason_ == "running") {
+            stop_reason_ = stop_reason_or_default(reason);
+        }
+        transition_state_locked(SessionState::Stopped);
+    } else if (timeout_event) {
+        // A losing caller still records the timeout metric to preserve the count.
+        timeout_events_total_.fetch_add(1);
     }
 
-    if (rx_socket_ >= 0) {
-        shutdown(rx_socket_, SHUT_RDWR);
-        close(rx_socket_);
-        rx_socket_ = -1;
-    }
-
-    if (tx_socket_ >= 0) {
-        shutdown(tx_socket_, SHUT_RDWR);
-        close(tx_socket_);
-        tx_socket_ = -1;
-    }
-
+    // Wake a transmitter blocked on the cv so it observes running_==false and
+    // exits; safe from any caller (this object is still alive here — a worker
+    // owns it, or an external caller holds a reference / is ~RtpSession itself).
     queue_cv_.notify_all();
 
+    // Self-stop: never touch the thread objects or sockets; just return.
+    if (is_self) {
+        return;
+    }
+
+    // External caller: claim the epilogue latch so exactly ONE external caller
+    // runs the join+close, even when several call stop() on the same session
+    // concurrently (the stress test does). A caller that loses the claim returns
+    // immediately; it holds its own shared_ptr reference (or, for ~RtpSession,
+    // runs only at refcount 0, so no concurrent external caller exists), so the
+    // object stays alive until the claiming caller's epilogue completes.
+    if (teardown_started_.exchange(true)) {
+        return;
+    }
+
+    // Join every worker thread BEFORE closing the sockets, so no thread is inside
+    // recvfrom()/sendto() on an fd when it is closed (which would be UB per POSIX
+    // and could let the fd be recycled under a blocked reader). The workers are
+    // never blocked forever — recvfrom returns within SO_RCVTIMEO (~200ms), the
+    // transmitter woke on the cv above, the watchdog on its tick — so each join
+    // is bounded. The claiming caller's join() of each now-finished worker thread
+    // is also the barrier that guarantees this object outlives every worker
+    // thread (workers hold no shared_ptr, so ~RtpSession never runs on one).
     if (receiver_thread_.joinable()) {
-        if (receiver_thread_.get_id() == caller) {
-            receiver_thread_.detach();
-        } else {
-            receiver_thread_.join();
-        }
+        receiver_thread_.join();
     }
-
     if (transmitter_thread_.joinable()) {
-        if (transmitter_thread_.get_id() == caller) {
-            transmitter_thread_.detach();
-        } else {
-            transmitter_thread_.join();
-        }
+        transmitter_thread_.join();
+    }
+    if (watchdog_thread_.joinable()) {
+        watchdog_thread_.join();
     }
 
-    if (watchdog_thread_.joinable()) {
-        if (watchdog_thread_.get_id() == caller) {
-            watchdog_thread_.detach();
-        } else {
-            watchdog_thread_.join();
-        }
+    const int rx_fd = rx_socket_.exchange(-1);
+    if (rx_fd >= 0) {
+        shutdown(rx_fd, SHUT_RDWR);
+        close(rx_fd);
+    }
+
+    const int tx_fd = tx_socket_.exchange(-1);
+    if (tx_fd >= 0) {
+        shutdown(tx_fd, SHUT_RDWR);
+        close(tx_fd);
     }
 }
 
@@ -917,7 +974,8 @@ void RtpSession::advance_jitter_min_seq_locked() {
 void RtpSession::maybe_send_rtcp_report(
     const sockaddr_in& remote_addr,
     const std::chrono::steady_clock::time_point& now) {
-    if (tx_socket_ < 0 || config_.remote_port == 0 || config_.remote_port == std::numeric_limits<uint16_t>::max()) {
+    const int tx_fd = tx_socket_.load();
+    if (tx_fd < 0 || config_.remote_port == 0 || config_.remote_port == std::numeric_limits<uint16_t>::max()) {
         return;
     }
 
@@ -942,7 +1000,7 @@ void RtpSession::maybe_send_rtcp_report(
     rr[7] = static_cast<uint8_t>(ssrc & 0xFFu);
 
     const ssize_t sent = sendto(
-        tx_socket_,
+        tx_fd,
         rr.data(),
         rr.size(),
         0,
