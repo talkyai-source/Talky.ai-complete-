@@ -43,17 +43,31 @@ def _get_orchestrator():
     return get_container().voice_orchestrator
 
 
-def _build_vonage_session_config():
-    """Build a VoiceSessionConfig tuned for Vonage (16 kHz linear16 WebSocket)."""
-    from app.domain.services.voice_orchestrator import VoiceSessionConfig
-    from app.domain.services.global_ai_config import get_global_config
+async def _build_vonage_session_config(to_number: Optional[str] = None):
+    """Build a VoiceSessionConfig tuned for Vonage (16 kHz linear16 WebSocket).
 
-    config = get_global_config()
+    Sources provider SELECTION per-tenant off the dialed DID (``to_number``):
+    resolve the tenant, load its persisted AIProviderConfig, and DERIVE the LLM
+    provider from it. Hardcoding "groq" while reading a possibly-gemini
+    ``llm_model`` 404'd every turn. Falls back to the process default for an
+    unknown/unroutable DID.
+    """
+    from app.domain.services.voice_orchestrator import VoiceSessionConfig
+    from app.domain.services.tenant_ai_config_resolver import (
+        resolve_ai_config_for_did,
+    )
+
+    tenant_id, config = await resolve_ai_config_for_did(to_number)
+    llm_provider_type = (
+        getattr(config.llm_provider, "value", None)
+        or str(config.llm_provider)
+        or "groq"
+    )
 
     return VoiceSessionConfig(
         gateway_type="browser",
         stt_provider_type="deepgram_flux",
-        llm_provider_type="groq",
+        llm_provider_type=llm_provider_type,
         tts_provider_type=config.tts_provider,
         stt_model="flux-general-en",       # was nova-2 — use Flux for better EOT detection
         stt_sample_rate=16000,
@@ -76,6 +90,13 @@ def _build_vonage_session_config():
         telephony_provider="vonage",
         campaign_id="vonage",
         lead_id="vonage-caller",
+        # Thread tenant context so per-tenant credentials resolve too.
+        tenant_id=tenant_id,
+        # Preserve the tenant's realtime pipeline selection.
+        pipeline_mode=getattr(config, "pipeline_mode", "cascaded") or "cascaded",
+        realtime_model=getattr(config, "realtime_model", "gpt-realtime-2"),
+        realtime_voice=getattr(config, "realtime_voice", "marin"),
+        realtime_settings=getattr(config, "realtime_settings", None),
     )
 
 
@@ -190,7 +211,11 @@ async def vonage_ws_audio(websocket: WebSocket, call_uuid: str):
     voice_session = None
     try:
         orchestrator = _get_orchestrator()
-        config = _build_vonage_session_config()
+        # Vonage echoes the custom headers set on the NCCO websocket endpoint
+        # (see vonage_answer) back as WS headers — to_number is the dialed DID
+        # and identifies the tenant. Best-effort: absent → process default.
+        to_number = websocket.headers.get("to_number")
+        config = await _build_vonage_session_config(to_number)
         voice_session = await orchestrator.create_voice_session(config)
         _vonage_sessions[call_uuid] = voice_session
 

@@ -56,8 +56,6 @@ async def get_config(
     Returns:
         AIProviderConfig with current settings
     """
-    from app.domain.services.global_ai_config import set_global_config
-
     tenant_id = current_user.tenant_id
     if not tenant_id:
         raise HTTPException(
@@ -120,8 +118,12 @@ async def get_config(
                     tenant_id,
                 )
 
-    # Keep voice pipeline in sync with tenant-selected config.
-    set_global_config(config)
+    # NOTE: this GET handler MUST NOT mutate any process-global state. It used
+    # to call set_global_config(config), which meant merely VIEWING the
+    # AI-Options page overwrote the model/provider/pipeline that every OTHER
+    # tenant's live call read off the shared singleton (cross-tenant model
+    # bleed). Per-call config is now sourced per-tenant from tenant_ai_configs
+    # via tenant_ai_config_resolver, so viewing config is a pure read.
     return config
 
 
@@ -147,7 +149,6 @@ async def save_config(
         AIProviderConfigWithWarnings — saved config plus soft latency advisory warnings
     """
     from app.domain.models.ai_config import DeepgramTTSModel, GoogleTTSModel
-    from app.domain.services.global_ai_config import set_global_config
 
     tenant_id = current_user.tenant_id
     if not tenant_id:
@@ -307,6 +308,10 @@ async def save_config(
             "Higher values may produce longer responses than callers expect."
         )
 
-    # Applies immediately to active voice pipeline selection.
-    set_global_config(config)
+    # Persisted per-tenant to tenant_ai_configs above. Live calls pick this up
+    # per-tenant via tenant_ai_config_resolver (keyed on the call's tenant_id) —
+    # the change lands on the tenant's NEXT call with no restart, and does NOT
+    # touch any other tenant's calls. We deliberately do NOT call
+    # set_global_config here anymore (that made the last tenant to save "win"
+    # the process-global that everyone else's calls read).
     return AIProviderConfigWithWarnings(config=config, latency_warnings=latency_warnings)

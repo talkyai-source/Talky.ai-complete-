@@ -159,12 +159,25 @@ async def prepare_prewarmed_session(
             str(_campaign_tenant_id) if _campaign_tenant_id else None,
         )
 
+        # Resolve the tenant's persisted AI provider config (model / provider /
+        # temperature / STT engine / pipeline mode) the same async way. This is
+        # what stops one tenant's AI-Options selection from bleeding into
+        # another tenant's live call: the outbound call now sources its provider
+        # selection from campaign.tenant_id's own row, not a process-global.
+        from app.domain.services.tenant_ai_config_resolver import (
+            get_tenant_ai_config_resolver,
+        )
+        ai_config = await get_tenant_ai_config_resolver().for_tenant_async(
+            str(_campaign_tenant_id) if _campaign_tenant_id else None,
+        )
+
         config = _build_telephony_session_config(
             gateway_type="telephony",
             campaign=campaign_row,
             agent_name=agent_name,
             direction=call_direction,
             voice_tuning_override=voice_tuning,
+            ai_config_override=ai_config,
         )
         # User-first only: relax the Flux end-of-turn timeout from 500ms
         # to 1000ms. The 500ms default is aggressive and was the cause of

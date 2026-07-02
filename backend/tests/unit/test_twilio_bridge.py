@@ -78,25 +78,37 @@ def test_twiml_stream_response_shape(monkeypatch):
     assert twiml.startswith("<?xml")
 
 
-def test_build_twilio_session_config_is_8khz(monkeypatch):
-    class _Cfg:
-        tts_provider = "cartesia"
-        llm_model = "llama-3.3-70b-versatile"
-        llm_temperature = 0.6
-        llm_max_tokens = 150
-        tts_voice_id = "voice-x"
-        tts_model = "sonic-3"
+@pytest.mark.asyncio
+async def test_build_twilio_session_config_is_8khz(monkeypatch):
+    # Provider selection is now sourced per-tenant from the resolver (keyed on
+    # the dialed DID), not the process-global. Stub the DID resolution to a
+    # tenant whose config is a Cartesia/groq selection.
+    from unittest.mock import AsyncMock
+    from app.domain.models.ai_config import AIProviderConfig
 
-    monkeypatch.setattr(
-        "app.domain.services.global_ai_config.get_global_config", lambda: _Cfg()
+    resolved = AIProviderConfig(
+        llm_provider="groq",
+        llm_model="llama-3.3-70b-versatile",
+        llm_temperature=0.6,
+        llm_max_tokens=150,
+        tts_provider="cartesia",
+        tts_voice_id="voice-x",
+        tts_model="sonic-3",
     )
-    cfg = tb._build_twilio_session_config()
+    monkeypatch.setattr(
+        "app.domain.services.tenant_ai_config_resolver.resolve_ai_config_for_did",
+        AsyncMock(return_value=("tenant-x", resolved)),
+    )
+    cfg = await tb._build_twilio_session_config("+15553334444")
     assert cfg.gateway_type == "twilio"
     assert cfg.session_type == "twilio"
     assert cfg.stt_sample_rate == 8000
     assert cfg.tts_sample_rate == 8000
     assert cfg.gateway_sample_rate == 8000
     assert cfg.gateway_input_sample_rate == 8000
+    # Provider derived from the resolved config (not hardcoded), tenant threaded.
+    assert cfg.llm_provider_type == "groq"
+    assert cfg.tenant_id == "tenant-x"
 
 
 # ── Gateway wire framing (the load-bearing part) ────────────────────────────

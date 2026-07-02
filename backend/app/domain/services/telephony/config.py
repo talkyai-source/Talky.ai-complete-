@@ -43,6 +43,7 @@ def _build_telephony_session_config(
     agent_name: Optional[str] = None,
     direction: Direction = Direction.OUTBOUND,
     voice_tuning_override=None,
+    ai_config_override=None,
 ):
     """
     Thin shim kept for call-site compatibility.
@@ -51,6 +52,12 @@ def _build_telephony_session_config(
     ``voice_tuning_override`` (T4-C3): pass an already-resolved
     :class:`VoiceTuning` to skip the sync env-only resolver. The bridge
     resolves it asynchronously (DB+env) before calling this.
+
+    ``ai_config_override``: pass the tenant's already-resolved
+    :class:`AIProviderConfig` (model/provider/pipeline selection) so the
+    call sources its provider selection from the tenant's own persisted row
+    rather than the process-global default. The async caller resolves it via
+    :mod:`tenant_ai_config_resolver` before calling this.
     """
     return build_telephony_session_config(
         gateway_type=gateway_type,
@@ -58,6 +65,7 @@ def _build_telephony_session_config(
         agent_name_override=agent_name,
         direction=direction,
         voice_tuning_override=voice_tuning_override,
+        ai_config_override=ai_config_override,
     )
 
 

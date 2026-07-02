@@ -52,16 +52,31 @@ def _webhook_url(path: str) -> str:
     return f"{_public_base()}{path}"
 
 
-def _build_twilio_session_config():
-    """VoiceSessionConfig tuned for Twilio Media Streams (8 kHz mu-law)."""
-    from app.domain.services.voice_orchestrator import VoiceSessionConfig
-    from app.domain.services.global_ai_config import get_global_config
+async def _build_twilio_session_config(to_number: str | None = None):
+    """VoiceSessionConfig tuned for Twilio Media Streams (8 kHz mu-law).
 
-    config = get_global_config()
+    Sources the provider SELECTION per-tenant: the dialed number (``to_number``,
+    the DID) identifies the tenant, so we resolve that tenant's persisted
+    AIProviderConfig from tenant_ai_configs. Falls back to the process default
+    for an unknown/unroutable DID. The LLM provider is DERIVED from the resolved
+    config — never hardcoded — because hardcoding "groq" while reading a
+    possibly-gemini ``llm_model`` 404'd every turn.
+    """
+    from app.domain.services.voice_orchestrator import VoiceSessionConfig
+    from app.domain.services.tenant_ai_config_resolver import (
+        resolve_ai_config_for_did,
+    )
+
+    tenant_id, config = await resolve_ai_config_for_did(to_number)
+    llm_provider_type = (
+        getattr(config.llm_provider, "value", None)
+        or str(config.llm_provider)
+        or "groq"
+    )
     return VoiceSessionConfig(
         gateway_type="twilio",
         stt_provider_type="deepgram_flux",
-        llm_provider_type="groq",
+        llm_provider_type=llm_provider_type,
         tts_provider_type=config.tts_provider,
         stt_model="flux-general-en",
         stt_sample_rate=8000,          # Twilio Media Streams = 8 kHz
@@ -85,6 +100,13 @@ def _build_twilio_session_config():
         telephony_provider="twilio",
         campaign_id="twilio",
         lead_id="twilio-caller",
+        # Thread tenant context so per-tenant credentials resolve too.
+        tenant_id=tenant_id,
+        # Preserve the tenant's realtime pipeline selection.
+        pipeline_mode=getattr(config, "pipeline_mode", "cascaded") or "cascaded",
+        realtime_model=getattr(config, "realtime_model", "gpt-realtime-2"),
+        realtime_voice=getattr(config, "realtime_voice", "marin"),
+        realtime_settings=getattr(config, "realtime_settings", None),
     )
 
 
@@ -192,11 +214,15 @@ async def twilio_media_stream(websocket: WebSocket):
                 start = data.get("start", {}) or {}
                 stream_sid = start.get("streamSid") or data.get("streamSid")
                 call_sid = start.get("callSid", "")
+                # The dialed DID is passed through as a custom Stream Parameter
+                # (see _twiml_stream_response). It identifies the tenant so the
+                # session sources that tenant's own provider selection.
+                to_number = (start.get("customParameters", {}) or {}).get("to")
                 logger.info(
-                    "Twilio media start: streamSid=%s callSid=%s",
-                    (stream_sid or "?")[:16], (call_sid or "?")[:16],
+                    "Twilio media start: streamSid=%s callSid=%s to=%s",
+                    (stream_sid or "?")[:16], (call_sid or "?")[:16], to_number or "?",
                 )
-                config = _build_twilio_session_config()
+                config = await _build_twilio_session_config(to_number)
                 voice_session = await orchestrator.create_voice_session(config)
                 gw = voice_session.media_gateway
                 if hasattr(gw, "set_stream_sid") and stream_sid:

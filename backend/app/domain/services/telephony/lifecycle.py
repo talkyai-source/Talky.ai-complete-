@@ -985,11 +985,21 @@ async def _on_new_call(call_id: str) -> None:
                 _vt = await get_voice_tuning_resolver().for_tenant_async(
                     str(inbound_route.tenant_id) if inbound_route.tenant_id else None,
                 )
+                # Source the inbound call's provider selection from the resolved
+                # tenant's own persisted AI config (not the process-global) —
+                # the per-tenant isolation fix, mirroring the voice-tuning path.
+                from app.domain.services.tenant_ai_config_resolver import (
+                    get_tenant_ai_config_resolver,
+                )
+                _ai_cfg = await get_tenant_ai_config_resolver().for_tenant_async(
+                    str(inbound_route.tenant_id) if inbound_route.tenant_id else None,
+                )
                 config = _build_telephony_session_config(
                     gateway_type=gateway_type,
                     campaign=inbound_campaign_row,
                     direction=Direction.INBOUND,
                     voice_tuning_override=_vt,
+                    ai_config_override=_ai_cfg,
                 )
                 logger.info(
                     "inbound_session_routed call=%s tenant=%s campaign=%s reason=%s",

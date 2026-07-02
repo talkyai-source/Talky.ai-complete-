@@ -190,46 +190,49 @@ async def lifespan(app: FastAPI):
 
     logger.info("Talky.ai started successfully")
 
-    # ── 4. Restore saved AI config ────────────────────────────────
-    # Load the most-recently saved tenant config from DB so the global AI
-    # config (TTS provider, voice, LLM model) survives server restarts and
-    # hot-reloads without requiring the user to re-visit AI Options first.
+    # ── 4. Per-tenant AI-config DB lookup wiring ──────────────────
+    # Per-call provider SELECTION (LLM model/provider/temperature/max-tokens,
+    # STT engine, TTS, pipeline mode, realtime settings) is resolved per-tenant
+    # from tenant_ai_configs at call time via TenantAIConfigResolver — keyed on
+    # the call's own tenant_id (campaign.tenant_id outbound, dialed DID inbound).
+    #
+    # This REPLACES the old boot-restore that loaded "whichever tenant saved
+    # last" into a process-global and used it as everyone's default — that was
+    # the source of cross-tenant model bleed. There is intentionally no global
+    # restore anymore: tenant-less paths (Ask AI, browser tests) use the
+    # immutable code default; every real call resolves its own tenant's row.
     try:
-        from app.domain.services.global_ai_config import set_global_config
-        from app.domain.models.ai_config import AIProviderConfig
-        db_client = container.db_client
-        async with db_client.pool.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                SELECT llm_provider, llm_model, llm_temperature, llm_max_tokens,
-                       stt_provider, stt_model, stt_language,
-                       tts_provider, tts_model, tts_voice_id, tts_sample_rate
-                FROM tenant_ai_configs
-                ORDER BY updated_at DESC NULLS LAST
-                LIMIT 1
-                """
-            )
-        if row:
-            saved = AIProviderConfig(
-                llm_provider=row["llm_provider"],
-                llm_model=row["llm_model"],
-                llm_temperature=row["llm_temperature"],
-                llm_max_tokens=row["llm_max_tokens"],
-                stt_provider=row["stt_provider"],
-                stt_model=row["stt_model"],
-                stt_language=row["stt_language"],
-                tts_provider=row["tts_provider"],
-                tts_model=row["tts_model"],
-                tts_voice_id=row["tts_voice_id"],
-                tts_sample_rate=row["tts_sample_rate"],
-            )
-            set_global_config(saved)
+        from app.domain.services.tenant_ai_config_resolver import (
+            get_tenant_ai_config_resolver,
+        )
+        from app.api.v1.endpoints.ai_options._shared import _fetch_tenant_config
+
+        _ai_cfg_pool = getattr(container, "db_pool", None)
+        if _ai_cfg_pool is not None:
+            async def _tenant_ai_config_db_lookup(tenant_id: str):
+                # One indexed lookup on tenant_ai_configs, cache-bypassed by
+                # design so an AI-Options edit lands on the tenant's next call
+                # without a restart. Bypass-RLS inline: runs from a non-request
+                # context (no per-tenant session active). Returns an
+                # AIProviderConfig or None (no row → resolver uses the default).
+                async with _ai_cfg_pool.acquire() as conn:
+                    async with conn.transaction():
+                        await conn.execute("SET LOCAL app.bypass_rls = 'true'")
+                        return await _fetch_tenant_config(conn, tenant_id)
+
+            get_tenant_ai_config_resolver().set_db_lookup(_tenant_ai_config_db_lookup)
+            logger.info("tenant_ai_config_db_lookup_wired")
+        else:
             logger.info(
-                "AI config restored from DB: tts=%s voice=%s llm=%s",
-                saved.tts_provider, saved.tts_voice_id, saved.llm_model,
+                "tenant_ai_config_db_lookup_skipped reason=no_db_pool "
+                "— resolver running on process default only"
             )
-    except Exception as exc:
-        logger.warning("Could not restore AI config from DB (using defaults): %s", exc)
+    except Exception as exc:  # noqa: BLE001 — AI-config lookup never blocks startup
+        logger.warning(
+            "tenant_ai_config_db_lookup_wiring_failed err=%s "
+            "— resolver falls back to process default",
+            exc,
+        )
 
     # ── Phase 4.2 — provider cost ledger flusher ────────────────
     # Records per-call provider cost events and batches them into

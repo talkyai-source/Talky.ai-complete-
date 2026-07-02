@@ -1,11 +1,18 @@
 """
-Global AI Configuration Service
+Global AI Configuration Service — PROCESS DEFAULT ONLY.
 
-Stores the user-selected LLM model and TTS voice that applies
-globally across the entire voice pipeline - dummy calls, real calls,
-SIP calls, and all other interactions.
+Provides the immutable process/env default :class:`AIProviderConfig` used for
+genuinely tenant-less paths (Ask AI, browser tests, campaign-less dev dials).
 
-This is a singleton service that maintains the current configuration.
+IMPORTANT (multi-tenant safety): this is NOT per-call, per-tenant config. Real
+calls source their provider selection (LLM model/provider/temperature/max-tokens,
+STT engine, TTS, pipeline mode, realtime) PER-TENANT from ``tenant_ai_configs``
+via :mod:`tenant_ai_config_resolver`, keyed on the call's own tenant_id. Using
+this singleton as per-call config caused cross-tenant model bleed (tenant B
+saving/viewing AI Options overwrote what tenant A's live call read). Do NOT call
+``set_global_config`` from any request path or the app boot restore — it is kept
+only as a test/seed hook. ``get_global_config`` is a pure read of the code
+default.
 """
 import os
 import random

@@ -15,6 +15,7 @@ import re
 from typing import Any, Optional
 
 from app.domain.models.agent_config import AgentConfig, AgentGoal, ConversationFlow, ConversationRule
+from app.domain.models.ai_config import AIProviderConfig
 from app.domain.services.voice_orchestrator import Direction, VoiceSessionConfig
 from app.domain.services.global_ai_config import get_global_config
 from app.domain.services.voice_tuning import (
@@ -367,6 +368,7 @@ def build_telephony_session_config(
     agent_name_override: Optional[str] = None,
     direction: Direction = Direction.OUTBOUND,
     voice_tuning_override: Optional[VoiceTuning] = None,
+    ai_config_override: Optional[AIProviderConfig] = None,
 ) -> VoiceSessionConfig:
     """
     Build a VoiceSessionConfig for a telephony call.
@@ -395,15 +397,20 @@ def build_telephony_session_config(
         outbound calls — so the LLM is correctly framed without each
         persona template needing two variants.
     """
-    global_config = get_global_config()
+    # Source of provider SELECTION (model/provider/temp/tokens/STT engine/
+    # pipeline mode/realtime). Prefer the tenant's persisted config threaded in
+    # by the async caller; fall back to the immutable process default only for
+    # genuinely tenant-less paths. This is the crux of the isolation fix: two
+    # concurrent tenants no longer share one mutable process-global.
+    source_config = ai_config_override if ai_config_override is not None else get_global_config()
 
     # Per-campaign TTS: each campaign runs on its OWN provider + voice (stored on
-    # the campaign row), falling back to the tenant global when unset. This is
+    # the campaign row), falling back to the tenant config when unset. This is
     # what lets calls honor a campaign's chosen voice/engine independently of the
     # account default (ends the account-wide-switch side effect).
-    tts_provider_type = global_config.tts_provider
-    tts_voice_id = global_config.tts_voice_id
-    tts_model = global_config.tts_model
+    tts_provider_type = source_config.tts_provider
+    tts_voice_id = source_config.tts_voice_id
+    tts_model = source_config.tts_model
     _camp_voice = _campaign_attr(campaign, "voice_id")
     _camp_provider = _campaign_attr(campaign, "tts_provider")
     if _camp_voice:
@@ -413,7 +420,7 @@ def build_telephony_session_config(
         # A different engine than the global one must not inherit the global's
         # provider-specific model id — blank it so the adapter uses its own
         # default (cartesia→sonic-3, elevenlabs→eleven_flash_v2_5, deepgram→voice).
-        if _camp_provider != global_config.tts_provider:
+        if _camp_provider != source_config.tts_provider:
             tts_model = ""
 
     script_config = _extract_script_config(campaign) or {}
@@ -527,8 +534,8 @@ def build_telephony_session_config(
     # turn 404'd ("model `gemini-2.5-flash` does not exist") and the agent
     # never replied. Read the provider from the saved config too.
     _llm_provider_type = (
-        getattr(global_config.llm_provider, "value", None)
-        or str(global_config.llm_provider)
+        getattr(source_config.llm_provider, "value", None)
+        or str(source_config.llm_provider)
         or "groq"
     )
 
@@ -547,7 +554,7 @@ def build_telephony_session_config(
     # STT engine choice (AI Options): Flux (semantic turn-detection) vs Nova-3
     # (acoustic VAD/endpointing). The orchestrator builds the matching primary;
     # the failover secondary is wired separately. Default = Flux (prior behaviour).
-    _stt_engine = (getattr(global_config, "stt_engine", None) or "deepgram_flux").lower()
+    _stt_engine = (getattr(source_config, "stt_engine", None) or "deepgram_flux").lower()
     if _stt_engine in ("deepgram_nova", "deepgram-nova", "nova", "nova-3"):
         _stt_provider_type, _stt_model = "deepgram_nova", "nova-3"
     else:
@@ -561,20 +568,20 @@ def build_telephony_session_config(
     # Default "cascaded" keeps every existing call byte-for-byte unchanged.
     _pipeline_mode = (
         script_config.get("pipeline_mode")
-        or getattr(global_config, "pipeline_mode", "cascaded")
+        or getattr(source_config, "pipeline_mode", "cascaded")
         or "cascaded"
     )
     _realtime_model = (
         script_config.get("realtime_model")
-        or getattr(global_config, "realtime_model", "gpt-realtime-2")
+        or getattr(source_config, "realtime_model", "gpt-realtime-2")
     )
     _realtime_voice = (
         script_config.get("realtime_voice")
-        or getattr(global_config, "realtime_voice", "marin")
+        or getattr(source_config, "realtime_voice", "marin")
     )
     _realtime_settings = (
         script_config.get("realtime_settings")
-        or getattr(global_config, "realtime_settings", None)
+        or getattr(source_config, "realtime_settings", None)
     )
     if _pipeline_mode == "realtime":
         logger.info(
@@ -606,9 +613,9 @@ def build_telephony_session_config(
         ),
         turn_0_min_confidence=_tuning.turn_0_min_confidence,
         turn_0_min_alpha_chars=_tuning.turn_0_min_alpha_chars,
-        llm_model=global_config.llm_model,
-        llm_temperature=global_config.llm_temperature,
-        llm_max_tokens=global_config.llm_max_tokens,
+        llm_model=source_config.llm_model,
+        llm_temperature=source_config.llm_temperature,
+        llm_max_tokens=source_config.llm_max_tokens,
         llm_thinking_budget=0,
         voice_id=tts_voice_id,
         tts_model=tts_model,
