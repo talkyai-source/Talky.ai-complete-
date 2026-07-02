@@ -24,6 +24,27 @@ from app.domain.models.session import CallSession
 logger = logging.getLogger(__name__)
 
 
+class TerminalSTTError(RuntimeError):
+    """Raised when the caller-audio STT stream ends via an unrecoverable
+    provider error instead of a normal pipeline shutdown.
+
+    FIX #1b — previously any exception out of ``stream_transcribe`` (e.g.
+    Deepgram's primary AND failover-secondary both failing) was logged and
+    swallowed here, so ``AudioIngest.process`` — and therefore
+    ``VoicePipelineService.start_pipeline`` and its ``pipeline_task`` —
+    returned *cleanly*.  That meant the done-callback in
+    ``telephony/lifecycle.py`` (``_pipeline_done_cb``) never saw an
+    exception and never forced teardown, leaving the caller on dead air
+    until the ~300s inactivity watchdog (or the gateway's ~2h hard cap)
+    finally noticed. Raising this instead lets the real exception propagate
+    out of the pipeline task so the done-callback fires within seconds.
+
+    Deliberately NOT raised for ``asyncio.CancelledError`` (a
+    ``BaseException``, already unaffected by the ``except Exception`` below)
+    so a normal hangup — which cancels ``pipeline_task`` — is unaffected.
+    """
+
+
 def _record_silence_check(pipeline, session, phrase: str) -> None:
     """Record a spoken silence-check as an assistant turn (issue #8).
 
@@ -335,6 +356,11 @@ class AudioIngest:
             except Exception as e:
                 stt_span.record_exception(e)
                 logger.error(f"STT stream error: {e}", extra={"call_id": call_id})
+                # FIX #1b — re-raise as a distinguishable terminal-failure
+                # type so it propagates through process_audio_stream /
+                # start_pipeline instead of being absorbed here. See
+                # TerminalSTTError's docstring for the full chain.
+                raise TerminalSTTError(str(e)) from e
             finally:
                 if _silence_task and not _silence_task.done():
                     _silence_task.cancel()

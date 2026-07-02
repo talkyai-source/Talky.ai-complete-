@@ -47,7 +47,7 @@ from app.domain.services.voice_pipeline.llm_response import (
 from app.domain.services.voice_pipeline.tts_playback import TtsPlayback
 from app.domain.services.voice_pipeline.turn_runner import TurnRunner
 from app.domain.services.voice_pipeline.turn_streamer import TurnStreamer
-from app.domain.services.voice_pipeline.audio_ingest import AudioIngest
+from app.domain.services.voice_pipeline.audio_ingest import AudioIngest, TerminalSTTError
 from app.domain.services.voice_pipeline.transcript_handler import TranscriptHandler
 from app.domain.services.voice_pipeline.turn_ender import TurnEnder
 from app.core.container import get_container
@@ -432,6 +432,22 @@ class VoicePipelineService:
             try:
                 session.stt_active = True
                 await self.process_audio_stream(session, agent_config, websocket)
+            except TerminalSTTError as e:
+                # FIX #1b — a terminal STT failure (primary + failover
+                # secondary both down) must propagate out of this task
+                # (after the finally block below runs) instead of being
+                # absorbed like a generic pipeline error. Re-raising lets
+                # telephony/lifecycle.py's _pipeline_done_cb see
+                # task.exception() and force-end + hang up the call within
+                # seconds, instead of the caller sitting on dead air until
+                # the ~300s inactivity watchdog notices.
+                span.record_exception(e)
+                logger.error(
+                    f"Pipeline error: terminal STT failure — {e}",
+                    extra={"call_id": call_id},
+                    exc_info=True,
+                )
+                raise
             except Exception as e:
                 span.record_exception(e)
                 logger.error(

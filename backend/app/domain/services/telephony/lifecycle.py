@@ -141,10 +141,78 @@ def _detect_zombie_sessions(
     return zombies
 
 
+def _collect_expired_sessions(
+    session_items,
+    *,
+    inactivity_timeout_s: int,
+    max_duration_s: int,
+) -> tuple[list, list]:
+    """Pure classifier: split live voice sessions into (stale, overlong).
+
+    FIX #11 — wires the previously-dead ``_SESSION_MAX_DURATION_S``
+    (``TELEPHONY_MAX_CALL_DURATION_S``) into an actual check. Before this,
+    the watchdog only ever enforced inactivity (``is_stale``); a call
+    parked on hold/IVR/voicemail music keeps producing transcripts, so
+    ``last_activity_at`` stays fresh and ``is_stale()`` never trips — such a
+    call could run to the gateway's ~2h hard cap.
+
+    ``session_items`` is the ``(call_id, voice_session)`` pair iterable
+    ``state_backend.iter_voice_session_items()`` yields. Extracted as a pure
+    function (mirrors ``_detect_zombie_sessions`` above) so the
+    classification logic is unit-testable without standing up the full
+    watchdog loop's state-backend / adapter / redis dependencies.
+
+    A session that is both silent AND ancient is reported once, as stale
+    (inactivity takes priority) — matches the watchdog's pre-fix behaviour
+    for the inactivity case exactly, just adds a second independent trip
+    wire for calls that stay "active" indefinitely.
+    """
+    stale: list = []
+    overlong: list = []
+    for call_id, vs in session_items:
+        call_session = getattr(vs, "call_session", None)
+        if call_session is None:
+            continue
+        if call_session.is_stale(inactivity_timeout_s):
+            stale.append(call_id)
+            continue
+        if call_session.get_duration_seconds() > max_duration_s:
+            overlong.append(call_id)
+    return stale, overlong
+
+
+async def _force_end_and_hangup(call_id: str) -> None:
+    """Force-end a session (teardown + persistence) AND best-effort hang up
+    the live PBX channel.
+
+    FIX #1 — ``_on_call_ended`` alone does NOT hang up the Asterisk channel;
+    it's designed to run AFTER StasisEnd has already fired (channel already
+    gone). But every *forced* teardown path (watchdog stale/zombie/max-
+    duration sweeps, and a crashed pipeline task via ``_pipeline_done_cb``)
+    invokes it proactively while the channel is often still live. Without an
+    explicit hangup here the caller is left on dead air until the gateway's
+    hard timeout (~2h) or they give up. ``adapter.hangup`` is guarded so a
+    failure (e.g. channel already gone) can never abort the rest of
+    teardown — StasisEnd re-delivers to ``_on_call_ended`` idempotently if
+    the channel actually was still up.
+    """
+    await _on_call_ended(call_id)
+    adapter = _bridge()._adapter
+    if adapter is not None:
+        try:
+            await adapter.hangup(call_id)
+        except Exception as exc:
+            logger.debug(
+                "force_end_and_hangup: adapter.hangup failed (non-fatal) call=%s err=%s",
+                call_id[:12], exc,
+            )
+
+
 async def _session_watchdog() -> None:
     """
     Periodically scan active sessions and tear down any that have been silent
-    for longer than _SESSION_INACTIVITY_TIMEOUT_S.
+    for longer than _SESSION_INACTIVITY_TIMEOUT_S, or that have run longer
+    than _SESSION_MAX_DURATION_S regardless of activity.
 
     Also sweeps orphaned ringing-phase pre-warm entries — outbound calls whose
     callee never answered and whose terminal Asterisk event never fired (rare
@@ -161,27 +229,40 @@ async def _session_watchdog() -> None:
             now = asyncio.get_event_loop().time()
             _sb = _state()
 
-            # ----- Active session inactivity sweep -----
-            stale = []
-            for call_id, vs in _sb.iter_voice_session_items():
+            # ----- Active session inactivity + max-duration sweep -----
+            _session_pairs = list(_sb.iter_voice_session_items())
+            for call_id, _vs in _session_pairs:
                 # Refresh the Redis ledger TTL for every live call each
                 # tick (debounced in the backend) so a call that's up but
                 # momentarily silent — caller on hold, long agent turn —
                 # doesn't let its ledger entry expire and become an
                 # un-recoverable zombie. No-op on the memory backend.
                 _sb.touch_call(call_id)
-                # FIX 1 — last_activity_at lives on CallSession (vs.call_session),
-                # not VoiceSession (vs).  Use the pre-built is_stale() method which
-                # compares datetime correctly instead of mixing monotonic time + datetime.
-                call_session = getattr(vs, "call_session", None)
-                if call_session and call_session.is_stale(_SESSION_INACTIVITY_TIMEOUT_S):
-                    stale.append(call_id)
+            # FIX 1 — last_activity_at lives on CallSession (vs.call_session),
+            # not VoiceSession (vs).  is_stale() compares datetime correctly
+            # instead of mixing monotonic time + datetime.
+            # FIX #11 — wires the previously-dead TELEPHONY_MAX_CALL_DURATION_S
+            # / _SESSION_MAX_DURATION_S as a second, independent trip wire
+            # (see _collect_expired_sessions docstring for why the inactivity
+            # check alone isn't enough).
+            stale, overlong = _collect_expired_sessions(
+                _session_pairs,
+                inactivity_timeout_s=_SESSION_INACTIVITY_TIMEOUT_S,
+                max_duration_s=_SESSION_MAX_DURATION_S,
+            )
             for call_id in stale:
                 logger.warning(
                     "telephony_watchdog: stale session %s (inactive >%ds) — forcing end",
                     call_id[:12], _SESSION_INACTIVITY_TIMEOUT_S,
                 )
-                await _on_call_ended(call_id)
+                await _force_end_and_hangup(call_id)
+            for call_id in overlong:
+                logger.warning(
+                    "telephony_watchdog: session %s exceeded max call duration "
+                    "(>%ds) — forcing end",
+                    call_id[:12], _SESSION_MAX_DURATION_S,
+                )
+                await _force_end_and_hangup(call_id)
 
             # ----- Authoritative zombie-session reconcile -----
             # Ground-truth check against Asterisk: a local voice session whose
@@ -210,9 +291,35 @@ async def _session_watchdog() -> None:
                             "concurrency slot",
                             cid[:12], _ZOMBIE_TICK_THRESHOLD,
                         )
-                        await _on_call_ended(cid)
+                        # adapter.hangup() here is a best-effort no-op in the
+                        # common case (the channel is already gone — that's
+                        # WHY it's a zombie) but is cheap insurance against a
+                        # missed-event false positive where the channel is
+                        # actually still live.
+                        await _force_end_and_hangup(cid)
             except Exception as exc:
                 logger.debug("zombie_reconcile_failed err=%s", exc)
+
+            # TODO (FIX #1c — inverse reconcile, not implemented here):
+            # the sweep above only catches "local session, no live channel".
+            # The mirror leak — "live Asterisk channel, no local session" (a
+            # channel ARI thinks is answered but for which _on_new_call never
+            # ran / crashed before registering the session, e.g. the
+            # exception path around line ~989 raced a crash before
+            # `_state().set_voice_session` — leaves an RTP/ExternalMedia leg
+            # burning gateway resources with nothing locally tracking it. To
+            # implement: alongside `_live_ids = await _adapter.list_active_
+            # channel_ids()` above, diff `_live_ids` against
+            # `_session_keys | _warmup_keys` (both already computed a few
+            # lines below) and debounce over N ticks the same way
+            # `_detect_zombie_sessions` does, then `adapter.hangup(cid)` for
+            # anything that survives the debounce. Left as a TODO rather than
+            # implemented blind: a channel can legitimately be live-but-
+            # unregistered for the few hundred ms between StasisStart and
+            # `_on_new_call` finishing `_sb.set_voice_session(...)` — the
+            # debounce window needs to be tuned against real Asterisk event
+            # timing (not available in this environment) to avoid hanging up
+            # calls that are simply mid-setup.
 
             # ----- Orphaned ringing-warmup sweep (bug #3 / #7) -----
             stale_ringing = [
@@ -434,6 +541,16 @@ def _pipeline_done_cb(task: asyncio.Task, call_id: str) -> None:
     via create_task(), Python logs to stderr but the session stays in
     _telephony_sessions forever.  This callback detects the failure and triggers
     _on_call_ended so the session is cleaned up and the PBX hangs up the channel.
+
+    FIX #1b — this is also the fast path for a terminal STT failure (primary
+    Deepgram stream dies AND, when failover is enabled, the secondary also
+    fails): AudioIngest.process now re-raises that condition as
+    TerminalSTTError instead of swallowing it, so it surfaces here as
+    task.exception() within seconds instead of waiting for the ~300s
+    inactivity watchdog. Uses _force_end_and_hangup (not bare
+    _on_call_ended) so the live Asterisk channel actually gets released —
+    a dead pipeline task means nothing else in the call is going to hang
+    the channel up.
     """
     if task.cancelled():
         return
@@ -452,7 +569,7 @@ def _pipeline_done_cb(task: asyncio.Task, call_id: str) -> None:
                 vs._pipeline_failed = True
         except Exception:
             pass
-        asyncio.create_task(_on_call_ended(call_id))
+        asyncio.create_task(_force_end_and_hangup(call_id))
 
 
 async def _on_ringing(call_id: str) -> None:
@@ -1278,9 +1395,12 @@ async def _on_ws_session_start(call_id: str) -> None:
                     )
                 except Exception as exc:
                     logger.error(f"Pipeline error {call_id[:12]}: {exc}", exc_info=True)
-                    # FIX 3 — trigger session teardown so the session doesn't leak
-                    # and the PBX hangs up the channel instead of staying connected.
-                    await _on_call_ended(call_id)
+                    # FIX 3 / FIX #1b — trigger session teardown so the session
+                    # doesn't leak, AND best-effort hang up so the PBX channel
+                    # is actually released instead of staying connected on
+                    # dead air (this also catches TerminalSTTError from a
+                    # terminal STT failure on the FreeSWITCH path).
+                    await _force_end_and_hangup(call_id)
 
             voice_session.pipeline_task = asyncio.create_task(_run())
             logger.info(f"Voice pipeline started for {call_id[:12]}")

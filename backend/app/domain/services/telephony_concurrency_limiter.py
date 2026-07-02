@@ -231,6 +231,22 @@ class TelephonyConcurrencyLimiter:
         policy = await self._load_policy(conn, tenant_id=tenant_id)
 
         await conn.execute("SELECT pg_advisory_xact_lock($1::bigint)", self._lock_key(tenant_id))
+
+        # FIX #12 — self-heal stale leases before counting. Without this,
+        # a crashed lease holder (never calls release_lease, stops
+        # heartbeating) sits in _active_counts forever with state IN
+        # ('active', 'releasing') AND released_at IS NULL — permanently
+        # shrinking this tenant's concurrency capacity. expire_stale_leases
+        # already implements the exact TTL+grace reap this needs; it was
+        # previously only reachable via a manual admin endpoint. Running it
+        # here, inside the advisory lock we already hold for this tenant,
+        # makes acquisition self-healing without any schema change: it uses
+        # the existing last_heartbeat_at / lease_ttl_seconds /
+        # heartbeat_grace_seconds columns the policy already carries.
+        await self.expire_stale_leases(
+            conn, tenant_id=tenant_id, request_id=request_id, created_by=created_by,
+        )
+
         active_calls, active_transfers = await self._active_counts(conn, tenant_id=tenant_id)
 
         if kind == LeaseKind.CALL and active_calls >= policy.max_active_calls:
@@ -482,6 +498,19 @@ class TelephonyConcurrencyLimiter:
 
     async def get_status(self, conn: asyncpg.Connection, *, tenant_id: str) -> Dict[str, Any]:
         policy = await self._load_policy(conn, tenant_id=tenant_id)
+        # FIX #12 — same self-heal as acquire_lease (see comment there) so a
+        # tenant's reported active_calls/active_transfers doesn't stay
+        # permanently inflated by a crashed holder's never-released lease
+        # just because nobody happened to call acquire_lease again. Best
+        # effort: get_status is a plain read path with no advisory lock
+        # held, so a reap failure here must not break status reporting.
+        try:
+            await self.expire_stale_leases(conn, tenant_id=tenant_id)
+        except Exception:
+            logger.warning(
+                "get_status: stale-lease reap failed for tenant=%s (non-fatal)",
+                tenant_id, exc_info=True,
+            )
         active_calls, active_transfers = await self._active_counts(conn, tenant_id=tenant_id)
         return {
             "tenant_id": tenant_id,

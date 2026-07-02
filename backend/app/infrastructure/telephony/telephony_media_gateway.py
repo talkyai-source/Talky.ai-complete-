@@ -65,6 +65,10 @@ class TelephonySession:
     # sample_offset is a running write cursor (MixMonitor-style), NOT a
     # wall-clock timestamp.  See send_audio() for the cursor logic.
     tts_recording_buffer: List[Tuple[int, bytes]] = field(default_factory=list)
+    # FIX #13 — running byte-size counter for tts_recording_buffer, mirrors
+    # recording_buffer_bytes above. Needed because tts_recording_buffer
+    # holds (offset, pcm_bytes) tuples rather than bare bytes.
+    tts_recording_buffer_bytes: int = 0
     is_active: bool = True
 
     # Monotonic start time (seconds) — set in on_call_started()
@@ -459,8 +463,22 @@ class TelephonyMediaGateway(MediaGateway):
             session.tts_recording_buffer.append(
                 (session.agent_rec_cursor, pcm16)
             )
+            session.tts_recording_buffer_bytes += len(pcm16)
             session.agent_rec_cursor += chunk_samples
-            
+
+            # FIX #13 — cap tts_recording_buffer the same way on_audio_received
+            # caps the caller-side recording_buffer (drop-oldest, ~60 min at
+            # the internal sample rate). Previously unbounded: a long
+            # agent-heavy call (worsened by FIX #11's runaway-duration
+            # sessions before that fix) grew this list without limit.
+            _MAX_RECORDING_BYTES = (self._sample_rate * 2) * 60 * 60  # 60 min
+            while (
+                session.tts_recording_buffer_bytes > _MAX_RECORDING_BYTES
+                and session.tts_recording_buffer
+            ):
+                _, _evicted = session.tts_recording_buffer.pop(0)
+                session.tts_recording_buffer_bytes -= len(_evicted)
+
         except Exception as exc:
             logger.warning(f"[TelephonyGW] TTS encode failed for {call_id[:12]}: {exc}", exc_info=True)
             return
@@ -688,4 +706,6 @@ class TelephonyMediaGateway(MediaGateway):
         session = self._sessions.get(call_id)
         if session:
             session.recording_buffer.clear()
+            session.recording_buffer_bytes = 0
             session.tts_recording_buffer.clear()
+            session.tts_recording_buffer_bytes = 0

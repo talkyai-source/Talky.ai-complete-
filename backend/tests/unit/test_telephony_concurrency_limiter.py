@@ -380,3 +380,109 @@ async def test_status_returns_policy_and_counts(limiter_ctx):
     assert status["tenant_id"] == tenant_id
     assert status["active_calls"] == 1
     assert status["max_active_calls"] == 1
+
+
+# ---------------------------------------------------------------------------
+# FIX #12 — self-healing stale-lease reap
+#
+# Before this fix, _active_counts counted every lease with
+# state IN ('active', 'releasing') AND released_at IS NULL, with no
+# TTL/heartbeat filter. acquire_lease never expired stale rows itself, and
+# expire_stale_leases (which DOES do the TTL+grace reap) was only reachable
+# via a manual admin endpoint. A crashed lease holder — one that acquired a
+# lease and then died without calling release_lease or heartbeat_lease —
+# would sit in the active count FOREVER, permanently shrinking that
+# tenant's concurrency capacity. These tests pin the fix: acquire_lease and
+# get_status now call expire_stale_leases themselves before counting, so a
+# stale lease self-heals without any external cron/manual call.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_acquire_lease_self_heals_stale_lease_before_counting(limiter_ctx):
+    conn, limiter, _redis, tenant_id = limiter_ctx  # policy: max_active_calls=1
+
+    crashed = await limiter.acquire_lease(
+        conn,
+        tenant_id=tenant_id,
+        call_id=str(uuid4()),
+        talklee_call_id="tlk_crashed",
+        lease_kind=LeaseKind.CALL,
+    )
+    assert crashed.accepted is True
+
+    # Simulate the holder crashing: it never releases and never heartbeats
+    # again. ttl_with_grace for the seeded policy is 30 + 5 = 35s.
+    for lease in conn.leases:
+        if lease.id == crashed.lease_id:
+            lease.last_heartbeat_at = datetime.now(timezone.utc) - timedelta(seconds=120)
+
+    # Without the fix this would be rejected: max_active_calls=1 and the
+    # crashed lease is still counted as active.
+    second = await limiter.acquire_lease(
+        conn,
+        tenant_id=tenant_id,
+        call_id=str(uuid4()),
+        talklee_call_id="tlk_after_crash",
+        lease_kind=LeaseKind.CALL,
+    )
+    assert second.accepted is True
+    assert second.reason == "lease_acquired"
+
+    # The crashed lease was actually reaped (not just skipped in counting).
+    crashed_row = next(l for l in conn.leases if l.id == crashed.lease_id)
+    assert crashed_row.state == "expired"
+    assert crashed_row.release_reason == "lease_ttl_expired"
+
+
+@pytest.mark.asyncio
+async def test_acquire_lease_still_rejects_when_holder_is_genuinely_alive(limiter_ctx):
+    """Guard against the self-heal being too aggressive: a lease that IS
+    heartbeating within the TTL+grace window must still count and still
+    enforce the cap."""
+    conn, limiter, _redis, tenant_id = limiter_ctx  # max_active_calls=1
+
+    alive = await limiter.acquire_lease(
+        conn,
+        tenant_id=tenant_id,
+        call_id=str(uuid4()),
+        talklee_call_id="tlk_alive",
+        lease_kind=LeaseKind.CALL,
+    )
+    assert alive.accepted is True
+
+    second = await limiter.acquire_lease(
+        conn,
+        tenant_id=tenant_id,
+        call_id=str(uuid4()),
+        talklee_call_id="tlk_should_reject",
+        lease_kind=LeaseKind.CALL,
+    )
+    assert second.accepted is False
+    assert second.reason == "max_active_calls_reached"
+
+    alive_row = next(l for l in conn.leases if l.id == alive.lease_id)
+    assert alive_row.state == "active"
+
+
+@pytest.mark.asyncio
+async def test_get_status_self_heals_stale_lease(limiter_ctx):
+    conn, limiter, _redis, tenant_id = limiter_ctx
+
+    crashed = await limiter.acquire_lease(
+        conn,
+        tenant_id=tenant_id,
+        call_id=str(uuid4()),
+        talklee_call_id="tlk_status_crashed",
+        lease_kind=LeaseKind.CALL,
+    )
+    assert crashed.accepted is True
+
+    for lease in conn.leases:
+        if lease.id == crashed.lease_id:
+            lease.last_heartbeat_at = datetime.now(timezone.utc) - timedelta(seconds=120)
+
+    status = await limiter.get_status(conn, tenant_id=tenant_id)
+
+    # Without the fix this would report 1 — a crashed holder inflating the
+    # tenant's reported active-call count forever.
+    assert status["active_calls"] == 0
