@@ -9,7 +9,10 @@ its own system message.
 from __future__ import annotations
 
 from app.services.scripts.call_state_tracker import CallState
-from app.services.scripts.spoken_email_normalizer import natural_email_readback
+from app.services.scripts.spoken_email_normalizer import (
+    natural_email_readback,
+    natural_phone_readback,
+)
 
 
 def compose_system_prompt(base_prompt: str, state: CallState) -> str:
@@ -54,6 +57,30 @@ def compose_system_prompt(base_prompt: str, state: CallState) -> str:
                     f"once they say yes: {state.email}"
                 )
 
+    # Phone / callback number — SAME confirm-before-commit surfacing as email.
+    if state.phone and not state.phone_confirmed:
+        readback = natural_phone_readback(state.phone)
+        if state.phone_readback_attempts >= 3:
+            pending.append(
+                "- You've tried a few times to confirm the caller's phone number "
+                "without a clear yes. Change tack: ask them to say it once more "
+                "slowly digit by digit, or offer to confirm it another way, or note "
+                f"it and move on. Do not keep re-reading the same value: {state.phone}"
+            )
+        elif readback:
+            pending.append(
+                f'- Say EXACTLY: "So that\'s {readback} — did I get that right?" '
+                f"Then stop and wait for their answer. Treat the number as final "
+                f"only once they say yes; if they correct it, capture the new value "
+                f"they give: {state.phone}"
+            )
+        else:
+            pending.append(
+                "- Read the caller's phone number back to them digit by digit and "
+                "ask if you got it right. Treat it as final only once they say "
+                f"yes: {state.phone}"
+            )
+
     lines: list[str] = []
     if state.email and state.email_confirmed:
         readback = natural_email_readback(state.email)
@@ -62,6 +89,13 @@ def compose_system_prompt(base_prompt: str, state: CallState) -> str:
             "- Caller email (confirmed — use this EXACT value, never re-transcribe "
             f"what you heard): {state.email}.{say} Do not spell it letter by "
             "letter unless the caller asks."
+        )
+    if state.phone and state.phone_confirmed:
+        readback = natural_phone_readback(state.phone)
+        say = f' If you read it back, say it digit by digit as: "{readback}".' if readback else ""
+        lines.append(
+            "- Caller phone/callback number (confirmed — use this EXACT value, never "
+            f"re-transcribe what you heard): {state.phone}.{say}"
         )
     if state.follow_up:
         lines.append(

@@ -134,6 +134,75 @@ def test_clean_reply_unchanged():
     assert safe == text
 
 
+# ── issue #3: the scrubber must NOT delete an email/number READ-BACK sentence ──
+
+def test_readback_of_email_that_trips_a_vendor_pattern_is_preserved():
+    # "gpt2024@gmail.com" trips the gpt-?\d pattern; deleting the sentence would
+    # mean the caller never hears the confirmation and the field stalls.
+    text = "So that's gpt2024@gmail.com — did I get that right?"
+    leaked, safe = scan_output_for_leakage(text)
+    assert leaked is False
+    assert "gpt2024@gmail.com" in safe
+
+
+def test_spoken_email_readback_with_vendor_name_local_is_preserved():
+    # spoken "claude dot smith at gmail dot com" trips the 'claude' pattern, but
+    # the "at <domain> dot <tld>" read-back shape exempts it (self-contained).
+    text = "So that's claude dot smith at gmail dot com, did I get that right?"
+    leaked, safe = scan_output_for_leakage(text)
+    assert leaked is False
+    assert "claude dot smith" in safe
+
+
+def test_protected_values_exempt_a_name_collision_sentence():
+    # a caller named "Llama" — the value passed by the caller must not be scrubbed
+    # from the agent's read-back just because it collides with a vendor name.
+    text = "Great, thanks Llama — I've got your details."
+    leaked_default, _ = scan_output_for_leakage(text)
+    assert leaked_default is True   # without protection it IS dropped
+    leaked, safe = scan_output_for_leakage(text, protected_values=["Llama"])
+    assert leaked is False
+    assert "Llama" in safe
+
+
+def test_phone_readback_digits_are_preserved():
+    text = "So that's 5 5 5 1 2 3 4 5 6 7 — did I get that right?"
+    leaked, safe = scan_output_for_leakage(text)
+    assert leaked is False
+    assert "5 5 5 1 2 3 4 5 6 7" in safe
+
+
+def test_readback_exemption_does_not_leak_a_separate_sentence():
+    # a read-back sentence is kept, but a SEPARATE technical-disclosure sentence
+    # in the same reply is still dropped.
+    text = "So that's bob at gmail dot com, right? I run on gpt-4 by the way."
+    leaked, safe = scan_output_for_leakage(text)
+    assert leaked is True
+    assert "bob at gmail dot com" in safe
+    assert "gpt-4" not in safe
+
+
+# ── issue #3: tightened standalone patterns don't over-fire ──────────────────
+
+def test_weather_temperature_is_not_flagged():
+    leaked, safe = scan_output_for_leakage("The temperature outside is 75 degrees today.")
+    assert leaked is False
+
+
+def test_sampling_temperature_still_flagged():
+    leaked, _ = scan_output_for_leakage("My temperature is set to 0.6 for sampling.")
+    assert leaked is True
+
+
+def test_bare_language_model_phrase_not_flagged_but_ai_self_ref_is():
+    leaked_ok, _ = scan_output_for_leakage(
+        "We can model the language patterns in your reviews."
+    )
+    assert leaked_ok is False
+    leaked_bad, _ = scan_output_for_leakage("As an AI language model, I cannot do that.")
+    assert leaked_bad is True
+
+
 # ── sanitize_tenant_text ─────────────────────────────────────────────────────
 
 def test_sanitize_neutralises_braces():

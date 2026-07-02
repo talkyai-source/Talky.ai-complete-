@@ -68,6 +68,33 @@ _MAX_HISTORY_PAIRS = int(os.getenv("VOICE_MAX_HISTORY_PAIRS", "20"))
 _END_SESSION_TOOL_INSTRUCTIONS = build_end_session_tool_instructions()
 
 
+def _readback_protected_values(session) -> tuple[str, ...]:
+    """Pending/captured core values + their spoken read-back forms, so the output
+    leak-scrubber never deletes a sentence that reads one back to the caller
+    (issue #3). Fail-soft: returns () if there are no captured slots."""
+    slots = getattr(session, "captured_slots", None)
+    if slots is None:
+        return ()
+    from app.services.scripts.spoken_email_normalizer import (
+        natural_email_readback,
+        natural_phone_readback,
+    )
+    out: list[str] = []
+    email = getattr(slots, "email", None)
+    if email:
+        out.append(email)
+        rb = natural_email_readback(email)
+        if rb:
+            out.append(rb)
+    phone = getattr(slots, "phone", None)
+    if phone:
+        out.append(phone)
+        rb = natural_phone_readback(phone)
+        if rb:
+            out.append(rb)
+    return tuple(out)
+
+
 def _truncate_history(history: list, max_pairs: int = _MAX_HISTORY_PAIRS) -> list:
     """Return the last max_pairs user/assistant pairs from conversation history."""
     if len(history) <= max_pairs * 2:
@@ -313,6 +340,13 @@ class TurnStreamer:
         _tts_model_id = expressive_caps.model_id_of(self._p)
         _expr_profile = expressive_caps.expressive_profile(_tts_model_id)
 
+        # Core-value read-back protection (issue #3): the output leak-scrubber must
+        # never delete a sentence that reads the caller's own email/number back to
+        # them (e.g. "claude.smith@…" trips a vendor pattern). Pass the pending /
+        # captured values + their spoken read-back forms so those sentences are
+        # exempted from scrubbing and the confirmation reaches the caller.
+        _protected_readback = _readback_protected_values(session)
+
         # Accent-matched fillers: a British voice should say "er"/"erm" and
         # British discourse markers; an American voice "um"/"uh"; etc. Resolved
         # once per call from the selected voice and memoized on the session.
@@ -530,7 +564,10 @@ class TurnStreamer:
                     if idx < 0:
                         break
 
-                    sentence = guardrails.clean_response(buf[:idx + 1].strip(), tts_model_id=_tts_model_id)
+                    sentence = guardrails.clean_response(
+                        buf[:idx + 1].strip(), tts_model_id=_tts_model_id,
+                        protected_values=_protected_readback,
+                    )
                     buf = buf[idx + 2:] if idx + 2 <= len(buf) else ""
 
                     if not sentence or len(sentence) < 6:
@@ -608,7 +645,10 @@ class TurnStreamer:
         if not ask_ai_end_action and not tts_was_interrupted and buf.strip():
             if not _barged():
                 if not max_sentences or sentences_done < max_sentences:
-                    sentence = guardrails.clean_response(buf.strip(), tts_model_id=_tts_model_id)
+                    sentence = guardrails.clean_response(
+                        buf.strip(), tts_model_id=_tts_model_id,
+                        protected_values=_protected_readback,
+                    )
                     if sentence:
                         await _settle_filler()
                         if t_tts_first is None:
@@ -664,7 +704,10 @@ class TurnStreamer:
         if ask_ai_end_action:
             full_text = raw_response_text.strip()
         else:
-            full_text = guardrails.clean_response(raw_response_text, tts_model_id=_tts_model_id)
+            full_text = guardrails.clean_response(
+                raw_response_text, tts_model_id=_tts_model_id,
+                protected_values=_protected_readback,
+            )
 
         if not ask_ai_end_action and max_sentences and full_text:
             parts = re.split(r'(?<=[.!?])\s+', full_text.strip())

@@ -14,7 +14,10 @@ import re
 from dataclasses import dataclass, replace
 from typing import Optional
 
-from app.services.scripts.spoken_email_normalizer import extract_email_from_speech
+from app.services.scripts.spoken_email_normalizer import (
+    extract_email_from_speech,
+    extract_phone_from_speech,
+)
 
 _DAY_RE = re.compile(
     r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
@@ -132,6 +135,14 @@ class CallState:
     # the confirm loop (issue: never-converging read-back) — after a few the
     # prompt offers a fallback (spell slowly / take it another way / move on).
     email_readback_attempts: int = 0
+    # Confirm-before-commit for a phone / callback number (issue #1 gap): a number
+    # is a CORE field too — one wrong digit makes it useless — so it gets the SAME
+    # fail-closed gate as email. A freshly captured number is UNCONFIRMED until the
+    # caller confirms the read-back; a correction re-opens it; ambiguous replies
+    # after a read-back are counted so the prompt can fall back.
+    phone: Optional[str] = None
+    phone_confirmed: bool = False
+    phone_readback_attempts: int = 0
     follow_up: Optional[str] = None
     project_type: Optional[str] = None
     bidding_active: Optional[bool] = None
@@ -144,6 +155,8 @@ def update_state_from_user_turn(
     *,
     readback_issued: bool = False,
     confirmation_verdict: Optional[str] = None,
+    phone_readback_issued: bool = False,
+    phone_confirmation_verdict: Optional[str] = None,
 ) -> CallState:
     """Return a new CallState with any new slots captured from `utterance`.
 
@@ -173,7 +186,7 @@ def update_state_from_user_turn(
     # (the agent must read it back and the caller must confirm). When the email
     # is captured-but-unconfirmed and the caller doesn't restate it, this turn is
     # treated as their reply to the read-back: an affirmation CONFIRMS it, a
-    # rejection RE-OPENS the field. Mirrors the CaptureConfirmation state machine.
+    # rejection RE-OPENS the field. This IS the live confirm-before-commit gate.
     email = state.email
     email_confirmed = state.email_confirmed
     email_readback_attempts = state.email_readback_attempts
@@ -203,6 +216,33 @@ def update_state_from_user_turn(
             # so the prompt can fall back after too many unresolved attempts.
             email_readback_attempts = state.email_readback_attempts + 1
 
+    # Phone / callback number — SAME confirm-before-commit gate as email, mirrored
+    # exactly: a new/corrected number starts UNCONFIRMED; when a number is pending
+    # and the agent read it back, the caller's reply is the confirmation (affirm ->
+    # confirm, reject -> re-open, unclear -> hold + bounded attempt). Fail-closed.
+    phone = state.phone
+    phone_confirmed = state.phone_confirmed
+    phone_readback_attempts = state.phone_readback_attempts
+    parsed_phone = extract_phone_from_speech(utterance)
+    if parsed_phone and parsed_phone != phone:
+        phone = parsed_phone
+        phone_confirmed = False
+        phone_readback_attempts = 0
+    elif phone and not phone_confirmed and phone_readback_issued:
+        verdict = (
+            phone_confirmation_verdict
+            if phone_confirmation_verdict is not None
+            else _classify_core_confirmation(utterance)
+        )
+        if verdict == "affirm":
+            phone_confirmed = True
+        elif verdict == "reject":
+            phone = None
+            phone_confirmed = False
+            phone_readback_attempts = 0
+        else:
+            phone_readback_attempts = state.phone_readback_attempts + 1
+
     follow_up = state.follow_up
     if follow_up is None:
         m = _DAY_RE.search(utterance)
@@ -225,6 +265,9 @@ def update_state_from_user_turn(
         email=email,
         email_confirmed=email_confirmed,
         email_readback_attempts=email_readback_attempts,
+        phone=phone,
+        phone_confirmed=phone_confirmed,
+        phone_readback_attempts=phone_readback_attempts,
         follow_up=follow_up,
         bidding_active=bidding_active,
         declined_count=declined_count,

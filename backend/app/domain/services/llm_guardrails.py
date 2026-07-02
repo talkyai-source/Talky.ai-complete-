@@ -246,7 +246,7 @@ class LLMGuardrails:
         
         return True, None
     
-    def clean_response(self, response: str, *, preserve_audio_tags: bool = False, tts_model_id=None) -> str:
+    def clean_response(self, response: str, *, preserve_audio_tags: bool = False, tts_model_id=None, protected_values=None) -> str:
         """
         Clean LLM response by removing common artifacts.
 
@@ -351,7 +351,7 @@ class LLMGuardrails:
         # infra). Redact the offending sentence(s) before TTS. The honest
         # "I'm an AI assistant for {company}" admission is intentionally allowed.
         from app.services.scripts.prompts.prompt_safety import scan_output_for_leakage
-        leaked, cleaned = scan_output_for_leakage(cleaned)
+        leaked, cleaned = scan_output_for_leakage(cleaned, protected_values or ())
         if leaked:
             logger.warning("Redacted technical disclosure from agent reply before TTS")
 

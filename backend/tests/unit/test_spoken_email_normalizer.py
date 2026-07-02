@@ -5,7 +5,11 @@ from __future__ import annotations
 import pytest
 
 from app.services.scripts.spoken_email_normalizer import (
+    extract_email_from_agent_readback,
     extract_email_from_speech,
+    extract_phone_from_speech,
+    natural_email_readback,
+    natural_phone_readback,
     spell_out_email,
 )
 
@@ -93,3 +97,99 @@ def test_multiword_and_carrier_spoken_locals_defer_to_llm():
     # unambiguous single-token spoken locals are still pinned deterministically
     assert e("john at gmail dot com") == "john@gmail.com"
     assert e("sarah underscore jones at outlook dot com") == "sarah_jones@outlook.com"
+
+
+# ── natural_email_readback (migrated from the deleted capture_confirmation test)
+# The read-back is the audible half of the confirm gate: separators/digits must
+# be voiced or a caller could yes-confirm a wrong address.
+
+def test_natural_readback_word_local_part():
+    assert natural_email_readback("allstateestimation@gmail.com") == \
+        "allstateestimation at gmail dot com"
+
+
+def test_natural_readback_word_plus_digits():
+    assert natural_email_readback("john7890@gmail.com") == "john 7 8 9 0 at gmail dot com"
+
+
+def test_natural_readback_spells_only_nonword_runs():
+    assert natural_email_readback("xq7@gmail.com") == "x-q 7 at gmail dot com"
+
+
+def test_natural_readback_multidot_domain():
+    assert natural_email_readback("bob@yahoo.co.uk") == "bob at yahoo dot co dot uk"
+
+
+def test_natural_readback_speaks_local_separators():
+    assert natural_email_readback("j.smith@gmail.com") == "j dot smith at gmail dot com"
+    assert natural_email_readback("john_smith@acme.com") == "john underscore smith at acme dot com"
+    assert natural_email_readback("a-team@acme.com") == "a dash team at acme dot com"
+    assert natural_email_readback("bob+tag@acme.com") == "bob plus tag at acme dot com"
+
+
+# ── extract_email_from_agent_readback (gap #2: multi-word emails enter the gate)
+
+@pytest.mark.parametrize("turn,expected", [
+    ("So that's all state estimation at gmail dot com — did I get that right?",
+     "allstateestimation@gmail.com"),
+    ("Okay, so that's all state estimation at the rate gmail dot com, is that right?",
+     "allstateestimation@gmail.com"),
+    ("Your email is cloud state estimation at gmail dot com, correct?",
+     "cloudstateestimation@gmail.com"),
+    ("Let me confirm, that's mary jane at yahoo dot co dot uk — did I get that right?",
+     "maryjane@yahoo.co.uk"),
+])
+def test_agent_readback_parses_assembled_multiword_email(turn, expected):
+    assert extract_email_from_agent_readback(turn) == expected
+
+
+@pytest.mark.parametrize("turn", [
+    # no confirm question -> not a read-back, just a mention
+    "I'll send it to all state estimation at gmail dot com.",
+    "Great, I have your details.",
+    # domain only / no preamble anchor -> refuse to guess a boundary
+    "Should I reach you at your gmail dot com address?",
+    # two spoken "at"s -> ambiguous, bail rather than mis-parse
+    "You work at microsoft and it's bob at gmail dot com, right?",
+    "",
+])
+def test_agent_readback_conservative_returns_none(turn):
+    assert extract_email_from_agent_readback(turn) is None
+
+
+# ── extract_phone_from_speech (gap #1: numbers get the same deterministic gate)
+
+@pytest.mark.parametrize("speech,expected", [
+    ("my number is 555 123 4567", "5551234567"),
+    ("you can call me at five five five one two three four five six seven", "5551234567"),
+    ("call me back on 555-123-4567", "5551234567"),
+    ("my cell is (212) 555 0199", "2125550199"),
+    ("reach me at plus four four seven nine one one one one one one one one",
+     "+447911111111"),
+])
+def test_extract_phone_positive(speech, expected):
+    assert extract_phone_from_speech(speech) == expected
+
+
+@pytest.mark.parametrize("speech", [
+    "",
+    "yeah that sounds good",
+    # an email's digits are NOT a phone
+    "bob one two three four five six seven at gmail dot com",
+    "my email is john123456@gmail.com",
+    # an address is not a phone (too few contiguous digits, no phone cue)
+    "Victor Street 177, apartment 138",
+    # a bare short number with no phone cue
+    "I have 3 or 4 projects",
+    # a bare digit run with neither a cue nor phone formatting stays untouched
+    "the code was 12345678",
+])
+def test_extract_phone_negative(speech):
+    assert extract_phone_from_speech(speech) is None
+
+
+def test_natural_phone_readback():
+    assert natural_phone_readback("5551234567") == "5 5 5 1 2 3 4 5 6 7"
+    assert natural_phone_readback("+447911") == "plus 4 4 7 9 1 1"
+    assert natural_phone_readback("") == ""
+    assert natural_phone_readback(None) == ""

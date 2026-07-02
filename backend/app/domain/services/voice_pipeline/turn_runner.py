@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from dataclasses import is_dataclass
+from dataclasses import is_dataclass, replace
 from typing import Optional
 
 from fastapi import WebSocket
@@ -31,8 +31,11 @@ from app.services.scripts import (
 )
 from app.services.scripts.call_state_tracker import _classify_core_confirmation
 from app.services.scripts.spoken_email_normalizer import (
+    extract_email_from_agent_readback,
     extract_email_from_speech,
+    extract_phone_from_speech,
     natural_email_readback,
+    natural_phone_readback,
 )
 from app.domain.services.voice_pipeline.confirm_llm import llm_confirmation_verdict
 
@@ -84,6 +87,55 @@ def _is_email_correction(utterance, current_email) -> bool:
     return bool(parsed and parsed != current_email)
 
 
+# A turn that explicitly asks the caller to confirm ("did I get that right?").
+# Required to promote a DOMAIN-ONLY match to a read-back (issue #4): naming the
+# domain ("reach you at your gmail dot com address?") is NOT a read-back unless
+# the turn also names the local part or asks for confirmation.
+_CONFIRM_QUESTION_RE = re.compile(
+    r"\b(did\s+i\s+(get|say|hear)\s+(that|it|this)|is\s+(that|this|it)\s+(right|correct)|"
+    r"got\s+(that|it)\s+right|that\s+right\?|is\s+that\s+ok(ay)?\?|"
+    r"sounds?\s+right|correct\?|right\?)",
+    re.IGNORECASE,
+)
+
+
+def _email_local_signal(email: str) -> str:
+    """The first alphabetic run (>=2 chars) of the local part — a distinctive
+    signal that the agent actually SPOKE the local part, not just the domain."""
+    local = email.split("@", 1)[0].lower()
+    for run in re.findall(r"[a-z]+", local):
+        if len(run) >= 2:
+            return run
+    return ""
+
+
+def _is_phone_correction(utterance, current_phone) -> bool:
+    """True if the caller restated a DIFFERENT phone number — a correction handled
+    by the capture path, so we skip the confirmation classification for it."""
+    if not current_phone:
+        return False
+    parsed = extract_phone_from_speech(utterance)
+    return bool(parsed and parsed != current_phone)
+
+
+def _email_from_recent_agent_readback(history):
+    """Parse an ASSEMBLED email out of the agent's most recent REAL turn (gap #2).
+
+    Only inspects the latest non-silence-check assistant turn — the read-back the
+    caller is replying to right now — and returns the assembled address only when
+    that turn is unmistakably a read-back-for-confirmation (see
+    ``extract_email_from_agent_readback``). None otherwise.
+    """
+    for m in reversed(history or []):
+        if getattr(m, "role", None) != MessageRole.ASSISTANT:
+            continue
+        c = m.content or ""
+        if _SILENCE_CHECK_RE.search(c.lower()):
+            continue
+        return extract_email_from_agent_readback(c)
+    return None
+
+
 def _agent_read_back_email(history, email) -> bool:
     """True if the agent's most recent REAL turn read the pending email back — so
     the caller's current turn can safely be interpreted as a confirmation reply.
@@ -92,24 +144,51 @@ def _agent_read_back_email(history, email) -> bool:
     digits as words ("j dot smith", "seven eight"), so a literal match of the
     glyph-laden read-back string fails for dotted/underscored/digit local parts.
     We therefore also match the domain-as-words (always spoken the same way,
-    e.g. "gmail dot com"). Silence-check turns are skipped so an interposed
-    "are you still there?" can't mask the read-back (re-audit flow #1 / cf #2).
+    e.g. "gmail dot com") — but ONLY when the local part is ALSO signalled, or the
+    turn asks for confirmation. A bare domain mention ("reach you at your gmail
+    dot com address?") does NOT verify the LOCAL part, so it must not let a "yeah"
+    confirm an unheard local (issue #4). Silence-check turns are skipped so an
+    interposed "are you still there?" can't mask the read-back (re-audit flow #1).
     """
     if not email or "@" not in email:
         return False
     spoken = natural_email_readback(email).lower()
     domain_spoken = email.rsplit("@", 1)[-1].lower().replace(".", " dot ")  # "gmail dot com"
+    local_sig = _email_local_signal(email)
     for m in reversed(history or []):
         if getattr(m, "role", None) != MessageRole.ASSISTANT:
             continue
         c = (m.content or "").lower()
         if _SILENCE_CHECK_RE.search(c):
             continue  # a silence-check is not a read-back — keep scanning back
-        return (
-            (bool(spoken) and spoken in c)
-            or (email.lower() in c)
-            or (bool(domain_spoken) and domain_spoken in c)
-        )
+        if (bool(spoken) and spoken in c) or (email.lower() in c):
+            return True  # full spoken read-back or the literal address
+        # Domain-only: require the local part be signalled too, OR a confirm question.
+        if bool(domain_spoken) and domain_spoken in c:
+            return (bool(local_sig) and local_sig in c) or bool(_CONFIRM_QUESTION_RE.search(c))
+        return False
+    return False
+
+
+def _agent_read_back_phone(history, phone) -> bool:
+    """True if the agent's most recent REAL turn read the pending phone number
+    back. Matches on the digit string regardless of formatting (the agent may
+    speak "555-123-4567", "5 5 5 …", or grouped), so a caller "yes" only counts
+    once the digits were actually voiced. Silence checks are skipped."""
+    if not phone:
+        return False
+    digits = re.sub(r"\D", "", phone)
+    if len(digits) < 7:
+        return False
+    spoken = natural_phone_readback(phone).lower()
+    for m in reversed(history or []):
+        if getattr(m, "role", None) != MessageRole.ASSISTANT:
+            continue
+        c = (m.content or "").lower()
+        if _SILENCE_CHECK_RE.search(c):
+            continue
+        c_digits = re.sub(r"\D", "", c)
+        return (digits in c_digits) or (bool(spoken) and spoken in c)
     return False
 
 
@@ -156,6 +235,22 @@ class TurnRunner:
         # fail-closed, so an unresolved verdict leaves the value pending.
         _pending = session.captured_slots
         _pending_email = getattr(_pending, "email", None)
+        # Gap #2: a multi-word / carrier-prefixed spoken email never enters
+        # CallState via the deterministic user-turn extractor (it refuses to guess
+        # a word boundary), so the HARDEST emails bypassed the gate. When nothing
+        # is pinned yet and this turn isn't itself a fresh email, seed the address
+        # the AGENT assembled and read back in its prior turn as UNCONFIRMED — so
+        # the SAME read-back → verdict → commit loop runs over it.
+        if not _pending_email and extract_email_from_speech(full_transcript) is None:
+            _seeded = _email_from_recent_agent_readback(session.conversation_history)
+            if _seeded:
+                _pending = replace(
+                    _pending, email=_seeded, email_confirmed=False,
+                    email_readback_attempts=0,
+                )
+                session.captured_slots = _pending
+                _pending_email = _seeded
+
         _readback_issued = _agent_read_back_email(session.conversation_history, _pending_email)
         _confirm_verdict = None
         if (
@@ -175,11 +270,34 @@ class TurnRunner:
                 "email_confirm call=%s via_llm=%s verdict=%s",
                 call_id[:8], _via_llm, _confirm_verdict,
             )
+
+        # Phone / callback number — SAME gate as email, resolved independently.
+        _pending_phone = getattr(_pending, "phone", None)
+        _phone_readback_issued = _agent_read_back_phone(
+            session.conversation_history, _pending_phone
+        )
+        _phone_verdict = None
+        if (
+            _pending_phone
+            and not getattr(_pending, "phone_confirmed", False)
+            and _phone_readback_issued
+            and not _is_phone_correction(full_transcript, _pending_phone)
+        ):
+            _phone_verdict = _classify_core_confirmation(full_transcript)
+            if _phone_verdict == "unclear":
+                _phone_verdict = await llm_confirmation_verdict(
+                    self._p.llm_provider, full_transcript, _pending_phone,
+                    subject="phone number",
+                )
+            logger.info("phone_confirm call=%s verdict=%s", call_id[:8], _phone_verdict)
+
         session.captured_slots = update_state_from_user_turn(
             _pending,
             full_transcript,
             readback_issued=_readback_issued,
             confirmation_verdict=_confirm_verdict,
+            phone_readback_issued=_phone_readback_issued,
+            phone_confirmation_verdict=_phone_verdict,
         )
 
         response_text = ""

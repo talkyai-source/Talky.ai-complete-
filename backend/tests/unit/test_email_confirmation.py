@@ -121,6 +121,82 @@ def test_gate_false_when_last_real_turn_is_unrelated():
     assert _agent_read_back_email(h, "bob@acme.com") is False
 
 
+# ── issue #4: a bare DOMAIN mention is NOT a read-back of the LOCAL part ──────
+
+def test_domain_only_mention_without_local_or_confirm_is_not_readback():
+    # "reach you at your gmail dot com address?" NAMES the domain but never voices
+    # the local part and doesn't ask to confirm — a "yeah" must not commit an
+    # email whose local part the caller never heard back.
+    from app.domain.services.voice_pipeline.turn_runner import _agent_read_back_email
+    from app.domain.models.conversation import MessageRole as R
+    h = [_msg(R.ASSISTANT, "Should I reach you at your gmail dot com address?")]
+    assert _agent_read_back_email(h, "bob@acme.com") is False
+
+
+def test_domain_plus_local_signal_is_a_readback():
+    from app.domain.services.voice_pipeline.turn_runner import _agent_read_back_email
+    from app.domain.models.conversation import MessageRole as R
+    # digits spoken as WORDS, so the full glyph read-back won't literal-match — but
+    # the local signal ("john") + domain-as-words is a genuine read-back.
+    h = [_msg(R.ASSISTANT, "So that's john seven eight nine zero at gmail dot com, right?")]
+    assert _agent_read_back_email(h, "john7890@gmail.com") is True
+
+
+def test_domain_only_with_confirm_question_counts():
+    # domain named AND an explicit confirm question -> a read-back (the caller is
+    # being asked to confirm), even if the local didn't literal-match.
+    from app.domain.services.voice_pipeline.turn_runner import _agent_read_back_email
+    from app.domain.models.conversation import MessageRole as R
+    h = [_msg(R.ASSISTANT, "Sending to your acme dot com — did I get that right?")]
+    assert _agent_read_back_email(h, "bob@acme.com") is True
+
+
+# ── issue #2: an assembled multi-word email enters the gate via the agent read-back
+
+def test_multiword_email_from_agent_readback_seeds_and_confirms():
+    """The end-to-end gap-2 loop at the state level: the deterministic user-turn
+    extractor leaves a multi-word email unset; the agent assembles + reads it back;
+    we seed that assembled address UNCONFIRMED; the caller's 'yes' confirms it."""
+    from dataclasses import replace
+    from app.domain.services.voice_pipeline.turn_runner import (
+        _email_from_recent_agent_readback,
+    )
+    from app.domain.models.conversation import Message, MessageRole as R
+
+    # 1) caller gave a multi-word email -> deterministic extractor pins nothing
+    s = update_state_from_user_turn(CallState(), "all state estimation at gmail dot com")
+    assert s.email is None
+
+    # 2) agent assembled + read it back; seed from that read-back turn
+    history = [
+        Message(role=R.ASSISTANT,
+                content="So that's all state estimation at gmail dot com — did I get that right?"),
+        Message(role=R.USER, content="yes that's right"),
+    ]
+    seeded = _email_from_recent_agent_readback(history)
+    assert seeded == "allstateestimation@gmail.com"
+    s = replace(s, email=seeded, email_confirmed=False)
+
+    # 3) the SAME gate now runs over it — caller's 'yes' confirms
+    s = update_state_from_user_turn(s, "yes that's right", readback_issued=True)
+    assert s.email == "allstateestimation@gmail.com"
+    assert s.email_confirmed is True
+
+
+def test_agent_readback_seed_ignored_when_not_a_confirmation_turn():
+    from app.domain.services.voice_pipeline.turn_runner import (
+        _email_from_recent_agent_readback,
+    )
+    from app.domain.models.conversation import Message, MessageRole as R
+    history = [
+        Message(role=R.ASSISTANT,
+                content="Great, I'll send the docs to all state estimation at gmail dot com."),
+    ]
+    # no confirm question -> not a read-back -> nothing seeded (gate not bypassed
+    # in the wrong direction either)
+    assert _email_from_recent_agent_readback(history) is None
+
+
 # ── bounded-attempts safety net (re-audit cf #6): the read-back can't loop forever
 
 def test_readback_attempts_increment_and_trigger_fallback():

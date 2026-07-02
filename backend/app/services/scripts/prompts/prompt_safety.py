@@ -34,7 +34,7 @@ Plus ``sanitize_tenant_text`` for input validation of operator-supplied fields.
 from __future__ import annotations
 
 import re
-from typing import Tuple
+from typing import Iterable, Tuple
 
 # ── 1. Delimiting (Microsoft Spotlighting / Anthropic XML tags) ──────────────
 
@@ -125,9 +125,49 @@ _LEAK_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\b(my|the)\s+(system\s+prompt|prompt|instructions|guardrails|"
                r"training\s+data|system\s+message)\b", re.IGNORECASE),
     re.compile(r"\bi\s+(was|am|'m)\s+(instructed|programmed|told|configured)\s+to\b", re.IGNORECASE),
-    re.compile(r"\b(language\s+model|large\s+language\s+model|llm)\b", re.IGNORECASE),
-    re.compile(r"\b(temperature|max[_\s]?tokens|thinking\s+budget|api\s+key)\b", re.IGNORECASE),
+    # "large language model" / "llm" are always technical disclosure. A bare
+    # "language model" is only a leak with a technical co-occurrence (an AI/model
+    # self-reference or a training/parameter mention) — otherwise it's fine, so a
+    # read-back sentence isn't dropped for the phrase alone (issue #3).
+    re.compile(r"\b(large\s+language\s+model|llm)\b", re.IGNORECASE),
+    re.compile(
+        r"\b(ai|a\.i\.|artificial\s+intelligence|trained|neural|underlying|"
+        r"i\s+am\s+an?|i'?m\s+an?)\b[^.\n]{0,20}\blanguage\s+model\b"
+        r"|\blanguage\s+model\b[^.\n]{0,20}\b(train(ed|ing)|parameters?|weights?|neural)\b",
+        re.IGNORECASE,
+    ),
+    # max_tokens / thinking budget / api key are unambiguous. "temperature" is a
+    # leak ONLY as a sampling parameter (near a number or a config word) — never
+    # for "the temperature outside is 75" (issue #3).
+    re.compile(r"\b(max[_\s]?tokens|thinking\s+budget|api\s+key)\b", re.IGNORECASE),
+    re.compile(
+        r"\btemperature\b[^.\n]{0,15}(\d+\.\d+|setting|parameter|sampling|set\s+to|config)"
+        r"|\b(sampling|parameter|set\s+to|config(?:ured)?)\b[^.\n]{0,15}\btemperature\b",
+        re.IGNORECASE,
+    ),
 )
+
+# A sentence that looks like an email/number READ-BACK must never be scrubbed —
+# dropping it means the caller never hears the confirmation and the core field
+# stalls (issue #3). We detect the read-back shape self-containedly: a literal
+# email, a spoken address ("… at gmail dot com"), or a 7+ digit run. Callers may
+# ALSO pass the exact pending value / spoken form via ``protected_values``.
+_READBACK_SIGNATURE_RE = re.compile(
+    r"[a-z0-9][a-z0-9._%+\-]*@[a-z0-9][a-z0-9.\-]*\.[a-z]{2,}"     # literal email
+    r"|\bat\s+[a-z0-9]+(\s+dot\s+[a-z0-9]+)+"                       # spoken "at gmail dot com"
+    r"|\d(?:[\s.\-()]*\d){6,}",                                     # 7+ digit run
+    re.IGNORECASE,
+)
+
+
+def _is_readback_sentence(sentence: str, protected: tuple[str, ...]) -> bool:
+    """True if the sentence contains a pending/captured core value or otherwise
+    looks like an email/number read-back — in which case it is EXEMPT from the
+    leak scrubber (the confirmation must reach the caller)."""
+    low = sentence.lower()
+    if any(v and v.lower() in low for v in protected):
+        return True
+    return bool(_READBACK_SIGNATURE_RE.search(sentence))
 
 # Spoken when a reply is entirely redacted — keeps the call graceful instead of
 # returning silence.
@@ -139,20 +179,36 @@ SAFE_DEFLECTION = (
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 
 
-def scan_output_for_leakage(text: str) -> Tuple[bool, str]:
+def scan_output_for_leakage(
+    text: str, protected_values: Iterable[str] = ()
+) -> Tuple[bool, str]:
     """Inspect a model reply for forbidden technical disclosure.
 
     Returns ``(leaked, safe_text)``. When a leak is found, the offending
     sentence(s) are dropped; if nothing survives, ``safe_text`` is
     ``SAFE_DEFLECTION``. When clean, returns ``(False, text)`` unchanged.
 
+    Read-back EXEMPTION (issue #3): a sentence that reads a core value back to the
+    caller — one containing a pending/captured value in ``protected_values``, or an
+    email/number read-back shape — is NEVER dropped, even if it happens to contain
+    a token that trips a leak pattern (e.g. an email ``gpt2024@…`` or a name
+    ``claude.smith@…``). Deleting it would mean the caller never hears the
+    confirmation and the core field stalls. Such a sentence is a confirmation the
+    agent was told to say, not technical disclosure, so keeping it whole is safe.
+
     Pure and cheap (a handful of regexes) so it can run on every turn's output
     before it reaches TTS.
     """
     if not text or not text.strip():
         return False, text
+    protected = tuple(v for v in protected_values if v)
     sentences = _SENTENCE_SPLIT_RE.split(text.strip())
-    kept = [s for s in sentences if not any(p.search(s) for p in _LEAK_PATTERNS)]
+    kept = [
+        s
+        for s in sentences
+        if _is_readback_sentence(s, protected)
+        or not any(p.search(s) for p in _LEAK_PATTERNS)
+    ]
     if len(kept) == len(sentences):
         return False, text
     safe = " ".join(kept).strip()

@@ -27,36 +27,41 @@ LLM_CONFIRM_FALLBACK_ENABLED = os.getenv(
 ).strip().lower() in {"1", "true", "yes", "on"}
 _TIMEOUT_S = float(os.getenv("EMAIL_CONFIRM_LLM_TIMEOUT_S", "1.5"))
 
-_SYSTEM = (
-    "You classify a caller's reply on a phone call. The agent just read an email "
-    "address back and asked the caller to confirm it is correct. Decide ONLY "
-    "whether the caller confirmed the address is correct.\n"
-    "- yes: a clear, unreserved confirmation that the address is correct.\n"
-    "- no: they said it is wrong or needs ANY change, including a partial "
-    "correction.\n"
-    "- unclear: anything else. If the reply contains any hedge, reservation, "
-    "condition, or you are at all torn, answer unclear — never guess yes.\n"
-    "Examples:\n"
-    '- "yeah you got it" -> yes\n'
-    '- "yes but that is my old email" -> no\n'
-    '- "close, it is dot smith not smith" -> no\n'
-    '- "uh hold on a second" -> unclear\n'
-    'Reply with exactly one word: "yes", "no", or "unclear".'
-)
+def _system_prompt(subject: str) -> str:
+    return (
+        f"You classify a caller's reply on a phone call. The agent just read a "
+        f"{subject} back and asked the caller to confirm it is correct. Decide ONLY "
+        f"whether the caller confirmed the {subject} is correct.\n"
+        "- yes: a clear, unreserved confirmation that it is correct.\n"
+        "- no: they said it is wrong or needs ANY change, including a partial "
+        "correction.\n"
+        "- unclear: anything else. If the reply contains any hedge, reservation, "
+        "condition, or you are at all torn, answer unclear — never guess yes.\n"
+        "Examples:\n"
+        '- "yeah you got it" -> yes\n'
+        '- "yes but that is my old one" -> no\n'
+        '- "close, it is five not nine" -> no\n'
+        '- "uh hold on a second" -> unclear\n'
+        'Reply with exactly one word: "yes", "no", or "unclear".'
+    )
 
 
-async def llm_confirmation_verdict(provider, utterance: str, email: str) -> str:
+async def llm_confirmation_verdict(
+    provider, utterance: str, value: str, *, subject: str = "email address"
+) -> str:
     """Return 'affirm' | 'reject' | 'unclear' for an ambiguous read-back reply.
 
-    Fail-closed: 'unclear' on disabled flag / missing provider / timeout / error /
-    unrecognised answer.
+    ``subject`` labels the core field being confirmed ("email address" or "phone
+    number") so the same fail-closed fallback serves both gates. Fail-closed:
+    'unclear' on disabled flag / missing provider / timeout / error / unrecognised
+    answer.
     """
     if not LLM_CONFIRM_FALLBACK_ENABLED or provider is None or not (utterance or "").strip():
         return "unclear"
 
     user = (
-        f'The agent read back the email "{email}" and asked if it is correct. '
-        f'The caller replied: "{utterance}". Did the caller confirm the address is '
+        f'The agent read back the {subject} "{value}" and asked if it is correct. '
+        f'The caller replied: "{utterance}". Did the caller confirm the {subject} is '
         f"correct? Answer yes, no, or unclear."
     )
     messages = [Message(role=MessageRole.USER, content=user)]
@@ -66,7 +71,7 @@ async def llm_confirmation_verdict(provider, utterance: str, email: str) -> str:
         async def _collect() -> None:
             nonlocal buf
             async for tok in provider.stream_chat_with_timeout(
-                messages, system_prompt=_SYSTEM, max_tokens=3, temperature=0.0
+                messages, system_prompt=_system_prompt(subject), max_tokens=3, temperature=0.0
             ):
                 buf += tok
                 if len(buf) > 24:  # a one-word answer is here well before this
