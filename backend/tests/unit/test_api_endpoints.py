@@ -84,7 +84,11 @@ class TestAuthEndpoints:
         """Test that /me endpoint requires auth header"""
         response = client.get("/api/v1/auth/me")
         assert response.status_code == 401
-        assert "Authorization" in response.json()["detail"] or "authorization" in response.json()["detail"].lower()
+        # Errors use the standardized envelope {"error": {code, message, ...}},
+        # not FastAPI's raw {"detail": ...}.
+        body = response.json()
+        detail = body["error"]["message"] if "error" in body else body.get("detail", "")
+        assert "authorization" in detail.lower()
     
     @pytest.mark.skipif(not IMPORT_SUCCESS, reason="App not available")
     def test_me_rejects_invalid_token_format(self):
