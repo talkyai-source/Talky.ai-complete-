@@ -248,7 +248,9 @@ async def lifespan(app: FastAPI):
     #  • quota_alerts_listener: caches the latest tenant throttle
     #    decision so make_call doesn't DB-read on the hot path.
     # Both are best-effort: if Redis is unavailable they no-op.
-    redis_for_listeners = getattr(container, "redis", None)
+    # Use the dedicated pub/sub client (no request-path read timeout) so the
+    # blocking listen() loops don't thrash-reconnect every socket_timeout.
+    redis_for_listeners = getattr(container, "redis_pubsub", None) or getattr(container, "redis", None)
     app.state.redis_listener_stop = asyncio.Event()
     app.state.redis_listener_tasks = []
     if redis_for_listeners is not None:

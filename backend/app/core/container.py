@@ -146,6 +146,9 @@ class ServiceContainer:
         self._db_pool: Optional[asyncpg.Pool] = None
         self._db_client: Optional[Client] = None
         self._redis: Optional["redis.Redis"] = None
+        # Dedicated pub/sub client (no request-path read timeout) — see
+        # _initialize_redis. Falls back to _redis via the redis_pubsub property.
+        self._redis_pubsub: Optional["redis.Redis"] = None
         self._queue_service = None
         self._call_service = None
         self._session_manager = None
@@ -224,6 +227,11 @@ class ServiceContainer:
             except Exception as e:
                 logger.error(f"Queue service close error: {e}")
 
+        if self._redis_pubsub is not None and self._redis_pubsub is not self._redis:
+            try:
+                await self._redis_pubsub.close()
+            except Exception as e:
+                logger.error(f"Redis pubsub close error: {e}")
         if self._redis:
             try:
                 await self._redis.close()
@@ -255,6 +263,12 @@ class ServiceContainer:
     @property
     def redis(self) -> Optional["redis.Redis"]:
         return self._redis
+
+    @property
+    def redis_pubsub(self) -> Optional["redis.Redis"]:
+        """Client for long-lived pub/sub listeners (no read timeout). Falls
+        back to the shared client when a dedicated one wasn't built."""
+        return self._redis_pubsub or self._redis
 
     @property
     def redis_enabled(self) -> bool:
@@ -335,11 +349,29 @@ class ServiceContainer:
                     socket_connect_timeout=2,
                     max_connections=50,
                 )
+                # Dedicated client for long-lived pub/sub LISTENERS
+                # (global_concurrency_listener). A blocking ``pubsub.listen()``
+                # idles between messages, so it must NOT inherit the 2s
+                # request-path ``socket_timeout`` — that made the listener time
+                # out and reconnect every 2s, thrashing the connection and
+                # risking missed keyspace-expiry/quota events. No read timeout
+                # here; ``health_check_interval`` + keepalive detect a dead
+                # socket without breaking a legitimately-idle subscription.
+                self._redis_pubsub = redis.from_url(
+                    redis_url,
+                    encoding="utf-8",
+                    decode_responses=True,
+                    socket_connect_timeout=2,
+                    socket_keepalive=True,
+                    health_check_interval=30,
+                    max_connections=8,
+                )
                 logger.info(f"redis_connected mode=single url={log_url}")
             await self._redis.ping()
         except Exception as e:
             logger.warning(f"Redis not available ({e}) — using in-memory fallback")
             self._redis = None
+            self._redis_pubsub = None
 
     async def _initialize_queue_service(self) -> None:
         try:
