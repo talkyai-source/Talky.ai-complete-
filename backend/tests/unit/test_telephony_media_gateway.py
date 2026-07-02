@@ -121,3 +121,57 @@ async def test_clear_recording_buffer_resets_tts_byte_counter():
     assert session.tts_recording_buffer_bytes == 0
     assert session.recording_buffer == []
     assert session.recording_buffer_bytes == 0
+
+
+# ---------------------------------------------------------------------------
+# QUICK-WIN fix #1 — f32le chunk-split no longer drops audio.
+#
+# send_audio's old carry (in tts_playback.py) only kept 2-byte (int16)
+# alignment. For an f32le provider (Google/Cartesia, 4 bytes/sample), a
+# chunk whose length is even-but-not-a-multiple-of-4 used to sail straight
+# through that guard into pcm_float32_to_int16() -> np.frombuffer(...,
+# dtype=float32), which raises ValueError("buffer size must be a multiple
+# of element size") on a misaligned buffer. send_audio's except-block then
+# swallowed the exception and dropped the ENTIRE chunk instead of just the
+# orphan tail.
+#
+# The fix moves the alignment carry into TelephonyMediaGateway.send_audio
+# itself, keyed on the session's _tts_source_format (align=4 for f32le,
+# align=2 for s16le), so a 4002-byte f32le chunk (not a multiple of 4) is
+# no longer dropped: it's fully accepted across two calls — the first 4000
+# bytes convert immediately and the trailing 2-byte orphan is carried and
+# combined with the next chunk instead of blowing up the whole chunk.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_send_audio_f32le_chunk_not_multiple_of_4_is_not_dropped():
+    gateway = TelephonyMediaGateway()
+    await gateway.initialize({"sample_rate": 8000, "tts_source_format": "f32le"})
+    adapter = AsyncMock()
+    await gateway.on_call_started(
+        "call-f32le-split", {"adapter": adapter, "pbx_call_id": "pbx-f32le-split"},
+    )
+    session = gateway._sessions["call-f32le-split"]
+
+    # 4002 bytes: even (passes an int16-only alignment guard) but NOT a
+    # multiple of 4 — this is exactly the shape that used to crash
+    # pcm_float32_to_int16() and get silently dropped.
+    chunk = b"\x00\x01\x02\x03" * 1000 + b"\xff\xee"
+    assert len(chunk) == 4002
+    assert len(chunk) % 2 == 0
+    assert len(chunk) % 4 != 0
+
+    # Must not raise, and must not be silently swallowed as a dropped chunk:
+    # 4000 bytes (1000 float32 samples) are processed and land in the
+    # recording buffer on this call; the trailing 2-byte orphan is carried
+    # forward instead of vanishing.
+    await gateway.send_audio("call-f32le-split", chunk)
+
+    assert session.tts_recording_buffer_bytes > 0
+    assert session._tts_pending_bytes == b"\xff\xee"
+
+    # Feeding the next chunk completes the orphan sample instead of losing
+    # it forever — 2 pending bytes + a 6-byte chunk is a multiple of 4, so
+    # nothing is left dangling after this call.
+    await gateway.send_audio("call-f32le-split", b"\x04\x05\x06\x07\x08\x09")
+    assert session._tts_pending_bytes == b""

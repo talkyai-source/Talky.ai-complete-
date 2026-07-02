@@ -133,9 +133,15 @@ class TtsPlayback:
                 call_id=call_id,
             ).__aiter__()
             provider_exhausted = False
-            # Orphan byte carried across chunk boundaries to keep Int16 samples
-            # aligned when a provider splits a sample between two chunks.
-            pending_byte = b""
+            # NOTE: sample-alignment carry across chunk boundaries used to live
+            # here (int16-only, 2-byte). It's now centralized in
+            # TelephonyMediaGateway.send_audio, keyed on the session's actual
+            # _tts_source_format (2 bytes for s16le, 4 for f32le) — a hardcoded
+            # 2-byte carry silently let misaligned f32le chunks through into
+            # pcm_float32_to_int16(), which raised and dropped the whole chunk.
+            # Centralizing in the gateway also covers the greeting path
+            # (voice_orchestrator.send_greeting), which calls send_audio
+            # directly and never went through this carry.
             # One retry if the provider yields NO audio within the inter-chunk
             # timeout (a brief stall before the sentence starts). Safe — nothing
             # has played yet, so no duplicate audio.
@@ -172,7 +178,6 @@ class TtsPlayback:
                             sample_rate=self._p.tts_sample_rate,
                             call_id=call_id,
                         ).__aiter__()
-                        pending_byte = b""
                         continue
                     logger.error(
                         "tts_inter_chunk_timeout call_id=%s timeout_s=%.1f "
@@ -214,22 +219,14 @@ class TtsPlayback:
                         self._p.latency_tracker.mark_audio_start(call_id)
                     first_chunk = False
                 raw = audio_chunk.data if hasattr(audio_chunk, "data") else audio_chunk
-                # Int16 PCM = 2 bytes/sample. A provider streaming raw PCM can
-                # split a sample ACROSS chunk boundaries: a chunk arrives odd-
-                # length with the sample's other byte in the NEXT chunk. CARRY
-                # that orphan byte forward (prepend it to the next chunk) instead
-                # of dropping it — dropping byte-shifts every following sample
-                # (high/low swapped) → loud buzz. This was the ElevenLabs
-                # eleven_v3 buzz: frequent odd chunks, worse on long RAG-backed
-                # answers (more chunks → more split samples).
+                # Sample-alignment carry (a provider can split a sample across
+                # chunk boundaries — dropping the orphan byte(s) byte-shifts
+                # every following sample, e.g. the ElevenLabs eleven_v3 buzz)
+                # is now handled centrally in
+                # TelephonyMediaGateway.send_audio, format-aware for both
+                # s16le and f32le. See the NOTE above.
                 if not isinstance(raw, (bytes, bytearray)):
                     raw = bytes(raw)
-                if pending_byte:
-                    raw = pending_byte + raw
-                    pending_byte = b""
-                if len(raw) % 2 != 0:
-                    pending_byte = raw[-1:]
-                    raw = raw[:-1]
                 if not raw:
                     continue
                 if not first_chunk_sent:

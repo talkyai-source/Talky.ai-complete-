@@ -103,6 +103,15 @@ class TelephonySession:
     # the current TTS chunk to fully drain.
     barge_in_event: Optional[asyncio.Event] = field(default=None)
 
+    # Orphan sample fragment carried across send_audio() calls so a TTS
+    # provider that splits a sample across two chunks doesn't corrupt (s16le)
+    # or crash-and-drop (f32le) the boundary. Alignment width depends on
+    # _tts_source_format (2 bytes for s16le, 4 for f32le) — see send_audio().
+    # Centralized here (rather than in the caller) so BOTH the per-turn TTS
+    # loop (tts_playback.py) and the greeting path (voice_orchestrator.
+    # send_greeting, which calls send_audio directly) get correct alignment.
+    _tts_pending_bytes: bytes = field(default_factory=bytes)
+
     # Metrics
     chunks_received: int = 0
     chunks_sent: int = 0
@@ -120,6 +129,13 @@ class TelephonySession:
 
     # Rate-limit timestamp for the queue-overrun warning (one log/sec/call).
     last_queue_drop_warn_at: float = 0.0
+
+    # Reliability quick-win: consecutive decode/resample failures in
+    # on_audio_received. A single bad packet is swallowed silently (must
+    # not crash the audio hot path), but a *recurring* fault used to be
+    # invisible at DEBUG until the 300s watchdog noticed dead air.
+    consecutive_audio_route_failures: int = 0
+    last_audio_route_error_warn_at: float = 0.0
 
 
 class TelephonyMediaGateway(MediaGateway):
@@ -139,6 +155,11 @@ class TelephonyMediaGateway(MediaGateway):
     # PCMU wire rate to / from the C++ Voice Gateway. Cannot change without
     # rebuilding the C++ binary, so stays at 8 kHz.
     _WIRE_SAMPLE_RATE: int = 8000
+
+    # Reliability quick-win thresholds for the audio-route failure counter
+    # (see TelephonySession.consecutive_audio_route_failures).
+    _AUDIO_ROUTE_LOG_INTERVAL_S: float = 5.0
+    _AUDIO_ROUTE_FORCE_END_THRESHOLD: int = 50
 
     def __init__(self) -> None:
         self._sessions: Dict[str, TelephonySession] = {}
@@ -327,11 +348,31 @@ class TelephonyMediaGateway(MediaGateway):
             else:
                 pcm_chunk = pcm_chunk_8k
         except Exception as exc:
-            logger.debug(
-                "TelephonyMediaGateway: ingress decode/resample failed for %s: %s",
-                call_id[:12], exc,
-            )
+            count = session.consecutive_audio_route_failures + 1
+            session.consecutive_audio_route_failures = count
+
+            if (now - session.last_audio_route_error_warn_at) >= self._AUDIO_ROUTE_LOG_INTERVAL_S:
+                session.last_audio_route_error_warn_at = now
+                logger.warning(
+                    "TelephonyMediaGateway: ingress decode/resample failed call_id=%s "
+                    "consecutive_failures=%d err=%s",
+                    call_id[:12], count, exc,
+                    extra={"call_id": call_id, "consecutive_failures": count},
+                )
+
+            if count >= self._AUDIO_ROUTE_FORCE_END_THRESHOLD:
+                logger.warning(
+                    "TelephonyMediaGateway: call_id=%s hit %d consecutive audio-route "
+                    "failures — forcing end instead of waiting for the 300s watchdog",
+                    call_id[:12], count,
+                )
+                session.consecutive_audio_route_failures = 0
+                # Must not block/crash the audio hot path — fire-and-forget.
+                asyncio.create_task(self.hangup_call(call_id, reason="audio_route_failure"))
             return
+
+        # Decode succeeded — clear the failure streak.
+        session.consecutive_audio_route_failures = 0
 
         session.chunks_received += 1
         session.total_bytes_received += len(audio_chunk)
@@ -405,6 +446,30 @@ class TelephonyMediaGateway(MediaGateway):
             logger.warning(f"[TelephonyGW] send_audio: no active session for {call_id[:12]}")
             return
 
+        if not audio_chunk:
+            return
+
+        # Carry an orphan partial-sample fragment across chunk boundaries.
+        # Format-aware: f32le (Google/Cartesia, 4 bytes/sample) needs 4-byte
+        # alignment; s16le (Deepgram, 2 bytes/sample) needs 2-byte alignment.
+        # A chunk whose length is even but not a multiple of 4 used to slip
+        # past the old int16-only carry (in tts_playback.py) straight into
+        # pcm_float32_to_int16() -> np.frombuffer(dtype=float32), which
+        # raises on a misaligned buffer size — the exception handler below
+        # then silently dropped the ENTIRE chunk (intermittent audio gaps on
+        # long f32le answers). Doing the carry here, keyed on this session's
+        # _tts_source_format, covers every send_audio() caller with one
+        # implementation — both the per-turn TTS loop and the greeting path.
+        if not isinstance(audio_chunk, (bytes, bytearray)):
+            audio_chunk = bytes(audio_chunk)
+        align = 4 if self._tts_source_format == "f32le" else 2
+        if session._tts_pending_bytes:
+            audio_chunk = session._tts_pending_bytes + audio_chunk
+            session._tts_pending_bytes = b""
+        remainder = len(audio_chunk) % align
+        if remainder:
+            session._tts_pending_bytes = audio_chunk[-remainder:]
+            audio_chunk = audio_chunk[:-remainder]
         if not audio_chunk:
             return
 

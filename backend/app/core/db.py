@@ -10,11 +10,28 @@ Usage:
 """
 import os
 import logging
+import asyncio
 import asyncpg
 from typing import Optional, Any, List, Dict
 from contextlib import asynccontextmanager
 
 logger = logging.getLogger(__name__)
+
+# Bounded wait for a connection when the pool is exhausted. Without this,
+# `pool.acquire()` blocks forever — a saturated pool (e.g. a slow query
+# holding every connection, or the DB itself wedged) hangs every caller
+# indefinitely instead of failing fast. Configurable so ops can tune it;
+# 10s is a guess-but-reasonable default for interactive request paths.
+_ACQUIRE_TIMEOUT_S = float(os.getenv("PG_POOL_ACQUIRE_TIMEOUT", "10"))
+
+
+class DatabasePoolTimeoutError(RuntimeError):
+    """Raised when no pooled connection became available within the acquire timeout.
+
+    Callers (error handlers) should map this to HTTP 503 — it signals
+    the DB/pool is saturated, not a client error.
+    """
+
 
 _pool: Optional[asyncpg.Pool] = None
 # Phase 2.3 — optional read-replica pool. Populated when
@@ -140,7 +157,17 @@ async def get_read_db():
             rows = await conn.fetch("SELECT * FROM campaigns WHERE ...")
     """
     pool = get_read_pool()
-    async with pool.acquire() as conn:
+    try:
+        conn = await pool.acquire(timeout=_ACQUIRE_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        logger.error(
+            "db_pool_acquire_timeout pool=read timeout_s=%.1f — pool exhausted or DB unresponsive",
+            _ACQUIRE_TIMEOUT_S,
+        )
+        raise DatabasePoolTimeoutError(
+            f"Timed out after {_ACQUIRE_TIMEOUT_S}s waiting for a read DB connection"
+        ) from None
+    try:
         from app.core.security.tenant_isolation import (
             get_current_tenant_id, get_bypass_rls,
         )
@@ -159,6 +186,8 @@ async def get_read_db():
             await conn.execute("SET LOCAL app.bypass_rls = 'false'")
 
         yield conn
+    finally:
+        await pool.release(conn)
 
 
 @asynccontextmanager
@@ -172,12 +201,22 @@ async def get_db():
             result = await conn.fetch("SELECT * FROM plans")
     """
     pool = get_pool()
-    async with pool.acquire() as conn:
+    try:
+        conn = await pool.acquire(timeout=_ACQUIRE_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        logger.error(
+            "db_pool_acquire_timeout pool=primary timeout_s=%.1f — pool exhausted or DB unresponsive",
+            _ACQUIRE_TIMEOUT_S,
+        )
+        raise DatabasePoolTimeoutError(
+            f"Timed out after {_ACQUIRE_TIMEOUT_S}s waiting for a DB connection"
+        ) from None
+    try:
         from app.core.security.tenant_isolation import get_current_tenant_id, get_bypass_rls
-        
+
         tenant_id = get_current_tenant_id()
         bypass_rls = get_bypass_rls()
-        
+
         # Set RLS context in PostgreSQL session
         if bypass_rls:
             await conn.execute("SET LOCAL app.bypass_rls = 'true'")
@@ -188,8 +227,10 @@ async def get_db():
         else:
             await conn.execute("SET LOCAL app.current_tenant_id = ''")
             await conn.execute("SET LOCAL app.bypass_rls = 'false'")
-            
+
         yield conn
+    finally:
+        await pool.release(conn)
 
 
 class Database:

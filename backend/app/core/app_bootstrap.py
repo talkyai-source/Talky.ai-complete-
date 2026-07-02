@@ -11,7 +11,11 @@ from app.api.v1.endpoints.auth import limiter
 from app.core.api_security_middleware import APISecurityMiddleware
 from app.core.config import get_settings
 from app.core.error_handlers import register_error_handlers
-from app.core.request_id_middleware import RequestIdLogFilter, RequestIdMiddleware
+from app.core.request_id_middleware import (
+    CallIdLogFilter,
+    RequestIdLogFilter,
+    RequestIdMiddleware,
+)
 from app.core.security_headers_middleware import SecurityHeadersMiddleware
 from app.core.session_security_middleware import SessionSecurityMiddleware
 from app.core.security.csrf import CSRFMiddleware
@@ -23,7 +27,7 @@ def configure_logging() -> None:
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
     logging.basicConfig(
         level=getattr(logging, log_level, logging.INFO),
-        format="%(asctime)s %(levelname)-8s [%(name)s] [req=%(request_id)s] %(message)s",
+        format="%(asctime)s %(levelname)-8s [%(name)s] [req=%(request_id)s] [call=%(call_id)s] %(message)s",
         datefmt="%H:%M:%S",
         # force=True reclaims the root logger even if an earlier import (or
         # uvicorn) already attached a handler. Without it, basicConfig is a
@@ -35,8 +39,10 @@ def configure_logging() -> None:
         force=True,
     )
     request_id_filter = RequestIdLogFilter()
+    call_id_filter = CallIdLogFilter()
     for handler in logging.getLogger().handlers:
         handler.addFilter(request_id_filter)
+        handler.addFilter(call_id_filter)
     for noisy in (
         "httpcore",
         "httpx",

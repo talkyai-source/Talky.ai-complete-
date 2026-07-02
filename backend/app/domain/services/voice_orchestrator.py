@@ -1394,6 +1394,16 @@ class VoiceOrchestrator:
             call_session.talklee_call_id = talklee_call_id
             call_session.barge_in_event = asyncio.Event()
 
+            # Wire barge-in into the media gateway's pacing loop, mirroring
+            # the cascaded path (voice_pipeline_service.start_pipeline).
+            # Without this, TelephonyMediaGateway.send_audio's pacing loop
+            # never sees the event fire (it stays None), so it can't
+            # early-exit and the agent keeps talking ~200-400ms over the
+            # caller after a barge-in on realtime calls.
+            set_barge_in = getattr(gateway, "set_barge_in_event", None)
+            if set_barge_in:
+                set_barge_in(call_id, call_session.barge_in_event)
+
             bridge = RealtimeBridge(
                 call_id=call_id,
                 realtime_session=rt,
@@ -1403,6 +1413,12 @@ class VoiceOrchestrator:
                 tenant_id=config.tenant_id,
                 campaign_id=config.campaign_id,
                 session_active=lambda: self._active_sessions.get(call_id) is not None,
+                barge_in_event=call_session.barge_in_event,
+                # Caller-speaks-first (INBOUND) calls must NOT have the agent
+                # greet at t=0 — that talks over the caller who just picked
+                # up expecting to speak first. OUTBOUND (platform-dialed)
+                # calls keep the existing greet-on-connect behaviour.
+                greet_on_start=(config.direction == Direction.OUTBOUND),
             )
 
             voice_session = VoiceSession(

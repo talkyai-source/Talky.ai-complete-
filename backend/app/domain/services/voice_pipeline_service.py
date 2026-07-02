@@ -405,6 +405,18 @@ class VoicePipelineService:
         websocket: Optional[WebSocket] = None,
     ) -> None:
         call_id = session.call_id
+
+        # Correlation: WebSockets/telephony callbacks never pass through the
+        # HTTP request-id middleware, so voice logs used to show `req=-`
+        # with no way to grep one call's logs together. Mirrors the same
+        # ContextVar + logging.Filter pattern used for tenant_id (see
+        # assistant_ws.py's set_current_tenant_id call) — set once here at
+        # pipeline start; asyncio.create_task copies the current context,
+        # so turn/STT/LLM/TTS tasks spawned from within this call's
+        # execution tree inherit it automatically.
+        from app.core.request_id_middleware import set_call_id
+        set_call_id(call_id)
+
         # Reuse the CallSession's barge-in event if one was already created
         # (e.g. by the orchestrator for the greeting).  This ensures Flux's
         # StartOfTurn callback sets the SAME event the greeting TTS loop is

@@ -103,6 +103,19 @@ def _get_orchestrator():
 _zombie_channel_ticks: dict[str, int] = {}
 _ZOMBIE_TICK_THRESHOLD = 2  # ~60s at the 30s watchdog cadence
 
+# Reliability quick-win: `_on_audio_received` swallows all exceptions from
+# the media gateway so a single bad RTP packet can never crash the audio
+# hot path — but a *recurring* fault (e.g. STT queue wedged, resample lib
+# broken for this call's codec) used to be invisible until the 300s
+# watchdog finally noticed dead air. This tracks per-call consecutive
+# failures so we can (a) surface it at WARNING, rate-limited so a storm of
+# bad packets doesn't spam the log, and (b) force-end the call well before
+# the watchdog if the fault never clears.
+_audio_route_failure_counts: dict[str, int] = {}
+_audio_route_last_logged_at: dict[str, float] = {}
+_AUDIO_ROUTE_LOG_INTERVAL_S = 5.0
+_AUDIO_ROUTE_FORCE_END_THRESHOLD = 50
+
 
 def _detect_zombie_sessions(
     local_ids: list,
@@ -1331,13 +1344,43 @@ async def _on_audio_received(call_id: str, audio_bytes: bytes) -> None:
         await voice_session.media_gateway.on_audio_received(
             voice_session.call_id, audio_bytes
         )
+        # Clear the streak on the next successful packet.
+        if call_id in _audio_route_failure_counts:
+            _audio_route_failure_counts.pop(call_id, None)
+            _audio_route_last_logged_at.pop(call_id, None)
     except Exception as exc:
-        logger.debug(f"Audio route error {call_id[:12]}: {exc}")
+        count = _audio_route_failure_counts.get(call_id, 0) + 1
+        _audio_route_failure_counts[call_id] = count
+
+        now = time.monotonic()
+        last_logged = _audio_route_last_logged_at.get(call_id, 0.0)
+        if now - last_logged >= _AUDIO_ROUTE_LOG_INTERVAL_S:
+            _audio_route_last_logged_at[call_id] = now
+            logger.warning(
+                "audio_route_error call_id=%s consecutive_failures=%d err=%s",
+                call_id[:12], count, exc,
+                extra={"call_id": call_id, "consecutive_failures": count},
+            )
+
+        if count >= _AUDIO_ROUTE_FORCE_END_THRESHOLD:
+            logger.warning(
+                "audio_route_error call_id=%s hit %d consecutive failures — "
+                "forcing end instead of waiting for the 300s watchdog",
+                call_id[:12], count,
+            )
+            _audio_route_failure_counts.pop(call_id, None)
+            _audio_route_last_logged_at.pop(call_id, None)
+            # Must not block/crash the audio hot path — fire-and-forget.
+            asyncio.create_task(_force_end_and_hangup(call_id))
 
 
 async def _on_call_ended(call_id: str) -> None:
     """Clean up voice session when the call hangs up."""
     logger.info(f"Telephony bridge: call ended {call_id[:12]}")
+
+    # Avoid leaking the audio-route failure trackers across calls.
+    _audio_route_failure_counts.pop(call_id, None)
+    _audio_route_last_logged_at.pop(call_id, None)
 
     # Track B (live call transparency): mark the call ENDED in calls.status
     # and emit a stream_events row so the live-calls panel removes it from

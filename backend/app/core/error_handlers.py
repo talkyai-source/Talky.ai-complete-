@@ -25,6 +25,7 @@ from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.request_id_middleware import get_request_id
+from app.core.db import DatabasePoolTimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +142,23 @@ async def rate_limit_exception_handler(
     )
 
 
+async def db_pool_timeout_exception_handler(
+    request: Request, exc: DatabasePoolTimeoutError
+) -> JSONResponse:
+    # Pool exhaustion / DB unresponsive — this is a transient capacity
+    # problem, not a client error or a code bug, so 503 (not 500) is the
+    # correct signal for clients/load-balancers to back off and retry.
+    logger.error("DB pool acquire timed out: %s", exc)
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content=_envelope(
+            code="service_unavailable",
+            message="The service is temporarily overloaded. Please retry shortly.",
+        ),
+        headers={"Retry-After": "5"},
+    )
+
+
 async def unhandled_exception_handler(
     request: Request, exc: Exception
 ) -> JSONResponse:
@@ -179,4 +197,5 @@ def register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(RateLimitExceeded, rate_limit_exception_handler)
+    app.add_exception_handler(DatabasePoolTimeoutError, db_pool_timeout_exception_handler)
     app.add_exception_handler(Exception, unhandled_exception_handler)

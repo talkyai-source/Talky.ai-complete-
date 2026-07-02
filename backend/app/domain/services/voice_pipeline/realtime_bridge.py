@@ -67,6 +67,7 @@ class RealtimeBridge:
         campaign_id: Optional[str] = None,
         session_active: Optional[Any] = None,
         greet_on_start: bool = True,
+        barge_in_event: Optional[asyncio.Event] = None,
     ) -> None:
         self._call_id = call_id
         self._rt = realtime_session
@@ -79,6 +80,14 @@ class RealtimeBridge:
         # caller pump stop promptly on hangup. Defaults to "always active" —
         # the pumps also stop when the RealtimeSession closes.
         self._session_active = session_active or (lambda: True)
+        # Same barge-in event the gateway's send_audio pacing loop watches
+        # (set via gateway.set_barge_in_event in the orchestrator). On an
+        # "interrupted" event from OpenAI we set() it BEFORE clearing the
+        # output buffer so the pacing loop's wait_for(event.wait(), ...)
+        # wakes immediately instead of waiting out its sleep window — then
+        # clear() it right after so it doesn't stay latched "set" for the
+        # next turn. Mirrors the cascaded path's barge_in_event wiring.
+        self._barge_in_event = barge_in_event
         # Agent-first: make the model greet immediately on connect. Set False
         # for caller-speaks-first campaigns (let semantic VAD wait for the
         # caller). Defaults True — outbound telephony is agent-first.
@@ -226,12 +235,25 @@ class RealtimeBridge:
                         logger.debug("realtime_bridge send_audio err: %s", exc)
 
                 elif kind == "interrupted":
-                    # Caller barged in: drop whatever the gateway still has
-                    # buffered so the agent stops mid-sentence immediately.
+                    # Caller barged in: signal the gateway's pacing loop
+                    # FIRST so any in-flight send_audio() burst exits within
+                    # microseconds (it's blocked on
+                    # asyncio.wait_for(barge_in_event.wait(), ...)) instead
+                    # of finishing its sleep window, THEN drop whatever the
+                    # gateway still has buffered so the agent stops
+                    # mid-sentence immediately.
+                    if self._barge_in_event is not None:
+                        self._barge_in_event.set()
                     try:
                         await self._gw.clear_output_buffer(self._call_id)
                     except Exception as exc:  # noqa: BLE001
                         logger.debug("realtime_bridge clear_output_buffer err: %s", exc)
+                    finally:
+                        # Un-latch so it doesn't stay "set" and short-circuit
+                        # the NEXT turn's pacing loop before any barge-in
+                        # actually happens.
+                        if self._barge_in_event is not None:
+                            self._barge_in_event.clear()
 
                 elif kind == "function_call" and ev.function_call:
                     await self._handle_function_call(ev.function_call)

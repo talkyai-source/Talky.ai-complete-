@@ -62,6 +62,10 @@ from app.domain.services.telephony.failure_reasons import (  # noqa: E402
     humanize_failure,
 )
 from app.domain.services.event_emitter import emit_event_via_pool  # noqa: E402
+from app.core.security.internal_auth import (  # noqa: E402
+    require_internal_or_tenant,
+    resolve_call_tenant,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -380,13 +384,27 @@ async def make_call(request: Request, body: MakeCallRequest):
 
     Returns 429 if call is blocked/throttled, 202 if queued.
     """
+    # ── Auth gate (SECURITY) ────────────────────────────────────────────
+    # This endpoint has TWO legitimate callers: the internal dialer worker
+    # (trusted via X-Internal-Service-Token) and a logged-in user (JWT →
+    # request.state.tenant_id). Reject anyone who is neither BEFORE doing
+    # any adapter/guard work. On the user path the effective tenant is
+    # ALWAYS derived from the JWT — a client-supplied body.tenant_id can
+    # never override it (that was the cross-tenant origination hole); a
+    # mismatching body tenant is a 403. Only the trusted internal path may
+    # name an arbitrary tenant in the body. Resolve the effective tenant
+    # here (401/403 enforced up-front, before any adapter/guard work).
+    caller_ctx = require_internal_or_tenant(request)
+    effective_tenant_id = resolve_call_tenant(request, body.tenant_id, ctx=caller_ctx)
+
     # Unpack the request body into the local names the rest of this
     # handler uses (kept identical so the originate/guard/warmup logic
     # below is untouched by the query-string → JSON-body migration).
     destination = body.destination
     caller_id = body.caller_id
     campaign_id = body.campaign_id
-    tenant_id = body.tenant_id
+    # NB: no local ``tenant_id = body.tenant_id`` — the tenant is authoritative
+    # via effective_tenant_id above; never re-derive it from the raw body.
     first_speaker = body.first_speaker
     agent_name = body.agent_name
 
@@ -441,9 +459,10 @@ async def make_call(request: Request, body: MakeCallRequest):
             },
         )
 
-    # Get tenant from request context or query param
-    # In production, get from auth/JWT token
-    effective_tenant_id = tenant_id or getattr(request.state, "tenant_id", None)
+    # effective_tenant_id was resolved up-front by resolve_call_tenant (the
+    # previous ``tenant_id or request.state.tenant_id`` let the client body
+    # OVERRIDE the JWT tenant — cross-tenant origination). A trusted
+    # internal caller that named no tenant still lands here as None.
     if not effective_tenant_id:
         raise HTTPException(status_code=400, detail="Tenant ID required")
 
@@ -794,8 +813,14 @@ async def make_call(request: Request, body: MakeCallRequest):
 
 
 @router.post("/hangup/{call_id}")
-async def hangup_call(call_id: str):
+async def hangup_call(call_id: str, request: Request):
     """Hang up a specific call."""
+    # Auth gate: internal service token OR authenticated user. Previously
+    # unauthenticated — any caller who cleared CSRF could hang up calls.
+    # NOTE: this proves the caller is authenticated but does NOT yet verify
+    # the call_id belongs to the caller's tenant (residual IDOR — flagged;
+    # call_id is the opaque provider channel id, not tenant-scoped here).
+    require_internal_or_tenant(request)
     if not _adapter:
         raise HTTPException(status_code=400, detail="Telephony adapter not connected")
     await _adapter.hangup(call_id)
@@ -870,7 +895,8 @@ async def hangup_calls_for_campaign(campaign_id: str) -> int:
 # ---------------------------------------------------------------------------
 
 @router.post("/transfer/blind")
-async def transfer_blind(payload: TransferPayload):
+async def transfer_blind(payload: TransferPayload, request: Request):
+    require_internal_or_tenant(request)
     if not _adapter or not _adapter.connected:
         raise HTTPException(status_code=400, detail="Telephony adapter not connected")
     result = await _adapter.transfer(payload.call_id, payload.destination, "blind")
@@ -878,7 +904,8 @@ async def transfer_blind(payload: TransferPayload):
 
 
 @router.post("/transfer/attended")
-async def transfer_attended(payload: TransferPayload):
+async def transfer_attended(payload: TransferPayload, request: Request):
+    require_internal_or_tenant(request)
     if not _adapter or not _adapter.connected:
         raise HTTPException(status_code=400, detail="Telephony adapter not connected")
     result = await _adapter.transfer(payload.call_id, payload.destination, "attended")
@@ -886,7 +913,8 @@ async def transfer_attended(payload: TransferPayload):
 
 
 @router.post("/transfer/deflect")
-async def transfer_deflect(payload: TransferPayload):
+async def transfer_deflect(payload: TransferPayload, request: Request):
+    require_internal_or_tenant(request)
     if not _adapter or not _adapter.connected:
         raise HTTPException(status_code=400, detail="Telephony adapter not connected")
     result = await _adapter.transfer(payload.call_id, payload.destination, "deflect")

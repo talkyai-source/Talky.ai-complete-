@@ -323,6 +323,17 @@ class ServiceContainer:
                     redis_url,
                     encoding="utf-8",
                     decode_responses=True,
+                    # Reliability quick-win: without these, a blackholed/
+                    # wedged Redis hangs every hot-path caller forever (the
+                    # concurrency limiter, cache reads, etc.) instead of
+                    # failing fast into their existing degrade-on-error
+                    # paths, and an unbounded pool can grow without limit
+                    # under retry storms. Values are conservative guesses
+                    # for an interactive voice workload — confirm against
+                    # observed Redis latency before tightening further.
+                    socket_timeout=2,
+                    socket_connect_timeout=2,
+                    max_connections=50,
                 )
                 logger.info(f"redis_connected mode=single url={log_url}")
             await self._redis.ping()
