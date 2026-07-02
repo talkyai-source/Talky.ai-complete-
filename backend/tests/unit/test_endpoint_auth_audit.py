@@ -59,6 +59,8 @@ _AUTH_FLOWS = {
     "POST /api/v1/auth/passkeys/login/complete": "passkey login response, pre-auth",
     "POST /api/v1/auth/mfa/verify": "MFA challenge, pre-auth (token in body)",
     "POST /api/v1/auth/refresh": "rotates refresh-cookie; pre-auth by design",
+    "POST /api/v1/auth/forgot-password": "reset-code request; pre-auth, enumeration-safe + rate-limited",
+    "POST /api/v1/auth/reset-password": "reset-code redemption; pre-auth (code in body)",
 }
 
 # Webhook callbacks from third parties / internal — these use payload
@@ -77,6 +79,7 @@ _WEBHOOKS = {
 # Public endpoints — no tenant data exposed.
 _PUBLIC = {
     "GET /api/v1/plans/": "public plan catalog (no per-tenant data)",
+    "GET /api/v1/billing/plans": "billing-module passthrough to the same public plan catalog (no per-tenant data)",
 }
 
 # ---------------------------------------------------------------------
@@ -143,6 +146,11 @@ def _route_has_auth_dep(endpoint_func) -> bool:
     auth_dep_names = {
         "get_current_user", "require_admin", "get_optional_user",
         "verify_admin_token",
+        # Higher-privilege guards that all chain to get_current_user.
+        # Omitting these produced false-positive "leaks" on the
+        # platform-admin-only user-management routes (they ARE secured).
+        "require_platform_admin", "require_tenant_member",
+        "require_permissions",
     }
     sig = inspect.signature(endpoint_func)
     src = inspect.getsource(endpoint_func)
@@ -173,6 +181,39 @@ def _norm_route_key(method: str, path: str) -> str:
     return f"{method.upper()} {path}"
 
 
+def _collect_api_routes(routes, prefix: str = ""):
+    """Yield (full_path, APIRoute) for every route, recursing into
+    included sub-routers.
+
+    FastAPI's ``include_router`` used to flatten every sub-route into a
+    top-level ``APIRoute`` on ``app.routes``. Newer FastAPI (0.128+)
+    instead mounts each included router as an internal ``_IncludedRouter``
+    whose real ``APIRoute`` objects live on ``original_router.routes``
+    with the prefix carried on the mount's ``include_context``. A flat
+    ``for route in app.routes`` therefore finds ZERO APIRoutes on the
+    newer version and the audit silently passes.
+
+    This walker reconstructs full paths across BOTH layouts so the
+    safeguard keeps working regardless of the installed FastAPI version.
+    """
+    from fastapi.routing import APIRoute
+
+    for route in routes:
+        if isinstance(route, APIRoute):
+            yield (prefix + route.path, route)
+        elif type(route).__name__ == "_IncludedRouter":
+            include_ctx = getattr(route, "include_context", None)
+            sub_prefix = getattr(include_ctx, "prefix", "") or ""
+            original = getattr(route, "original_router", None)
+            if original is not None:
+                yield from _collect_api_routes(
+                    original.routes, prefix + sub_prefix,
+                )
+        elif hasattr(route, "routes"):
+            # Plain Mount / sub-app — recurse without a known prefix.
+            yield from _collect_api_routes(route.routes, prefix)
+
+
 @pytest.mark.skipif(
     "main" not in __import__("sys").modules
     and not __import__("importlib").util.find_spec("app.main"),
@@ -189,21 +230,17 @@ def test_every_db_route_requires_auth():
     triggering RLS context setup, returns 404/500 to legitimate
     users, and gets reported as "DB shows empty but data is there."
     """
-    from fastapi.routing import APIRoute
-
     from app.main import app
 
     leaks: list[str] = []
     audited: int = 0
 
-    for route in app.routes:
-        if not isinstance(route, APIRoute):
-            continue
+    for path, route in _collect_api_routes(app.routes):
         for method in route.methods:
             if method == "HEAD":  # auto-derived from GET
                 continue
             audited += 1
-            key = _norm_route_key(method, route.path)
+            key = _norm_route_key(method, path)
             if key in KNOWN_PUBLIC_ROUTES:
                 continue
             try:
@@ -231,18 +268,14 @@ def test_known_public_routes_actually_exist():
     KNOWN_PUBLIC_ROUTES no longer exists in the app, the entry is dead
     and should be removed — leaving it lets a future bug hide behind it.
     """
-    from fastapi.routing import APIRoute
-
     from app.main import app
 
     real_routes: set[str] = set()
-    for route in app.routes:
-        if not isinstance(route, APIRoute):
-            continue
+    for path, route in _collect_api_routes(app.routes):
         for method in route.methods:
             if method == "HEAD":
                 continue
-            real_routes.add(_norm_route_key(method, route.path))
+            real_routes.add(_norm_route_key(method, path))
 
     stale = [k for k in KNOWN_PUBLIC_ROUTES if k not in real_routes]
     # Don't fail on stale entries — endpoint paths drift; flag for cleanup.

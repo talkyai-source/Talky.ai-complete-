@@ -483,7 +483,13 @@ def model_prompt_addendum(model: str) -> str:
     Appended to the very end of the composed system prompt by the per-turn
     layer (see voice_pipeline/llm_response.py) so it lands in the recency slot.
     """
-    m = (model or "").lower()
+    # Model ids are gathered from duck-typed provider internals
+    # (getattr(provider, "_model", "")). Coerce defensively: a non-string
+    # value (an un-configured/failover provider, or a mock) must NEVER
+    # raise here, because this runs inside the live per-turn assembly and
+    # an exception aborts the whole turn — which on the barge-in path
+    # silently drops the partial assistant-reply commit.
+    m = (model if isinstance(model, str) else "").lower()
     # Mirror GeminiLLMProvider._is_gemini_3: the rolling "*-latest" aliases are
     # thinking-floored as 3.x by the provider, so they show the same NATO-
     # spelling quirk and need the same email read-back reminder. Keep in sync.

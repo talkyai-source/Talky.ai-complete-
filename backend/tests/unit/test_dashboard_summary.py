@@ -128,13 +128,15 @@ async def test_summary_computes_avg_duration_from_real_calls():
         {"duration_seconds": None},  # in-progress, excluded from mean
         {"duration_seconds": 0},     # also excluded
     ]
+    # The endpoint now loads the month's (outcome, duration) rows ONCE and
+    # derives answered / failed / minutes / avg / outcome_breakdown from
+    # that single query — so there are exactly three `calls` queries:
+    #   1) total_calls (count), 2) month rows (data), 3) active_calls (count).
     builders = {
         "calls": [
-            _FakeBuilder(count=5, data=[]),                # total_calls
-            _FakeBuilder(count=5, data=answered_rows),     # answered_resp (used twice)
-            _FakeBuilder(count=0, data=[]),                # failed_calls
-            _FakeBuilder(count=2, data=[]),                # active_calls
-            _FakeBuilder(count=0, data=[]),                # outcome_breakdown
+            _FakeBuilder(count=5, data=[]),                # 1: total_calls (count only)
+            _FakeBuilder(count=5, data=answered_rows),     # 2: month rows → feeds avg
+            _FakeBuilder(count=2, data=[]),                # 3: active_calls (count only)
         ],
         "campaigns": [_FakeBuilder(count=1, data=[])],
         "tenants": [_FakeBuilder(data=[{"minutes_allocated": 100}])],
@@ -159,13 +161,13 @@ async def test_summary_outcome_breakdown_groups_by_outcome():
         {"outcome": "no_answer"},
         {"outcome": "no_answer"},
     ]
+    # outcome_breakdown is derived from the single month-rows query (query
+    # #2), not a dedicated 5th query. Three `calls` queries total.
     builders = {
         "calls": [
-            _FakeBuilder(count=7, data=[]),
-            _FakeBuilder(count=7, data=[]),
-            _FakeBuilder(count=0, data=[]),
-            _FakeBuilder(count=0, data=[]),
-            _FakeBuilder(count=7, data=outcome_rows),
+            _FakeBuilder(count=7, data=[]),                # 1: total_calls (count only)
+            _FakeBuilder(count=7, data=outcome_rows),      # 2: month rows → feeds outcome_breakdown
+            _FakeBuilder(count=0, data=[]),                # 3: active_calls (count only)
         ],
         "campaigns": [_FakeBuilder(count=0, data=[])],
         "tenants": [_FakeBuilder(data=[{"minutes_allocated": 0}])],

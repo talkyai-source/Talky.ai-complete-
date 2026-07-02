@@ -131,9 +131,13 @@ class TestPerPersonaDirectionalOpeners:
             "lead_gen", "Alex", "Acme", LEAD_GEN_SLOTS,
             direction="outbound",
         ))
+        # Opener rewritten (2026-07-02) to Josh-Braun permission/problem
+        # shape: introduce + honest reason + explicit permission ask + an
+        # easy out if it's a rough moment. Assert that intent, not the
+        # retired "out of the blue / bad time" wording.
         assert "Alex from Acme" in flat
-        assert "out of the blue" in flat
-        assert "bad time" in flat
+        assert "grab thirty seconds" in flat   # permission ask
+        assert "when's better" in flat          # easy out
 
     def test_lead_gen_inbound_opener(self):
         """Caller-speaks-first lead_gen — still an OUTBOUND call: introduce +

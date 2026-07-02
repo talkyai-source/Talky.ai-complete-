@@ -150,8 +150,12 @@ async def test_compute_minutes_floors_seconds_to_minutes():
     pool = _FakePool(conn)
     out = await compute_tenant_minutes_used(pool, str(uuid4()))
     assert out == 5
-    # Query was a SUM aggregation
-    _, query, _ = conn.calls[0]
+    # The aggregation runs inside a transaction that first issues a
+    # `SET LOCAL app.bypass_rls` execute(), so the SUM lands on the
+    # fetchval call — locate it by kind rather than a fixed index.
+    fetchval_queries = [q for kind, q, _ in conn.calls if kind == "fetchval"]
+    assert fetchval_queries, "expected a fetchval SUM aggregation"
+    query = fetchval_queries[0]
     assert "SUM(duration_seconds)" in query
     assert "calls" in query
 

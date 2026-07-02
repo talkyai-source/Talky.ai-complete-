@@ -105,19 +105,25 @@ async def test_stt_failover_enabled_wraps_in_resilient(monkeypatch: pytest.Monke
     monkeypatch.setenv("STT_FAILOVER_ENABLED", "true")
     cfg = VoiceSessionConfig(tenant_id="t1")
 
-    # Two distinct provider instances so the wrapper can hold both.
-    primary = MagicMock(initialize=AsyncMock(), name="primary")
+    # Cross-engine resilience (the current wiring): Flux is the PRIMARY,
+    # Nova-3 is the SECONDARY — a different Deepgram engine, same auth, so
+    # a Flux-side outage fails over to Nova and vice-versa. Patch BOTH
+    # provider classes (the old test patched only Flux and modelled a
+    # same-class secondary, which no longer matches the code).
+    primary = MagicMock(initialize=AsyncMock())
     primary.name = "deepgram_flux_primary"
-    secondary = MagicMock(initialize=AsyncMock(), name="secondary")
-    secondary.name = "deepgram_flux_secondary"
-    instances = iter([primary, secondary])
-    fake_cls = MagicMock(side_effect=lambda *a, **k: next(instances))
+    secondary = MagicMock(initialize=AsyncMock())
+    secondary.name = "deepgram_nova_secondary"
+    flux_cls = MagicMock(return_value=primary)
+    nova_cls = MagicMock(return_value=secondary)
 
     with patch(
         "app.domain.services.credential_resolver.get_credential_resolver",
         return_value=_resolver("dg-key"),
     ), patch(
-        "app.infrastructure.stt.deepgram_flux.DeepgramFluxSTTProvider", fake_cls,
+        "app.infrastructure.stt.deepgram_flux.DeepgramFluxSTTProvider", flux_cls,
+    ), patch(
+        "app.infrastructure.stt.deepgram_nova.DeepgramNovaSTTProvider", nova_cls,
     ):
         result = await VoiceOrchestrator()._create_stt_provider(cfg)
 
@@ -132,18 +138,23 @@ async def test_stt_secondary_init_failure_falls_back_to_primary(monkeypatch):
     monkeypatch.setenv("STT_FAILOVER_ENABLED", "true")
     cfg = VoiceSessionConfig(tenant_id="t1")
 
+    # Flux primary initialises fine; the Nova-3 secondary fails to init
+    # (e.g. bad creds) → the wrapper is bypassed and the bare primary is
+    # returned so calls still flow. Patch both engine classes.
     primary = MagicMock(initialize=AsyncMock())
     primary.name = "deepgram_flux"
     secondary = MagicMock(initialize=AsyncMock(side_effect=RuntimeError("auth fail")))
-    secondary.name = "deepgram_flux_alt"
-    instances = iter([primary, secondary])
-    fake_cls = MagicMock(side_effect=lambda *a, **k: next(instances))
+    secondary.name = "deepgram_nova_alt"
+    flux_cls = MagicMock(return_value=primary)
+    nova_cls = MagicMock(return_value=secondary)
 
     with patch(
         "app.domain.services.credential_resolver.get_credential_resolver",
         return_value=_resolver("dg-key"),
     ), patch(
-        "app.infrastructure.stt.deepgram_flux.DeepgramFluxSTTProvider", fake_cls,
+        "app.infrastructure.stt.deepgram_flux.DeepgramFluxSTTProvider", flux_cls,
+    ), patch(
+        "app.infrastructure.stt.deepgram_nova.DeepgramNovaSTTProvider", nova_cls,
     ):
         result = await VoiceOrchestrator()._create_stt_provider(cfg)
 
