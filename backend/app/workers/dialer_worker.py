@@ -576,19 +576,25 @@ class DialerWorker:
         if job.agent_name:
             payload["agent_name"] = job.agent_name
 
-        # Authenticate as an internal service. Preferred: a shared-secret
-        # X-Internal-Service-Token header (CSRF-exempt — see
-        # core/security/csrf). Until INTERNAL_SERVICE_TOKEN is provisioned
-        # on both api + worker, fall back to the legacy Origin:<FRONTEND_URL>
-        # spoof so this code deploys as a no-op and the token can be flipped
-        # on safely. Remove the fallback once the token is rolled out.
+        # Authenticate as an internal service with the shared-secret
+        # X-Internal-Service-Token header (CSRF-exempt + accepted by the
+        # telephony origination auth gate — see core/security/csrf and
+        # core/security/internal_auth). The legacy Origin:<FRONTEND_URL>
+        # spoof fallback was REMOVED (it was the cover for the unauthenticated
+        # cross-tenant origination hole): if the token is missing we fail
+        # LOUD (the API correctly rejects with 401) rather than sneaking
+        # through an insecure path.
         internal_token = os.getenv("INTERNAL_SERVICE_TOKEN", "").strip()
         try:
             headers = {"Content-Type": "application/json"}
             if internal_token:
                 headers["X-Internal-Service-Token"] = internal_token
             else:
-                headers["Origin"] = os.getenv("FRONTEND_URL") or "http://localhost:3000"
+                logger.error(
+                    "INTERNAL_SERVICE_TOKEN is not set on the dialer worker — "
+                    "outbound origination will be rejected (401) by the API auth "
+                    "gate. Provision the token in the worker environment."
+                )
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                     if resp.status == 503:
