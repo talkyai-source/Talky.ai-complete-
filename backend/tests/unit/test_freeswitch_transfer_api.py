@@ -3,6 +3,11 @@ Tests for the generic telephony_bridge transfer endpoints.
 
 Previously tested freeswitch_bridge directly; now tests the PBX-agnostic
 telephony_bridge which delegates to whichever CallControlAdapter is active.
+
+The transfer endpoints are auth-gated (require_internal_or_tenant): a caller
+must present a valid internal service token OR an authenticated tenant (JWT).
+These tests exercise the endpoints on the authenticated (tenant) path and
+also assert the unauthenticated path is rejected with 401.
 """
 import unittest
 from datetime import datetime, timezone
@@ -17,6 +22,24 @@ from app.infrastructure.telephony.freeswitch_esl import (
     TransferLeg,
     TransferStatus,
 )
+
+
+def _authed_request():
+    """A request that passes require_internal_or_tenant via the JWT (tenant)
+    path — no internal token, but request.state.tenant_id is set (as
+    TenantMiddleware would after validating a session)."""
+    req = MagicMock()
+    req.headers = {}  # no X-Internal-Service-Token → forces the tenant path
+    req.state.tenant_id = "tenant-test"
+    return req
+
+
+def _unauthed_request():
+    """A request with neither an internal token nor an authenticated tenant."""
+    req = MagicMock()
+    req.headers = {}
+    req.state.tenant_id = None
+    return req
 
 
 class TelephonyBridgeTransferApiTests(unittest.IsolatedAsyncioTestCase):
@@ -46,7 +69,7 @@ class TelephonyBridgeTransferApiTests(unittest.IsolatedAsyncioTestCase):
                 destination="1002",
                 mode="blind",
             )
-            response = await telephony_bridge.transfer_blind(payload)
+            response = await telephony_bridge.transfer_blind(payload, _authed_request())
 
         self.assertEqual(response.status_code, 200)
         import json
@@ -74,7 +97,7 @@ class TelephonyBridgeTransferApiTests(unittest.IsolatedAsyncioTestCase):
                 destination="1003",
                 mode="attended",
             )
-            await telephony_bridge.transfer_attended(payload)
+            await telephony_bridge.transfer_attended(payload, _authed_request())
 
         mock_adapter.transfer.assert_awaited_once_with("call-2", "1003", "attended")
 
@@ -82,7 +105,7 @@ class TelephonyBridgeTransferApiTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(telephony_bridge, "_adapter", None):
             payload = telephony_bridge.TransferPayload(call_id="call-1", destination="1002")
             with self.assertRaises(HTTPException) as ctx:
-                await telephony_bridge.transfer_blind(payload)
+                await telephony_bridge.transfer_blind(payload, _authed_request())
             self.assertEqual(ctx.exception.status_code, 400)
 
     async def test_transfer_endpoint_requires_connected_adapter(self) -> None:
@@ -91,8 +114,19 @@ class TelephonyBridgeTransferApiTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(telephony_bridge, "_adapter", mock_adapter):
             payload = telephony_bridge.TransferPayload(call_id="call-1", destination="1002")
             with self.assertRaises(HTTPException) as ctx:
-                await telephony_bridge.transfer_blind(payload)
+                await telephony_bridge.transfer_blind(payload, _authed_request())
             self.assertEqual(ctx.exception.status_code, 400)
+
+    async def test_transfer_endpoint_requires_auth(self) -> None:
+        """No internal token and no authenticated tenant → 401, before any
+        adapter work."""
+        mock_adapter = MagicMock()
+        mock_adapter.connected = True
+        with patch.object(telephony_bridge, "_adapter", mock_adapter):
+            payload = telephony_bridge.TransferPayload(call_id="call-1", destination="1002")
+            with self.assertRaises(HTTPException) as ctx:
+                await telephony_bridge.transfer_blind(payload, _unauthed_request())
+            self.assertEqual(ctx.exception.status_code, 401)
 
 
 if __name__ == "__main__":
