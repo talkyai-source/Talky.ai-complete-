@@ -25,6 +25,10 @@ from app.domain.models.ai_config import (
     GOOGLE_TTS_MODELS,
     GROQ_MODELS,
     ProviderListResponse,
+    REALTIME_MODEL,
+    REALTIME_NOISE_REDUCTION,
+    REALTIME_TURN_DETECTION,
+    REALTIME_VOICES,
     STT_ENGINES,
 )
 from app.infrastructure.tts.elevenlabs_catalog import (
@@ -86,7 +90,21 @@ async def list_providers():
         tts={
             "providers": tts_providers,
             "models": tts_models,
-        }
+        },
+        # Realtime (speech-to-speech) pipeline mode — static catalog the
+        # frontend renders as a selectable card. Exposed only when the OpenAI
+        # key is configured, mirroring how Gemini is gated above (avoids a save
+        # that 503s at call time because no key can be resolved).
+        realtime=(
+            {
+                "model": REALTIME_MODEL,
+                "voices": [dict(v) for v in REALTIME_VOICES],
+                "turn_detection": list(REALTIME_TURN_DETECTION),
+                "noise_reduction": list(REALTIME_NOISE_REDUCTION),
+            }
+            if os.getenv("OPENAI_API_KEY")
+            else {}
+        ),
     )
 
 

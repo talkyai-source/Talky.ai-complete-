@@ -760,6 +760,81 @@ async def _reject_overcap_call(call_id: str) -> None:
             pass
 
 
+async def _fetch_campaign_row(db_pool, tenant_id: str, campaign_id: str):
+    """Fetch a campaign row as a dict for the inbound session config
+    (RLS-bypass single-row read scoped by tenant_id + id). Returns None on
+    miss/error — the caller then binds tenant-only with the default agent."""
+    try:
+        from app.core.db_utils import acquire_with_tenant
+        async with acquire_with_tenant(db_pool, None) as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM campaigns WHERE id = $1 AND tenant_id = $2",
+                campaign_id, tenant_id,
+            )
+        return dict(row) if row else None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "inbound_campaign_fetch_failed tenant=%s campaign=%s err=%s",
+            str(tenant_id)[:8], str(campaign_id)[:8], exc,
+        )
+        return None
+
+
+def _inbound_caller_number(call_id: str) -> Optional[str]:
+    """Best-effort caller ANI captured from the inbound StasisStart event."""
+    try:
+        adapter = _bridge()._adapter
+        get_meta = getattr(adapter, "get_inbound_call_meta", None)
+        meta = get_meta(call_id) if callable(get_meta) else None
+        if meta:
+            return meta.get("caller_number")
+    except Exception:
+        pass
+    return None
+
+
+async def _resolve_inbound_route_for_call(call_id: str):
+    """Resolve an inbound Asterisk call to (route, campaign_row).
+
+    Returns ``(None, None)`` when this isn't an inbound Asterisk call, when no
+    DID/context was captured, or on any error — so the caller falls through to
+    today's exact default-agent path (rollout-safe). A returned
+    ``route.rejected`` means the caller must hang up (conflict / strict).
+    """
+    try:
+        adapter = _bridge()._adapter
+        if not adapter or getattr(adapter, "name", "") != "asterisk":
+            return None, None
+        get_meta = getattr(adapter, "get_inbound_call_meta", None)
+        meta = get_meta(call_id) if callable(get_meta) else None
+        if not meta:
+            return None, None
+
+        from app.domain.services.telephony.inbound_router import (
+            resolve_inbound_route,
+        )
+        from app.core.container import get_container as _gc
+        _c = _gc()
+        route = await resolve_inbound_route(
+            _c.db_pool,
+            called_did=meta.get("called_did"),
+            context=meta.get("context"),
+            environment=os.getenv("ENVIRONMENT", "development"),
+        )
+        campaign_row = None
+        if route.resolved and route.campaign_id:
+            campaign_row = await _fetch_campaign_row(
+                _c.db_pool, route.tenant_id, route.campaign_id,
+            )
+        return route, campaign_row
+    except Exception as exc:  # noqa: BLE001 — never break call setup on this
+        logger.warning(
+            "inbound_route_resolve_wrapper_failed call=%s err=%s",
+            call_id[:12], exc,
+        )
+        return None, None
+
+
 async def _on_new_call(call_id: str) -> None:
     """Initialize AI pipeline when a new SIP call arrives."""
     # Track B (live call transparency): the remote side just picked up.
@@ -870,13 +945,63 @@ async def _on_new_call(call_id: str) -> None:
                     )
             _sb.pop_ringing_event(call_id)  # clean up event
         connect_task: Optional[asyncio.Task] = None
+        inbound_route = None
+        inbound_campaign_row = None
         if pre is not None:
             voice_session, connect_task = pre  # type: ignore[assignment]
         else:
-            config = _build_telephony_session_config(gateway_type=gateway_type)
+            # ── Phase C: per-tenant INBOUND routing ─────────────────────────
+            # For a fresh (inbound / non-prewarmed) call, resolve the dialed
+            # DID + trunk context to a tenant/campaign so the CORRECT agent /
+            # prompt / knowledge loads. Additive + fail-soft: an unresolved
+            # DID falls back to today's exact default-agent config; a
+            # conflict / strict-unknown is rejected (fail-closed isolation).
+            inbound_route, inbound_campaign_row = await _resolve_inbound_route_for_call(call_id)
+            if inbound_route is not None and inbound_route.rejected:
+                logger.warning(
+                    "inbound_rejected call=%s reason=%s — hanging up",
+                    call_id[:12], inbound_route.reason,
+                )
+                await _reject_overcap_call(call_id)
+                return
+            if inbound_route is not None and inbound_route.resolved:
+                from app.domain.services.voice_orchestrator import Direction
+                from app.domain.services.voice_tuning import (
+                    get_voice_tuning_resolver,
+                )
+                _vt = await get_voice_tuning_resolver().for_tenant_async(
+                    str(inbound_route.tenant_id) if inbound_route.tenant_id else None,
+                )
+                config = _build_telephony_session_config(
+                    gateway_type=gateway_type,
+                    campaign=inbound_campaign_row,
+                    direction=Direction.INBOUND,
+                    voice_tuning_override=_vt,
+                )
+                logger.info(
+                    "inbound_session_routed call=%s tenant=%s campaign=%s reason=%s",
+                    call_id[:12], str(inbound_route.tenant_id)[:8],
+                    str(inbound_route.campaign_id)[:8] if inbound_route.campaign_id else "-",
+                    inbound_route.reason,
+                )
+            else:
+                config = _build_telephony_session_config(gateway_type=gateway_type)
             voice_session = await orchestrator.create_voice_session(config)
 
         _sb.set_voice_session(call_id, voice_session)
+
+        # Inbound is caller-speaks-first: the caller opened the channel, so
+        # default to user-first timing (no outbound-style auto greeting) when
+        # we resolved the call to a tenant. Only touches the resolved-inbound
+        # path — the fallback path keeps its historical default.
+        if inbound_route is not None and inbound_route.resolved:
+            try:
+                voice_session._first_speaker = "user"
+                _cs0 = getattr(voice_session, "call_session", None)
+                if _cs0 is not None:
+                    _cs0._first_speaker = "user"
+            except Exception:
+                pass
 
         # Ensure the per-call first-speaker is on the session for the greeting
         # decision below. The pre-warm-consumed path already carries it; the
@@ -902,11 +1027,53 @@ async def _on_new_call(call_id: str) -> None:
             from app.core.container import get_container as _gc
             _c = _gc()
             if _c.is_initialized:
-                await bind_telephony_call(
+                binding = await bind_telephony_call(
                     voice_session=voice_session,
                     pbx_channel_id=call_id,
                     db_client=_c.db_client,
                 )
+                # Phase C — inbound calls have NO pre-existing calls row (only
+                # the dialer pre-creates one for outbound), so bind_telephony_
+                # call returns None. When we resolved the inbound call to a
+                # tenant/campaign, bind that here: stamps tenant/campaign on the
+                # session (so tenant-scoped downstream works) + best-effort
+                # creates an inbound calls row keyed to the channel. Fail-soft.
+                if (
+                    binding is None
+                    and inbound_route is not None
+                    and inbound_route.resolved
+                    and inbound_route.tenant_id
+                ):
+                    from app.services.scripts.call_transcript_persister import (
+                        bind_inbound_call,
+                    )
+                    await bind_inbound_call(
+                        voice_session=voice_session,
+                        pbx_channel_id=call_id,
+                        db_client=_c.db_client,
+                        tenant_id=str(inbound_route.tenant_id),
+                        campaign_id=(
+                            str(inbound_route.campaign_id)
+                            if inbound_route.campaign_id else None
+                        ),
+                        caller_number=_inbound_caller_number(call_id),
+                    )
+                    # Load the campaign's knowledge into the session prompt,
+                    # mirroring the outbound prewarm path.
+                    try:
+                        from app.services.scripts.knowledge.session_inject import (
+                            apply_campaign_knowledge,
+                        )
+                        _kb_pool = getattr(
+                            getattr(_c, "db_client", None), "pool", None,
+                        )
+                        _cs_kb = getattr(voice_session, "call_session", None)
+                        if _cs_kb is not None and inbound_campaign_row is not None:
+                            await apply_campaign_knowledge(
+                                _cs_kb, inbound_campaign_row, pool=_kb_pool,
+                            )
+                    except Exception as _kb_exc:
+                        logger.debug("inbound_campaign_knowledge_skipped: %s", _kb_exc)
         except Exception as _bind_exc:
             logger.debug(f"bind_telephony_call wrapper: {_bind_exc}")
 
@@ -990,7 +1157,13 @@ async def _on_new_call(call_id: str) -> None:
         # and a concurrent warmup + stream on the same httpx HTTP/2
         # connection causes ~4 s of contention.  A cold LLM handshake adds
         # only ~100-200 ms, which is acceptable for the fallback path.
-        if connect_task is not None:
+        # Realtime sessions already opened their single speech-to-speech socket
+        # in create_voice_session; there are no separate STT/LLM/TTS providers
+        # to warm (they are None). Skip the cascaded provider warmup entirely.
+        _is_realtime = getattr(voice_session, "realtime_bridge", None) is not None
+        if _is_realtime:
+            pass
+        elif connect_task is not None:
             try:
                 results = await asyncio.wait_for(connect_task, timeout=1.0)
                 if isinstance(results, list):
@@ -1042,13 +1215,25 @@ async def _on_new_call(call_id: str) -> None:
                 )
 
         if is_asterisk:
-            # Start the voice pipeline (STT → LLM → TTS loop).  The media gateway
-            # and gateway_session mapping were already registered above, so any
-            # caller audio that arrived during warmup is waiting in input_queue
-            # and will be drained into Flux immediately.
-            voice_session.pipeline_task = asyncio.create_task(
-                voice_session.pipeline.start_pipeline(voice_session.call_session, None)
-            )
+            # Start the voice pipeline. Two modes:
+            #   realtime  — a single OpenAI gpt-realtime-2 speech-to-speech
+            #               bridge (pipeline_mode=="realtime"); it pumps caller
+            #               audio ↔ model audio over the SAME media gateway.
+            #   cascaded  — the classic STT → LLM → TTS loop (default).
+            # The media gateway and gateway_session mapping were already
+            # registered above, so any caller audio that arrived during warmup
+            # is waiting in input_queue.
+            if getattr(voice_session, "realtime_bridge", None) is not None:
+                voice_session.pipeline_task = asyncio.create_task(
+                    voice_session.realtime_bridge.run()
+                )
+                logger.info(
+                    "BRIDGE realtime_pipeline_started call_id=%s", call_id[:12],
+                )
+            else:
+                voice_session.pipeline_task = asyncio.create_task(
+                    voice_session.pipeline.start_pipeline(voice_session.call_session, None)
+                )
             # FIX 3 — attach done-callback so a crash inside start_pipeline triggers
             # _on_call_ended rather than leaving a silent dead session.
             voice_session.pipeline_task.add_done_callback(
@@ -1082,7 +1267,13 @@ async def _on_new_call(call_id: str) -> None:
             # difference: caller-first waits 2 seconds before speaking
             # so the callee has a moment to compose themselves before
             # the AI greets. Agent-first speaks immediately on pickup.
-            if first_speaker == "agent":
+            # Realtime mode owns its own turn-taking + greeting (the model
+            # greets per its instructions when the bridge triggers the first
+            # response). Skip the cascaded TTS greeting path entirely — it uses
+            # voice_session.pipeline, which is None for realtime sessions.
+            if getattr(voice_session, "realtime_bridge", None) is not None:
+                pass
+            elif first_speaker == "agent":
                 voice_session._greeting_task = asyncio.create_task(
                     _send_outbound_greeting(voice_session)
                 )

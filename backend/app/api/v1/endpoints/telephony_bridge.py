@@ -625,6 +625,67 @@ async def make_call(request: Request, body: MakeCallRequest):
             detail_msg = f"{detail_msg} (cause: {prewarm.failure_reason})"
         raise HTTPException(status_code=503, detail=detail_msg)
 
+    # Per-tenant SIP-trunk resolution (isolation). Resolve which PJSIP
+    # endpoint this tenant's outbound leg must go through and, for an
+    # own/BYO trunk, which of their verified numbers to present as caller-ID.
+    # Fail-safe: on any resolver issue this returns the platform default
+    # (env endpoint, caller-ID unchanged) so today's default-trunk tenants
+    # are byte-for-byte identical. Only Asterisk consumes trunk_endpoint;
+    # other adapters keep their existing signature.
+    trunk_endpoint: Optional[str] = None
+    if getattr(_adapter, "name", "") == "asterisk":
+        try:
+            from app.domain.services.telephony.trunk_resolver import (
+                resolve_outbound_trunk,
+            )
+            route = await resolve_outbound_trunk(
+                container.db_pool,
+                tenant_id=str(effective_tenant_id),
+                environment=environment,
+            )
+            if route.refused:
+                # Own-trunk-only production model: the tenant has no usable
+                # own trunk / caller-ID and there is NO shared upstream to
+                # fall back on. Refuse cleanly (permanent 4xx — the dialer
+                # treats non-503 as a permanent failure and surfaces the
+                # structured error) rather than silently mis-routing.
+                logger.warning(
+                    "outbound_refused_no_pbx tenant=%s dest=%s reason=%s",
+                    str(effective_tenant_id)[:8], destination, route.reason,
+                )
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": "tenant_pbx_required",
+                        "reason": route.reason,
+                        "message": (
+                            "This tenant has no active SIP trunk / verified "
+                            "caller-ID. Set up your PBX (add + activate a SIP "
+                            "trunk and verify a phone number) before dialing."
+                        ),
+                    },
+                )
+            if not route.is_default:
+                trunk_endpoint = route.endpoint
+                # Own-trunk routes carry the tenant's own dialable number
+                # (or the trunk's configured caller-ID); present it. Default
+                # routes leave caller_id untouched (back-compat).
+                if route.caller_id:
+                    caller_id = route.caller_id
+                logger.info(
+                    "outbound_trunk_route dest=%s tenant=%s endpoint=%s reason=%s",
+                    destination, str(effective_tenant_id)[:8],
+                    route.endpoint, route.reason,
+                )
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001 — never block a call on this
+            logger.error(
+                "outbound_trunk_route_failed tenant=%s err=%s — using default endpoint",
+                str(effective_tenant_id)[:8], exc,
+            )
+            trunk_endpoint = None
+
     planned_call_id = (
         f"talky-out-{uuid4()}"
         if getattr(_adapter, "name", "") == "asterisk"
@@ -662,6 +723,7 @@ async def make_call(request: Request, body: MakeCallRequest):
                 destination=destination,
                 caller_id=caller_id,
                 channel_id=planned_call_id,
+                trunk_endpoint=trunk_endpoint,
             )
         else:
             call_id = await _adapter.originate_call(

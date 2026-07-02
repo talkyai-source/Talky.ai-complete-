@@ -64,11 +64,39 @@ def test_blank_optional_strings_are_dropped():
         {"register_interval": 999999},    # above ceiling
         {"register_interval": True},      # bool is not an int here
         {"register_interval": "1800"},    # string not allowed
+        {"source_host": "1.2.3.4 5.6.7.8"},   # whitespace
+        {"source_host": "sip.evil\ncom"},      # newline injection
+        {"source_host": "host with space"},    # space
+        {"source_host": "a" * 256},            # too long
+        {"source_host": 12345},                # not a string
     ],
 )
 def test_invalid_values_raise(meta):
     with pytest.raises(ValueError):
         normalize_trunk_metadata(meta)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["203.0.113.9", "sip.acme-carrier.com", "2001:db8::1", "pbx.example.com:5061"],
+)
+def test_source_host_accepts_hostname_or_ip(value):
+    out = normalize_trunk_metadata({"source_host": f"  {value}  "})
+    assert out["source_host"] == value  # stripped, preserved
+
+
+def test_source_host_blank_is_dropped():
+    out = normalize_trunk_metadata({"source_host": "   "})
+    assert "source_host" not in out
+
+
+def test_source_host_bad_value_rejected_at_request_layer():
+    with pytest.raises(ValueError):
+        SIPTrunkCreateRequest(
+            trunk_name="primary-pbx",
+            sip_domain="pbx.example.com",
+            metadata={"source_host": "1.2.3.4 evil"},
+        )
 
 
 def test_create_request_normalises_metadata():

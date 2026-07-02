@@ -694,3 +694,94 @@ class TestBuildTelephonySessionConfig:
         # Retired legacy markers must never reappear.
         assert "Business Development Specialist" not in config.system_prompt
         assert "GREETING RESPONSE" not in config.system_prompt
+
+
+class TestPipelineModeThreading:
+    """The realtime pipeline_mode + its knobs must survive from the tenant
+    AI-Options config (and optional per-campaign override) all the way onto the
+    VoiceSessionConfig that create_voice_session branches on. Without this wire,
+    a real telephony call always runs cascaded and realtime never engages."""
+
+    def _real_global_config(self, **overrides):
+        # A REAL AIProviderConfig (not a MagicMock) so getattr defaults resolve
+        # correctly — MagicMock auto-creates every attribute and would mask the
+        # "cascaded" default.
+        from app.domain.models.ai_config import AIProviderConfig
+        return AIProviderConfig(**overrides)
+
+    def test_default_global_config_is_cascaded(self):
+        from app.domain.services.telephony_session_config import (
+            build_telephony_session_config,
+        )
+        with patch(
+            "app.domain.services.telephony_session_config.get_global_config",
+            return_value=self._real_global_config(),
+        ):
+            config = build_telephony_session_config(gateway_type="telephony")
+        assert config.pipeline_mode == "cascaded"
+        # Realtime knobs carry their model defaults but are inert when cascaded.
+        assert config.realtime_model == "gpt-realtime-2"
+        assert config.realtime_voice == "marin"
+        assert config.realtime_settings is None
+
+    def test_tenant_global_config_realtime_threads_through(self):
+        from app.domain.services.telephony_session_config import (
+            build_telephony_session_config,
+        )
+        gcfg = self._real_global_config(
+            pipeline_mode="realtime",
+            realtime_model="gpt-realtime-2",
+            realtime_voice="cedar",
+            realtime_settings={"turn_detection": "high", "noise_reduction": "far_field"},
+        )
+        with patch(
+            "app.domain.services.telephony_session_config.get_global_config",
+            return_value=gcfg,
+        ):
+            config = build_telephony_session_config(gateway_type="telephony")
+        assert config.pipeline_mode == "realtime"
+        assert config.realtime_voice == "cedar"
+        assert config.realtime_model == "gpt-realtime-2"
+        assert config.realtime_settings == {
+            "turn_detection": "high",
+            "noise_reduction": "far_field",
+        }
+
+    def test_per_campaign_script_config_overrides_tenant_default(self):
+        """A cascaded tenant can still run a SINGLE campaign on realtime by
+        setting pipeline_mode on the campaign's script_config."""
+        from app.domain.services.telephony_session_config import (
+            build_telephony_session_config,
+        )
+        campaign = {
+            "id": "realtime-campaign",
+            "script_config": {
+                # knowledge-driven (no persona_type) so composition always works
+                "company_name": "Acme",
+                "agent_names": ["Alex"],
+                "pipeline_mode": "realtime",
+                "realtime_voice": "sage",
+            },
+        }
+        with patch(
+            "app.domain.services.telephony_session_config.get_global_config",
+            return_value=self._real_global_config(),  # tenant default: cascaded
+        ):
+            config = build_telephony_session_config(campaign=campaign)
+        assert config.pipeline_mode == "realtime"
+        assert config.realtime_voice == "sage"
+
+    def test_campaign_without_realtime_stays_cascaded(self):
+        from app.domain.services.telephony_session_config import (
+            build_telephony_session_config,
+        )
+        campaign = {
+            "id": "plain-campaign",
+            "script_config": {"company_name": "Acme", "agent_names": ["Alex"]},
+        }
+        with patch(
+            "app.domain.services.telephony_session_config.get_global_config",
+            return_value=self._real_global_config(),
+        ):
+            config = build_telephony_session_config(campaign=campaign)
+        assert config.pipeline_mode == "cascaded"

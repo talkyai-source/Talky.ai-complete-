@@ -553,6 +553,36 @@ def build_telephony_session_config(
     else:
         _stt_provider_type, _stt_model = "deepgram_flux", "flux-general-en"
 
+    # ── Pipeline mode (Realtime add-on) ─────────────────────────────────
+    # Tenant-level default comes from the AI-Options global config (which is a
+    # full AIProviderConfig and now carries these fields). A campaign MAY
+    # override per-campaign via its script_config, so one tenant can run some
+    # campaigns on the realtime speech-to-speech pipeline and others cascaded.
+    # Default "cascaded" keeps every existing call byte-for-byte unchanged.
+    _pipeline_mode = (
+        script_config.get("pipeline_mode")
+        or getattr(global_config, "pipeline_mode", "cascaded")
+        or "cascaded"
+    )
+    _realtime_model = (
+        script_config.get("realtime_model")
+        or getattr(global_config, "realtime_model", "gpt-realtime-2")
+    )
+    _realtime_voice = (
+        script_config.get("realtime_voice")
+        or getattr(global_config, "realtime_voice", "marin")
+    )
+    _realtime_settings = (
+        script_config.get("realtime_settings")
+        or getattr(global_config, "realtime_settings", None)
+    )
+    if _pipeline_mode == "realtime":
+        logger.info(
+            "telephony_pipeline_mode=realtime campaign=%s voice=%s model=%s",
+            str(_campaign_id(campaign)) if campaign else "telephony",
+            _realtime_voice, _realtime_model,
+        )
+
     return VoiceSessionConfig(
         gateway_type=gateway_type,
         stt_provider_type=_stt_provider_type,
@@ -601,6 +631,11 @@ def build_telephony_session_config(
         system_prompt=system_prompt,
         direction=direction,
         persona_type=persona_type,
+        # Realtime pipeline mode (default "cascaded" = unchanged behaviour).
+        pipeline_mode=_pipeline_mode,
+        realtime_model=_realtime_model,
+        realtime_voice=_realtime_voice,
+        realtime_settings=_realtime_settings,
     )
 
 

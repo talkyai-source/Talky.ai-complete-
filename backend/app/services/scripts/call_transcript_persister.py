@@ -184,6 +184,109 @@ async def bind_telephony_call(
     )
 
 
+async def bind_inbound_call(
+    *,
+    voice_session,
+    pbx_channel_id: str,
+    db_client,
+    tenant_id: str,
+    campaign_id: Optional[str],
+    caller_number: Optional[str],
+) -> Optional[CallBinding]:
+    """Bind an INBOUND call that has no pre-existing ``calls`` row (Phase C).
+
+    Unlike outbound (where the dialer pre-creates the row), a true inbound
+    call arrives with nothing in ``calls``. This stamps the resolved tenant /
+    campaign onto the voice_session so tenant-scoped downstream (transcript
+    persist, outcome) works, and — BEST-EFFORT — creates an inbound ``calls``
+    row keyed to the channel so the transcript has somewhere to land.
+
+    Schema note: ``calls.campaign_id`` and ``calls.lead_id`` are BOTH NOT
+    NULL, so a bare inbound row is impossible — we must have a campaign and a
+    lead. When a campaign was resolved we upsert a lead for the caller's ANI
+    under it, then insert the call row. When NO campaign was resolved we skip
+    the row entirely and only stamp the tenant (the call still runs the
+    tenant's default agent; the transcript just isn't persisted to a row).
+
+    Never raises — any DB error logs and leaves the session tenant-stamped.
+    """
+    # Always stamp tenant/campaign so the correct downstream context loads
+    # even if the calls-row insert below can't complete.
+    voice_session._dialer_tenant_id = str(tenant_id) if tenant_id else None
+    voice_session._dialer_campaign_id = str(campaign_id) if campaign_id else None
+
+    if not campaign_id:
+        logger.info(
+            "bind_inbound_call tenant=%s pbx=%s — no campaign resolved, "
+            "tenant-stamped only (no calls row)",
+            str(tenant_id)[:8], pbx_channel_id[:12] if pbx_channel_id else "?",
+        )
+        return None
+
+    pool = getattr(db_client, "pool", None)
+    if pool is None:
+        logger.warning("bind_inbound_call no pool on db_client; tenant-stamped only")
+        return None
+
+    phone = (caller_number or "unknown")[:20]
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("SET LOCAL app.bypass_rls = 'true'")
+                # Upsert a lead for the inbound caller under the campaign
+                # (calls.lead_id is NOT NULL). The (campaign_id, phone_number)
+                # partial-unique index makes this idempotent per caller.
+                lead_row = await conn.fetchrow(
+                    """
+                    INSERT INTO leads (tenant_id, campaign_id, phone_number, status)
+                    VALUES ($1, $2, $3, 'pending')
+                    ON CONFLICT (campaign_id, phone_number)
+                        WHERE status != 'deleted'
+                    DO UPDATE SET updated_at = NOW()
+                    RETURNING id
+                    """,
+                    tenant_id, campaign_id, phone,
+                )
+                lead_id = str(lead_row["id"]) if lead_row else None
+                if lead_id is None:
+                    return None
+
+                call_row = await conn.fetchrow(
+                    """
+                    INSERT INTO calls (
+                        tenant_id, campaign_id, lead_id, phone_number,
+                        external_call_uuid, status, started_at, answered_at
+                    )
+                    VALUES ($1, $2, $3, $4, $5, 'answered', NOW(), NOW())
+                    RETURNING id
+                    """,
+                    tenant_id, campaign_id, lead_id, phone, pbx_channel_id,
+                )
+    except Exception as exc:  # noqa: BLE001 — best-effort; tenant already stamped
+        logger.warning(
+            "bind_inbound_call insert failed tenant=%s campaign=%s pbx=%s err=%s "
+            "— tenant-stamped only",
+            str(tenant_id)[:8], str(campaign_id)[:8],
+            pbx_channel_id[:12] if pbx_channel_id else "?", exc,
+        )
+        return None
+
+    internal_call_id = str(call_row["id"]) if call_row else None
+    voice_session._dialer_call_id = internal_call_id
+    voice_session._dialer_lead_id = lead_id
+    voice_session._dialer_phone = phone
+    logger.info(
+        "bind_inbound_call created calls.id=%s tenant=%s campaign=%s lead=%s pbx=%s",
+        (internal_call_id or "?")[:8], str(tenant_id)[:8], str(campaign_id)[:8],
+        lead_id[:8], pbx_channel_id[:12] if pbx_channel_id else "?",
+    )
+    return CallBinding(
+        internal_call_id=internal_call_id,
+        tenant_id=str(tenant_id),
+        campaign_id=str(campaign_id),
+    )
+
+
 async def save_call_transcript_on_hangup(
     *,
     voice_session,

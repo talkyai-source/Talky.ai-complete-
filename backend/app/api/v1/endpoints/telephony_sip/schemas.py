@@ -107,6 +107,30 @@ def normalize_trunk_metadata(meta: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     _opt_bool("register")
     _opt_bool("srtp")
 
+    # source_host — the hostname/IP the tenant's carrier signals inbound from.
+    # SECURITY-relevant: it becomes the PJSIP `identify match=` that decides
+    # which inbound signalling is trusted as THIS tenant's trunk, so it must
+    # be a clean single token (no whitespace/newlines/control chars). Empty →
+    # dropped (the generator then falls back to sip_domain).
+    if "source_host" in out:
+        sh = out["source_host"]
+        if sh is None or (isinstance(sh, str) and not sh.strip()):
+            out.pop("source_host", None)
+        else:
+            if not isinstance(sh, str):
+                raise ValueError("source_host must be a string")
+            sh = sh.strip()
+            if len(sh) > 255:
+                raise ValueError("source_host must be at most 255 characters")
+            # Reject any whitespace/control chars; allow only host/IP tokens
+            # (letters, digits, dot, hyphen, colon for IPv6/port).
+            if not re.fullmatch(r"[A-Za-z0-9.\-:]+", sh):
+                raise ValueError(
+                    "source_host must be a hostname or IP address "
+                    "(no spaces or control characters)"
+                )
+            out["source_host"] = sh
+
     if "dtmf_mode" in out and out["dtmf_mode"] not in {m.value for m in DTMFMode}:
         raise ValueError("dtmf_mode must be one of: " + ", ".join(m.value for m in DTMFMode))
 

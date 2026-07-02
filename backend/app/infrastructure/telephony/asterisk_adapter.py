@@ -138,6 +138,14 @@ class AsteriskAdapter(CallControlAdapter):
         # is not running — logs first error and every 50th thereafter).
         self._tts_error_counts: Dict[str, int] = {}
 
+        # Phase C — inbound routing. channel_id → {"called_did", "context",
+        # "caller_number"} extracted from the inbound StasisStart event so the
+        # bridge can resolve the call to a tenant/campaign. One-time debug dump
+        # of the raw StasisStart channel fields lets ops confirm WHICH field
+        # actually carries the DID on the live carrier leg.
+        self._inbound_call_meta: Dict[str, Dict[str, Any]] = {}
+        self._inbound_debug_dumped: bool = False
+
     def _track_originated_channel(self, channel_id: str) -> None:
         if not channel_id:
             return
@@ -913,9 +921,64 @@ class AsteriskAdapter(CallControlAdapter):
                 pass
             await self._release_rtp_port(listen_port)
 
+    def _extract_inbound_meta(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        """Pull the called DID + dialplan context (+ caller number) out of an
+        inbound StasisStart event, DEFENSIVELY — the exact field that carries
+        the DID varies by trunk config, so we try several.
+
+        DID candidates, in order: ``channel.dialplan.exten`` (the dialed
+        extension/DID in most PJSIP inbound setups), then the ``connected``
+        line number, then the StasisStart ``args`` (a dialplan can pass the
+        DID as an app arg). Context: ``channel.dialplan.context``.
+
+        Emits a ONE-TIME DEBUG dump of the raw channel dialplan/caller/
+        connected fields so an operator can eyeball which field actually
+        carries the DID on the live carrier (Blaze) inbound leg.
+        """
+        channel = event.get("channel") or {}
+        dialplan = channel.get("dialplan") or {}
+        caller = channel.get("caller") or {}
+        connected = channel.get("connected") or {}
+        args = event.get("args") or []
+
+        if not self._inbound_debug_dumped:
+            self._inbound_debug_dumped = True
+            logger.info(
+                "INBOUND_STASIS_DEBUG (one-time) dialplan=%s caller=%s "
+                "connected=%s args=%s channel_name=%s — confirm which field "
+                "carries the DID on the live carrier leg",
+                dialplan, caller, connected, args, channel.get("name"),
+            )
+
+        called_did = (
+            (dialplan.get("exten") if isinstance(dialplan, dict) else None)
+            or (connected.get("number") if isinstance(connected, dict) else None)
+            or (args[0] if args else None)
+        )
+        context = dialplan.get("context") if isinstance(dialplan, dict) else None
+        caller_number = caller.get("number") if isinstance(caller, dict) else None
+
+        return {
+            "called_did": called_did,
+            "context": context,
+            "caller_number": caller_number,
+        }
+
+    def get_inbound_call_meta(self, channel_id: str) -> Optional[Dict[str, Any]]:
+        """Return the {called_did, context, caller_number} captured for an
+        inbound channel (or None). Consumed by the bridge's _on_new_call to
+        resolve the tenant/campaign. Non-destructive read."""
+        return self._inbound_call_meta.get(channel_id)
+
     async def _on_stasis_start(self, channel_id: str, event: Dict[str, Any]) -> None:
         """Set up ExternalMedia → C++ Gateway → AI pipeline for a new inbound call."""
         logger.info(f"AsteriskAdapter: new call channel={channel_id[:12]}")
+        # Phase C — capture the DID/context BEFORE any await so the bridge can
+        # read it in _on_new_call to resolve the tenant/campaign.
+        try:
+            self._inbound_call_meta[channel_id] = self._extract_inbound_meta(event)
+        except Exception as _meta_exc:  # noqa: BLE001 — never block call setup
+            logger.debug("inbound_meta_extract_failed channel=%s err=%s", channel_id[:12], _meta_exc)
         listen_port = await self._alloc_rtp_port()
         session_id = f"asterisk-{channel_id[:12]}-{listen_port}"
         bridge_id = ""
@@ -1076,6 +1139,7 @@ class AsteriskAdapter(CallControlAdapter):
         bridge_id = self._bridges.pop(channel_id, None)
         session_id = self._gateway_sessions.pop(channel_id, None)
         self._tts_error_counts.pop(channel_id, None)
+        self._inbound_call_meta.pop(channel_id, None)
 
         if session_id:
             try:
@@ -1238,6 +1302,7 @@ class AsteriskAdapter(CallControlAdapter):
         destination: str,
         caller_id: str,
         channel_id: Optional[str] = None,
+        trunk_endpoint: Optional[str] = None,
     ) -> str:
         """
         Originate an outbound call via ARI that rings the destination phone.
@@ -1293,9 +1358,16 @@ class AsteriskAdapter(CallControlAdapter):
         # production can route through the upstream carrier (default:
         # blazedigitel-endpoint, registered in /etc/asterisk/pjsip.conf)
         # while local dev can still target lan-pbx by setting the env var.
+        #
+        # Per-tenant isolation: the caller may pass an explicit
+        # ``trunk_endpoint`` (e.g. ``trunk-<trunkid>`` for a BYO/own trunk).
+        # When None — the historical behaviour — we fall back to the global
+        # env endpoint, so default-trunk tenants are byte-for-byte unchanged.
         # -------------------------------------------------------------------
         import os as _os
-        trunk = _os.getenv("TELEPHONY_PJSIP_OUTBOUND_ENDPOINT", "blazedigitel-endpoint")
+        trunk = trunk_endpoint or _os.getenv(
+            "TELEPHONY_PJSIP_OUTBOUND_ENDPOINT", "blazedigitel-endpoint"
+        )
         endpoint = f"PJSIP/{destination}@{trunk}"
 
         # Pre-generate channel ID and register BEFORE ARI POST to prevent

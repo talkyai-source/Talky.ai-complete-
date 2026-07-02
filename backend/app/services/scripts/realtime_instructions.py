@@ -1,0 +1,120 @@
+"""Clean instruction composer for the OpenAI gpt-realtime-2 (speech-to-speech)
+pipeline mode.
+
+WHY THIS IS SEPARATE (read before touching)
+--------------------------------------------
+The cascaded pipeline steers a *text* LLM with a large layered system prompt
+(compose_prompt + compliance_floor + per-turn prompt_builder) and then hands
+the text to a TTS engine that is nudged with bracketed audio tags
+(ElevenLabs/Cartesia). NONE of that transfers to a speech-to-speech model:
+
+  * A realtime model produces the audio itself, so bracket audio-tags
+    ("[laughs]", "<break>") would be spoken literally or ignored — expression
+    is steered with plain natural-language direction instead.
+  * The cascaded prompt is tuned around STT quirks, read-back gates, and
+    per-turn captured-slot headers that simply do not exist in a duplex
+    session with server-side VAD.
+
+So this composer deliberately imports NOTHING from
+`app.services.scripts.prompts.*` (composer / guardrails / prompt_builder /
+personas) and NOTHING from the TTS audio-tag builders. It writes a tight,
+voice-first instruction string from scratch. Keeping the two paths physically
+separate is the whole point of the realtime add-on.
+
+Output shape (one string, four blocks):
+  1. IDENTITY / PERSONA   — name, company, role, the campaign goal.
+  2. EXPRESSIVE DELIVERY  — natural-language voice direction for a
+                            speech-to-speech model (warmth, genuine laughter,
+                            natural hesitation/pace-matching).
+  3. COMPLIANCE ESSENTIALS — plain-language must-nots (AI disclosure, never
+                            read back card/SSN/OTP, stop when asked, only
+                            state given/looked-up facts).
+  4. KNOWLEDGE TOOL NOTE  — one line: a knowledge_lookup function exists; use
+                            it for company facts.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Optional
+
+
+@dataclass
+class RealtimePersona:
+    """Minimal persona/campaign inputs for the realtime instruction string.
+
+    Intentionally small and self-contained — the realtime path does not reuse
+    the cascaded PersonaType / campaign-slot machinery.
+    """
+    agent_name: str = "Alex"
+    company_name: str = "the company"
+    role: str = "a friendly voice assistant"
+    goal: str = "have a helpful, natural conversation with the caller"
+    # Optional extra, operator-supplied freeform guidance (kept short).
+    extra_notes: Optional[str] = None
+
+
+# ── Block 2: expressive delivery, written for a speech-to-speech model ───────
+_EXPRESSIVE_DELIVERY = """\
+HOW YOU SOUND
+You are on a live phone call. Talk like a real person, not a script.
+- Be warm and genuinely present. Smile with your voice.
+- Match the caller's energy and pace: slow down if they're thinking, pick it
+  up if they're brisk. Leave natural little pauses; don't rush your words
+  together.
+- Use light, natural hesitations ("hmm", "let me see", "right") only where a
+  real person would — never as filler.
+- If something is genuinely funny, let a real laugh come through. Don't force
+  humour; react honestly.
+- Keep turns short and conversational. Say one thing, then let them respond —
+  don't monologue. Ask, listen, react.
+- Never spell things out letter by letter or read punctuation aloud unless the
+  caller explicitly asks you to confirm something character by character."""
+
+# ── Block 3: compliance essentials, in plain speech-to-speech language ───────
+_COMPLIANCE_ESSENTIALS = """\
+GROUND RULES (always)
+- If the caller asks whether you're an AI, tell them honestly and simply that
+  yes, you're an AI assistant. Never claim to be a human.
+- Never read back, repeat, or confirm full credit-card numbers, social-security
+  numbers, or one-time passcodes. If a caller starts reading one, gently steer
+  away and do not echo the digits.
+- The moment a caller wants to stop, opt out, or not be called again, respect
+  it immediately, acknowledge warmly, and wind the call down. Never pressure.
+- Only state facts you were given or that you looked up with your knowledge
+  tool. If you don't know something, say so plainly — never invent prices,
+  policies, names, or details."""
+
+
+def _knowledge_note() -> str:
+    return (
+        "KNOWLEDGE\n"
+        "You have a knowledge_lookup function for company facts (pricing, "
+        "hours, policies, products, service areas). Call it before stating any "
+        "company-specific detail you're not certain of, and speak only what it "
+        "returns."
+    )
+
+
+def build_realtime_instructions(persona: RealtimePersona) -> str:
+    """Compose the full realtime `instructions` string from a persona.
+
+    Pure and dependency-free: no imports from the cascaded prompt machinery,
+    no TTS audio-tag blocks. Returns one plain string ready to drop into the
+    session.update `instructions` field.
+    """
+    identity = (
+        "WHO YOU ARE\n"
+        f"You are {persona.agent_name}, {persona.role} for {persona.company_name}. "
+        f"Your goal on this call: {persona.goal}."
+    )
+
+    blocks = [
+        identity,
+        _EXPRESSIVE_DELIVERY,
+        _COMPLIANCE_ESSENTIALS,
+        _knowledge_note(),
+    ]
+    if persona.extra_notes and persona.extra_notes.strip():
+        blocks.append("ALSO\n" + persona.extra_notes.strip())
+
+    return "\n\n".join(blocks)

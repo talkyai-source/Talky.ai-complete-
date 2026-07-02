@@ -93,11 +93,18 @@ class CallControlAdapter(ABC):
         destination: str,
         caller_id: str,
         channel_id: Optional[str] = None,
+        trunk_endpoint: Optional[str] = None,
     ) -> str:
         """
         Originate an outbound call to *destination* with the given *caller_id*.
         Implementations that support caller-supplied UUIDs may use
         *channel_id* to make pre-call warmup state addressable before dialing.
+
+        *trunk_endpoint* optionally overrides the PBX endpoint the call is
+        routed through (per-tenant SIP-trunk isolation). ``None`` (the
+        default) preserves the implementation's existing global-endpoint
+        behaviour, so existing callers are unaffected.
+
         Returns the PBX-assigned call UUID string.
         """
 

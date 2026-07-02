@@ -148,6 +148,28 @@ class AIProviderConfig(BaseModel):
     # don't opt in see zero behaviour change.
     voice_tuning: Optional[Dict[str, Any]] = Field(default=None)
 
+    # ── Pipeline mode (Realtime add-on, Phase 1) ─────────────────────────
+    # Selects HOW the voice call is served:
+    #   "cascaded"  — the classic three-stage pipeline (STT → LLM → TTS)
+    #                 with the full composed system prompt. THE DEFAULT, so
+    #                 every existing tenant is byte-for-byte unaffected.
+    #   "realtime"  — a single OpenAI gpt-realtime-2 speech-to-speech
+    #                 WebSocket session (audio in → audio out, own voice,
+    #                 semantic VAD, function calling). Completely separate
+    #                 code path; does NOT touch the cascaded prompt machinery.
+    # NOTE (Phase 1): the field exists and is validated, but the gateway does
+    # NOT yet branch on it — wiring lands in Phase 1b once the bridge is proven.
+    pipeline_mode: str = "cascaded"  # "cascaded" | "realtime"
+    # Realtime-only knobs (ignored entirely when pipeline_mode == "cascaded").
+    realtime_model: str = "gpt-realtime-2"
+    realtime_voice: str = "marin"
+    # Optional overrides for turn_detection / noise_reduction etc. Sane
+    # defaults are applied by the session builder, so this may stay None.
+    # Recognised keys: {"turn_detection": {"type","eagerness"},
+    #                   "noise_reduction": {"type"},
+    #                   "transcription_model": str}
+    realtime_settings: Optional[Dict[str, Any]] = Field(default=None)
+
     class Config:
         use_enum_values = True
 
@@ -157,6 +179,10 @@ class ProviderListResponse(BaseModel):
     llm: Dict
     stt: Dict
     tts: Dict
+    # Realtime (speech-to-speech) pipeline mode. Additive — older frontends
+    # that don't know about it simply ignore the extra key. Empty default so
+    # the field is always present with a stable shape.
+    realtime: Dict = Field(default_factory=dict)
 
 
 class LatencyTestResult(BaseModel):
@@ -280,6 +306,31 @@ GEMINI_MODELS = [
         provider="gemini",
     ),
 ]
+
+
+# =============================================================================
+# OPENAI REALTIME (gpt-realtime-2 speech-to-speech pipeline mode)
+# =============================================================================
+# Static catalog surfaced by the AI-Options /providers endpoint so the frontend
+# can render the realtime card. Voices are OpenAI's gpt-realtime voice set.
+# marin + cedar are the newest expressive voices; the rest are the standard
+# realtime voices. If OpenAI adds/removes voices, edit this list only.
+REALTIME_MODEL = "gpt-realtime-2"
+
+REALTIME_VOICES = [
+    {"id": "marin", "name": "Marin", "description": "Warm, natural, expressive — recommended default.", "gender": "female"},
+    {"id": "cedar", "name": "Cedar", "description": "Warm, grounded, natural male voice.", "gender": "male"},
+    {"id": "alloy", "name": "Alloy", "description": "Neutral, balanced, general-purpose.", "gender": "neutral"},
+    {"id": "ash", "name": "Ash", "description": "Clear, measured, professional.", "gender": "male"},
+    {"id": "ballad", "name": "Ballad", "description": "Soft, expressive, storytelling tone.", "gender": "male"},
+    {"id": "coral", "name": "Coral", "description": "Bright, friendly, upbeat.", "gender": "female"},
+    {"id": "sage", "name": "Sage", "description": "Calm, reassuring, thoughtful.", "gender": "female"},
+    {"id": "verse", "name": "Verse", "description": "Lively, dynamic, conversational.", "gender": "male"},
+]
+
+# Selectable knobs surfaced to the frontend (map 1:1 to session builder options).
+REALTIME_TURN_DETECTION = ["low", "medium", "high"]
+REALTIME_NOISE_REDUCTION = ["near_field", "far_field", "none"]
 
 
 DEEPGRAM_MODELS = [

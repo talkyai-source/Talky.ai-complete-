@@ -80,6 +80,45 @@ def _row_to_response(row: asyncpg.Record) -> SIPTrunkResponse:
     )
 
 
+async def _sync_trunk_pjsip_config(row: asyncpg.Record, *, active: bool) -> None:
+    """Render/apply or remove the per-tenant namespaced PJSIP config for a
+    trunk after an activate / deactivate / update (Phase B).
+
+    FAIL-SOFT: never raises. A generation error logs a warning and leaves the
+    DB row intact — the API call still succeeds; the config just isn't applied
+    (an operator sees the warning). The Fernet password is decrypted only in
+    memory here and is NEVER logged.
+    """
+    try:
+        # The shared platform-default upstream is hand-managed
+        # (blazedigitel-endpoint); never emit a generated file for it.
+        from app.domain.services.telephony.trunk_resolver import (
+            platform_default_trunk_name,
+        )
+        name = (row["trunk_name"] or "").strip().lower()
+        if name and name == platform_default_trunk_name().strip().lower():
+            return
+
+        from app.infrastructure.telephony.pjsip_config_generator import (
+            apply_trunk_config,
+            remove_trunk_config,
+        )
+        if active:
+            decrypted = None
+            enc = row["auth_password_encrypted"]
+            if enc:
+                decrypted = get_encryption_service().decrypt(enc)
+            await apply_trunk_config(row, decrypted_password=decrypted)
+        else:
+            await remove_trunk_config(str(row["id"]))
+    except Exception as exc:  # noqa: BLE001 — must not 500 the API
+        logger.warning(
+            "pjsip_config_sync_failed trunk=%s active=%s err=%s — "
+            "DB row saved, config not applied",
+            str(row["id"])[:8] if row is not None else "?", active, exc,
+        )
+
+
 async def _get_tenant_trunk(
     conn: asyncpg.Connection,
     tenant_id: str,
@@ -513,6 +552,12 @@ async def update_sip_trunk(
                 resource_type="sip_trunk",
                 resource_id=response_model.id,
             )
+            # Phase B — an edit to an already-active trunk (host / auth /
+            # caller-ID / register) must re-render its config so Asterisk
+            # picks up the change on the next reload. Inactive trunks have no
+            # file to update. Fail-soft.
+            if row["is_active"]:
+                await _sync_trunk_pjsip_config(row, active=True)
             return response_model
 
 
@@ -674,6 +719,9 @@ async def _set_trunk_active_state(
                 resource_type="sip_trunk",
                 resource_id=response_model.id,
             )
+            # Phase B — sync the tenant's namespaced PJSIP config: activate →
+            # render+write trunk-<id>.conf; deactivate → remove it. Fail-soft.
+            await _sync_trunk_pjsip_config(row, active=active_state)
             return response_model
 
 
