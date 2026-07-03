@@ -147,6 +147,8 @@ class CampaignService:
         tenant_id: Optional[str] = None,
         priority_override: Optional[int] = None,
         first_speaker: Literal["agent", "user"] = "agent",
+        list_id: Optional[str] = None,
+        allow_running: bool = False,
     ) -> StartCampaignResult:
         """
         Start a campaign - enqueue all pending leads as dialer jobs.
@@ -180,19 +182,24 @@ class CampaignService:
         try:
             # 1. Validate campaign
             campaign = await self.get_campaign(campaign_id)
-            
-            if campaign.get("status") == "running":
+
+            # ``allow_running`` lets "call this list" enqueue a list's pending
+            # leads even while the campaign is already running — the active-job
+            # dedup below prevents double-dialing, so re-entry is safe.
+            if campaign.get("status") == "running" and not allow_running:
                 raise CampaignStateError("Campaign is already running")
-            
+
             # 2. Resolve tenant_id
             tenant_id = tenant_id or campaign.get("tenant_id") or "default-tenant"
-            
-            # 3. Get pending leads
-            leads = await self._get_pending_leads(campaign_id)
 
-            if not leads:
+            # 3. Get pending leads (optionally scoped to a single contact list)
+            leads = await self._get_pending_leads(campaign_id, list_id=list_id)
+
+            if not leads and list_id is None:
                 # No pending/calling leads — reset failed/skipped leads so
-                # a campaign restart actually retries them.
+                # a campaign restart actually retries them. Skipped for a
+                # single-list dial: we never want a "call this list" to revive
+                # other lists' failed leads.
                 reset_count = await self._reset_leads_for_restart(campaign_id)
                 if reset_count > 0:
                     logger.info(
@@ -214,11 +221,18 @@ class CampaignService:
             # The dialer worker dequeues jobs and immediately validates campaign
             # status against the DB.  If status is updated after the Redis push,
             # the worker sees the old status (e.g. "stopped") and skips every job.
-            await self._update_campaign_status(
-                campaign_id,
-                status="running",
-                total_leads=len(leads)
-            )
+            #
+            # For a single-list dial we only enqueue that list's leads, so
+            # len(leads) is NOT the campaign's total — don't clobber total_leads
+            # in that case.
+            if list_id is None:
+                await self._update_campaign_status(
+                    campaign_id,
+                    status="running",
+                    total_leads=len(leads)
+                )
+            else:
+                await self._update_campaign_status(campaign_id, status="running")
 
             # 5. Get queue service
             queue_service = await self._get_queue_service()
@@ -430,16 +444,67 @@ class CampaignService:
     # Private Helpers
     # =========================================================================
     
-    async def _get_pending_leads(self, campaign_id: str) -> List[Dict[str, Any]]:
+    def _inactive_list_ids(self, campaign_id: str) -> set:
+        """Return the set of contact_list ids that are toggled OFF for this
+        campaign.
+
+        Leads whose ``list_id`` is in this set must NOT be dialed. Leads with
+        list_id NULL (Ungrouped) or pointing at an active list are always
+        eligible. Fail-safe: on ANY error (table missing, query failure) we
+        return an empty set so the dialer keeps calling rather than silently
+        going dark — an over-inclusive dial is far less harmful than a
+        campaign that stops dead.
+        """
+        try:
+            resp = (
+                self.db_client.table("contact_lists")
+                .select("id, is_active")
+                .eq("campaign_id", campaign_id)
+                .eq("is_active", False)
+                .execute()
+            )
+            return {str(r["id"]) for r in (getattr(resp, "data", None) or [])}
+        except Exception as exc:  # noqa: BLE001 — never let this stop dialing
+            logger.warning(
+                "active-list filter lookup failed for campaign %s (including all "
+                "leads as fail-safe): %s",
+                campaign_id, exc,
+            )
+            return set()
+
+    async def _get_pending_leads(
+        self,
+        campaign_id: str,
+        list_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         """Get all pending leads for a campaign, ordered by priority.
-        Also includes leads stuck at 'calling' from a previous crashed run."""
-        response = self.db_client.table("leads").select("*")\
+        Also includes leads stuck at 'calling' from a previous crashed run.
+
+        Leads belonging to an INACTIVE contact list are excluded (the core of
+        the list on/off toggle). Leads with list_id NULL or an active list are
+        kept. When ``list_id`` is provided the result is additionally scoped to
+        that single list ("call this list").
+        """
+        query = self.db_client.table("leads").select("*")\
             .eq("campaign_id", campaign_id)\
-            .in_("status", ["pending", "calling"])\
-            .order("priority", desc=True)\
+            .in_("status", ["pending", "calling"])
+        if list_id is not None:
+            query = query.eq("list_id", list_id)
+        response = query.order("priority", desc=True)\
             .order("created_at")\
             .execute()
-        return response.data or []
+        leads = response.data or []
+
+        # Exclude leads whose list is toggled off. Skipped entirely when a
+        # single list was requested (that list is being explicitly dialed).
+        if list_id is None:
+            inactive = self._inactive_list_ids(campaign_id)
+            if inactive:
+                leads = [
+                    l for l in leads
+                    if str(l.get("list_id")) not in inactive or l.get("list_id") is None
+                ]
+        return leads
 
     async def _reset_leads_for_restart(self, campaign_id: str) -> int:
         """Reset failed/skipped/calling leads to pending so a campaign restart retries them."""

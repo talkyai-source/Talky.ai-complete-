@@ -37,12 +37,21 @@ class ImportError(BaseModel):
 
 
 class BulkImportResponse(BaseModel):
-    """Bulk import response"""
+    """Bulk import response.
+
+    ``list_id`` / ``list_name`` / ``list_contact_count`` describe the contact
+    list this import created (or reused). They are optional so any older
+    client that ignores them keeps working; they're None only if list creation
+    was skipped/failed and the leads were imported as Ungrouped.
+    """
     total_rows: int
     imported: int
     failed: int
     duplicates_skipped: int = 0
     errors: List[ImportError]
+    list_id: Optional[str] = None
+    list_name: Optional[str] = None
+    list_contact_count: Optional[int] = None
 
 
 class BulkPasteRequest(BaseModel):
@@ -251,20 +260,41 @@ async def upload_campaign_contacts(
                 source_row=row_num,
             ))
 
-        # 5. Normalize, dedup, revive, chunk-insert via the shared core.
+        # 5. Create (or reuse) the contact list for this upload — named after
+        #    the uploaded file. Best-effort: if it fails, list_id stays None and
+        #    the leads import as Ungrouped rather than the whole upload failing.
+        from app.api.v1.endpoints.contact_lists import create_contact_list, _live_count
+        list_id = create_contact_list(
+            db_client,
+            campaign_id=campaign_id,
+            tenant_id=campaign_tenant_id or current_user.tenant_id,
+            name=file.filename,
+            source="csv",
+        )
+
+        # 6. Normalize, dedup, revive, chunk-insert via the shared core,
+        #    tagging every inserted/revived lead with the list.
         result = ingest_lead_records(
             db_client,
             campaign_id=campaign_id,
             tenant_id=campaign_tenant_id or current_user.tenant_id,
             records=records,
             normalize=lambda p: _normalize_for_user(p, current_user),
+            list_id=list_id,
         )
 
         logger.info(
-            f"CSV upload completed for campaign '{campaign_name}': "
+            f"CSV upload completed for campaign '{campaign_name}' (list={list_id}): "
             f"{result.imported} imported ({result.revived} revived), "
             f"{result.duplicates_skipped} duplicates skipped, {len(result.errors)} errors"
         )
+
+        list_count = None
+        if list_id is not None:
+            try:
+                list_count = _live_count(db_client, campaign_id, list_id)
+            except Exception:  # noqa: BLE001
+                list_count = None
 
         return BulkImportResponse(
             total_rows=result.total,
@@ -275,6 +305,9 @@ async def upload_campaign_contacts(
                 ImportError(row=e.row, error=e.error, phone=e.phone)
                 for e in result.errors[:100]
             ],
+            list_id=list_id,
+            list_name=file.filename if list_id is not None else None,
+            list_contact_count=list_count,
         )
     
     except HTTPException:
@@ -327,21 +360,42 @@ async def paste_campaign_contacts(
         for i, tok in enumerate(tokens, start=1)
     ]
 
-    # 3. Shared ingest core.
+    # 3. Create (or reuse) the paste's contact list ("Pasted contacts <date>").
+    from app.api.v1.endpoints.contact_lists import (
+        create_contact_list, default_paste_list_name, _live_count,
+    )
+    list_name = default_paste_list_name()
+    list_id = create_contact_list(
+        db_client,
+        campaign_id=campaign_id,
+        tenant_id=campaign_tenant_id or current_user.tenant_id,
+        name=list_name,
+        source="paste",
+    )
+
+    # 4. Shared ingest core, tagging leads with the list.
     result = ingest_lead_records(
         db_client,
         campaign_id=campaign_id,
         tenant_id=campaign_tenant_id or current_user.tenant_id,
         records=records,
         normalize=lambda p: _normalize_for_user(p, current_user),
+        list_id=list_id,
     )
 
     logger.info(
-        "Paste import for campaign %s: %d imported (%d revived), %d duplicates, "
+        "Paste import for campaign %s (list=%s): %d imported (%d revived), %d duplicates, "
         "%d invalid",
-        campaign_id, result.imported, result.revived,
+        campaign_id, list_id, result.imported, result.revived,
         result.duplicates_skipped, result.invalid,
     )
+
+    list_count = None
+    if list_id is not None:
+        try:
+            list_count = _live_count(db_client, campaign_id, list_id)
+        except Exception:  # noqa: BLE001
+            list_count = None
 
     return BulkImportResponse(
         total_rows=result.total,
@@ -352,6 +406,9 @@ async def paste_campaign_contacts(
             ImportError(row=e.row, error=e.error, phone=e.phone)
             for e in result.errors[:100]
         ],
+        list_id=list_id,
+        list_name=list_name if list_id is not None else None,
+        list_contact_count=list_count,
     )
 
 

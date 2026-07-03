@@ -26,6 +26,7 @@ from app.api.v1.endpoints.campaign_knowledge import router as campaign_knowledge
 from app.api.v1.endpoints.clients import router as clients_router
 from app.api.v1.endpoints.connectors import router as connectors_router
 from app.api.v1.endpoints.contacts import router as contacts_router
+from app.api.v1.endpoints.contact_lists import router as contact_lists_router
 from app.api.v1.endpoints.dashboard import router as dashboard_router
 from app.api.v1.endpoints.health import router as health_router
 from app.api.v1.endpoints.meetings import router as meetings_router
@@ -68,6 +69,7 @@ api_router.include_router(auth_router)
 api_router.include_router(campaigns_router)
 api_router.include_router(campaign_knowledge_router)
 api_router.include_router(contacts_router)
+api_router.include_router(contact_lists_router)
 api_router.include_router(calls_router)
 api_router.include_router(recordings_router)
 api_router.include_router(health_router)

@@ -1121,6 +1121,8 @@ async def list_campaign_contacts(
     page_size: int = Query(50, ge=1, le=100, description="Items per page"),
     status: Optional[str] = Query(None, description="Filter by status (pending, called, completed, dnc)"),
     last_call_result: Optional[str] = Query(None, description="Filter by last call result"),
+    list_id: Optional[str] = Query(None, description="Filter by contact list id, or 'ungrouped' for leads with no list"),
+    search: Optional[str] = Query(None, description="Case-insensitive phone_number substring match"),
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)
 ):
@@ -1166,7 +1168,18 @@ async def list_campaign_contacts(
             query = query.eq("status", status)
         if last_call_result:
             query = query.eq("last_call_result", last_call_result)
-        
+        # Contact-list filter: a real list id → exact match; the synthetic
+        # 'ungrouped' sentinel → leads with no list_id (always-active bucket).
+        if list_id:
+            if list_id.lower() == "ungrouped":
+                query = query.is_("list_id", None)
+            else:
+                query = query.eq("list_id", list_id)
+        # Search matches a phone_number substring (case-insensitive). Kept to a
+        # single indexed column so pagination + counts stay correct.
+        if search:
+            query = query.ilike("phone_number", f"%{search}%")
+
         # 3. Apply pagination
         offset = (page - 1) * page_size
         response = query.order(

@@ -141,12 +141,20 @@ def ingest_lead_records(
     records: list[LeadRecord],
     normalize: Callable[[str], str],
     chunk_size: int = DEFAULT_CHUNK_SIZE,
+    list_id: Optional[str] = None,
 ) -> IngestResult:
     """Normalize, dedup, revive and chunk-insert a batch of contacts.
 
     ``normalize`` must return an E.164 string or raise ``ValueError`` for
     an unusable number. Mirrors the CSV importer's semantics exactly so
     the two entry points behave identically.
+
+    ``list_id`` (optional) tags every inserted/revived lead with the
+    contact-list it belongs to. When None (legacy callers) the lead stays
+    Ungrouped (list_id NULL), preserving the pre-list behaviour exactly.
+    A revived soft-deleted lead is re-tagged to the new list so a
+    re-upload moves it into the fresh list rather than stranding it in an
+    old one.
     """
     result = IngestResult(total=len(records))
     live_phones, deleted_by_phone = _load_existing(db_client, campaign_id)
@@ -185,7 +193,7 @@ def ingest_lead_records(
             live_phones.add(phone)
             continue
 
-        to_insert.append({
+        lead_row = {
             "id": str(uuid.uuid4()),
             "tenant_id": tenant_id,
             "campaign_id": campaign_id,
@@ -198,7 +206,13 @@ def ingest_lead_records(
             "last_call_result": "pending",
             "call_attempts": 0,
             "created_at": datetime.utcnow().isoformat(),
-        })
+        }
+        # Only stamp list_id when we actually have one, so pre-list callers
+        # produce byte-identical insert rows (and never touch the column on a
+        # DB where the migration hasn't run yet).
+        if list_id is not None:
+            lead_row["list_id"] = list_id
+        to_insert.append(lead_row)
         live_phones.add(phone)
 
     # Chunked insert — a single bad chunk is reported but doesn't sink the rest.
@@ -217,13 +231,17 @@ def ingest_lead_records(
     # Revive soft-deleted matches in place.
     for rev in to_revive:
         try:
-            db_client.table("leads").update({
+            revive_payload = {
                 "status": "pending",
                 "first_name": rev["first_name"],
                 "last_name": rev["last_name"],
                 "email": rev["email"],
                 "custom_fields": rev["custom_fields"],
-            }).eq("id", rev["id"]).execute()
+            }
+            # Move a revived lead into the list it was just re-uploaded under.
+            if list_id is not None:
+                revive_payload["list_id"] = list_id
+            db_client.table("leads").update(revive_payload).eq("id", rev["id"]).execute()
             result.revived += 1
             result.imported += 1
         except Exception as e:
