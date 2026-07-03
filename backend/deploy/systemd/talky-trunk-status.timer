@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh Talky SIP-trunk live registration status every 15s
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=15
+AccuracySec=2s
+
+[Install]
+WantedBy=timers.target
