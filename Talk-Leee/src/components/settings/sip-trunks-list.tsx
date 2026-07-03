@@ -140,12 +140,14 @@ function TestStatusBadge({ trunk }: { trunk: SipTrunkRow }) {
                         ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
                         : "border-gray-500/30 bg-gray-500/10 text-gray-700 dark:text-gray-400";
         const label = live.charAt(0).toUpperCase() + live.slice(1);
+        // Show the REAL backend reason (e.g. "403 Forbidden") right in the badge.
+        const detail = trunk.live_status_detail ? ` · ${trunk.live_status_detail}` : "";
         const checked = trunk.live_status_checked_at
             ? ` · ${new Date(trunk.live_status_checked_at).toLocaleTimeString()}`
             : "";
         return (
             <span
-                title={`Live Asterisk registration: ${live}${checked}`}
+                title={`Live Asterisk registration: ${live}${detail}${checked}`}
                 className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${cls}`}
             >
                 {live === "registered" ? (
@@ -155,7 +157,7 @@ function TestStatusBadge({ trunk }: { trunk: SipTrunkRow }) {
                 ) : (
                     <AlertCircle className="h-3 w-3" aria-hidden />
                 )}
-                {label}
+                {label}{detail}
             </span>
         );
     }

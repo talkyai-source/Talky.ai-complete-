@@ -80,6 +80,7 @@ export interface SipTrunkRow {
     last_tested_at?: string | null;
     last_test_result?: SipTrunkTestResult | null;
     live_registration_status?: string | null;
+    live_status_detail?: string | null;
     live_status_checked_at?: string | null;
     created_at: string;
 }
