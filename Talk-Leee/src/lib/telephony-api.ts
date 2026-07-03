@@ -79,6 +79,8 @@ export interface SipTrunkRow {
     metadata: Record<string, unknown>;
     last_tested_at?: string | null;
     last_test_result?: SipTrunkTestResult | null;
+    live_registration_status?: string | null;
+    live_status_checked_at?: string | null;
     created_at: string;
 }
 
@@ -203,6 +205,9 @@ export function useSipTrunks() {
         // regardless — the .trunks-on-a-bare-array bug hid EVERY trunk before.
         queryFn: () => api<SipTrunkRow[] | { trunks: SipTrunkRow[] }>("/telephony/sip/trunks"),
         select: (d) => (Array.isArray(d) ? d : (d?.trunks ?? [])),
+        // Auto-refresh so the live registration status (written by the 15s
+        // server updater) stays current on the card without a manual reload.
+        refetchInterval: 15000,
     });
 }
 

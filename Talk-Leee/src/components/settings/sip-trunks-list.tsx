@@ -127,13 +127,45 @@ function formToMeta(form: TrunkForm, base: Record<string, unknown>): Record<stri
 type ModalMode = "create" | "edit";
 
 function TestStatusBadge({ trunk }: { trunk: SipTrunkRow }) {
+    // Prefer the REAL-TIME Asterisk registration status (refreshed ~15s by the
+    // server updater) over the frozen Test snapshot — this is the live truth.
+    const live = trunk.live_registration_status;
+    if (live) {
+        const cls =
+            live === "registered"
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                : live === "rejected"
+                    ? "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400"
+                    : live === "unregistered"
+                        ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                        : "border-gray-500/30 bg-gray-500/10 text-gray-700 dark:text-gray-400";
+        const label = live.charAt(0).toUpperCase() + live.slice(1);
+        const checked = trunk.live_status_checked_at
+            ? ` · ${new Date(trunk.live_status_checked_at).toLocaleTimeString()}`
+            : "";
+        return (
+            <span
+                title={`Live Asterisk registration: ${live}${checked}`}
+                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${cls}`}
+            >
+                {live === "registered" ? (
+                    <CheckCircle2 className="h-3 w-3" aria-hidden />
+                ) : live === "rejected" ? (
+                    <XCircle className="h-3 w-3" aria-hidden />
+                ) : (
+                    <AlertCircle className="h-3 w-3" aria-hidden />
+                )}
+                {label}
+            </span>
+        );
+    }
     if (!trunk.last_test_result || !trunk.last_tested_at) {
         return (
             <span
-                title="Click Test to verify reachability"
+                title="Live status pending — the updater refreshes every ~15s"
                 className="inline-flex items-center gap-1 rounded-full border border-gray-500/30 bg-gray-500/10 px-2 py-0.5 text-xs font-semibold text-gray-700 dark:text-gray-400"
             >
-                <AlertCircle className="h-3 w-3" aria-hidden /> Untested
+                <AlertCircle className="h-3 w-3" aria-hidden /> Checking…
             </span>
         );
     }
@@ -388,7 +420,7 @@ export function SipTrunksList() {
                                     <th className="px-4 py-3">Endpoint</th>
                                     <th className="px-4 py-3">Direction</th>
                                     <th className="px-4 py-3">Auth</th>
-                                    <th className="px-4 py-3">Reachability</th>
+                                    <th className="px-4 py-3">Live status</th>
                                     <th className="px-4 py-3">Active</th>
                                     <th className="px-4 py-3 text-right">Actions</th>
                                 </tr>
