@@ -366,6 +366,12 @@ class MakeCallRequest(BaseModel):
     tenant_id: Optional[str] = None
     first_speaker: Optional[Literal["agent", "user"]] = None
     agent_name: Optional[str] = None
+    # Lead identity for the "who you're calling" prompt block. Optional — the
+    # dialer worker only sends these when the lead has them. Absent = blind
+    # dial (unchanged behaviour). Never used for auth/routing.
+    lead_first_name: Optional[str] = None
+    lead_last_name: Optional[str] = None
+    lead_company: Optional[str] = None
 
 
 @router.post("/call")
@@ -407,6 +413,9 @@ async def make_call(request: Request, body: MakeCallRequest):
     # via effective_tenant_id above; never re-derive it from the raw body.
     first_speaker = body.first_speaker
     agent_name = body.agent_name
+    lead_first_name = body.lead_first_name
+    lead_last_name = body.lead_last_name
+    lead_company = body.lead_company
 
     # Single-owner guard. Only the process holding the ARI owner lock may
     # originate — its the only one with a live Asterisk connection and the
@@ -609,6 +618,9 @@ async def make_call(request: Request, body: MakeCallRequest):
         campaign_id=campaign_id,
         agent_name=agent_name,
         container=container,
+        lead_first_name=lead_first_name,
+        lead_last_name=lead_last_name,
+        lead_company=lead_company,
     )
     effective_first_speaker = prewarm.effective_first_speaker
     pre_warm_session = prewarm.session

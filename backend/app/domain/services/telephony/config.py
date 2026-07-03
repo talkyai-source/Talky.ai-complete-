@@ -44,6 +44,9 @@ def _build_telephony_session_config(
     direction: Direction = Direction.OUTBOUND,
     voice_tuning_override=None,
     ai_config_override=None,
+    lead_first_name: Optional[str] = None,
+    lead_last_name: Optional[str] = None,
+    lead_company: Optional[str] = None,
 ):
     """
     Thin shim kept for call-site compatibility.
@@ -66,6 +69,9 @@ def _build_telephony_session_config(
         direction=direction,
         voice_tuning_override=voice_tuning_override,
         ai_config_override=ai_config_override,
+        lead_first_name=lead_first_name,
+        lead_last_name=lead_last_name,
+        lead_company=lead_company,
     )
 
 

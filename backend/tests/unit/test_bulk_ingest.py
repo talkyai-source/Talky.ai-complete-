@@ -146,3 +146,65 @@ def test_ingest_revives_soft_deleted():
     assert res.imported == 1
     assert db.inserted == []           # revived in place, not inserted
     assert any(u.get("status") == "pending" for u in db.updates)
+
+
+# ── company column ────────────────────────────────────────────────
+def test_ingest_stores_company_in_custom_fields():
+    """A company on the LeadRecord lands in custom_fields.company (no new
+    column) and does not disturb existing custom_fields."""
+    db = _FakeDB(existing_rows=[])
+    res = ingest_lead_records(
+        db, campaign_id="c1", tenant_id="t1",
+        records=[LeadRecord(
+            "+1 415 555 1234", first_name="Jo", company="Acme Roofing",
+            custom_fields={"note": "vip"}, source_row=1,
+        )],
+        normalize=_id_normalize,
+    )
+    assert res.imported == 1
+    assert len(db.inserted) == 1
+    cf = db.inserted[0]["custom_fields"]
+    assert cf["company"] == "Acme Roofing"
+    assert cf["note"] == "vip"          # pre-existing custom field preserved
+
+
+def test_ingest_company_absent_leaves_custom_fields_clean():
+    """No company → no 'company' key injected (byte-for-byte prior behaviour)."""
+    db = _FakeDB(existing_rows=[])
+    ingest_lead_records(
+        db, campaign_id="c1", tenant_id="t1",
+        records=[LeadRecord("+1 415 555 1234", first_name="Jo", source_row=1)],
+        normalize=_id_normalize,
+    )
+    assert db.inserted[0]["custom_fields"] == {}
+
+
+def test_ingest_company_flows_through_revive():
+    db = _FakeDB(existing_rows=[
+        {"id": "DEL1", "phone_number": "+14155551234", "status": "deleted", "is_lead": True},
+    ])
+    ingest_lead_records(
+        db, campaign_id="c1", tenant_id="t1",
+        records=[LeadRecord("+1 415 555 1234", first_name="Jo", company="Beta LLC", source_row=1)],
+        normalize=_id_normalize,
+    )
+    assert any(
+        u.get("custom_fields", {}).get("company") == "Beta LLC" for u in db.updates
+    )
+
+
+def test_ingest_tolerates_unknown_extra_column():
+    """An unknown 5th (or Nth) column carried in custom_fields must not break
+    ingest — the survivor is still inserted with its extra data intact."""
+    db = _FakeDB(existing_rows=[])
+    res = ingest_lead_records(
+        db, campaign_id="c1", tenant_id="t1",
+        records=[LeadRecord(
+            "+1 415 555 1234", first_name="Jo",
+            custom_fields={"favorite_color": "blue"}, source_row=1,
+        )],
+        normalize=_id_normalize,
+    )
+    assert res.imported == 1
+    assert res.invalid == 0
+    assert db.inserted[0]["custom_fields"]["favorite_color"] == "blue"

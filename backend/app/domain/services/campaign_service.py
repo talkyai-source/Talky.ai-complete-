@@ -506,6 +506,16 @@ class CampaignService:
         tenant_id_str = str(tenant_id)
         phone_number = str(lead["phone_number"])
 
+        # Lead identity for the "who you're calling" prompt block. Company
+        # lives in the lead's custom_fields JSONB (written by bulk_ingest).
+        # All best-effort: a missing name/company just yields a blind dial.
+        lead_first_name = (lead.get("first_name") or None)
+        lead_last_name = (lead.get("last_name") or None)
+        _custom = lead.get("custom_fields") or {}
+        lead_company = None
+        if isinstance(_custom, dict):
+            lead_company = (_custom.get("company") or None)
+
         # Pick an agent name from the campaign pool — stays stable for
         # the whole call. Fall back to None (legacy campaigns) so the
         # session config can use its own default pool.
@@ -538,8 +548,11 @@ class CampaignService:
             created_at=now,
             first_speaker=first_speaker,
             agent_name=agent_name,
+            lead_first_name=lead_first_name,
+            lead_last_name=lead_last_name,
+            lead_company=lead_company,
         )
-        
+
         job_record = {
             "id": job_id,
             "campaign_id": str(campaign_id),

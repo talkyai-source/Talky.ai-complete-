@@ -151,11 +151,12 @@ async def upload_campaign_contacts(
     - Batch insertion for better performance
     - Detailed error reporting with row numbers
     
-    CSV Format Expected:
-        phone_number,first_name,last_name,email
-        +1234567890,John,Doe,john@example.com
-        555-123-4567,Jane,Smith,jane@example.com
-    
+    CSV Format Expected (company is optional; any extra column is preserved
+    in custom_fields and never breaks the import):
+        phone_number,first_name,last_name,email,company
+        +1234567890,John,Doe,john@example.com,Acme Roofing
+        555-123-4567,Jane,Smith,jane@example.com,
+
     Returns:
         ImportResult with counts and per-row errors
     """
@@ -218,7 +219,7 @@ async def upload_campaign_contacts(
         records: List[LeadRecord] = []
         for row_num, row in enumerate(csv_reader, start=2):  # Row 1 is header
             phone_raw = None
-            first_name = last_name = email = None
+            first_name = last_name = email = company = None
             custom_fields: dict = {}
             for key, value in row.items():
                 key_lower = (key or "").lower().strip()
@@ -231,13 +232,21 @@ async def upload_campaign_contacts(
                     last_name = value_clean
                 elif key_lower == 'email':
                     email = value_clean
+                elif key_lower == 'company':
+                    # Recognized 5th column — stored canonically as
+                    # custom_fields.company by the ingest core and later
+                    # injected into the agent's "who you're calling" prompt.
+                    company = value_clean
                 elif value_clean:
+                    # Any OTHER column is preserved verbatim in custom_fields,
+                    # so an extra/unknown column never breaks the import.
                     custom_fields[key] = value_clean
             records.append(LeadRecord(
                 phone_raw=phone_raw or "",
                 first_name=first_name,
                 last_name=last_name,
                 email=email,
+                company=company,
                 custom_fields=custom_fields,
                 source_row=row_num,
             ))

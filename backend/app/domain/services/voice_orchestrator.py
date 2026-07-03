@@ -259,6 +259,16 @@ class VoiceSessionConfig:
     realtime_voice: str = "marin"
     realtime_settings: Optional[Dict[str, Any]] = None
 
+    # ── Callee identity ("who you're calling") ───────────────────────────
+    # Set by build_telephony_session_config from the lead threaded through
+    # make_call. The cascaded path bakes this into system_prompt directly;
+    # these fields carry the same identity to the realtime pipeline, which
+    # builds its own instruction string from the config. All optional →
+    # None means a blind dial (unchanged behaviour).
+    callee_first_name: Optional[str] = None
+    callee_last_name: Optional[str] = None
+    callee_company: Optional[str] = None
+
 
 # ---------------------------------------------------------------------------
 # VoiceSession — container for a running session's resources
@@ -1453,11 +1463,32 @@ class VoiceOrchestrator:
             or "have a helpful, natural conversation with the caller"
         )
         role = getattr(ac, "role", None) or "a friendly voice assistant"
+
+        # "Who you're calling" for the realtime pipeline. The cascaded path
+        # gets this via system_prompt; realtime builds instructions from the
+        # persona, so surface it as extra_notes. Fail-soft: no name → no note.
+        extra_notes = None
+        first = (getattr(config, "callee_first_name", None) or "").strip()
+        last = (getattr(config, "callee_last_name", None) or "").strip()
+        callee_company = (getattr(config, "callee_company", None) or "").strip()
+        full = " ".join(p for p in (first, last) if p).strip()
+        if full:
+            greet = first or full
+            comp_clause = f" from {callee_company}" if callee_company else ""
+            extra_notes = (
+                f"You are calling {full}{comp_clause}. You haven't spoken to "
+                "them yet, so treat the name as who you expect to reach, not a "
+                "confirmed fact. Greet them by first name and check you've "
+                f'reached the right person (e.g. "Hi, is this {greet}?") before '
+                "getting into it. Don't recite their details back robotically."
+            )
+
         return RealtimePersona(
             agent_name=str(agent_name),
             company_name=str(company),
             role=str(role),
             goal=str(goal),
+            extra_notes=extra_notes,
         )
 
     async def _create_media_gateway(self, config: VoiceSessionConfig):

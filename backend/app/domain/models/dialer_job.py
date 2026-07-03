@@ -105,7 +105,23 @@ class DialerJob(BaseModel):
         default=None,
         description="Agent name used by the AI on this call. Picked from the campaign's 1-3 name pool.",
     )
-    
+
+    # Lead identity captured at job-creation time (mirrors how agent_name
+    # flows) so the outbound agent knows WHO it's calling — it can greet by
+    # first name and confirm it reached the right person, instead of dialing
+    # blind. All optional: a lead with no name/company degrades cleanly to a
+    # blind dial (today's behaviour). Threaded through make_call into the
+    # agent's system prompt; never used for routing or dedup.
+    lead_first_name: Optional[str] = Field(
+        default=None, description="Callee's first name, if known."
+    )
+    lead_last_name: Optional[str] = Field(
+        default=None, description="Callee's last name, if known."
+    )
+    lead_company: Optional[str] = Field(
+        default=None, description="Callee's company/organization, if known."
+    )
+
     # Pydantic V2 configuration
     model_config = {"use_enum_values": True}
     
@@ -171,6 +187,9 @@ class DialerJob(BaseModel):
             "call_id": self.call_id,
             "first_speaker": self.first_speaker,
             "agent_name": self.agent_name,
+            "lead_first_name": self.lead_first_name,
+            "lead_last_name": self.lead_last_name,
+            "lead_company": self.lead_company,
         }
     
     @classmethod

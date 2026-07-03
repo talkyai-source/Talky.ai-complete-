@@ -362,6 +362,44 @@ def build_telephony_greeting(agent_name: str, company_name: str) -> str:
     return _random.choice(variants)
 
 
+def build_call_target_block(
+    first_name: Optional[str] = None,
+    last_name: Optional[str] = None,
+    company: Optional[str] = None,
+) -> str:
+    """Compose the "PERSON YOU'RE CALLING" prompt block for an outbound call
+    whose lead identity is known at dial time.
+
+    Returns "" when no usable NAME is present, so the caller can prepend the
+    result unconditionally and degrade cleanly to a blind dial — the composed
+    prompt is then byte-for-byte identical to today's. A lone company (no name)
+    also returns "" on purpose: you can't greet someone by a company, and we
+    must never have the agent recite an org name robotically.
+
+    This is deliberately NOT the CAPTURED block: the callee has NOT confirmed
+    their identity yet (we haven't even spoken to them), so the wording frames
+    the name as who we EXPECT to reach — something to confirm, not a settled
+    fact the agent may assert.
+    """
+    first = (first_name or "").strip()
+    last = (last_name or "").strip()
+    comp = (company or "").strip()
+    full = " ".join(p for p in (first, last) if p).strip()
+    if not full:
+        return ""
+    greet_name = first or full
+    company_clause = f", from {comp}" if comp else ""
+    return (
+        f"PERSON YOU'RE CALLING: {full}{company_clause}. This is who the number "
+        "belongs to on our list — you have NOT spoken to them yet, so treat the "
+        "name as who you expect to reach, not a confirmed fact. Open by greeting "
+        f'them by their first name naturally (e.g. "Hi, is this {greet_name}?") '
+        "and confirm you've reached the right person before launching in. Do not "
+        "read their details back robotically or recite the company name at them.\n"
+        "------------------------------------------------------------\n"
+    )
+
+
 def build_telephony_session_config(
     gateway_type: str = "telephony",
     campaign: Optional[Any] = None,
@@ -369,6 +407,9 @@ def build_telephony_session_config(
     direction: Direction = Direction.OUTBOUND,
     voice_tuning_override: Optional[VoiceTuning] = None,
     ai_config_override: Optional[AIProviderConfig] = None,
+    lead_first_name: Optional[str] = None,
+    lead_last_name: Optional[str] = None,
+    lead_company: Optional[str] = None,
 ) -> VoiceSessionConfig:
     """
     Build a VoiceSessionConfig for a telephony call.
@@ -489,6 +530,22 @@ def build_telephony_session_config(
 
     # (Brand-accuracy line is now part of the composed base prompt — see
     # prompts.composer.brand_correction_line, appended inside compose_prompt.)
+
+    # "Who you're calling" — prepend the CALL-TARGET block so the agent knows
+    # the callee's name/company and can greet them by name. Prepended (like the
+    # per-turn CAPTURED header) so it sits in the top-of-prompt attention
+    # window; it is framed as context to CONFIRM, so it never competes with the
+    # HARD RULES / compliance floor that follow. Empty when no name is threaded
+    # → system_prompt is byte-for-byte today's blind-dial prompt.
+    call_target_block = build_call_target_block(
+        lead_first_name, lead_last_name, lead_company
+    )
+    if call_target_block:
+        system_prompt = call_target_block + "\n" + system_prompt
+        logger.info(
+            "telephony_call_target_injected campaign=%s has_company=%s",
+            _campaign_id(campaign), bool((lead_company or "").strip()),
+        )
 
     # AgentConfig mirrors the persona so downstream code (greeting
     # builder, logs, analytics) sees the right business_type / tone.
@@ -643,6 +700,12 @@ def build_telephony_session_config(
         realtime_model=_realtime_model,
         realtime_voice=_realtime_voice,
         realtime_settings=_realtime_settings,
+        # Callee identity — the cascaded path already has it baked into
+        # system_prompt above; these carry it to the realtime pipeline, which
+        # composes its own instructions from the config (not system_prompt).
+        callee_first_name=(lead_first_name or "").strip() or None,
+        callee_last_name=(lead_last_name or "").strip() or None,
+        callee_company=(lead_company or "").strip() or None,
     )
 
 

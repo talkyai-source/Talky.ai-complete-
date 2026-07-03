@@ -52,6 +52,11 @@ class LeadRecord:
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     email: Optional[str] = None
+    # Optional company/organization for the contact. Stored in the lead's
+    # custom_fields JSONB under the canonical "company" key (no schema
+    # migration — the leads table already has custom_fields), and later
+    # threaded into the outbound agent's "who you're calling" prompt block.
+    company: Optional[str] = None
     custom_fields: dict = field(default_factory=dict)
     source_row: Optional[int] = None
 
@@ -71,6 +76,24 @@ class IngestResult:
     duplicates_skipped: int = 0
     invalid: int = 0
     errors: list = field(default_factory=list)
+
+
+def _custom_fields_with_company(rec: "LeadRecord") -> dict:
+    """Return the record's custom_fields with the contact's company folded in
+    under the canonical ``company`` key.
+
+    Kept out of the insert/revive dicts inline so CSV import and paste import
+    (and any future entry point) store company the exact same way. A blank
+    company leaves custom_fields untouched, so a company-less import is
+    byte-identical to before this change. An explicit ``company`` already in
+    custom_fields (e.g. a stray "Company" header that fell through to the
+    catch-all) is overridden by the parsed value so the key stays canonical.
+    """
+    fields = dict(rec.custom_fields or {})
+    company = (rec.company or "").strip()
+    if company:
+        fields["company"] = company
+    return fields
 
 
 def parse_pasted_numbers(text: str) -> list[str]:
@@ -157,7 +180,7 @@ def ingest_lead_records(
                 "first_name": rec.first_name,
                 "last_name": rec.last_name,
                 "email": rec.email,
-                "custom_fields": rec.custom_fields or {},
+                "custom_fields": _custom_fields_with_company(rec),
             })
             live_phones.add(phone)
             continue
@@ -170,7 +193,7 @@ def ingest_lead_records(
             "first_name": rec.first_name,
             "last_name": rec.last_name,
             "email": rec.email,
-            "custom_fields": rec.custom_fields or {},
+            "custom_fields": _custom_fields_with_company(rec),
             "status": "pending",
             "last_call_result": "pending",
             "call_attempts": 0,

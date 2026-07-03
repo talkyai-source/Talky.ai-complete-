@@ -119,6 +119,9 @@ async def prepare_prewarmed_session(
     campaign_id: Optional[str],
     agent_name: Optional[str],
     container,
+    lead_first_name: Optional[str] = None,
+    lead_last_name: Optional[str] = None,
+    lead_company: Optional[str] = None,
 ) -> PrewarmResult:
     """Build + fully warm a VoiceSession before the SIP call is originated.
 
@@ -178,6 +181,9 @@ async def prepare_prewarmed_session(
             direction=call_direction,
             voice_tuning_override=voice_tuning,
             ai_config_override=ai_config,
+            lead_first_name=lead_first_name,
+            lead_last_name=lead_last_name,
+            lead_company=lead_company,
         )
         # User-first only: relax the Flux end-of-turn timeout from 500ms
         # to 1000ms. The 500ms default is aggressive and was the cause of

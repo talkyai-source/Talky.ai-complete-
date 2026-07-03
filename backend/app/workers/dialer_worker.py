@@ -575,6 +575,15 @@ class DialerWorker:
         }
         if job.agent_name:
             payload["agent_name"] = job.agent_name
+        # Thread the lead's identity so the agent can greet the callee by name
+        # and confirm it reached the right person. All optional — a nameless
+        # lead simply omits these and the call dials blind (unchanged behaviour).
+        if getattr(job, "lead_first_name", None):
+            payload["lead_first_name"] = job.lead_first_name
+        if getattr(job, "lead_last_name", None):
+            payload["lead_last_name"] = job.lead_last_name
+        if getattr(job, "lead_company", None):
+            payload["lead_company"] = job.lead_company
 
         # Authenticate as an internal service with the shared-secret
         # X-Internal-Service-Token header (CSRF-exempt + accepted by the
