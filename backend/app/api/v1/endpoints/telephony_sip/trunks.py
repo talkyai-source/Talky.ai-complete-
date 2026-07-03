@@ -70,7 +70,7 @@ def _row_to_response(row: asyncpg.Record) -> SIPTrunkResponse:
         is_active=row["is_active"],
         auth_username=row["auth_username"],
         auth_configured=bool(row["auth_password_encrypted"]),
-        metadata=row["metadata"] or {},
+        metadata=_coerce_jsonb(row["metadata"]) or {},
         last_tested_at=row["last_tested_at"] if "last_tested_at" in keys else None,
         last_test_result=(
             _coerce_jsonb(row["last_test_result"]) if "last_test_result" in keys else None
