@@ -17,8 +17,9 @@ import { AlertCircle, CheckCircle2, FileUp, Loader2, Upload } from "lucide-react
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { extendedApi, BulkImportResponse } from "@/lib/extended-api";
+import { parseContactsCsv, type ContactRow } from "@/lib/contact-csv";
 
-type Row = { phone: string; first_name: string; last_name: string; email: string; company: string };
+type Row = ContactRow;
 type PhoneCheck = { ok: boolean; normalized: string; reason?: string };
 
 /** Mirror of the backend normalize_phone_number, but flags <7 digits as a
@@ -39,62 +40,9 @@ function checkPhone(raw: string): PhoneCheck {
     return { ok: true, normalized };
 }
 
-function parseCsv(text: string): string[][] {
-    const rows: string[][] = [];
-    let row: string[] = [], field = "", inQuotes = false;
-    for (let i = 0; i < text.length; i++) {
-        const c = text[i];
-        if (inQuotes) {
-            if (c === '"') {
-                if (text[i + 1] === '"') { field += '"'; i++; } else inQuotes = false;
-            } else field += c;
-        } else if (c === '"') inQuotes = true;
-        else if (c === ",") { row.push(field); field = ""; }
-        else if (c === "\r") { /* skip */ }
-        else if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
-        else field += c;
-    }
-    if (field.length || row.length) { row.push(field); rows.push(row); }
-    return rows.filter((r) => r.some((c) => c.trim() !== ""));
-}
-
-function mapHeaders(headers: string[]) {
-    const norm = headers.map((h) => h.trim().toLowerCase().replace(/[\s_\-().]/g, ""));
-    // Substring match by priority (earlier candidate wins); `exclude` skips
-    // look-alike columns like "Phone Valid", "Email Status", "Extra Emails".
-    const findBy = (cands: string[], exclude: string[] = []) => {
-        for (const cand of cands) {
-            const i = norm.findIndex(
-                (h) => h.includes(cand) && !exclude.some((x) => h.includes(x)),
-            );
-            if (i >= 0) return i;
-        }
-        return -1;
-    };
-    return {
-        phone: findBy(
-            ["e164", "tonumber", "mobileno", "mobilenumber", "mobile", "cellphone", "cell",
-             "phonenumber", "phone", "contactno", "telephone", "tel", "number"],
-            ["valid", "status", "type", "count", "email"],
-        ),
-        first: findBy(["firstname", "givenname", "fname"]),
-        last: findBy(["lastname", "surname", "familyname", "lname"]),
-        full: findBy(["fullname"]),
-        email: findBy(["emailaddress", "email"], ["valid", "status", "extra", "secondary"]),
-        company: findBy(["companyname", "company", "organization", "organisation", "business", "accountname"]),
-    };
-}
-
-/** Real exports (Retell, HubSpot, etc.) often put a title/metadata preamble
- *  above the header row. Scan the first rows and pick the first that actually
- *  looks like a header — has a phone column AND a name column. */
-function findHeaderRow(grid: string[][]): number {
-    for (let i = 0; i < Math.min(grid.length, 15); i++) {
-        const m = mapHeaders(grid[i]);
-        if (m.phone >= 0 && (m.first >= 0 || m.last >= 0 || m.full >= 0)) return i;
-    }
-    return 0;
-}
+// CSV parsing (preamble skip + fuzzy column mapping + Full Name split + company)
+// lives in the shared `@/lib/contact-csv` module so this modal and the global
+// /contacts page use ONE parser. See parseContactsCsv.
 
 function esc(s: string): string {
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -149,32 +97,12 @@ export function SmartCsvImport({
         setFileName(f.name);
         try {
             const text = await f.text();
-            const grid = parseCsv(text);
-            if (grid.length < 2) { setParseError("The file has no data rows."); return; }
-            // Skip any title/metadata preamble and find the real header row.
-            const headerRow = findHeaderRow(grid);
-            const m = mapHeaders(grid[headerRow]);
-            if (m.phone < 0) {
+            const { rows: parsed, phoneFound } = parseContactsCsv(text);
+            if (!phoneFound) {
                 setParseError("Couldn't find a phone column. Make sure the file has a header row with a column like 'Phone', 'Mobile', or 'To Number'.");
                 return;
             }
-            const parsed: Row[] = grid.slice(headerRow + 1).map((r) => {
-                let first = m.first >= 0 ? (r[m.first] ?? "").trim() : "";
-                let last = m.last >= 0 ? (r[m.last] ?? "").trim() : "";
-                // No explicit first/last but a Full Name column → split it.
-                if (!first && !last && m.full >= 0) {
-                    const parts = (r[m.full] ?? "").trim().split(/\s+/).filter(Boolean);
-                    first = parts[0] ?? "";
-                    last = parts.slice(1).join(" ");
-                }
-                return {
-                    phone: (r[m.phone] ?? "").trim(),
-                    first_name: first,
-                    last_name: last,
-                    email: m.email >= 0 ? (r[m.email] ?? "").trim() : "",
-                    company: m.company >= 0 ? (r[m.company] ?? "").trim() : "",
-                };
-            }).filter((r) => r.phone || r.first_name || r.last_name);
+            if (parsed.length === 0) { setParseError("The file has no data rows."); return; }
             setRows(parsed);
         } catch {
             setParseError("Couldn't read the file. Make sure it's a UTF-8 .csv.");

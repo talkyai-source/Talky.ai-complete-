@@ -6,13 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { dashboardApi, Campaign } from "@/lib/dashboard-api";
 import { extendedApi, BulkImportResponse } from "@/lib/extended-api";
+import { parseContactsCsv } from "@/lib/contact-csv";
 import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Download, X } from "lucide-react";
 import { motion } from "framer-motion";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
 const MAX_ROWS = 50_000;
 const PREVIEW_ROWS = 5;
-const REQUIRED_HEADERS = ["phone_number"] as const;
 
 type ParsedRow = {
     rowNum: number;
@@ -32,27 +32,6 @@ type ParseSummary = {
     headerError?: string;
 };
 
-// Lightweight CSV line splitter that respects double-quoted values.
-function splitCsvLine(line: string): string[] {
-    const out: string[] = [];
-    let cur = "";
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-        const c = line[i];
-        if (inQuotes) {
-            if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }
-            else if (c === '"') inQuotes = false;
-            else cur += c;
-        } else {
-            if (c === '"') inQuotes = true;
-            else if (c === ",") { out.push(cur); cur = ""; }
-            else cur += c;
-        }
-    }
-    out.push(cur);
-    return out.map((v) => v.trim());
-}
-
 function isLikelyValidPhone(raw: string): boolean {
     const cleaned = raw.replace(/[^\d]/g, "");
     if (cleaned.length < 3) return false;
@@ -66,38 +45,30 @@ function isLikelyValidEmail(raw: string): boolean {
 }
 
 function parseCsvText(text: string): ParseSummary {
-    const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-    if (lines.length === 0) {
-        return { headers: [], rows: [], valid: 0, invalid: 0, headerError: "File is empty." };
-    }
-    const headers = splitCsvLine(lines[0]).map((h) => h.toLowerCase());
-    const missing = REQUIRED_HEADERS.filter((r) => !headers.includes(r));
-    if (missing.length > 0) {
+    // ONE shared parser (skips preamble, fuzzy-maps columns, splits Full Name,
+    // captures company) — see @/lib/contact-csv. This page keeps its own
+    // per-row validation (phone/email sanity + in-file dedupe) on top.
+    const { headers, rows: contactRows, phoneFound } = parseContactsCsv(text);
+    if (!phoneFound) {
         return {
             headers,
             rows: [],
             valid: 0,
             invalid: 0,
-            headerError: `Missing required column(s): ${missing.join(", ")}. Found: ${headers.join(", ") || "(none)"}.`,
+            headerError: headers.length
+                ? `Couldn't find a phone column. Found: ${headers.join(", ")}. Add a column like 'phone_number', 'Phone', 'Mobile', or 'To Number'.`
+                : "File is empty.",
         };
     }
-    const idx = (name: string) => headers.indexOf(name);
-    const phoneIdx = idx("phone_number");
-    const firstIdx = idx("first_name");
-    const lastIdx = idx("last_name");
-    const emailIdx = idx("email");
 
     const rows: ParsedRow[] = [];
     const seen = new Set<string>();
     let valid = 0;
     let invalid = 0;
 
-    for (let i = 1; i < lines.length; i++) {
-        const cells = splitCsvLine(lines[i]);
-        const phone = (cells[phoneIdx] ?? "").trim();
-        const firstName = firstIdx >= 0 ? (cells[firstIdx] ?? "").trim() : "";
-        const lastName = lastIdx >= 0 ? (cells[lastIdx] ?? "").trim() : "";
-        const email = emailIdx >= 0 ? (cells[emailIdx] ?? "").trim() : "";
+    contactRows.forEach((c, i) => {
+        const phone = c.phone;
+        const email = c.email;
 
         let error: string | undefined;
         if (!phone) error = "phone_number is empty";
@@ -110,15 +81,15 @@ function parseCsvText(text: string): ParseSummary {
         if (ok) valid++; else invalid++;
 
         rows.push({
-            rowNum: i + 1,
+            rowNum: i + 2, // +2: 1 header row + 1-based display
             phone,
-            firstName,
-            lastName,
+            firstName: c.first_name,
+            lastName: c.last_name,
             email,
             valid: ok,
             error,
         });
-    }
+    });
 
     return { headers, rows, valid, invalid };
 }
@@ -256,7 +227,18 @@ export default function ContactsPage() {
         try {
             setUploading(true);
             setError("");
-            const response = await extendedApi.uploadCSV(selectedCampaign, file, true);
+            // Rebuild a CLEAN csv from the shared parser (skips the export's
+            // title/metadata preamble + normalizes headers to what the backend
+            // expects) so the raw file's junk rows never reach the server. Same
+            // approach as the campaign SmartCsvImport.
+            const esc = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
+            const { rows: contactRows } = parseContactsCsv(await file.text());
+            const clean = contactRows.filter((r) => r.phone && isLikelyValidPhone(r.phone));
+            const csv = ["phone_number,first_name,last_name,email,company"]
+                .concat(clean.map((r) => [r.phone, r.first_name, r.last_name, r.email, r.company].map(esc).join(",")))
+                .join("\n");
+            const cleanFile = new File([csv], "contacts.csv", { type: "text/csv" });
+            const response = await extendedApi.uploadCSV(selectedCampaign, cleanFile, true);
             setResult(response);
             clearFile();
         } catch (err) {
