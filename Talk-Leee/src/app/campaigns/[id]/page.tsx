@@ -1,13 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { dashboardApi, Campaign, Contact, MinutesStatus } from "@/lib/dashboard-api";
+import { dashboardApi, Campaign, Contact, ContactList, MinutesStatus } from "@/lib/dashboard-api";
 import { SmartCsvImport } from "@/components/campaigns/smart-csv-import";
+import { ContactLists, ActiveContactsSummary } from "@/components/campaigns/contact-lists";
 import { ScriptCard } from "@/components/campaigns/script-card";
 import { LiveCallsPanel } from "@/components/campaigns/live-calls-panel";
 import { CallIssuesPanel } from "@/components/campaigns/call-issues-panel";
@@ -85,6 +86,13 @@ export default function CampaignDetailPage() {
 
     // CSV Upload (smart import modal)
     const [csvModalOpen, setCsvModalOpen] = useState(false);
+
+    // Contact lists — the grouped-upload cards + the active-contacts summary.
+    // `listsRefreshToken` re-fetches the lists row after an import; `lists`
+    // mirrors what the row loaded so the Start summary can read active counts.
+    const [listsRefreshToken, setListsRefreshToken] = useState(0);
+    const [lists, setLists] = useState<ContactList[]>([]);
+    const listsSectionRef = useRef<HTMLDivElement | null>(null);
 
     // First-speaker selector shown after the Start button is pressed
     const [startModalOpen, setStartModalOpen] = useState(false);
@@ -362,6 +370,13 @@ export default function CampaignDetailPage() {
                         </div>
                     )}
 
+                    {/* Active-contacts summary — which lists get dialed on Start.
+                        "View more" scrolls to the full lists row below. */}
+                    <ActiveContactsSummary
+                        lists={lists}
+                        onViewMore={() => listsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                    />
+
                     {/* Stats */}
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
                         <motion.div
@@ -469,6 +484,16 @@ export default function CampaignDetailPage() {
                         <CallIssuesPanel campaignId={campaignId} />
                     </motion.div>
 
+                    {/* Contact lists row — toggle active/inactive + call a whole list. */}
+                    <div ref={listsSectionRef}>
+                        <ContactLists
+                            campaignId={campaignId}
+                            refreshToken={listsRefreshToken}
+                            onListsLoaded={setLists}
+                            onCallStarted={() => { void loadData(); }}
+                        />
+                    </div>
+
                     {/* Contacts */}
                     <motion.div
                         initial={{ opacity: 0, y: 20 }}
@@ -493,7 +518,7 @@ export default function CampaignDetailPage() {
                             open={csvModalOpen}
                             campaignId={campaignId}
                             onClose={() => setCsvModalOpen(false)}
-                            onImported={() => { void loadData(); }}
+                            onImported={() => { void loadData(); setListsRefreshToken((t) => t + 1); }}
                         />
 
                         {showAddContact && (

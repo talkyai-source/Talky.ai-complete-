@@ -173,6 +173,31 @@ export interface Contact {
     qualified_call_id?: string | null;
 }
 
+// Contact List Types (grouped uploads / pasted batches).
+// A campaign's contacts are grouped into named lists — one per CSV upload or
+// paste batch. A synthetic `{id:"ungrouped"}` list is returned by the backend
+// whenever NULL-list leads exist; it CANNOT be toggled or called (the UI hides
+// those controls for it) and its `created_at` is null.
+export interface ContactList {
+    id: string;
+    name: string;
+    /** Where the list came from ("csv", "paste", …). Absent for the synthetic ungrouped list. */
+    source?: string | null;
+    is_active: boolean;
+    contact_count: number;
+    created_at: string | null;
+}
+
+/** Result of POST /contact-lists/{id}/call — placing REAL outbound calls now. */
+export interface ContactListCallResult {
+    list_id: string;
+    is_active: boolean;
+    eligible_count: number;
+    jobs_enqueued: number;
+    started: boolean;
+    message: string;
+}
+
 // Internal types for backend responses
 interface CallListItem {
     id: string;
@@ -336,12 +361,45 @@ class DashboardApi {
     async listContacts(
         campaignId: string,
         page: number = 1,
-        pageSize: number = 50
+        pageSize: number = 50,
+        opts?: { listId?: string | null; search?: string | null }
     ): Promise<{ items: Contact[]; total: number; page: number; page_size: number }> {
+        const params: Record<string, string> = { page: String(page), page_size: String(pageSize) };
+        // `list_id` accepts a real list id OR the synthetic "ungrouped" sentinel.
+        if (opts?.listId) params.list_id = opts.listId;
+        const search = opts?.search?.trim();
+        if (search) params.search = search;
         return this.client.request({
             path: `/campaigns/${campaignId}/contacts`,
             method: "GET",
-            params: { page: String(page), page_size: String(pageSize) },
+            params,
+        });
+    }
+
+    // Contact lists (grouped uploads). Fail-soft in the UI: callers show an
+    // error strip on reject but never blank the page.
+    async listContactLists(campaignId: string): Promise<ContactList[]> {
+        return this.client.request({
+            path: `/campaigns/${campaignId}/contact-lists`,
+            method: "GET",
+        });
+    }
+
+    /** Toggle a list active/inactive. The synthetic "ungrouped" list rejects this. */
+    async updateContactList(listId: string, isActive: boolean): Promise<ContactList> {
+        return this.client.request({
+            path: `/contact-lists/${listId}`,
+            method: "PATCH",
+            body: { is_active: isActive },
+        });
+    }
+
+    /** Places REAL outbound calls to a list's eligible contacts immediately.
+     *  Treat like Start Campaign — confirm() before calling. */
+    async callContactList(listId: string): Promise<ContactListCallResult> {
+        return this.client.request({
+            path: `/contact-lists/${listId}/call`,
+            method: "POST",
         });
     }
 
