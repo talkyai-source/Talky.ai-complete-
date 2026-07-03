@@ -104,6 +104,51 @@ def test_render_caller_id_and_source_host_overrides():
     assert "match=203.0.113.9" in conf  # identify uses the explicit source host
 
 
+def test_render_dtmf_rfc2833_maps_to_valid_pjsip_rfc4733():
+    # PJSIP rejects the legacy chan_sip name 'rfc2833'; an unmapped value fails
+    # the whole endpoint ("Error parsing dtmf_mode=rfc2833"). Must become rfc4733.
+    conf = render_trunk_conf(_input(dtmf_mode="rfc2833"))
+    assert "dtmf_mode=rfc4733" in conf
+    assert "dtmf_mode=rfc2833" not in conf
+
+
+def test_render_drops_unknown_dtmf_mode_rather_than_break_endpoint():
+    conf = render_trunk_conf(_input(dtmf_mode="bogus"))
+    assert "dtmf_mode=" not in conf
+
+
+def test_render_auth_has_default_realm():
+    # Mirrors the working primary (realm=asterisk); a missing/wrong realm 403s.
+    conf = render_trunk_conf(_input())
+    assert "realm=asterisk" in conf
+
+
+def test_render_auth_realm_override():
+    conf = render_trunk_conf(_input(auth_realm="sip.acme.example"))
+    assert "realm=sip.acme.example" in conf
+
+
+def test_render_endpoint_has_nat_traversal_settings():
+    conf = render_trunk_conf(_input())
+    assert "rtp_symmetric=yes" in conf
+    assert "force_rport=yes" in conf
+    assert "rewrite_contact=yes" in conf
+
+
+def test_render_registers_the_number_not_login_when_caller_id_set():
+    # Mirror the primary: register the DID/number as the identity, auth with the login.
+    conf = render_trunk_conf(_input(register=True, caller_id="+442046132300"))
+    assert "client_uri=sip:+442046132300@sip.acme.example" in conf
+    assert "contact_user=+442046132300" in conf
+    assert "from_user=+442046132300" in conf
+
+
+def test_render_falls_back_to_login_identity_without_caller_id():
+    conf = render_trunk_conf(_input(register=True))
+    assert "client_uri=sip:acmeuser@sip.acme.example" in conf
+    assert "contact_user=acmeuser" in conf
+
+
 def test_render_without_auth_omits_auth_and_outbound_auth():
     conf = render_trunk_conf(_input(auth_username=None, auth_password=None))
     assert f"[trunk-{TRUNK_ID}-auth]" not in conf

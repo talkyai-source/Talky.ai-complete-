@@ -84,6 +84,7 @@ class TrunkConfigInput:
     register_interval: int = _DEFAULT_REGISTER_INTERVAL
     dtmf_mode: Optional[str] = None
     source_host: Optional[str] = None     # identify match; defaults to sip_domain
+    auth_realm: Optional[str] = None      # digest realm; defaults to "asterisk" to mirror the working primary
 
 
 def _reject_newlines(field: str, value: str) -> str:
@@ -118,6 +119,13 @@ def render_trunk_conf(inp: TrunkConfigInput) -> str:
     ep = f"trunk-{tid}"
     transport_obj = f"transport-{transport}"
     has_auth = bool(inp.auth_username and inp.auth_password)
+    # The IDENTITY we register + present. Mirror the working blazedigitel primary,
+    # which registers its DID/number (not the raw SIP login). Prefer the tenant's
+    # configured caller-id/number; fall back to the auth username.
+    reg_identity = (
+        _reject_newlines("caller_id", inp.caller_id.strip()) if inp.caller_id
+        else (_reject_newlines("auth_username", inp.auth_username.strip()) if inp.auth_username else "")
+    )
     source_host = _reject_newlines(
         "source_host", (inp.source_host or domain).strip()
     )
@@ -139,16 +147,32 @@ def render_trunk_conf(inp: TrunkConfigInput) -> str:
     if has_auth:
         lines.append(f"outbound_auth={ep}-auth")
     lines.append(f"aors={ep}-aor")
-    if inp.auth_username:
-        lines.append(f"from_user={_reject_newlines('auth_username', inp.auth_username.strip())}")
+    if reg_identity:
+        lines.append(f"from_user={reg_identity}")
     lines.append(f"from_domain={domain}")
     if inp.caller_id:
         cid = _reject_newlines("caller_id", inp.caller_id.strip())
         # Present the tenant's own caller-ID on outbound legs.
         lines.append(f'callerid=<{cid}>')
     if inp.dtmf_mode:
-        lines.append(f"dtmf_mode={_reject_newlines('dtmf_mode', inp.dtmf_mode.strip())}")
+        # PJSIP (res_pjsip) does NOT accept the legacy chan_sip names. Map the
+        # UI's values to valid PJSIP ones or Asterisk refuses to create the
+        # endpoint ("Error parsing dtmf_mode=rfc2833"). Valid: rfc4733, inband,
+        # info, auto, auto_info.
+        _dm_raw = inp.dtmf_mode.strip().lower()
+        _dm = {
+            "rfc2833": "rfc4733",
+            "sip-info": "info",
+            "sipinfo": "info",
+        }.get(_dm_raw, _dm_raw)
+        if _dm in {"rfc4733", "inband", "info", "auto", "auto_info"}:
+            lines.append(f"dtmf_mode={_reject_newlines('dtmf_mode', _dm)}")
     lines.append("direct_media=no")
+    # NAT / symmetric-RTP — mirror the working primary so audio flows through the
+    # carrier's NAT and the Contact is rewritten to the public address.
+    lines.append("rtp_symmetric=yes")
+    lines.append("force_rport=yes")
+    lines.append("rewrite_contact=yes")
     lines.append("")
 
     # --- auth (only when credentials present) ---
@@ -158,6 +182,12 @@ def render_trunk_conf(inp: TrunkConfigInput) -> str:
         lines.append("auth_type=userpass")
         lines.append(f"username={_reject_newlines('auth_username', inp.auth_username.strip())}")
         lines.append(f"password={_reject_newlines('auth_password', inp.auth_password)}")
+        # Digest realm — the working primary sets realm=asterisk; a missing/wrong
+        # realm is a classic 403-on-REGISTER cause. Default to "asterisk", override
+        # via the trunk's Advanced auth_realm.
+        realm = _reject_newlines("auth_realm", (inp.auth_realm or "asterisk").strip())
+        if realm:
+            lines.append(f"realm={realm}")
         lines.append("")
 
     # --- aor ---
@@ -172,13 +202,15 @@ def render_trunk_conf(inp: TrunkConfigInput) -> str:
         interval = int(inp.register_interval or _DEFAULT_REGISTER_INTERVAL)
         if interval < 60 or interval > 86400:
             interval = _DEFAULT_REGISTER_INTERVAL
-        user = _reject_newlines("auth_username", inp.auth_username.strip())
         lines.append(f"[{ep}-reg]")
         lines.append("type=registration")
         lines.append(f"transport={transport_obj}")
         lines.append(f"outbound_auth={ep}-auth")
         lines.append(f"server_uri=sip:{domain}:{port}")
-        lines.append(f"client_uri=sip:{user}@{domain}")
+        # Register the NUMBER as the identity (client_uri + contact_user), auth
+        # with the SIP login — exactly how the working primary registers.
+        lines.append(f"client_uri=sip:{reg_identity}@{domain}")
+        lines.append(f"contact_user={reg_identity}")
         lines.append(f"retry_interval={interval}")
         lines.append(f"expiration={interval}")
         # Registration resilience (telephony-audit #4, 2026-07-02). PJSIP
@@ -239,6 +271,7 @@ def build_trunk_config_input(row: Any, *, decrypted_password: Optional[str]) -> 
         register_interval=int(md.get("register_interval", _DEFAULT_REGISTER_INTERVAL) or _DEFAULT_REGISTER_INTERVAL),
         dtmf_mode=(md.get("dtmf_mode") or None),
         source_host=(md.get("source_host") or None),
+        auth_realm=(md.get("auth_realm") or None),
     )
 
 
