@@ -198,8 +198,11 @@ export function useActivateTelephonyProvider() {
 export function useSipTrunks() {
     return useQuery({
         queryKey: telephonyKeys.sipTrunks,
-        queryFn: () => api<{ trunks: SipTrunkRow[] }>("/telephony/sip/trunks"),
-        select: (d) => d.trunks ?? [],
+        // The backend returns a BARE array (response_model=list[SIPTrunkResponse]).
+        // Tolerate both a bare array and a {trunks:[]} wrapper so the card renders
+        // regardless — the .trunks-on-a-bare-array bug hid EVERY trunk before.
+        queryFn: () => api<SipTrunkRow[] | { trunks: SipTrunkRow[] }>("/telephony/sip/trunks"),
+        select: (d) => (Array.isArray(d) ? d : (d?.trunks ?? [])),
     });
 }
 
