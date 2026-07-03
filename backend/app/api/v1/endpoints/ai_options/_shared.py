@@ -33,7 +33,11 @@ async def _fetch_tenant_config(conn, tenant_id: str) -> Optional[AIProviderConfi
             tts_voice_id,
             tts_sample_rate,
             voice_tuning,
-            stt_engine
+            stt_engine,
+            pipeline_mode,
+            realtime_model,
+            realtime_voice,
+            realtime_settings
         FROM tenant_ai_configs
         WHERE tenant_id = $1
         """,
@@ -58,6 +62,19 @@ async def _fetch_tenant_config(conn, tenant_id: str) -> Optional[AIProviderConfi
     else:
         tuning_dict = None
 
+    # realtime_settings is JSONB — same dict-or-str coercion as voice_tuning.
+    raw_rt = dict(row).get("realtime_settings")
+    if isinstance(raw_rt, str):
+        import json as _json
+        try:
+            rt_settings = _json.loads(raw_rt)
+        except (ValueError, TypeError):
+            rt_settings = None
+    elif isinstance(raw_rt, dict):
+        rt_settings = raw_rt if raw_rt else None
+    else:
+        rt_settings = None
+
     return AIProviderConfig(
         llm_provider=row["llm_provider"],
         llm_model=row["llm_model"],
@@ -72,6 +89,10 @@ async def _fetch_tenant_config(conn, tenant_id: str) -> Optional[AIProviderConfi
         tts_voice_id=row["tts_voice_id"],
         tts_sample_rate=row["tts_sample_rate"],
         voice_tuning=tuning_dict,
+        pipeline_mode=(dict(row).get("pipeline_mode") or "cascaded"),
+        realtime_model=(dict(row).get("realtime_model") or "gpt-realtime-2"),
+        realtime_voice=(dict(row).get("realtime_voice") or "marin"),
+        realtime_settings=rt_settings,
     )
 
 
@@ -91,6 +112,10 @@ async def _upsert_tenant_config(conn, tenant_id: str, config: AIProviderConfig) 
     else:
         voice_tuning_json = "{}"
 
+    realtime_settings_json = (
+        _json.dumps(config.realtime_settings) if config.realtime_settings else None
+    )
+
     await conn.execute(
         """
         INSERT INTO tenant_ai_configs (
@@ -107,10 +132,15 @@ async def _upsert_tenant_config(conn, tenant_id: str, config: AIProviderConfig) 
             tts_voice_id,
             tts_sample_rate,
             voice_tuning,
-            stt_engine
+            stt_engine,
+            pipeline_mode,
+            realtime_model,
+            realtime_voice,
+            realtime_settings
         )
         VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14,
+            $15, $16, $17, $18::jsonb
         )
         ON CONFLICT (tenant_id) DO UPDATE SET
             llm_provider = EXCLUDED.llm_provider,
@@ -126,6 +156,10 @@ async def _upsert_tenant_config(conn, tenant_id: str, config: AIProviderConfig) 
             tts_sample_rate = EXCLUDED.tts_sample_rate,
             voice_tuning = EXCLUDED.voice_tuning,
             stt_engine = EXCLUDED.stt_engine,
+            pipeline_mode = EXCLUDED.pipeline_mode,
+            realtime_model = EXCLUDED.realtime_model,
+            realtime_voice = EXCLUDED.realtime_voice,
+            realtime_settings = EXCLUDED.realtime_settings,
             updated_at = NOW()
         """,
         tenant_id,
@@ -142,6 +176,10 @@ async def _upsert_tenant_config(conn, tenant_id: str, config: AIProviderConfig) 
         config.tts_sample_rate,
         voice_tuning_json,
         config.stt_engine,
+        config.pipeline_mode,
+        config.realtime_model,
+        config.realtime_voice,
+        realtime_settings_json,
     )
 
 
