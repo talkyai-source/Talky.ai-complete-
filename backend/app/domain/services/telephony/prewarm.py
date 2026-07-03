@@ -216,6 +216,29 @@ async def prepare_prewarmed_session(
         if agent_name:
             pre_warm_session._agent_name = agent_name
 
+        # ── Realtime (gpt-realtime-2): unified pipeline — skip cascaded warmup ──
+        # A realtime session is ONE OpenAI speech-to-speech WebSocket, already
+        # connected by _create_realtime_voice_session. There is NO separate
+        # STT / TTS / LLM provider to pre-warm, so the strict cascaded warmup
+        # gate below (STT pre_connect, TTS connect_for_call, LLM warm_up, TTS
+        # inference load, LLM stream prime, greeting pre-synth) does not apply —
+        # and it FAILS on the absent cascaded providers, surfacing to the user
+        # as "voice provider not ready" and refusing the call. Realtime is a
+        # unified system: the only readiness that matters (the OpenAI Realtime
+        # session) is already established, and the opening greeting is handled by
+        # the bridge's own trigger_greeting. So go straight to ready.
+        if getattr(pre_warm_session, "realtime_bridge", None) is not None:
+            logger.info(
+                "prewarm: realtime session %s — unified pipeline ready, "
+                "skipping cascaded warmup gate",
+                pre_warm_session.call_id[:12],
+            )
+            return PrewarmResult(
+                session=pre_warm_session,
+                effective_first_speaker=effective_first_speaker,
+                failure_reason=None,
+            )
+
         # ── Campaign knowledge (vectorless RAG, P2) ─────────────────────
         # Flag-gated + fail-soft: for inline/map_retrieve campaigns this bakes
         # the (compacted) knowledge tree into the session's system prompt now,
