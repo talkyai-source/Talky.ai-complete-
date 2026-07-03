@@ -78,6 +78,9 @@ def _row_to_response(row: asyncpg.Record) -> SIPTrunkResponse:
         live_registration_status=(
             row["live_registration_status"] if "live_registration_status" in keys else None
         ),
+        live_status_detail=(
+            row["live_status_detail"] if "live_status_detail" in keys else None
+        ),
         live_status_checked_at=(
             row["live_status_checked_at"] if "live_status_checked_at" in keys else None
         ),
@@ -188,6 +191,7 @@ async def list_sip_trunks(
                 last_tested_at,
                 last_test_result,
                 live_registration_status,
+                live_status_detail,
                 live_status_checked_at,
                 created_at,
                 updated_at

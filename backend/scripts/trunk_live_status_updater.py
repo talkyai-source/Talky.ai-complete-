@@ -62,6 +62,33 @@ def read_registrations() -> dict[str, str]:
     return reg
 
 
+def read_reg_failures() -> dict[str, str]:
+    """registered-identity (number/login) -> 'CODE Reason' (e.g. '403 Forbidden')
+    parsed from recent Asterisk registration-failure log lines, so the card can
+    show the REAL reason a trunk is Rejected."""
+    for path in ("/var/log/asterisk/messages.log", "/var/log/asterisk/full"):
+        try:
+            out = subprocess.run(
+                ["tail", "-n", "500", path], capture_output=True, text=True, timeout=10,
+            ).stdout
+        except Exception:
+            continue
+        if not out:
+            continue
+        fails: dict[str, str] = {}
+        pat = re.compile(
+            r"(\d{3} [A-Za-z][A-Za-z ]*?) (?:fatal |temporal |non-fatal )?response "
+            r"received.*registration attempt to 'sip:([^@]+)@"
+        )
+        for line in out.splitlines():
+            m = pat.search(line)
+            if m:
+                fails[m.group(2).strip()] = m.group(1).strip()  # most-recent wins
+        if fails:
+            return fails
+    return {}
+
+
 def status_for(trunk: dict, reg: dict[str, str]) -> str:
     tid = trunk["id"]
     own = reg.get(f"trunk-{tid}-reg")
@@ -78,24 +105,33 @@ def status_for(trunk: dict, reg: dict[str, str]) -> str:
 
 async def main() -> None:
     reg = read_registrations()
+    fails = read_reg_failures()
     conn = await asyncpg.connect(load_database_url())
     try:
-        rows = await conn.fetch("SELECT id, is_active, metadata FROM tenant_sip_trunks")
+        rows = await conn.fetch(
+            "SELECT id, is_active, metadata, auth_username FROM tenant_sip_trunks"
+        )
         for r in rows:
             raw = r["metadata"]
             md = raw if isinstance(raw, dict) else (
                 json.loads(raw) if isinstance(raw, str) and raw else {}
             )
             st = status_for({"id": str(r["id"]), "is_active": r["is_active"], "metadata": md}, reg)
+            detail = None
+            if st in ("rejected", "unregistered"):
+                ident = (md.get("caller_id") or r["auth_username"] or "").strip()
+                detail = fails.get(ident)
+                if not detail and r["auth_username"]:
+                    detail = fails.get(r["auth_username"].strip())
             await conn.execute(
                 "UPDATE tenant_sip_trunks "
-                "SET live_registration_status=$1, live_status_checked_at=NOW() "
-                "WHERE id=$2",
-                st, r["id"],
+                "SET live_registration_status=$1, live_status_detail=$2, live_status_checked_at=NOW() "
+                "WHERE id=$3",
+                st, detail, r["id"],
             )
     finally:
         await conn.close()
-    print(f"updated {len(rows)} trunks; registrations seen: {reg}")
+    print(f"updated {len(rows)} trunks; registrations={reg}; failures={fails}")
 
 
 if __name__ == "__main__":

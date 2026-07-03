@@ -213,6 +213,7 @@ class SIPTrunkResponse(BaseModel):
     # inactive/unknown), refreshed ~15s by the trunk-status updater. NOT the
     # frozen Test snapshot — this is the live truth the card renders.
     live_registration_status: Optional[str] = None
+    live_status_detail: Optional[str] = None  # e.g. "403 Forbidden" — the real reason
     live_status_checked_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
