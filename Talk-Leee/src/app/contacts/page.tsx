@@ -12,6 +12,7 @@ import { parseContactsCsv } from "@/lib/contact-csv";
 import { ContactLists } from "@/components/campaigns/contact-lists";
 import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Download, X, Search, Plus, Pencil, Trash2 } from "lucide-react";
 import { motion } from "framer-motion";
+import Link from "next/link";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
 const MAX_ROWS = 50_000;
@@ -607,9 +608,9 @@ export default function ContactsPage() {
                 <div className="max-w-3xl">
                     <div className="content-card text-center text-sm text-muted-foreground">
                         You don&apos;t have any campaigns yet.{" "}
-                        <a href="/campaigns" className="font-semibold text-emerald-700 hover:underline dark:text-emerald-400">
+                        <Link href="/campaigns" className="font-semibold text-emerald-700 hover:underline dark:text-emerald-400">
                             Create a campaign
-                        </a>{" "}
+                        </Link>{" "}
                         first, then import contacts here.
                     </div>
                 </div>
