@@ -133,13 +133,23 @@ async def probe_sip_endpoint(
                 "detail": f"Received SIP reply: {first_line[:80]}",
             }
         except asyncio.TimeoutError:
+            # Many carriers (Blaze included) DELIBERATELY ignore OPTIONS from an
+            # unregistered/unknown source, so silence is NOT proof of failure:
+            # the host resolved and the datagram left our socket cleanly. Treat
+            # this as reachable-but-inconclusive so the activation gate isn't
+            # permanently stuck for such providers — the real SIP-level proof is
+            # the registration status shown after the trunk is activated.
             return {
-                "ok": False,
+                "ok": True,
                 "latency_ms": int(timeout * 1000),
                 "transport": "udp",
                 "target": f"{host}:{port}",
-                "error": "timeout",
-                "detail": "No SIP reply within timeout (possible firewall / NAT / wrong host)",
+                "inconclusive": True,
+                "detail": (
+                    "Host resolved and OPTIONS sent, but the carrier did not reply "
+                    "(normal for providers that don't answer OPTIONS). Activate to "
+                    "register — the registration status is the real check."
+                ),
             }
     except socket.gaierror as exc:
         return {

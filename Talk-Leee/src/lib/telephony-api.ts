@@ -257,11 +257,23 @@ export function useUpdateSipTrunk() {
     });
 }
 
+function newIdempotencyKey(): string {
+    return typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random()}`;
+}
+
 export function useActivateSipTrunk() {
     const qc = useQueryClient();
     return useMutation({
+        // The activate/deactivate endpoints REQUIRE an Idempotency-Key header
+        // (400 "Idempotency Key Required" without it) — same as create/update.
+        // Missing it here made every Active toggle silently 400 → dead buttons.
         mutationFn: (id: string) =>
-            api<SipTrunkRow>(`/telephony/sip/trunks/${id}/activate`, { method: "POST" }),
+            api<SipTrunkRow>(`/telephony/sip/trunks/${id}/activate`, {
+                method: "POST",
+                headers: { "Idempotency-Key": newIdempotencyKey() },
+            }),
         onSuccess: () => {
             void qc.invalidateQueries({ queryKey: telephonyKeys.sipTrunks });
         },
@@ -272,7 +284,10 @@ export function useDeactivateSipTrunk() {
     const qc = useQueryClient();
     return useMutation({
         mutationFn: (id: string) =>
-            api<SipTrunkRow>(`/telephony/sip/trunks/${id}/deactivate`, { method: "POST" }),
+            api<SipTrunkRow>(`/telephony/sip/trunks/${id}/deactivate`, {
+                method: "POST",
+                headers: { "Idempotency-Key": newIdempotencyKey() },
+            }),
         onSuccess: () => {
             void qc.invalidateQueries({ queryKey: telephonyKeys.sipTrunks });
         },
@@ -283,7 +298,10 @@ export function useTestSipTrunk() {
     const qc = useQueryClient();
     return useMutation({
         mutationFn: (id: string) =>
-            api<SipTrunkTestResponse>(`/telephony/sip/trunks/${id}/test`, { method: "POST" }),
+            api<SipTrunkTestResponse>(`/telephony/sip/trunks/${id}/test`, {
+                method: "POST",
+                headers: { "Idempotency-Key": newIdempotencyKey() },
+            }),
         onSuccess: () => {
             void qc.invalidateQueries({ queryKey: telephonyKeys.sipTrunks });
         },
