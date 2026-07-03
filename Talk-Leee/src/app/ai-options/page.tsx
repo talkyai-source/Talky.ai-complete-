@@ -308,7 +308,8 @@ export default function AIOptionsPage() {
         }
     }
 
-    async function handlePreviewVoiceById(voiceId: string) {
+    async function handlePreviewVoiceById(voiceId: string, opts?: { provider?: string }) {
+        const isRealtime = opts?.provider === "realtime";
         const selectedVoice = voices.find((voice) => voice.id === voiceId);
         try {
             setPreviewingVoiceId(voiceId);
@@ -326,14 +327,16 @@ export default function AIOptionsPage() {
                 await audio.play();
                 return;
             }
-            const response = await aiOptionsApi.previewVoice({ voice_id: voiceId, text: "Hello, I am your AI voice assistant. How can I help you today?" });
+            const response = await aiOptionsApi.previewVoice({ voice_id: voiceId, text: "Hello, I am your AI voice assistant. How can I help you today?", provider: opts?.provider });
             const audioData = atob(response.audio_base64);
             const audioArray = new Float32Array(audioData.length / 4);
             const dataView = new DataView(new ArrayBuffer(audioData.length));
             for (let i = 0; i < audioData.length; i++) dataView.setUint8(i, audioData.charCodeAt(i));
             for (let i = 0; i < audioArray.length; i++) audioArray[i] = dataView.getFloat32(i * 4, true);
             if (audioArray.length === 0) throw new Error("This voice returned no audio — it may be deprecated or unavailable.");
-            const sampleRate = selectedVoice?.provider === "cartesia" || selectedVoice?.provider === "google" || selectedVoice?.provider === "deepgram" || selectedVoice?.provider === "elevenlabs" ? 24000 : 16000;
+            // Realtime previews come from OpenAI's speech endpoint at 24 kHz;
+            // cascaded providers also emit 24 kHz float32, everything else 16 kHz.
+            const sampleRate = isRealtime || selectedVoice?.provider === "cartesia" || selectedVoice?.provider === "google" || selectedVoice?.provider === "deepgram" || selectedVoice?.provider === "elevenlabs" ? 24000 : 16000;
             const audioContext = new AudioContext({ sampleRate });
             const audioBuffer = audioContext.createBuffer(1, audioArray.length, sampleRate);
             audioBuffer.getChannelData(0).set(audioArray);
@@ -546,27 +549,35 @@ export default function AIOptionsPage() {
                                 <div className="mb-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                                     {realtimeCatalog.voices.map((voice) => {
                                         const selected = config.realtime_voice === voice.id;
+                                        const isPlaying = previewingVoiceId === voice.id;
                                         return (
                                             <motion.button
                                                 type="button"
                                                 key={voice.id}
-                                                onClick={() => setConfig({ ...config, realtime_voice: voice.id })}
+                                                // Speak-on-selection: persist the choice first (so it
+                                                // sticks even if the preview fails), then play a sample.
+                                                onClick={() => { setConfig({ ...config, realtime_voice: voice.id }); void handlePreviewVoiceById(voice.id, { provider: "realtime" }); }}
                                                 whileHover={{ y: -2 }}
                                                 className={`relative rounded-xl border p-2.5 text-left transition-colors ${selected ? "border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/40" : "border-border bg-background hover:border-emerald-500/40 hover:bg-muted/50"}`}
                                             >
-                                                <p className="truncate text-sm font-medium text-foreground">{voice.name}</p>
-                                                {voice.description && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{voice.description}</p>}
-                                                {voice.gender && (
-                                                    <div className="mt-2 flex flex-wrap gap-1">
-                                                        <span className={`rounded px-1.5 py-0.5 text-[11px] ${voice.gender === "female" ? "bg-pink-500/15 text-pink-500" : "bg-blue-500/15 text-blue-500"}`}>{voice.gender}</span>
-                                                    </div>
-                                                )}
+                                                <span className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full bg-emerald-500/15" aria-hidden>
+                                                    {isPlaying ? <Equalizer active color="#10b981" /> : <Play className="h-3.5 w-3.5 text-emerald-500" />}
+                                                </span>
+                                                <div className="pr-8">
+                                                    <p className="truncate text-sm font-medium text-foreground">{voice.name}</p>
+                                                    {voice.description && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{voice.description}</p>}
+                                                    {voice.gender && (
+                                                        <div className="mt-2 flex flex-wrap gap-1">
+                                                            <span className={`rounded px-1.5 py-0.5 text-[11px] ${voice.gender === "female" ? "bg-pink-500/15 text-pink-500" : "bg-blue-500/15 text-blue-500"}`}>{voice.gender}</span>
+                                                        </div>
+                                                    )}
+                                                </div>
                                                 {selected && <Check className="absolute bottom-2 right-2 h-4 w-4 text-emerald-500" />}
                                             </motion.button>
                                         );
                                     })}
                                 </div>
-                                <p className="mb-5 text-[11px] text-muted-foreground">Preview coming soon — realtime voices can't be sampled yet.</p>
+                                <p className="mb-5 text-[11px] text-muted-foreground">Selecting a voice plays a sample.</p>
 
                                 <div className="grid gap-4 sm:grid-cols-2">
                                     <div>

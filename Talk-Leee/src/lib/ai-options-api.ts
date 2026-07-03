@@ -133,6 +133,9 @@ export interface TTSTestResponse {
 export interface VoicePreviewRequest {
     voice_id: string;
     text?: string;
+    /** "realtime" to preview a gpt-realtime-2 voice (synthesized 24 kHz via
+     *  OpenAI speech). Omit for the cascaded TTS voices. */
+    provider?: string;
 }
 
 export interface VoicePreviewResponse {

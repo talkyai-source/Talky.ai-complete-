@@ -52,6 +52,85 @@ router = APIRouter(tags=["AI Options"])
 _VOICE_PREVIEW_CACHE_DIR = Path("/tmp/talky-voice-preview-cache")
 _PREVIEW_SAMPLE_TEXT = "Hello, I am your AI voice assistant. How can I help you today?"
 
+# --- Realtime (gpt-realtime-2) voice previews -------------------------------
+# The realtime voices (marin, cedar, …) are OpenAI voices, but they are spoken
+# by the realtime speech-to-speech model — there is no separate TTS step at
+# call time. To *preview* them in the UI we synthesize a one-off sample with
+# OpenAI's dedicated speech endpoint (gpt-4o-mini-tts). That model returns
+# 24 kHz mono pcm16, which we convert to the same float32le payload the
+# cascaded path already returns so the frontend player is identical.
+#
+# gpt-4o-mini-tts accepts the full realtime voice set — INCLUDING marin + cedar
+# (live-verified 2026-07-03: both return HTTP 200 with real audio). So every
+# realtime voice previews as ITSELF — no substitution.
+_OPENAI_SPEECH_URL = "https://api.openai.com/v1/audio/speech"
+_REALTIME_PREVIEW_MODEL = "gpt-4o-mini-tts"
+_REALTIME_PREVIEW_SAMPLE_RATE = 24000  # gpt-4o-mini-tts pcm output is 24 kHz
+# Voices the /audio/speech (gpt-4o-mini-tts) model accepts directly.
+_OPENAI_SPEECH_VOICES = {
+    "alloy", "ash", "ballad", "cedar", "coral", "echo",
+    "fable", "marin", "onyx", "nova", "sage", "shimmer", "verse",
+}
+
+
+def _realtime_preview_cache_key(voice_id: str) -> str:
+    """Namespaced cache key so a realtime 'ash' never collides with a
+    cascaded voice that happens to share the id."""
+    return f"realtime-{voice_id}"
+
+
+async def _synthesize_realtime_preview(voice_id: str, text: str) -> bytes:
+    """Synthesize a realtime-voice sample via OpenAI's speech endpoint and
+    return float32le PCM bytes (24 kHz mono). Raises HTTPException on any
+    failure so the caller can surface a clean error without crashing."""
+    import aiohttp
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="OpenAI API key not configured",
+        )
+
+    speech_voice = voice_id if voice_id in _OPENAI_SPEECH_VOICES else None
+    if not speech_voice:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Realtime voice '{voice_id}' is not previewable",
+        )
+
+    payload = {
+        "model": _REALTIME_PREVIEW_MODEL,
+        "voice": speech_voice,
+        "input": text,
+        "response_format": "pcm",
+    }
+    timeout = aiohttp.ClientTimeout(total=30)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                _OPENAI_SPEECH_URL,
+                headers={"Authorization": f"Bearer {api_key}"},
+                json=payload,
+            ) as resp:
+                body = await resp.read()
+                if resp.status != 200:
+                    detail = body.decode("utf-8", "replace")[:200]
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail=f"OpenAI speech API error ({resp.status}): {detail}",
+                    )
+    except HTTPException:
+        raise
+    except aiohttp.ClientError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"OpenAI speech request failed: {exc}",
+        )
+
+    # gpt-4o-mini-tts pcm = 24 kHz mono linear16 → float32 for the frontend.
+    return _linear16_to_float32le_bytes(body)
+
 
 def _preview_cache_path(voice_id: str) -> Path:
     safe = "".join(ch for ch in voice_id if ch.isalnum() or ch in {"-", "_"})
@@ -82,6 +161,9 @@ class VoicePreviewRequest(BaseModel):
     """Request for voice preview"""
     voice_id: str
     text: str = "Hello, I am your AI voice assistant. How can I help you today?"
+    # Set to "realtime" to preview a gpt-realtime-2 voice (synthesized via
+    # OpenAI's speech endpoint). Omit / leave None for the cascaded TTS voices.
+    provider: Optional[str] = None
 
 
 class VoicePreviewResponse(BaseModel):
@@ -112,6 +194,11 @@ async def preview_voice(request: VoicePreviewRequest):
     Returns:
         VoicePreviewResponse with base64 audio data
     """
+    # Realtime voices take a completely separate path (OpenAI speech endpoint).
+    # Handled first so it never touches the cascaded provider detection below.
+    if (request.provider or "").lower() == "realtime":
+        return await _preview_realtime_voice(request)
+
     try:
         # Serve from disk cache when available — no external API call needed.
         cached = _load_preview_cache(request.voice_id)
@@ -266,6 +353,51 @@ async def preview_voice(request: VoicePreviewRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Voice preview failed: {str(e)}"
         )
+
+
+async def _preview_realtime_voice(request: VoicePreviewRequest) -> VoicePreviewResponse:
+    """Preview a gpt-realtime-2 voice. Cached under a `realtime-` namespace and
+    synthesized on miss via OpenAI's speech endpoint. Never touches the
+    cascaded providers; failures surface as clean HTTP errors."""
+    voice_id = request.voice_id
+    cache_key = _realtime_preview_cache_key(voice_id)
+
+    cached = _load_preview_cache(cache_key)
+    if cached:
+        audio_base64 = base64.b64encode(cached).decode("utf-8")
+        duration_seconds = len(cached) / (_REALTIME_PREVIEW_SAMPLE_RATE * 4)
+        return VoicePreviewResponse(
+            voice_id=voice_id,
+            voice_name=voice_id,
+            audio_base64=audio_base64,
+            duration_seconds=duration_seconds,
+            latency_ms=0.0,
+        )
+
+    start_time = time.time()
+    combined_audio = await _synthesize_realtime_preview(voice_id, request.text)
+    latency_ms = (time.time() - start_time) * 1000
+
+    if not combined_audio:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Realtime voice '{voice_id}' returned no audio. "
+                "The voice may be unavailable on this API key."
+            ),
+        )
+
+    _save_preview_cache(cache_key, combined_audio)
+
+    audio_base64 = base64.b64encode(combined_audio).decode("utf-8")
+    duration_seconds = len(combined_audio) / (_REALTIME_PREVIEW_SAMPLE_RATE * 4)
+    return VoicePreviewResponse(
+        voice_id=voice_id,
+        voice_name=voice_id,
+        audio_base64=audio_base64,
+        duration_seconds=duration_seconds,
+        latency_ms=latency_ms,
+    )
 
 
 @router.get("/voices/prefetch-status")
