@@ -75,6 +75,12 @@ def _row_to_response(row: asyncpg.Record) -> SIPTrunkResponse:
         last_test_result=(
             _coerce_jsonb(row["last_test_result"]) if "last_test_result" in keys else None
         ),
+        live_registration_status=(
+            row["live_registration_status"] if "live_registration_status" in keys else None
+        ),
+        live_status_checked_at=(
+            row["live_status_checked_at"] if "live_status_checked_at" in keys else None
+        ),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -181,6 +187,8 @@ async def list_sip_trunks(
                 metadata,
                 last_tested_at,
                 last_test_result,
+                live_registration_status,
+                live_status_checked_at,
                 created_at,
                 updated_at
             FROM tenant_sip_trunks
@@ -719,9 +727,31 @@ async def _set_trunk_active_state(
                 resource_type="sip_trunk",
                 resource_id=response_model.id,
             )
+            # Single-active invariant (per tenant): activating one trunk turns
+            # OFF any other active trunk and removes its Asterisk config, so
+            # exactly one own-trunk is ever live. Atomic (same transaction).
+            others: list[asyncpg.Record] = []
+            if active_state:
+                others = await conn.fetch(
+                    """
+                    UPDATE tenant_sip_trunks
+                    SET is_active = false, updated_by = $3, updated_at = NOW()
+                    WHERE tenant_id = $1 AND id <> $2 AND is_active = true
+                    RETURNING
+                        id, tenant_id, trunk_name, sip_domain, port, transport,
+                        direction, is_active, auth_username, auth_password_encrypted,
+                        metadata, last_tested_at, last_test_result, created_at, updated_at
+                    """,
+                    current_user.tenant_id,
+                    trunk_id,
+                    current_user.id,
+                )
+
             # Phase B — sync the tenant's namespaced PJSIP config: activate →
             # render+write trunk-<id>.conf; deactivate → remove it. Fail-soft.
             await _sync_trunk_pjsip_config(row, active=active_state)
+            for other in others:
+                await _sync_trunk_pjsip_config(other, active=False)
             return response_model
 
 

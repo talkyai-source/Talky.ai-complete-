@@ -209,6 +209,11 @@ class SIPTrunkResponse(BaseModel):
     metadata: Dict[str, Any]
     last_tested_at: Optional[datetime] = None
     last_test_result: Optional[Dict[str, Any]] = None
+    # Real-time Asterisk registration state (registered/rejected/unregistered/
+    # inactive/unknown), refreshed ~15s by the trunk-status updater. NOT the
+    # frozen Test snapshot — this is the live truth the card renders.
+    live_registration_status: Optional[str] = None
+    live_status_checked_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
