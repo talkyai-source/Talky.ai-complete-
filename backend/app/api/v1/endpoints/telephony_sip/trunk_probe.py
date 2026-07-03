@@ -97,77 +97,72 @@ async def probe_sip_endpoint(
         f"Content-Length: 0\r\n\r\n"
     ).encode()
 
-    sock = None
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.setblocking(False)
-        loop = asyncio.get_running_loop()
-
-        addr_info = await loop.run_in_executor(
-            None, lambda: socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_DGRAM),
-        )
-        if not addr_info:
+    # Run the blocking UDP send/recv in a thread executor. The previous
+    # loop.sock_sendto/loop.sock_recv approach on a non-blocking socket THROWS
+    # under uvloop (which the api service runs), returning error=exception with
+    # an empty detail — that was the "Test unreachable despite everything green"
+    # bug. A plain blocking socket in a thread is loop-agnostic and reliable.
+    def _blocking_probe() -> dict:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.settimeout(timeout)
+            addr_info = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_DGRAM)
+            if not addr_info:
+                return {
+                    "ok": False, "latency_ms": 0, "transport": "udp",
+                    "target": f"{host}:{port}", "error": "dns_failure",
+                    "detail": "Could not resolve host",
+                }
+            sockaddr = addr_info[0][4]
+            s.sendto(options, sockaddr)
+            try:
+                data, _ = s.recvfrom(4096)
+                latency_ms = int((time.perf_counter() - start) * 1000)
+                first_line = (
+                    data.split(b"\r\n", 1)[0].decode("ascii", errors="replace") if data else ""
+                )
+                return {
+                    "ok": True,
+                    "latency_ms": latency_ms,
+                    "transport": "udp",
+                    "target": f"{host}:{port}",
+                    "detail": f"Received SIP reply: {first_line[:80]}",
+                }
+            except socket.timeout:
+                # Carriers (Blaze included) may ignore OPTIONS from an unregistered
+                # source; silence when the host resolved + the datagram sent is
+                # inconclusive, not failure. The registration status is the real check.
+                return {
+                    "ok": True,
+                    "latency_ms": int(timeout * 1000),
+                    "transport": "udp",
+                    "target": f"{host}:{port}",
+                    "inconclusive": True,
+                    "detail": (
+                        "Host resolved and OPTIONS sent, but the carrier did not reply "
+                        "(normal for providers that don't answer OPTIONS). Registration "
+                        "status is the real check."
+                    ),
+                }
+        except socket.gaierror as exc:
             return {
                 "ok": False, "latency_ms": 0, "transport": "udp",
-                "target": f"{host}:{port}", "error": "dns_failure",
-                "detail": "Could not resolve host",
+                "target": f"{host}:{port}", "error": "dns_failure", "detail": str(exc),
             }
-        sockaddr = addr_info[0][4]
-
-        if hasattr(loop, "sock_sendto"):
-            await loop.sock_sendto(sock, options, sockaddr)
-        else:
-            await loop.run_in_executor(None, lambda: sock.sendto(options, sockaddr))
-
-        try:
-            data = await asyncio.wait_for(loop.sock_recv(sock, 4096), timeout=timeout)
-            latency_ms = int((time.perf_counter() - start) * 1000)
-            first_line = (
-                data.split(b"\r\n", 1)[0].decode("ascii", errors="replace") if data else ""
-            )
+        except Exception as exc:  # never leave detail empty — surface the real reason
             return {
-                "ok": True,
-                "latency_ms": latency_ms,
+                "ok": False,
+                "latency_ms": int((time.perf_counter() - start) * 1000),
                 "transport": "udp",
                 "target": f"{host}:{port}",
-                "detail": f"Received SIP reply: {first_line[:80]}",
+                "error": "exception",
+                "detail": str(exc) or f"{type(exc).__name__}",
             }
-        except asyncio.TimeoutError:
-            # Many carriers (Blaze included) DELIBERATELY ignore OPTIONS from an
-            # unregistered/unknown source, so silence is NOT proof of failure:
-            # the host resolved and the datagram left our socket cleanly. Treat
-            # this as reachable-but-inconclusive so the activation gate isn't
-            # permanently stuck for such providers — the real SIP-level proof is
-            # the registration status shown after the trunk is activated.
-            return {
-                "ok": True,
-                "latency_ms": int(timeout * 1000),
-                "transport": "udp",
-                "target": f"{host}:{port}",
-                "inconclusive": True,
-                "detail": (
-                    "Host resolved and OPTIONS sent, but the carrier did not reply "
-                    "(normal for providers that don't answer OPTIONS). Activate to "
-                    "register — the registration status is the real check."
-                ),
-            }
-    except socket.gaierror as exc:
-        return {
-            "ok": False, "latency_ms": 0, "transport": "udp",
-            "target": f"{host}:{port}", "error": "dns_failure", "detail": str(exc),
-        }
-    except Exception as exc:
-        return {
-            "ok": False,
-            "latency_ms": int((time.perf_counter() - start) * 1000),
-            "transport": "udp",
-            "target": f"{host}:{port}",
-            "error": "exception",
-            "detail": str(exc),
-        }
-    finally:
-        if sock is not None:
+        finally:
             try:
-                sock.close()
+                s.close()
             except Exception:
                 pass
+
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _blocking_probe)
