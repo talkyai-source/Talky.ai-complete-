@@ -277,6 +277,13 @@ async def save_config(
 
     latency_warnings: list[str] = []
 
+    # Realtime (gpt-realtime-2) does NOT use the cascaded LLM/STT/TTS pipeline,
+    # so the cascaded-latency advisories below are irrelevant — return none.
+    # (This was surfacing a floating "latency" notification about the cascaded
+    # LLM/tokens even when the user had switched to Realtime.)
+    if (getattr(config, "pipeline_mode", "cascaded") or "cascaded") == "realtime":
+        return AIProviderConfigWithWarnings(config=config, latency_warnings=[])
+
     if config.llm_model in SLOW_MODELS:
         latency_warnings.append(
             f"'{config.llm_model}' is a large reasoning model. "

@@ -102,8 +102,22 @@ class RealtimeBridge:
         """Run until the call ends or the realtime session closes. Fail-soft:
         never raises out — a realtime error ends this bridge (and the call)
         cleanly."""
-        logger.info("realtime_bridge start call=%s internal_rate=%d",
-                    self._call_id, self._internal_rate)
+        logger.info("realtime_bridge start call=%s internal_rate=%d wire_rate=%d",
+                    self._call_id, self._internal_rate, _WIRE_RATE)
+        # Diagnostic guard: the μ-law wire to OpenAI is fixed at 8 kHz. When the
+        # gateway internal rate is ALSO 8 kHz (what the orchestrator forces for
+        # realtime) the bridge does the ideal zero-resample codec-only path. Any
+        # other value means every caller/model frame is resampled — if the
+        # gateway's real input rate ever diverges from this single value the
+        # caller audio is silently pitch/speed-shifted before the model hears it
+        # (the "voice not flowing into the model" failure). Make it visible.
+        if self._internal_rate != _WIRE_RATE:
+            logger.warning(
+                "realtime_bridge call=%s gateway internal_rate=%d != wire %d — "
+                "every frame is resampled; verify the gateway feeds caller audio "
+                "at exactly this rate or the model hears a speed-shifted caller",
+                self._call_id, self._internal_rate, _WIRE_RATE,
+            )
         try:
             self._caller_task = asyncio.create_task(
                 self._pump_caller_audio(), name=f"rt-caller-{self._call_id}"

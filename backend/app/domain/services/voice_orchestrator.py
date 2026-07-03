@@ -417,6 +417,14 @@ class VoiceOrchestrator:
                 "realtime session setup failed call_id=%s — falling back to "
                 "cascaded pipeline", call_id[:8],
             )
+            # Force cascaded mode so the gateway + pipeline built below use the
+            # CASCADED sample rate (STT rate), not realtime's 8kHz. Without this
+            # the fallback ran the cascaded pipeline on an 8kHz gateway →
+            # half-rate/garbled "ghost" audio (the exact symptom the user hit).
+            try:
+                config.pipeline_mode = "cascaded"
+            except Exception:  # noqa: BLE001 — config may be immutable; best-effort
+                pass
 
         # --- Providers: reuse singletons for ask_ai, init fresh for all others ---
         # TTS is always created fresh per-session (see __init__ comment for why).
@@ -1398,6 +1406,14 @@ class VoiceOrchestrator:
                 conversation_context=ConversationContext(),
                 agent_config=config.agent_config,
                 persona_type=config.persona_type,
+                # CallSession REQUIRES these (they're cascaded fields). Omitting
+                # them raised "2 validation errors for CallSession" → the realtime
+                # setup crashed and fell back to cascaded (at the wrong 8kHz rate),
+                # which is what produced the "ghost" audio. Realtime doesn't USE the
+                # cascaded system_prompt, but the model needs the field populated;
+                # voice_id carries the realtime voice for telemetry/consistency.
+                system_prompt=config.system_prompt,
+                voice_id=(getattr(config, "realtime_voice", None) or config.voice_id),
                 started_at=datetime.utcnow(),
                 last_activity_at=datetime.utcnow(),
             )
@@ -1504,8 +1520,22 @@ class VoiceOrchestrator:
 
         init_config = {
             "sample_rate": 8000 if _is_realtime else config.gateway_sample_rate,
+            # Realtime runs the gateway at ONE 8 kHz rate in BOTH directions.
+            # The RealtimeBridge only knows a single internal rate (it reads
+            # gateway._sample_rate) and resamples that <-> the μ-law 8 kHz wire.
+            # If the gateway's INPUT rate is left at the cascaded STT rate
+            # (16 kHz) while output is forced to 8 kHz, the caller-audio the
+            # bridge pulls off get_audio_queue() is 16 kHz but the bridge treats
+            # it as 8 kHz — so the model receives the caller at half speed /
+            # garbled ("my voice is not flowing into the model"). Forcing input
+            # to 8 kHz too keeps the gateway self-consistent with the bridge's
+            # single-rate model. No-op on the telephony gateway (which ignores
+            # input_sample_rate and always decodes the 8 kHz μ-law wire);
+            # correct for Twilio (8 kHz μ-law wire) and browser (client must
+            # send 8 kHz). Cascaded keeps its STT-native input rate.
             "input_sample_rate": (
-                config.gateway_input_sample_rate or config.stt_sample_rate
+                8000 if _is_realtime
+                else (config.gateway_input_sample_rate or config.stt_sample_rate)
             ),
             "channels": config.gateway_channels,
             "bit_depth": config.gateway_bit_depth,
