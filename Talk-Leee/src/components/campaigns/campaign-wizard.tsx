@@ -210,9 +210,9 @@ export function CampaignWizard() {
                         <div>
                             <Label htmlFor="cw-goal">Goal <span className="text-muted-foreground font-normal">(optional)</span></Label>
                             <textarea
-                                id="cw-goal" value={goal} onChange={(e) => setGoal(e.target.value)} rows={9}
+                                id="cw-goal" value={goal} onChange={(e) => setGoal(e.target.value)} rows={24}
                                 placeholder="e.g. Book a free 30-minute discovery call. Describe what a successful call looks like, the key qualifying questions to ask, and any must-cover points."
-                                className="mt-1 w-full min-h-[240px] resize-y rounded-md border border-gray-300 dark:border-white/15 bg-white dark:bg-zinc-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                className="mt-1 w-full min-h-[640px] resize-y rounded-md border border-gray-300 dark:border-white/15 bg-white dark:bg-zinc-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                             />
                         </div>
 
