@@ -642,39 +642,14 @@ async def _set_trunk_active_state(
                 )
                 return quota_problem
 
-            # Activation gate: refuse to flip a trunk live until a probe
-            # has actually proven the host is reachable. Deactivation is
-            # always allowed (you need to be able to disable a broken
-            # trunk fast). Tenants whose last_test_result is missing or
-            # has ok=false must run /trunks/{id}/test first.
-            if active_state:
-                test_row = await conn.fetchrow(
-                    """
-                    SELECT last_tested_at, last_test_result
-                    FROM tenant_sip_trunks
-                    WHERE id = $1 AND tenant_id = $2
-                    """,
-                    trunk_id, current_user.tenant_id,
-                )
-                if test_row:
-                    raw = test_row["last_test_result"]
-                    if isinstance(raw, str):
-                        try:
-                            raw = json.loads(raw)
-                        except Exception:
-                            raw = None
-                    last_ok = bool(raw and raw.get("ok"))
-                    if not last_ok:
-                        return _problem(
-                            request=request,
-                            status_code=400,
-                            title="Activation Blocked",
-                            detail=(
-                                "Run a successful connectivity test before activating "
-                                "this trunk. POST /trunks/{id}/test."
-                            ),
-                            type_suffix="trunk-not-verified",
-                        )
+            # Activation is NO LONGER gated on the reachability probe. That probe
+            # is unreliable (carriers that ignore OPTIONS; it can also throw inside
+            # the sandboxed api service) and the gate created a trap: a trunk you
+            # turned off couldn't be turned back on. The REAL verification now is
+            # the real-time registration status (live_registration_status, refreshed
+            # ~15s by the trunk-status updater): activate → config applied → the card
+            # shows Registered / Rejected / Unregistered live. Deactivation was, and
+            # remains, always allowed.
 
             row = await conn.fetchrow(
                 """
