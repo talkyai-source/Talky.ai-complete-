@@ -52,6 +52,7 @@ import asyncio
 import base64
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
@@ -196,6 +197,15 @@ class OpenAIRealtimeSession:
         # create when idle, and otherwise defer until the current response ends.
         self._response_active = False
         self._pending_response_create = False
+
+        # Per-turn latency instrumentation. T0 = the caller stopped talking
+        # (server VAD `speech_stopped`); we log the delta to the FIRST model
+        # audio delta of the turn (T1). This is the same "caller-stopped →
+        # first agent audio" metric the cascaded latency_tracker reports as
+        # total_latency_ms, so realtime vs cascaded is an apples-to-apples
+        # compare from the logs. None between turns / for the agent-first
+        # greeting (which has no preceding caller speech).
+        self._t_speech_stopped: Optional[float] = None
 
         self.stats = _RealtimeStats()
 
@@ -513,6 +523,18 @@ class OpenAIRealtimeSession:
             except Exception:  # noqa: BLE001
                 return
             self.stats.audio_frames_out += 1
+            # T1: first model audio of this turn. Log the caller-stopped → first-
+            # audio latency (the perceived "how long till it answers" number) and
+            # disarm so we only log once per turn.
+            if self._t_speech_stopped is not None:
+                ms = int((time.monotonic() - self._t_speech_stopped) * 1000)
+                self._t_speech_stopped = None
+                logger.info(
+                    "realtime_turn_latency call=%s speech_end_to_first_audio_ms=%d",
+                    self._call_id, ms,
+                    extra={"call_id": self._call_id,
+                           "realtime_speech_end_to_first_audio_ms": ms},
+                )
             self._offer_event(RealtimeEvent(kind="audio", audio=audio, raw=data))
             return
 
@@ -549,6 +571,14 @@ class OpenAIRealtimeSession:
         # ---- Barge-in: caller started talking ------------------------------
         if etype == "input_audio_buffer.speech_started":
             self._on_interruption("speech_started")
+            return
+
+        # ---- Caller stopped talking (server VAD end-of-speech) = T0 --------
+        # Latency mark only: the model's response follows; we time from here to
+        # its first audio delta above. No behaviour change — turn-taking is
+        # server-owned.
+        if etype == "input_audio_buffer.speech_stopped":
+            self._t_speech_stopped = time.monotonic()
             return
 
         # ---- A new model response begins -----------------------------------
