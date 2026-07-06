@@ -28,6 +28,18 @@ from app.domain.models.voice_contract import TelephonyProvider
 
 logger = logging.getLogger(__name__)
 
+# Bound every Twilio REST round-trip. A stalled/black-holed TCP connection to
+# Twilio must never wedge the awaiting coroutine indefinitely — that wedges
+# origination/teardown for the whole call. Two layers of defense:
+#   1. A client-level HTTP timeout (belt) so the underlying requests session
+#      itself gives up.
+#   2. asyncio.wait_for() around every executor call (suspenders) so that
+#      even if the client-level timeout can't be honoured (e.g. the executor
+#      thread is stuck in blocking I/O the http client doesn't guard), the
+#      calling coroutine is unblocked on schedule and the operation fails
+#      cleanly instead of hanging forever.
+_REST_TIMEOUT_SECONDS = 10.0
+
 
 class TwilioProviderAdapter(TelephonyProviderAdapter):
     """
@@ -57,7 +69,20 @@ class TwilioProviderAdapter(TelephonyProviderAdapter):
             return self._client
         try:
             from twilio.rest import Client
-            self._client = Client(self._account_sid, self._auth_token)
+            http_client = None
+            try:
+                # Client-level timeout: bounds the underlying requests
+                # session so a black-holed connection doesn't sit forever
+                # even before our asyncio.wait_for() guard kicks in.
+                from twilio.http.http_client import TwilioHttpClient
+                http_client = TwilioHttpClient(timeout=_REST_TIMEOUT_SECONDS)
+            except Exception as exc:  # pragma: no cover - defensive only
+                logger.debug("TwilioHttpClient timeout setup failed: %s", exc)
+            self._client = Client(
+                self._account_sid,
+                self._auth_token,
+                http_client=http_client,
+            )
             return self._client
         except ImportError as exc:
             raise RuntimeError(
@@ -105,7 +130,14 @@ class TwilioProviderAdapter(TelephonyProviderAdapter):
             return call.sid
 
         loop = asyncio.get_running_loop()
-        call_sid = await loop.run_in_executor(None, _create_call)
+        try:
+            call_sid = await asyncio.wait_for(
+                loop.run_in_executor(None, _create_call), timeout=_REST_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(
+                f"Twilio originate_call timed out after {_REST_TIMEOUT_SECONDS}s"
+            ) from exc
         logger.info("TwilioProviderAdapter: originated call %s → %s", call_sid, destination)
         return str(call_sid)
 
@@ -116,7 +148,14 @@ class TwilioProviderAdapter(TelephonyProviderAdapter):
             client.calls(call_id).update(status="completed")
 
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, _hangup)
+        try:
+            await asyncio.wait_for(
+                loop.run_in_executor(None, _hangup), timeout=_REST_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(
+                f"Twilio hangup timed out after {_REST_TIMEOUT_SECONDS}s"
+            ) from exc
         logger.info("TwilioProviderAdapter: hung up %s", call_id)
 
     async def transfer(
@@ -141,7 +180,14 @@ class TwilioProviderAdapter(TelephonyProviderAdapter):
             client.calls(call_id).update(twiml=twiml)
 
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, _transfer)
+        try:
+            await asyncio.wait_for(
+                loop.run_in_executor(None, _transfer), timeout=_REST_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(
+                f"Twilio transfer timed out after {_REST_TIMEOUT_SECONDS}s"
+            ) from exc
         return {"status": "transferred", "attempt_id": call_id, "mode": mode}
 
     # ------------------------------------------------------------------
@@ -179,7 +225,9 @@ class TwilioProviderAdapter(TelephonyProviderAdapter):
 
         try:
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(None, _ping)
+            return await asyncio.wait_for(
+                loop.run_in_executor(None, _ping), timeout=_REST_TIMEOUT_SECONDS
+            )
         except Exception as exc:
             logger.debug("Twilio health_check failed: %s", exc)
             return False
@@ -202,7 +250,9 @@ class TwilioProviderAdapter(TelephonyProviderAdapter):
         start = time.perf_counter()
         try:
             loop = asyncio.get_running_loop()
-            account = await loop.run_in_executor(None, _ping)
+            account = await asyncio.wait_for(
+                loop.run_in_executor(None, _ping), timeout=_REST_TIMEOUT_SECONDS
+            )
             latency_ms = int((time.perf_counter() - start) * 1000)
             return {
                 "ok": True,

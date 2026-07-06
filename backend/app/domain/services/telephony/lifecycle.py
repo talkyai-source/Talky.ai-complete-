@@ -69,6 +69,34 @@ def _state():
 _SESSION_INACTIVITY_TIMEOUT_S = int(os.getenv("TELEPHONY_INACTIVITY_TIMEOUT_S", "300"))
 _SESSION_MAX_DURATION_S = int(os.getenv("TELEPHONY_MAX_CALL_DURATION_S", "3600"))
 
+# P1-9 — module-level set retaining references to fire-and-forget forced-
+# hangup tasks. asyncio only holds a *weak* reference to tasks spawned via
+# create_task(); with nothing else referencing them, the task object can be
+# garbage-collected mid-execution (CPython schedules on the next GC pass),
+# silently dropping the forced teardown/hangup on crashed-pipeline and
+# audio-route-failure paths. Mirrors the _track_task pattern in
+# app/infrastructure/telephony/freeswitch_audio_bridge.py:82-90.
+_background_tasks: set = set()
+
+
+def _track_task(coro) -> "asyncio.Task":
+    """Spawn coro as a task whose reference is retained until completion.
+
+    Adds the task to the module-level ``_background_tasks`` set so it can't
+    be garbage-collected while still running, and logs (rather than
+    swallows) any exception it raises.
+    """
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+
+    def _done(t: "asyncio.Task") -> None:
+        _background_tasks.discard(t)
+        if not t.cancelled() and t.exception():
+            logger.error("lifecycle background task failed: %s", t.exception())
+
+    task.add_done_callback(_done)
+    return task
+
 
 def _pop_ringing_warmup(call_id: str):
     """
@@ -582,7 +610,9 @@ def _pipeline_done_cb(task: asyncio.Task, call_id: str) -> None:
                 vs._pipeline_failed = True
         except Exception:
             pass
-        asyncio.create_task(_force_end_and_hangup(call_id))
+        # P1-9 — retain the task reference (see _track_task) so it can't be
+        # GC'd mid-flight and silently drop the forced hangup.
+        _track_task(_force_end_and_hangup(call_id))
 
 
 async def _on_ringing(call_id: str) -> None:
@@ -1380,8 +1410,10 @@ async def _on_audio_received(call_id: str, audio_bytes: bytes) -> None:
             )
             _audio_route_failure_counts.pop(call_id, None)
             _audio_route_last_logged_at.pop(call_id, None)
-            # Must not block/crash the audio hot path — fire-and-forget.
-            asyncio.create_task(_force_end_and_hangup(call_id))
+            # Must not block/crash the audio hot path — fire-and-forget, but
+            # P1-9 — retain the task reference (see _track_task) so it can't
+            # be GC'd mid-flight and silently drop the forced hangup.
+            _track_task(_force_end_and_hangup(call_id))
 
 
 async def _on_call_ended(call_id: str) -> None:
@@ -1620,11 +1652,15 @@ async def _on_ws_session_start(call_id: str) -> None:
 
     if not voice_session:
         logger.error("FS WebSocket session race timeout — hanging up call %s", call_id[:12])
-        if _bridge()._adapter:
-            try:
-                await _bridge()._adapter.hangup(call_id)
-            except Exception:
-                pass
+        # P1-10 — _on_new_call acquires the global concurrency lease for
+        # this call_id BEFORE storing the VoiceSession, so a session-race
+        # timeout here can fire with a lease already held. A bare
+        # adapter.hangup() tears down the PBX channel but never releases
+        # that lease, leaking the cluster-wide concurrency slot until its
+        # ~10-min TTL expires. _force_end_and_hangup runs _on_call_ended
+        # (which releases the lease first, then no-ops the rest since no
+        # VoiceSession is stored) followed by the same best-effort hangup.
+        await _force_end_and_hangup(call_id)
         return
 
     bridge_ws = get_audio_bridge().get_websocket(call_id)

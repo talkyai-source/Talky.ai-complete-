@@ -125,6 +125,14 @@ async def add_user_to_tenant(
                 detail="Can only add users to your own tenant",
             )
 
+    # Escalation ceiling: can't grant a role above your own level.
+    requested_role = normalize_role(request.role_name)
+    if requested_role.level > user_role.level:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot grant a role above your own tier",
+        )
+
     async with db_client.pool.acquire() as conn:
         # Verify user exists
         user_row = await conn.fetchrow(
@@ -256,6 +264,14 @@ async def update_tenant_user(
         param_idx = 1
 
         if request.role_name:
+            # Escalation ceiling: can't grant a role above your own level.
+            requested_role = normalize_role(request.role_name)
+            if requested_role.level > user_role.level:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Cannot grant a role above your own tier",
+                )
+
             # Get role ID
             role_row = await conn.fetchrow(
                 "SELECT id FROM roles WHERE name = $1",

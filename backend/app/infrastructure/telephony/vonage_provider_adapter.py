@@ -17,6 +17,7 @@ SDK: ``vonage`` v4.x  (``pip install vonage``)
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Any, Dict, Optional
@@ -25,6 +26,15 @@ from app.domain.interfaces.telephony_provider_adapter import TelephonyProviderAd
 from app.domain.models.voice_contract import TelephonyProvider
 
 logger = logging.getLogger(__name__)
+
+# Bound every Vonage REST round-trip. A stalled/black-holed TCP connection to
+# Vonage must never wedge the awaiting coroutine indefinitely — that wedges
+# origination/teardown for the whole call. asyncio.wait_for() around every
+# executor call guarantees the calling coroutine is unblocked on schedule and
+# the operation fails cleanly instead of hanging forever, independent of
+# whatever timeout behaviour the underlying SDK's HTTP transport does or
+# doesn't honour.
+_REST_TIMEOUT_SECONDS = 10.0
 
 
 class VonageProviderAdapter(TelephonyProviderAdapter):
@@ -77,7 +87,16 @@ class VonageProviderAdapter(TelephonyProviderAdapter):
                 application_id=self._app_id,
                 private_key=private_key_arg,
             )
-            self._client = Vonage(auth=auth)
+            options = None
+            try:
+                # Client-level timeout: bounds the underlying HTTP transport
+                # so a black-holed connection doesn't sit forever even
+                # before our asyncio.wait_for() guard kicks in.
+                from vonage_http_client import HttpClientOptions
+                options = HttpClientOptions(timeout=_REST_TIMEOUT_SECONDS)
+            except Exception as exc:  # pragma: no cover - defensive only
+                logger.debug("Vonage HttpClientOptions timeout setup failed: %s", exc)
+            self._client = Vonage(auth=auth, options=options) if options else Vonage(auth=auth)
             return self._client
         except ImportError:
             raise RuntimeError(
@@ -103,8 +122,6 @@ class VonageProviderAdapter(TelephonyProviderAdapter):
         The NCCO instructs Vonage to connect the call audio to our WebSocket
         endpoint so the AI pipeline can process it in real time.
         """
-        import asyncio
-
         client = self._get_client()
 
         ws_url = f"{webhook_base_url.replace('http', 'ws', 1)}/api/v1/vonage/ws-audio"
@@ -155,13 +172,18 @@ class VonageProviderAdapter(TelephonyProviderAdapter):
                 return response.get("uuid", response.get("conversation_uuid", ""))
 
         loop = asyncio.get_running_loop()
-        call_uuid = await loop.run_in_executor(None, _create_call)
+        try:
+            call_uuid = await asyncio.wait_for(
+                loop.run_in_executor(None, _create_call), timeout=_REST_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(
+                f"Vonage originate_call timed out after {_REST_TIMEOUT_SECONDS}s"
+            ) from exc
         logger.info("VonageProviderAdapter: originated call %s → %s", call_uuid, destination)
         return str(call_uuid)
 
     async def hangup(self, call_id: str) -> None:
-        import asyncio
-
         client = self._get_client()
 
         def _hangup():
@@ -172,7 +194,14 @@ class VonageProviderAdapter(TelephonyProviderAdapter):
                 client.voice.update_call(call_id, {"action": "hangup"})
 
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, _hangup)
+        try:
+            await asyncio.wait_for(
+                loop.run_in_executor(None, _hangup), timeout=_REST_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(
+                f"Vonage hangup timed out after {_REST_TIMEOUT_SECONDS}s"
+            ) from exc
         logger.info("VonageProviderAdapter: hung up %s", call_id)
 
     async def transfer(
@@ -181,8 +210,6 @@ class VonageProviderAdapter(TelephonyProviderAdapter):
         destination: str,
         mode: str = "blind",
     ) -> Dict[str, Any]:
-        import asyncio
-
         client = self._get_client()
         ncco = [{"action": "connect", "endpoint": [{"type": "phone", "number": destination}]}]
 
@@ -200,7 +227,14 @@ class VonageProviderAdapter(TelephonyProviderAdapter):
                 })
 
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, _transfer)
+        try:
+            await asyncio.wait_for(
+                loop.run_in_executor(None, _transfer), timeout=_REST_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(
+                f"Vonage transfer timed out after {_REST_TIMEOUT_SECONDS}s"
+            ) from exc
         return {"status": "transferred", "attempt_id": call_id, "mode": mode}
 
     # ------------------------------------------------------------------
