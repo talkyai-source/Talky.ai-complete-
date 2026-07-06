@@ -341,10 +341,22 @@ class AudioIngest:
                     except Exception as _close_exc:
                         logger.debug("[SilenceMonitor] close-on-silence failed: %s", _close_exc)
 
-            # Silence monitor runs for ALL voice sessions (telephony + Ask AI).
-            # It only arms after the first AI reply, so the natural silence at the
-            # start of a call never trips it.
-            _silence_task: Optional[asyncio.Task] = asyncio.create_task(_silence_monitor())
+            # Silence monitor is a TELEPHONY concern: a phone caller who goes
+            # quiet may have physically walked away, so we check in and, after a
+            # few unanswered check-ins, close politely. But a BROWSER session —
+            # the Ask-AI widget and the campaign Test-agent WebSocket — has a
+            # PRESENT user who reads / thinks / takes notes between turns; nagging
+            # "Are you still there?" mid-conversation is noise and was reported as
+            # aggressive. Gate it to the telephony gateway only (restores this
+            # monitor's original telephony-only scope). Missing gateway_type
+            # defaults to telephony (real calls always set it) so a malformed
+            # phone session never loses its silence handling.
+            _gw_type = getattr(getattr(session, "config", None), "gateway_type", "telephony")
+            _silence_task: Optional[asyncio.Task] = (
+                asyncio.create_task(_silence_monitor())
+                if _gw_type == "telephony"
+                else None
+            )
 
             try:
                 async for transcript in self._p.stt_provider.stream_transcribe(
