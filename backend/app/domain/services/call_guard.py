@@ -76,6 +76,7 @@ class GuardCheck(str, Enum):
     DNC_CHECK = "dnc_check"
     VELOCITY_CHECK = "velocity_check"
     SPEND_LIMIT = "spend_limit"
+    MINUTES_QUOTA = "minutes_quota"
 
 
 @dataclass
@@ -283,6 +284,7 @@ class CallGuard:
             (GuardCheck.DNC_CHECK, self._check_dnc),
             (GuardCheck.RATE_LIMIT, self._check_rate_limit),
             (GuardCheck.CONCURRENCY_LIMIT, self._check_concurrency),
+            (GuardCheck.MINUTES_QUOTA, self._check_minutes_quota),
             (GuardCheck.SPEND_LIMIT, self._check_spend_limit),
             (GuardCheck.BUSINESS_HOURS, self._check_business_hours),
             (GuardCheck.VELOCITY_CHECK, self._check_velocity),
@@ -797,6 +799,58 @@ class CallGuard:
                 "current_spend": current_spend,
                 "spend_cap": cap,
                 "remaining": cap - current_spend,
+            },
+        )
+
+    async def _check_minutes_quota(
+        self,
+        tenant_id: str,
+        tenant_limits: Optional[TenantCallLimits] = None,
+        estimated_duration_seconds: Optional[int] = None,
+        **kwargs
+    ) -> CheckResult:
+        """Block origination once the tenant's monthly minutes are exhausted.
+
+        Closes the direct-origination revenue leak: campaigns + dialer enforce
+        minutes elsewhere, but ``POST /sip/telephony/call`` reached the carrier
+        with NO minutes gate, so an exhausted tenant billed unmetered calls.
+
+        Fail-OPEN by design (matches _check_spend_limit): a missing/zero
+        allocation = "no quota configured" -> pass; any load/logic error is
+        caught by evaluate()'s per-check try/except and treated as passed, so a
+        metering hiccup never strands legitimate calls.
+        """
+        allocated = (tenant_limits.monthly_minutes_allocated if tenant_limits else 0) or 0
+        if not tenant_limits or allocated <= 0:
+            return CheckResult(
+                check=GuardCheck.MINUTES_QUOTA,
+                passed=True,
+                reason="no_minutes_quota",
+            )
+
+        used = tenant_limits.monthly_minutes_used or 0
+        # Round this call's minutes UP (carriers bill per started minute).
+        est_minutes = -(-(estimated_duration_seconds or 60) // 60)  # ceil division
+
+        if used + est_minutes > allocated:
+            return CheckResult(
+                check=GuardCheck.MINUTES_QUOTA,
+                passed=False,
+                reason=f"minutes_quota_exhausted: {used}/{allocated} used",
+                details={
+                    "minutes_used": used,
+                    "minutes_allocated": allocated,
+                    "estimated_minutes": est_minutes,
+                },
+            )
+
+        return CheckResult(
+            check=GuardCheck.MINUTES_QUOTA,
+            passed=True,
+            details={
+                "minutes_used": used,
+                "minutes_allocated": allocated,
+                "remaining": allocated - used,
             },
         )
 
