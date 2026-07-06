@@ -13,6 +13,7 @@ import { ScriptCard } from "@/components/campaigns/script-card";
 import { LiveCallsPanel } from "@/components/campaigns/live-calls-panel";
 import { CallIssuesPanel } from "@/components/campaigns/call-issues-panel";
 import { KnowledgePanel } from "@/components/campaigns/knowledge-panel";
+import { TestAgentButton } from "@/components/campaigns/test-agent-button";
 import { Modal } from "@/components/ui/modal";
 import { checkCallingWindow } from "@/lib/calling-window";
 import {
@@ -325,6 +326,7 @@ export default function CampaignDetailPage() {
                                     {minutes.remaining_minutes} min left
                                 </span>
                             )}
+                            <TestAgentButton campaignId={campaignId} disabled={actionLoading} />
                             <Button variant="outline" onClick={() => router.push(`/campaigns/${campaignId}/edit`)} disabled={actionLoading}>
                                 <Pencil className="w-4 h-4" />
                                 Edit

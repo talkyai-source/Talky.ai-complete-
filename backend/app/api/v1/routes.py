@@ -14,6 +14,7 @@ from app.api.v1.endpoints.admin import router as admin_router
 from app.api.v1.endpoints.ai_options import router as ai_options_router
 from app.api.v1.endpoints.analytics import router as analytics_router
 from app.api.v1.endpoints.ask_ai_ws import router as ask_ai_ws_router
+from app.api.v1.endpoints.campaign_test_ws import router as campaign_test_ws_router
 
 # --- WebSocket / AI endpoints ---
 from app.api.v1.endpoints.assistant_config import router as assistant_config_router
@@ -85,6 +86,7 @@ api_router.include_router(webhooks_secure_router)
 api_router.include_router(assistant_config_router)
 api_router.include_router(assistant_ws_router)
 api_router.include_router(ask_ai_ws_router)
+api_router.include_router(campaign_test_ws_router)
 api_router.include_router(ai_options_router)
 api_router.include_router(telephony_bridge_router)
 api_router.include_router(vonage_bridge_router)
