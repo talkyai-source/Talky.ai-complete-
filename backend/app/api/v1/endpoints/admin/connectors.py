@@ -8,7 +8,7 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 from app.core.postgres_adapter import Client
 
-from app.api.v1.dependencies import get_db_client, require_admin, CurrentUser
+from app.api.v1.dependencies import get_db_client, require_platform_admin, CurrentUser
 from ._serialization import AdminResponseModel
 
 router = APIRouter()
@@ -77,7 +77,7 @@ def _get_token_status(token_expires_at: Optional[str], status: str) -> str:
 
 @router.get("/connectors", response_model=AdminConnectorListResponse)
 async def list_admin_connectors(
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
     tenant_id: Optional[str] = Query(None, description="Filter by tenant"),
     status: Optional[str] = Query(None, description="Filter by status"),
@@ -174,7 +174,7 @@ async def list_admin_connectors(
 @router.get("/connectors/{connector_id}", response_model=AdminConnectorDetail)
 async def get_admin_connector_detail(
     connector_id: str,
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client)
 ):
     """
@@ -236,7 +236,7 @@ async def get_admin_connector_detail(
 @router.post("/connectors/{connector_id}/reconnect")
 async def force_reconnect_connector(
     connector_id: str,
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client)
 ):
     """
@@ -328,7 +328,7 @@ async def force_reconnect_connector(
 @router.post("/connectors/{connector_id}/revoke")
 async def revoke_connector(
     connector_id: str,
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client)
 ):
     """

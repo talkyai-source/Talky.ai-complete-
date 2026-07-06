@@ -9,6 +9,7 @@ from typing import List, Optional
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
+from app.core.security.rbac import require_permission, Permission
 from app.utils.tenant_filter import apply_tenant_filter, verify_tenant_access
 
 logger = logging.getLogger(__name__)
@@ -126,7 +127,7 @@ _LIVE_STATUSES = ("queued", "dialing", "ringing", "answered", "in_call", "initia
 _LIVE_MAX_AGE_MINUTES = 30
 
 
-@router.post("/{call_id}/hangup")
+@router.post("/{call_id}/hangup", dependencies=[Depends(require_permission(Permission.CALLS_DELETE))])
 async def hangup_live_call(
     call_id: str,
     current_user: CurrentUser = Depends(get_current_user),

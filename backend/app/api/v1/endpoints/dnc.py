@@ -25,7 +25,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
-from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool
+from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool, require_admin
 from app.domain.services.dnc_service import (
     KNOWN_SOURCES,
     SOURCE_BULK_IMPORT,
@@ -124,7 +124,7 @@ async def list_dnc_entries(
     return [_to_response(e) for e in entries]
 
 
-@router.post("/", response_model=DNCEntryResponse, status_code=201)
+@router.post("/", response_model=DNCEntryResponse, status_code=201, dependencies=[Depends(require_admin)])
 async def add_dnc_entry(
     payload: DNCAddRequest,
     current_user: CurrentUser = Depends(get_current_user),
@@ -154,7 +154,7 @@ async def add_dnc_entry(
     return _to_response(entry)
 
 
-@router.post("/bulk-import", response_model=DNCBulkImportResponse)
+@router.post("/bulk-import", response_model=DNCBulkImportResponse, dependencies=[Depends(require_admin)])
 async def bulk_import(
     payload: DNCBulkImportRequest,
     current_user: CurrentUser = Depends(get_current_user),
@@ -176,7 +176,7 @@ async def bulk_import(
     return DNCBulkImportResponse(**result)
 
 
-@router.post("/caller-opt-out", response_model=DNCEntryResponse, status_code=201)
+@router.post("/caller-opt-out", response_model=DNCEntryResponse, status_code=201, dependencies=[Depends(require_admin)])
 async def caller_opt_out(
     payload: DNCCallerOptOutRequest,
     current_user: CurrentUser = Depends(get_current_user),
@@ -216,7 +216,7 @@ async def check_dnc(
     return DNCCheckResponse(e164=e164, on_dnc=on_list)
 
 
-@router.delete("/{entry_id}", status_code=204, response_class=Response)
+@router.delete("/{entry_id}", status_code=204, response_class=Response, dependencies=[Depends(require_admin)])
 async def remove_dnc_entry(
     entry_id: str,
     current_user: CurrentUser = Depends(get_current_user),

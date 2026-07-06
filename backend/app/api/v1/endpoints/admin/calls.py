@@ -8,7 +8,7 @@ from typing import List, Optional
 from datetime import datetime
 from app.core.postgres_adapter import Client
 
-from app.api.v1.dependencies import get_db_client, require_admin, CurrentUser
+from app.api.v1.dependencies import get_db_client, require_platform_admin, CurrentUser
 from ._serialization import AdminResponseModel
 
 router = APIRouter()
@@ -92,7 +92,7 @@ class AdminCallDetail(AdminResponseModel):
 
 @router.get("/calls/live", response_model=List[LiveCallItem])
 async def get_live_calls(
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client)
 ):
     """
@@ -164,7 +164,7 @@ async def get_live_calls(
 
 @router.get("/calls/history", response_model=CallHistoryResponse)
 async def get_call_history(
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
     page: int = 1,
     page_size: int = 20,
@@ -272,7 +272,7 @@ async def get_call_history(
 @router.get("/calls/{call_id}", response_model=AdminCallDetail)
 async def get_admin_call_detail(
     call_id: str,
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client)
 ):
     """
@@ -380,7 +380,7 @@ async def get_admin_call_detail(
 @router.post("/calls/{call_id}/terminate")
 async def terminate_call(
     call_id: str,
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client)
 ):
     """

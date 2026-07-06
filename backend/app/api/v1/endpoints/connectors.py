@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
+from app.core.security.rbac import require_permission, Permission
 from app.infrastructure.connectors.base import ConnectorFactory
 from app.infrastructure.connectors.oauth import get_oauth_state_manager, OAuthStateError
 from app.infrastructure.connectors.encryption import get_encryption_service
@@ -351,7 +352,7 @@ async def authorize_connector_by_type(
     return TypeAuthorizeResponse(authorization_url=auth_url)
 
 
-@router.post("/{type}/disconnect")
+@router.post("/{type}/disconnect", dependencies=[Depends(require_permission(Permission.CONNECTORS_DELETE))])
 async def disconnect_connector_by_type(
     type: str,
     current_user: CurrentUser = Depends(get_current_user),
@@ -416,7 +417,7 @@ async def get_connector(
     )
 
 
-@router.post("/authorize", response_model=OAuthAuthorizeResponse)
+@router.post("/authorize", response_model=OAuthAuthorizeResponse, dependencies=[Depends(require_permission(Permission.CONNECTORS_CREATE))])
 async def authorize_connector(
     request: CreateConnectorRequest,
     http_request: Request,
@@ -594,7 +595,7 @@ async def oauth_callback(
         return RedirectResponse(_frontend_callback_url(frontend_url, status="error", error="callback_failed"))
 
 
-@router.delete("/{connector_id}")
+@router.delete("/{connector_id}", dependencies=[Depends(require_permission(Permission.CONNECTORS_DELETE))])
 async def delete_connector(
     connector_id: str,
     current_user: CurrentUser = Depends(get_current_user),
@@ -626,7 +627,7 @@ async def delete_connector(
     return {"success": True, "message": "Connector disconnected"}
 
 
-@router.post("/{connector_id}/refresh")
+@router.post("/{connector_id}/refresh", dependencies=[Depends(require_permission(Permission.CONNECTORS_UPDATE))])
 async def refresh_connector_tokens(
     connector_id: str,
     current_user: CurrentUser = Depends(get_current_user),

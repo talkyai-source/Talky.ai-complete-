@@ -43,6 +43,20 @@ def _unauthed_request():
 
 
 class TelephonyBridgeTransferApiTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        # P0-6 added a call-ownership check (calls.external_call_uuid -> tenant)
+        # to the transfer/hangup routes. These tests exercise the transfer
+        # MECHANICS (adapter wiring), not ownership — which has its own tests in
+        # test_telephony_bridge_auth.py — and there is no live container here.
+        # No-op the ownership check so these keep testing what they test.
+        self._own_patch = patch.object(
+            telephony_bridge, "_verify_call_ownership", new=AsyncMock()
+        )
+        self._own_patch.start()
+
+    async def asyncTearDown(self) -> None:
+        self._own_patch.stop()
+
     async def test_blind_transfer_endpoint(self) -> None:
         mock_adapter = MagicMock()
         mock_adapter.connected = True

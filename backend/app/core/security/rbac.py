@@ -476,10 +476,16 @@ def check_permission(
     if required in user_permissions:
         return True
 
-    # Admin permission grants all actions on that resource
+    # Admin permission grants all actions on that resource.
+    # Not every resource defines an ``<resource>:admin`` permission
+    # (e.g. calls, connectors) — guard the lookup so a missing admin
+    # perm fails SAFE (skip the fallback -> deny) instead of raising.
     resource = required.split(":")[0]
-    admin_perm = Permission(f"{resource}:admin")
-    if admin_perm in user_permissions:
+    try:
+        admin_perm = Permission(f"{resource}:admin")
+    except ValueError:
+        admin_perm = None
+    if admin_perm is not None and admin_perm in user_permissions:
         return True
 
     # Platform admin grants everything

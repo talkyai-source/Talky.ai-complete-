@@ -4,7 +4,9 @@ User management: list, create, update (role / block), delete.
 
 Mutations are restricted to platform_admin (the highest tier) so this screen
 can't be used to escalate privileges (gap G1) — a tenant_admin cannot mint a
-platform_admin here. Listing is available to any admin tier (require_admin).
+platform_admin here. Listing and single-user reads also require platform_admin
+(P0-3): these queries span every tenant's users, so a tenant_admin must not be
+able to read them.
 """
 from __future__ import annotations
 
@@ -19,7 +21,6 @@ from app.api.v1.dependencies import (
     CurrentUser,
     get_audit_logger,
     get_db_client,
-    require_admin,
     require_platform_admin,
 )
 from app.core.postgres_adapter import Client
@@ -114,7 +115,7 @@ async def _safe_audit(audit_logger: AuditLogger, **kwargs) -> None:
 
 @router.get("/users", response_model=List[AdminUserItem])
 async def list_users(
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
     search: Optional[str] = Query(None, description="Match email or name"),
     role: Optional[str] = Query(None, description="Filter by role"),
@@ -154,7 +155,7 @@ async def list_users(
 @router.get("/users/{user_id}", response_model=AdminUserItem)
 async def get_user(
     user_id: str,
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
 ):
     """Get a single user by id (admin only)."""

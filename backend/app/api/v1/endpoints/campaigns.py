@@ -59,6 +59,7 @@ def _get_campaign_service(db_client: Client) -> CampaignService:
     return CampaignService(db_client, queue_service=queue_service)
 
 from app.core.security.api_security import rate_limit_dependency
+from app.core.security.rbac import require_permission, Permission
 from app.core.security.idempotency import (
     idempotency_dependency, 
     store_idempotent_response, 
@@ -236,7 +237,7 @@ def _calling_config_from_schedule(schedule) -> Optional[dict]:
     return cfg
 
 
-@router.post("/", dependencies=[Depends(rate_limit_dependency)])
+@router.post("/", dependencies=[Depends(rate_limit_dependency), Depends(require_permission(Permission.CAMPAIGNS_CREATE))])
 async def create_campaign(
     campaign_data: CampaignCreateRequest,
     request: Request,
@@ -323,7 +324,7 @@ async def create_campaign(
         raise HTTPException(status_code=500, detail="Failed to create campaign")
 
 
-@router.post("/apply-tts-config", dependencies=[Depends(rate_limit_dependency)])
+@router.post("/apply-tts-config", dependencies=[Depends(rate_limit_dependency), Depends(require_permission(Permission.CAMPAIGNS_UPDATE))])
 async def apply_tts_config(
     body: ApplyTtsConfigRequest,
     request: Request,
@@ -397,7 +398,7 @@ async def get_campaign(
         raise HTTPException(status_code=500, detail="Failed to get campaign")
 
 
-@router.put("/{campaign_id}", dependencies=[Depends(rate_limit_dependency)])
+@router.put("/{campaign_id}", dependencies=[Depends(rate_limit_dependency), Depends(require_permission(Permission.CAMPAIGNS_UPDATE))])
 async def update_campaign(
     campaign_id: str,
     campaign_data: CampaignUpdateRequest,
@@ -520,7 +521,7 @@ async def list_campaign_calls_with_transcripts(
     return result
 
 
-@router.post("/{campaign_id}/start", dependencies=[Depends(rate_limit_dependency)])
+@router.post("/{campaign_id}/start", dependencies=[Depends(rate_limit_dependency), Depends(require_permission(Permission.CAMPAIGNS_UPDATE))])
 async def start_campaign(
     campaign_id: str,
     request: Request,
@@ -636,7 +637,7 @@ async def start_campaign(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/{campaign_id}/pause")
+@router.post("/{campaign_id}/pause", dependencies=[Depends(require_permission(Permission.CAMPAIGNS_UPDATE))])
 async def pause_campaign(
     campaign_id: str,
     request: Request,
@@ -674,7 +675,7 @@ async def pause_campaign(
         raise HTTPException(status_code=500, detail="Failed to pause campaign")
 
 
-@router.post("/{campaign_id}/stop")
+@router.post("/{campaign_id}/stop", dependencies=[Depends(require_permission(Permission.CAMPAIGNS_UPDATE))])
 async def stop_campaign(
     campaign_id: str,
     clear_queue: bool = Query(False, description="Clear pending jobs from queue"),
@@ -895,7 +896,7 @@ def _phone_validation_relaxed(user) -> bool:
     return bool(email and email.strip().lower() in _RELAXED_PHONE_EMAILS)
 
 
-@router.post("/{campaign_id}/contacts")
+@router.post("/{campaign_id}/contacts", dependencies=[Depends(require_permission(Permission.CAMPAIGNS_UPDATE))])
 async def add_contact_to_campaign(
     campaign_id: str,
     contact: ContactCreate,
@@ -1034,7 +1035,7 @@ async def add_contact_to_campaign(
         raise HTTPException(status_code=500, detail="Failed to add contact")
 
 
-@router.patch("/{campaign_id}/contacts/{contact_id}")
+@router.patch("/{campaign_id}/contacts/{contact_id}", dependencies=[Depends(require_permission(Permission.CAMPAIGNS_UPDATE))])
 async def update_contact_in_campaign(
     campaign_id: str,
     contact_id: str,
@@ -1202,7 +1203,7 @@ async def list_campaign_contacts(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/{campaign_id}/contacts/{contact_id}")
+@router.delete("/{campaign_id}/contacts/{contact_id}", dependencies=[Depends(require_permission(Permission.CAMPAIGNS_UPDATE))])
 async def remove_contact_from_campaign(
     campaign_id: str,
     contact_id: str,

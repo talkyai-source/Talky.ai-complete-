@@ -12,6 +12,7 @@ from typing import Any, List, Optional
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser, get_audit_logger, get_db_pool
+from app.core.security.rbac import require_permission, Permission
 from app.domain.services.billing_service import BillingService
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 
@@ -103,7 +104,7 @@ def get_default_urls(request: Request):
 # Endpoints
 # ============================================
 
-@router.post("/create-checkout-session", response_model=CreateCheckoutResponse)
+@router.post("/create-checkout-session", response_model=CreateCheckoutResponse, dependencies=[Depends(require_permission(Permission.BILLING_UPDATE))])
 async def create_checkout_session(
     body: CreateCheckoutRequest,
     request: Request,
@@ -259,7 +260,7 @@ async def get_subscription(
         )
 
 
-@router.post("/portal", response_model=PortalResponse)
+@router.post("/portal", response_model=PortalResponse, dependencies=[Depends(require_permission(Permission.BILLING_UPDATE))])
 async def create_portal_session(
     body: PortalRequest,
     request: Request,
@@ -306,7 +307,7 @@ async def create_portal_session(
         )
 
 
-@router.post("/cancel", response_model=CancelResponse)
+@router.post("/cancel", response_model=CancelResponse, dependencies=[Depends(require_permission(Permission.BILLING_ADMIN))])
 async def cancel_subscription(
     request: Request,
     current_user: CurrentUser = Depends(get_current_user),

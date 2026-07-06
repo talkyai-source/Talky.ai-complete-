@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 from app.core.postgres_adapter import Client
 
-from app.api.v1.dependencies import get_db_client, require_admin, CurrentUser
+from app.api.v1.dependencies import get_db_client, require_platform_admin, CurrentUser
 from ._serialization import AdminResponseModel
 
 router = APIRouter()
@@ -61,7 +61,7 @@ class QuotaUpdateRequest(BaseModel):
 
 @router.get("/tenants", response_model=List[TenantListItem])
 async def list_tenants(
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
     search: Optional[str] = None,
     status: Optional[str] = None
@@ -139,7 +139,7 @@ async def list_tenants(
 @router.get("/tenants/{tenant_id}", response_model=TenantDetailResponse)
 async def get_tenant(
     tenant_id: str,
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client)
 ):
     """
@@ -208,7 +208,7 @@ async def get_tenant(
 async def update_tenant_quota(
     tenant_id: str,
     quota: QuotaUpdateRequest,
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client)
 ):
     """
@@ -268,7 +268,7 @@ async def update_tenant_quota(
 @router.post("/tenants/{tenant_id}/suspend")
 async def suspend_tenant(
     tenant_id: str,
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client)
 ):
     """
@@ -306,7 +306,7 @@ async def suspend_tenant(
 @router.post("/tenants/{tenant_id}/resume")
 async def resume_tenant(
     tenant_id: str,
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client)
 ):
     """

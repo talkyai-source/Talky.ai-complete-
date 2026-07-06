@@ -8,7 +8,7 @@ from typing import List, Optional
 from datetime import datetime
 from app.core.postgres_adapter import Client
 
-from app.api.v1.dependencies import get_db_client, require_admin, CurrentUser
+from app.api.v1.dependencies import get_db_client, require_platform_admin, CurrentUser
 
 router = APIRouter()
 
@@ -42,7 +42,7 @@ class UsageSummaryResponse(BaseModel):
 
 @router.get("/usage/summary", response_model=UsageSummaryResponse)
 async def get_admin_usage_summary(
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
     tenant_id: Optional[str] = Query(None, description="Filter by tenant"),
     from_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
@@ -153,7 +153,7 @@ async def get_admin_usage_summary(
 
 @router.get("/usage/breakdown")
 async def get_admin_usage_breakdown(
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
     group_by: str = Query("provider", description="Group by: provider, tenant, type"),
     tenant_id: Optional[str] = Query(None, description="Filter by tenant"),
