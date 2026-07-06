@@ -68,6 +68,8 @@ class RealtimeBridge:
         session_active: Optional[Any] = None,
         greet_on_start: bool = True,
         barge_in_event: Optional[asyncio.Event] = None,
+        transcript_service: Optional[Any] = None,
+        talklee_call_id: Optional[str] = None,
     ) -> None:
         self._call_id = call_id
         self._rt = realtime_session
@@ -76,6 +78,21 @@ class RealtimeBridge:
         self._knowledge_pool = knowledge_pool
         self._tenant_id = tenant_id
         self._campaign_id = campaign_id
+        # Transcript accumulation. The realtime speech-to-speech path produces
+        # NO transcript on its own; we feed the model's final agent + caller
+        # transcripts into the SAME in-memory TranscriptService buffer the
+        # cascaded path uses (class-level, keyed by call_id), so the shared
+        # hangup persister (call_transcript_persister) writes them to the calls
+        # row exactly like a cascaded call. Optional / fail-soft — a missing
+        # service or any accumulation error must never break the call.
+        self._transcript_service = transcript_service
+        self._talklee_call_id = talklee_call_id
+        self._turn_index = 0
+        if transcript_service is not None and talklee_call_id:
+            try:
+                transcript_service.bind_call_identity(call_id, talklee_call_id)
+            except Exception:  # noqa: BLE001
+                pass
         # Optional callable returning whether the call is still active; lets the
         # caller pump stop promptly on hangup. Defaults to "always active" —
         # the pumps also stop when the RealtimeSession closes.
@@ -96,6 +113,11 @@ class RealtimeBridge:
         self._stop = asyncio.Event()
         self._caller_task: Optional[asyncio.Task] = None
         self._model_task: Optional[asyncio.Task] = None
+        # Detached knowledge-tool tasks. A tool call does a DB round-trip and
+        # MUST NOT block the single model-event pump (that would freeze audio +
+        # barge-in for the whole lookup), so each is dispatched as its own task
+        # and tracked here for clean cancellation on teardown.
+        self._tool_tasks: "set[asyncio.Task]" = set()
 
     # ── Lifecycle ────────────────────────────────────────────────────────
     async def run(self) -> None:
@@ -118,6 +140,13 @@ class RealtimeBridge:
                 "at exactly this rate or the model hears a speed-shifted caller",
                 self._call_id, self._internal_rate, _WIRE_RATE,
             )
+        # Tell the gateway this session's output is already real-time-paced by
+        # the model, so its send_audio pacing loop skips opportunistic batching
+        # (batch=1) — realtime shouldn't pay cascaded's TTS-batching latency.
+        try:
+            self._gw.set_realtime_output(self._call_id, True)
+        except Exception:  # noqa: BLE001 — pacing hint is best-effort
+            pass
         try:
             self._caller_task = asyncio.create_task(
                 self._pump_caller_audio(), name=f"rt-caller-{self._call_id}"
@@ -154,19 +183,22 @@ class RealtimeBridge:
             logger.info("realtime_bridge end call=%s", self._call_id)
 
     async def stop(self) -> None:
-        """Idempotent teardown: stop pumps, close the realtime session."""
+        """Idempotent teardown: stop pumps, cancel any in-flight tool task,
+        close the realtime session."""
         self._stop.set()
-        for task in (self._caller_task, self._model_task):
-            if task is not None and not task.done():
+        tasks = [t for t in (self._caller_task, self._model_task) if t is not None]
+        tasks += list(self._tool_tasks)
+        for task in tasks:
+            if not task.done():
                 task.cancel()
-        for task in (self._caller_task, self._model_task):
-            if task is not None:
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                    pass
+        for task in tasks:
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
         self._caller_task = None
         self._model_task = None
+        self._tool_tasks.clear()
         try:
             await self._rt.close()
         except Exception:  # noqa: BLE001 — cleanup must never raise
@@ -270,13 +302,29 @@ class RealtimeBridge:
                             self._barge_in_event.clear()
 
                 elif kind == "function_call" and ev.function_call:
-                    await self._handle_function_call(ev.function_call)
+                    # Do NOT await here — this is the SOLE event pump. The tool
+                    # does a knowledge DB round-trip; awaiting it would stall
+                    # audio deltas AND barge-in ("interrupted") for the whole
+                    # lookup, so the agent goes silent and un-interruptible
+                    # mid-turn. Dispatch it detached and keep draining the
+                    # socket; send_function_result already sequences the
+                    # follow-up response.create safely (openai_realtime.py:407).
+                    tool_task = asyncio.create_task(
+                        self._handle_function_call(ev.function_call),
+                        name=f"rt-tool-{self._call_id}",
+                    )
+                    self._tool_tasks.add(tool_task)
+                    tool_task.add_done_callback(self._tool_tasks.discard)
 
                 elif kind == "agent_transcript" and ev.text:
                     logger.debug("realtime agent: %s", ev.text)
+                    if getattr(ev, "is_final", False):
+                        self._record_turn("assistant", ev.text)
 
                 elif kind == "caller_transcript" and ev.text:
                     logger.debug("realtime caller: %s", ev.text)
+                    if getattr(ev, "is_final", False):
+                        self._record_turn("user", ev.text)
 
                 elif kind == "error":
                     logger.warning("realtime_bridge model error call=%s: %s",
@@ -289,6 +337,25 @@ class RealtimeBridge:
             logger.error("realtime_bridge model pump err call=%s: %s",
                          self._call_id, exc)
         logger.debug("realtime_bridge model pump ended call=%s", self._call_id)
+
+    def _record_turn(self, role: str, text: str) -> None:
+        """Accumulate one finalised transcript turn (role-tagged, in order) into
+        the shared TranscriptService buffer. Fail-soft: a transcript error must
+        never break the call, so everything here is swallowed."""
+        if self._transcript_service is None:
+            return
+        try:
+            self._transcript_service.accumulate_turn(
+                self._call_id,
+                role,
+                text,
+                talklee_call_id=self._talklee_call_id,
+                turn_index=self._turn_index,
+            )
+            self._turn_index += 1
+        except Exception as exc:  # noqa: BLE001 — transcript must never break a call
+            logger.debug("realtime_bridge record_turn err call=%s: %s",
+                         self._call_id, exc)
 
     async def _handle_function_call(self, fc: Any) -> None:
         """Fulfil the model's knowledge_lookup tool using the SAME retrieval
@@ -323,7 +390,12 @@ class RealtimeBridge:
             from app.services.scripts.knowledge.retrieval import retrieve_knowledge
             nodes = await retrieve_knowledge(
                 self._knowledge_pool,
-                tenant_id=self._tenant_id or "",
+                # Pass None (not "") when tenant is unknown. acquire_with_tenant
+                # treats None as "bypass RLS", but an empty string is fed to
+                # _validate_uuid("") which raises → retrieve_knowledge swallows
+                # it and returns [] → the model silently gets "no info". This is
+                # the same tenant semantics the cascaded path uses.
+                tenant_id=self._tenant_id or None,
                 campaign_id=self._campaign_id,
                 query=query,
                 k=2,

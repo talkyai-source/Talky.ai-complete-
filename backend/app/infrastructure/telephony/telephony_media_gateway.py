@@ -103,6 +103,14 @@ class TelephonySession:
     # the current TTS chunk to fully drain.
     barge_in_event: Optional[asyncio.Event] = field(default=None)
 
+    # Realtime pipeline output flag. The OpenAI Realtime stream arrives ALREADY
+    # real-time-paced by the model (unlike bursty TTS, which the pacing loop's
+    # look-ahead + opportunistic batching were designed for). When True,
+    # send_audio stops batching (batch=1) so the low-latency deltas aren't held
+    # back to coalesce — realtime skips STT+TTS and must not pay cascaded's
+    # output-batching tax. Set via set_realtime_output() from RealtimeBridge.
+    realtime_output: bool = field(default=False)
+
     # Orphan sample fragment carried across send_audio() calls so a TTS
     # provider that splits a sample across two chunks doesn't corrupt (s16le)
     # or crash-and-drop (f32le) the boundary. Alignment width depends on
@@ -588,6 +596,12 @@ class TelephonyMediaGateway(MediaGateway):
             )
         except ValueError:
             MAX_BATCH_PACKETS = 2
+        # Realtime output is already real-time-paced by the model; opportunistic
+        # batching (built to coalesce bursty TTS) only adds delay here, so send
+        # each 20ms packet the moment it's available. Barge-in early-exit below
+        # still bounds residual audio the same way.
+        if getattr(session, "realtime_output", False):
+            MAX_BATCH_PACKETS = 1
 
         session.tts_buffer += pcmu
 
@@ -713,6 +727,14 @@ class TelephonyMediaGateway(MediaGateway):
         session = self._sessions.get(call_id)
         if session:
             session.barge_in_event = event
+
+    def set_realtime_output(self, call_id: str, enabled: bool = True) -> None:
+        """Mark a session's output as a realtime (already-paced) stream so the
+        send_audio pacing loop skips opportunistic batching (batch=1). Called by
+        RealtimeBridge at start; no-op if the session is gone."""
+        session = self._sessions.get(call_id)
+        if session:
+            session.realtime_output = enabled
 
     async def clear_output_buffer(self, call_id: str) -> None:
         """

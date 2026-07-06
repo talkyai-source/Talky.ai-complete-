@@ -1392,7 +1392,13 @@ class VoiceOrchestrator:
                 from app.core.container import get_container
                 c = get_container()
                 if c.is_initialized:
-                    knowledge_pool = c.db_pool
+                    # Use the SAME accessor the cascaded per-turn retrieval uses
+                    # (turn_streamer._knowledge_block_for_turn:
+                    #   getattr(container.db_client, "pool", None)). Both resolve
+                    # to the one asyncpg pool, but aligning the accessor keeps the
+                    # two knowledge paths provably identical and avoids the
+                    # db_pool @property raising if the pool is torn down mid-setup.
+                    knowledge_pool = getattr(c.db_client, "pool", None)
             except Exception:
                 knowledge_pool = None
 
@@ -1420,6 +1426,15 @@ class VoiceOrchestrator:
             call_session.talklee_call_id = talklee_call_id
             call_session.barge_in_event = asyncio.Event()
 
+            # Transcript accumulation for the realtime path. The speech-to-speech
+            # model emits no transcript on its own, so the bridge feeds the
+            # model's final agent + caller transcripts into a TranscriptService
+            # (class-level buffer keyed by call_id) — the SAME buffer the shared
+            # hangup persister reads. We stash it on the voice_session so
+            # lifecycle._on_call_ended finds it (pipeline is None on realtime).
+            from app.domain.services.transcript_service import TranscriptService
+            realtime_transcript_service = TranscriptService()
+
             # Wire barge-in into the media gateway's pacing loop, mirroring
             # the cascaded path (voice_pipeline_service.start_pipeline).
             # Without this, TelephonyMediaGateway.send_audio's pacing loop
@@ -1445,6 +1460,8 @@ class VoiceOrchestrator:
                 # up expecting to speak first. OUTBOUND (platform-dialed)
                 # calls keep the existing greet-on-connect behaviour.
                 greet_on_start=(config.direction == Direction.OUTBOUND),
+                transcript_service=realtime_transcript_service,
+                talklee_call_id=talklee_call_id,
             )
 
             voice_session = VoiceSession(
@@ -1456,6 +1473,9 @@ class VoiceOrchestrator:
                 realtime_bridge=bridge,
                 config=config,
             )
+            # Surface the transcript buffer for the hangup persister
+            # (lifecycle._on_call_ended falls back to this when pipeline is None).
+            voice_session.transcript_service = realtime_transcript_service
             return voice_session
         except Exception as exc:  # noqa: BLE001 — fail soft to cascaded
             logger.error(

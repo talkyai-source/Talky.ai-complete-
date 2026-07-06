@@ -1472,6 +1472,12 @@ async def _on_call_ended(call_id: str) -> None:
         try:
             pipeline = getattr(voice_session, "pipeline", None)
             transcript_service = getattr(pipeline, "transcript_service", None)
+            # Realtime sessions have no cascaded pipeline; the bridge accumulated
+            # transcripts into a TranscriptService stashed on the voice_session.
+            if transcript_service is None:
+                transcript_service = getattr(
+                    voice_session, "transcript_service", None
+                )
             from app.core.container import get_container as _gc
             _c = _gc()
             _pool = _c.db_pool if _c.is_initialized else None

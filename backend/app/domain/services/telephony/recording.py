@@ -45,17 +45,26 @@ async def _save_call_recording(voice_session, call_id: str) -> None:
         return
 
     # Resolve sample rate from the live session so this stays correct after
-    # the 8kHz -> 16kHz telephony migration. The voice_session.config holds
-    # the gateway sample rate that the recording buffers were written at.
+    # the 8kHz -> 16kHz telephony migration. The recording buffers are written
+    # at the gateway's INTERNAL rate (gateway._sample_rate), so prefer that as
+    # the source of truth — it is authoritative for both cascaded and realtime.
+    # Realtime forces the gateway to 8 kHz while config.gateway_sample_rate
+    # stays at its (24 kHz) default; using the config value there would encode
+    # the WAV at the wrong rate and play it back badly speed-shifted. Fall back
+    # to config only when the gateway doesn't expose its rate.
     rec_sample_rate = 16000
     try:
-        cfg = getattr(voice_session, "config", None)
-        if cfg is not None:
-            rec_sample_rate = int(
-                getattr(cfg, "gateway_sample_rate", None)
-                or getattr(cfg, "stt_sample_rate", None)
-                or 16000
-            )
+        gw_rate = getattr(gateway, "_sample_rate", None)
+        if gw_rate:
+            rec_sample_rate = int(gw_rate)
+        else:
+            cfg = getattr(voice_session, "config", None)
+            if cfg is not None:
+                rec_sample_rate = int(
+                    getattr(cfg, "gateway_sample_rate", None)
+                    or getattr(cfg, "stt_sample_rate", None)
+                    or 16000
+                )
     except Exception:
         rec_sample_rate = 16000
 

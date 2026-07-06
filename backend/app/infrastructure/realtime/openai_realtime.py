@@ -114,6 +114,10 @@ class RealtimeEvent:
     audio: Optional[bytes] = None
     function_call: Optional[RealtimeFunctionCall] = None
     raw: Optional[Dict[str, Any]] = None
+    # True on the terminal transcript event for a turn (agent transcript "done"
+    # / caller transcription "completed"), carrying the FULL turn text. The
+    # bridge persists only these finals so incremental deltas never double-count.
+    is_final: bool = False
 
 
 @dataclass
@@ -308,6 +312,21 @@ class OpenAIRealtimeSession:
         transcription_model = (
             self._settings.get("transcription_model") or _DEFAULT_TRANSCRIPTION_MODEL
         )
+
+        # Optional voice speed (audio.output.speed). Only sent when the operator
+        # set it — an unset value keeps today's exact payload so live calls are
+        # unaffected. Clamped to the API's documented 0.25–1.5 window.
+        output_block: Dict[str, Any] = {
+            "format": {"type": "audio/pcmu"},
+            "voice": self._voice,
+        }
+        speed = self._settings.get("speed")
+        if speed is not None:
+            try:
+                output_block["speed"] = max(0.25, min(1.5, float(speed)))
+            except (TypeError, ValueError):
+                pass
+
         session: Dict[str, Any] = {
             "type": "realtime",
             "instructions": self._instructions,
@@ -319,13 +338,25 @@ class OpenAIRealtimeSession:
                     # noise_reduction omitted when the caller chose "none".
                     **({"noise_reduction": noise_reduction} if noise_reduction else {}),
                 },
-                "output": {
-                    "format": {"type": "audio/pcmu"},
-                    "voice": self._voice,
-                },
+                "output": output_block,
             },
             "output_modalities": ["audio"],
         }
+
+        # Optional generation controls — again only sent when explicitly set, so
+        # the default payload is byte-for-byte unchanged.
+        #   temperature       — sampling temperature (0.6–1.2 typical for realtime)
+        #   max_output_tokens — cap per model response ("inf" or an int)
+        temperature = self._settings.get("temperature")
+        if temperature is not None:
+            try:
+                session["temperature"] = float(temperature)
+            except (TypeError, ValueError):
+                pass
+        max_output_tokens = self._settings.get("max_output_tokens")
+        if max_output_tokens is not None:
+            session["max_output_tokens"] = max_output_tokens
+
         if self._tools:
             session["tools"] = self._tools
         return {"type": "session.update", "session": session}
@@ -492,14 +523,27 @@ class OpenAIRealtimeSession:
                 self._offer_event(RealtimeEvent(kind="agent_transcript", text=delta))
             return
 
-        # ---- Caller transcription ------------------------------------------
-        if etype in (
-            "conversation.item.input_audio_transcription.delta",
-            "conversation.item.input_audio_transcription.completed",
-        ):
-            text = data.get("delta") or data.get("transcript")
+        # Terminal agent transcript for the turn — full text, persisted.
+        if etype == "response.output_audio_transcript.done":
+            text = data.get("transcript")
             if text:
-                self._offer_event(RealtimeEvent(kind="caller_transcript", text=text))
+                self._offer_event(RealtimeEvent(
+                    kind="agent_transcript", text=text, is_final=True))
+            return
+
+        # ---- Caller transcription (incremental) ----------------------------
+        if etype == "conversation.item.input_audio_transcription.delta":
+            delta = data.get("delta")
+            if delta:
+                self._offer_event(RealtimeEvent(kind="caller_transcript", text=delta))
+            return
+
+        # Terminal caller transcript for the turn — full text, persisted.
+        if etype == "conversation.item.input_audio_transcription.completed":
+            text = data.get("transcript")
+            if text:
+                self._offer_event(RealtimeEvent(
+                    kind="caller_transcript", text=text, is_final=True))
             return
 
         # ---- Barge-in: caller started talking ------------------------------
