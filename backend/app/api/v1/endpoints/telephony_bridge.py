@@ -63,6 +63,7 @@ from app.domain.services.telephony.failure_reasons import (  # noqa: E402
 )
 from app.domain.services.event_emitter import emit_event_via_pool  # noqa: E402
 from app.core.security.internal_auth import (  # noqa: E402
+    CallerContext,
     require_internal_or_tenant,
     resolve_call_tenant,
 )
@@ -824,15 +825,56 @@ async def make_call(request: Request, body: MakeCallRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+async def _verify_call_ownership(ctx: CallerContext, call_id: str) -> None:
+    """Ensure a JWT-authenticated caller only controls their OWN tenant's call.
+
+    Internal-token callers (the dialer / system) are trusted and skip this — they
+    legitimately act on any tenant's calls. For the USER path we look the call up
+    by its provider channel id (``calls.external_call_uuid``) and compare the
+    owning tenant to the caller's. Fail-CLOSED: a call not on record, or one owned
+    by another tenant, is a 403 — a tenant may not hang up or transfer/redirect
+    another tenant's live call (the P0-6 IDOR).
+    """
+    if ctx.is_internal:
+        return
+    from app.core.container import get_container
+
+    container = get_container()
+    if not getattr(container, "is_initialized", False) or container.db_pool is None:
+        raise HTTPException(status_code=503, detail="Call ownership check unavailable")
+    try:
+        async with container.db_pool.acquire() as conn:
+            await conn.execute("SET LOCAL app.bypass_rls = 'on'")
+            row = await conn.fetchrow(
+                "SELECT tenant_id FROM calls WHERE external_call_uuid = $1", call_id
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("call ownership lookup failed call_id=%s err=%s", call_id, exc)
+        raise HTTPException(status_code=503, detail="Call ownership check failed")
+
+    owner = str(row["tenant_id"]) if row and row["tenant_id"] is not None else None
+    if owner is None or owner != ctx.tenant_id:
+        logger.warning(
+            "IDOR blocked: tenant=%s tried to control call_id=%s (owner=%s)",
+            ctx.tenant_id, call_id, owner,
+        )
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "call_not_owned",
+                "message": "You may only control your own tenant's calls.",
+            },
+        )
+
+
 @router.post("/hangup/{call_id}")
 async def hangup_call(call_id: str, request: Request):
     """Hang up a specific call."""
-    # Auth gate: internal service token OR authenticated user. Previously
-    # unauthenticated — any caller who cleared CSRF could hang up calls.
-    # NOTE: this proves the caller is authenticated but does NOT yet verify
-    # the call_id belongs to the caller's tenant (residual IDOR — flagged;
-    # call_id is the opaque provider channel id, not tenant-scoped here).
-    require_internal_or_tenant(request)
+    # Auth gate: internal service token OR authenticated user, THEN (user path)
+    # verify the call_id belongs to the caller's tenant — closes the IDOR where
+    # any authenticated tenant could hang up another tenant's live call.
+    ctx = require_internal_or_tenant(request)
+    await _verify_call_ownership(ctx, call_id)
     if not _adapter:
         raise HTTPException(status_code=400, detail="Telephony adapter not connected")
     await _adapter.hangup(call_id)
@@ -908,7 +950,8 @@ async def hangup_calls_for_campaign(campaign_id: str) -> int:
 
 @router.post("/transfer/blind")
 async def transfer_blind(payload: TransferPayload, request: Request):
-    require_internal_or_tenant(request)
+    ctx = require_internal_or_tenant(request)
+    await _verify_call_ownership(ctx, payload.call_id)
     if not _adapter or not _adapter.connected:
         raise HTTPException(status_code=400, detail="Telephony adapter not connected")
     result = await _adapter.transfer(payload.call_id, payload.destination, "blind")
@@ -917,7 +960,8 @@ async def transfer_blind(payload: TransferPayload, request: Request):
 
 @router.post("/transfer/attended")
 async def transfer_attended(payload: TransferPayload, request: Request):
-    require_internal_or_tenant(request)
+    ctx = require_internal_or_tenant(request)
+    await _verify_call_ownership(ctx, payload.call_id)
     if not _adapter or not _adapter.connected:
         raise HTTPException(status_code=400, detail="Telephony adapter not connected")
     result = await _adapter.transfer(payload.call_id, payload.destination, "attended")
@@ -926,7 +970,8 @@ async def transfer_attended(payload: TransferPayload, request: Request):
 
 @router.post("/transfer/deflect")
 async def transfer_deflect(payload: TransferPayload, request: Request):
-    require_internal_or_tenant(request)
+    ctx = require_internal_or_tenant(request)
+    await _verify_call_ownership(ctx, payload.call_id)
     if not _adapter or not _adapter.connected:
         raise HTTPException(status_code=400, detail="Telephony adapter not connected")
     result = await _adapter.transfer(payload.call_id, payload.destination, "deflect")

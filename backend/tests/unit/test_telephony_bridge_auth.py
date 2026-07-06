@@ -153,3 +153,91 @@ def test_make_call_user_own_tenant_passes_gate(monkeypatch):
     req = _request(tenant_id="tenant-A")
     err = _call_make_call(req, _make_body("tenant-A"))
     assert err.status_code not in (401, 403)
+
+
+# ── P0-6: hangup/transfer call-ownership (IDOR) ──────────────────────────
+#
+# The user (JWT) path must only control its OWN tenant's calls. Internal-token
+# callers (the dialer/system) are trusted and skip the check. Fail-closed: a
+# call owned by another tenant, or not on record, is a 403.
+
+from app.core.security.internal_auth import CallerContext  # noqa: E402
+
+
+class _FakeConn:
+    def __init__(self, row):
+        self._row = row
+
+    async def execute(self, *a, **k):
+        return None
+
+    async def fetchrow(self, *a, **k):
+        return self._row
+
+
+class _FakeAcquire:
+    def __init__(self, row):
+        self._row = row
+
+    async def __aenter__(self):
+        return _FakeConn(self._row)
+
+    async def __aexit__(self, *a):
+        return False
+
+
+class _FakePool:
+    def __init__(self, row):
+        self._row = row
+
+    def acquire(self):
+        return _FakeAcquire(self._row)
+
+
+class _FakeContainer:
+    def __init__(self, row):
+        self.is_initialized = True
+        self.db_pool = _FakePool(row)
+
+
+def _patch_container(monkeypatch, row):
+    import app.core.container as cmod
+
+    monkeypatch.setattr(cmod, "get_container", lambda: _FakeContainer(row))
+
+
+def _verify(ctx, call_id):
+    from app.api.v1.endpoints.telephony_bridge import _verify_call_ownership
+
+    return asyncio.run(_verify_call_ownership(ctx, call_id))
+
+
+def test_ownership_internal_caller_skips_check(monkeypatch):
+    # Trusted internal path: never touches the container (patch it to explode).
+    import app.core.container as cmod
+
+    def _boom():
+        raise AssertionError("internal path must not query call ownership")
+
+    monkeypatch.setattr(cmod, "get_container", _boom)
+    _verify(CallerContext(is_internal=True, tenant_id=None), "call-x")  # no raise
+
+
+def test_ownership_same_tenant_allowed(monkeypatch):
+    _patch_container(monkeypatch, {"tenant_id": "tenant-A"})
+    _verify(CallerContext(is_internal=False, tenant_id="tenant-A"), "call-x")  # no raise
+
+
+def test_ownership_cross_tenant_is_403(monkeypatch):
+    _patch_container(monkeypatch, {"tenant_id": "tenant-B"})
+    with pytest.raises(HTTPException) as exc:
+        _verify(CallerContext(is_internal=False, tenant_id="tenant-A"), "call-x")
+    assert exc.value.status_code == 403
+
+
+def test_ownership_unknown_call_is_403(monkeypatch):
+    # Call not on record → cannot prove ownership → fail-closed 403.
+    _patch_container(monkeypatch, None)
+    with pytest.raises(HTTPException) as exc:
+        _verify(CallerContext(is_internal=False, tenant_id="tenant-A"), "call-x")
+    assert exc.value.status_code == 403
