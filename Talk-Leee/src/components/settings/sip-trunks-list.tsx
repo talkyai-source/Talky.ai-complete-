@@ -414,8 +414,8 @@ export function SipTrunksList() {
                         No SIP trunks configured yet. Click <strong>Add trunk</strong> to connect your PBX.
                     </div>
                 ) : (
-                    <div className="overflow-x-auto rounded-xl border border-border bg-card/50">
-                        <table className="min-w-full text-sm">
+                    <div className="rounded-xl border border-border bg-card/50">
+                        <table className="w-full text-sm">
                             <thead>
                                 <tr className="border-b border-border bg-muted/30 text-left text-xs font-semibold text-muted-foreground">
                                     <th className="px-4 py-3">Trunk</th>

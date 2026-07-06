@@ -13,6 +13,7 @@ intermediate model.
 from __future__ import annotations
 
 import asyncio
+import re
 import socket
 import ssl
 import time
@@ -121,12 +122,30 @@ async def probe_sip_endpoint(
                 first_line = (
                     data.split(b"\r\n", 1)[0].decode("ascii", errors="replace") if data else ""
                 )
+                # ANY SIP reply proves the server is alive and reachable. A 4xx/5xx
+                # to an ANONYMOUS OPTIONS ping (404/403/405/501 …) is normal and does
+                # NOT mean the trunk is unhealthy — the carrier just has no user/route
+                # for a bare ping. The live registration status is the real credential
+                # check. So classify the code and phrase it so a 404 doesn't read as a
+                # failure (that was the confusing "Test returns 404" report).
+                m = re.search(r"SIP/2\.0\s+(\d{3})", first_line)
+                code = m.group(1) if m else None
+                if code == "200":
+                    detail = "Reachable — SIP server answered 200 OK"
+                elif code:
+                    detail = (
+                        f"Reachable — SIP server answered {code} to the OPTIONS ping "
+                        "(normal for a carrier; the live registration status is the real check)"
+                    )
+                else:
+                    detail = "Reachable — SIP server answered"
                 return {
                     "ok": True,
                     "latency_ms": latency_ms,
                     "transport": "udp",
                     "target": f"{host}:{port}",
-                    "detail": f"Received SIP reply: {first_line[:80]}",
+                    "sip_code": code,
+                    "detail": detail,
                 }
             except socket.timeout:
                 # Carriers (Blaze included) may ignore OPTIONS from an unregistered
