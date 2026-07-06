@@ -21,18 +21,22 @@ personas) and NOTHING from the TTS audio-tag builders. It writes a tight,
 voice-first instruction string from scratch. Keeping the two paths physically
 separate is the whole point of the realtime add-on.
 
-Output shape (one string, four blocks):
-  1. IDENTITY / PERSONA   — name, company, role, the campaign goal.
-  2. EXPRESSIVE DELIVERY  — natural-language voice direction for a
-                            speech-to-speech model (warmth, genuine laughter,
-                            natural hesitation/pace-matching).
-  3. COMPLIANCE ESSENTIALS — plain-language must-nots (AI disclosure ONLY when
-                            directly asked, never read back card/SSN/OTP, stop
-                            when asked, only state given/looked-up facts).
-  4. KNOWLEDGE TOOL NOTE  — a knowledge_lookup function exists; use it for
-                            company facts, and cover the lookup pause with a
-                            natural verbal hold so the caller never hears dead
-                            silence.
+Structure follows OpenAI's realtime prompting guide: SHORT labeled sections,
+precise trigger->action rules, no overlapping/conflicting directives.
+
+Output shape (one string, labeled blocks):
+  1. WHO YOU ARE        — name, company, role, the campaign goal.
+  2. HOW YOU OPEN       — greet, say who/why, ask one question, hand back.
+  3. HOW YOU SOUND      — natural-language voice direction for a
+                          speech-to-speech model (warmth, genuine laughter,
+                          natural hesitation/pace-matching, short turns).
+  4. GROUND RULES       — plain-language must-nots (be honest you're an AI and
+                          name it when asked, never read back card/SSN/OTP, stop
+                          when asked, only state given/looked-up facts).
+  5. KNOWLEDGE          — a knowledge_lookup function exists; use it for company
+                          facts, and cover the lookup pause with a natural verbal
+                          hold (the anti-dead-air preamble) so the caller never
+                          hears dead silence.
 """
 from __future__ import annotations
 
@@ -59,23 +63,18 @@ class RealtimePersona:
 _EXPRESSIVE_DELIVERY = """\
 HOW YOU SOUND
 You are on a live phone call. Talk like a real person, not a script.
-- Be warm, genuine, and present. Smile with your voice. Let real emotion
-  through — sound pleased when they say something good, sympathetic when they
-  share a problem, curious when you ask a question.
-- React and back-channel like a human listener: little "mm-hmm", "right",
-  "gotcha", "oh, nice", "yeah, totally" as they talk, so they know you're
-  following. Acknowledge what they just said before moving on.
-- Match the caller's energy and pace: slow down if they're thinking, pick it
-  up if they're brisk. Leave natural little pauses; don't rush your words
-  together.
-- Use light, natural hesitations and fillers ("hmm", "let me see", "so…",
-  "y'know") the way a real person does when they're thinking or holding the
-  floor — they make you sound human, not scripted.
-- If something is genuinely funny, let a real laugh come through. Don't force
-  humour; react honestly.
-- Keep turns short and conversational. Say one thing, then let them respond —
-  don't monologue. Ask, listen, react.
-- Never spell things out letter by letter or read punctuation aloud unless the
+- Be warm, genuine, and present, and let real emotion through — pleased when
+  they share good news, sympathetic with a problem, curious when you ask.
+  Smile with your voice.
+- Back-channel like a human listener ("mm-hmm", "right", "gotcha", "oh, nice")
+  and acknowledge what they just said before moving on.
+- Match the caller's energy and pace: slow down when they're thinking, pick it
+  up when they're brisk. Leave natural little pauses and light fillers ("hmm",
+  "let me see", "so…") instead of rushing your words together.
+- If something is genuinely funny, let a real laugh come through — never forced.
+- Keep turns short: say one thing, then hand back. Ask, listen, react — don't
+  monologue.
+- Don't spell things out letter by letter or read punctuation aloud unless the
   caller explicitly asks you to confirm something character by character."""
 
 # ── Block 3: compliance essentials, in plain speech-to-speech language ───────

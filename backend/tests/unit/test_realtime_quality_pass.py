@@ -201,3 +201,207 @@ def test_session_update_includes_and_clamps_controls_when_set():
     assert s["audio"]["output"]["speed"] == 1.5
     assert s["temperature"] == 0.8
     assert s["max_output_tokens"] == 512
+
+
+# ---------------------------------------------------------------------------
+# TURN-DETECTION builder — string / server_vad dict / default
+# ---------------------------------------------------------------------------
+
+def _td(settings):
+    return OpenAIRealtimeSession(
+        api_key="sk", settings=settings
+    )._build_session_update()["session"]["audio"]["input"]["turn_detection"]
+
+
+def test_turn_detection_default_is_semantic_vad_medium():
+    # New gentler telephony default: semantic_vad eagerness "medium" (was "high").
+    assert _td(None) == {"type": "semantic_vad", "eagerness": "medium"}
+
+
+def test_turn_detection_bare_string_is_semantic_vad_eagerness():
+    # A bare string stays eagerness shorthand for semantic_vad (back-compat).
+    assert _td({"turn_detection": "low"}) == {
+        "type": "semantic_vad", "eagerness": "low"
+    }
+
+
+def test_turn_detection_server_vad_dict_passes_through():
+    # A dict with an explicit type=server_vad is respected and its params pass
+    # straight through (the noisy-telephony override the research recommends).
+    sv = {
+        "type": "server_vad",
+        "threshold": 0.6,
+        "prefix_padding_ms": 300,
+        "silence_duration_ms": 700,
+    }
+    td = _td({"turn_detection": sv})
+    assert td["type"] == "server_vad"
+    assert td["threshold"] == 0.6
+    assert td["prefix_padding_ms"] == 300
+    assert td["silence_duration_ms"] == 700
+
+
+def test_turn_detection_dict_without_type_defaults_semantic():
+    # A dict WITHOUT "type" defaults to semantic_vad (back-compat with the
+    # eagerness-only object the AI-Options frontend may send).
+    td = _td({"turn_detection": {"eagerness": "high"}})
+    assert td == {"type": "semantic_vad", "eagerness": "high"}
+
+
+# ---------------------------------------------------------------------------
+# REASONING effort — default "low", omitted when falsy, dropped on retry
+# ---------------------------------------------------------------------------
+
+def test_reasoning_effort_defaults_to_low():
+    s = OpenAIRealtimeSession(api_key="sk")._build_session_update()["session"]
+    # Wire shape is a nested object: session.reasoning = {"effort": …}.
+    assert s["reasoning"] == {"effort": "low"}
+
+
+def test_reasoning_effort_overridable():
+    s = OpenAIRealtimeSession(
+        api_key="sk", settings={"reasoning_effort": "medium"},
+    )._build_session_update()["session"]
+    assert s["reasoning"] == {"effort": "medium"}
+
+
+def test_reasoning_effort_omitted_when_falsy():
+    for val in (None, "", "none", "None", False):
+        s = OpenAIRealtimeSession(
+            api_key="sk", settings={"reasoning_effort": val},
+        )._build_session_update()["session"]
+        assert "reasoning" not in s, f"reasoning should be omitted for {val!r}"
+
+
+def test_reasoning_dropped_on_retry_payload():
+    # The fail-soft retry builds the SAME payload minus the reasoning field.
+    sess = OpenAIRealtimeSession(api_key="sk")
+    full = sess._build_session_update(include_reasoning=True)["session"]
+    retry = sess._build_session_update(include_reasoning=False)["session"]
+    assert "reasoning" in full
+    assert "reasoning" not in retry
+    # Everything else is unchanged.
+    assert retry["audio"] == full["audio"]
+    assert retry["instructions"] == full["instructions"]
+
+
+# ---------------------------------------------------------------------------
+# FAIL-SOFT — connect() retries session.update ONCE without the reasoning field
+# ---------------------------------------------------------------------------
+
+class _ScriptedWS:
+    """Minimal fake Realtime websocket for the handshake.
+
+    Seeds session.created; then answers each session.update we send: if the
+    payload carries a `reasoning` field it replies with an `error` (simulating a
+    server that rejects the unknown field), otherwise with `session.updated`.
+    Once the handshake finishes it raises StopAsyncIteration so the recv loop
+    exits cleanly (no hang).
+    """
+
+    def __init__(self):
+        import collections
+        self._inbox = collections.deque([
+            json.dumps({"type": "session.created"})
+        ])
+        self.sent = []
+        self.closed = False
+
+    async def send(self, data):
+        payload = json.loads(data)
+        self.sent.append(payload)
+        has_reasoning = "reasoning" in payload.get("session", {})
+        if has_reasoning:
+            self._inbox.append(json.dumps(
+                {"type": "error", "error": {"message": "unknown parameter: reasoning"}}
+            ))
+        else:
+            self._inbox.append(json.dumps({"type": "session.updated"}))
+
+    async def recv(self):
+        if self._inbox:
+            return self._inbox.popleft()
+        raise _ws_module.exceptions.ConnectionClosed(None, None)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._inbox:
+            return self._inbox.popleft()
+        raise StopAsyncIteration
+
+    async def close(self):
+        self.closed = True
+
+
+import json  # noqa: E402  (used by _ScriptedWS above)
+import websockets as _ws_module  # noqa: E402
+
+
+@pytest.mark.asyncio
+async def test_connect_retries_without_reasoning_on_rejection(monkeypatch):
+    fake = _ScriptedWS()
+
+    async def _fake_connect(*a, **k):
+        return fake
+
+    import app.infrastructure.realtime.openai_realtime as rt_mod
+    monkeypatch.setattr(rt_mod.websockets, "connect", _fake_connect)
+
+    sess = OpenAIRealtimeSession(api_key="sk", call_id="retry-test")
+    ok = await sess.connect()
+    assert ok is True
+    # Two session.updates were sent: the first WITH reasoning (rejected), the
+    # second WITHOUT it (accepted) — the fail-soft retry.
+    updates = [m for m in fake.sent if m.get("type") == "session.update"]
+    assert len(updates) == 2
+    assert "reasoning" in updates[0]["session"]
+    assert "reasoning" not in updates[1]["session"]
+    await sess.close()
+
+
+@pytest.mark.asyncio
+async def test_connect_no_retry_when_first_update_accepted(monkeypatch):
+    # With reasoning disabled, the first (reasoning-free) update is accepted and
+    # there is NO second attempt.
+    fake = _ScriptedWS()
+
+    async def _fake_connect(*a, **k):
+        return fake
+
+    import app.infrastructure.realtime.openai_realtime as rt_mod
+    monkeypatch.setattr(rt_mod.websockets, "connect", _fake_connect)
+
+    sess = OpenAIRealtimeSession(
+        api_key="sk", call_id="noretry", settings={"reasoning_effort": "none"},
+    )
+    ok = await sess.connect()
+    assert ok is True
+    updates = [m for m in fake.sent if m.get("type") == "session.update"]
+    assert len(updates) == 1
+    assert "reasoning" not in updates[0]["session"]
+    await sess.close()
+
+
+# ---------------------------------------------------------------------------
+# TASK 3 — restructured instructions keep the compliance floor + lookup preamble
+# ---------------------------------------------------------------------------
+
+def test_instructions_preserve_compliance_floor_verbatim():
+    text = build_realtime_instructions(RealtimePersona())
+    # Honesty floor preserved verbatim (aligned to guardrails.py Rule 1).
+    assert "Be honest about what you are" in text
+    assert "never claim or imply you're human" in text
+    assert "that you're an AI" in text
+    assert "I'm an AI assistant" in text
+    # No concealment framing may creep back in.
+    assert "Do NOT volunteer" not in text
+    assert "don't volunteer" not in text.lower()
+
+
+def test_instructions_keep_lookup_preamble():
+    text = build_realtime_instructions(RealtimePersona())
+    # The anti-dead-air preamble (a natural hold before the tool call) stays.
+    assert "NEVER sit in dead silence" in text
+    assert "let me check that for you" in text

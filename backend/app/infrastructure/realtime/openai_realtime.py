@@ -74,9 +74,28 @@ _CONNECT_HANDSHAKE_TIMEOUT_S = 15.0
 
 # Default turn-detection / noise-reduction / transcription, overridable via
 # the `settings` dict passed to __init__ (from AIProviderConfig.realtime_settings).
-_DEFAULT_TURN_DETECTION = {"type": "semantic_vad", "eagerness": "high"}
+#
+# Turn-taking is the #1 realtime quality lever. We default to semantic_vad at
+# eagerness "medium" — a gentler, telephony-sensible setting that lets the
+# caller finish more often than the old "high" (which was reported as
+# interrupting). Operators can override via realtime_settings, either with a
+# bare eagerness string ("low|medium|high|auto") or, for NOISY TELEPHONY audio,
+# a full server_vad object for predictable/tunable turn detection, e.g.
+#   {"type": "server_vad", "threshold": 0.6,
+#    "prefix_padding_ms": 300, "silence_duration_ms": 700}
+# (raise threshold to reject background noise; longer silence_duration_ms is
+# laggier but avoids cutting in on pauses; prefix_padding_ms avoids clipping
+# the onset). A dict with an explicit "type" is passed straight through.
+_DEFAULT_TURN_DETECTION = {"type": "semantic_vad", "eagerness": "medium"}
 _DEFAULT_NOISE_REDUCTION = {"type": "far_field"}
 _DEFAULT_TRANSCRIPTION_MODEL = "gpt-realtime-whisper"
+
+# Default reasoning effort for the voice path. OpenAI's realtime prompting guide
+# recommends "low" as the production voice default — a big latency win — raising
+# it only for harder tasks. Shape on the wire is session.reasoning = {"effort": …}
+# (values: minimal|low|medium|high|xhigh). Overridable via realtime_settings
+# ("reasoning_effort"); set it falsy / "none" to omit the field entirely.
+_DEFAULT_REASONING_EFFORT = "low"
 
 
 @dataclass
@@ -254,28 +273,23 @@ class OpenAIRealtimeSession:
                 await self._teardown()
                 return False
 
-            # 2. We send our session.update.
-            await self._ws.send(json.dumps(self._build_session_update()))
-
-            # 3. Server confirms with session.updated. (Ignore any interleaved
-            #    non-terminal events while we wait for it.)
-            updated = None
-            for _ in range(10):
-                msg = await asyncio.wait_for(
-                    self._recv_json(), timeout=_CONNECT_HANDSHAKE_TIMEOUT_S
-                )
-                if not msg:
-                    break
-                if msg.get("type") == "session.updated":
-                    updated = msg
-                    break
-                if msg.get("type") == "error":
-                    logger.error("realtime handshake error call=%s: %s",
-                                 self._call_id, msg.get("error"))
-                    await self._teardown()
-                    return False
-            if updated is None:
-                logger.error("realtime: never received session.updated call=%s",
+            # 2+3. Send our session.update and wait for session.updated.
+            ok = await self._send_session_update(include_reasoning=True)
+            # CRITICAL fail-soft: if the handshake was rejected (e.g. the server
+            # doesn't accept the reasoning field on this model), RETRY ONCE
+            # without it so a single unknown field never drops the whole call to
+            # cascaded. The socket is still open (an `error` event is a normal
+            # message, not a close), so a re-sent session.update can succeed.
+            if not ok:
+                reff = self._settings.get("reasoning_effort", _DEFAULT_REASONING_EFFORT)
+                if reff and str(reff).lower() != "none":
+                    logger.warning(
+                        "realtime: session.update rejected; retrying once WITHOUT "
+                        "reasoning field call=%s", self._call_id,
+                    )
+                    ok = await self._send_session_update(include_reasoning=False)
+            if not ok:
+                logger.error("realtime: session.update not confirmed call=%s",
                              self._call_id)
                 await self._teardown()
                 return False
@@ -295,18 +309,31 @@ class OpenAIRealtimeSession:
         )
         return True
 
-    def _build_session_update(self) -> Dict[str, Any]:
+    def _build_session_update(self, *, include_reasoning: bool = True) -> Dict[str, Any]:
         """The session.update payload. audio/pcmu in+out (no resampling),
-        our voice, our clean instructions, semantic VAD, noise reduction,
-        and the tool list."""
+        our voice, our clean instructions, turn detection, noise reduction,
+        reasoning effort, and the tool list.
+
+        ``include_reasoning=False`` builds the payload WITHOUT the reasoning
+        field — the fail-soft retry connect() uses if the first handshake is
+        rejected, so an unsupported field can never kill the whole call.
+        """
         # Accept both the full API objects and the simple values the AI-Options
-        # frontend sends (eagerness "low|medium|high"; noise "near_field|
+        # frontend sends (eagerness "low|medium|high|auto"; noise "near_field|
         # far_field|none"). Normalise to the wire shape.
+        #   - a dict WITH an explicit "type" (e.g. server_vad) is respected and
+        #     its params (threshold/prefix_padding_ms/silence_duration_ms) pass
+        #     straight through;
+        #   - a dict WITHOUT "type" defaults to semantic_vad (back-compat);
+        #   - a bare string is eagerness shorthand for semantic_vad.
         td = self._settings.get("turn_detection")
         if isinstance(td, str):
             turn_detection = {"type": "semantic_vad", "eagerness": td}
         elif isinstance(td, dict):
-            turn_detection = {"type": "semantic_vad", **td}
+            if td.get("type"):
+                turn_detection = dict(td)
+            else:
+                turn_detection = {"type": "semantic_vad", **td}
         else:
             turn_detection = _DEFAULT_TURN_DETECTION
 
@@ -367,9 +394,43 @@ class OpenAIRealtimeSession:
         if max_output_tokens is not None:
             session["max_output_tokens"] = max_output_tokens
 
+        # Reasoning effort — the voice default is "low" for latency (research).
+        # Shape: session["reasoning"] = {"effort": …}. Fail-soft: omitted when
+        # falsy/"none", and dropped entirely on the retry path (include_reasoning
+        # False) so a rejected field never kills the handshake.
+        reasoning_effort = self._settings.get("reasoning_effort", _DEFAULT_REASONING_EFFORT)
+        if include_reasoning and reasoning_effort and str(reasoning_effort).lower() != "none":
+            session["reasoning"] = {"effort": reasoning_effort}
+
         if self._tools:
             session["tools"] = self._tools
         return {"type": "session.update", "session": session}
+
+    async def _send_session_update(self, *, include_reasoning: bool) -> bool:
+        """Send one session.update and wait for the server's session.updated
+        confirmation. Returns True on confirmation, False on an error event or
+        timeout. Does NOT tear down — connect() decides whether to retry
+        (fail-soft) or give up, so the socket stays usable for a retry."""
+        if self._ws is None:
+            return False
+        await self._ws.send(json.dumps(
+            self._build_session_update(include_reasoning=include_reasoning)
+        ))
+        # Ignore interleaved non-terminal events while we wait for the terminal
+        # session.updated / error.
+        for _ in range(10):
+            msg = await asyncio.wait_for(
+                self._recv_json(), timeout=_CONNECT_HANDSHAKE_TIMEOUT_S
+            )
+            if not msg:
+                return False
+            if msg.get("type") == "session.updated":
+                return True
+            if msg.get("type") == "error":
+                logger.error("realtime handshake error call=%s: %s",
+                             self._call_id, msg.get("error"))
+                return False
+        return False
 
     # ── Caller → model ───────────────────────────────────────────────────
     async def send_caller_audio(self, mulaw_bytes: bytes) -> None:
