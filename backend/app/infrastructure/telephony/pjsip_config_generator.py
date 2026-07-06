@@ -119,12 +119,17 @@ def render_trunk_conf(inp: TrunkConfigInput) -> str:
     ep = f"trunk-{tid}"
     transport_obj = f"transport-{transport}"
     has_auth = bool(inp.auth_username and inp.auth_password)
-    # The IDENTITY we register + present. Mirror the working blazedigitel primary,
-    # which registers its DID/number (not the raw SIP login). Prefer the tenant's
-    # configured caller-id/number; fall back to the auth username.
+    # The IDENTITY we register + present in From/Contact. This MUST be the SIP
+    # login (auth username), NOT the caller-id DID. Providers reject a REGISTER
+    # whose From/Contact identity differs from the authenticated user with 403
+    # Forbidden — proven live against sip3.blazedigitel.com: From=login(150001)
+    # -> 200 OK, From=DID(+442046132300) -> 403 Forbidden, same password/realm.
+    # (The primary still registers 17789249977 because there its login == the
+    # number.) The caller-id is presented separately via `callerid=` on outbound
+    # legs only. Fall back to caller_id only for IP-auth trunks that have no login.
     reg_identity = (
-        _reject_newlines("caller_id", inp.caller_id.strip()) if inp.caller_id
-        else (_reject_newlines("auth_username", inp.auth_username.strip()) if inp.auth_username else "")
+        _reject_newlines("auth_username", inp.auth_username.strip()) if inp.auth_username
+        else (_reject_newlines("caller_id", inp.caller_id.strip()) if inp.caller_id else "")
     )
     source_host = _reject_newlines(
         "source_host", (inp.source_host or domain).strip()

@@ -135,12 +135,17 @@ def test_render_endpoint_has_nat_traversal_settings():
     assert "rewrite_contact=yes" in conf
 
 
-def test_render_registers_the_number_not_login_when_caller_id_set():
-    # Mirror the primary: register the DID/number as the identity, auth with the login.
+def test_render_registers_the_login_not_caller_id_did():
+    # A REGISTER whose From/Contact identity != the authenticated user is 403'd by
+    # the carrier (proven live against Blaze: login->200, DID->403). Register as
+    # the LOGIN; the DID is presented only as callerid on outbound legs.
     conf = render_trunk_conf(_input(register=True, caller_id="+442046132300"))
-    assert "client_uri=sip:+442046132300@sip.acme.example" in conf
-    assert "contact_user=+442046132300" in conf
-    assert "from_user=+442046132300" in conf
+    assert "client_uri=sip:acmeuser@sip.acme.example" in conf
+    assert "contact_user=acmeuser" in conf
+    assert "from_user=acmeuser" in conf
+    assert "callerid=<+442046132300>" in conf
+    # The DID must never appear as the registration/From identity.
+    assert "+442046132300@sip.acme.example" not in conf
 
 
 def test_render_falls_back_to_login_identity_without_caller_id():
