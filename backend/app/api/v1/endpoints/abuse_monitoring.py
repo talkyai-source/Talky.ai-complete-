@@ -21,7 +21,18 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-router = APIRouter(prefix="/admin/abuse", tags=["Abuse Monitoring (Day 7)"])
+from app.api.v1.dependencies import require_admin
+
+# Router-level auth: every /admin/abuse/* route was previously reachable with NO
+# authentication (only Depends(get_db_pool)) — anyone could read cross-tenant
+# abuse data and edit detection rules. Gate the whole router at admin level.
+# (Cross-tenant scoping to platform_admin is a deliberate follow-up; this closes
+# the fully-unauthenticated hole.)
+router = APIRouter(
+    prefix="/admin/abuse",
+    tags=["Abuse Monitoring (Day 7)"],
+    dependencies=[Depends(require_admin)],
+)
 
 
 # ---------------------------------------------------------------------------

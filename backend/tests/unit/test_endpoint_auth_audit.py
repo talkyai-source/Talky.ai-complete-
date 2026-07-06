@@ -99,16 +99,9 @@ _PUBLIC = {
 # of this file holds for new endpoints, while the technical debt
 # stays visible in source instead of silently lurking.
 _KNOWN_AUTH_GAPS = {
-    # Admin abuse-monitoring endpoints — should require_admin.
-    "GET /api/v1/admin/abuse/events": "TODO: add require_admin",
-    "GET /api/v1/admin/abuse/events/{event_id}": "TODO: add require_admin",
-    "POST /api/v1/admin/abuse/events/{event_id}/resolve": "TODO: add require_admin",
-    "GET /api/v1/admin/abuse/statistics": "TODO: add require_admin",
-    "GET /api/v1/admin/abuse/rules": "TODO: add require_admin",
-    "POST /api/v1/admin/abuse/rules": "TODO: add require_admin",
-    "PUT /api/v1/admin/abuse/rules/{rule_id}": "TODO: add require_admin",
-    "DELETE /api/v1/admin/abuse/rules/{rule_id}": "TODO: add require_admin",
-    "GET /api/v1/admin/abuse/alerts": "TODO: add require_admin",
+    # (Abuse-monitoring endpoints FIXED 2026-07-06 — the /admin/abuse router
+    # now Depends(require_admin); the 9 entries were removed so this gate
+    # PROVES the fix rather than laundering the vuln.)
     # Audit-log statistics — should require_admin.
     "GET /api/v1/admin/audit/stats/events-by-type": "TODO: add require_admin",
     "GET /api/v1/admin/audit/stats/failed-logins": "TODO: add require_admin",
@@ -163,6 +156,33 @@ def _route_has_auth_dep(endpoint_func) -> bool:
         ann = str(param.annotation)
         if any(name in ann for name in auth_dep_names):
             return True
+    return False
+
+
+def _route_level_auth(route) -> bool:
+    """True if the route carries an auth dependency at the ROUTER or decorator
+    level (e.g. ``APIRouter(dependencies=[Depends(require_admin)])`` or
+    ``@router.get(..., dependencies=[...])``). The handler-source scan above
+    can't see these, but FastAPI merges them into ``route.dependant`` — so walk
+    the resolved dependency tree and look for an auth callable. Router-level
+    auth is a first-class, valid pattern; a route gated this way is NOT a leak.
+    """
+    auth_dep_names = {
+        "get_current_user", "require_admin", "get_optional_user",
+        "verify_admin_token", "require_platform_admin",
+        "require_tenant_member", "require_permissions",
+    }
+    seen: set[int] = set()
+    stack = list(getattr(getattr(route, "dependant", None), "dependencies", []) or [])
+    while stack:
+        dep = stack.pop()
+        if id(dep) in seen:
+            continue
+        seen.add(id(dep))
+        name = getattr(getattr(dep, "call", None), "__name__", "")
+        if name in auth_dep_names:
+            return True
+        stack.extend(getattr(dep, "dependencies", []) or [])
     return False
 
 
@@ -245,7 +265,10 @@ def test_every_db_route_requires_auth():
                 continue
             try:
                 has_db = _route_has_db_dep(route.endpoint)
-                has_auth = _route_has_auth_dep(route.endpoint)
+                has_auth = (
+                    _route_has_auth_dep(route.endpoint)
+                    or _route_level_auth(route)
+                )
             except (OSError, TypeError):
                 # Some endpoints (lambdas, builtins) don't have a
                 # readable source. Skip — those are never tenant-scoped
