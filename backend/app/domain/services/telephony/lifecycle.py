@@ -689,6 +689,30 @@ async def _on_ringing(call_id: str) -> None:
         or _sb.get_voice_session(call_id) is not None
     ):
         return  # idempotent/reserved — never create a second warmup for a call
+
+    # Track B (live call transparency): the callee's phone is now ringing.
+    # Emit RINGING so the live-calls panel advances "Dialing" → "Ringing" in
+    # real time instead of sitting on "Dialing" right up until answer. Uses the
+    # same provider-id resolver as the ANSWERED/ENDED emits, so it lands on the
+    # same calls row. Best-effort — a status emit must never block warmup.
+    try:
+        from app.domain.services.call_status import (
+            CallState, record_call_state_by_provider_id,
+        )
+        from app.core.container import get_container as _gc_ring
+        _cr = _gc_ring()
+        if _cr.is_initialized:
+            await record_call_state_by_provider_id(
+                _cr.db_pool,
+                provider_call_id=call_id,
+                new_state=CallState.RINGING,
+                metadata={"description": "Ringing"},
+            )
+    except Exception as _ring_exc:
+        logger.debug(
+            "call_status.ringing_emit_raised call=%s err=%s", call_id[:12], _ring_exc,
+        )
+
     if _sb.voice_session_count() + _sb.ringing_warmup_count() >= _bridge()._MAX_TELEPHONY_SESSIONS:
         logger.warning(
             "ringing_warmup_skipped_at_capacity call_id=%s", call_id[:12],
