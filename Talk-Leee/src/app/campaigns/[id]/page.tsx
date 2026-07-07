@@ -98,6 +98,10 @@ export default function CampaignDetailPage() {
     // First-speaker selector shown after the Start button is pressed
     const [startModalOpen, setStartModalOpen] = useState(false);
     const [firstSpeaker, setFirstSpeaker] = useState<"agent" | "user">("agent");
+    // Batch size = max calls in flight at once (dialing/ringing/answered). The
+    // campaign dials in batches of this size; a new call starts only as an
+    // earlier one finishes. Seeded from the campaign's saved setting when known.
+    const [batchSize, setBatchSize] = useState<number>(10);
 
     // Add contact form
     const [showAddContact, setShowAddContact] = useState(false);
@@ -152,6 +156,36 @@ export default function CampaignDetailPage() {
         }
     }, [campaignId, loadData]);
 
+    // Live-sync campaign status + stats while it's running. Without this the
+    // page loads once and never refreshes, so a Stop issued on another device
+    // (or the campaign finishing on its own) leaves this view stuck showing
+    // "running". Poll is lightweight — only the campaign row + stats, never the
+    // full contacts list — and stops itself once the campaign is no longer
+    // running.
+    useEffect(() => {
+        const status = campaign?.status;
+        if (status !== "running" && status !== "active") return;
+        let cancelled = false;
+        const tick = async () => {
+            try {
+                const [c, s] = await Promise.all([
+                    dashboardApi.getCampaign(campaignId),
+                    dashboardApi.getCampaignStats(campaignId).catch(() => null),
+                ]);
+                if (cancelled) return;
+                setCampaign(c.campaign);
+                if (s) setStats(s);
+            } catch {
+                /* transient network hiccup — the next tick retries */
+            }
+        };
+        const id = window.setInterval(tick, 7000);
+        return () => {
+            cancelled = true;
+            window.clearInterval(id);
+        };
+    }, [campaign?.status, campaignId]);
+
     function handleStartClick() {
         // Out of plan minutes — don't even open the modal; the backend
         // would 402 anyway. The banner above the button explains why.
@@ -165,6 +199,11 @@ export default function CampaignDetailPage() {
         // Default back to "agent" every time so a previous choice doesn't
         // silently carry over into the next Start.
         setFirstSpeaker("agent");
+        // Seed the batch size from the campaign's saved setting if it has one.
+        const savedBatch = (campaign?.calling_config as { batch_size?: number } | undefined)?.batch_size;
+        if (typeof savedBatch === "number" && savedBatch >= 0) {
+            setBatchSize(savedBatch);
+        }
         setStartModalOpen(true);
     }
 
@@ -172,7 +211,10 @@ export default function CampaignDetailPage() {
         try {
             setActionLoading(true);
             setStartModalOpen(false);
-            await dashboardApi.startCampaign(campaignId, { first_speaker: firstSpeaker });
+            await dashboardApi.startCampaign(campaignId, {
+                first_speaker: firstSpeaker,
+                batch_size: batchSize,
+            });
             await loadData();
         } catch (err) {
             // The backend's out-of-minutes 402 ships a structured detail
@@ -796,6 +838,48 @@ export default function CampaignDetailPage() {
                             </div>
                         </div>
                     </label>
+
+                    <div className="mt-3 rounded-lg border border-border p-3">
+                        <div className="flex items-center justify-between gap-3">
+                            <div>
+                                <div className="text-sm font-medium text-foreground">
+                                    Calls at a time (batch size)
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                    How many calls dial simultaneously. A new call starts only as an
+                                    earlier one finishes (answered, no-answer, voicemail, etc.).
+                                    Lower = gentler on your trunk; higher = faster throughput.
+                                </div>
+                            </div>
+                            <input
+                                type="number"
+                                min={1}
+                                max={100}
+                                value={batchSize}
+                                onChange={(e) => {
+                                    const n = parseInt(e.target.value, 10);
+                                    setBatchSize(Number.isNaN(n) ? 1 : Math.min(100, Math.max(1, n)));
+                                }}
+                                className="w-20 shrink-0 rounded-md border border-border bg-background px-2 py-1 text-center text-sm text-foreground"
+                            />
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                            {[5, 10, 20, 50].map((n) => (
+                                <button
+                                    key={n}
+                                    type="button"
+                                    onClick={() => setBatchSize(n)}
+                                    className={`rounded-md border px-2 py-0.5 text-xs transition-colors ${
+                                        batchSize === n
+                                            ? "border-primary bg-primary/5 text-foreground"
+                                            : "border-border text-muted-foreground hover:bg-muted/40"
+                                    }`}
+                                >
+                                    {n}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
                 </div>
             </Modal>
         </DashboardLayout>

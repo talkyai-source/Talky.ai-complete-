@@ -364,6 +364,31 @@ class DialerWorker:
                 )
                 return
 
+            # Batch-dispatch gate. Unlike the concurrency guard — which counts
+            # only ANSWERED calls and so let hundreds of calls ring at once —
+            # this caps the number of calls a campaign has IN FLIGHT (dialing /
+            # ringing / answered / in-call) at its configured batch size. The
+            # campaign dials in controlled batches of N; a new call is only
+            # originated once an earlier one reaches a terminal outcome
+            # (answered-&-ended / no-answer / voicemail / invalid / off), which
+            # is exactly the "batch of 10, then the next batch" behaviour. Batch
+            # size is per-campaign and client-selectable (calling_config.
+            # batch_size); 0 disables the gate (unbounded, legacy behaviour).
+            batch_size = self._resolve_batch_size(campaign_cfg)
+            if batch_size > 0:
+                inflight = await self._campaign_inflight_calls(job.campaign_id)
+                if inflight >= batch_size:
+                    logger.debug(
+                        "batch_gate: campaign %s at capacity (%d/%d in flight) — "
+                        "deferring job %s", job.campaign_id, inflight, batch_size,
+                        job.job_id,
+                    )
+                    await self.queue_service.schedule_retry(job, delay_seconds=5)
+                    await self._update_job_status(
+                        job.job_id, JobStatus.RETRY_SCHEDULED, reason="batch_capacity",
+                    )
+                    return
+
             try:
                 # 5. Initiate the call via the provider/PBX.
                 provider_call_id = await self._make_call(job, rules)
@@ -848,6 +873,51 @@ class DialerWorker:
         except Exception as e:
             logger.warning(f"Failed to load campaign calling_config for {campaign_id}: {e}")
         return None
+
+    def _resolve_batch_size(self, campaign_cfg: Optional[dict]) -> int:
+        """Resolve the per-campaign batch size (max calls in flight at once).
+
+        Client-selectable via ``calling_config.batch_size``; falls back to the
+        ``DIALER_BATCH_SIZE`` env default (10). 0 (or negative) disables the
+        batch gate — unbounded, legacy behaviour.
+        """
+        default = int(os.getenv("DIALER_BATCH_SIZE", "10"))
+        if isinstance(campaign_cfg, dict):
+            raw = campaign_cfg.get("batch_size")
+            if raw is not None:
+                try:
+                    return max(0, int(raw))
+                except (TypeError, ValueError):
+                    pass
+        return max(0, default)
+
+    async def _campaign_inflight_calls(self, campaign_id: str) -> int:
+        """Count calls currently IN FLIGHT for a campaign — those still holding
+        a batch slot (dialing / ringing / answered / in_call / initiated).
+        Terminal states (ended / completed / failed) have freed their slot.
+
+        Fail-open: on a transient DB error return 0 so a hiccup never wedges
+        dispatch (the concurrency guard remains as a backstop).
+        """
+        try:
+            async with self._acquire_db() as conn:
+                val = await conn.fetchval(
+                    """
+                    SELECT count(*) FROM calls
+                     WHERE campaign_id = $1
+                       AND status IN (
+                           'dialing', 'ringing', 'answered', 'in_call', 'initiated'
+                       )
+                    """,
+                    campaign_id,
+                )
+            return int(val or 0)
+        except Exception as exc:
+            logger.warning(
+                "batch_gate: in-flight count failed campaign=%s err=%s",
+                campaign_id, exc,
+            )
+            return 0
 
     async def _get_lead_last_called(self, lead_id: str) -> Optional[datetime]:
         """Get the last time a lead was called."""
