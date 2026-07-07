@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import random
+import time
 from typing import Optional, List
 from datetime import datetime, timedelta, timezone
 
@@ -35,14 +36,14 @@ class DialerQueueService:
     - dialer:priority:queue - High priority jobs (checked first)
     - dialer:tenant:{id}:queue - Tenant-specific FIFO queues
     - dialer:scheduled - Sorted set for delayed retries
-    - dialer:processing - Set of jobs currently being processed
+    - dialer:processing - ZSET of in-flight jobs, scored by start time (age-out)
     """
-    
+
     # Redis key prefixes
     PRIORITY_QUEUE = "dialer:priority:queue"
     TENANT_QUEUE_PREFIX = "dialer:tenant:{tenant_id}:queue"
     SCHEDULED_ZSET = "dialer:scheduled"
-    PROCESSING_SET = "dialer:processing"
+    PROCESSING_ZSET = "dialer:processing"
     STATS_KEY = "dialer:stats"
     
     # Default priority threshold (8+ goes to priority queue)
@@ -59,10 +60,29 @@ class DialerQueueService:
         self._config = ConfigManager()
         self._initialized = False
     
+    async def _migrate_processing_key(self) -> None:
+        """One-time: the in-flight tracker used to be a plain SET; it's now a
+        timestamped ZSET. A pre-existing SET at the key would WRONGTYPE every
+        zadd, so drop it — its members are stale-by-definition after a redeploy
+        (and this is exactly the pile-up we're clearing)."""
+        try:
+            if self._redis is None:
+                return
+            ktype = await self._redis.type(self.PROCESSING_ZSET)
+            if ktype not in ("zset", "none"):
+                dropped = await self._redis.delete(self.PROCESSING_ZSET)
+                logger.info(
+                    "migrated dialer:processing (%s -> zset), dropped %s stale key(s)",
+                    ktype, dropped,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("processing-key migration check failed: %s", exc)
+
     async def initialize(self) -> None:
         """Initialize Redis connection if not provided."""
         if self._redis is not None:
             self._initialized = True
+            await self._migrate_processing_key()
             return
         
         if not REDIS_AVAILABLE:
@@ -87,6 +107,7 @@ class DialerQueueService:
             )
             await self._redis.ping()
             self._initialized = True
+            await self._migrate_processing_key()
             logger.info(f"DialerQueueService connected to Redis: {redis_url}")
         except Exception as e:
             logger.error(f"Failed to connect to Redis: {e}")
@@ -229,8 +250,8 @@ class DialerQueueService:
             job_data = json.dumps(job.to_redis_dict())
             await self._redis.zadd(self.SCHEDULED_ZSET, {job_data: execute_at})
             
-            # Remove from processing set
-            await self._redis.srem(self.PROCESSING_SET, job.job_id)
+            # Remove from the in-flight ZSET (rescheduled, no longer processing).
+            await self._redis.zrem(self.PROCESSING_ZSET, job.job_id)
             
             logger.info(
                 f"Scheduled retry for job {job.job_id} "
@@ -286,29 +307,55 @@ class DialerQueueService:
             return 0
     
     async def mark_completed(self, job_id: str, outcome: str = "completed") -> None:
-        """Mark a job as completed."""
-        await self._redis.srem(self.PROCESSING_SET, job_id)
+        """Mark a job as completed (removes it from the in-flight ZSET)."""
+        await self._redis.zrem(self.PROCESSING_ZSET, job_id)
         await self._redis.hincrby(self.STATS_KEY, "total_completed", 1)
         await self._redis.hincrby(self.STATS_KEY, f"outcome_{outcome}", 1)
         logger.debug(f"Job {job_id} marked completed: {outcome}")
-    
+
     async def mark_failed(self, job_id: str, error: str) -> None:
-        """Mark a job as failed."""
-        await self._redis.srem(self.PROCESSING_SET, job_id)
+        """Mark a job as failed (removes it from the in-flight ZSET)."""
+        await self._redis.zrem(self.PROCESSING_ZSET, job_id)
         await self._redis.hincrby(self.STATS_KEY, "total_failed", 1)
         logger.debug(f"Job {job_id} marked failed: {error}")
 
     async def mark_skipped(self, job_id: str, reason: str = "skipped") -> None:
         """Mark a dequeued job as skipped without treating it as a failure."""
-        await self._redis.srem(self.PROCESSING_SET, job_id)
+        await self._redis.zrem(self.PROCESSING_ZSET, job_id)
         await self._redis.hincrby(self.STATS_KEY, "total_skipped", 1)
         await self._redis.hincrby(self.STATS_KEY, f"outcome_{reason}", 1)
         logger.debug(f"Job {job_id} marked skipped: {reason}")
-    
+
     async def _mark_processing(self, job_id: str) -> None:
-        """Mark a job as currently being processed."""
-        await self._redis.sadd(self.PROCESSING_SET, job_id)
+        """Mark a job as currently being processed.
+
+        Stored in a ZSET scored by the enqueue-to-processing timestamp so a
+        job that never reaches a terminal mark (e.g. a successfully-originated
+        call whose end-of-call finalisation ran without a wired queue_service)
+        can be AGED OUT by ``reap_stale_processing`` instead of leaking forever.
+        This is what let dialer:processing pile up to hundreds of stale members.
+        """
+        await self._redis.zadd(self.PROCESSING_ZSET, {job_id: time.time()})
         await self._redis.hincrby(self.STATS_KEY, "total_dequeued", 1)
+
+    async def reap_stale_processing(self, max_age_seconds: int = 900) -> int:
+        """Self-heal the in-flight ZSET: drop members older than the max plausible
+        job lifetime (default 15 min ≫ ring + hard call ceiling). A member older
+        than this is a zombie — its call ended without the entry being removed —
+        so it's safe to evict. O(log n + m); safe to call on every worker tick.
+        Returns the number reaped."""
+        if not self._redis:
+            return 0
+        try:
+            cutoff = time.time() - int(max_age_seconds)
+            removed = await self._redis.zremrangebyscore(self.PROCESSING_ZSET, 0, cutoff)
+            n = int(removed or 0)
+            if n:
+                logger.info("reaper: evicted %d stale dialer:processing member(s) (>%ss)", n, max_age_seconds)
+            return n
+        except Exception as exc:  # noqa: BLE001 — never let hygiene break dispatch
+            logger.warning("reap_stale_processing failed: %s", exc)
+            return 0
     
     async def get_queue_stats(self) -> dict:
         """Get queue statistics."""
@@ -323,7 +370,7 @@ class DialerQueueService:
             scheduled_count = await self._redis.zcard(self.SCHEDULED_ZSET)
             
             # Get processing count
-            processing_count = await self._redis.scard(self.PROCESSING_SET)
+            processing_count = await self._redis.zcard(self.PROCESSING_ZSET)
             
             # Get stats hash
             stats = await self._redis.hgetall(self.STATS_KEY) or {}
@@ -415,7 +462,7 @@ class DialerQueueService:
                 
                 # Clear scheduled and processing
                 await self._redis.delete(self.SCHEDULED_ZSET)
-                await self._redis.delete(self.PROCESSING_SET)
+                await self._redis.delete(self.PROCESSING_ZSET)
             
             logger.info(f"Cleared {count} jobs from queue")
             return count

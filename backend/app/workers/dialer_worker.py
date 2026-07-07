@@ -802,6 +802,13 @@ class DialerWorker:
                 await reap_stuck_calls(conn)
         except Exception as exc:
             logger.warning("reaper tick failed: %s", exc)
+        # Self-heal the Redis in-flight ZSET: age out members whose call ended
+        # without a terminal mark (the dialer:processing pile-up). Independent
+        # of the DB reapers — its own try/except so a Redis blip can't skip them.
+        try:
+            await self.queue_service.reap_stale_processing()
+        except Exception as exc:
+            logger.warning("processing-zset reaper tick failed: %s", exc)
 
     async def _get_active_tenant_ids(self) -> List[str]:
         """Get list of tenants with active/running campaigns."""
