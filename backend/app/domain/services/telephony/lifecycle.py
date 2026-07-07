@@ -1590,6 +1590,22 @@ async def _on_call_ended(call_id: str) -> None:
                 from app.core.container import get_container as _gc2
                 _c2 = _gc2()
                 if _c2.is_initialized:
+                    # Pull the real PBX hangup cause off the adapter (captured
+                    # from the terminal ARI event) so an unanswered call is
+                    # classified NO_ANSWER / BUSY / REJECTED — not defaulted to
+                    # an agent-side hangup — which is what lets it reschedule
+                    # +24h. Only fill it if the pipeline didn't already set one.
+                    if not getattr(voice_session, "_hangup_reason", None):
+                        try:
+                            _adapter = _bridge()._adapter
+                            _cause = _adapter.get_hangup_cause(call_id) if _adapter else None
+                            if _cause:
+                                voice_session._hangup_reason = _cause
+                        except Exception as _cause_exc:
+                            logger.debug(
+                                "hangup_cause_lookup_failed call=%s err=%s",
+                                call_id[:12], _cause_exc,
+                            )
                     outcome = resolve_call_outcome(
                         voice_session,
                         hangup_reason=getattr(voice_session, "_hangup_reason", None),

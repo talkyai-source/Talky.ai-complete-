@@ -204,6 +204,19 @@ class TranscriptHandler:
                 self._p._pending_llm_tasks[call_id] = task
             return
 
+        # Real-time voicemail detection: if the first thing heard after the
+        # callee "answers" is an answering-machine greeting, hang up now and
+        # mark the call voicemail — no message, no conversation. Only the
+        # opening turn(s), only on a final transcript.
+        if transcript.text and transcript.is_final and session.turn_id <= 1:
+            from app.domain.services.voice_pipeline.voicemail_detector import (
+                detect_and_hang_up_voicemail,
+            )
+            if await detect_and_hang_up_voicemail(
+                call_id, transcript.text, session.turn_id
+            ):
+                return
+
         if transcript.text:
             event_type = "eager_end_of_turn" if metadata.get("eager") else "update"
             if transcript.is_final:

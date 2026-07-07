@@ -324,7 +324,19 @@ class RealtimeBridge:
                 elif kind == "caller_transcript" and ev.text:
                     logger.debug("realtime caller: %s", ev.text)
                     if getattr(ev, "is_final", False):
+                        _tidx = self._turn_index
                         self._record_turn("user", ev.text)
+                        # Real-time voicemail detection on the opening turn(s):
+                        # if the callee is an answering machine, hang up now and
+                        # end the pump — no message, no conversation.
+                        if _tidx <= 1:
+                            from app.domain.services.voice_pipeline.voicemail_detector import (
+                                detect_and_hang_up_voicemail,
+                            )
+                            if await detect_and_hang_up_voicemail(
+                                self._call_id, ev.text, _tidx
+                            ):
+                                break
 
                 elif kind == "error":
                     logger.warning("realtime_bridge model error call=%s: %s",

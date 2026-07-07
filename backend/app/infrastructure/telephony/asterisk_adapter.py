@@ -51,6 +51,27 @@ class _UnicastRtpCacheEntry:
     cached_at: float = 0.0
 
 
+# Q.850 cause code → a snake-case string the outcome resolver recognises
+# (see outcome_resolver._BUSY_CAUSES / _NO_ANSWER_CAUSES / _REJECT_CAUSES).
+# Only the codes that change a dial outcome are mapped; everything else falls
+# through to the resolver's session-state heuristic.
+_Q850_CAUSE_TEXT: Dict[int, str] = {
+    1:  "unallocated_number",       # not active / invalid → INVALID/UNREACHABLE
+    17: "user_busy",                # busy
+    18: "no_user_response",         # no answer
+    19: "no_answer",                # no answer (user alerted, no pickup)
+    20: "no_answer",                # subscriber absent / phone off
+    21: "call_rejected",            # declined
+    22: "unallocated_number",       # number changed
+    27: "destination_out_of_order", # destination unreachable
+    28: "unallocated_number",       # invalid number format
+    34: "switch_congestion",        # no circuit available
+    38: "switch_congestion",        # network out of order
+    42: "switch_congestion",        # switching equipment congestion
+    44: "switch_congestion",        # requested channel unavailable
+}
+
+
 class AsteriskAdapter(CallControlAdapter):
     """
     CallControlAdapter backed by Asterisk ARI + C++ Voice Gateway.
@@ -107,6 +128,14 @@ class AsteriskAdapter(CallControlAdapter):
         # reliably passing appArgs through PJSIP trunks.
         self._originated_channels: set[str] = set()
         self._originated_channel_order: list[str] = []
+
+        # Q.850 / SIP hangup cause (as Asterisk's cause_txt string) captured
+        # off the terminal ARI event, keyed by channel id. The outcome resolver
+        # reads this (via get_hangup_cause) to tell no-answer / busy / rejected
+        # apart from an agent-side hangup — without it every unanswered call was
+        # mislabelled and never got its no-answer +24h reschedule. Bounded: an
+        # entry is popped when consumed, and stale ones are cleaned on hangup.
+        self._hangup_causes: Dict[str, str] = {}
 
         # Global event callbacks
         self._call_arrived_callbacks: Dict[str, Callable] = {}
@@ -171,6 +200,15 @@ class AsteriskAdapter(CallControlAdapter):
         channel_id = next(iter(self._originated_channels))
         self._originated_channels.discard(channel_id)
         return channel_id
+
+    def get_hangup_cause(self, channel_id: str) -> Optional[str]:
+        """Return (and consume) the captured Q.850 hangup cause for a channel.
+
+        The lifecycle's call-ended hook calls this so the outcome resolver can
+        classify no-answer / busy / rejected from the real PBX cause instead of
+        defaulting to an agent-side hangup. Popped so the map stays bounded.
+        """
+        return self._hangup_causes.pop(channel_id, None)
 
     def _emit_outbound_channel_alias(self, original_call_id: str, actual_call_id: str) -> None:
         if (
@@ -680,6 +718,22 @@ class AsteriskAdapter(CallControlAdapter):
                     self._preemptive_up_channels.add(channel_id)
 
         elif event_type in ("StasisEnd", "ChannelDestroyed", "ChannelHangupRequest"):
+            # Capture the hangup cause (Q.850) BEFORE we tear anything down so
+            # the outcome resolver can classify no-answer / busy / rejected
+            # instead of defaulting to an agent-side hangup. ChannelDestroyed
+            # carries `cause` (int) + `cause_txt` (e.g. "No Answer", "User
+            # busy"); the channel's `hangupsource`/`cause` may also be present.
+            _cause_txt = event.get("cause_txt") or channel.get("cause_txt")
+            if not _cause_txt:
+                _cause_int = event.get("cause")
+                if _cause_int is None:
+                    _cause_int = channel.get("cause")
+                if _cause_int is not None:
+                    _cause_txt = _Q850_CAUSE_TEXT.get(int(_cause_int)) if str(_cause_int).lstrip("-").isdigit() else None
+            if _cause_txt and channel_id not in self._hangup_causes:
+                # Keep the first (most authoritative) terminal cause for a
+                # channel — StasisEnd + ChannelDestroyed can both fire.
+                self._hangup_causes[channel_id] = str(_cause_txt)
             # Drop any preemptive Up record for channels that are now gone.
             self._preemptive_up_channels.discard(channel_id)
             self._discard_originated_channel(channel_id)
