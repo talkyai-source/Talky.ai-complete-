@@ -1370,6 +1370,14 @@ class AsteriskAdapter(CallControlAdapter):
         )
         endpoint = f"PJSIP/{destination}@{trunk}"
 
+        # Ring timeout (seconds): how long Asterisk lets the destination ring
+        # before giving up. Without it ARI defaults to 30s, but making it
+        # explicit + env-tunable lets us enforce a "natural" ring window — a
+        # call that isn't answered within it is torn down by Asterisk with a
+        # no-answer cause, which the outcome resolver maps to NO_ANSWER and the
+        # disposition policy reschedules for +24h (never the same day).
+        ring_timeout = int(_os.getenv("DIALER_RING_TIMEOUT_S", "30"))
+
         # Pre-generate channel ID and register BEFORE ARI POST to prevent
         # the StasisStart WS event from arriving before the HTTP response.
         pre_id = channel_id or f"talky-out-{uuid.uuid4()}"
@@ -1385,6 +1393,7 @@ class AsteriskAdapter(CallControlAdapter):
                     "app": self._app_name,
                     "appArgs": "outbound",
                     "channelId": pre_id,
+                    "timeout": ring_timeout,
                 },
             )
         except Exception:

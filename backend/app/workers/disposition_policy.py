@@ -66,18 +66,23 @@ from app.domain.models.dialer_job import CallOutcome
 
 _MINUTE = 60
 _HOUR = 60 * _MINUTE
+_DAY = 24 * _HOUR
 
 _RETRY_SCHEDULES: dict[CallOutcome, list[int]] = {
     # Busy: the line is alive, the person is simply on another call.
     # Worth a few quick-ish attempts spaced out over the next hour.
     CallOutcome.BUSY: [5 * _MINUTE, 15 * _MINUTE, 45 * _MINUTE],
-    # No-answer: present but not picking up. One same-day retry a couple
-    # of hours later, then a single next-day attempt at a different time
-    # of day. After that, stop — they're screening.
-    CallOutcome.NO_ANSWER: [2 * _HOUR, 20 * _HOUR],
-    # Voicemail: we reached an answering machine. A single later retry —
-    # if it goes to voicemail again, stop. Two total touches max.
-    CallOutcome.VOICEMAIL: [4 * _HOUR],
+    # No-answer: rang out, nobody picked up. Product rule (2026-07-07):
+    # NEVER redial the same day — always wait a full 24h so the next
+    # attempt lands on a following day. Two next-day attempts, then stop
+    # (they're screening). The calling-window gate still finalises legality.
+    CallOutcome.NO_ANSWER: [_DAY, _DAY],
+    # Voicemail: we reached an answering machine (we hang up immediately,
+    # never leave a message). Retry a full day later, not the same day.
+    CallOutcome.VOICEMAIL: [_DAY],
+    # Unavailable / phone switched off: not reachable right now but may be
+    # on later. Treat like no-answer — retry a full day later, not same day.
+    CallOutcome.UNAVAILABLE: [_DAY, _DAY],
     # Failed / timeout: transient pipeline or network trouble, not a
     # signal about the prospect. Fast geometric backoff. Cap is 3 total
     # attempts (2 retries) — the originate-side retry_policy keeps its
@@ -93,6 +98,7 @@ _ATTEMPT_CAPS: dict[CallOutcome, int] = {
     CallOutcome.BUSY: 4,
     CallOutcome.NO_ANSWER: 3,
     CallOutcome.VOICEMAIL: 2,
+    CallOutcome.UNAVAILABLE: 3,
     CallOutcome.FAILED: 3,
     CallOutcome.TIMEOUT: 3,
 }
@@ -105,14 +111,15 @@ _SUCCESS_OUTCOMES: frozenset[CallOutcome] = frozenset(
 # Outcomes that are terminal failures — record the result, never retry.
 # REJECTED: they actively declined. GOAL_NOT_ACHIEVED: a real
 # conversation that didn't convert — redialing is a human decision, not
-# an automatic one. SPAM/INVALID/UNAVAILABLE/DISCONNECTED: dead input.
+# an automatic one. SPAM/INVALID/DISCONNECTED: dead input — the number is
+# not active, so redialing it is pointless. (UNAVAILABLE / phone-off is
+# NOT here: it may be reachable later, so it retries +24h — see schedules.)
 _TERMINAL_NO_RETRY: frozenset[CallOutcome] = frozenset(
     {
         CallOutcome.REJECTED,
         CallOutcome.GOAL_NOT_ACHIEVED,
         CallOutcome.SPAM,
         CallOutcome.INVALID,
-        CallOutcome.UNAVAILABLE,
         CallOutcome.DISCONNECTED,
     }
 )

@@ -67,7 +67,16 @@ def _state():
 
 # Watchdog timeouts (read once at import time — match prior bridge behaviour).
 _SESSION_INACTIVITY_TIMEOUT_S = int(os.getenv("TELEPHONY_INACTIVITY_TIMEOUT_S", "300"))
-_SESSION_MAX_DURATION_S = int(os.getenv("TELEPHONY_MAX_CALL_DURATION_S", "3600"))
+# Absolute hard ceiling — a call is force-ended past this no matter what
+# (backstop against a wedged pipeline). The *soft* cap below is the normal
+# target; the hard ceiling only catches a call that keeps signalling "closing"
+# indefinitely.
+_SESSION_MAX_DURATION_S = int(os.getenv("TELEPHONY_MAX_CALL_DURATION_S", "480"))
+# Soft cap: the agent is given this long (5 min by default) to reach a
+# conclusion. Past it the call is wrapped up UNLESS the agent is actively
+# closing the deal (see `_session_is_closing`), in which case it may run on to
+# the hard ceiling above. Set 0 to disable the soft cap (hard ceiling only).
+_SESSION_SOFT_CAP_S = int(os.getenv("TELEPHONY_SOFT_CALL_CAP_S", "300"))
 
 # P1-9 — module-level set retaining references to fire-and-forget forced-
 # hangup tasks. asyncio only holds a *weak* reference to tasks spawned via
@@ -182,11 +191,45 @@ def _detect_zombie_sessions(
     return zombies
 
 
+def _session_is_closing(vs) -> bool:
+    """True when the agent is actively closing the deal — which earns the call
+    an extension past the soft cap (up to the hard ceiling).
+
+    The soft cap exists so a chatty or stalled call is wrapped up at ~5 min,
+    but a call that's genuinely about to convert shouldn't be cut off mid-close.
+    Signals, any of which grant the extension:
+
+      * ``voice_session._deal_closing`` — an explicit flag the pipeline/agent
+        sets when the LLM signals it's about to close (strongest signal).
+      * ``conversation_context.user_confirmed`` — the prospect has verbally
+        confirmed the action; we're in the final beat of the close.
+      * the conversation has reached the ``closing`` stage.
+
+    Best-effort: any missing attribute just means "not closing" → the soft cap
+    applies. Never raises.
+    """
+    if bool(getattr(vs, "_deal_closing", False)):
+        return True
+    cs = getattr(vs, "call_session", None)
+    if cs is None:
+        return False
+    ctx = getattr(cs, "conversation_context", None)
+    if ctx is not None and bool(getattr(ctx, "user_confirmed", False)):
+        return True
+    # Current conversation stage may live on the context or the session,
+    # depending on pipeline. Treat a "closing" stage as an active close.
+    stage = getattr(ctx, "state", None) or getattr(cs, "state", None) or getattr(cs, "stage", None)
+    if stage is not None and str(getattr(stage, "value", stage)).lower() == "closing":
+        return True
+    return False
+
+
 def _collect_expired_sessions(
     session_items,
     *,
     inactivity_timeout_s: int,
     max_duration_s: int,
+    soft_cap_s: int = 0,
 ) -> tuple[list, list]:
     """Pure classifier: split live voice sessions into (stale, overlong).
 
@@ -217,7 +260,13 @@ def _collect_expired_sessions(
         if call_session.is_stale(inactivity_timeout_s):
             stale.append(call_id)
             continue
-        if call_session.get_duration_seconds() > max_duration_s:
+        duration = call_session.get_duration_seconds()
+        # Absolute hard ceiling — end no matter what.
+        if duration > max_duration_s:
+            overlong.append(call_id)
+            continue
+        # Soft cap (5 min): wrap up unless the agent is actively closing.
+        if soft_cap_s and duration > soft_cap_s and not _session_is_closing(vs):
             overlong.append(call_id)
     return stale, overlong
 
@@ -290,6 +339,7 @@ async def _session_watchdog() -> None:
                 _session_pairs,
                 inactivity_timeout_s=_SESSION_INACTIVITY_TIMEOUT_S,
                 max_duration_s=_SESSION_MAX_DURATION_S,
+                soft_cap_s=_SESSION_SOFT_CAP_S,
             )
             for call_id in stale:
                 logger.warning(
