@@ -25,6 +25,43 @@ from app.domain.models.session import CallSession
 logger = logging.getLogger(__name__)
 
 
+def silence_action(
+    *,
+    caller_silence_s: float,
+    activity_silence_s: float,
+    since_last_nudge_s: Optional[float],
+    in_grace: bool,
+    is_caller_first: bool,
+    user_turns: int,
+    hangup_s: float,
+    opening_s: float,
+    mid_s: float,
+    nudge_gap_s: float,
+) -> str:
+    """One silence-monitor tick decision → ``'hangup'`` | ``'nudge'`` | ``'wait'``.
+
+    Pure (no I/O, no clocks) so the natural caller-first flow is unit-testable
+    without a live audio pipeline. Mirrors the monitor loop's order exactly:
+
+      1. ``in_grace`` (the AI just finished speaking) suppresses everything;
+      2. ``caller_silence_s >= hangup_s`` (60s of no caller speech) → close;
+      3. otherwise nudge once the ACTIVITY silence passes the threshold
+         (``opening_s`` when caller-first and the caller hasn't spoken yet, else
+         ``mid_s``) AND at least ``nudge_gap_s`` has passed since the last nudge.
+    """
+    if in_grace:
+        return "wait"
+    if caller_silence_s >= hangup_s:
+        return "hangup"
+    opening = is_caller_first and user_turns == 0
+    threshold = opening_s if opening else mid_s
+    if activity_silence_s < threshold:
+        return "wait"
+    if since_last_nudge_s is not None and since_last_nudge_s < nudge_gap_s:
+        return "wait"
+    return "nudge"
+
+
 class TerminalSTTError(RuntimeError):
     """Raised when the caller-audio STT stream ends via an unrecoverable
     provider error instead of a normal pipeline shutdown.
@@ -302,14 +339,31 @@ class AudioIngest:
                         _silence_since = _now()
                         continue
 
-                    # Grace right after the AI finished speaking.
-                    if _tts_ended_at is not None and (
+                    # Decide this tick with the pure `silence_action` (unit-tested):
+                    # grace → wait; 60s caller silence → hangup; else nudge on the
+                    # opening/mid threshold + min gap.
+                    _in_grace = _tts_ended_at is not None and (
                         _now() - _tts_ended_at
-                    ).total_seconds() < _TTS_GRACE_S:
+                    ).total_seconds() < _TTS_GRACE_S
+                    _action = silence_action(
+                        caller_silence_s=(_now() - _last_caller_at).total_seconds(),
+                        activity_silence_s=(_now() - _silence_since).total_seconds(),
+                        since_last_nudge_s=(
+                            (_now() - _last_nudge_at).total_seconds()
+                            if _last_nudge_at is not None else None
+                        ),
+                        in_grace=_in_grace,
+                        is_caller_first=_is_caller_first,
+                        user_turns=_prev_user_turns,
+                        hangup_s=_SILENCE_HANGUP_S,
+                        opening_s=_OPENING_HELLO_S,
+                        mid_s=_MID_NUDGE_S,
+                        nudge_gap_s=_NUDGE_MIN_GAP_S,
+                    )
+                    if _action == "wait":
                         continue
 
-                    # 60s of continuous caller silence → close the call politely.
-                    if (_now() - _last_caller_at).total_seconds() >= _SILENCE_HANGUP_S:
+                    if _action == "hangup":
                         logger.info(
                             "[SilenceMonitor] %s — %.0fs caller silence, closing call",
                             call_id[:12], _SILENCE_HANGUP_S,
@@ -323,22 +377,13 @@ class AudioIngest:
                             logger.debug("[SilenceMonitor] close-on-silence failed: %s", _close_exc)
                         break
 
-                    # Gentle nudge. Opening (caller-first, caller hasn't spoken
-                    # yet) → a soft "Hello?"; otherwise a light check-in.
+                    # _action == "nudge": opening (caller-first, not yet spoken)
+                    # → a soft "Hello?"; otherwise a light check-in.
                     _opening = _is_caller_first and _prev_user_turns == 0
-                    _threshold = _OPENING_HELLO_S if _opening else _MID_NUDGE_S
-                    _silence = (_now() - _silence_since).total_seconds()
-                    if _silence < _threshold:
-                        continue
-                    if _last_nudge_at is not None and (
-                        _now() - _last_nudge_at
-                    ).total_seconds() < _NUDGE_MIN_GAP_S:
-                        continue
-
                     _phrase = random.choice(_OPENING_PHRASES if _opening else _GENTLE_PHRASES)
                     logger.info(
-                        "[SilenceMonitor] %s — %.0fs silence (%s), nudging: %r",
-                        call_id[:12], _silence, "opening" if _opening else "mid", _phrase,
+                        "[SilenceMonitor] %s — silence (%s), nudging: %r",
+                        call_id[:12], "opening" if _opening else "mid", _phrase,
                     )
                     try:
                         await self._p.synthesize_and_send_audio(session, _phrase, websocket)

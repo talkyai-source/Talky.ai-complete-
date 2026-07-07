@@ -493,31 +493,54 @@ async def make_call(request: Request, body: MakeCallRequest):
     from app.core.container import get_container
     container = get_container()
 
+    # Shared-pool allotment (resolved up-front). If this tenant is allotted a
+    # pool account, that account's DID is inherently trusted — the pool trunk is
+    # registered with the carrier and OWNS the number — so it satisfies caller-ID
+    # ownership WITHOUT a per-tenant verified DID (the pool DID is globally unique
+    # and can't be verified per-tenant anyway). Resolving it here lets us (a) skip
+    # the ownership gate for a pool route and (b) reuse the route below without a
+    # second lookup. Fail-safe: any error → no pool route → normal path.
+    _pool_route = None
+    if getattr(_adapter, "name", "") == "asterisk" and effective_tenant_id:
+        try:
+            from app.domain.services.telephony.trunk_resolver import (
+                _resolve_pool_assignment,
+            )
+            _pool_route = await _resolve_pool_assignment(
+                container.db_pool,
+                tenant_id=str(effective_tenant_id),
+                is_production=(environment == "production"),
+            )
+        except Exception:  # noqa: BLE001 — never block a call on this
+            _pool_route = None
+
     # T0.1 — Caller-ID ownership enforcement. The check itself (env-mode
     # resolution, DID verification, fail-closed lookup) lives in the
     # telephony package; the endpoint only translates a denial into the
     # 403. See caller_id_guard.check_caller_id_ownership for the ramp-in
     # knob (CALLER_ID_ENFORCEMENT_MODE = enforce | log | off).
-    caller_id_decision = await check_caller_id_ownership(
-        container.db_pool,
-        tenant_id=str(effective_tenant_id),
-        caller_id=caller_id,
-        environment=environment,
-    )
-    if not caller_id_decision.allowed:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "error": "caller_id_not_verified",
-                "message": (
-                    "The caller_id is not registered and verified under "
-                    "this tenant. Register it at POST /api/v1/"
-                    "tenant-phone-numbers and verify before dialing."
-                ),
-                "caller_id": caller_id,
-                "require_attestation": caller_id_decision.require_attestation,
-            },
+    # Skipped for a pool route — the pool account is the trusted caller-ID owner.
+    if _pool_route is None:
+        caller_id_decision = await check_caller_id_ownership(
+            container.db_pool,
+            tenant_id=str(effective_tenant_id),
+            caller_id=caller_id,
+            environment=environment,
         )
+        if not caller_id_decision.allowed:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "caller_id_not_verified",
+                    "message": (
+                        "The caller_id is not registered and verified under "
+                        "this tenant. Register it at POST /api/v1/"
+                        "tenant-phone-numbers and verify before dialing."
+                    ),
+                    "caller_id": caller_id,
+                    "require_attestation": caller_id_decision.require_attestation,
+                },
+            )
 
     guard = CallGuard(
         db_pool=container.db_pool,
@@ -667,14 +690,18 @@ async def make_call(request: Request, body: MakeCallRequest):
     trunk_endpoint: Optional[str] = None
     if getattr(_adapter, "name", "") == "asterisk":
         try:
-            from app.domain.services.telephony.trunk_resolver import (
-                resolve_outbound_trunk,
-            )
-            route = await resolve_outbound_trunk(
-                container.db_pool,
-                tenant_id=str(effective_tenant_id),
-                environment=environment,
-            )
+            # Reuse the pool route resolved up-front (for the ownership-gate
+            # skip); only hit the full resolver when there's no pool allotment.
+            route = _pool_route
+            if route is None:
+                from app.domain.services.telephony.trunk_resolver import (
+                    resolve_outbound_trunk,
+                )
+                route = await resolve_outbound_trunk(
+                    container.db_pool,
+                    tenant_id=str(effective_tenant_id),
+                    environment=environment,
+                )
             if route.refused:
                 # Own-trunk-only production model: the tenant has no usable
                 # own trunk / caller-ID and there is NO shared upstream to
