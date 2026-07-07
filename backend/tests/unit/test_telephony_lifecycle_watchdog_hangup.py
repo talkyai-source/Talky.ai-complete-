@@ -212,3 +212,51 @@ class TestForceEndAndHangup:
         await asyncio.sleep(0)
 
         assert called_with == ["crashed-call"]
+
+
+# ---------------------------------------------------------------------------
+# Agent 5-min soft cap + deal-closing extension (natural-workflow item 6)
+# ---------------------------------------------------------------------------
+
+class TestSoftCap:
+    def test_over_soft_cap_not_closing_is_overlong(self):
+        vs = SimpleNamespace(call_session=_call_session(last_activity_ago_s=1, age_s=320))
+        _stale, overlong = lifecycle._collect_expired_sessions(
+            [("c1", vs)], inactivity_timeout_s=300, max_duration_s=480, soft_cap_s=300,
+        )
+        assert overlong == ["c1"]
+
+    def test_over_soft_cap_but_closing_survives(self):
+        cs = _call_session(last_activity_ago_s=1, age_s=320)
+        cs.conversation_context = SimpleNamespace(user_confirmed=True)
+        vs = SimpleNamespace(call_session=cs)
+        _stale, overlong = lifecycle._collect_expired_sessions(
+            [("c1", vs)], inactivity_timeout_s=300, max_duration_s=480, soft_cap_s=300,
+        )
+        assert overlong == []
+
+    def test_deal_closing_flag_grants_extension(self):
+        vs = SimpleNamespace(
+            call_session=_call_session(last_activity_ago_s=1, age_s=320),
+            _deal_closing=True,
+        )
+        _stale, overlong = lifecycle._collect_expired_sessions(
+            [("c1", vs)], inactivity_timeout_s=300, max_duration_s=480, soft_cap_s=300,
+        )
+        assert overlong == []
+
+    def test_closing_call_still_ends_at_hard_ceiling(self):
+        cs = _call_session(last_activity_ago_s=1, age_s=500)  # past hard ceiling
+        cs.conversation_context = SimpleNamespace(user_confirmed=True)
+        vs = SimpleNamespace(call_session=cs)
+        _stale, overlong = lifecycle._collect_expired_sessions(
+            [("c1", vs)], inactivity_timeout_s=300, max_duration_s=480, soft_cap_s=300,
+        )
+        assert overlong == ["c1"]
+
+    def test_soft_cap_zero_disables_soft_cap(self):
+        vs = SimpleNamespace(call_session=_call_session(last_activity_ago_s=1, age_s=320))
+        _stale, overlong = lifecycle._collect_expired_sessions(
+            [("c1", vs)], inactivity_timeout_s=300, max_duration_s=480, soft_cap_s=0,
+        )
+        assert overlong == []
