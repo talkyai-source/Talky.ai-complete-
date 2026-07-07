@@ -128,7 +128,22 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
         # trip the limiter within seconds and Asterisk hangs up the call.
         _ip_for_skip = request.client.host if request.client else ""
         _is_loopback = _ip_for_skip in {"127.0.0.1", "::1", "localhost"}
-        if request.method == "OPTIONS" or _is_loopback:
+        # Trusted first-party services (the dialer worker, the C++ voice gateway)
+        # authenticate with a valid internal service token. They are exempt from
+        # the shared IP-tier bucket for the same reason loopback is: a legitimate
+        # campaign's origination burst — and the gateway's per-frame audio POSTs
+        # — would otherwise exhaust the single IP tier and 429 every call (the
+        # dialer's "No call_id returned" terminal failures). Call volume for this
+        # path is already governed by the call-guard limiter and the concurrency
+        # cap. The check is a constant-time shared-secret compare; an unset
+        # INTERNAL_SERVICE_TOKEN disables the exemption (fail-safe).
+        _is_internal = False
+        try:
+            from app.core.security.internal_auth import _valid_internal_token
+            _is_internal = _valid_internal_token(request)
+        except Exception:
+            _is_internal = False
+        if request.method == "OPTIONS" or _is_loopback or _is_internal:
             return await call_next(request)
 
         try:
