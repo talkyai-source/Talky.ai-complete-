@@ -242,6 +242,31 @@ class AudioIngest:
                 # more chance before we auto-close on silence (re-audit flow #5).
                 _MAX_CONSECUTIVE = 3
 
+                # Caller-speaks-first (INBOUND) mode: the agent must NOT ask "Are
+                # you still there?" before the CALLER has actually spoken. In this
+                # mode the agent sends no opening greeting, but a pre-warm TTS blip
+                # can still flip `_had_first_exchange` True — which would fire the
+                # check-in while we're merely waiting for the callee's first word,
+                # exactly the aggressive behaviour reported on caller-first calls.
+                # Gate on a real caller turn having happened first.
+                try:
+                    from app.domain.services.voice_pipeline.turn_helpers import (
+                        _first_speaker_label,
+                    )
+                    _is_caller_first = _first_speaker_label(session) == "inbound"
+                except Exception:
+                    _is_caller_first = False
+
+                def _caller_has_spoken() -> bool:
+                    try:
+                        for _m in getattr(session, "conversation_history", []) or []:
+                            _role = getattr(_m, "role", None)
+                            if getattr(_role, "value", _role) == "user":
+                                return True
+                    except Exception:
+                        pass
+                    return False
+
                 while session.stt_active and consecutive < _MAX_CONSECUTIVE:
                     await asyncio.sleep(1.0)  # poll every second
 
@@ -271,6 +296,12 @@ class AudioIngest:
 
                     # Don't arm until after the first AI response (user-speaks-first)
                     if not _had_first_exchange:
+                        _last_event_at = datetime.utcnow()
+                        continue
+
+                    # Caller-first: never nag before the caller has actually spoken,
+                    # even if a pre-warm blip armed _had_first_exchange.
+                    if _is_caller_first and not _caller_has_spoken():
                         _last_event_at = datetime.utcnow()
                         continue
 
