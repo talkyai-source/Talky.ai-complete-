@@ -757,13 +757,20 @@ class DialerWorker:
             yield conn
 
     async def _reap_stuck_jobs_tick(self) -> None:
-        """Mark in-flight jobs hung past the timeout as failed, so zombie
-        'dialing' rows don't accumulate and the lead is freed for a fresh
-        attempt. Logic lives in dialer.stuck_job_reaper; best-effort."""
+        """Reap zombies each tick, best-effort:
+          * stuck dialer JOBS (hung originate) → marked failed, lead freed;
+          * stuck CALL rows (non-terminal past the max call lifetime) → closed
+            as ended, so they leave the live-calls panel AND free their
+            batch-dispatch slot (a stale 'dialing' row must never wedge the
+            batch gate). Logic lives in dialer.stuck_job_reaper."""
         try:
-            from app.domain.services.dialer.stuck_job_reaper import reap_stuck_jobs
+            from app.domain.services.dialer.stuck_job_reaper import (
+                reap_stuck_jobs,
+                reap_stuck_calls,
+            )
             async with self._acquire_db() as conn:
                 await reap_stuck_jobs(conn)
+                await reap_stuck_calls(conn)
         except Exception as exc:
             logger.warning("reaper tick failed: %s", exc)
 
@@ -896,9 +903,19 @@ class DialerWorker:
         a batch slot (dialing / ringing / answered / in_call / initiated).
         Terminal states (ended / completed / failed) have freed their slot.
 
+        Anti-wedge safety net: a call whose status is non-terminal but that is
+        OLDER than the max plausible call lifetime is a zombie (originate hung,
+        an ARI hangup event was lost, a worker died mid-call) — it is NOT really
+        in flight. We stop counting it after DIALER_INFLIGHT_MAX_AGE_S so a
+        handful of stuck 'dialing' rows can never permanently wedge the batch
+        gate. The stuck-call reaper (run each tick) then closes them for real.
+
         Fail-open: on a transient DB error return 0 so a hiccup never wedges
         dispatch (the concurrency guard remains as a backstop).
         """
+        # Ring window (30s) + hard call ceiling (8m) + buffer. A non-terminal
+        # call older than this cannot still be a live conversation.
+        max_age = int(os.getenv("DIALER_INFLIGHT_MAX_AGE_S", "600"))
         try:
             async with self._acquire_db() as conn:
                 val = await conn.fetchval(
@@ -908,8 +925,10 @@ class DialerWorker:
                        AND status IN (
                            'dialing', 'ringing', 'answered', 'in_call', 'initiated'
                        )
+                       AND created_at > now() - make_interval(secs => $2::int)
                     """,
                     campaign_id,
+                    max_age,
                 )
             return int(val or 0)
         except Exception as exc:

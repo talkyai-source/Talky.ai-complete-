@@ -5,7 +5,9 @@ import pytest
 from app.domain.services.dialer import job_states as st
 from app.domain.services.dialer.stuck_job_reaper import (
     reap_stuck_jobs,
+    reap_stuck_calls,
     STUCK_REASON,
+    _INFLIGHT_CALL_STATUSES,
 )
 from app.domain.services.dialer.job_lifecycle import (
     cancel_active_jobs_for_campaign,
@@ -58,6 +60,27 @@ async def test_reaper_marks_in_flight_and_returns_count():
 async def test_reaper_noop_returns_zero():
     conn = _FakeConn(returned_ids=[])
     assert await reap_stuck_jobs(conn) == 0
+
+
+@pytest.mark.asyncio
+async def test_stuck_call_reaper_closes_zombie_calls():
+    # A stale non-terminal call must be closed so it frees its batch slot and
+    # leaves the live-calls panel.
+    conn = _FakeConn(returned_ids=["c1", "c2"])
+    n = await reap_stuck_calls(conn, timeout_seconds=600)
+    assert n == 2
+    sql, args = conn.calls[0]
+    assert args[0] == list(_INFLIGHT_CALL_STATUSES)
+    assert args[1] == 600
+    assert "UPDATE calls" in sql and "'ended'" in sql
+    # Preserves any real outcome already written; only fills a missing one.
+    assert "COALESCE(outcome" in sql
+
+
+@pytest.mark.asyncio
+async def test_stuck_call_reaper_noop_returns_zero():
+    conn = _FakeConn(returned_ids=[])
+    assert await reap_stuck_calls(conn) == 0
 
 
 # ── job lifecycle (Supabase-style adapter fake) ───────────────

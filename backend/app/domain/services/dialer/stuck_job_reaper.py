@@ -28,6 +28,15 @@ logger = logging.getLogger(__name__)
 DEFAULT_STUCK_TIMEOUT_S = int(os.getenv("DIALER_STUCK_TIMEOUT_S", "120"))
 STUCK_REASON = "stuck_timeout"
 
+# How long a CALL row may sit in a non-terminal status before it's a zombie.
+# Must exceed the max plausible live-call lifetime (ring window + the hard call
+# ceiling) so a real 8-minute conversation is never reaped mid-call. Default
+# 600s. Env-overridable.
+CALL_STUCK_TIMEOUT_S = int(os.getenv("DIALER_CALL_STUCK_TIMEOUT_S", "600"))
+_INFLIGHT_CALL_STATUSES = (
+    "dialing", "ringing", "answered", "in_call", "initiated",
+)
+
 
 async def reap_stuck_jobs(
     conn,
@@ -63,6 +72,48 @@ async def reap_stuck_jobs(
     if reaped:
         logger.warning(
             "reaper: marked %d stuck dialer job(s) failed (in-flight > %ss)",
+            reaped,
+            timeout_seconds,
+        )
+    return reaped
+
+
+async def reap_stuck_calls(
+    conn,
+    *,
+    timeout_seconds: int = CALL_STUCK_TIMEOUT_S,
+) -> int:
+    """Close ``calls`` rows stuck in a non-terminal status past the timeout.
+
+    A call that has sat in ``dialing`` / ``ringing`` / ``answered`` / ``in_call``
+    longer than the max plausible call lifetime is a zombie: the originate hung,
+    or an ARI hangup event was lost, so ``_on_call_ended`` never fired to mark it
+    ENDED. Left alone it lingers as "dialing" in the live-calls panel forever AND
+    — now that batch dispatch counts in-flight calls — holds a batch slot,
+    eventually wedging the campaign (it can never dial the next call). Marking it
+    ENDED frees the slot and records an honest terminal state. Any real outcome
+    already written is preserved; otherwise it's recorded as ``failed``.
+
+    Idempotent and cheap (one indexed UPDATE); safe on every worker tick.
+    """
+    rows = await conn.fetch(
+        """
+        UPDATE calls
+           SET status     = 'ended',
+               ended_at   = COALESCE(ended_at, now()),
+               outcome    = COALESCE(outcome, 'failed'),
+               updated_at = now()
+         WHERE status = ANY($1::text[])
+           AND created_at < now() - make_interval(secs => $2::int)
+        RETURNING id
+        """,
+        list(_INFLIGHT_CALL_STATUSES),
+        int(timeout_seconds),
+    )
+    reaped = len(rows)
+    if reaped:
+        logger.warning(
+            "reaper: closed %d stuck call(s) as ended (in-flight > %ss)",
             reaped,
             timeout_seconds,
         )
