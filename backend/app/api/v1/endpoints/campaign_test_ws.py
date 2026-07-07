@@ -237,11 +237,17 @@ async def campaign_test_websocket(
             voice_session = await orchestrator.create_voice_session(config)
 
             # Per-call first-speaker on the session (phone path sets both).
+            # Also opt this test call into the natural silence handling so it
+            # behaves like a real call: a gentle "Hello?" after ~10s of caller
+            # silence, and auto-close after 60s. (Real phone calls get this by
+            # gateway_type; the browser test call opts in explicitly.)
             try:
                 voice_session._first_speaker = fs
+                voice_session._enable_silence_monitor = True
                 _cs = getattr(voice_session, "call_session", None)
                 if _cs is not None:
                     _cs._first_speaker = fs
+                    _cs._enable_silence_monitor = True
             except Exception:  # noqa: BLE001
                 pass
 

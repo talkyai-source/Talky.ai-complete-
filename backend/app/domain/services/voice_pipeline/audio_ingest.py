@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from datetime import datetime
 from typing import AsyncIterator, Optional
@@ -212,43 +213,41 @@ class AudioIngest:
             # caller is still there.  Phrases are varied each time to avoid sounding
             # robotic.  Runs in parallel with the STT consumer loop; cancelled when
             # the pipeline exits.  Disabled for Ask AI (browser sessions).
-            _SILENCE_PHRASES = [
-                "Are you still there?",
-                "Still with me?",
-                "Hello — you still on the line?",
-                "Hey, just checking — can you hear me?",
-                "Did I lose you?",
-                "You still there? I'm here.",
-                "Just making sure I haven't lost you — you there?",
-                "Hello? Are you still with me?",
+            # Natural, GENTLE silence handling (product flow, 2026-07-07):
+            #   • agent waits (caller-first sends no greeting);
+            #   • after ~10s of no caller speech, one soft "Hello?" nudge — never
+            #     the old aggressive "Are you still there?";
+            #   • once the caller speaks, the LLM introduces itself and the
+            #     conversation proceeds naturally (prompt-driven);
+            #   • after 60s of continuous caller silence, close the call politely.
+            _OPENING_HELLO_S = float(os.getenv("VOICE_OPENING_HELLO_S", "10"))
+            _MID_NUDGE_S = float(os.getenv("VOICE_MID_NUDGE_S", "10"))
+            _SILENCE_HANGUP_S = float(os.getenv("VOICE_SILENCE_HANGUP_S", "60"))
+            _TTS_GRACE_S = 3.0
+            _NUDGE_MIN_GAP_S = 12.0
+            # Opening nudges (caller hasn't spoken yet) — just a natural "hello".
+            _OPENING_PHRASES = ["Hello?", "Hi, are you there?", "Hello, can you hear me?"]
+            # Mid-conversation check-ins — gentle, no "are you still there".
+            _GENTLE_PHRASES = [
+                "Hello?",
+                "I'm still here whenever you're ready.",
+                "Take your time — I'm here.",
+                "Sorry, did I lose you?",
             ]
+
+            def _count_user_turns() -> int:
+                n = 0
+                try:
+                    for _m in getattr(session, "conversation_history", []) or []:
+                        _role = getattr(_m, "role", None)
+                        if getattr(_role, "value", _role) == "user":
+                            n += 1
+                except Exception:
+                    pass
+                return n
 
             async def _silence_monitor() -> None:
                 import random
-                # Minimum pause after AI finishes speaking before silence counts.
-                # Prevents firing immediately after TTS ends while caller is
-                # drawing breath to respond.
-                _TTS_GRACE_S = 3.0
-                _last_event_at = datetime.utcnow()
-                _tts_ended_at: Optional[datetime] = None
-                _was_active: bool = False
-                # Only arm after the FIRST complete AI response — user-speaks-first
-                # mode means there is natural silence at call start that must not
-                # trigger the monitor.
-                _had_first_exchange: bool = False
-                consecutive = 0
-                # Give up after this many unanswered check-ins. 3 (not 2) gives a
-                # briefly-quiet caller — thinking, muted, or STT missing them — one
-                # more chance before we auto-close on silence (re-audit flow #5).
-                _MAX_CONSECUTIVE = 3
-
-                # Caller-speaks-first (INBOUND) mode: the agent must NOT ask "Are
-                # you still there?" before the CALLER has actually spoken. In this
-                # mode the agent sends no opening greeting, but a pre-warm TTS blip
-                # can still flip `_had_first_exchange` True — which would fire the
-                # check-in while we're merely waiting for the callee's first word,
-                # exactly the aggressive behaviour reported on caller-first calls.
-                # Gate on a real caller turn having happened first.
                 try:
                     from app.domain.services.voice_pipeline.turn_helpers import (
                         _first_speaker_label,
@@ -257,135 +256,109 @@ class AudioIngest:
                 except Exception:
                     _is_caller_first = False
 
-                def _caller_has_spoken() -> bool:
-                    try:
-                        for _m in getattr(session, "conversation_history", []) or []:
-                            _role = getattr(_m, "role", None)
-                            if getattr(_role, "value", _role) == "user":
-                                return True
-                    except Exception:
-                        pass
-                    return False
+                _now = datetime.utcnow
+                _last_caller_at = _now()   # last caller speech → drives the 60s hangup
+                _silence_since = _now()    # last caller OR AI activity → drives nudges
+                _last_nudge_at: Optional[datetime] = None
+                _prev_user_turns = _count_user_turns()
+                _was_active = False
+                _tts_ended_at: Optional[datetime] = None
 
-                while session.stt_active and consecutive < _MAX_CONSECUTIVE:
-                    await asyncio.sleep(1.0)  # poll every second
-
+                while session.stt_active:
+                    await asyncio.sleep(1.0)
                     if not session.stt_active:
                         break
 
-                    currently_active = session.tts_active or session.llm_active
+                    # Caller spoke since last tick → resets BOTH clocks (this is
+                    # the real signal that they're present and engaged).
+                    _uturns = _count_user_turns()
+                    if _uturns > _prev_user_turns:
+                        _prev_user_turns = _uturns
+                        _last_caller_at = _now()
+                        _silence_since = _now()
+                        _last_nudge_at = None
+                        _was_active = False
+                        _tts_ended_at = None
+                        continue
 
-                    # AI is speaking or processing — reset baseline
-                    if currently_active:
-                        _last_event_at = datetime.utcnow()
+                    # AI speaking / thinking (incl. our own nudge) → resets the
+                    # NUDGE clock only, never the caller-silence (hangup) clock.
+                    _active = session.tts_active or session.llm_active
+                    if _active:
+                        _silence_since = _now()
                         _tts_ended_at = None
                         _was_active = True
-                        consecutive = 0
                         continue
-
-                    # TTS/LLM just went inactive — start grace period clock
-                    if _was_active and not currently_active:
-                        _tts_ended_at = datetime.utcnow()
-                        _last_event_at = _tts_ended_at
-                        _had_first_exchange = True  # AI has spoken at least once
+                    if _was_active:
+                        _tts_ended_at = _now()
+                        _silence_since = _tts_ended_at
                         _was_active = False
-                        consecutive = 0
-                        continue  # give the caller the full grace period first
-
-                    _was_active = False
-
-                    # Don't arm until after the first AI response (user-speaks-first)
-                    if not _had_first_exchange:
-                        _last_event_at = datetime.utcnow()
                         continue
 
-                    # Caller-first: never nag before the caller has actually spoken,
-                    # even if a pre-warm blip armed _had_first_exchange.
-                    if _is_caller_first and not _caller_has_spoken():
-                        _last_event_at = datetime.utcnow()
+                    # Caller mid-utterance (StartOfTurn before the transcript).
+                    _barge = self._p._barge_in_events.get(call_id)
+                    if _barge and _barge.is_set():
+                        _last_caller_at = _now()
+                        _silence_since = _now()
                         continue
 
-                    # Enforce post-TTS grace period before counting silence
-                    if _tts_ended_at is not None:
-                        if (datetime.utcnow() - _tts_ended_at).total_seconds() < _TTS_GRACE_S:
-                            continue
-
-                    # User is already speaking (StartOfTurn detected before transcript)
-                    _barge_ev = self._p._barge_in_events.get(call_id)
-                    if _barge_ev and _barge_ev.is_set():
-                        _last_event_at = datetime.utcnow()
-                        consecutive = 0
+                    # Grace right after the AI finished speaking.
+                    if _tts_ended_at is not None and (
+                        _now() - _tts_ended_at
+                    ).total_seconds() < _TTS_GRACE_S:
                         continue
 
-                    # User spoke since our last baseline — reset
-                    if session.last_activity_at > _last_event_at:
-                        _last_event_at = session.last_activity_at
-                        consecutive = 0
+                    # 60s of continuous caller silence → close the call politely.
+                    if (_now() - _last_caller_at).total_seconds() >= _SILENCE_HANGUP_S:
+                        logger.info(
+                            "[SilenceMonitor] %s — %.0fs caller silence, closing call",
+                            call_id[:12], _SILENCE_HANGUP_S,
+                        )
+                        try:
+                            await self._p._shutdown_session_for_end_action(
+                                session, websocket, "silence_timeout",
+                                "I'll let you go for now — feel free to reach out anytime. Take care.",
+                            )
+                        except Exception as _close_exc:
+                            logger.debug("[SilenceMonitor] close-on-silence failed: %s", _close_exc)
+                        break
+
+                    # Gentle nudge. Opening (caller-first, caller hasn't spoken
+                    # yet) → a soft "Hello?"; otherwise a light check-in.
+                    _opening = _is_caller_first and _prev_user_turns == 0
+                    _threshold = _OPENING_HELLO_S if _opening else _MID_NUDGE_S
+                    _silence = (_now() - _silence_since).total_seconds()
+                    if _silence < _threshold:
+                        continue
+                    if _last_nudge_at is not None and (
+                        _now() - _last_nudge_at
+                    ).total_seconds() < _NUDGE_MIN_GAP_S:
                         continue
 
-                    # How long has it been since any activity?
-                    elapsed = (datetime.utcnow() - _last_event_at).total_seconds()
-                    silence_limit = random.uniform(5.0, 7.0)
-                    if elapsed < silence_limit:
-                        continue
-
-                    # Silence threshold exceeded — ask with a varied phrase
-                    phrase = random.choice(_SILENCE_PHRASES)
-                    consecutive += 1
+                    _phrase = random.choice(_OPENING_PHRASES if _opening else _GENTLE_PHRASES)
                     logger.info(
-                        "[SilenceMonitor] %s — %.1fs silence, asking (%d/%d): %r",
-                        call_id[:12], elapsed, consecutive, _MAX_CONSECUTIVE, phrase,
+                        "[SilenceMonitor] %s — %.0fs silence (%s), nudging: %r",
+                        call_id[:12], _silence, "opening" if _opening else "mid", _phrase,
                     )
                     try:
-                        await self._p.synthesize_and_send_audio(session, phrase, websocket)
-                        # Record it (history + transcript) so the LLM knows it
-                        # already asked and the transcript matches what was spoken.
-                        _record_silence_check(self._p, session, phrase)
+                        await self._p.synthesize_and_send_audio(session, _phrase, websocket)
+                        _record_silence_check(self._p, session, _phrase)
                     except Exception as _sm_exc:
                         logger.debug("[SilenceMonitor] TTS failed: %s", _sm_exc)
+                    _last_nudge_at = _now()
+                    _silence_since = _now()  # give them room to answer before re-nudging
 
-                    # Reset baseline with grace period after our own TTS phrase
-                    _tts_ended_at = datetime.utcnow()
-                    _last_event_at = _tts_ended_at
-
-                logger.debug(
-                    "[SilenceMonitor] %s exiting (consecutive=%d stt_active=%s)",
-                    call_id[:12], consecutive, session.stt_active,
-                )
-
-                # Gave up after MAX unanswered check-ins while the call is still
-                # live → the caller is gone. Close politely with a brief goodbye
-                # instead of leaving a silent line open until the session timeout
-                # (reuses the proven end-session teardown: farewell + hangup).
-                if session.stt_active and consecutive >= _MAX_CONSECUTIVE:
-                    logger.info(
-                        "[SilenceMonitor] %s — no response after %d check-ins, closing call",
-                        call_id[:12], consecutive,
-                    )
-                    try:
-                        await self._p._shutdown_session_for_end_action(
-                            session,
-                            websocket,
-                            "silence_timeout",
-                            "I'll let you go for now — feel free to give us a call back anytime. Take care.",
-                        )
-                    except Exception as _close_exc:
-                        logger.debug("[SilenceMonitor] close-on-silence failed: %s", _close_exc)
-
-            # Silence monitor is a TELEPHONY concern: a phone caller who goes
-            # quiet may have physically walked away, so we check in and, after a
-            # few unanswered check-ins, close politely. But a BROWSER session —
-            # the Ask-AI widget and the campaign Test-agent WebSocket — has a
-            # PRESENT user who reads / thinks / takes notes between turns; nagging
-            # "Are you still there?" mid-conversation is noise and was reported as
-            # aggressive. Gate it to the telephony gateway only (restores this
-            # monitor's original telephony-only scope). Missing gateway_type
-            # defaults to telephony (real calls always set it) so a malformed
-            # phone session never loses its silence handling.
+            # Run for real phone calls AND for any session that explicitly opts
+            # in — the campaign Test-agent WebSocket sets `_enable_silence_monitor`
+            # so the test call behaves like a real one (10s hello, 60s auto-close).
+            # A plain Ask-AI widget never opts in, so it is never nagged. Missing
+            # gateway_type defaults to telephony so a real phone session always
+            # keeps its silence handling.
             _gw_type = getattr(getattr(session, "config", None), "gateway_type", "telephony")
+            _opt_in = bool(getattr(session, "_enable_silence_monitor", False))
             _silence_task: Optional[asyncio.Task] = (
                 asyncio.create_task(_silence_monitor())
-                if _gw_type == "telephony"
+                if (_gw_type == "telephony" or _opt_in)
                 else None
             )
 
