@@ -18,6 +18,10 @@ class CampaignStartRequest(BaseModel):
     # a terminal outcome. Client-selectable; None keeps the campaign's existing
     # setting (or the DIALER_BATCH_SIZE default). 0 = unbounded.
     batch_size: Optional[int] = Field(default=None, ge=0, le=100)
+    # Minimum wait (seconds) between consecutive call originations — paces the
+    # campaign so calls go out on a steady cadence instead of back-to-back.
+    # Works together with batch_size. None keeps the existing setting; 0 = no gap.
+    call_gap_seconds: Optional[int] = Field(default=None, ge=0, le=3600)
 
 
 class CampaignCallingSchedule(BaseModel):

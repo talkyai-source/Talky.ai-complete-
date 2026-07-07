@@ -554,22 +554,26 @@ async def start_campaign(
         priority_override = (start_request.priority_override if start_request else None)
         first_speaker = (start_request.first_speaker if start_request else "agent")
 
-        # Persist the client's batch-size choice onto the campaign's
-        # calling_config so the dialer's batch gate reads it. None → leave the
-        # existing setting untouched. Merged (not overwritten) so schedule keys
+        # Persist the client's pacing choices (batch size + inter-call gap) onto
+        # the campaign's calling_config so the dialer's gates read them. None →
+        # leave that setting untouched. Merged (not overwritten) so schedule keys
         # already in calling_config survive.
         _batch_size = (start_request.batch_size if start_request else None)
-        if _batch_size is not None:
+        _call_gap = (start_request.call_gap_seconds if start_request else None)
+        if _batch_size is not None or _call_gap is not None:
             try:
                 _existing = await service.get_campaign(campaign_id)
                 _cfg = dict(_existing.get("calling_config") or {})
-                _cfg["batch_size"] = int(_batch_size)
+                if _batch_size is not None:
+                    _cfg["batch_size"] = int(_batch_size)
+                if _call_gap is not None:
+                    _cfg["call_gap_seconds"] = int(_call_gap)
                 db_client.table("campaigns").update(
                     {"calling_config": _cfg}
                 ).eq("id", campaign_id).execute()
             except Exception as _bs_exc:
                 logger.warning(
-                    "failed to persist batch_size for campaign %s: %s",
+                    "failed to persist pacing config for campaign %s: %s",
                     campaign_id, _bs_exc,
                 )
 

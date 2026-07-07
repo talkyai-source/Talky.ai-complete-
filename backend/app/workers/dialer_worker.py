@@ -389,6 +389,29 @@ class DialerWorker:
                     )
                     return
 
+            # Inter-call gap. Enforce a minimum wait between consecutive
+            # originations for this campaign so calls are PACED (a gentle,
+            # human-like cadence) rather than fired back-to-back the instant a
+            # batch slot frees. Works alongside the batch gate: a new call goes
+            # out only when BOTH there's a free slot AND at least `call_gap`
+            # seconds have passed since the campaign's last dial. Per-campaign,
+            # client-selectable (calling_config.call_gap_seconds); 0 = no gap.
+            call_gap = self._resolve_call_gap(campaign_cfg)
+            if call_gap > 0:
+                since_last = await self._campaign_seconds_since_last_dial(job.campaign_id)
+                if since_last is not None and since_last < call_gap:
+                    wait = max(1, call_gap - since_last)
+                    logger.debug(
+                        "call_gap: campaign %s dialed %ds ago (<%ds) — deferring "
+                        "job %s by %ds", job.campaign_id, since_last, call_gap,
+                        job.job_id, wait,
+                    )
+                    await self.queue_service.schedule_retry(job, delay_seconds=wait)
+                    await self._update_job_status(
+                        job.job_id, JobStatus.RETRY_SCHEDULED, reason="call_gap",
+                    )
+                    return
+
             try:
                 # 5. Initiate the call via the provider/PBX.
                 provider_call_id = await self._make_call(job, rules)
@@ -937,6 +960,49 @@ class DialerWorker:
                 campaign_id, exc,
             )
             return 0
+
+    def _resolve_call_gap(self, campaign_cfg: Optional[dict]) -> int:
+        """Resolve the per-campaign inter-call gap in seconds — the minimum wait
+        between consecutive originations. Client-selectable via
+        ``calling_config.call_gap_seconds``; falls back to the ``DIALER_CALL_GAP_S``
+        env default (0 = no gap). Negative is clamped to 0.
+        """
+        default = int(os.getenv("DIALER_CALL_GAP_S", "0"))
+        if isinstance(campaign_cfg, dict):
+            raw = campaign_cfg.get("call_gap_seconds")
+            if raw is not None:
+                try:
+                    return max(0, int(raw))
+                except (TypeError, ValueError):
+                    pass
+        return max(0, default)
+
+    async def _campaign_seconds_since_last_dial(self, campaign_id: str) -> Optional[int]:
+        """Seconds since this campaign's most recent call was originated (the
+        newest calls.created_at). Returns None when the campaign has no recent
+        calls (first dial — no gap to enforce) or on a DB error (fail-open: the
+        gap is simply not enforced rather than wedging dispatch).
+
+        Scoped to the last hour so the max() stays on a small, recent slice.
+        """
+        try:
+            async with self._acquire_db() as conn:
+                val = await conn.fetchval(
+                    """
+                    SELECT EXTRACT(EPOCH FROM (now() - max(created_at)))::int
+                      FROM calls
+                     WHERE campaign_id = $1
+                       AND created_at > now() - interval '1 hour'
+                    """,
+                    campaign_id,
+                )
+            return int(val) if val is not None else None
+        except Exception as exc:
+            logger.warning(
+                "call_gap: last-dial lookup failed campaign=%s err=%s",
+                campaign_id, exc,
+            )
+            return None
 
     async def _get_lead_last_called(self, lead_id: str) -> Optional[datetime]:
         """Get the last time a lead was called."""

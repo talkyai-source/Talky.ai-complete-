@@ -312,15 +312,18 @@ class DashboardApi {
 
     async startCampaign(
         id: string,
-        opts?: { first_speaker?: "agent" | "user"; batch_size?: number },
+        opts?: { first_speaker?: "agent" | "user"; batch_size?: number; call_gap_seconds?: number },
     ): Promise<{ message: string; jobs_enqueued: number }> {
         const body: Record<string, unknown> = {
             first_speaker: opts?.first_speaker ?? "agent",
         };
-        // Only send batch_size when the caller set it, so omitting it leaves
-        // the campaign's existing setting untouched.
+        // Only send pacing settings when the caller set them, so omitting one
+        // leaves the campaign's existing setting untouched.
         if (opts?.batch_size !== undefined && opts?.batch_size !== null) {
             body.batch_size = opts.batch_size;
+        }
+        if (opts?.call_gap_seconds !== undefined && opts?.call_gap_seconds !== null) {
+            body.call_gap_seconds = opts.call_gap_seconds;
         }
         return this.client.request({
             path: `/campaigns/${id}/start`,

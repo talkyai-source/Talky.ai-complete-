@@ -102,6 +102,9 @@ export default function CampaignDetailPage() {
     // campaign dials in batches of this size; a new call starts only as an
     // earlier one finishes. Seeded from the campaign's saved setting when known.
     const [batchSize, setBatchSize] = useState<number>(10);
+    // Wait time (seconds) between consecutive calls — paces dialing on top of
+    // the batch size. 0 = no gap (dial as slots free).
+    const [callGap, setCallGap] = useState<number>(0);
 
     // Add contact form
     const [showAddContact, setShowAddContact] = useState(false);
@@ -199,10 +202,13 @@ export default function CampaignDetailPage() {
         // Default back to "agent" every time so a previous choice doesn't
         // silently carry over into the next Start.
         setFirstSpeaker("agent");
-        // Seed the batch size from the campaign's saved setting if it has one.
-        const savedBatch = (campaign?.calling_config as { batch_size?: number } | undefined)?.batch_size;
-        if (typeof savedBatch === "number" && savedBatch >= 0) {
-            setBatchSize(savedBatch);
+        // Seed the pacing controls from the campaign's saved settings if present.
+        const cfg = campaign?.calling_config as { batch_size?: number; call_gap_seconds?: number } | undefined;
+        if (typeof cfg?.batch_size === "number" && cfg.batch_size >= 0) {
+            setBatchSize(cfg.batch_size);
+        }
+        if (typeof cfg?.call_gap_seconds === "number" && cfg.call_gap_seconds >= 0) {
+            setCallGap(cfg.call_gap_seconds);
         }
         setStartModalOpen(true);
     }
@@ -214,6 +220,7 @@ export default function CampaignDetailPage() {
             await dashboardApi.startCampaign(campaignId, {
                 first_speaker: firstSpeaker,
                 batch_size: batchSize,
+                call_gap_seconds: callGap,
             });
             await loadData();
         } catch (err) {
@@ -876,6 +883,51 @@ export default function CampaignDetailPage() {
                                     }`}
                                 >
                                     {n}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="mt-3 rounded-lg border border-border p-3">
+                        <div className="flex items-center justify-between gap-3">
+                            <div>
+                                <div className="text-sm font-medium text-foreground">
+                                    Wait between calls
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                    Minimum gap before the next call is dialed, so calls go out on a
+                                    steady cadence instead of all at once. Applies on top of the batch
+                                    size. 0 = no wait.
+                                </div>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-1">
+                                <input
+                                    type="number"
+                                    min={0}
+                                    max={3600}
+                                    value={callGap}
+                                    onChange={(e) => {
+                                        const n = parseInt(e.target.value, 10);
+                                        setCallGap(Number.isNaN(n) ? 0 : Math.min(3600, Math.max(0, n)));
+                                    }}
+                                    className="w-20 rounded-md border border-border bg-background px-2 py-1 text-center text-sm text-foreground"
+                                />
+                                <span className="text-xs text-muted-foreground">sec</span>
+                            </div>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                            {[0, 5, 15, 30, 60].map((n) => (
+                                <button
+                                    key={n}
+                                    type="button"
+                                    onClick={() => setCallGap(n)}
+                                    className={`rounded-md border px-2 py-0.5 text-xs transition-colors ${
+                                        callGap === n
+                                            ? "border-primary bg-primary/5 text-foreground"
+                                            : "border-border text-muted-foreground hover:bg-muted/40"
+                                    }`}
+                                >
+                                    {n === 0 ? "None" : `${n}s`}
                                 </button>
                             ))}
                         </div>
