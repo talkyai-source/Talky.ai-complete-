@@ -237,6 +237,17 @@ class CampaignService:
             # 5. Get queue service
             queue_service = await self._get_queue_service()
 
+            # 5b. Reset the inter-call gap clock for this run so the FIRST call
+            # dials immediately — the gap only spaces subsequent calls, never the
+            # opener. The dialer stamps this key on each originate; clearing it on
+            # start means "no previous dial in this run yet". Best-effort.
+            try:
+                _redis = getattr(queue_service, "_redis", None)
+                if _redis is not None:
+                    await _redis.delete(f"dialer:last_dial:{campaign_id}")
+            except Exception as _gap_exc:
+                logger.debug("start_campaign: gap-clock reset failed: %s", _gap_exc)
+
             # 6. Create and enqueue jobs
             jobs_created = 0
             jobs_data = []

@@ -484,6 +484,12 @@ class DialerWorker:
                     # await self._publish_call_event(internal_call_id, job, talklee_call_id, provider_call_id)
 
                     self._jobs_processed += 1
+                    # Stamp the campaign's last-dial time for the inter-call gap.
+                    # Tracked in Redis (not the calls table) so it only reflects
+                    # dials from the CURRENT run — start_campaign clears the key,
+                    # so the FIRST call of a run never waits out the gap; the gap
+                    # only spaces the calls that follow.
+                    await self._mark_campaign_dialed(job.campaign_id)
                     logger.info(
                         "Call initiated: internal_call_id=%s provider_call_id=%s job=%s",
                         internal_call_id,
@@ -977,26 +983,41 @@ class DialerWorker:
                     pass
         return max(0, default)
 
-    async def _campaign_seconds_since_last_dial(self, campaign_id: str) -> Optional[int]:
-        """Seconds since this campaign's most recent call was originated (the
-        newest calls.created_at). Returns None when the campaign has no recent
-        calls (first dial — no gap to enforce) or on a DB error (fail-open: the
-        gap is simply not enforced rather than wedging dispatch).
+    @staticmethod
+    def _campaign_last_dial_key(campaign_id: str) -> str:
+        return f"dialer:last_dial:{campaign_id}"
 
-        Scoped to the last hour so the max() stays on a small, recent slice.
+    async def _mark_campaign_dialed(self, campaign_id: str) -> None:
+        """Record 'a call was just originated for this campaign' in Redis, for
+        the inter-call gap. Kept in Redis (not the calls table) so it reflects
+        only the CURRENT run: start_campaign clears it, so the first call of a
+        run never waits. TTL comfortably exceeds the max gap (60 min)."""
+        try:
+            if self._redis is None:
+                return
+            now = datetime.now(timezone.utc).timestamp()
+            await self._redis.set(
+                self._campaign_last_dial_key(campaign_id), str(now), ex=3700,
+            )
+        except Exception as exc:
+            logger.debug("call_gap: mark_dialed failed campaign=%s err=%s", campaign_id, exc)
+
+    async def _campaign_seconds_since_last_dial(self, campaign_id: str) -> Optional[int]:
+        """Seconds since this campaign's last origination IN THE CURRENT RUN.
+
+        Reads the Redis last-dial key set by ``_mark_campaign_dialed``. Returns
+        None when there's no key — i.e. the FIRST call of a run (start_campaign
+        clears it) or Redis is unavailable — so the gap is NOT applied and the
+        first call dials immediately. The gap only ever spaces subsequent calls.
         """
         try:
-            async with self._acquire_db() as conn:
-                val = await conn.fetchval(
-                    """
-                    SELECT EXTRACT(EPOCH FROM (now() - max(created_at)))::int
-                      FROM calls
-                     WHERE campaign_id = $1
-                       AND created_at > now() - interval '1 hour'
-                    """,
-                    campaign_id,
-                )
-            return int(val) if val is not None else None
+            if self._redis is None:
+                return None
+            val = await self._redis.get(self._campaign_last_dial_key(campaign_id))
+            if not val:
+                return None
+            last = float(val)
+            return max(0, int(datetime.now(timezone.utc).timestamp() - last))
         except Exception as exc:
             logger.warning(
                 "call_gap: last-dial lookup failed campaign=%s err=%s",
