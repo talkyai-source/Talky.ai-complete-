@@ -5,6 +5,7 @@ Redis-based job queue with priority support
 import asyncio
 import json
 import logging
+import random
 from typing import Optional, List
 from datetime import datetime, timedelta, timezone
 
@@ -212,10 +213,18 @@ class DialerQueueService:
             # Update job for retry
             job.attempt_number += 1
             job.status = JobStatus.RETRY_SCHEDULED
-            job.scheduled_at = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
-            
+
+            # De-synchronise the herd: when a whole batch is throttled/queued at
+            # once it would otherwise re-fire in lockstep after exactly the same
+            # delay, re-burst, and re-trip the limiter. Spread re-enqueue over a
+            # small jitter window (0..min(25% of delay, 15s)) so retries fan out
+            # instead of stampeding.
+            jitter = random.uniform(0, min(delay_seconds * 0.25, 15.0))
+            effective_delay = delay_seconds + jitter
+            job.scheduled_at = datetime.now(timezone.utc) + timedelta(seconds=effective_delay)
+
             # Calculate execution time as Unix timestamp
-            execute_at = datetime.now(timezone.utc).timestamp() + delay_seconds
+            execute_at = datetime.now(timezone.utc).timestamp() + effective_delay
             
             job_data = json.dumps(job.to_redis_dict())
             await self._redis.zadd(self.SCHEDULED_ZSET, {job_data: execute_at})

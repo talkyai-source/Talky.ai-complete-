@@ -107,6 +107,29 @@ class TelephonyRateLimiter:
 
     @staticmethod
     def _default_policy(policy_scope: str, metric_key: str) -> ThresholdPolicy:
+        # Outbound call origination (the ``calls`` scope) is the product's core
+        # function, NOT a control-plane mutation — a legitimate campaign dials
+        # far faster than the 20/min API-abuse ceiling. The real cap on
+        # simultaneous load is the concurrency guard (max_concurrent_calls);
+        # this limiter only exists to catch runaway volume, so for outbound it
+        # sits well above any sane dial rate. Without this, a normal campaign's
+        # queue drain trips the block and wedges every call (the 0-calls-placed
+        # incident). The strict thresholds remain for the abuse-sensitive
+        # api_mutation / runtime_mutation / sip_edge control-plane scopes.
+        if policy_scope == "calls":
+            return ThresholdPolicy(
+                policy_id=None,
+                policy_name="default-calls",
+                policy_scope=policy_scope,
+                metric_key=metric_key,
+                window_seconds=60,
+                warn_threshold=500,
+                throttle_threshold=800,
+                block_threshold=1200,
+                block_duration_seconds=60,
+                throttle_retry_seconds=5,
+                metadata={"source": "default-calls"},
+            )
         return ThresholdPolicy(
             policy_id=None,
             policy_name="default",
