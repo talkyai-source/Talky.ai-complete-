@@ -897,39 +897,69 @@ export default function CampaignDetailPage() {
                                 <div className="text-xs text-muted-foreground">
                                     Minimum gap before the next call is dialed, so calls go out on a
                                     steady cadence instead of all at once. Applies on top of the batch
-                                    size. 0 = no wait.
+                                    size. Set to 0 for no wait.
                                 </div>
                             </div>
                             <div className="flex shrink-0 items-center gap-1">
                                 <input
                                     type="number"
                                     min={0}
-                                    max={3600}
-                                    value={callGap}
+                                    max={60}
+                                    aria-label="Minutes"
+                                    value={Math.floor(callGap / 60)}
                                     onChange={(e) => {
-                                        const n = parseInt(e.target.value, 10);
-                                        setCallGap(Number.isNaN(n) ? 0 : Math.min(3600, Math.max(0, n)));
+                                        const m = parseInt(e.target.value, 10);
+                                        const mins = Number.isNaN(m) ? 0 : Math.min(60, Math.max(0, m));
+                                        setCallGap(Math.min(3600, mins * 60 + (callGap % 60)));
                                     }}
-                                    className="w-20 rounded-md border border-border bg-background px-2 py-1 text-center text-sm text-foreground"
+                                    className="w-14 rounded-md border border-border bg-background px-2 py-1 text-center text-sm text-foreground"
+                                />
+                                <span className="text-xs text-muted-foreground">min</span>
+                                <input
+                                    type="number"
+                                    min={0}
+                                    max={59}
+                                    aria-label="Seconds"
+                                    value={callGap % 60}
+                                    onChange={(e) => {
+                                        const s = parseInt(e.target.value, 10);
+                                        const secs = Number.isNaN(s) ? 0 : Math.min(59, Math.max(0, s));
+                                        setCallGap(Math.min(3600, Math.floor(callGap / 60) * 60 + secs));
+                                    }}
+                                    className="w-14 rounded-md border border-border bg-background px-2 py-1 text-center text-sm text-foreground"
                                 />
                                 <span className="text-xs text-muted-foreground">sec</span>
                             </div>
                         </div>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                            {[0, 5, 15, 30, 60].map((n) => (
-                                <button
-                                    key={n}
-                                    type="button"
-                                    onClick={() => setCallGap(n)}
-                                    className={`rounded-md border px-2 py-0.5 text-xs transition-colors ${
-                                        callGap === n
-                                            ? "border-primary bg-primary/5 text-foreground"
-                                            : "border-border text-muted-foreground hover:bg-muted/40"
-                                    }`}
-                                >
-                                    {n === 0 ? "None" : `${n}s`}
-                                </button>
-                            ))}
+                        <div className="mt-2 flex items-center gap-2">
+                            <div className="flex flex-wrap gap-1.5">
+                                {[
+                                    { label: "None", v: 0 },
+                                    { label: "30s", v: 30 },
+                                    { label: "1m", v: 60 },
+                                    { label: "2m", v: 120 },
+                                    { label: "5m", v: 300 },
+                                ].map((p) => (
+                                    <button
+                                        key={p.v}
+                                        type="button"
+                                        onClick={() => setCallGap(p.v)}
+                                        className={`rounded-md border px-2 py-0.5 text-xs transition-colors ${
+                                            callGap === p.v
+                                                ? "border-primary bg-primary/5 text-foreground"
+                                                : "border-border text-muted-foreground hover:bg-muted/40"
+                                        }`}
+                                    >
+                                        {p.label}
+                                    </button>
+                                ))}
+                            </div>
+                            {callGap > 0 && (
+                                <span className="ml-auto text-xs text-muted-foreground">
+                                    = {Math.floor(callGap / 60) > 0 ? `${Math.floor(callGap / 60)}m ` : ""}
+                                    {callGap % 60 > 0 ? `${callGap % 60}s` : (Math.floor(callGap / 60) > 0 ? "" : "0s")}
+                                </span>
+                            )}
                         </div>
                     </div>
                 </div>
