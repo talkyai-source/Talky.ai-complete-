@@ -163,6 +163,17 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
     reviewsRef.current = reviews;
     const requested = useRef<Set<string>>(new Set());
 
+    // Release any recording object URLs on unmount so they don't leak browser
+    // memory over a long operator session (fetchRecordingBlob mints a blob URL
+    // per played recording).
+    useEffect(() => {
+        return () => {
+            for (const rv of Object.values(reviewsRef.current)) {
+                if (rv.blobUrl) URL.revokeObjectURL(rv.blobUrl);
+            }
+        };
+    }, []);
+
     // Fetch a call's transcript + recording id. Polls a few times because the
     // recording upload + transcript persist land a beat after "ended".
     const loadDetail = useCallback(async (callId: string, attempt = 0) => {

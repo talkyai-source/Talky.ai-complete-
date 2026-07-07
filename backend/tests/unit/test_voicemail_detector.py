@@ -25,6 +25,13 @@ class TestIsVoicemailGreeting:
             "I'm not interested, thanks.",
             "Can you tell me what this is about?",
             "Sorry, now's not a good time.",
+            # A live person / business answerer must NEVER be hung up on. These
+            # phrasings were deliberately dropped from the phrase list because a
+            # real human says them (regression guard for the false-positive fix).
+            "You've reached Acme Plumbing, how can I help you?",
+            "You have reached the front desk, one moment.",
+            "He's not available, can I take a message?",
+            "Please leave me alone, I'm not interested.",
         ):
             assert is_voicemail_greeting(text) is False, text
 

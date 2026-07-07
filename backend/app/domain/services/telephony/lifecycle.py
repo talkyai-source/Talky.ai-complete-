@@ -68,10 +68,11 @@ def _state():
 # Watchdog timeouts (read once at import time — match prior bridge behaviour).
 _SESSION_INACTIVITY_TIMEOUT_S = int(os.getenv("TELEPHONY_INACTIVITY_TIMEOUT_S", "300"))
 # Absolute hard ceiling — a call is force-ended past this no matter what
-# (backstop against a wedged pipeline). The *soft* cap below is the normal
-# target; the hard ceiling only catches a call that keeps signalling "closing"
-# indefinitely.
-_SESSION_MAX_DURATION_S = int(os.getenv("TELEPHONY_MAX_CALL_DURATION_S", "480"))
+# (backstop against a wedged pipeline, or a call that keeps signalling "closing"
+# forever). The *soft* cap below (5 min) is the normal target; this ceiling is
+# generous — 10 min — so a genuine deal-closing conversation that legitimately
+# runs past the soft cap is never cut short, only true runaways are caught.
+_SESSION_MAX_DURATION_S = int(os.getenv("TELEPHONY_MAX_CALL_DURATION_S", "600"))
 # Soft cap: the agent is given this long (5 min by default) to reach a
 # conclusion. Past it the call is wrapped up UNLESS the agent is actively
 # closing the deal (see `_session_is_closing`), in which case it may run on to

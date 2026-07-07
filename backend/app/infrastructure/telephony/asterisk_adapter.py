@@ -731,6 +731,13 @@ class AsteriskAdapter(CallControlAdapter):
                 if _cause_int is not None:
                     _cause_txt = _Q850_CAUSE_TEXT.get(int(_cause_int)) if str(_cause_int).lstrip("-").isdigit() else None
             if _cause_txt and channel_id not in self._hangup_causes:
+                # Bound memory: get_hangup_cause() pops entries it consumes, but a
+                # call that ends pre-answer with no voice session is never
+                # consumed, so cap the map and evict the oldest half (dicts keep
+                # insertion order) to prevent unbounded growth over a long run.
+                if len(self._hangup_causes) >= 2000:
+                    for _old in list(self._hangup_causes)[:1000]:
+                        self._hangup_causes.pop(_old, None)
                 # Keep the first (most authoritative) terminal cause for a
                 # channel — StasisEnd + ChannelDestroyed can both fire.
                 self._hangup_causes[channel_id] = str(_cause_txt)

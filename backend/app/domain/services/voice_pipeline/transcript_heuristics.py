@@ -25,6 +25,13 @@ def is_repetitive_transcript(text: str) -> bool:
 # Matched case-insensitively as substrings against the FIRST caller-side
 # transcript. Kept high-precision: these read as a recorded greeting, not
 # something a live human says when they pick up an unexpected call.
+# HIGH PRECISION by design: a false positive hangs up on a LIVE prospect, which
+# is worse than staying on a voicemail a beat too long. So this list contains
+# only wording a recorded greeting uses that a human answering an outbound call
+# would not say about themselves in their first breath. Deliberately EXCLUDED as
+# too ambiguous: bare "you've reached" / "you have reached" (a business answers
+# "You've reached [Company]"), bare "please leave" ("please leave me alone"),
+# and bare "is not available" (a receptionist: "he's not available").
 _VOICEMAIL_PHRASES = (
     "leave a message",
     "leave your message",
@@ -34,24 +41,21 @@ _VOICEMAIL_PHRASES = (
     "at the tone",
     "at the beep",
     "record your message",
+    "please record your message",
     "your call has been forwarded",
     "has been forwarded to",
     "the person you are trying to reach",
     "person you're trying to reach",
-    "is not available",
     "not available right now",
     "unable to take your call",
-    "can't take your call",
-    "cannot take your call",
+    "can't take your call right now",
+    "cannot take your call right now",
     "you have reached the voicemail",
     "you've reached the voicemail",
-    "you have reached",     # "you have reached 07… / the office of…"
-    "you've reached",
-    "please leave",
+    "reached the voicemail",
     "voicemail box",
     "automated voice messaging",
     "google voice",
-    "please record",
 )
 
 
