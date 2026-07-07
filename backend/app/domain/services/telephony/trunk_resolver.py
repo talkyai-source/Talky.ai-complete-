@@ -33,6 +33,7 @@ credentials into Asterisk config is Phase B.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -296,6 +297,48 @@ def _extract_trunk_caller_id(metadata) -> Optional[str]:
     return None
 
 
+async def _resolve_pool_assignment(
+    db_pool, *, tenant_id: str, is_production: bool
+) -> Optional[OutboundTrunkRoute]:
+    """If this tenant has been allotted a SHARED-POOL trunk, route to it.
+
+    The allotment is stored on the tenant's OWN ``tenants.calling_rules.pool_trunk``
+    as ``{"id","endpoint","caller_id","label"}`` — the endpoint + DID are
+    snapshotted at assignment time, so this per-call read touches only the
+    tenant's own row (no cross-tenant lookup, no RLS bypass on the hot path).
+    Takes precedence over the tenant's own trunks (explicit operator intent).
+    Returns None when there's no assignment or on any error (fail-safe → fall
+    through to normal own-trunk resolution).
+    """
+    try:
+        from app.core.db_utils import acquire_with_tenant
+        async with acquire_with_tenant(db_pool, str(tenant_id)) as conn:
+            raw = await conn.fetchval(
+                "SELECT calling_rules->'pool_trunk' FROM tenants WHERE id = $1",
+                tenant_id,
+            )
+        if not raw:
+            return None
+        pt = raw if isinstance(raw, dict) else json.loads(raw)
+        endpoint = (pt.get("endpoint") or "").strip()
+        if not endpoint:
+            return None
+        caller_id = (pt.get("caller_id") or "").strip() or None
+        return OutboundTrunkRoute(
+            endpoint=endpoint,
+            caller_id=caller_id,
+            trunk_id=(pt.get("id") or None),
+            is_default=False,
+            reason="pool_assigned",
+            refused=False,
+        )
+    except Exception as exc:  # noqa: BLE001 — fail-safe, never block a call
+        logger.error(
+            "pool_assignment_resolve_failed tenant=%s err=%s", str(tenant_id)[:8], exc
+        )
+        return None
+
+
 async def resolve_outbound_trunk(
     db_pool,
     *,
@@ -316,6 +359,18 @@ async def resolve_outbound_trunk(
         return _fallback_route("no_tenant", shared_default_enabled=shared_default)
 
     is_production = environment.strip().lower() == "production"
+
+    # Shared-pool allotment wins: if an operator assigned this tenant a pool
+    # account, dial on it (no own trunk / registration needed on the tenant).
+    pool_route = await _resolve_pool_assignment(
+        db_pool, tenant_id=str(tenant_id), is_production=is_production
+    )
+    if pool_route is not None:
+        logger.info(
+            "trunk_resolved tenant=%s endpoint=%s reason=pool_assigned",
+            str(tenant_id)[:8], pool_route.endpoint,
+        )
+        return pool_route
 
     try:
         from app.core.db_utils import acquire_with_tenant

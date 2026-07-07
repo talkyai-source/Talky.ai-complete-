@@ -30,6 +30,9 @@ import {
     useActivateSipTrunk,
     useDeactivateSipTrunk,
     useDeleteSipTrunk,
+    usePoolTrunks,
+    usePoolAssignment,
+    useSetPoolAssignment,
     type SipTrunkInput,
     type SipTrunkRow,
 } from "@/lib/telephony-api";
@@ -186,6 +189,79 @@ function TestStatusBadge({ trunk }: { trunk: SipTrunkRow }) {
                 <><XCircle className="h-3 w-3" aria-hidden /> Unreachable</>
             )}
         </span>
+    );
+}
+
+/**
+ * Shared trunk pool selector — allot one of the platform's registered pool
+ * accounts (e.g. 150001–150004) to this tenant. When set, this tenant's
+ * outbound calls dial on that account with no own trunk / registration needed.
+ */
+function PoolAccountSelector() {
+    const poolQuery = usePoolTrunks();
+    const assignmentQuery = usePoolAssignment();
+    const setAssignment = useSetPoolAssignment();
+
+    const pool = poolQuery.data ?? [];
+    const current = assignmentQuery.data?.pool_trunk_id ?? "";
+
+    // Nothing to show until the platform actually has pool accounts.
+    if (!poolQuery.isLoading && pool.length === 0) return null;
+
+    async function onChange(value: string) {
+        try {
+            await setAssignment.mutateAsync(value || null);
+            notificationsStore.create({
+                type: "success",
+                title: value ? "Shared account assigned" : "Shared account cleared",
+                message: value
+                    ? "This tenant will now dial on the selected pool account."
+                    : "This tenant will use its own trunk (or the default).",
+            });
+        } catch (e) {
+            notificationsStore.create({
+                type: "error",
+                title: "Couldn't update",
+                message: e instanceof Error ? e.message : "Failed to set the shared account.",
+            });
+        }
+    }
+
+    return (
+        <div className="mb-4 rounded-lg border border-border bg-muted/30 p-3">
+            <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                    <div className="text-sm font-medium text-foreground">Shared trunk account</div>
+                    <div className="text-xs text-muted-foreground">
+                        Dial on one of the platform&apos;s registered pool accounts — no setup or
+                        registration needed. Overrides your own trunks when set.
+                    </div>
+                </div>
+                <div className="flex items-center gap-2">
+                    <Select
+                        ariaLabel="Shared trunk account"
+                        value={current}
+                        onChange={(next) => void onChange(next)}
+                        disabled={setAssignment.isPending || poolQuery.isLoading}
+                        className="min-w-[14rem]"
+                    >
+                        <option value="">— None (use my own trunk) —</option>
+                        {pool.map((p) => (
+                            <option key={p.id} value={p.id}>
+                                {p.label}
+                                {p.caller_id ? ` · ${p.caller_id}` : ""}
+                                {p.registration_status && p.registration_status !== "registered"
+                                    ? ` · ${p.registration_status}`
+                                    : ""}
+                            </option>
+                        ))}
+                    </Select>
+                    {setAssignment.isPending && (
+                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden />
+                    )}
+                </div>
+            </div>
+        </div>
     );
 }
 
@@ -405,6 +481,7 @@ export function SipTrunksList() {
                 </div>
             </CardHeader>
             <CardContent>
+                <PoolAccountSelector />
                 {trunksQuery.isLoading ? (
                     <div className="flex items-center justify-center py-8 text-muted-foreground">
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> Loading trunks…

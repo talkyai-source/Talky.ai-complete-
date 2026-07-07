@@ -263,6 +263,51 @@ export function useUpdateSipTrunk() {
     });
 }
 
+// ----- Shared trunk pool: allot a registered pool account to this tenant ----
+
+export interface PoolTrunkItem {
+    id: string;
+    label: string;
+    caller_id?: string | null;
+    registration_status?: string | null;
+}
+
+export interface PoolAssignment {
+    pool_trunk_id?: string | null;
+    label?: string | null;
+    caller_id?: string | null;
+}
+
+export function usePoolTrunks() {
+    return useQuery({
+        queryKey: ["telephony", "pool-trunks"] as const,
+        queryFn: () => api<PoolTrunkItem[]>("/telephony/sip/trunks/pool"),
+        refetchInterval: 15000,
+    });
+}
+
+export function usePoolAssignment() {
+    return useQuery({
+        queryKey: ["telephony", "pool-assignment"] as const,
+        queryFn: () => api<PoolAssignment>("/telephony/sip/trunks/pool-assignment"),
+    });
+}
+
+export function useSetPoolAssignment() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: (poolTrunkId: string | null) =>
+            api<PoolAssignment>("/telephony/sip/trunks/pool-assignment", {
+                method: "PUT",
+                body: JSON.stringify({ pool_trunk_id: poolTrunkId }),
+            }),
+        onSuccess: () => {
+            void qc.invalidateQueries({ queryKey: ["telephony", "pool-assignment"] });
+            void qc.invalidateQueries({ queryKey: telephonyKeys.sipTrunks });
+        },
+    });
+}
+
 function newIdempotencyKey(): string {
     return typeof crypto !== "undefined" && crypto.randomUUID
         ? crypto.randomUUID()

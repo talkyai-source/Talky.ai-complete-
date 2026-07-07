@@ -706,31 +706,13 @@ async def _set_trunk_active_state(
                 resource_type="sip_trunk",
                 resource_id=response_model.id,
             )
-            # Single-active invariant (per tenant): activating one trunk turns
-            # OFF any other active trunk and removes its Asterisk config, so
-            # exactly one own-trunk is ever live. Atomic (same transaction).
-            others: list[asyncpg.Record] = []
-            if active_state:
-                others = await conn.fetch(
-                    """
-                    UPDATE tenant_sip_trunks
-                    SET is_active = false, updated_by = $3, updated_at = NOW()
-                    WHERE tenant_id = $1 AND id <> $2 AND is_active = true
-                    RETURNING
-                        id, tenant_id, trunk_name, sip_domain, port, transport,
-                        direction, is_active, auth_username, auth_password_encrypted,
-                        metadata, last_tested_at, last_test_result, created_at, updated_at
-                    """,
-                    current_user.tenant_id,
-                    trunk_id,
-                    current_user.id,
-                )
-
-            # Phase B — sync the tenant's namespaced PJSIP config: activate →
+            # Multi-active (2026-07-07): a tenant may run SEVERAL trunks at once
+            # (removed the old single-active invariant that deactivated the
+            # others on activate). Each active trunk keeps its own live Asterisk
+            # config; the outbound resolver picks among a tenant's active trunks.
+            # Phase B — sync THIS trunk's namespaced PJSIP config: activate →
             # render+write trunk-<id>.conf; deactivate → remove it. Fail-soft.
             await _sync_trunk_pjsip_config(row, active=active_state)
-            for other in others:
-                await _sync_trunk_pjsip_config(other, active=False)
             return response_model
 
 
@@ -851,4 +833,153 @@ async def test_sip_trunk(
         error=result.get("error"),
         detail=result.get("detail"),
         tested_at=tested_at,
+    )
+
+
+# ── Shared trunk pool: list available accounts + per-tenant assignment ──────
+# The 4 Blaze accounts (150001-150004) are registered once as pool trunks
+# (metadata.pool=true). A tenant is "allotted" one by storing a snapshot
+# (id/endpoint/caller_id/label) on tenants.calling_rules.pool_trunk — the
+# outbound resolver then dials on that pool account with no own trunk needed.
+
+from pydantic import BaseModel  # noqa: E402
+
+
+class PoolTrunkItem(BaseModel):
+    id: str
+    label: str
+    caller_id: Optional[str] = None
+    registration_status: Optional[str] = None
+
+
+class PoolAssignmentBody(BaseModel):
+    pool_trunk_id: Optional[str] = None  # null clears the assignment
+
+
+class PoolAssignmentResponse(BaseModel):
+    pool_trunk_id: Optional[str] = None
+    label: Optional[str] = None
+    caller_id: Optional[str] = None
+
+
+async def _fetch_pool_trunk(conn, pool_trunk_id: str):
+    """Read one active pool trunk (RLS bypassed — pool trunks are platform-shared,
+    owned by the pool tenant). Caller must be inside a transaction."""
+    await conn.execute("SET LOCAL app.bypass_rls = 'on'")
+    return await conn.fetchrow(
+        """
+        SELECT id, auth_username, metadata->>'caller_id' AS caller_id,
+               live_registration_status, is_active
+        FROM tenant_sip_trunks
+        WHERE id = $1::uuid AND is_active = TRUE AND metadata->>'pool' = 'true'
+        """,
+        pool_trunk_id,
+    )
+
+
+@router.get("/trunks/pool", response_model=list[PoolTrunkItem])
+async def list_pool_trunks(
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_pool: asyncpg.Pool = Depends(get_db_pool),
+):
+    """List the shared-pool SIP accounts a tenant can be allotted."""
+    tenant_problem = _require_tenant(request, current_user)
+    if tenant_problem:
+        return tenant_problem
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SET LOCAL app.bypass_rls = 'on'")
+            rows = await conn.fetch(
+                """
+                SELECT id, auth_username, metadata->>'caller_id' AS caller_id,
+                       live_registration_status
+                FROM tenant_sip_trunks
+                WHERE metadata->>'pool' = 'true' AND is_active = TRUE
+                ORDER BY auth_username
+                """
+            )
+    return [
+        PoolTrunkItem(
+            id=str(r["id"]),
+            label=r["auth_username"],
+            caller_id=r["caller_id"],
+            registration_status=r["live_registration_status"],
+        )
+        for r in rows
+    ]
+
+
+@router.get("/trunks/pool-assignment", response_model=PoolAssignmentResponse)
+async def get_pool_assignment(
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_pool: asyncpg.Pool = Depends(get_db_pool),
+):
+    tenant_problem = _require_tenant(request, current_user)
+    if tenant_problem:
+        return tenant_problem
+    async with db_pool.acquire() as conn:
+        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id)
+        raw = await conn.fetchval(
+            "SELECT calling_rules->'pool_trunk' FROM tenants WHERE id = $1",
+            current_user.tenant_id,
+        )
+    if not raw:
+        return PoolAssignmentResponse()
+    pt = raw if isinstance(raw, dict) else json.loads(raw)
+    return PoolAssignmentResponse(
+        pool_trunk_id=pt.get("id"), label=pt.get("label"), caller_id=pt.get("caller_id")
+    )
+
+
+@router.put("/trunks/pool-assignment", response_model=PoolAssignmentResponse)
+async def set_pool_assignment(
+    body: PoolAssignmentBody,
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_pool: asyncpg.Pool = Depends(get_db_pool),
+):
+    """Allot a shared-pool account to this tenant (or clear it with null)."""
+    tenant_problem = _require_tenant(request, current_user)
+    if tenant_problem:
+        return tenant_problem
+    pid = (body.pool_trunk_id or "").strip() or None
+
+    if pid is None:
+        async with db_pool.acquire() as conn:
+            await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id)
+            await conn.execute(
+                "UPDATE tenants SET calling_rules = (COALESCE(calling_rules,'{}'::jsonb) - 'pool_trunk'), "
+                "updated_at = NOW() WHERE id = $1",
+                current_user.tenant_id,
+            )
+        return PoolAssignmentResponse()
+
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            pool = await _fetch_pool_trunk(conn, pid)
+        if pool is None:
+            return _problem(
+                request=request,
+                status_code=400,
+                title="Invalid Pool Account",
+                detail="That trunk is not an active shared-pool account.",
+                type_suffix="invalid-pool-trunk",
+            )
+        snapshot = {
+            "id": str(pool["id"]),
+            "endpoint": f"trunk-{pool['id']}",
+            "caller_id": pool["caller_id"],
+            "label": pool["auth_username"],
+        }
+        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id)
+        await conn.execute(
+            "UPDATE tenants SET calling_rules = COALESCE(calling_rules,'{}'::jsonb) "
+            "|| jsonb_build_object('pool_trunk', $2::jsonb), updated_at = NOW() WHERE id = $1",
+            current_user.tenant_id,
+            json.dumps(snapshot),
+        )
+    return PoolAssignmentResponse(
+        pool_trunk_id=snapshot["id"], label=snapshot["label"], caller_id=snapshot["caller_id"]
     )
