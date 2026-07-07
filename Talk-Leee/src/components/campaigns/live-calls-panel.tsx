@@ -16,10 +16,26 @@
  * an SSE subscriber on top of the same backend events table.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Phone, PhoneCall, PhoneOff, PhoneIncoming, CircleCheck, CircleX, Loader2 } from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Phone, PhoneCall, PhoneOff, PhoneIncoming, CircleCheck, CircleX, Loader2, ChevronRight, ChevronDown, FileText } from "lucide-react";
 
 import { api } from "@/lib/api";
+import { dashboardApi } from "@/lib/dashboard-api";
+import { extendedApi } from "@/lib/extended-api";
+
+// Per-call recording + transcript, fetched the moment a call ends so the
+// operator can review it inline without stopping the campaign or leaving the
+// page. Recording/transcript finalise a beat AFTER the call flips to "ended",
+// so `loadDetail` polls a few times until they're ready.
+type CallReview = {
+    loading: boolean;
+    ready: boolean;
+    transcript?: string;
+    recordingId?: string | null;
+    error?: string;
+    blobUrl?: string;
+    recordingLoading?: boolean;
+};
 
 const POLL_INTERVAL_MS = 1500;
 const RECENT_WINDOW_SECONDS = 60;
@@ -140,6 +156,65 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
     const [hangingUpId, setHangingUpId] = useState<string | null>(null);
     const aborted = useRef(false);
 
+    // Inline recording + transcript review for ended calls.
+    const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+    const [reviews, setReviews] = useState<Record<string, CallReview>>({});
+    const reviewsRef = useRef<Record<string, CallReview>>({});
+    reviewsRef.current = reviews;
+    const requested = useRef<Set<string>>(new Set());
+
+    // Fetch a call's transcript + recording id. Polls a few times because the
+    // recording upload + transcript persist land a beat after "ended".
+    const loadDetail = useCallback(async (callId: string, attempt = 0) => {
+        try {
+            const call = await dashboardApi.getCall(callId);
+            const hasTranscript = !!(call.transcript && call.transcript.trim());
+            const hasRecording = !!call.recording_id;
+            const ready = hasTranscript || hasRecording;
+            setReviews((r) => ({
+                ...r,
+                [callId]: {
+                    loading: !ready && attempt < 6,
+                    ready,
+                    transcript: call.transcript,
+                    recordingId: call.recording_id ?? null,
+                },
+            }));
+            if (!ready && attempt < 6 && !aborted.current) {
+                window.setTimeout(() => void loadDetail(callId, attempt + 1), 1500);
+            }
+        } catch (e) {
+            setReviews((r) => ({
+                ...r,
+                [callId]: {
+                    ...(r[callId] ?? { ready: false }),
+                    loading: false,
+                    error: e instanceof Error ? e.message : "Failed to load",
+                },
+            }));
+        }
+    }, []);
+
+    // Lazily fetch the recording audio blob (authenticated) on expand.
+    const loadRecording = useCallback(async (callId: string, recordingId: string) => {
+        setReviews((r) => ({ ...r, [callId]: { ...(r[callId] ?? { ready: true }), recordingLoading: true } }));
+        try {
+            const url = await extendedApi.fetchRecordingBlob(recordingId);
+            setReviews((r) => ({ ...r, [callId]: { ...(r[callId] ?? { ready: true }), blobUrl: url, recordingLoading: false } }));
+        } catch {
+            setReviews((r) => ({ ...r, [callId]: { ...(r[callId] ?? { ready: true }), recordingLoading: false } }));
+        }
+    }, []);
+
+    const toggleExpand = useCallback((callId: string) => {
+        setExpanded((e) => ({ ...e, [callId]: !e[callId] }));
+        const rv = reviewsRef.current[callId];
+        // On first expand, kick the recording blob if we know its id.
+        if (rv?.recordingId && !rv.blobUrl && !rv.recordingLoading) {
+            void loadRecording(callId, rv.recordingId);
+        }
+    }, [loadRecording]);
+
     async function handleHangup(callId: string) {
         try {
             setHangingUpId(callId);
@@ -203,6 +278,18 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
         [items],
     );
 
+    // Prefetch each call's transcript + recording id the instant it ends, so
+    // expanding the row shows everything immediately rather than after a fetch.
+    // Once per call (guarded by `requested`).
+    useEffect(() => {
+        for (const c of recentlyEnded) {
+            if (!requested.current.has(c.id)) {
+                requested.current.add(c.id);
+                void loadDetail(c.id);
+            }
+        }
+    }, [recentlyEnded, loadDetail]);
+
     return (
         <div className="rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-white/5 shadow-sm overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-white/10">
@@ -248,53 +335,156 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
                                 const elapsed = live
                                     ? elapsedSeconds(c.answered_at ?? c.started_at, nowMs)
                                     : c.duration_seconds ?? null;
+                                const rv = reviews[c.id];
+                                const isOpen = !!expanded[c.id];
                                 return (
-                                    <tr key={c.id} className="hover:bg-gray-50 dark:hover:bg-white/[0.04]">
-                                        <td className="px-4 py-2 font-mono text-sm text-gray-900 dark:text-zinc-100">
-                                            {c.to_number}
-                                        </td>
-                                        <td className="px-4 py-2 font-mono text-xs text-muted-foreground">
-                                            {c.caller_id ?? "—"}
-                                        </td>
-                                        <td className="px-4 py-2">
-                                            <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${look.pillClass}`}>
-                                                <look.Icon className={`h-3.5 w-3.5 ${look.iconClass}`} aria-hidden />
-                                                {look.label}
-                                            </span>
-                                        </td>
-                                        <td className="px-4 py-2 font-mono text-sm tabular-nums">
-                                            {fmtDuration(elapsed)}
-                                        </td>
-                                        <td className="px-4 py-2 text-xs text-muted-foreground">
-                                            {c.started_at ? new Date(c.started_at).toLocaleTimeString() : "—"}
-                                        </td>
-                                        <td className="px-4 py-2 text-right">
-                                            {live ? (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleHangup(c.id)}
-                                                    disabled={hangingUpId === c.id}
-                                                    aria-label={`Hang up call to ${c.to_number}`}
-                                                    title="Hang up"
-                                                    className="inline-flex h-7 w-7 items-center justify-center rounded-md text-red-600 transition-colors hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-950/50 disabled:opacity-50"
-                                                >
-                                                    {hangingUpId === c.id ? (
-                                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                                    ) : (
-                                                        <PhoneOff className="h-3.5 w-3.5" />
+                                    <Fragment key={c.id}>
+                                        <tr
+                                            className={`hover:bg-gray-50 dark:hover:bg-white/[0.04] ${!live ? "cursor-pointer" : ""}`}
+                                            onClick={!live ? () => toggleExpand(c.id) : undefined}
+                                        >
+                                            <td className="px-4 py-2 font-mono text-sm text-gray-900 dark:text-zinc-100">
+                                                <span className="inline-flex items-center gap-1.5">
+                                                    {!live && (
+                                                        isOpen
+                                                            ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+                                                            : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
                                                     )}
-                                                </button>
-                                            ) : (
-                                                <span className="text-muted-foreground">—</span>
-                                            )}
-                                        </td>
-                                    </tr>
+                                                    {c.to_number}
+                                                </span>
+                                            </td>
+                                            <td className="px-4 py-2 font-mono text-xs text-muted-foreground">
+                                                {c.caller_id ?? "—"}
+                                            </td>
+                                            <td className="px-4 py-2">
+                                                <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${look.pillClass}`}>
+                                                    <look.Icon className={`h-3.5 w-3.5 ${look.iconClass}`} aria-hidden />
+                                                    {look.label}
+                                                </span>
+                                            </td>
+                                            <td className="px-4 py-2 font-mono text-sm tabular-nums">
+                                                {fmtDuration(elapsed)}
+                                            </td>
+                                            <td className="px-4 py-2 text-xs text-muted-foreground">
+                                                {c.started_at ? new Date(c.started_at).toLocaleTimeString() : "—"}
+                                            </td>
+                                            <td className="px-4 py-2 text-right">
+                                                {live ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => { e.stopPropagation(); handleHangup(c.id); }}
+                                                        disabled={hangingUpId === c.id}
+                                                        aria-label={`Hang up call to ${c.to_number}`}
+                                                        title="Hang up"
+                                                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-red-600 transition-colors hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-950/50 disabled:opacity-50"
+                                                    >
+                                                        {hangingUpId === c.id ? (
+                                                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                        ) : (
+                                                            <PhoneOff className="h-3.5 w-3.5" />
+                                                        )}
+                                                    </button>
+                                                ) : (
+                                                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                                                        <FileText className="h-3.5 w-3.5" aria-hidden />
+                                                        {rv?.loading && !rv?.ready ? "Finalizing…" : "Recording & transcript"}
+                                                    </span>
+                                                )}
+                                            </td>
+                                        </tr>
+                                        {!live && isOpen && (
+                                            <tr className="bg-gray-50/70 dark:bg-white/[0.02]">
+                                                <td colSpan={6} className="px-4 py-3">
+                                                    <CallReviewPanel
+                                                        review={rv}
+                                                        onLoadRecording={() => {
+                                                            if (rv?.recordingId) void loadRecording(c.id, rv.recordingId);
+                                                        }}
+                                                    />
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </Fragment>
                                 );
                             })}
                         </tbody>
                     </table>
                 </div>
             )}
+        </div>
+    );
+}
+
+/** Inline recording player + transcript for a just-ended call. */
+function CallReviewPanel({
+    review,
+    onLoadRecording,
+}: {
+    review?: CallReview;
+    onLoadRecording: () => void;
+}) {
+    const stillFinalizing =
+        !review ||
+        (review.loading && !review.ready && !review.transcript && !review.recordingId);
+
+    if (stillFinalizing) {
+        return (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                Finalizing recording &amp; transcript…
+            </div>
+        );
+    }
+    if (review.error) {
+        return (
+            <div className="text-xs text-red-600 dark:text-red-400">
+                Couldn&apos;t load this call: {review.error}
+            </div>
+        );
+    }
+
+    const hasTranscript = !!(review.transcript && review.transcript.trim());
+    return (
+        <div className="space-y-3">
+            <div>
+                {review.blobUrl ? (
+                    // eslint-disable-next-line jsx-a11y/media-has-caption
+                    <audio controls src={review.blobUrl} className="h-9 w-full max-w-md" />
+                ) : review.recordingId ? (
+                    review.recordingLoading ? (
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                            Loading recording…
+                        </div>
+                    ) : (
+                        <button
+                            type="button"
+                            onClick={onLoadRecording}
+                            className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-muted/40"
+                        >
+                            <PhoneCall className="h-3.5 w-3.5" aria-hidden />
+                            Load recording
+                        </button>
+                    )
+                ) : (
+                    <div className="text-xs text-muted-foreground">No recording for this call.</div>
+                )}
+            </div>
+
+            <div>
+                <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Transcript
+                </div>
+                {hasTranscript ? (
+                    <pre className="max-h-56 overflow-y-auto whitespace-pre-wrap rounded-md bg-white/70 p-2 font-sans text-xs leading-relaxed text-foreground dark:bg-black/20">
+                        {review.transcript}
+                    </pre>
+                ) : (
+                    <div className="text-xs text-muted-foreground">
+                        No transcript — no spoken conversation (e.g. voicemail or a quick hang-up).
+                    </div>
+                )}
+            </div>
         </div>
     );
 }
