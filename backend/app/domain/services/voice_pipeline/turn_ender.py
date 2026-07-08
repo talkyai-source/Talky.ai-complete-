@@ -185,6 +185,15 @@ class TurnEnder:
                 "backchannel_suppressed transcript=%r call=%s",
                 full_transcript, call_id[:12],
             )
+            # A backchannel IS caller presence. It never enters history, so
+            # the silence monitor's turn-count check can't see it — stamp it
+            # so "Okay" doesn't get answered with "Sorry, did I lose you?"
+            # eight seconds later (Lukaz call, 2026-07-08).
+            try:
+                from datetime import datetime as _dt, timezone as _tz
+                session._last_backchannel_at = _dt.now(_tz.utc)
+            except Exception:
+                pass
             # Clear the session's pending input so the old transcript
             # doesn't carry into the next real turn.
             try:

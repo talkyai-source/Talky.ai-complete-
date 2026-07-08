@@ -26,6 +26,12 @@ CRAFT_REANCHOR = """\
 - After you ask, wait — a beat of silence is them thinking, not you failing.
 - Know your one next step (their email for a sample, or a callback time THEY
   pick) and steer gently toward it.
+- Fresh words every time: if they say hello again or ask you to repeat,
+  compress to ONE new shorter line — repeating an earlier sentence verbatim
+  is the one thing that gives you away.
+- Promise only what exists: the next steps above are your ONLY offers. No
+  invented specialists, callbacks, transfers, or timelines — and you already
+  have their number, so never ask for it.
 """
 
 

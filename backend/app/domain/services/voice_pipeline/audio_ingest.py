@@ -311,7 +311,16 @@ class AudioIngest:
                     # Caller spoke since last tick → resets BOTH clocks (this is
                     # the real signal that they're present and engaged).
                     _uturns = _count_user_turns()
-                    if _uturns > _prev_user_turns:
+                    # Suppressed backchannels ("Okay", "Yes") never enter
+                    # history but ARE the caller talking — honor the stamp
+                    # turn_ender leaves so brief affirmations reset the
+                    # clocks exactly like a full turn.
+                    _bc_at = getattr(session, "_last_backchannel_at", None)
+                    _bc_fresh = (
+                        _bc_at is not None
+                        and (_now() - _bc_at).total_seconds() < 2.5
+                    )
+                    if _uturns > _prev_user_turns or _bc_fresh:
                         _prev_user_turns = _uturns
                         _last_caller_at = _now()
                         _silence_since = _now()
