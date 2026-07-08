@@ -463,6 +463,26 @@ class TurnEnder:
                 except Exception as e:
                     logger.warning(f"Failed to flush transcript for {call_id}: {e}")
 
+                # Agent END_CALL: the model closed the conversation this turn
+                # (goodbye / wrong number / voicemail). Its goodbye audio has
+                # already played via the streamed sentences, so hang up now
+                # with no extra farewell. Real capability replacing the
+                # role-played "[hangs up]" the audit found.
+                if getattr(session, "_end_call_requested", False):
+                    logger.info(
+                        "agent_end_call call_id=%s — model requested hangup",
+                        call_id[:12],
+                    )
+                    try:
+                        await self._p._shutdown_session_for_end_action(
+                            session, websocket, "agent_end_call", "",
+                        )
+                    except Exception as _ec_exc:
+                        logger.warning(
+                            "agent_end_call_failed call_id=%s err=%s",
+                            call_id[:12], _ec_exc,
+                        )
+
             except Exception as e:
                 turn_span.record_exception(e)
                 logger.error(

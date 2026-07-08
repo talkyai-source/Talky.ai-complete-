@@ -726,6 +726,19 @@ class VoicePipelineService:
         and tests that mock it are unchanged; the barge-in event is resolved here
         and passed in.
         """
+        # Agent END_CALL sentinel — this is the single choke point every piece
+        # of agent speech flows through (streamed sentences, greetings,
+        # nudges), so the token is stripped here and can never be spoken.
+        # The turn finisher performs the actual hangup after audio completes.
+        from app.domain.services.voice_pipeline.end_call import extract_end_call
+        text, _wants_end = extract_end_call(text)
+        if _wants_end:
+            try:
+                session._end_call_requested = True
+            except Exception:
+                pass
+            if not text:
+                return False  # token-only reply: nothing to speak
         return await self._tts_playback.synthesize_and_send(
             session,
             text,

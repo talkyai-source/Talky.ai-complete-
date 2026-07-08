@@ -398,6 +398,12 @@ def compose_prompt(
 
     parts.append(FINAL_RESPONSE_CONTRACT)
 
+    # Call control (the END_CALL sentinel — the agent's one real way to end a
+    # call) + lead-gen conversation craft. Before the compliance floor so the
+    # floor keeps the recency slot on its invariants.
+    from app.domain.services.voice_pipeline.end_call import call_control_rules
+    parts.append(call_control_rules())
+
     # The non-negotiable safety floor goes LAST (after the tenant's own
     # additional_instructions) so it wins on the few invariants via recency —
     # without altering anything the campaign author wrote. See compliance_floor.

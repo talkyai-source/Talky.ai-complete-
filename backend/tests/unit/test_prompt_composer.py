@@ -305,7 +305,13 @@ def test_composed_prompts_do_not_leak_placeholder_tokens():
     ]
 
     for out in outputs:
-        assert not re.search(r"\[[a-zA-Z_ -]+\]", out)
+        # [[END_CALL]] is the DELIBERATE agent hangup sentinel (end_call.py),
+        # not a leaked placeholder — anything else in brackets still fails.
+        leaks = [
+            m for m in re.findall(r"\[[a-zA-Z_ -]+\]", out)
+            if "END_CALL" not in m and "END CALL" not in m
+        ]
+        assert not leaks, leaks
         assert "completely free" not in out
         assert "no obligation" not in out
         assert "You are a real person" not in out

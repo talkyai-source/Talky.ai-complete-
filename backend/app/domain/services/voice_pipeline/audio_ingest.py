@@ -297,6 +297,8 @@ class AudioIngest:
                 _last_caller_at = _now()   # last caller speech → drives the 60s hangup
                 _silence_since = _now()    # last caller OR AI activity → drives nudges
                 _last_nudge_at: Optional[datetime] = None
+                _nudge_count = 0
+                _MAX_NUDGES = 2
                 _prev_user_turns = _count_user_turns()
                 _was_active = False
                 _tts_ended_at: Optional[datetime] = None
@@ -314,6 +316,7 @@ class AudioIngest:
                         _last_caller_at = _now()
                         _silence_since = _now()
                         _last_nudge_at = None
+                        _nudge_count = 0  # they're back — fresh nudge budget
                         _was_active = False
                         _tts_ended_at = None
                         continue
@@ -390,6 +393,14 @@ class AudioIngest:
                         _last_nudge_at = _now()  # keep the gap clock sane
                         continue
 
+                    # Cap nudges per call: after two check-ins a silent human
+                    # isn't coming back, and a third "still with me?" reads as
+                    # nagging (audited calls had up to SIX). Let the 60s
+                    # caller-silence hangup finish the call quietly.
+                    if _action == "nudge" and _nudge_count >= _MAX_NUDGES:
+                        _last_nudge_at = _now()
+                        continue
+
                     # _action == "nudge": opening (caller-first, not yet spoken)
                     # → a soft "Hello?"; otherwise a light check-in.
                     _opening = _is_caller_first and _prev_user_turns == 0
@@ -404,6 +415,7 @@ class AudioIngest:
                     except Exception as _sm_exc:
                         logger.debug("[SilenceMonitor] TTS failed: %s", _sm_exc)
                     _last_nudge_at = _now()
+                    _nudge_count += 1
                     _silence_since = _now()  # give them room to answer before re-nudging
 
             # Run for real phone calls AND for any session that explicitly opts
