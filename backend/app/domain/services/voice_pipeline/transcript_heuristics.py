@@ -62,11 +62,26 @@ _VOICEMAIL_PHRASES = (
     # A live person answering an unexpected call never describes themselves
     # as a voicemail/messaging service in their first breath.
     "voicemail service",
-    "voice mail service",
     "messaging service",
-    "the ee voice mail",
-    "the e e voice mail",
+    "the ee voicemail",
+    "the e e voicemail",
+    # Personal-greeting wording (2026-07-08 live miss: "Sorry I missed your
+    # call... please leave me a message and your phone number"). A person who
+    # just ANSWERED the phone cannot have "missed your call", and only a
+    # recording asks you to "leave me/us a message".
+    "sorry i missed your call",
+    "leave me a message",
+    "leave us a message",
+    "the voicemail of",
 )
+
+
+def _normalise_voicemail_blob(text: str) -> str:
+    """Whitespace-normalise AND unify the 'voice mail' spelling so every
+    phrase is written once with 'voicemail' yet matches both STT spellings
+    (Deepgram emits both, sometimes within one call)."""
+    blob = " ".join(text.lower().split())
+    return blob.replace("voice mail", "voicemail")
 
 
 def is_voicemail_greeting(text: str) -> bool:
@@ -81,5 +96,5 @@ def is_voicemail_greeting(text: str) -> bool:
     """
     if not text:
         return False
-    blob = " ".join(text.lower().split())  # normalise whitespace
+    blob = _normalise_voicemail_blob(text)
     return any(phrase in blob for phrase in _VOICEMAIL_PHRASES)

@@ -63,6 +63,21 @@ _MACHINE_END_PHRASES = (
     "voice mail",
 )
 
+# IVR / voicemail MENU navigation — wording no live human ever produces, so
+# these hang up at ANY turn without needing screening first. Observed when a
+# missed greeting let the agent talk INTO a mailbox: the recorder menu then
+# loops "To listen to your message, press one..." for minutes (2026-07-08:
+# two calls burned 127s/134s doing exactly this).
+_ALWAYS_MACHINE_PHRASES = (
+    "rerecord your message",
+    "re-record your message",
+    "to listen to your message, press",
+    "continue recording your message",
+    "message, press one",
+    "press the hash key",
+    "press the pound key",
+)
+
 
 def assess_machine_text(
     text: str,
@@ -85,6 +100,10 @@ def assess_machine_text(
 
     if turn_index <= _MAX_TURN_INDEX_FOR_OPENING and is_voicemail_greeting(blob):
         return "voicemail"
+
+    # Mailbox/IVR menu wording is machine-only at ANY point in a call.
+    if any(p in blob for p in _ALWAYS_MACHINE_PHRASES):
+        return "machine_end"
 
     if screening_seen and any(p in blob for p in _MACHINE_END_PHRASES):
         return "machine_end"

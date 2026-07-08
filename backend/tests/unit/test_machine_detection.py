@@ -65,3 +65,20 @@ def test_human_conversation():
 
 def test_empty():
     assert _a("") == "none"
+
+
+# ── 2026-07-08 live misses, now covered ──────────────────────────────────
+def test_personal_greeting_leave_me_a_message():
+    assert _a("Hi. It is here. Sorry I missed your call. Uh, please leave me a message and your phone number.") == "voicemail"
+
+
+def test_voice_mail_spelling_with_space():
+    assert _a("Hello. You have reached the voice mail of DPT briefing and gutting.") == "voicemail"
+
+
+def test_mailbox_menu_any_turn():
+    assert _a("To listen to your message, press one. To rerecord your message, press two.", turn=5) == "machine_end"
+
+
+def test_hash_key_menu_any_turn():
+    assert _a("please hang up or press the hash key for more options", turn=3) == "machine_end"
