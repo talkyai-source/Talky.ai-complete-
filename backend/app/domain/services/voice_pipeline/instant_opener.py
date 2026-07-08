@@ -71,7 +71,23 @@ async def try_instant_opener(session, transcript: str) -> bool:
         from app.domain.services.telephony.modes.agent_first import (
             _send_outbound_greeting,
         )
-        await _send_outbound_greeting(vs)
+        # The opener IS the answer to the caller's own "Hello?" — the trailing
+        # audio/echo of that very hello fires a fresh StartOfTurn barge-in a
+        # beat after playback starts, and the greeting player (correctly, for
+        # normal turns) aborts on it. Result observed live 15:13: agent
+        # permanently silent. Make THIS one playback barge-in-immune by
+        # parking the event; a real interruption costs at most ~3s of opener
+        # audio, versus a dead call.
+        _evt = getattr(session, "barge_in_event", None)
+        try:
+            if _evt is not None:
+                _evt.clear()
+                session.barge_in_event = None
+            await _send_outbound_greeting(vs)
+        finally:
+            if _evt is not None:
+                _evt.clear()
+                session.barge_in_event = _evt
         return True
     except Exception as exc:  # noqa: BLE001 — fall through to the LLM turn
         logger.warning(
