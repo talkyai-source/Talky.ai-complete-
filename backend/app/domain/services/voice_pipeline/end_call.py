@@ -54,8 +54,8 @@ CALL_CONTROL_RULES = f"""\
   to stop, it's a wrong number, or a voicemail/answering machine answered —
   say at most ONE short, warm closing line and end that reply with the exact
   token {END_CALL_TOKEN} . The system hangs up for you.
-- The token is invisible to the caller. Rely on it alone: phrases like
-  "[hangs up]" are just words and end nothing.
+- The token is invisible to the caller. Rely on it alone — stage directions
+  written as words ("hangs up", "ends call") do nothing.
 - Voicemail or answering machine: reply with {END_CALL_TOKEN} by itself —
   we call the person back another time instead of leaving recordings.
 
