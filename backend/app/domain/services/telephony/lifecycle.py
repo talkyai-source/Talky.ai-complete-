@@ -1516,8 +1516,39 @@ async def _on_audio_received(call_id: str, audio_bytes: bytes) -> None:
             _track_task(_force_end_and_hangup(call_id))
 
 
+# Calls whose teardown is in flight (or already ran). ARI terminal events
+# arrive in bursts (ChannelHangupRequest + StasisEnd + ChannelDestroyed) and
+# the adapter can dispatch _on_call_ended more than once for the same call.
+# Two concurrent teardowns of one call caused a REAL full-process deadlock
+# (2026-07-08): teardown A held the calls-row lock at an await point while
+# teardown B's call_service chain blocked the event loop synchronously
+# waiting on that same row — A could never resume to commit. One teardown
+# per call, ever. Entries are dropped after a delay purely to bound memory.
+_ended_calls_in_flight: set[str] = set()
+
+
+def _release_ended_marker_later(call_id: str, delay_s: float = 600.0) -> None:
+    async def _drop() -> None:
+        try:
+            await asyncio.sleep(delay_s)
+        finally:
+            _ended_calls_in_flight.discard(call_id)
+    try:
+        _track_task(_drop())
+    except Exception:
+        _ended_calls_in_flight.discard(call_id)
+
+
 async def _on_call_ended(call_id: str) -> None:
     """Clean up voice session when the call hangs up."""
+    if call_id in _ended_calls_in_flight:
+        logger.info(
+            "Telephony bridge: duplicate call-end ignored %s", call_id[:12]
+        )
+        return
+    _ended_calls_in_flight.add(call_id)
+    _release_ended_marker_later(call_id)
+
     logger.info(f"Telephony bridge: call ended {call_id[:12]}")
 
     # Avoid leaking the audio-route failure trackers across calls.
