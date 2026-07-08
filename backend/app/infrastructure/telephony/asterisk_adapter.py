@@ -155,6 +155,11 @@ class AsteriskAdapter(CallControlAdapter):
         # UI's "Dialing" → "Ringing"); provider warmup stays on _on_ringing.
         self._on_early_ringing: Optional[Callable] = None
         self._early_ring_emitted: set[str] = set()
+        # Channels whose call-end callback has been dispatched — prevents the
+        # pre-Stasis terminal arm double-firing after StasisEnd already
+        # dispatched teardown for the same channel (terminal events arrive in
+        # bursts: ChannelHangupRequest + StasisEnd + ChannelDestroyed).
+        self._end_dispatched: dict[str, None] = {}
         self._on_outbound_channel_alias: Optional[Callable] = None
 
         # RTP port allocator (32000–32999, matching Day 5 defaults)
@@ -771,8 +776,10 @@ class AsteriskAdapter(CallControlAdapter):
             self._discard_originated_channel(channel_id)
             # Clean up pending outbound channels that were never answered.
             if channel_id in self._pending_outbound:
+                self._end_dispatched[channel_id] = None
                 asyncio.create_task(self._cleanup_pending_outbound(channel_id))
             elif channel_id in self._active_sessions:
+                self._end_dispatched[channel_id] = None
                 asyncio.create_task(self._on_stasis_end(channel_id, event_type))
             elif channel_id in self._ext_channels.values():
                 # External channel ended — find and clean up parent
@@ -782,6 +789,30 @@ class AsteriskAdapter(CallControlAdapter):
                 )
                 if parent:
                     asyncio.create_task(self._on_stasis_end(parent, event_type))
+            elif (
+                event_type == "ChannelDestroyed"
+                and channel_id not in self._end_dispatched
+                and channel_id.startswith("talky-out")
+                and self._on_any_call_end is not None
+            ):
+                # PRE-STASIS terminal: a channel WE originated died without
+                # ever entering Stasis (busy / no-answer / rejected / carrier
+                # failure — with app-originate, StasisStart only fires on
+                # answer). It has no _pending_outbound entry and no session,
+                # so none of the arms above fires the end callback — without
+                # this, the call row sits in dialing/ringing until a reaper
+                # sweeps it minutes later. Signal the end NOW so status +
+                # outcome (from the captured Q.850 cause) land in real time.
+                self._end_dispatched[channel_id] = None
+                logger.info(
+                    f"AsteriskAdapter: pre-answer terminal channel={channel_id[:12]} "
+                    f"— dispatching call-end for real-time outcome"
+                )
+                asyncio.create_task(self._on_any_call_end(channel_id))
+            # Bound the dedupe map (insertion-ordered dict; evict oldest half).
+            if len(self._end_dispatched) >= 2000:
+                for _old in list(self._end_dispatched)[:1000]:
+                    self._end_dispatched.pop(_old, None)
 
     async def _on_outbound_stasis_start(self, channel_id: str) -> None:
         """

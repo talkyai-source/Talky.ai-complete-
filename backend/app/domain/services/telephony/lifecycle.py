@@ -1743,6 +1743,63 @@ async def _on_call_ended(call_id: str) -> None:
             await _get_orchestrator().end_session(voice_session)
         except Exception:
             pass
+    else:
+        # ----- No voice session: the call was NEVER answered ---------------
+        # (busy / no-answer / rejected / carrier failure — the adapter's
+        # pre-Stasis terminal arm dispatched us). The answered-path outcome
+        # persist above needs voice_session._dialer_call_id, so without this
+        # branch an unanswered call keeps outcome=NULL until a reaper sweeps
+        # it minutes later — the UI shows "ringing" long after the carrier
+        # said "busy". Resolve the outcome from the captured Q.850 cause and
+        # drive the SAME call_service chain (calls row + lead + campaign
+        # counters + dialer job) so "not available" lands in real time.
+        # Idempotent: only calls still without an outcome are touched.
+        try:
+            from app.core.container import get_container as _gc4
+            _c4 = _gc4()
+            if _c4.is_initialized:
+                _cause = None
+                try:
+                    _adp = _bridge()._adapter
+                    _cause = _adp.get_hangup_cause(call_id) if _adp else None
+                except Exception:
+                    _cause = None
+                async with _c4.db_pool.acquire() as _conn:
+                    _row = await _conn.fetchrow(
+                        """
+                        SELECT id, tenant_id FROM calls
+                        WHERE external_call_uuid = $1 AND outcome IS NULL
+                          AND status NOT IN ('completed', 'failed')
+                        LIMIT 1
+                        """,
+                        call_id,
+                    )
+                if _row is not None:
+                    outcome = resolve_call_outcome(None, hangup_reason=_cause)
+                    from app.core.security.tenant_isolation import (
+                        set_bypass_rls,
+                        set_current_tenant_id,
+                    )
+                    set_bypass_rls(True)
+                    set_current_tenant_id(str(_row["tenant_id"]))
+                    call_service = CallService(
+                        db_client=_c4.db_client,
+                        queue_service=getattr(_c4, "_queue_service", None),
+                    )
+                    await call_service.handle_call_status(
+                        call_uuid=str(_row["id"]),
+                        outcome=outcome,
+                        duration=0,
+                    )
+                    logger.info(
+                        "call_outcome_persisted_preanswer call_id=%s outcome=%s cause=%s",
+                        call_id[:12], outcome.value, _cause,
+                    )
+        except Exception as pa_err:
+            logger.warning(
+                "preanswer_outcome_persist_failed call_id=%s err=%s",
+                call_id[:12], pa_err,
+            )
     # Clean up gateway session mapping and early audio buffer for this call.
     _state().remove_gateway_sessions_for_call(call_id)
 
