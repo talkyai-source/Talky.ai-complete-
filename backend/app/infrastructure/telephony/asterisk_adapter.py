@@ -731,20 +731,19 @@ class AsteriskAdapter(CallControlAdapter):
                 # Carrier 180 — the callee's phone just started ringing. Arrives
                 # well before StasisStart, so surface it for live-status now.
                 # Only for OUR outbound channels; once per channel.
-                if (
-                    self._on_early_ringing is not None
-                    and channel_id not in self._early_ring_emitted
-                    and (
-                        channel_id in self._originated_channels
-                        or channel_id.startswith("talky-out")
-                    )
-                ):
-                    self._early_ring_emitted.add(channel_id)
-                    logger.info(
-                        f"AsteriskAdapter: outbound channel early-ringing "
-                        f"channel={channel_id[:12]}"
-                    )
-                    asyncio.create_task(self._on_early_ringing(channel_id))
+                self._dispatch_early_ringing(channel_id)
+
+        elif event_type == "Dial":
+            # Some carriers (observed on Blaze) never flip the channel state to
+            # Ringing, so ChannelStateChange alone misses the entire ring phase
+            # and the UI sits on "Dialing" until pickup. Asterisk still emits
+            # Dial events with dialstatus progression ("" → RINGING → ANSWER)
+            # for channels subscribed to the app — use RINGING as the same
+            # early-ringing signal (deduped, so double delivery is harmless).
+            if str(event.get("dialstatus") or "").upper() == "RINGING":
+                peer = event.get("peer") or {}
+                _dial_ch = str(peer.get("id") or channel_id or "")
+                self._dispatch_early_ringing(_dial_ch)
 
         elif event_type in ("StasisEnd", "ChannelDestroyed", "ChannelHangupRequest"):
             # Capture the hangup cause (Q.850) BEFORE we tear anything down so
@@ -1308,6 +1307,28 @@ class AsteriskAdapter(CallControlAdapter):
     def set_call_end_callback(self, callback: Callable) -> None:
         """Global callback invoked when any call ends."""
         self._on_any_call_end = callback
+
+    def _dispatch_early_ringing(self, channel_id: str) -> None:
+        """Fire the early-ringing callback once per outbound channel.
+
+        Shared by ChannelStateChange(Ringing) and Dial(dialstatus=RINGING) —
+        whichever the carrier actually delivers first wins; the dedupe set
+        makes the other a no-op."""
+        if (
+            not channel_id
+            or self._on_early_ringing is None
+            or channel_id in self._early_ring_emitted
+            or not (
+                channel_id in self._originated_channels
+                or channel_id.startswith("talky-out")
+            )
+        ):
+            return
+        self._early_ring_emitted.add(channel_id)
+        logger.info(
+            f"AsteriskAdapter: outbound channel early-ringing channel={channel_id[:12]}"
+        )
+        asyncio.create_task(self._on_early_ringing(channel_id))
 
     def set_early_ringing_callback(self, callback: Callable) -> None:
         """Register the EARLY-ringing (ChannelStateChange Ringing) callback.

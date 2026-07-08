@@ -327,6 +327,14 @@ async def list_call_issues(
           AND  dj.updated_at >= NOW() - make_interval(mins => $2)
           AND  dj.status NOT IN ('completed', 'goal_achieved')
           AND  (dj.failure_reason IS NOT NULL OR dj.last_error IS NOT NULL)
+          -- Self-clearing PACING deferrals are normal dialer operation
+          -- (inter-call gap, batch slot, per-account rate limiter). They
+          -- retry on their own within seconds/minutes and need no operator
+          -- action — surfacing one card per lead flooded the panel with
+          -- hundreds of "issues" on any healthy paced campaign.
+          AND  COALESCE(dj.failure_reason, dj.last_error, '')
+                 NOT IN ('call_gap', 'batch_capacity',
+                         'call_guard_throttled', 'call_guard_queued')
           AND  NOT EXISTS (
                  SELECT 1 FROM calls c2
                  WHERE c2.lead_id = dj.lead_id

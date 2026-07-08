@@ -120,6 +120,19 @@ _RULES: list[tuple[str, IssueAdvice]] = [
         "Calls are going out faster than the per-account limit allows. The dialer will retry shortly — no action needed.",
         "warning", "safety",
     )),
+    # Pacing — normal operation, never an operator problem. These are also
+    # excluded from GET /calls/issues at the SQL level; the entries exist so
+    # any other surface that maps a reason renders them as benign info.
+    ("call_gap", IssueAdvice(
+        "Pacing between calls",
+        "The campaign spaces its calls (inter-call gap). This number dials automatically when its turn comes — no action needed.",
+        "info", "pacing",
+    )),
+    ("batch_capacity", IssueAdvice(
+        "Waiting for a batch slot",
+        "The campaign dials in batches; this number starts as soon as an in-flight call finishes — no action needed.",
+        "info", "pacing",
+    )),
     ("call_guard_queued", IssueAdvice(
         "Waiting for a free slot",
         "The call is queued behind the account's rate limiter and will dial automatically when a slot frees up.",
