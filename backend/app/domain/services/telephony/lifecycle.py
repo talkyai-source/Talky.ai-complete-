@@ -1721,6 +1721,9 @@ async def _on_call_ended(call_id: str) -> None:
                     call_service = CallService(
                         db_client=_c2.db_client,
                         queue_service=getattr(_c2, "_queue_service", None),
+                        # 2026-07-08: pooled + atomic teardown writes —
+                        # see CallService._handle_call_status_pooled.
+                        db_pool=_c2.db_pool,
                     )
                     await call_service.handle_call_status(
                         call_uuid=dialer_call_id,
@@ -1816,6 +1819,9 @@ async def _on_call_ended(call_id: str) -> None:
                     call_service = CallService(
                         db_client=_c4.db_client,
                         queue_service=getattr(_c4, "_queue_service", None),
+                        # 2026-07-08: pooled + atomic teardown writes —
+                        # see CallService._handle_call_status_pooled.
+                        db_pool=_c4.db_pool,
                     )
                     await call_service.handle_call_status(
                         call_uuid=str(_row["id"]),

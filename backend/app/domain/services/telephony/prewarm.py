@@ -84,27 +84,30 @@ async def _resolve_session_accent(call_session, provider: Optional[str]) -> None
         pass
 
 
-def _lookup_campaign_row(container, campaign_id: Optional[str]):
+async def _lookup_campaign_row(campaign_id: Optional[str]):
     """Best-effort campaign fetch for the layered prompt composer.
 
     Failure is non-fatal — we fall back to the legacy prompt — so any
     error is logged and swallowed.
+
+    2026-07-08: this runs on every outbound call during pre-warm (hot path),
+    so it was moved off the blocking postgres_adapter (`db_client.table()`
+    — blocks the event loop on the shared thread pool AND opens an unpooled
+    asyncpg connection per call) onto the pooled async `get_db()` connection.
+    `get_db()` reads the same tenant-isolation contextvars the adapter did,
+    so RLS/tenant behaviour is unchanged.
     """
     if not campaign_id:
         return None
     try:
-        db_client = getattr(container, "db_client", None)
-        if db_client is None:
-            return None
-        row = (
-            db_client.table("campaigns")
-            .select("*")
-            .eq("id", campaign_id)
-            .limit(1)
-            .execute()
-        )
-        if getattr(row, "data", None):
-            return row.data[0]
+        from app.core.db import get_db
+
+        async with get_db() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM campaigns WHERE id = $1::uuid LIMIT 1",
+                str(campaign_id),
+            )
+        return dict(row) if row else None
     except Exception as cexc:
         logger.warning(
             "campaign_lookup_failed campaign_id=%s err=%s — using legacy prompt",
@@ -129,7 +132,7 @@ async def prepare_prewarmed_session(
     cleaned up and ``session`` is None with ``failure_reason`` set.
     """
     effective_first_speaker = _resolve_first_speaker(first_speaker)
-    campaign_row = _lookup_campaign_row(container, campaign_id)
+    campaign_row = await _lookup_campaign_row(campaign_id)
 
     pre_warm_session = None
     warmup_failure_reason: Optional[str] = None

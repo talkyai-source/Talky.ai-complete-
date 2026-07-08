@@ -114,19 +114,25 @@ async def _save_call_recording(voice_session, call_id: str) -> None:
     tenant_id = "default"
     campaign_id = "unknown"
 
+    # 2026-07-08: this lookup runs once per call at recording persist (hot
+    # path), so it was moved off the blocking postgres_adapter
+    # (`db_client.table()` — blocks the event loop on the shared thread pool
+    # AND opens an unpooled asyncpg connection per call) onto the pooled
+    # async `get_db()` connection. `get_db()` reads the same tenant-isolation
+    # contextvars the adapter did, so RLS/tenant behaviour is unchanged.
     try:
-        result = (
-            db_client.table("calls")
-            .select("id, tenant_id, campaign_id")
-            .eq("external_call_uuid", call_id)
-            .limit(1)
-            .execute()
-        )
-        if result.data:
-            row = result.data[0] if isinstance(result.data, list) else result.data
-            internal_call_id = str(row.get("id"))
-            tenant_id = str(row.get("tenant_id") or "default")
-            campaign_id = str(row.get("campaign_id") or "unknown")
+        from app.core.db import get_db
+
+        async with get_db() as conn:
+            row = await conn.fetchrow(
+                "SELECT id, tenant_id, campaign_id FROM calls "
+                "WHERE external_call_uuid = $1 LIMIT 1",
+                call_id,
+            )
+        if row:
+            internal_call_id = str(row["id"])
+            tenant_id = str(row["tenant_id"] or "default")
+            campaign_id = str(row["campaign_id"] or "unknown")
             logger.info(
                 f"Resolved PBX channel {call_id[:12]} → calls.id={internal_call_id}, "
                 f"tenant={tenant_id[:8]}, campaign={campaign_id[:8]}"

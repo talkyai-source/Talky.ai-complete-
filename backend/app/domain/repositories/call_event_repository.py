@@ -8,9 +8,10 @@ never interrupts an active call.
 """
 from __future__ import annotations
 
+import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from app.core.postgres_adapter import Client
@@ -43,29 +44,45 @@ class CallEventRepository:
         Write an event to the call_events table.
 
         Returns the event id on success, None on failure.
+
+        2026-07-08: this fires on every call end (hot path), so it was moved
+        off the blocking postgres_adapter (`Client.table().insert().execute()`
+        — blocks the event loop on the shared 4-worker thread pool AND opens
+        an unpooled asyncpg connection per call) onto the pooled async
+        `get_db()` connection. `get_db()` reads the exact same tenant-isolation
+        contextvars (`get_current_tenant_id()` / `get_bypass_rls()`) the
+        adapter did, so RLS behaviour is unchanged; call_events itself has no
+        RLS policy today, but we keep the same SET LOCAL sequencing for
+        parity. Callers already wrap this in best-effort try/except — that
+        fail-soft contract is preserved (any error is logged and swallowed,
+        never raised).
         """
         event_id = str(uuid.uuid4())
-        record = {
-            "id": event_id,
-            "call_id": call_id,
-            "event_type": event_type,
-            "source": source,
-            "event_data": event_data or {},
-            "created_at": datetime.utcnow().isoformat(),
-        }
-        if talklee_call_id:
-            record["talklee_call_id"] = talklee_call_id
-        if leg_id:
-            record["leg_id"] = leg_id
-        if previous_state:
-            record["previous_state"] = previous_state
-        if new_state:
-            record["new_state"] = new_state
-
         try:
-            response = self._db_client.table("call_events").insert(record).execute()
-            if getattr(response, "error", None):
-                raise RuntimeError(response.error)
+            from app.core.db import get_db
+
+            async with get_db() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO call_events (
+                        id, call_id, event_type, source, event_data, created_at,
+                        talklee_call_id, leg_id, previous_state, new_state
+                    ) VALUES (
+                        $1::uuid, $2::uuid, $3, $4, $5::jsonb, $6,
+                        $7, $8::uuid, $9, $10
+                    )
+                    """,
+                    event_id,
+                    call_id,
+                    event_type,
+                    source,
+                    json.dumps(event_data or {}, default=str),
+                    datetime.now(timezone.utc),
+                    talklee_call_id,
+                    leg_id,
+                    previous_state,
+                    new_state,
+                )
             logger.debug(f"Call event logged: {event_type} for call {call_id}")
             return event_id
         except Exception as e:

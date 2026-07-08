@@ -385,9 +385,13 @@ class ServiceContainer:
     def _initialize_call_service(self) -> None:
         try:
             from app.domain.services.call_service import CallService
+            # 2026-07-08: pass the pooled asyncpg connection so
+            # handle_call_status's teardown writes run non-blocking and
+            # atomic instead of through the blocking postgres_adapter.
             self._call_service = CallService(
                 db_client=self.db_client,
                 queue_service=self._queue_service,
+                db_pool=self._db_pool,
             )
             logger.info("CallService initialized")
         except Exception as e:

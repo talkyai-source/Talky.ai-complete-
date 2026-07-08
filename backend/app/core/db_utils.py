@@ -60,6 +60,8 @@ def _validate_uuid(value: str) -> str:
 async def acquire_with_tenant(
     pool: asyncpg.Pool,
     tenant_id: Optional[str],
+    *,
+    timeout: Optional[float] = None,
 ) -> AsyncIterator[asyncpg.Connection]:
     """Acquire a connection with the right RLS context already set.
 
@@ -71,8 +73,20 @@ async def acquire_with_tenant(
     SET LOCAL inside the wrapping transaction guarantees the GUC is
     dropped when the connection is returned to the pool, so a later
     consumer of the same connection never inherits stale tenant context.
+
+    ``timeout`` (2026-07-08): optional bounded wait for a pool slot,
+    mirroring ``app.core.db.get_db()``'s acquire timeout. Defaults to
+    ``None`` (asyncpg's own default — wait indefinitely), so existing
+    callers are unaffected. Raises ``asyncio.TimeoutError`` on expiry —
+    callers that want the saturated-pool case to degrade gracefully
+    (e.g. a request/teardown path) should catch it and fail soft rather
+    than propagate a hang.
     """
-    async with pool.acquire() as conn:
+    # Only pass `timeout` through when the caller asked for one — several
+    # unit-test fake pools implement a bare `acquire()` with no kwargs, and
+    # asyncpg's own default (wait indefinitely) is unaffected by omitting it.
+    acquire_cm = pool.acquire(timeout=timeout) if timeout is not None else pool.acquire()
+    async with acquire_cm as conn:
         async with conn.transaction():
             if tenant_id is not None:
                 _validate_uuid(str(tenant_id))
