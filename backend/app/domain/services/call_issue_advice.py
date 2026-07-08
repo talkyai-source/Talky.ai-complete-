@@ -133,6 +133,11 @@ _RULES: list[tuple[str, IssueAdvice]] = [
         "The campaign dials in batches; this number starts as soon as an in-flight call finishes — no action needed.",
         "info", "pacing",
     )),
+    ("tenant_gap", IssueAdvice(
+        "Pacing across campaigns",
+        "Another campaign of this account just placed a call; campaigns take turns so only one call originates at a time — no action needed.",
+        "info", "pacing",
+    )),
     ("call_guard_queued", IssueAdvice(
         "Waiting for a free slot",
         "The call is queued behind the account's rate limiter and will dial automatically when a slot frees up.",

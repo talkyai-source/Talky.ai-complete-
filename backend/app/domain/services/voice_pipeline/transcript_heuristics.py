@@ -56,6 +56,16 @@ _VOICEMAIL_PHRASES = (
     "voicemail box",
     "automated voice messaging",
     "google voice",
+    # UK carrier voicemail services (verbatim from 2026-07-08 production
+    # transcripts: O2 "welcome to the o two messaging service", Vodafone
+    # "this is the Vodafone voice mail service", EE "to the EE voice mail").
+    # A live person answering an unexpected call never describes themselves
+    # as a voicemail/messaging service in their first breath.
+    "voicemail service",
+    "voice mail service",
+    "messaging service",
+    "the ee voice mail",
+    "the e e voice mail",
 )
 
 

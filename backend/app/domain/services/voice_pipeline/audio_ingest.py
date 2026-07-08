@@ -377,6 +377,19 @@ class AudioIngest:
                             logger.debug("[SilenceMonitor] close-on-silence failed: %s", _close_exc)
                         break
 
+                    # Never nudge a MACHINE. Once screening/voicemail wording
+                    # was heard (machine_detection flags), "Sorry, did I lose
+                    # you?" at a recording or a screening hold is pure waste
+                    # (observed 3x per voicemail call, 2026-07-08 audit) — and
+                    # during a screening hold, silence is the correct
+                    # etiquette. The 60s hangup above still applies.
+                    if _action == "nudge" and (
+                        getattr(session, "_machine_screening", False)
+                        or getattr(session, "_amd_voicemail", False)
+                    ):
+                        _last_nudge_at = _now()  # keep the gap clock sane
+                        continue
+
                     # _action == "nudge": opening (caller-first, not yet spoken)
                     # → a soft "Hello?"; otherwise a light check-in.
                     _opening = _is_caller_first and _prev_user_turns == 0

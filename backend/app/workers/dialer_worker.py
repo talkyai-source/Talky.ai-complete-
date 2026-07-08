@@ -412,6 +412,27 @@ class DialerWorker:
                     )
                     return
 
+            # 4.9. TENANT-wide pacing: one origination at a time across ALL
+            # campaigns. The per-campaign gap above works, but two running
+            # campaigns phase-lock and fire near-simultaneously every cycle,
+            # doubling load on the single voice pipeline at the same instant
+            # (measured: 12-23s replies, audio gaps). Atomic Redis claim —
+            # whoever wins dials; everyone else waits out the window.
+            from app.domain.services.dialer.global_pacing import (
+                claim_tenant_dial_slot, release_tenant_dial_slot,
+            )
+            _tenant_wait = await claim_tenant_dial_slot(self._redis, job.tenant_id)
+            if _tenant_wait > 0:
+                logger.debug(
+                    "tenant_gap: tenant %s dialed recently — deferring job %s by %ds",
+                    job.tenant_id, job.job_id, _tenant_wait,
+                )
+                await self.queue_service.schedule_retry(job, delay_seconds=_tenant_wait)
+                await self._update_job_status(
+                    job.job_id, JobStatus.RETRY_SCHEDULED, reason="tenant_gap",
+                )
+                return
+
             try:
                 # 5. Initiate the call via the provider/PBX.
                 provider_call_id = await self._make_call(job, rules)
@@ -422,6 +443,9 @@ class DialerWorker:
                 # bad lead. Without this guard, a 30-second outage burns
                 # every job's max_retries and marks them all FAILED.
                 if provider_call_id == self._PIPELINE_UNAVAILABLE:
+                    # Nothing dialed — give the tenant slot back so the other
+                    # campaign isn't paced against a failed attempt.
+                    await release_tenant_dial_slot(self._redis, job.tenant_id)
                     await self._update_lead_status(job.lead_id, "pending")
                     await self.queue_service.schedule_retry(job, delay_seconds=60)
                     await self._update_job_status(
@@ -506,6 +530,15 @@ class DialerWorker:
                 pass
                 
         except Exception as e:
+            # Nothing dialed — release the tenant pacing slot (best-effort)
+            # so a failed originate doesn't burn the whole gap window.
+            try:
+                from app.domain.services.dialer.global_pacing import (
+                    release_tenant_dial_slot,
+                )
+                await release_tenant_dial_slot(self._redis, job.tenant_id)
+            except Exception:
+                pass
             self._jobs_failed += 1
             job.last_error = str(e)
             job.last_outcome = CallOutcome.FAILED

@@ -135,11 +135,14 @@ def _looks_like_voicemail(voice_session: Any) -> bool:
     """Heuristic: scan the first assistant transcript and any AMD hint
     on the session for voicemail markers. Cheap; runs once at hangup."""
     try:
-        # AMD flag — set by the telephony adapter if answering-machine
-        # detection ran during call setup.
+        # AMD flag — set by answering-machine detection (final-transcript AMD
+        # sets it on the voice session; the interim machine detector sets it
+        # on the pipeline CallSession it holds — check both).
         if getattr(voice_session, "_amd_voicemail", False):
             return True
         cs = getattr(voice_session, "call_session", None)
+        if cs is not None and getattr(cs, "_amd_voicemail", False):
+            return True
         history = getattr(cs, "conversation_history", []) if cs else []
         # Look at the first 1-2 user turns — voicemail greetings show
         # up there. Anything later is likely a real conversation.

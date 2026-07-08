@@ -204,10 +204,25 @@ class TranscriptHandler:
                 self._p._pending_llm_tasks[call_id] = task
             return
 
-        # Real-time voicemail detection: if the first thing heard after the
-        # callee "answers" is an answering-machine greeting, hang up now and
-        # mark the call voicemail — no message, no conversation. Only the
-        # opening turn(s), only on a final transcript.
+        # Real-time machine detection on EVERY transcript, interims included.
+        # A recorded greeting is continuous speech, so EndOfTurn never fires
+        # and a final-only check sits deaf for the whole message (audited
+        # 2026-07-08: 45-134s burned per voicemail). Handles opening
+        # voicemail, call-screening services, and the post-screening
+        # "not available / after the tone" endgame. Fail-soft; returns True
+        # only when the call is being hung up.
+        if transcript.text:
+            from app.domain.services.voice_pipeline.machine_detection import (
+                handle_machine_interim,
+            )
+            if await handle_machine_interim(
+                call_id, session, transcript.text,
+                media_gateway=getattr(self._p, "media_gateway", None),
+            ):
+                return
+
+        # Final-transcript voicemail detection kept as the belt-and-braces
+        # fallback (some machines DO pause long enough to finalize a turn).
         if transcript.text and transcript.is_final and session.turn_id <= 1:
             from app.domain.services.voice_pipeline.voicemail_detector import (
                 detect_and_hang_up_voicemail,
