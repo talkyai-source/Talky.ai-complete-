@@ -165,6 +165,7 @@ from app.domain.services.telephony.lifecycle import (  # noqa: E402
     _get_orchestrator,
     _session_watchdog,
     _SESSION_INACTIVITY_TIMEOUT_S,
+    _on_early_ringing,
     _on_ringing,
     _on_new_call,
     _on_audio_received,
@@ -244,6 +245,10 @@ async def start_telephony(
         # first-turn latency matched to subsequent turns (~<500 ms).
         if hasattr(_adapter, "set_ringing_callback"):
             _adapter.set_ringing_callback(_on_ringing)
+        # Early-ringing (carrier 180) hook — live-status only, so the UI can
+        # advance "Dialing" → "Ringing" the moment the callee's phone rings.
+        if hasattr(_adapter, "set_early_ringing_callback"):
+            _adapter.set_early_ringing_callback(_on_early_ringing)
         if hasattr(_adapter, "set_outbound_channel_alias_callback"):
             _adapter.set_outbound_channel_alias_callback(_alias_ringing_call_id)
 
@@ -504,13 +509,25 @@ async def make_call(request: Request, body: MakeCallRequest):
     if getattr(_adapter, "name", "") == "asterisk" and effective_tenant_id:
         try:
             from app.domain.services.telephony.trunk_resolver import (
+                _resolve_campaign_trunk,
                 _resolve_pool_assignment,
             )
-            _pool_route = await _resolve_pool_assignment(
-                container.db_pool,
-                tenant_id=str(effective_tenant_id),
-                is_production=(environment == "production"),
-            )
+            # Campaign-level trunk override first: two campaigns of the same
+            # tenant may be allotted different PBX accounts / caller-IDs.
+            # Same trust model as the pool route (operator-assigned snapshot),
+            # so it also satisfies the caller-ID ownership gate below.
+            if campaign_id:
+                _pool_route = await _resolve_campaign_trunk(
+                    container.db_pool,
+                    campaign_id=str(campaign_id),
+                    tenant_id=str(effective_tenant_id),
+                )
+            if _pool_route is None:
+                _pool_route = await _resolve_pool_assignment(
+                    container.db_pool,
+                    tenant_id=str(effective_tenant_id),
+                    is_production=(environment == "production"),
+                )
         except Exception:  # noqa: BLE001 — never block a call on this
             _pool_route = None
 

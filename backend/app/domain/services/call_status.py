@@ -248,6 +248,20 @@ async def record_call_state(
     state = coerce_state(new_state)
     ts_col = _STATE_TIMESTAMP_COLUMN.get(state)
 
+    # Forward-only guard for EARLY states. ARI events race under load
+    # (a late RINGING task can land after ANSWERED), and early-ringing
+    # signals may repeat. Never let an early state overwrite a live or
+    # terminal one — a call the UI shows as "answered" must not snap
+    # back to "ringing". Live/terminal states still accept any forward
+    # transition (see module docstring on out-of-order ARI events).
+    _early = state in (
+        CallState.QUEUED, CallState.DIALING, CallState.RINGING, CallState.INITIATED,
+    )
+    _guard_sql = (
+        " AND NOT (status = ANY('{answered,in_call,ended,completed,failed}'))"
+        if _early else ""
+    )
+
     # 1. UPDATE the calls table.
     try:
         async with db_pool.acquire() as conn:
@@ -256,11 +270,19 @@ async def record_call_state(
                 # if the same state event arrives twice (race-tolerant).
                 sql = (
                     f"UPDATE calls SET status = $1, {ts_col} = COALESCE({ts_col}, NOW()), "
-                    f"updated_at = NOW() WHERE id = $2"
+                    f"updated_at = NOW() WHERE id = $2{_guard_sql}"
                 )
             else:
-                sql = "UPDATE calls SET status = $1, updated_at = NOW() WHERE id = $2"
-            await conn.execute(sql, state.value, call_id)
+                sql = f"UPDATE calls SET status = $1, updated_at = NOW() WHERE id = $2{_guard_sql}"
+            result = await conn.execute(sql, state.value, call_id)
+            if _early and result == "UPDATE 0":
+                # Downgrade blocked (or row gone) — skip the stream event
+                # too so the live panel never regresses either.
+                logger.debug(
+                    "call_status.downgrade_skipped call=%s state=%s",
+                    call_id, state.value,
+                )
+                return
     except Exception as exc:
         logger.warning(
             "call_status.update_failed call=%s state=%s err=%s",

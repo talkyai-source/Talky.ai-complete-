@@ -297,6 +297,50 @@ def _extract_trunk_caller_id(metadata) -> Optional[str]:
     return None
 
 
+async def _resolve_campaign_trunk(
+    db_pool, *, campaign_id: str, tenant_id: str
+) -> Optional[OutboundTrunkRoute]:
+    """If this CAMPAIGN has been allotted a specific trunk, route to it.
+
+    Per-campaign override — lets two campaigns of the same tenant dial out on
+    different PBX accounts (different caller-IDs). Stored on the campaign's own
+    ``campaigns.calling_config.trunk`` as ``{"id","endpoint","caller_id","label"}``
+    (snapshotted at assignment time, same shape as the tenant pool allotment).
+    Takes precedence over BOTH the tenant pool allotment and own-trunk
+    resolution. Returns None when there's no assignment or on any error
+    (fail-safe → fall through to the tenant-level paths).
+    """
+    try:
+        from app.core.db_utils import acquire_with_tenant
+        async with acquire_with_tenant(db_pool, str(tenant_id)) as conn:
+            raw = await conn.fetchval(
+                "SELECT calling_config->'trunk' FROM campaigns "
+                "WHERE id = $1::uuid AND tenant_id = $2::uuid",
+                str(campaign_id), str(tenant_id),
+            )
+        if not raw:
+            return None
+        ct = raw if isinstance(raw, dict) else json.loads(raw)
+        endpoint = (ct.get("endpoint") or "").strip()
+        if not endpoint:
+            return None
+        caller_id = (ct.get("caller_id") or "").strip() or None
+        return OutboundTrunkRoute(
+            endpoint=endpoint,
+            caller_id=caller_id,
+            trunk_id=(ct.get("id") or None),
+            is_default=False,
+            reason="campaign_assigned",
+            refused=False,
+        )
+    except Exception as exc:  # noqa: BLE001 — fail-safe, never block a call
+        logger.error(
+            "campaign_trunk_resolve_failed campaign=%s err=%s",
+            str(campaign_id)[:8], exc,
+        )
+        return None
+
+
 async def _resolve_pool_assignment(
     db_pool, *, tenant_id: str, is_production: bool
 ) -> Optional[OutboundTrunkRoute]:
@@ -344,6 +388,7 @@ async def resolve_outbound_trunk(
     *,
     tenant_id: Optional[str],
     environment: str,
+    campaign_id: Optional[str] = None,
 ) -> OutboundTrunkRoute:
     """Resolve the outbound route for ``tenant_id`` (async, DB-backed).
 
@@ -359,6 +404,19 @@ async def resolve_outbound_trunk(
         return _fallback_route("no_tenant", shared_default_enabled=shared_default)
 
     is_production = environment.strip().lower() == "production"
+
+    # Campaign-level trunk override wins over everything: two campaigns of the
+    # same tenant may dial out on different PBX accounts / caller-IDs.
+    if campaign_id:
+        campaign_route = await _resolve_campaign_trunk(
+            db_pool, campaign_id=str(campaign_id), tenant_id=str(tenant_id)
+        )
+        if campaign_route is not None:
+            logger.info(
+                "trunk_resolved tenant=%s campaign=%s endpoint=%s reason=campaign_assigned",
+                str(tenant_id)[:8], str(campaign_id)[:8], campaign_route.endpoint,
+            )
+            return campaign_route
 
     # Shared-pool allotment wins: if an operator assigned this tenant a pool
     # account, dial on it (no own trunk / registration needed on the tenant).

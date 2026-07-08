@@ -666,6 +666,31 @@ def _pipeline_done_cb(task: asyncio.Task, call_id: str) -> None:
         _track_task(_force_end_and_hangup(call_id))
 
 
+async def _on_early_ringing(call_id: str) -> None:
+    """Carrier reported 180 Ringing for an outbound channel (seconds before
+    StasisStart). Status-only hook: advance the live call to RINGING so the
+    UI moves "Dialing" → "Ringing" in real time. Never does warmup, never
+    raises — a status emit must not touch call setup."""
+    try:
+        from app.domain.services.call_status import (
+            CallState, record_call_state_by_provider_id,
+        )
+        from app.core.container import get_container as _gc_er
+        _c = _gc_er()
+        if _c.is_initialized:
+            await record_call_state_by_provider_id(
+                _c.db_pool,
+                provider_call_id=call_id,
+                new_state=CallState.RINGING,
+                metadata={"description": "Ringing"},
+            )
+    except Exception as _er_exc:  # noqa: BLE001 — best-effort
+        logger.debug(
+            "call_status.early_ringing_emit_raised call=%s err=%s",
+            call_id[:12], _er_exc,
+        )
+
+
 async def _on_ringing(call_id: str) -> None:
     """
     Fired when the Asterisk adapter has parked an outbound channel in its

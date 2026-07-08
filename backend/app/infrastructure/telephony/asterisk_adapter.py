@@ -149,6 +149,12 @@ class AsteriskAdapter(CallControlAdapter):
         # during the 2–10 s of otherwise idle ring time, so that first-turn
         # latency after answer matches subsequent turns.
         self._on_ringing: Optional[Callable] = None
+        # Optional EARLY-ringing callback. Fired on ChannelStateChange(Ringing)
+        # — the carrier's 180, which arrives seconds BEFORE StasisStart on an
+        # originated channel. Used purely for live-status transparency (the
+        # UI's "Dialing" → "Ringing"); provider warmup stays on _on_ringing.
+        self._on_early_ringing: Optional[Callable] = None
+        self._early_ring_emitted: set[str] = set()
         self._on_outbound_channel_alias: Optional[Callable] = None
 
         # RTP port allocator (32000–32999, matching Day 5 defaults)
@@ -716,6 +722,24 @@ class AsteriskAdapter(CallControlAdapter):
                         f"StasisStart processed for channel={channel_id[:12]} — saved for later"
                     )
                     self._preemptive_up_channels.add(channel_id)
+            elif channel_state in ("ringing", "ring"):
+                # Carrier 180 — the callee's phone just started ringing. Arrives
+                # well before StasisStart, so surface it for live-status now.
+                # Only for OUR outbound channels; once per channel.
+                if (
+                    self._on_early_ringing is not None
+                    and channel_id not in self._early_ring_emitted
+                    and (
+                        channel_id in self._originated_channels
+                        or channel_id.startswith("talky-out")
+                    )
+                ):
+                    self._early_ring_emitted.add(channel_id)
+                    logger.info(
+                        f"AsteriskAdapter: outbound channel early-ringing "
+                        f"channel={channel_id[:12]}"
+                    )
+                    asyncio.create_task(self._on_early_ringing(channel_id))
 
         elif event_type in ("StasisEnd", "ChannelDestroyed", "ChannelHangupRequest"):
             # Capture the hangup cause (Q.850) BEFORE we tear anything down so
@@ -743,6 +767,7 @@ class AsteriskAdapter(CallControlAdapter):
                 self._hangup_causes[channel_id] = str(_cause_txt)
             # Drop any preemptive Up record for channels that are now gone.
             self._preemptive_up_channels.discard(channel_id)
+            self._early_ring_emitted.discard(channel_id)
             self._discard_originated_channel(channel_id)
             # Clean up pending outbound channels that were never answered.
             if channel_id in self._pending_outbound:
@@ -1252,6 +1277,14 @@ class AsteriskAdapter(CallControlAdapter):
     def set_call_end_callback(self, callback: Callable) -> None:
         """Global callback invoked when any call ends."""
         self._on_any_call_end = callback
+
+    def set_early_ringing_callback(self, callback: Callable) -> None:
+        """Register the EARLY-ringing (ChannelStateChange Ringing) callback.
+
+        Fired once per outbound channel the moment the carrier reports 180
+        Ringing — used by the bridge to advance the live call status to
+        "ringing" in real time. Status-only; never used for warmup."""
+        self._on_early_ringing = callback
 
     def set_ringing_callback(self, callback: Callable) -> None:
         """

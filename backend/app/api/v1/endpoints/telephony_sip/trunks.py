@@ -983,3 +983,129 @@ async def set_pool_assignment(
     return PoolAssignmentResponse(
         pool_trunk_id=snapshot["id"], label=snapshot["label"], caller_id=snapshot["caller_id"]
     )
+
+
+# ── Per-CAMPAIGN trunk allotment ──────────────────────────────────────────
+# Lets two campaigns of the same tenant dial out on different PBX accounts
+# (different caller-IDs). Snapshot lives on campaigns.calling_config.trunk,
+# same {"id","endpoint","caller_id","label"} shape as the tenant pool
+# allotment; trunk_resolver._resolve_campaign_trunk gives it top precedence.
+
+
+class CampaignTrunkBody(BaseModel):
+    campaign_id: str
+    trunk_id: Optional[str] = None  # null clears the assignment
+
+
+class CampaignTrunkResponse(BaseModel):
+    campaign_id: str
+    trunk_id: Optional[str] = None
+    label: Optional[str] = None
+    caller_id: Optional[str] = None
+
+
+async def _fetch_assignable_trunk(conn, trunk_id: str, tenant_id):
+    """Read one active trunk this tenant may dial on: their OWN trunk or a
+    shared-pool account. RLS bypassed inside a transaction (pool rows live
+    under the pool tenant), with the ownership check done explicitly in SQL."""
+    await conn.execute("SET LOCAL app.bypass_rls = 'on'")
+    return await conn.fetchrow(
+        """
+        SELECT id, trunk_name, auth_username, metadata->>'caller_id' AS caller_id
+        FROM tenant_sip_trunks
+        WHERE id = $1::uuid AND is_active = TRUE
+          AND (tenant_id = $2::uuid OR metadata->>'pool' = 'true')
+        """,
+        trunk_id, str(tenant_id),
+    )
+
+
+@router.get("/trunks/campaign-assignment", response_model=CampaignTrunkResponse)
+async def get_campaign_trunk_assignment(
+    campaign_id: str,
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_pool: asyncpg.Pool = Depends(get_db_pool),
+):
+    tenant_problem = _require_tenant(request, current_user)
+    if tenant_problem:
+        return tenant_problem
+    async with db_pool.acquire() as conn:
+        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id)
+        raw = await conn.fetchval(
+            "SELECT calling_config->'trunk' FROM campaigns "
+            "WHERE id = $1::uuid AND tenant_id = $2::uuid",
+            campaign_id, current_user.tenant_id,
+        )
+    if not raw:
+        return CampaignTrunkResponse(campaign_id=campaign_id)
+    ct = raw if isinstance(raw, dict) else json.loads(raw)
+    return CampaignTrunkResponse(
+        campaign_id=campaign_id,
+        trunk_id=ct.get("id"), label=ct.get("label"), caller_id=ct.get("caller_id"),
+    )
+
+
+@router.put("/trunks/campaign-assignment", response_model=CampaignTrunkResponse)
+async def set_campaign_trunk_assignment(
+    body: CampaignTrunkBody,
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_pool: asyncpg.Pool = Depends(get_db_pool),
+):
+    """Allot a specific trunk to one campaign (or clear it with null).
+
+    The campaign then dials on that trunk with its caller-ID, regardless of
+    the tenant-level pool allotment or own-trunk resolution."""
+    tenant_problem = _require_tenant(request, current_user)
+    if tenant_problem:
+        return tenant_problem
+    tid = (body.trunk_id or "").strip() or None
+
+    if tid is None:
+        async with db_pool.acquire() as conn:
+            await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id)
+            await conn.execute(
+                "UPDATE campaigns SET calling_config = "
+                "(COALESCE(calling_config,'{}'::jsonb) - 'trunk'), updated_at = NOW() "
+                "WHERE id = $1::uuid AND tenant_id = $2::uuid",
+                body.campaign_id, current_user.tenant_id,
+            )
+        return CampaignTrunkResponse(campaign_id=body.campaign_id)
+
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            trunk = await _fetch_assignable_trunk(conn, tid, current_user.tenant_id)
+        if trunk is None:
+            return _problem(
+                request=request,
+                status_code=400,
+                title="Invalid Trunk",
+                detail="That trunk is not active or not available to this tenant.",
+                type_suffix="invalid-campaign-trunk",
+            )
+        snapshot = {
+            "id": str(trunk["id"]),
+            "endpoint": f"trunk-{trunk['id']}",
+            "caller_id": trunk["caller_id"],
+            "label": trunk["trunk_name"] or trunk["auth_username"],
+        }
+        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id)
+        updated = await conn.execute(
+            "UPDATE campaigns SET calling_config = COALESCE(calling_config,'{}'::jsonb) "
+            "|| jsonb_build_object('trunk', $3::jsonb), updated_at = NOW() "
+            "WHERE id = $1::uuid AND tenant_id = $2::uuid",
+            body.campaign_id, current_user.tenant_id, json.dumps(snapshot),
+        )
+        if updated == "UPDATE 0":
+            return _problem(
+                request=request,
+                status_code=404,
+                title="Campaign Not Found",
+                detail="No such campaign under this tenant.",
+                type_suffix="campaign-not-found",
+            )
+    return CampaignTrunkResponse(
+        campaign_id=body.campaign_id,
+        trunk_id=snapshot["id"], label=snapshot["label"], caller_id=snapshot["caller_id"],
+    )
