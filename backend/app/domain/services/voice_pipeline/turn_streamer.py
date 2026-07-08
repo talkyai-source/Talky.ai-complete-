@@ -394,8 +394,15 @@ class TurnStreamer:
             if _a and _a not in _addenda:
                 _addenda.append(_a)
         _company = getattr(_agent_cfg, "company_name", "") or ""
+        # Craft re-anchor rides just before the compliance re-anchor: the
+        # anti-monologue rules need per-turn recency (base-prompt versions
+        # fade — audited 35-word lectures), while compliance keeps the very
+        # last slot it has always owned.
+        from app.domain.services.voice_pipeline.conversation_craft import (
+            craft_reanchor,
+        )
         trailing_block = "\n\n".join(
-            b for b in (_addenda + [compliance_reanchor(_company)]) if b
+            b for b in (_addenda + [craft_reanchor(), compliance_reanchor(_company)]) if b
         )
 
         # Single assembler (prompts folder) owns the block ORDER + the
