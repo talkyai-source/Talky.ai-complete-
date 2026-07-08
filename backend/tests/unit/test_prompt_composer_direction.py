@@ -131,12 +131,13 @@ class TestPerPersonaDirectionalOpeners:
             "lead_gen", "Alex", "Acme", LEAD_GEN_SLOTS,
             direction="outbound",
         ))
-        # Opener rewritten (2026-07-02) to Josh-Braun permission/problem
-        # shape: introduce + honest reason + explicit permission ask + an
-        # easy out if it's a rough moment. Assert that intent, not the
-        # retired "out of the blue / bad time" wording.
+        # Opener rewritten (2026-07-08 gatekeeper/opener audit) to a
+        # permission-to-DECLINE shape (Josh Braun): introduce + honest reason
+        # stated immediately + an easy way to say no, not a bare "have you
+        # got thirty seconds?" permission-to-proceed ask (Gong: "bad time?"
+        # openers cost bookings). Assert that intent, not retired wording.
         assert "Alex from Acme" in flat
-        assert "grab thirty seconds" in flat   # permission ask
+        assert "tell me to get lost" in flat    # permission-to-decline
         assert "when's better" in flat          # easy out
 
     def test_lead_gen_inbound_opener(self):
@@ -146,8 +147,8 @@ class TestPerPersonaDirectionalOpeners:
             "lead_gen", "Alex", "Acme", LEAD_GEN_SLOTS,
             direction="inbound",
         ))
-        assert "this is Alex from Acme" in flat
-        assert "reaching out" in flat.lower()
+        assert "Alex from Acme" in flat
+        assert "calling because" in flat.lower()
         # The opener must explicitly tell the agent not to play receptionist.
         assert "do not play receptionist" in flat.lower()
 

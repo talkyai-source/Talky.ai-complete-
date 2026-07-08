@@ -25,6 +25,25 @@ from app.domain.services.telephony.config import (
 
 logger = logging.getLogger(__name__)
 
+# 2026-07-08: opener-content guard. Prod surfaced 2 calls where the spoken
+# opener was a bare "Hello?" — the pre-synth greeting text was empty/
+# whitespace or degraded to a filler word, so the callee heard what sounded
+# like a wrong-number call instead of a real introduction. These are the
+# filler-only strings we refuse to speak as a whole opener (punctuation is
+# stripped before the comparison, so "Hello?", "Hello.", "hi" etc. all match).
+_BARE_FILLER_OPENERS = {"hello", "hi", "hey", "hiya", "yo"}
+
+
+def _has_real_opener_content(text) -> bool:
+    """True when `text` is genuine greeting content — not empty/whitespace
+    and not just a bare filler word standing in for the whole opener."""
+    if not text or not isinstance(text, str):
+        return False
+    stripped = text.strip().strip("?!.,;: ").strip()
+    if not stripped:
+        return False
+    return stripped.lower() not in _BARE_FILLER_OPENERS
+
 
 async def _send_outbound_greeting(voice_session) -> None:
     """
@@ -65,6 +84,29 @@ async def _send_outbound_greeting(voice_session) -> None:
         # which playback path runs.
         was_interrupted = False
         chunks_sent = 0
+
+        # 2026-07-08: opener-content guard — never speak a bare "Hello?" (or
+        # empty text) as the whole opener. If the pre-synth text is degraded,
+        # discard it (and its matching audio chunks, since they were
+        # synthesized FROM that bad text) and fall through to the slow path,
+        # which rebuilds real greeting content via _build_call_greeting.
+        # Wrapped defensively so any failure here just falls through to the
+        # existing pre-synth behaviour rather than breaking the greeting.
+        try:
+            if presynth_chunks and presynth_text and not _has_real_opener_content(
+                presynth_text
+            ):
+                logger.warning(
+                    "outbound_greeting_presynth_rejected call_id=%s text=%r "
+                    "— falling back to real-time greeting build",
+                    call_id[:12], presynth_text,
+                )
+                presynth_chunks = None
+                presynth_text = None
+        except Exception as _guard_exc:
+            logger.debug(
+                "opener-content guard failed for %s: %s", call_id[:12], _guard_exc
+            )
 
         if presynth_chunks and presynth_text:
             _t0 = _time.monotonic()
@@ -137,6 +179,34 @@ async def _send_outbound_greeting(voice_session) -> None:
                 getattr(voice_session, "_first_speaker", None) or "agent"
             )
             greeting = _build_call_greeting(session, first_speaker=first_speaker)
+
+            # 2026-07-08: last-resort opener-content guard. If even the
+            # real-time greeting builder produced empty/filler-only text
+            # (e.g. a persona template misconfiguration), never let the
+            # spoken opener be a bare "Hello?" — build a minimal branded
+            # line from whatever agent/company name is already on the
+            # session. Wrapped so any failure here falls through to the
+            # original (possibly degraded) greeting rather than crashing.
+            try:
+                if not _has_real_opener_content(greeting):
+                    from app.domain.services.telephony.config import (
+                        _resolve_greeting_context,
+                    )
+                    agent_name, company = _resolve_greeting_context(session)
+                    greeting = (
+                        f"Hello, this is {agent_name} calling from {company}."
+                    )
+                    logger.warning(
+                        "outbound_greeting_realtime_rejected call_id=%s "
+                        "— using safe minimal branded opener",
+                        call_id[:12],
+                    )
+            except Exception as _guard_exc:
+                logger.debug(
+                    "final opener-content guard failed for %s: %s",
+                    call_id[:12], _guard_exc,
+                )
+
             logger.info(
                 "outbound_greeting_realtime call_id=%s first_speaker=%s text=%r",
                 call_id[:12], first_speaker, greeting[:60],

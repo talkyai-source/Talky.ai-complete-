@@ -21,6 +21,7 @@ from fastapi import WebSocket
 from app.core.telemetry import pipeline_span, record_latency
 from app.domain.models.conversation import AudioChunk, Message, MessageRole
 from app.domain.models.session import CallSession
+from app.domain.services.voice_pipeline import turn_director
 
 logger = logging.getLogger(__name__)
 
@@ -261,16 +262,15 @@ class AudioIngest:
             _MID_NUDGE_S = float(os.getenv("VOICE_MID_NUDGE_S", "10"))
             _SILENCE_HANGUP_S = float(os.getenv("VOICE_SILENCE_HANGUP_S", "60"))
             _TTS_GRACE_S = 3.0
-            _NUDGE_MIN_GAP_S = 12.0
-            # Opening nudges (caller hasn't spoken yet) — just a natural "hello".
-            _OPENING_PHRASES = ["Hello?", "Hi, are you there?", "Hello, can you hear me?"]
-            # Mid-conversation check-ins — gentle, no "are you still there".
-            _GENTLE_PHRASES = [
-                "Hello?",
-                "I'm still here whenever you're ready.",
-                "Take your time — I'm here.",
-                "Sorry, did I lose you?",
-            ]
+            # 2026-07-08: widened 12.0 -> 15.0 (env-overridable) so mid
+            # check-ins don't stack up as nagging on a caller who is just
+            # thinking; the opening ("hello?") gap is unaffected.
+            _NUDGE_MIN_GAP_S = float(os.getenv("VOICE_NUDGE_MIN_GAP_S", "15.0"))
+            # Phrase ladders + suppression rule moved to turn_director.py
+            # (2026-07-08) — pure, unit-tested, and shared so this monitor
+            # never again picks a random needy line at random tiers. See
+            # that module's docstring for the two production bugs this
+            # fixes.
 
             def _count_user_turns() -> int:
                 n = 0
@@ -284,7 +284,6 @@ class AudioIngest:
                 return n
 
             async def _silence_monitor() -> None:
-                import random
                 try:
                     from app.domain.services.voice_pipeline.turn_helpers import (
                         _first_speaker_label,
@@ -328,6 +327,14 @@ class AudioIngest:
                         _nudge_count = 0  # they're back — fresh nudge budget
                         _was_active = False
                         _tts_ended_at = None
+                        # 2026-07-08: mark that the caller has produced real
+                        # audio at least once this call — other modules can
+                        # read this via getattr(session, "_caller_spoke_since_greeting", False)
+                        # without any dependency on this monitor's internals.
+                        try:
+                            session._caller_spoke_since_greeting = True
+                        except Exception:
+                            pass
                         continue
 
                     # AI speaking / thinking (incl. our own nudge) → resets the
@@ -413,7 +420,42 @@ class AudioIngest:
                     # _action == "nudge": opening (caller-first, not yet spoken)
                     # → a soft "Hello?"; otherwise a light check-in.
                     _opening = _is_caller_first and _prev_user_turns == 0
-                    _phrase = random.choice(_OPENING_PHRASES if _opening else _GENTLE_PHRASES)
+
+                    # 2026-07-08 guard: on an AGENT-FIRST call where the
+                    # caller has NEVER spoken (no real turn, no fresh
+                    # backchannel), a MID nudge would be the caller's first
+                    # ever line from us — "I'm still here whenever you're
+                    # ready" landing before they've said a word. Skip the
+                    # nudge entirely; only the 60s hangup still applies.
+                    # Fails open (nudges as before) if the check itself errors.
+                    if not _opening:
+                        try:
+                            _caller_spoke = bool(
+                                getattr(session, "_caller_spoke_since_greeting", False)
+                            ) or _prev_user_turns > 0
+                            if turn_director.should_suppress_mid_nudge(
+                                is_caller_first=_is_caller_first,
+                                caller_has_ever_spoken=_caller_spoke,
+                            ):
+                                _last_nudge_at = _now()
+                                continue
+                        except Exception as _guard_exc:
+                            logger.debug(
+                                "[SilenceMonitor] mid-nudge suppression check "
+                                "failed, falling through to normal nudge: %s",
+                                _guard_exc,
+                            )
+
+                    try:
+                        _phrase = turn_director.choose_silence_phrase(
+                            is_opening=_opening, nudge_index=_nudge_count,
+                        )
+                    except Exception as _phrase_exc:
+                        logger.debug(
+                            "[SilenceMonitor] choose_silence_phrase failed, "
+                            "falling back to 'Still there?': %s", _phrase_exc,
+                        )
+                        _phrase = "Hello?" if _opening else "Still there?"
                     logger.info(
                         "[SilenceMonitor] %s — silence (%s), nudging: %r",
                         call_id[:12], "opening" if _opening else "mid", _phrase,

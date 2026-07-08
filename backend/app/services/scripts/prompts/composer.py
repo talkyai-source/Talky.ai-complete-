@@ -404,6 +404,13 @@ def compose_prompt(
     from app.domain.services.voice_pipeline.end_call import call_control_rules
     parts.append(call_control_rules())
 
+    # Wrong-person / gatekeeper pivot + graceful-exit rules (2026-07-08 audit:
+    # agent went silent after "is this David?" -> "No."). Placed right after
+    # call_control_rules — same trailing, high-recency slot — so the pivot
+    # instruction is fresh on every turn, still ahead of the compliance floor.
+    from app.domain.services.voice_pipeline.gatekeeper import gatekeeper_rules
+    parts.append(gatekeeper_rules())
+
     # The non-negotiable safety floor goes LAST (after the tenant's own
     # additional_instructions) so it wins on the few invariants via recency —
     # without altering anything the campaign author wrote. See compliance_floor.

@@ -39,6 +39,13 @@ from app.domain.repositories.call_event_repository import CallEventRepository
 
 logger = logging.getLogger(__name__)
 
+# 2026-07-08: post-greeting-TTS STT unmute tail for telephony (non-browser)
+# calls. SOTA guidance (Coval, Gladia, Deepgram, Retell) recommends 200-500ms
+# here to absorb network jitter + echo-tail decay on PSTN before STT goes
+# live again; the previous 0.1s was clipping fast-caller replies. Env
+# overridable for tuning without a code change.
+_STT_UNMUTE_TAIL_S = float(os.getenv("STT_UNMUTE_TAIL_S", "0.25"))
+
 
 def _failover_enabled(env_var: str) -> bool:
     """Truthy parse for opt-in failover env flags. T1.3."""
@@ -756,7 +763,15 @@ class VoiceOrchestrator:
                 and session.stt_provider
                 and hasattr(session.stt_provider, "unmute")
             ):
-                await asyncio.sleep(0.05 if waited_for_browser_playback else 0.1)
+                # 2026-07-08: telephony (non-browser) tail widened 0.1s -> 0.25s.
+                # SOTA guidance (Coval, Gladia, Deepgram, Retell) recommends a
+                # 200-500ms post-TTS unmute tail on PSTN to cover network jitter
+                # + echo-tail decay before re-enabling STT; 0.1s was clipping
+                # fast-caller replies right after the agent finished speaking.
+                # Browser sessions keep 0.05s — they have real client-side AEC.
+                await asyncio.sleep(
+                    0.05 if waited_for_browser_playback else _STT_UNMUTE_TAIL_S
+                )
                 await session.stt_provider.unmute(session.call_id)
                 logger.debug(f"Unmuted STT for call {session.call_id} after greeting")
 
