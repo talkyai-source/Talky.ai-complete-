@@ -35,11 +35,16 @@ def build_live_state_block(
     agent_name: str,
     company_name: str,
     has_introduced: bool = False,
+    time_of_day_line: str = "",
 ) -> str:
-    """Return the LIVE STATE block, or '' when there's no identity to anchor."""
+    """Return the LIVE STATE block, or '' when there's no identity to anchor.
+
+    ``time_of_day_line`` — optional pre-built line stating the CALLEE's local
+    time-of-day so a "morning/afternoon/evening" greeting matches their clock
+    (see voice_pipeline.time_of_day). Empty when the timezone is unknown."""
     name = (agent_name or "").strip()
     company = (company_name or "").strip()
-    if not name and not company:
+    if not name and not company and not time_of_day_line:
         return ""
 
     # Phrased as a status line ("You're on this call as …") rather than a fresh
@@ -65,6 +70,10 @@ def build_live_state_block(
             "this turn: who you are and why you're calling, in one or two "
             "sentences."
         )
+    if time_of_day_line:
+        lines.append(time_of_day_line)
+    if not lines:
+        return ""
     return (
         "LIVE STATE — current call status, read this before you reply:\n"
         + "\n".join(lines)

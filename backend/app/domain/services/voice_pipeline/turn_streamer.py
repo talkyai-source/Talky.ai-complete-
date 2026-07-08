@@ -364,10 +364,27 @@ class TurnStreamer:
         # is what stops weaker models re-introducing / drifting their title over
         # a long call. Identity comes off the session's agent_config.
         _agent_cfg = getattr(session, "agent_config", None)
+        # Callee-local time-of-day so "morning/afternoon/evening" matches the
+        # hour where the phone rang (was always "Morning"). Timezone comes from
+        # the campaign (calling_config.timezone), stashed on the session; UK
+        # campaigns default to Europe/London when unset.
+        _tz_name = (
+            getattr(session, "_campaign_timezone", None)
+            or getattr(_agent_cfg, "timezone", None)
+            or "Europe/London"
+        )
+        try:
+            from app.domain.services.voice_pipeline.time_of_day import (
+                time_of_day_line as _tod_line,
+            )
+            _tod = _tod_line(_tz_name)
+        except Exception:
+            _tod = ""
         live_state_block = build_live_state_block(
             agent_name=(getattr(_agent_cfg, "agent_name", "") or ""),
             company_name=(getattr(_agent_cfg, "company_name", "") or ""),
             has_introduced=bool(getattr(session, "_has_introduced", False)),
+            time_of_day_line=_tod,
         )
 
         # Trailing safety block: re-assert the per-model addendum (e.g. the
