@@ -180,7 +180,24 @@ class TurnEnder:
             except Exception as exc:  # metrics must never break a turn
                 logger.debug("interruption_classify_failed err=%s", exc)
 
-        if _is_backchannel(full_transcript) and _has_prior_user_turn:
+        # Exception: if the agent's LAST turn was a QUESTION, a short
+        # "yep / yes / no / sure" is the ANSWER, not a listening noise —
+        # suppressing it strands the call in silence (observed 2026-07-08:
+        # agent asked "is that Sam?", caller said "Yep", it was dropped and
+        # the agent never replied). A question ends with "?" — when it does,
+        # let the affirmative through to the LLM.
+        _agent_last_msg = next(
+            (m.content for m in reversed(session.conversation_history)
+             if m.role == MessageRole.ASSISTANT),
+            "",
+        )
+        _agent_asked_question = _agent_last_msg.rstrip().endswith("?")
+
+        if (
+            _is_backchannel(full_transcript)
+            and _has_prior_user_turn
+            and not _agent_asked_question
+        ):
             logger.info(
                 "backchannel_suppressed transcript=%r call=%s",
                 full_transcript, call_id[:12],
