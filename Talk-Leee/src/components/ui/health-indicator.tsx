@@ -13,7 +13,11 @@ function meta(variant: Variant) {
 
 export function HealthIndicator({ className }: { className?: string }) {
     const q = useHealth();
-    const variant: Variant = q.isError ? "down" : q.isFetching ? "degraded" : q.data?.status === "ok" ? "ok" : "degraded";
+    // "Down" only after the health probe actually failed (post-retry), never
+    // merely because a refetch is in flight — flashing amber/red every poll
+    // reads as "the server keeps going down" when it's just the 30s poll or
+    // a slow client link. While refetching, keep showing the last real state.
+    const variant: Variant = q.isError ? "down" : q.data?.status === "ok" ? "ok" : "degraded";
     const m = meta(variant);
 
     return (

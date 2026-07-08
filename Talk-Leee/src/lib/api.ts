@@ -481,7 +481,10 @@ class ApiClient {
 
     async health(): Promise<{ status: string }> {
         const path = "/health";
-        return this.client().request({ path, method: "GET", timeoutMs: 2500 });
+        // 8s, not 2.5s: the dashboard is used over long-haul links where RTT +
+        // TLS alone can exceed 2.5s under congestion — a tight timeout makes
+        // the health pill scream "Down" while the server is fine.
+        return this.client().request({ path, method: "GET", timeoutMs: 8000 });
     }
 
     /* ---------- MFA (Multi-Factor Authentication) ---------- */
