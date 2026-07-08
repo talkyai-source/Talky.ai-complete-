@@ -104,6 +104,20 @@ class TurnEnder:
                     pass
                 return
 
+        # Caller-first INSTANT opener: the first bare "Hello?" is answered by
+        # the ringing-phase pre-synth greeting (~0.3s) instead of a full
+        # LLM+TTS round trip (3-14s+ — two of eight live calls lost the human
+        # to that silence, 2026-07-08). Only the FIRST turn, only a bare
+        # greeting; a real question still gets the LLM. Fail-soft.
+        if not _has_prior_user_turn_for_floor and _first_speaker_label(session) == "user":
+            from app.domain.services.voice_pipeline.instant_opener import (
+                is_bare_greeting, try_instant_opener,
+            )
+            if is_bare_greeting(full_transcript) and await try_instant_opener(
+                session, full_transcript
+            ):
+                return
+
         # Guard against the confirmed Deepgram Flux hallucination bug (GitHub #1524)
         # where the STT model outputs repetitive nonsense text ("blah blah blah…").
         # Heuristic: if a single word accounts for >50% of a 6+ word transcript,

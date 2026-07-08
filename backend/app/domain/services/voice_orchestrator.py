@@ -543,6 +543,13 @@ class VoiceOrchestrator:
             leg_id=leg_id,
             config=config,
         )
+        # Back-reference for pipeline-layer collaborators (e.g. the caller-first
+        # instant opener needs the VoiceSession's pre-synth greeting from a
+        # context that only holds the CallSession).
+        try:
+            call_session._voice_session_ref = voice_session
+        except Exception:
+            pass
         try:
             self._active_sessions[call_id] = voice_session
             logger.info(f"Voice session created: {call_id[:8]}")
