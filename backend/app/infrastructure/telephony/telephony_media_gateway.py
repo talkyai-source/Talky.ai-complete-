@@ -493,6 +493,16 @@ class TelephonyMediaGateway(MediaGateway):
             else:
                 pcm16 = audio_chunk
 
+            # Egress audio hygiene (2026-07-08): strip DC and gate true
+            # near-silence to hard zero BEFORE µ-law, so quiet TTS stretches
+            # encode as clean silence instead of an audible near-zero buzz
+            # floor (µ-law's finest resolution is near zero). See
+            # egress_audio_hygiene for the root-cause write-up.
+            from app.infrastructure.telephony.egress_audio_hygiene import (
+                clean_egress_pcm16,
+            )
+            pcm16 = clean_egress_pcm16(pcm16)
+
             # Downsample internal rate -> 8 kHz wire rate before µ-law encode.
             # soxr_mq for the same reason as ingress: phone bandwidth caps the
             # perceptual difference vs soxr_hq, and TTS bursts are frequent.
