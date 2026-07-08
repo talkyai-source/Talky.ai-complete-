@@ -324,6 +324,41 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Telephony heartbeat start failed (non-fatal): {e}")
 
+    async def _auto_connect_telephony() -> None:
+        """Connect the bridge to Asterisk and wire the FULL callback set.
+
+        Shared by the boot path and the stale-lock retry below. Wires the
+        same callbacks as the manual /sip/telephony/connect endpoint —
+        the boot path previously skipped the ringing/early-ringing/alias
+        hooks, so a boot-connected process silently lost ring-time warmup
+        and live ringing status until someone manually hit /connect.
+        """
+        if not (_tb._adapter and _tb._adapter.connected):
+            adapter_type = os.getenv("TELEPHONY_ADAPTER", "auto")
+            _tb._adapter = await CallControlAdapterFactory.create(adapter_type)
+            _tb._adapter.register_call_event_handlers(
+                on_new_call=_tb._on_new_call,
+                on_call_ended=_tb._on_call_ended,
+                on_audio_received=_tb._on_audio_received,
+            )
+            if hasattr(_tb._adapter, "set_global_session_start_callback"):
+                _tb._adapter.set_global_session_start_callback(_tb._on_ws_session_start)
+            if hasattr(_tb._adapter, "set_ringing_callback"):
+                _tb._adapter.set_ringing_callback(_tb._on_ringing)
+            if hasattr(_tb._adapter, "set_early_ringing_callback"):
+                _tb._adapter.set_early_ringing_callback(_tb._on_early_ringing)
+            if hasattr(_tb._adapter, "set_outbound_channel_alias_callback"):
+                _tb._adapter.set_outbound_channel_alias_callback(_tb._alias_ringing_call_id)
+            await _tb._adapter.connect()
+            logger.info(f"Telephony bridge auto-connected: {_tb._adapter.name}")
+        else:
+            logger.info("Telephony bridge already connected — skipping auto-connect")
+        # Arm the inactivity watchdog + pod-capacity readiness wiring.
+        # Without this, a normal lifespan boot left the capacity gate and
+        # the zombie-session watchdog disarmed — only a manual POST to
+        # /sip/telephony/start turned them on. (audit #9)
+        _tb.ensure_session_management_started()
+
     if not _is_owner:
         owner = None
         try:
@@ -335,32 +370,44 @@ async def lifespan(app: FastAPI):
             "by %s. This process will NOT connect ARI and will 503 telephony "
             "routes. Expected with --workers >1 / a second pod; if you see this "
             "on a single-worker deploy, a previous owner's lock has not yet "
-            "expired (clears within ~60s).",
+            "expired (clears within ~60s). Will retry ownership for ~5 minutes.",
             owner or "another process",
         )
+
+        # On a single-worker deploy the usual cause is a RESTART: the old
+        # process died holding the lock (expires ~60s), the new one tried
+        # ONCE at boot and gave up — leaving telephony 503'ing until a
+        # manual /connect or another restart (observed 2026-07-08: 6+ min
+        # of failed originations after a deploy). Retry for a few minutes;
+        # a genuine second worker keeps failing acquire and nothing changes.
+        async def _retry_telephony_ownership() -> None:
+            for attempt in range(1, 7):  # ~5 minutes of coverage
+                await asyncio.sleep(50)
+                try:
+                    if await _state_backend.acquire_telephony_ownership():
+                        logger.info(
+                            "Telephony ownership acquired on retry %d — connecting ARI",
+                            attempt,
+                        )
+                        await _auto_connect_telephony()
+                        return
+                except Exception as exc:  # noqa: BLE001 — keep retrying
+                    logger.warning(
+                        "telephony_ownership_retry_failed attempt=%d err=%s",
+                        attempt, exc,
+                    )
+            logger.critical(
+                "Telephony ownership NOT acquired after retries — this process "
+                "will keep 503ing telephony routes (another owner is alive, or "
+                "the lock backend is unhealthy)."
+            )
+
+        asyncio.get_running_loop().create_task(_retry_telephony_ownership())
     else:
         # Auto-connect telephony bridge so campaigns can originate calls
         # immediately. Must happen after container startup (needs the loop).
         try:
-            if not (_tb._adapter and _tb._adapter.connected):
-                adapter_type = os.getenv("TELEPHONY_ADAPTER", "auto")
-                _tb._adapter = await CallControlAdapterFactory.create(adapter_type)
-                _tb._adapter.register_call_event_handlers(
-                    on_new_call=_tb._on_new_call,
-                    on_call_ended=_tb._on_call_ended,
-                    on_audio_received=_tb._on_audio_received,
-                )
-                if hasattr(_tb._adapter, "set_global_session_start_callback"):
-                    _tb._adapter.set_global_session_start_callback(_tb._on_ws_session_start)
-                await _tb._adapter.connect()
-                logger.info(f"Telephony bridge auto-connected: {_tb._adapter.name}")
-            else:
-                logger.info("Telephony bridge already connected — skipping auto-connect")
-            # Arm the inactivity watchdog + pod-capacity readiness wiring.
-            # Without this, a normal lifespan boot left the capacity gate and
-            # the zombie-session watchdog disarmed — only a manual POST to
-            # /sip/telephony/start turned them on. (audit #9)
-            _tb.ensure_session_management_started()
+            await _auto_connect_telephony()
         except Exception as e:
             logger.warning(f"Telephony bridge auto-connect failed (non-fatal): {e}")
 
