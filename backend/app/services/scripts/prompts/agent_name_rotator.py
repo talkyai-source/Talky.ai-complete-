@@ -39,23 +39,49 @@ def pick_agent_name_for_voice(
     restarted call keeps the same agent name instead of re-rolling. When None,
     selection is uniformly random as before.
 
+    THE POOL ALWAYS WINS (2026-07-09): campaigns configure their names in the
+    UI without gender tags, and the old "no tag matched → invent a built-in
+    name" branch made the agent introduce itself as a name the campaign never
+    configured ("Emily") while the campaign's own instructions said "You are
+    James" — a self-contradicting prompt observed in production. Gender only
+    ORDERS the preference within the configured pool; it never replaces it.
+
     Never raises — on any inconsistency it degrades to a plain pool pick.
     """
     chooser = random.Random(seed) if seed is not None else random
     vg = (voice_gender or "").strip().lower()
-    if vg in ("male", "female"):
+    if vg in ("male", "female") and pool:
         gmap = {str(k).strip().lower(): str(v).strip().lower() for k, v in (genders or {}).items()}
         matching = [n for n in pool if n and gmap.get(str(n).strip().lower()) == vg]
         if matching:
             return chooser.choice(matching)
-        # No matching-gender name configured — use a built-in gendered name.
-        try:
-            from app.domain.services.global_ai_config import get_random_agent_name
-            return get_random_agent_name(vg)
-        except Exception:
-            pass
-    # Unknown voice gender (or fallback failed) → legacy behaviour.
+        # No explicit tag matched. Infer gender from the built-in name lists
+        # (first token, case-insensitive) and prefer pool names that match the
+        # voice — but if nothing infers, STILL pick from the pool.
+        inferred = [n for n in pool if n and _inferred_gender(n) == vg]
+        if inferred:
+            return chooser.choice(inferred)
+    # Unknown voice gender / nothing inferred → the configured pool decides.
     return pick_agent_name(pool, seed=seed)
+
+
+def _inferred_gender(name: str) -> Optional[str]:
+    """Best-effort gender for an untagged name via the built-in name lists.
+    First token only ("Sarah jones" → "sarah"). None when unknown/ambiguous."""
+    try:
+        from app.domain.services.global_ai_config import FEMALE_NAMES, MALE_NAMES
+        first = str(name).strip().split()[0].strip().lower()
+        if not first:
+            return None
+        male = any(first == str(n).strip().lower() for n in MALE_NAMES)
+        female = any(first == str(n).strip().lower() for n in FEMALE_NAMES)
+        if male and not female:
+            return "male"
+        if female and not male:
+            return "female"
+        return None
+    except Exception:
+        return None
 
 
 def pick_agent_name(pool: Sequence[str], *, seed: Optional[str] = None) -> str:

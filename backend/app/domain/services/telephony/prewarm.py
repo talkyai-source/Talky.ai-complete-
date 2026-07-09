@@ -107,7 +107,25 @@ async def _lookup_campaign_row(campaign_id: Optional[str]):
                 "SELECT * FROM campaigns WHERE id = $1::uuid LIMIT 1",
                 str(campaign_id),
             )
-        return dict(row) if row else None
+        if not row:
+            return None
+        data = dict(row)
+        # 2026-07-09 REGRESSION FIX: raw asyncpg returns jsonb columns as JSON
+        # *strings* (no codec registered), while the old postgres_adapter
+        # decoded them to dicts. Downstream, _extract_script_config() rejects a
+        # str ("unexpected type=str — ignoring"), which silently threw away the
+        # campaign's ENTIRE identity — agent names, company, persona — and every
+        # call got a random built-in name + the fallback company (observed live
+        # 2026-07-09, 40 warnings). Decode jsonb fields back to dicts here.
+        import json as _json
+        for _k in ("script_config", "calling_config"):
+            _v = data.get(_k)
+            if isinstance(_v, str) and _v:
+                try:
+                    data[_k] = _json.loads(_v)
+                except Exception:
+                    pass  # leave as-is; downstream guards handle it
+        return data
     except Exception as cexc:
         logger.warning(
             "campaign_lookup_failed campaign_id=%s err=%s — using legacy prompt",

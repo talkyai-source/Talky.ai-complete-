@@ -720,6 +720,17 @@ def _extract_script_config(campaign: Any) -> Optional[dict]:
         cfg = getattr(campaign, "script_config", None)
     if not cfg:
         return None
+    # 2026-07-09: raw asyncpg returns jsonb as a JSON *string* (the old sync
+    # adapter decoded it to a dict). Ignoring a str here silently dropped the
+    # campaign's whole identity — agent names, company, persona — so every
+    # call ran on random fallback names (live regression, 40 calls). Decode.
+    if isinstance(cfg, str):
+        try:
+            import json as _json
+            cfg = _json.loads(cfg)
+        except Exception:
+            logger.warning("script_config is an unparseable str — ignoring")
+            return None
     if not isinstance(cfg, dict):
         logger.warning(
             "script_config has unexpected type=%s — ignoring",
