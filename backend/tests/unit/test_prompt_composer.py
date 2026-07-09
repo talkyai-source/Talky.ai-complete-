@@ -72,8 +72,13 @@ def _no_unfilled_placeholders(text: str) -> None:
 def test_compose_lead_gen_full():
     out = compose_prompt("lead_gen", "Alex", "Acme", LEAD_GEN_SLOTS)
     assert "HARD RULES" in out
-    assert "NATURAL CONVERSATION ENGINE" in out
-    assert "NICHE AND COMPLIANCE ADAPTATION" in out
+    # 2026-07-08 guardrails compression (10.6k-token prompt was costing ~1s+
+    # TTFT/turn on Groq+Qwen) renamed/merged these sections but kept the
+    # underlying rule: natural, non-interrogating conversation craft now
+    # lives under "SOUND HUMAN, NOT SCRIPTED"; the regulated-niches carve-out
+    # is now "REGULATED NICHES".
+    assert "SOUND HUMAN, NOT SCRIPTED" in out
+    assert "REGULATED NICHES" in out
     # New stage-machine persona structure (replaces the old prose body).
     assert "WHO YOU ARE" in out
     assert "STAGE 2 — DISCOVER" in out
@@ -85,7 +90,7 @@ def test_compose_lead_gen_full():
     # FACTS — SOURCE OF TRUTH sits DIRECTLY after the HARD RULES (top-attention
     # window, effectively Hard Rule 11), before the rest of the guardrails.
     assert out.index("HARD RULES") < out.index("FACTS — SOURCE OF TRUTH")
-    assert out.index("FACTS — SOURCE OF TRUTH") < out.index("PRIVACY AND DATA MINIMIZATION")
+    assert out.index("FACTS — SOURCE OF TRUTH") < out.index("## PRIVACY")
     # the old PRODUCTION SUCCESS / FAILURE mirror of HARD RULES is deleted
     assert "PRODUCTION SUCCESS / FAILURE" not in out
     # Agent identity + one representative campaign slot are filled in.
@@ -120,21 +125,27 @@ def test_compose_receptionist_full():
 
 def test_composed_prompt_has_voice_safe_output_rules():
     out = compose_prompt("lead_gen", "Alex", "Acme", LEAD_GEN_SLOTS)
-    assert "Never output markdown" in out
+    # "Never output markdown" was folded into the single no-markdown/no-brackets
+    # HARD RULE by the 2026-07-08 compression; assert the surviving wording.
+    assert "No markdown" in out
     assert "Ask ONE question per turn" in out
-    assert "Use soft tag questions sparingly" in out
-    assert "When the transcript is unclear, do not guess" in out
+    # "Use soft tag questions sparingly" / "do not guess" prose was compressed
+    # into the CORE DETAILS + SOUND HUMAN sections — same never-guess rule.
+    assert "never guess an unclear part" in out or "Unclear detail" in out
     # PRODUCTION SUCCESS / FAILURE was deleted 2026-07-02 (mirrored HARD RULES;
     # A/B showed no regression) — its rules live in HARD RULES + FACTS.
     assert "You have failed if" not in out
-    assert "Regulated or sensitive niches" in out
-    assert "SILENT CALL STATE" in out
-    assert "HANDOFF AND ESCALATION PACKAGE" in out
-    assert "PRIVACY AND DATA MINIMIZATION" in out
+    assert "REGULATED NICHES" in out
+    assert "STAYING ON TRACK" in out
+    assert "HANDOFFS" in out
+    assert "## PRIVACY" in out
     assert "FINAL RESPONSE CONTRACT" in out
     assert "Never claim you checked a calendar" in out
-    assert "no confirmed captured slots yet" in out
-    assert "conversation history to understand where the call is" in out
+    # The dedicated "## CAPTURED BLOCK" section (incl. the no-block fallback
+    # guidance) was folded into HARD RULE 4 by the 2026-07-08 compression —
+    # same never-re-ask invariant, one copy instead of two.
+    assert "every line in it is a fact" in out
+    assert "never re-ask" in out
 
 
 def test_communication_frameworks_and_persuasion_present():
@@ -216,11 +227,14 @@ def test_prompt_identity_is_honest_not_deceptive():
     # the rule names the desired behaviour and shows the correct exchange instead
     # of listing forbidden phrases.
     assert "You are a real person" not in out
-    assert "Be honest about what you are" in out
-    assert "name that you're an AI" in out
-    # Few-shot example of the correct disclosure answer is present.
-    assert "I'm an AI assistant for Acme" in out
-    assert "are you a real person or an AI" in out.lower() or "real person or an AI" in out
+    # 2026-07-08 compression restructured Rule 1 to lead with the disclosure
+    # trigger + few-shot answer, and made the never-claim-human stance explicit
+    # rather than an intro sentence — same invariant, tighter wording.
+    assert "Never claim to be human" in out
+    assert "whether you're a bot, an AI, or a real person" in out
+    # Few-shot example of the correct disclosure answer is present (line-wrapped
+    # in the composed prompt, so match across whitespace).
+    assert re.search(r"AI assistant for\s+Acme", out)
     # The lead_gen realism line points at Rule 1 and names AI (no dodge wording).
     assert "name that\n    you're an AI assistant" in out or "name that you're an AI assistant" in out
 
