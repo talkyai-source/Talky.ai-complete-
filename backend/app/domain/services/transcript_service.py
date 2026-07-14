@@ -3,8 +3,8 @@ Transcript Service
 Handles transcript accumulation and storage for call conversations.
 Provider-agnostic - works with any voice pipeline.
 """
+import json
 import logging
-import inspect
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
@@ -62,18 +62,70 @@ class TranscriptService:
     _buffers: Dict[str, List[TranscriptTurn]] = {}
     _call_bindings: Dict[str, str] = {}
 
-    async def _run_execute(self, query):
-        """
-        Execute a PostgreSQL query builder in sync/async compatible fashion.
+    @staticmethod
+    def _resolve_pool(db_client, db_pool):
+        """Return an asyncpg pool from an explicit ``db_pool``, a postgres-
+        adapter ``db_client`` (``.pool``), or the DI container — whichever is
+        available. ``None`` when the DB layer isn't initialised (tests, early
+        startup) so callers fail soft instead of raising."""
+        if db_pool is not None:
+            return db_pool
+        pool = getattr(db_client, "pool", None)
+        if pool is not None:
+            return pool
+        try:
+            from app.core.container import get_container
+            container = get_container()
+            if getattr(container, "is_initialized", False):
+                return getattr(container, "db_pool", None)
+        except Exception:
+            return None
+        return None
 
-        Some client variants return an awaitable from `.execute()`, while
-        others return the response directly.
+    async def _write_calls_transcript(
+        self,
+        pool,
+        row_id: str,
+        transcript_text: str,
+        transcript_json: List[Dict[str, Any]],
+        talklee_call_id: Optional[str],
+    ) -> None:
+        """UPDATE ``calls`` with the current transcript over a POOLED asyncpg
+        connection.
+
+        Root-cause note (2026-07): the previous path went through
+        ``postgres_adapter`` (``db_client.table(...).update(...).execute()``),
+        whose ``execute()`` hopped onto a thread-pool and BLOCKED the event
+        loop on ``.result()`` while opening a brand-new unpooled
+        ``asyncpg.connect`` per turn — stalling every concurrent live call.
+        This uses the shared pool and a single ``UPDATE`` inside one implicit
+        transaction, mirroring recording.py / call_status.py.
+
+        RLS: this is a platform-internal write with no request-scoped JWT (the
+        pipeline task carries no tenant context), so — exactly like the
+        authoritative hangup persister ``save_call_transcript_on_hangup`` — we
+        bypass RLS for the single scoped transaction via
+        ``acquire_with_tenant(pool, None)``. The connection is held only for
+        this one UPDATE; ``json.dumps`` runs beforehand, so no slow / network
+        await happens while the connection is checked out.
         """
-        result = query.execute()
-        if inspect.isawaitable(result):
-            return await result
-        return result
-    
+        from app.core.db_utils import acquire_with_tenant
+
+        turns_jsonb = json.dumps(transcript_json)
+        async with acquire_with_tenant(pool, None) as conn:
+            if talklee_call_id:
+                await conn.execute(
+                    "UPDATE calls SET transcript = $1, transcript_json = $2::jsonb, "
+                    "talklee_call_id = $3, updated_at = NOW() WHERE id = $4",
+                    transcript_text, turns_jsonb, talklee_call_id, row_id,
+                )
+            else:
+                await conn.execute(
+                    "UPDATE calls SET transcript = $1, transcript_json = $2::jsonb, "
+                    "updated_at = NOW() WHERE id = $3",
+                    transcript_text, turns_jsonb, row_id,
+                )
+
     def accumulate_turn(
         self, 
         call_id: str, 
@@ -270,135 +322,210 @@ class TranscriptService:
     async def flush_to_database(
         self,
         call_id: str,
-        db_client,
+        db_client=None,
         tenant_id: Optional[str] = None,
         talklee_call_id: Optional[str] = None,
+        *,
+        target_call_id: Optional[str] = None,
+        db_pool=None,
     ) -> None:
         """
         Incrementally update calls.transcript with current buffer.
-        
+
         Day 17: Called after each completed turn to persist progress.
         Does NOT clear the buffer (unlike save_transcript).
-        
+
         Args:
-            call_id: Call identifier
-            db_client: PostgreSQL client
-            tenant_id: Optional tenant identifier
+            call_id: Buffer key (the voice-session UUID the transcript is
+                accumulated under).
+            db_client: Legacy postgres-adapter client (its ``.pool`` is used).
+            tenant_id: Optional tenant identifier (kept for signature/back-compat;
+                the write bypasses RLS like the hangup persister — see
+                ``_write_calls_transcript``).
+            talklee_call_id: Human-friendly call id, stamped only onto the
+                session's own row (see ``target_call_id`` note below).
+            target_call_id: The REAL ``calls.id`` to update. For outbound
+                campaign calls ``call_id`` (the voice-session UUID) does NOT
+                equal ``calls.id`` — the dialer inserted the row under its own
+                UUID keyed to the PBX channel via ``external_call_uuid`` — so a
+                ``WHERE id = call_id`` UPDATE matched ZERO rows and the
+                incremental transcript never landed. The caller resolves the
+                dialer's ``calls.id`` (from ``VoiceSession._dialer_call_id``,
+                itself the result of recording.py-style
+                ``WHERE external_call_uuid`` lookup) and passes it here. When
+                ``None`` (browser / ask_ai / standalone), we fall back to
+                ``call_id`` — the historical target, correct for those flows
+                where ``calls.id == call_id``.
+            db_pool: Explicit asyncpg pool (preferred; the pooled async path).
         """
         turns = self.get_turns(call_id)
         if not turns:
             return
-        
+
+        pool = self._resolve_pool(db_client, db_pool)
+        if pool is None:
+            logger.warning("flush_to_database: no DB pool available for %s", call_id)
+            return
+
         try:
             transcript_text = self.get_transcript_text(call_id)
             transcript_json = self.get_transcript_json(call_id)
-
             resolved_talklee_call_id = self._resolve_talklee_call_id(call_id, talklee_call_id)
-            call_update = {
-                "transcript": transcript_text,
-                "transcript_json": transcript_json,
-                "updated_at": datetime.utcnow().isoformat(),
-            }
-            if resolved_talklee_call_id:
-                call_update["talklee_call_id"] = resolved_talklee_call_id
 
-            await self._run_execute(db_client.table("calls").update(call_update).eq("id", call_id))
-            
-            logger.debug(
-                f"Flushed transcript for call {call_id}: {len(turns)} turns"
+            row_id = str(target_call_id) if target_call_id else str(call_id)
+            # Only stamp talklee_call_id on the session's OWN row. When writing
+            # to the dialer's calls row (target_call_id set) we must NOT clobber
+            # its talklee_call_id — the dialer minted that independently and the
+            # authoritative hangup persister writes transcript columns only.
+            talklee_to_write = resolved_talklee_call_id if not target_call_id else None
+
+            await self._write_calls_transcript(
+                pool, row_id, transcript_text, transcript_json, talklee_to_write,
             )
-            
+
+            logger.debug(
+                "Flushed transcript for call %s -> calls.id=%s: %d turns",
+                call_id, row_id, len(turns),
+            )
+
         except Exception as e:
             logger.warning(f"Failed to flush transcript for {call_id}: {e}")
     
     async def save_transcript(
-        self, 
-        call_id: str, 
-        db_client,
+        self,
+        call_id: str,
+        db_client=None,
         tenant_id: Optional[str] = None,
         talklee_call_id: Optional[str] = None,
+        *,
+        target_call_id: Optional[str] = None,
+        db_pool=None,
     ) -> Optional[str]:
         """
         Save accumulated transcript to database.
-        
+
         Performs:
         1. Insert into transcripts table (structured)
         2. Update calls.transcript (plain text)
         3. Update calls.transcript_json (JSONB)
-        
+
+        Uses the same POOLED async path as ``flush_to_database`` (no blocking
+        adapter). ``target_call_id`` follows the same semantics documented on
+        ``flush_to_database``.
+
         Args:
             call_id: Call identifier
-            db_client: PostgreSQL client
+            db_client: Legacy postgres-adapter client (its ``.pool`` is used)
             tenant_id: Optional tenant identifier
-            
+            db_pool: Explicit asyncpg pool (preferred)
+
         Returns:
             Transcript ID if successful, None otherwise
         """
         turns = self.get_turns(call_id)
-        
+
         if not turns:
             logger.warning(f"No transcript to save for call {call_id}")
             return None
-        
+
+        pool = self._resolve_pool(db_client, db_pool)
+        if pool is None:
+            logger.error("save_transcript: no DB pool available for %s", call_id)
+            return None
+
         try:
             # Get transcript data
             transcript_text = self.get_transcript_text(call_id)
             transcript_json = self.get_transcript_json(call_id)
             metrics = self.get_metrics(call_id)
             resolved_talklee_call_id = self._resolve_talklee_call_id(call_id, talklee_call_id)
-            
-            # Step 1: Insert into transcripts table
-            transcript_insert = {
-                "call_id": call_id,
-                "tenant_id": tenant_id,
-                "turns": transcript_json,
-                "full_text": transcript_text,
-                "word_count": metrics["word_count"],
-                "turn_count": metrics["turn_count"],
-                "user_word_count": metrics["user_word_count"],
-                "assistant_word_count": metrics["assistant_word_count"],
-            }
-            if resolved_talklee_call_id:
-                transcript_insert["talklee_call_id"] = resolved_talklee_call_id
+            turns_jsonb = json.dumps(transcript_json)
+            row_id = str(target_call_id) if target_call_id else str(call_id)
 
-            try:
-                transcript_result = await self._run_execute(
-                    db_client.table("transcripts").insert(transcript_insert)
-                )
-            except Exception as insert_error:
-                if "talklee_call_id" in str(insert_error):
-                    transcript_insert.pop("talklee_call_id", None)
-                    transcript_result = await self._run_execute(
-                        db_client.table("transcripts").insert(transcript_insert)
-                    )
-                else:
-                    raise
-            
-            transcript_id = None
-            if transcript_result.data and len(transcript_result.data) > 0:
-                transcript_id = transcript_result.data[0].get("id")
-            
+            transcript_id = await self._insert_transcript_row(
+                pool,
+                call_id=str(call_id),
+                tenant_id=tenant_id,
+                turns_jsonb=turns_jsonb,
+                transcript_text=transcript_text,
+                metrics=metrics,
+                talklee_call_id=resolved_talklee_call_id,
+            )
+
             # Step 2 & 3: Update calls table with transcript
-            call_update = {
-                "transcript": transcript_text,
-                "transcript_json": transcript_json,
-                "updated_at": datetime.utcnow().isoformat(),
-            }
-            if resolved_talklee_call_id:
-                call_update["talklee_call_id"] = resolved_talklee_call_id
+            talklee_to_write = resolved_talklee_call_id if not target_call_id else None
+            await self._write_calls_transcript(
+                pool, row_id, transcript_text, transcript_json, talklee_to_write,
+            )
 
-            await self._run_execute(db_client.table("calls").update(call_update).eq("id", call_id))
-            
             logger.info(
                 f"Transcript saved for call {call_id}: "
                 f"{metrics['turn_count']} turns, {metrics['word_count']} words"
             )
-            
+
             return transcript_id
-            
+
         except Exception as e:
             logger.error(f"Failed to save transcript for call {call_id}: {e}")
             return None
+
+    async def _insert_transcript_row(
+        self,
+        pool,
+        *,
+        call_id: str,
+        tenant_id: Optional[str],
+        turns_jsonb: str,
+        transcript_text: str,
+        metrics: Dict[str, int],
+        talklee_call_id: Optional[str],
+    ) -> Optional[str]:
+        """INSERT a structured ``transcripts`` row (pooled async). Retries once
+        without ``talklee_call_id`` on a fresh transaction if that column is
+        absent (older schemas) — preserving the legacy fallback behaviour."""
+        from app.core.db_utils import acquire_with_tenant
+
+        base_cols = (
+            "call_id, tenant_id, turns, full_text, word_count, turn_count, "
+            "user_word_count, assistant_word_count"
+        )
+        base_args = [
+            call_id,
+            tenant_id,
+            turns_jsonb,
+            transcript_text,
+            metrics["word_count"],
+            metrics["turn_count"],
+            metrics["user_word_count"],
+            metrics["assistant_word_count"],
+        ]
+
+        async def _do_insert(include_talklee: bool):
+            if include_talklee:
+                cols = base_cols + ", talklee_call_id"
+                args = base_args + [talklee_call_id]
+            else:
+                cols = base_cols
+                args = base_args
+            # $3 (turns) is jsonb; the rest bind positionally in order.
+            placeholders = ", ".join(
+                f"${i + 1}::jsonb" if i == 2 else f"${i + 1}"
+                for i in range(len(args))
+            )
+            sql = (
+                f"INSERT INTO transcripts ({cols}) VALUES ({placeholders}) "
+                f"RETURNING id"
+            )
+            async with acquire_with_tenant(pool, None) as conn:
+                row = await conn.fetchrow(sql, *args)
+            return row["id"] if row else None
+
+        try:
+            return await _do_insert(include_talklee=bool(talklee_call_id))
+        except Exception as insert_error:
+            if talklee_call_id and "talklee_call_id" in str(insert_error):
+                return await _do_insert(include_talklee=False)
+            raise
     
     def clear_buffer(self, call_id: str) -> None:
         """

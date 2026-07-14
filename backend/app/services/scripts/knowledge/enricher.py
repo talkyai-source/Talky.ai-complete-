@@ -23,7 +23,15 @@ logger = logging.getLogger(__name__)
 
 _ENRICH_MODEL = os.getenv("KNOWLEDGE_ENRICH_MODEL", "llama-3.1-8b-instant")
 _BATCH_SIZE = int(os.getenv("KNOWLEDGE_ENRICH_BATCH", "25"))
-_CONTENT_CLIP = 600  # chars of node content sent to the enricher
+# Chars of node content sent to the enricher. This was 600, which truncated
+# every node to just the TOP of the section, so keywords/voice_answer NEVER
+# saw any fact below ~600 chars — the enrichment silently summarised only the
+# head of each node. (Retrieval still FTS/trgm-indexes the FULL content, but
+# the fuzzy keywords + spoken answer missed later facts.) Raised to cover whole
+# realistic KB sections; env-overridable for cost control on huge corpora.
+# NOTE: this only affects FUTURE ingests — nodes already enriched at the old
+# 600-char cap must be RE-INGESTED to pick up their later facts.
+_CONTENT_CLIP = int(os.getenv("KNOWLEDGE_ENRICH_CONTENT_CHARS", "6000"))
 
 
 @dataclass

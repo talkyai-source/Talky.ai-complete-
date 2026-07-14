@@ -288,7 +288,17 @@ class AudioIngest:
                     from app.domain.services.voice_pipeline.turn_helpers import (
                         _first_speaker_label,
                     )
-                    _is_caller_first = _first_speaker_label(session) == "inbound"
+                    # _first_speaker_label only ever returns "user" or "agent"
+                    # (see its docstring) — comparing against "inbound" here
+                    # was always False, so _is_caller_first was permanently
+                    # False: the OPENING "Hello?" ladder never fired and
+                    # should_suppress_mid_nudge always saw is_caller_first=False,
+                    # so a caller-first call with a silent callee got 60s of
+                    # dead air with no nudge at all. "user" is the correct
+                    # caller-first sentinel — matches turn_ender.py's own
+                    # `_first_speaker_label(session) == "user"` check for the
+                    # instant-opener path.
+                    _is_caller_first = _first_speaker_label(session) == "user"
                 except Exception:
                     _is_caller_first = False
 

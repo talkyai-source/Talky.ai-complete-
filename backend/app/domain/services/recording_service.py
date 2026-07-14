@@ -27,6 +27,7 @@ Retention lifecycle (set on the bucket, not in this code):
 """
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import os
@@ -194,6 +195,18 @@ class S3Client:
             raise
 
 
+def _write_wav_file(recordings_dir: str, filepath: str, wav_data: bytes) -> None:
+    """Synchronous makedirs+write, run off the event loop via
+    ``asyncio.to_thread`` by ``RecordingService._save_local``. Kept as a
+    free function (rather than inline in a closure) so it has no implicit
+    access to ``self``/event-loop state — the thread only ever touches the
+    plain, immutable arguments passed in, so there's nothing for it to race.
+    """
+    os.makedirs(recordings_dir, exist_ok=True)
+    with open(filepath, "wb") as fh:
+        fh.write(wav_data)
+
+
 # ---------------------------------------------------------------------------
 # RecordingService
 # ---------------------------------------------------------------------------
@@ -332,7 +345,20 @@ class RecordingService:
                 f"Uploading recording call={call_id} "
                 f"size={len(wav_data)}B bucket={self._s3.bucket} key={key}"
             )
-            self._s3.upload(key, wav_data, content_type="audio/wav")
+            # ROOT CAUSE FIX (2026-07-13): S3Client.upload() is a synchronous
+            # boto3 call (blocking socket I/O) — calling it directly here
+            # blocks the single asyncio event loop for the full upload
+            # round-trip (can be seconds for a multi-minute call's WAV over
+            # a slow/loaded link), stalling every other in-flight call's
+            # audio pump on this process. asyncio.to_thread runs it on a
+            # worker thread so the loop keeps servicing other calls while
+            # this upload is in flight; the coroutine still awaits the
+            # result so save_and_link's return value / ordering is
+            # unchanged. `wav_data`/`key` are plain immutable bytes/str, so
+            # there is nothing for the thread to race against.
+            await asyncio.to_thread(
+                self._s3.upload, key, wav_data, content_type="audio/wav"
+            )
             upload_finished = datetime.utcnow()
 
             logger.info(f"Recording uploaded: {key}")
@@ -376,7 +402,6 @@ class RecordingService:
         Returns the recording UUID string on success, None on failure.
         """
         recordings_dir = os.getenv("LOCAL_RECORDINGS_DIR", "./recordings")
-        os.makedirs(recordings_dir, exist_ok=True)
         abs_dir = os.path.abspath(recordings_dir)
         filepath = os.path.join(abs_dir, f"{call_id}.wav")
         try:
@@ -384,8 +409,15 @@ class RecordingService:
             if not wav_data:
                 logger.warning(f"No WAV data to save locally for call {call_id}")
                 return None
-            with open(filepath, "wb") as fh:
-                fh.write(wav_data)
+            # ROOT CAUSE FIX (2026-07-13): os.makedirs + open()/write() are
+            # synchronous filesystem calls — blocking on this process's
+            # single asyncio event loop for as long as the disk write takes
+            # (worse under load or on a slow/network-backed volume), during
+            # which every other in-flight call is starved. Offload the
+            # whole makedirs+write sequence to a worker thread; `filepath`/
+            # `wav_data` are immutable local values captured at call time,
+            # so there is no shared mutable state for the thread to race.
+            await asyncio.to_thread(_write_wav_file, recordings_dir, filepath, wav_data)
             logger.info(
                 f"Recording saved locally: {filepath} ({len(wav_data):,} bytes, "
                 f"{buffer.get_duration_seconds():.1f}s)"

@@ -37,6 +37,18 @@ _INFLIGHT_CALL_STATUSES = (
     "dialing", "ringing", "answered", "in_call", "initiated",
 )
 
+# Call statuses that prove the originate actually landed and a conversation is
+# (or was, moments ago) genuinely under way. A job whose linked `calls` row is
+# in one of these must NEVER be reaped on the job's own (short, 120s) timeout
+# — an answered call routinely runs well past 120s. Deliberately excludes
+# "initiated": that status means a call row was created but the provider never
+# even confirmed the channel, which is exactly the hung-origination case the
+# reaper exists to catch. A call wedged in one of THESE live statuses is still
+# bounded — `reap_stuck_calls` (CALL_STUCK_TIMEOUT_S, default 600s) closes it
+# independently, which drops it out of this set and makes the job reapable on
+# the next tick.
+_LIVE_CALL_STATUSES = ("dialing", "ringing", "answered", "in_call")
+
 
 async def reap_stuck_jobs(
     conn,
@@ -44,6 +56,23 @@ async def reap_stuck_jobs(
     timeout_seconds: int = DEFAULT_STUCK_TIMEOUT_S,
 ) -> int:
     """Mark in-flight jobs older than ``timeout_seconds`` as failed.
+
+    A job is only reaped if it is BOTH past its timeout AND has no linked
+    ``calls`` row currently in a live status (``_LIVE_CALL_STATUSES``). This
+    is what keeps a genuinely long-running, answered conversation (which
+    routinely exceeds the 120s job timeout) from being reaped mid-call — the
+    reaper used to key purely off ``dialer_jobs.updated_at``, with no
+    awareness of whether a live call existed for the job at all, so any call
+    answered and talking past 120s got its job (and therefore its
+    active-job/lead-dedup slot) killed out from under it, freeing the lead to
+    be re-enqueued and double-dialed while the first call was still live.
+
+    The linkage is ``calls.dialer_job_id``, populated at call-row INSERT
+    (``dialer_worker._create_call_record``) — see that function's 2026-07-13
+    fix note. A job that never reached origination (no ``calls`` row at all)
+    or whose call never progressed past ``initiated`` has no row satisfying
+    the ``EXISTS`` clause below, so it is still reaped normally: this only
+    ever narrows which jobs get reaped, it never widens it.
 
     Args:
         conn: an asyncpg connection (or anything with ``.fetch``).
@@ -62,11 +91,17 @@ async def reap_stuck_jobs(
                updated_at       = now()
          WHERE status = ANY($1::text[])
            AND updated_at < now() - make_interval(secs => $3::int)
+           AND NOT EXISTS (
+               SELECT 1 FROM calls c
+                WHERE c.dialer_job_id = dialer_jobs.id
+                  AND c.status = ANY($4::text[])
+           )
         RETURNING id
         """,
         list(IN_FLIGHT_STATUSES),
         STUCK_REASON,
         int(timeout_seconds),
+        list(_LIVE_CALL_STATUSES),
     )
     reaped = len(rows)
     if reaped:

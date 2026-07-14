@@ -31,6 +31,19 @@ _EL_MAX_RETRIES = 2
 _EL_RETRY_BASE_DELAY = 0.3  # 300ms base, exponential with jitter
 
 
+class ElevenLabsPartialAudioError(RuntimeError):
+    """Raised when synthesis is cut short AFTER some audio was already
+    yielded to the caller (e.g. a read timeout mid-sentence).
+
+    Distinguishes a partial delivery from a clean failure: the caller
+    (tts_playback.py) already skips its "I'm sorry" fallback whenever any
+    audio reached the gateway (first_chunk_sent), so surfacing this as a
+    plain exception is enough for fail-soft behaviour — the important part
+    is that stream_synthesize itself never retries the full text once the
+    caller has heard the start of the sentence, which would duplicate it.
+    """
+
+
 class _SingleKeyLease:
     """Drop-in replacement for KeyPool.acquire() when only one key is configured."""
 
@@ -92,6 +105,15 @@ class ElevenLabsTTSProvider(TTSProvider):
         # limit_per_host=50 matches the server's max_concurrent_pipelines default.
         # The previous limit=10 (global cap) serialized requests at 10+ concurrent
         # sessions — limit_per_host scopes the cap to api.elevenlabs.io only.
+        #
+        # This connector cap is a SECOND, lower-level ceiling behind the
+        # provider_concurrency "elevenlabs" guard (see get_provider_guard call
+        # below and provider_concurrency.py). The guard must stay <=
+        # limit_per_host — if the guard were raised above 50 without raising
+        # this too, requests would queue silently inside aiohttp instead of at
+        # the guard, where wait time is logged. Guard default is 8 (env
+        # ELEVENLABS_MAX_CONCURRENT), well under this 50, so the guard is
+        # always the binding, visible constraint.
         connector = aiohttp.TCPConnector(limit_per_host=50, keepalive_timeout=30)
         self._session = aiohttp.ClientSession(
             connector=connector,
@@ -148,6 +170,15 @@ class ElevenLabsTTSProvider(TTSProvider):
         # callers can't fan out to 50 simultaneous in-flight requests.
         async with self._guard.acquire():
             last_err: Optional[Exception] = None
+            # True once ANY audio chunk from THIS synthesis has reached the
+            # caller. A read timeout after that point must never fall
+            # through to the retry-by-continue path below — that path
+            # re-POSTs the full `text` from scratch, and the caller would
+            # hear the restarted sentence appended after what already
+            # played (duplicated/garbled speech). Once set, this flag is
+            # permanent for the remainder of the call — see the guard in
+            # both except clauses.
+            chunks_yielded = False
             for attempt in range(_EL_MAX_RETRIES + 1):
                 key_ctx = (
                     self._pool.acquire() if self._pool is not None
@@ -158,10 +189,36 @@ class ElevenLabsTTSProvider(TTSProvider):
                         "xi-api-key": lease.key,
                         "Content-Type": "application/json",
                     }
+                    _t_post = asyncio.get_event_loop().time()
                     try:
                         async with self._session.post(
                             url, headers=headers, params=params, json=payload,
                         ) as response:
+                            # Fail-soft observability: response headers + POST->
+                            # first-byte timing. ElevenLabs surfaces per-request
+                            # concurrency state in headers, which is the only way
+                            # to see queuing that happens BELOW our own guard
+                            # (i.e. inside their infra) rather than in front of it.
+                            # A missing/renamed header must never break TTS, so
+                            # every read here is best-effort.
+                            try:
+                                _ttfb_ms = (asyncio.get_event_loop().time() - _t_post) * 1000.0
+                                _h = response.headers
+                                logger.info(
+                                    "elevenlabs_tts_response status=%s ttfb_ms=%.0f "
+                                    "request_id=%s region=%s current_concurrent=%s "
+                                    "max_concurrent=%s",
+                                    response.status,
+                                    _ttfb_ms,
+                                    _h.get("request-id", "unknown"),
+                                    _h.get("x-region", _h.get("region", "unknown")),
+                                    _h.get("current-concurrent-requests", "unknown"),
+                                    _h.get("maximum-concurrent-requests", "unknown"),
+                                )
+                            except Exception as _hdr_exc:  # noqa: BLE001
+                                logger.debug(
+                                    "elevenlabs_header_telemetry_failed err=%s", _hdr_exc
+                                )
                             if response.status not in (200, 206):
                                 error_text = await response.text()
                                 is_retryable = response.status in (429, 500, 502, 503, 504)
@@ -188,6 +245,7 @@ class ElevenLabsTTSProvider(TTSProvider):
                             async for chunk in response.content.iter_chunked(2048):
                                 if not chunk:
                                     continue
+                                chunks_yielded = True
                                 yield AudioChunk(
                                     data=chunk,
                                     sample_rate=selected_sample_rate,
@@ -199,6 +257,22 @@ class ElevenLabsTTSProvider(TTSProvider):
                     except asyncio.TimeoutError as exc:
                         lease.report_failure(retryable=True)
                         last_err = exc
+                        if chunks_yielded:
+                            # Audio already reached the caller for this
+                            # sentence — do NOT retry (that would re-POST
+                            # the full text and duplicate what was already
+                            # spoken). End the stream here and raise a
+                            # distinguishable error so callers can tell
+                            # this apart from "nothing played at all".
+                            logger.warning(
+                                "[ElevenLabs] timeout after partial audio — "
+                                "ending stream without retry (no duplicate "
+                                "synthesis)",
+                            )
+                            raise ElevenLabsPartialAudioError(
+                                "ElevenLabs TTS timed out after partial "
+                                "audio was already streamed"
+                            ) from exc
                         if attempt < _EL_MAX_RETRIES:
                             delay = min(
                                 _EL_RETRY_BASE_DELAY * (2 ** attempt), 5.0
@@ -212,6 +286,11 @@ class ElevenLabsTTSProvider(TTSProvider):
                         raise RuntimeError("ElevenLabs TTS request timeout") from exc
                     except aiohttp.ClientError as exc:
                         lease.report_failure(retryable=True)
+                        if chunks_yielded:
+                            raise ElevenLabsPartialAudioError(
+                                f"ElevenLabs TTS connection error after "
+                                f"partial audio: {exc}"
+                            ) from exc
                         raise RuntimeError(f"ElevenLabs TTS error: {exc}") from exc
 
             if last_err:

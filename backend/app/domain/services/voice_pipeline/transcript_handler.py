@@ -179,29 +179,27 @@ class TranscriptHandler:
             return
 
         if metadata.get("eager") and transcript.text:
+            # CONTAINMENT (safety): do NOT launch a speculative turn on eager.
+            #
+            # An EagerEndOfTurn is RETRACTABLE — Deepgram fires TurnResumed if the
+            # caller keeps talking — but the turn runner commits IRREVERSIBLE
+            # effects mid-run: captured_slots (CORE email / phone / yes-no) at
+            # turn_runner.py:294, and agent END_CALL / hangup. The TurnResumed
+            # cancel path rolls back conversation_history but NOT captured_slots,
+            # so a retracted speculative turn could PERMANENTLY commit a partial
+            # CORE field or hang the call up. Speculation is therefore unsafe for
+            # any irreversible action.
+            #
+            # We trade the ~150–250ms eager head start for correctness: only the
+            # CONFIRMED EndOfTurn path above (detect_turn_end) starts the real
+            # turn, exactly once. We still stash the transcript + confidence so
+            # that confirmed final path — which reads session.current_user_input
+            # and _last_transcript_confidence — has the caller's words even when
+            # they only ever arrived via eager events (no plain interim).
             if not session.llm_active and call_id not in self._p._pending_llm_tasks:
                 session.current_user_input = transcript.text
-                # Stash the transcript's confidence alongside the text so
-                # handle_turn_end can apply a turn-0 floor on garbled
-                # mishears without re-acquiring the transcript object.
+                # Confidence feeds handle_turn_end's turn-0 garbled-mishear floor.
                 session._last_transcript_confidence = transcript.confidence
-                # Snapshot history length so TurnResumed can roll back any
-                # messages the speculative task appends before cancellation.
-                session._speculative_history_len = len(session.conversation_history)
-                # Speculatively start LLM now (EagerEndOfTurn fired — 150–250ms before
-                # EndOfTurn). If user keeps talking, TurnResumed cancels this task via
-                # the handle_transcript "resumed" branch above (session.llm_active=False
-                # + task.cancel()).
-                task = asyncio.create_task(
-                    self._p.handle_turn_end(
-                        session, websocket, source="speculative",
-                        user_text=transcript.text,
-                    )
-                )
-                # Tag: a SPECULATIVE task is tentative (the user may keep
-                # talking). It is cancellable by TurnResumed or a barge-in.
-                task._turn_type = "speculative"
-                self._p._pending_llm_tasks[call_id] = task
             return
 
         # Real-time machine detection on EVERY transcript, interims included.

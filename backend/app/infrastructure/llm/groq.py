@@ -43,6 +43,16 @@ _LLM_RETRY_BASE_DELAY = 0.3  # 300ms — fast first retry for voice latency budg
 # reserve — their max_tokens is purely the answer. Env-tunable.
 _THINKING_RESERVE_TOKENS = int(os.getenv("GROQ_THINKING_RESERVE_TOKENS", "1024"))
 
+# Debug logging of per-message CONTENT (first 100 chars) is off by default —
+# in production debug mode it was writing caller PII and tenant operator
+# instructions (system/user/assistant/tool message text) straight to logs.
+# Structural info (role, content length, message count) is always safe and
+# always logged; raw content only appears when an operator explicitly opts
+# in for local troubleshooting.
+_LOG_MESSAGE_CONTENT = os.getenv("LOG_MESSAGE_CONTENT", "false").strip().lower() in (
+    "1", "true", "yes", "on",
+)
+
 
 def _coerce_int(value) -> int:
     """Best-effort int coercion for SDK fields whose shape may vary by
@@ -82,9 +92,53 @@ def _extract_cached_tokens(usage_obj) -> int:
     return 0
 
 
-def _emit_usage_log(usage_obj, *, model: str) -> None:
-    """Surface Groq's per-request token usage so operators can see when
-    prompt caching is firing.
+def _get_field(obj, name: str):
+    """getattr-or-dict-get, safe across typed SDK objects and plain dicts."""
+    if obj is None:
+        return None
+    val = getattr(obj, name, None)
+    if val is not None:
+        return val
+    if isinstance(obj, dict):
+        return obj.get(name)
+    return None
+
+
+def _extract_stream_usage(chunk):
+    """Pull the usage object off a Groq streaming chunk, tolerating both SDK
+    usage surfaces.
+
+    Groq-python 0.37.x streaming chunks normally expose usage under the
+    Groq-specific ``chunk.x_groq.usage`` field (present on the final content
+    chunk of a stream). ``chunk.usage`` — the OpenAI-compatible field — is
+    ONLY populated when the request sets ``stream_options={"include_usage":
+    True}``, which Groq's SDK rejects outright (see the NOTE in stream_chat).
+    So in practice ``chunk.usage`` is normally None and ``x_groq.usage`` is
+    where the real numbers live; we check ``usage`` first anyway in case a
+    future SDK version starts populating both, and fall back to
+    ``x_groq.usage`` — whichever is present wins, both reads are getattr-safe
+    so a shape change on either surface degrades to "no usage this chunk"
+    instead of raising.
+    """
+    usage = _get_field(chunk, "usage")
+    if usage is not None:
+        return usage
+    x_groq = _get_field(chunk, "x_groq")
+    return _get_field(x_groq, "usage")
+
+
+def _emit_usage_log(
+    usage_obj,
+    *,
+    model: str,
+    client_ttft_ms: Optional[float] = None,
+    client_total_ms: Optional[float] = None,
+    partial: bool = False,
+) -> None:
+    """Surface Groq's per-request token usage + server/client timing so
+    operators can see when prompt caching is firing AND where time in a
+    turn actually went (Groq queue/prompt/completion vs. our own network +
+    client overhead).
 
     Emits a single structured log line at INFO with:
     * ``prompt_tokens``  — total prompt size sent (system + history)
@@ -94,22 +148,73 @@ def _emit_usage_log(usage_obj, *, model: str) -> None:
                             this value should be non-zero on turn 2+)
     * ``cache_hit_ratio``— cached / prompt, 0.0–1.0
     * ``completion_tokens`` — yield this turn
+    * ``queue_time`` / ``prompt_time`` / ``completion_time`` / ``total_time``
+      — Groq's own server-side phase timings (seconds), when the SDK
+      surfaces them (``x_groq.usage``: see Groq's "Understanding Metrics"
+      docs). Any field the SDK doesn't provide logs as -1 rather than
+      raising or silently omitting the field, so log parsers can rely on
+      a stable line shape.
+    * ``req_id`` — Groq's ``x_groq.id`` for cross-referencing with their
+      console/support, when available.
+    * ``client_ttft_ms`` — wall-clock from request dispatch to first
+      content token, measured by the caller (stream_chat_with_timeout).
+    * ``client_net_remainder_ms`` — client_ttft_ms minus Groq's own
+      queue_time+prompt_time (both converted to ms). This is the part of
+      TTFT Groq's own timings don't account for: our network hop +
+      httpx/SDK overhead + (for the first token) part of completion_time.
+      Negative or missing inputs log as -1 (best-effort, not exact).
+    * ``partial`` — true when this line was emitted at stream end without
+      a final usage chunk (e.g. barge-in cut the stream before Groq sent
+      one) — token counts most-likely reflect a preceding partial log
+      only, not this call; see the caller for the barge-in fallback path.
 
     A consistently-zero ``cache_hit_ratio`` after turn 0 is the signal
     that prompt caching is not engaging — typically because the system
     prompt is changing across turns or sits below Groq's 1k-token
     minimum cache threshold.
+
+    Fail-soft: every field extraction below is getattr/dict-get safe with a
+    default, and the whole function is wrapped by its caller so a logging
+    bug can never break the token stream.
     """
-    prompt_tokens = _coerce_int(getattr(usage_obj, "prompt_tokens", None)
-                                or (usage_obj.get("prompt_tokens") if isinstance(usage_obj, dict) else None))
-    completion_tokens = _coerce_int(getattr(usage_obj, "completion_tokens", None)
-                                    or (usage_obj.get("completion_tokens") if isinstance(usage_obj, dict) else None))
+    prompt_tokens = _coerce_int(_get_field(usage_obj, "prompt_tokens"))
+    completion_tokens = _coerce_int(_get_field(usage_obj, "completion_tokens"))
     cached_tokens = _extract_cached_tokens(usage_obj)
     ratio = (cached_tokens / prompt_tokens) if prompt_tokens else 0.0
+
+    # Groq server-side phase timings (seconds) — present on x_groq.usage,
+    # absent on a bare OpenAI-shaped usage object. -1 marks "not provided"
+    # rather than conflating it with a genuine 0.0s.
+    def _timing(field: str) -> float:
+        val = _get_field(usage_obj, field)
+        if val is None:
+            return -1.0
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return -1.0
+
+    queue_time = _timing("queue_time")
+    prompt_time = _timing("prompt_time")
+    completion_time = _timing("completion_time")
+    total_time = _timing("total_time")
+    req_id = _get_field(usage_obj, "id") or "unknown"
+
+    net_remainder_ms = -1.0
+    if client_ttft_ms is not None and queue_time >= 0 and prompt_time >= 0:
+        net_remainder_ms = client_ttft_ms - (queue_time + prompt_time) * 1000.0
+
     logger.info(
-        "llm_usage model=%s prompt_tokens=%d cached_tokens=%d "
-        "cache_hit_ratio=%.2f completion_tokens=%d",
-        model, prompt_tokens, cached_tokens, ratio, completion_tokens,
+        "llm_usage model=%s partial=%s prompt_tokens=%d cached_tokens=%d "
+        "cache_hit_ratio=%.2f completion_tokens=%d req_id=%s "
+        "queue_time=%.3f prompt_time=%.3f completion_time=%.3f total_time=%.3f "
+        "client_ttft_ms=%.0f client_total_ms=%.0f client_net_remainder_ms=%.0f",
+        model, partial, prompt_tokens, cached_tokens,
+        ratio, completion_tokens, req_id,
+        queue_time, prompt_time, completion_time, total_time,
+        client_ttft_ms if client_ttft_ms is not None else -1.0,
+        client_total_ms if client_total_ms is not None else -1.0,
+        net_remainder_ms,
     )
     # Mirror to Prometheus (T4-B2). The metric tracks the most-recent
     # ratio per (mode, persona); operators read it with avg_over_time
@@ -442,9 +547,21 @@ class GroqLLMProvider(LLMProvider):
             without finish_reason or exception), we detect it in 2s and break
             cleanly rather than waiting up to 9s and then discarding content.
 
+        The `timeout_seconds` budget measures ONLY the time spent *awaiting the
+        next token from Groq* — it is accumulated across the token-fetch awaits
+        and explicitly EXCLUDES the time the consumer holds this generator
+        suspended at `yield` (real-time-paced TTS/playback between token pulls).
+        Counting playback time against the LLM budget was truncating healthy,
+        valid multi-sentence replies mid-sentence: the generator is suspended at
+        its `yield` while audio plays, so a plain wall-clock kept ticking on time
+        we never spent waiting on Groq. Genuine Groq slowness is still caught —
+        the per-await `_INTERTOKEN_TIMEOUT` bounds every single token wait, and
+        the accumulated Groq-wait budget bounds the total.
+
         Args:
             messages: Conversation history
-            timeout_seconds: Hard wall-clock limit for the entire stream
+            timeout_seconds: Budget for total time spent WAITING ON GROQ (not
+                downstream playback) across the whole stream
             **kwargs: Passed to stream_chat
 
         Yields:
@@ -455,17 +572,22 @@ class GroqLLMProvider(LLMProvider):
         """
         _INTERTOKEN_TIMEOUT = 2.0  # Groq confirmed bug: stream stalls silently mid-stream
 
-        t_start = asyncio.get_event_loop().time()
+        # Time spent INSIDE the awaits that fetch the next token from Groq.
+        # The gap between yielding a token and being asked for the next one
+        # (consumer-side TTS/playback) is NOT added here, so downstream pacing
+        # can never consume the LLM budget.
+        groq_wait_accumulated = 0.0
         tokens_received = 0
         gen = self.stream_chat(messages, **kwargs)
         try:
             while True:
-                remaining = timeout_seconds - (asyncio.get_event_loop().time() - t_start)
+                remaining = timeout_seconds - groq_wait_accumulated
                 if remaining <= 0:
                     if tokens_received > 0:
-                        # Wall-clock expired mid-stream — treat as normal end, content already TTS'd
+                        # Budget of actual Groq-wait time exhausted mid-stream —
+                        # content already yielded/TTS'd, treat as normal end.
                         logger.warning(
-                            "LLM wall-clock expired mid-stream (limit=%.1fs, tokens=%d) — "
+                            "LLM Groq-wait budget expired mid-stream (limit=%.1fs, tokens=%d) — "
                             "treating as stream end", timeout_seconds, tokens_received
                         )
                         break
@@ -478,48 +600,54 @@ class GroqLLMProvider(LLMProvider):
                     )
                 # Use tight inter-token timeout after first token to catch Groq silent stalls
                 token_timeout = remaining if tokens_received == 0 else min(remaining, _INTERTOKEN_TIMEOUT)
+                _wait_t0 = asyncio.get_event_loop().time()
                 try:
                     token = await asyncio.wait_for(gen.__anext__(), timeout=token_timeout)
-                    if tokens_received == 0:
-                        ttft_ms = (asyncio.get_event_loop().time() - t_start) * 1000
-                        if ttft_ms > 800:
-                            logger.warning(
-                                "High TTFT: %.0fms — likely Groq rate limiting or cold cache. "
-                                "Check Groq console for token bucket status.", ttft_ms
-                            )
-                    tokens_received += 1
-                    yield token
                 except StopAsyncIteration:
                     break
                 except asyncio.TimeoutError:
-                    elapsed = asyncio.get_event_loop().time() - t_start
+                    # Only the Groq wait counts — a full `token_timeout` elapsed here.
+                    groq_wait_accumulated += asyncio.get_event_loop().time() - _wait_t0
                     if tokens_received > 0:
                         # Inter-token stall: Groq stopped sending tokens mid-stream silently.
                         # Content already yielded and TTS'd — break cleanly, no fallback needed.
                         logger.warning(
-                            "Groq inter-token stall after %.2fs (tokens=%d) — "
+                            "Groq inter-token stall (groq_wait=%.2fs, tokens=%d) — "
                             "treating as stream end (Groq silent-stall bug)",
-                            elapsed, tokens_received,
+                            groq_wait_accumulated, tokens_received,
                         )
                         break
                     logger.error(
                         "LLM timeout waiting for first token after %.2fs (limit=%.1fs): %s",
-                        elapsed, timeout_seconds, "asyncio.TimeoutError",
+                        groq_wait_accumulated, timeout_seconds, "asyncio.TimeoutError",
                     )
                     raise LLMTimeoutError(
                         f"LLM response timed out after {timeout_seconds}s"
                     )
                 except GroqAPITimeoutError as exc:
-                    elapsed = asyncio.get_event_loop().time() - t_start
+                    groq_wait_accumulated += asyncio.get_event_loop().time() - _wait_t0
                     logger.error(
                         "LLM Groq API timeout after %.2fs (limit=%.1fs, tokens=%d): %s",
-                        elapsed, timeout_seconds, tokens_received, exc,
+                        groq_wait_accumulated, timeout_seconds, tokens_received, exc,
                     )
                     if tokens_received > 0:
                         break
                     raise LLMTimeoutError(
                         f"LLM response timed out after {timeout_seconds}s"
                     )
+                # Success: charge ONLY the just-measured Groq-wait span to the
+                # budget, then yield. Whatever downstream time the consumer spends
+                # before pulling again lands OUTSIDE this measured span.
+                groq_wait_accumulated += asyncio.get_event_loop().time() - _wait_t0
+                if tokens_received == 0:
+                    ttft_ms = groq_wait_accumulated * 1000
+                    if ttft_ms > 800:
+                        logger.warning(
+                            "High TTFT: %.0fms — likely Groq rate limiting or cold cache. "
+                            "Check Groq console for token bucket status.", ttft_ms
+                        )
+                tokens_received += 1
+                yield token
         finally:
             await gen.aclose()
     
@@ -691,10 +819,22 @@ class GroqLLMProvider(LLMProvider):
             logger.debug(f"Messages count: {len(groq_messages)}")
             logger.debug(f"Stop sequences: {stop_sequences}")
             
-            # Log each message for debugging (truncated)
+            # Log each message for debugging. Content (caller PII / tenant
+            # operator instructions) is NOT logged by default — only role and
+            # length, which is enough to debug shape/ordering issues without
+            # writing sensitive text to logs. Set LOG_MESSAGE_CONTENT=true to
+            # opt into the old truncated-content preview for local debugging.
             for i, msg in enumerate(groq_messages):
-                content_preview = msg['content'][:100] if msg['content'] else '<EMPTY>'
-                logger.debug(f"Message {i}: role={msg['role']}, content='{content_preview}...'")
+                content = msg['content']
+                content_len = len(content) if content else 0
+                if _LOG_MESSAGE_CONTENT:
+                    content_preview = content[:100] if content else '<EMPTY>'
+                    logger.debug(f"Message {i}: role={msg['role']}, content='{content_preview}...'")
+                else:
+                    logger.debug(
+                        f"Message {i}: role={msg['role']}, content_len={content_len}"
+                        f"{' <EMPTY>' if not content else ''}"
+                    )
             
             top_p = kwargs.get("top_p")
             if top_p is None:
@@ -815,29 +955,84 @@ class GroqLLMProvider(LLMProvider):
                                     **request_kwargs
                                 )
 
-                                # Yield tokens as they arrive. Groq sends a
-                                # final usage-only chunk (choices=[], usage
-                                # populated) when stream_options.include_usage
-                                # is enabled — record it and skip yielding.
+                                # Yield tokens as they arrive. Normal Groq
+                                # streaming usage arrives on the Groq-specific
+                                # chunk.x_groq.usage field (chunk.usage is only
+                                # populated when stream_options.include_usage is
+                                # set, which Groq rejects — see NOTE above);
+                                # _extract_stream_usage checks both, getattr-safe.
                                 token_count = 0
                                 final_usage = None
                                 tc_acc: Dict[int, dict] = {}
-                                async for chunk in stream:
-                                    if chunk.choices:
-                                        delta = chunk.choices[0].delta
-                                        if delta.content:
-                                            token_count += 1
-                                            tokens_yielded += 1
-                                            yield delta.content
-                                        # Assemble streamed tool-call fragments
-                                        # (name + arguments arrive in pieces).
-                                        if tool_calls_sink is not None:
-                                            frags = getattr(delta, "tool_calls", None)
-                                            if frags:
-                                                _accumulate_tool_call_frags(tc_acc, frags)
-                                    chunk_usage = getattr(chunk, "usage", None)
-                                    if chunk_usage is not None:
-                                        final_usage = chunk_usage
+                                # Client-side timing for telemetry only — never
+                                # gates yielding. dispatch = right before we
+                                # start consuming the stream; first_content_t =
+                                # the moment the first content token is ready.
+                                _t_dispatch = asyncio.get_event_loop().time()
+                                _first_content_t: Optional[float] = None
+                                try:
+                                    async for chunk in stream:
+                                        if chunk.choices:
+                                            delta = chunk.choices[0].delta
+                                            if delta.content:
+                                                if _first_content_t is None:
+                                                    _first_content_t = asyncio.get_event_loop().time()
+                                                token_count += 1
+                                                tokens_yielded += 1
+                                                yield delta.content
+                                            # Assemble streamed tool-call fragments
+                                            # (name + arguments arrive in pieces).
+                                            if tool_calls_sink is not None:
+                                                frags = getattr(delta, "tool_calls", None)
+                                                if frags:
+                                                    _accumulate_tool_call_frags(tc_acc, frags)
+                                        chunk_usage = _extract_stream_usage(chunk)
+                                        if chunk_usage is not None:
+                                            final_usage = chunk_usage
+                                finally:
+                                    # Fail-soft telemetry tail. Runs on normal
+                                    # stream completion AND on early close —
+                                    # e.g. barge-in causes the consumer
+                                    # (stream_chat_with_timeout) to call
+                                    # gen.aclose(), which raises GeneratorExit at
+                                    # our current `yield` above; this `finally`
+                                    # still runs so we log what we captured
+                                    # instead of nothing. Never let a telemetry
+                                    # bug break the token stream or propagate
+                                    # past the exception that triggered us here.
+                                    try:
+                                        client_ttft_ms = (
+                                            (_first_content_t - _t_dispatch) * 1000.0
+                                            if _first_content_t is not None else None
+                                        )
+                                        client_total_ms = (
+                                            asyncio.get_event_loop().time() - _t_dispatch
+                                        ) * 1000.0
+                                        if final_usage is not None:
+                                            _emit_usage_log(
+                                                final_usage, model=model,
+                                                client_ttft_ms=client_ttft_ms,
+                                                client_total_ms=client_total_ms,
+                                            )
+                                        elif token_count > 0:
+                                            # No final usage chunk arrived — most
+                                            # likely a barge-in closed the stream
+                                            # before Groq emitted one (or this
+                                            # model/SDK path never sends it).
+                                            # Content was demonstrably yielded and
+                                            # TTS'd, so log what's available
+                                            # rather than staying silent.
+                                            _emit_usage_log(
+                                                None, model=model,
+                                                client_ttft_ms=client_ttft_ms,
+                                                client_total_ms=client_total_ms,
+                                                partial=True,
+                                            )
+                                    except Exception as _telemetry_exc:  # noqa: BLE001
+                                        logger.debug(
+                                            "groq_usage_telemetry_failed err=%s",
+                                            _telemetry_exc,
+                                        )
 
                                 # Surface any assembled tool calls to the caller.
                                 # Only reached on a fully-successful stream, so a
@@ -850,8 +1045,6 @@ class GroqLLMProvider(LLMProvider):
                                 )
                                 if token_count == 0 and not (tool_calls_sink is not None and tc_acc):
                                     logger.warning("Zero tokens received from Groq")
-                                if final_usage is not None:
-                                    _emit_usage_log(final_usage, model=model)
                             _lease.report_success()
                             return  # success — exit retry loop AND generator
 

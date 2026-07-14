@@ -29,6 +29,56 @@ configure_logging()
 logger = logging.getLogger(__name__)
 
 
+async def _event_loop_lag_heartbeat(stop_event: asyncio.Event) -> None:
+    """Per-loop scheduling-lag heartbeat — the primary "knee" metric.
+
+    Wakes every 10ms on an ABSOLUTE deadline and records how far past that
+    deadline the loop actually scheduled it. Absolute deadlines (not chained
+    ``sleep(0.010)`` calls) so measurement error cannot accumulate as drift.
+    Under CPU contention / a blocking call this lag climbs long before per-turn
+    latency degrades, which makes it the metric to watch during load testing
+    and a standing production saturation signal.
+
+    Independent of ASYNCIO_DEBUG / slow_callback diagnostics. Fail-soft: a
+    metrics hiccup re-arms the deadline instead of killing the loop; cancelled
+    cleanly on shutdown via ``stop_event`` (same path as the other background
+    tasks).
+    """
+    from app.infrastructure.metrics.voice_metrics import (
+        observe_event_loop_lag_seconds,
+    )
+
+    loop = asyncio.get_running_loop()
+    period = 0.010
+    deadline = loop.time() + period
+    while not stop_event.is_set():
+        try:
+            await asyncio.sleep(max(0.0, deadline - loop.time()))
+            now = loop.time()
+            lag = max(0.0, now - deadline)
+            observe_event_loop_lag_seconds(lag)
+            deadline += period
+            if now > deadline:
+                # Still behind after advancing by one period means the stall
+                # already recorded above (lag > one period) ate into more
+                # than one tick. Without this resync, the un-advanced
+                # deadline stays in the past and the next several iterations
+                # would each sleep(0) and emit their OWN lag sample for the
+                # very same stall — a catch-up burst that over-represents one
+                # event as many. Resync onto "now" so a single stall always
+                # yields exactly one observation. The normal (non-stall) case
+                # never hits this branch, so chained absolute deadlines keep
+                # scheduling with no drift.
+                deadline = now + period
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # Never let a metric error kill the heartbeat. Re-arm off "now"
+            # so a long stall doesn't spend the next iterations in a burst of
+            # zero-length sleeps trying to catch a stale deadline up.
+            deadline = loop.time() + period
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -291,6 +341,22 @@ async def lifespan(app: FastAPI):
             )
         )
         logger.info("stream_events_cleanup_task_started")
+
+    # Event-loop scheduling-lag heartbeat. A 10ms absolute-deadline ticker
+    # that records how far past each deadline the loop woke it — the primary
+    # "knee" metric for load testing and a standing production saturation
+    # signal. Runs regardless of Redis/DB (it measures THIS loop), never blocks
+    # startup (fire-and-forget create_task), and is drained by the same
+    # stop-event / cancel path as the listeners above. Guarded so a single
+    # process/loop never registers two heartbeats.
+    if not getattr(app.state, "_loop_lag_heartbeat_started", False):
+        app.state._loop_lag_heartbeat_started = True
+        app.state.redis_listener_tasks.append(
+            asyncio.create_task(
+                _event_loop_lag_heartbeat(app.state.redis_listener_stop)
+            )
+        )
+        logger.info("event_loop_lag_heartbeat_started period_ms=10")
 
     # Single-owner telephony lock. Exactly ONE process may hold the ARI
     # event connection to Asterisk and serve calls — all per-call live

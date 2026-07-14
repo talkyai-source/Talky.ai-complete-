@@ -278,7 +278,10 @@ class TelephonyRateLimiter:
             decision.policy.window_seconds,
             decision.block_ttl_seconds,
             request_id,
-            json.dumps(payload),
+            # Raw dict — the pool's jsonb codec (app.core.db) encodes via
+            # json.dumps on write; a pre-dumped string here would be
+            # double-encoded into a JSON string scalar.
+            payload,
             created_by,
         )
 
@@ -455,12 +458,13 @@ class TelephonyRateLimiter:
                     or f"Rate-limit threshold breached: {decision.policy.metric_key}",
                 tenant_id,
                 "telephony_rate_limiter",
-                json.dumps({
+                # Raw dict — see _record_event comment above.
+                {
                     "metric": decision.policy.metric_key,
                     "counter": decision.counter_value,
                     "threshold": decision.threshold_value,
                     "action": decision.action.value,
-                }),
+                },
                 "API throttling warning" if decision.action == RateLimitAction.WARN
                     else "API rate limit hit",
             )

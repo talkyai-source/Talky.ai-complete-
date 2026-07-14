@@ -334,7 +334,10 @@ async def create_sip_trunk(
                     canonical_payload["direction"],
                     canonical_payload["auth_username"],
                     encrypted_password,
-                    json.dumps(canonical_payload["metadata"]),
+                    # Raw dict — the pool's jsonb codec (app.core.db) encodes
+                    # via json.dumps on write; a pre-dumped string here would
+                    # be double-encoded into a JSON string scalar.
+                    canonical_payload["metadata"],
                     current_user.id,
                 )
             except asyncpg.UniqueViolationError:
@@ -540,7 +543,8 @@ async def update_sip_trunk(
                     direction.value if isinstance(direction, SIPDirection) else direction,
                     auth_username,
                     auth_password_encrypted,
-                    json.dumps(metadata),
+                    # Raw dict — see create-path comment above.
+                    metadata,
                     current_user.id,
                 )
             except asyncpg.UniqueViolationError:
@@ -820,7 +824,8 @@ async def test_sip_trunk(
             WHERE id = $3 AND tenant_id = $4
             """,
             tested_at,
-            json.dumps(result),
+            # Raw dict — see create-path comment above.
+            result,
             trunk_id,
             current_user.tenant_id,
         )
@@ -978,7 +983,8 @@ async def set_pool_assignment(
             "UPDATE tenants SET calling_rules = COALESCE(calling_rules,'{}'::jsonb) "
             "|| jsonb_build_object('pool_trunk', $2::jsonb), updated_at = NOW() WHERE id = $1",
             current_user.tenant_id,
-            json.dumps(snapshot),
+            # Raw dict — see create-path comment above.
+            snapshot,
         )
     return PoolAssignmentResponse(
         pool_trunk_id=snapshot["id"], label=snapshot["label"], caller_id=snapshot["caller_id"]
@@ -1095,7 +1101,8 @@ async def set_campaign_trunk_assignment(
             "UPDATE campaigns SET calling_config = COALESCE(calling_config,'{}'::jsonb) "
             "|| jsonb_build_object('trunk', $3::jsonb), updated_at = NOW() "
             "WHERE id = $1::uuid AND tenant_id = $2::uuid",
-            body.campaign_id, current_user.tenant_id, json.dumps(snapshot),
+            # Raw dict — see create-path comment above.
+            body.campaign_id, current_user.tenant_id, snapshot,
         )
         if updated == "UPDATE 0":
             return _problem(

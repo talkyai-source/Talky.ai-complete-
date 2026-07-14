@@ -9,8 +9,11 @@ OWASP API Security Top 10 2023:
 - API10: Unsafe Consumption of APIs
 """
 
+import json
 import logging
-from typing import Optional
+import os
+import secrets
+from typing import Optional, Tuple
 
 from fastapi import APIRouter, Request, HTTPException, Depends, Header, status
 
@@ -20,6 +23,7 @@ from app.core.security.webhook_verification import (
     generate_webhook_secret,
     WebhookSecretManager,
 )
+from app.domain.services.call_service import WebhookTargetMismatch
 from app.core.security.idempotency import (
     idempotency_dependency,
     store_idempotent_response,
@@ -61,6 +65,110 @@ async def get_webhook_secret_from_db(
 
 
 # =============================================================================
+# Shared verified-tenant helpers (single source of truth for ALL four
+# call-mutation webhook routes — webhooks.py ×2 and webhooks_secure.py ×2)
+# =============================================================================
+
+async def verify_webhook_tenant(
+    request: Request, tenant_id: str, secret_name: str
+) -> Tuple[str, bytes]:
+    """Authenticate a webhook to a tenant via its per-tenant HMAC secret.
+
+    Looks up the tenant's secret and verifies the request signature. On
+    success the ``X-Tenant-ID`` is proven to belong to the caller (they hold
+    that tenant's secret), so the returned tenant id is SAFE to use as the
+    object-level authorization scope for the ensuing mutation. Raises 401
+    when no secret is configured or the signature is missing/invalid.
+
+    Returns ``(verified_tenant_id, raw_body)``.
+    """
+    secret = await get_webhook_secret_from_db(tenant_id, secret_name)
+    if not secret:
+        logger.warning("No webhook secret configured for tenant %s (%s)", tenant_id, secret_name)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Webhook not configured",
+        )
+    body = await verify_webhook_request(
+        request=request,
+        secret=secret,
+        signature_header="X-Webhook-Signature",
+        timestamp_header="X-Webhook-Timestamp",
+    )
+    return tenant_id, body
+
+
+async def dispatch_goal_achieved(tenant_id: str, call_id: Optional[str]) -> dict:
+    """Single service dispatch for BOTH goal-achieved routes.
+
+    Threads the VERIFIED tenant id into the tenant-scoped service method.
+    A ``None`` result (call not found OR belongs to another tenant) becomes
+    an identical 404, so a foreign id is indistinguishable from a missing
+    one and a 200 always means a real write occurred.
+    """
+    if not call_id:
+        raise HTTPException(status_code=400, detail="call_id required")
+
+    from app.core.container import get_container
+    result = await get_container().call_service.mark_goal_achieved(
+        tenant_id=tenant_id, call_id=call_id,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Call not found")
+    return result
+
+
+async def dispatch_mark_spam(
+    tenant_id: str,
+    call_id: Optional[str],
+    lead_id: Optional[str],
+    reason: str,
+) -> dict:
+    """Single service dispatch for BOTH mark-spam routes.
+
+    404 (not found / cross-tenant, indistinguishable) on a ``None`` result;
+    400 when the body ``lead_id`` does not belong to the scoped call.
+    """
+    from app.core.container import get_container
+    try:
+        result = await get_container().call_service.mark_as_spam(
+            tenant_id=tenant_id,
+            call_id=call_id,
+            lead_id=lead_id,
+            reason=reason,
+        )
+    except WebhookTargetMismatch:
+        raise HTTPException(
+            status_code=400, detail="lead_id does not belong to the specified call"
+        )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Call not found")
+    return result
+
+
+_INTERNAL_TOKEN_HEADER = "x-internal-service-token"
+
+
+def require_internal_service(request: Request) -> None:
+    """Gate an admin/provisioning route to a valid internal-service token.
+
+    Mirrors ``app.core.security.internal_auth`` (constant-time compare,
+    fail-safe on an unset/empty ``INTERNAL_SERVICE_TOKEN`` — no token is
+    ever accepted, so the guarded route stays non-functional rather than
+    open). Raises 401 otherwise. This closes the unauthenticated
+    secret-write hole on ``/admin/configure``.
+    """
+    configured = os.getenv("INTERNAL_SERVICE_TOKEN", "").strip()
+    presented = request.headers.get(_INTERNAL_TOKEN_HEADER, "")
+    if configured and presented and secrets.compare_digest(presented, configured):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Admin authentication required",
+    )
+
+
+# =============================================================================
 # Example: Secured Webhook Endpoints
 # =============================================================================
 
@@ -85,26 +193,12 @@ async def mark_goal_achieved_secured(
     - X-Webhook-Timestamp: Unix timestamp (optional, for replay protection)
     - X-Tenant-ID: Tenant identifier for secret lookup
     """
-    # Get webhook secret for this tenant
-    secret = await get_webhook_secret_from_db(x_tenant_id, "call_goal_achieved")
-
-    if not secret:
-        logger.warning(f"No webhook secret configured for tenant {x_tenant_id}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Webhook not configured"
-        )
-
-    # Verify signature
+    # Verify HMAC signature and obtain the VERIFIED tenant id (shared helper).
     try:
-        body = await verify_webhook_request(
-            request=request,
-            secret=secret,
-            signature_header="X-Webhook-Signature",
-            timestamp_header="X-Webhook-Timestamp",
+        tenant_id, body = await verify_webhook_tenant(
+            request, x_tenant_id, "call_goal_achieved"
         )
     except HTTPException:
-        # Log security event
         logger.warning(
             f"Webhook signature verification failed for tenant {x_tenant_id}",
             extra={
@@ -115,22 +209,14 @@ async def mark_goal_achieved_secured(
         )
         raise
 
-    # Process webhook
-    import json
+    # Process webhook via the single shared, tenant-scoped dispatch path.
     try:
         data = json.loads(body)
-        call_id = data.get("call_id")
-
-        if not call_id:
-            raise HTTPException(status_code=400, detail="call_id required")
-
-        from app.core.container import get_container
-        call_service = get_container().call_service
-        result = await call_service.mark_goal_achieved(call_id)
-        return result
-
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    try:
+        return await dispatch_goal_achieved(tenant_id, data.get("call_id"))
     except HTTPException:
         raise
     except Exception as e:
@@ -154,40 +240,24 @@ async def mark_as_spam_secured(
     """
     Mark a call/lead as spam - with webhook signature verification.
     """
-    # Get webhook secret
-    secret = await get_webhook_secret_from_db(x_tenant_id, "call_mark_spam")
+    # Verify HMAC signature and obtain the VERIFIED tenant id (shared helper).
+    tenant_id, body = await verify_webhook_tenant(request, x_tenant_id, "call_mark_spam")
 
-    if not secret:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Webhook not configured"
-        )
-
-    # Verify signature
-    await verify_webhook_request(
-        request=request,
-        secret=secret,
-        signature_header="X-Webhook-Signature",
-        timestamp_header="X-Webhook-Timestamp",
-    )
-
-    # Process webhook
-    import json
+    # Process webhook via the single shared, tenant-scoped dispatch path.
     try:
-        data = await request.json()
-        call_id = data.get("call_id")
-        lead_id = data.get("lead_id")
-        reason = data.get("reason", "spam")
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
-        from app.core.container import get_container
-        call_service = get_container().call_service
-        result = await call_service.mark_as_spam(
-            call_id=call_id,
-            lead_id=lead_id,
-            reason=reason
+    try:
+        return await dispatch_mark_spam(
+            tenant_id,
+            data.get("call_id"),
+            data.get("lead_id"),
+            data.get("reason", "spam"),
         )
-        return result
-
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error marking as spam: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to mark as spam")
@@ -266,12 +336,20 @@ async def configure_webhook(
     webhook_name: str,
     tenant_id: str,
     db_client: Client = Depends(get_db_client),
+    _admin: None = Depends(require_internal_service),
 ):
     """
     Configure a new webhook for a tenant.
     Generates and returns a secure secret.
+
+    SECURITY (P0): this writes a tenant's webhook HMAC secret (a
+    secret-takeover primitive) and MUST NOT be reachable unauthenticated.
+    It is now gated by ``require_internal_service`` — a valid internal
+    service token is required. Fail-safe: with INTERNAL_SERVICE_TOKEN
+    unset the guard 401s every request, leaving the route non-functional
+    rather than open. TODO: expose an admin-JWT (platform_admin) variant
+    via webhooks_admin.py if a UI-driven provisioning path is needed.
     """
-    # In production, this should require admin authentication
     secret = generate_webhook_secret()
 
     try:

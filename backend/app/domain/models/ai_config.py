@@ -167,7 +167,14 @@ class AIProviderConfig(BaseModel):
     # defaults are applied by the session builder, so this may stay None.
     # Recognised keys: {"turn_detection": {"type","eagerness"},
     #                   "noise_reduction": {"type"},
-    #                   "transcription_model": str}
+    #                   "transcription_model": str,
+    #                   "provider": "openai" (default) | "xai",
+    #                   "model": str (xai-only model override),
+    #                   "agent_id": str (xai-only: use a console-built agent
+    #                                    instead of a bare model)}
+    # "provider" is the opt-in switch for the xAI Grok Voice adapter (see
+    # app/infrastructure/realtime/xai_realtime.py) — omitted/"openai" keeps
+    # every existing tenant on the OpenAI gpt-realtime-2 path unchanged.
     realtime_settings: Optional[Dict[str, Any]] = Field(default=None)
 
     class Config:

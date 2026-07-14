@@ -414,15 +414,27 @@ class QueryBuilder:
         """
         Coerce Python values to DB bind-safe values.
 
-        asyncpg expects JSON/JSONB values as JSON strings unless a custom codec
-        is registered. We serialize dict/list payloads centrally so repository
-        callers can pass native Python structures safely.
+        The pool now registers a jsonb/json codec (see ``app.core.db``) that
+        encodes dict/list -> JSON text automatically on the wire — and
+        decodes the reverse on read. For a column whose ``udt_name`` is
+        actually "json"/"jsonb", pre-serializing here would hand the codec's
+        encoder an already-JSON *string*, which it then ``json.dumps()``
+        again, corrupting the column into a quoted JSON-string scalar
+        instead of the intended object/array. So dict/list values bound to
+        a json/jsonb column pass straight through; every other target
+        (including cases where ``udt_name`` is unresolved) keeps the
+        legacy manual serialization it always used.
         """
+        is_jsonb_target = udt_name in {"json", "jsonb"}
         if isinstance(value, dict):
+            if is_jsonb_target:
+                return value
             return json.dumps(value, default=str)
         if isinstance(value, list):
             # Preserve native lists for PostgreSQL array columns (udt_name starts with "_").
             if udt_name and udt_name.startswith("_"):
+                return value
+            if is_jsonb_target:
                 return value
             return json.dumps(value, default=str)
         if isinstance(value, str) and udt_name in {"date", "timestamp", "timestamptz"}:

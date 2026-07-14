@@ -16,9 +16,16 @@ message after the tone", we hang up immediately instead of nudging a beep.
 Precision-first (a false positive hangs up on a live prospect):
   * the opening-voicemail check reuses the same high-precision phrase list as
     the final-transcript AMD, and only within the opening turns;
-  * ``machine_end`` additionally requires that a screening bot was ALREADY
+  * ``machine_end`` additionally requires that a screening BOT was ALREADY
     heard on this call — a live receptionist saying "he's not available" can
-    never trip it because no screening phrase preceded her.
+    never trip it because no screening phrase preceded her;
+  * the screening-arming phrase list itself only contains wording an
+    automated screener produces ("record your name and reason for calling").
+    Generic hold/transfer wording a live receptionist also says — "please
+    stay on the line", "connecting you now", "hold" — is deliberately
+    excluded, so it never arms the endgame in the first place (2026-07-13:
+    it used to, and that let a live transfer hold + "he's not available"
+    false-hangup on a human).
 
 Pure decision core (:func:`assess_machine_text`) + a thin async wrapper the
 transcript handler calls per interim. All fail-soft: any error returns the
@@ -38,22 +45,32 @@ logger = logging.getLogger(__name__)
 # final-transcript AMD in voicemail_detector.
 _MAX_TURN_INDEX_FOR_OPENING = 1
 
-# Carrier / handset call-screening wording. Marking screening only sets a
-# flag — it never hangs up by itself — so this list may be a little looser
-# than the voicemail one. Matched as substrings on normalised text.
+# Carrier / handset call-screening wording. This list is what ARMS the
+# machine_end endgame below, so precision matters here even though marking
+# screening alone never hangs up — a live receptionist genuinely says things
+# like "please stay on the line" or "connecting you now" while transferring
+# a real call, so those are LIVE-TRANSFER cues, NOT evidence of an automated
+# screening bot, and must NOT be in this list (2026-07-13 fix: they used to
+# be, which let a live "please stay on the line" -> "he is not available"
+# sequence arm and then fire machine_end on a human receptionist). Everything
+# left here is wording only an automated call-screening service actually
+# produces — no live human asks a caller to "record your name and reason for
+# calling" in those exact terms. Matched as substrings on normalised text.
 _SCREENING_PHRASES = (
     "record your name and reason",
     "if you record your name",
     "see if this person is available",
     "see if this call is available",
-    "please stay on the line",
-    "connecting you now",  # some screens say this before the hold
 )
 
 # The screening endgame / any-time machine wording. Only consulted once
 # screening was already heard on this call (see precision note above).
+# Deliberately excludes generic phrases a live human says too ("is not
+# available", "please hold") — those are necessary but not sufficient
+# evidence of a machine; every phrase here is genuine answering-machine /
+# voicemail wording (the beep, the recording instruction, the "voicemail"
+# self-identification).
 _MACHINE_END_PHRASES = (
-    "is not available",
     "leave an additional message",
     "leave a message",
     "after the tone",
@@ -195,11 +212,32 @@ async def handle_machine_interim(
                 adapter = _bridge()._adapter
                 if adapter is not None:
                     await adapter.hangup(str(call_id))
+                    hung_up = True
+                else:
+                    logger.warning(
+                        "machine_hangup_no_adapter call=%s — no bridge adapter "
+                        "available for the fallback hangup",
+                        str(call_id)[:12],
+                    )
             except Exception as hang_exc:  # pragma: no cover - defensive
                 logger.warning(
                     "machine_hangup_failed call=%s err=%s",
                     str(call_id)[:12], hang_exc,
                 )
+        if not hung_up:
+            # Both the media-gateway and bridge-adapter hangup paths failed (or
+            # were unavailable). The call is flagged VOICEMAIL and the caller
+            # will stop processing this transcript regardless — silence beats
+            # talking to a suspected machine — but that must NOT read as a
+            # successful hangup anywhere else: surface it loudly so on-call/
+            # metrics can catch a call that is still connected with a silent
+            # agent (2026-07-14: this used to fail silently at ``return True``).
+            logger.error(
+                "machine_hangup_both_paths_failed call=%s verdict=%s — voicemail "
+                "flagged but the call was NOT actually hung up; it may still be "
+                "live with the agent silent",
+                str(call_id)[:12], verdict,
+            )
         return True
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug("machine_detect_error call=%s err=%s", str(call_id)[:12], exc)

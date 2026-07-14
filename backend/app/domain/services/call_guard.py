@@ -79,6 +79,20 @@ class GuardCheck(str, Enum):
     MINUTES_QUOTA = "minutes_quota"
 
 
+# Checks that must FAIL CLOSED (block) when the check function itself raises,
+# rather than the generic "infra error -> treat as passed" fallback used for
+# ordinary availability checks (rate limiter, concurrency, etc.). These are
+# compliance-critical: silently allowing a call to proceed because a DNC (or
+# spend-cap) lookup errored is a compliance violation, not a mere degraded
+# experience. Keep this set narrow — everything NOT listed here keeps the
+# original fail-open-on-infra-error behavior intentionally, so a DB blip in
+# e.g. the rate limiter or concurrency lookup never blocks legitimate calls.
+_FAIL_CLOSED_ON_ERROR_CHECKS = frozenset({
+    GuardCheck.DNC_CHECK,
+    GuardCheck.SPEND_LIMIT,
+})
+
+
 @dataclass
 class CheckResult:
     """Result of a single guard check."""
@@ -311,14 +325,31 @@ class CallGuard:
                     break  # Fail fast
 
             except Exception as e:
-                logger.warning(f"Guard check {check_type} error (treating as passed): {e}")
+                # Compliance-critical checks (DNC, spend) must FAIL CLOSED on
+                # an infra error — treating an unverifiable DNC lookup as
+                # "passed" lets a number that IS on the do-not-call list
+                # dial through the instant the DB hiccups. Availability
+                # checks (rate limiter, concurrency, etc.) legitimately keep
+                # failing open: a transient infra error there should degrade
+                # gracefully, not block otherwise-compliant calls.
+                fail_closed = check_type in _FAIL_CLOSED_ON_ERROR_CHECKS
+                logger.warning(
+                    f"Guard check {check_type} error "
+                    f"({'BLOCKING (fail-closed)' if fail_closed else 'treating as passed'}): {e}"
+                )
                 error_result = CheckResult(
                     check=check_type,
-                    passed=True,
+                    passed=not fail_closed,
                     latency_ms=int((time.time() - check_start) * 1000),
-                    reason=f"check_error_skipped: {str(e)}",
+                    reason=(
+                        f"check_error_blocked: {str(e)}" if fail_closed
+                        else f"check_error_skipped: {str(e)}"
+                    ),
                 )
                 check_results.append(error_result)
+                if fail_closed:
+                    failed_checks.append(check_type)
+                    break  # Fail fast, same as a genuine compliance failure.
                 # Do NOT add to failed_checks — infrastructure errors should
                 # not block calls.  Only genuine check failures (passed=False
                 # returned by the check function) should block/queue/throttle.
@@ -751,7 +782,22 @@ class CallGuard:
                         },
                     )
         except asyncpg.PostgresError as e:
-            logger.debug(f"dnc_entries query failed (table may not exist): {e}")
+            # FAIL CLOSED: a DNC lookup that errors is not proof the number
+            # is clean — it's proof we couldn't check. Compliance (TCPA/DNC)
+            # must never be waved through on a DB error. This used to
+            # `return CheckResult(passed=True)` here, which meant any
+            # transient DB blip (or the dnc_entries table genuinely missing)
+            # silently allowed a DNC-listed number to dial.
+            logger.warning(
+                f"dnc_entries query failed — failing CLOSED (blocking) "
+                f"rather than allowing an unverified number to dial: {e}"
+            )
+            return CheckResult(
+                check=GuardCheck.DNC_CHECK,
+                passed=False,
+                reason=f"dnc_check_unavailable: {str(e)}",
+                details={"error": str(e)},
+            )
 
         return CheckResult(
             check=GuardCheck.DNC_CHECK,
@@ -774,8 +820,16 @@ class CallGuard:
             )
 
         # Simple check - in production, you'd estimate cost based on destination
-        current_spend = tenant_limits.monthly_spend_used or 0
-        cap = tenant_limits.monthly_spend_cap
+        # Coerce defensively (belt-and-suspenders on top of the float cast in
+        # _get_tenant_limits): asyncpg NUMERIC columns surface as
+        # decimal.Decimal, and `Decimal + float` / `Decimal > float` both
+        # raise TypeError. Without this, a tenant with ANY spend cap
+        # configured would raise on every evaluation, and since SPEND_LIMIT
+        # is in _FAIL_CLOSED_ON_ERROR_CHECKS, that TypeError would fail
+        # closed and block every call for that tenant -- not just calls that
+        # are actually over cap.
+        current_spend = float(tenant_limits.monthly_spend_used or 0)
+        cap = float(tenant_limits.monthly_spend_cap)
 
         # Estimate call cost (simplified - $0.05/minute)
         estimated_cost = (estimated_duration_seconds or 60) / 60 * 0.05
@@ -1111,8 +1165,20 @@ class CallGuard:
             max_queue_size=row["max_queue_size"],
             monthly_minutes_allocated=row["monthly_minutes_allocated"],
             monthly_minutes_used=row["monthly_minutes_used"],
-            monthly_spend_cap=row["monthly_spend_cap"],
-            monthly_spend_used=row["monthly_spend_used"] or 0.0,
+            # asyncpg returns NUMERIC columns as decimal.Decimal, but every
+            # downstream consumer (spend-cap arithmetic, the JSON limits
+            # cache) works in plain float. Coerce once, here at the DB
+            # boundary, so Decimal never leaks into `Decimal + float`
+            # arithmetic (raises TypeError) or `json.dumps` (raises
+            # TypeError, silently swallowed by the cache try/except below).
+            monthly_spend_cap=(
+                float(row["monthly_spend_cap"])
+                if row["monthly_spend_cap"] is not None else None
+            ),
+            monthly_spend_used=(
+                float(row["monthly_spend_used"])
+                if row["monthly_spend_used"] is not None else 0.0
+            ),
             max_call_duration_seconds=row["max_call_duration_seconds"],
             min_call_interval_seconds=row["min_call_interval_seconds"],
             allowed_country_codes=row["allowed_country_codes"] or [],
@@ -1207,9 +1273,20 @@ class CallGuard:
             aggregate_calls_per_hour=row["aggregate_calls_per_hour"],
             aggregate_calls_per_day=row["aggregate_calls_per_day"],
             aggregate_concurrent_calls=row["aggregate_concurrent_calls"],
-            revenue_share_percent=row["revenue_share_percent"],
-            min_billing_amount=row["min_billing_amount"],
-            max_billing_amount=row["max_billing_amount"],
+            # Same Decimal-from-NUMERIC boundary issue as monthly_spend_*
+            # above: coerce here so the JSON cache write below never raises.
+            revenue_share_percent=(
+                float(row["revenue_share_percent"])
+                if row["revenue_share_percent"] is not None else None
+            ),
+            min_billing_amount=(
+                float(row["min_billing_amount"])
+                if row["min_billing_amount"] is not None else None
+            ),
+            max_billing_amount=(
+                float(row["max_billing_amount"])
+                if row["max_billing_amount"] is not None else None
+            ),
             feature_whitelist=row["feature_whitelist"] or [],
             feature_blacklist=row["feature_blacklist"] or [],
             fraud_detection_sensitivity=row["fraud_detection_sensitivity"],
@@ -1312,8 +1389,11 @@ class CallGuard:
                     result.call_id,
                     result.phone_number,
                     result.decision.value,
-                    json.dumps([r.to_dict() for r in result.check_results]),
-                    json.dumps([c.value for c in result.failed_checks]),
+                    # Raw list — the pool's jsonb codec (app.core.db) encodes
+                    # via json.dumps on write; a pre-dumped string here would
+                    # be double-encoded into a JSON string scalar.
+                    [r.to_dict() for r in result.check_results],
+                    [c.value for c in result.failed_checks],
                     result.queue_position,
                     result.retry_after_seconds,
                     result.total_latency_ms,

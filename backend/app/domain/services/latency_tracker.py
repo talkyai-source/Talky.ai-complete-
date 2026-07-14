@@ -3,7 +3,8 @@ Latency Tracker Service
 Tracks end-to-end latency metrics for voice pipeline turns
 """
 import logging
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 from enum import Enum
@@ -34,93 +35,112 @@ class LatencyStage(Enum):
 class LatencyMetrics:
     """
     Latency metrics for a single turn in the conversation.
-    
+
     Tracks time from user speech end to AI audio response start.
     Target: < 500-700ms total latency.
+
+    All the ``*_time`` marks below are MONOTONIC timestamps (``time.monotonic()``
+    seconds, not wall-clock) — durations are always computed as a plain
+    subtraction between two of these. Monotonic time cannot go backwards or
+    jump from an NTP step the way ``datetime.utcnow()`` can, so a duration
+    computed here can never come out negative or wildly wrong because the
+    system clock was adjusted mid-turn.
+
+    ``wall_clock_anchor`` / ``monotonic_anchor`` are the ONE genuinely-needed
+    absolute time-of-day reference: captured once (wall clock + the matching
+    monotonic reading) when the turn starts, so ``to_dict()`` can still show
+    human-readable event times for logs/debugging without using wall clock
+    for any duration math.
     """
     call_id: str
     turn_id: int
-    listening_start_time: Optional[datetime] = None
-    stt_first_transcript_time: Optional[datetime] = None
-    speech_end_time: Optional[datetime] = None
-    llm_start_time: Optional[datetime] = None
-    llm_first_token_time: Optional[datetime] = None
-    llm_end_time: Optional[datetime] = None
-    tts_start_time: Optional[datetime] = None
-    tts_first_chunk_time: Optional[datetime] = None
-    response_start_time: Optional[datetime] = None
-    tts_end_time: Optional[datetime] = None
-    audio_start_time: Optional[datetime] = None
+    listening_start_time: Optional[float] = None
+    stt_first_transcript_time: Optional[float] = None
+    speech_end_time: Optional[float] = None
+    llm_start_time: Optional[float] = None
+    llm_first_token_time: Optional[float] = None
+    llm_end_time: Optional[float] = None
+    tts_start_time: Optional[float] = None
+    tts_first_chunk_time: Optional[float] = None
+    response_start_time: Optional[float] = None
+    tts_end_time: Optional[float] = None
+    audio_start_time: Optional[float] = None
     turn_outcome: str = "in_progress"
     interruption_reason: Optional[str] = None
-    
+    # Absolute-time anchor pair — wall-clock only lives here, never in the
+    # duration math above. See class docstring.
+    wall_clock_anchor: Optional[datetime] = None
+    monotonic_anchor: Optional[float] = None
+
+    def _iso(self, monotonic_ts: Optional[float]) -> Optional[str]:
+        """Render a monotonic mark as an absolute ISO8601 time-of-day for
+        logging, by offsetting it from the wall-clock anchor. Returns None
+        if the mark or the anchor is missing (e.g. metrics built directly in
+        a test without going through ``LatencyTracker.start_turn``)."""
+        if monotonic_ts is None or self.wall_clock_anchor is None or self.monotonic_anchor is None:
+            return None
+        offset = monotonic_ts - self.monotonic_anchor
+        return (self.wall_clock_anchor + timedelta(seconds=offset)).isoformat()
+
     @property
     def total_latency_ms(self) -> Optional[float]:
         """
         Time from speech end to audio start (total round-trip).
         This is the key metric for user experience.
         """
-        if self.speech_end_time and self.audio_start_time:
-            delta = self.audio_start_time - self.speech_end_time
-            return delta.total_seconds() * 1000
+        if self.speech_end_time is not None and self.audio_start_time is not None:
+            return (self.audio_start_time - self.speech_end_time) * 1000
         return None
-    
+
     @property
     def llm_latency_ms(self) -> Optional[float]:
         """Time spent in LLM processing."""
-        if self.llm_start_time and self.llm_end_time:
-            delta = self.llm_end_time - self.llm_start_time
-            return delta.total_seconds() * 1000
+        if self.llm_start_time is not None and self.llm_end_time is not None:
+            return (self.llm_end_time - self.llm_start_time) * 1000
         return None
 
     @property
     def stt_first_transcript_ms(self) -> Optional[float]:
         """Time from listening start to first transcript token."""
-        if self.listening_start_time and self.stt_first_transcript_time:
-            delta = self.stt_first_transcript_time - self.listening_start_time
-            return delta.total_seconds() * 1000
+        if self.listening_start_time is not None and self.stt_first_transcript_time is not None:
+            return (self.stt_first_transcript_time - self.listening_start_time) * 1000
         return None
 
     @property
     def llm_first_token_ms(self) -> Optional[float]:
         """Time from LLM start to first streamed token."""
-        if self.llm_start_time and self.llm_first_token_time:
-            delta = self.llm_first_token_time - self.llm_start_time
-            return delta.total_seconds() * 1000
+        if self.llm_start_time is not None and self.llm_first_token_time is not None:
+            return (self.llm_first_token_time - self.llm_start_time) * 1000
         return None
-    
+
     @property
     def tts_latency_ms(self) -> Optional[float]:
         """Time spent in TTS synthesis."""
-        if self.tts_start_time and self.tts_end_time:
-            delta = self.tts_end_time - self.tts_start_time
-            return delta.total_seconds() * 1000
+        if self.tts_start_time is not None and self.tts_end_time is not None:
+            return (self.tts_end_time - self.tts_start_time) * 1000
         return None
-    
+
     @property
     def time_to_first_audio_ms(self) -> Optional[float]:
         """Time from TTS start to first audio chunk."""
-        if self.tts_start_time and self.audio_start_time:
-            delta = self.audio_start_time - self.tts_start_time
-            return delta.total_seconds() * 1000
+        if self.tts_start_time is not None and self.audio_start_time is not None:
+            return (self.audio_start_time - self.tts_start_time) * 1000
         return None
 
     @property
     def tts_first_chunk_ms(self) -> Optional[float]:
         """Time from TTS start to first TTS audio chunk."""
-        if self.tts_start_time and self.tts_first_chunk_time:
-            delta = self.tts_first_chunk_time - self.tts_start_time
-            return delta.total_seconds() * 1000
+        if self.tts_start_time is not None and self.tts_first_chunk_time is not None:
+            return (self.tts_first_chunk_time - self.tts_start_time) * 1000
         return None
 
     @property
     def response_start_latency_ms(self) -> Optional[float]:
         """Time from speech end to first outbound response audio."""
-        if self.speech_end_time and self.response_start_time:
-            delta = self.response_start_time - self.speech_end_time
-            return delta.total_seconds() * 1000
+        if self.speech_end_time is not None and self.response_start_time is not None:
+            return (self.response_start_time - self.speech_end_time) * 1000
         return None
-    
+
     @property
     def is_within_target(self) -> bool:
         """Check if total latency is within target (< 700ms)."""
@@ -143,17 +163,20 @@ class LatencyMetrics:
             "is_within_target": self.is_within_target,
             "turn_outcome": self.turn_outcome,
             "interruption_reason": self.interruption_reason,
+            # Absolute time-of-day for humans reading logs — derived from the
+            # monotonic marks via the wall-clock anchor (see class docstring).
+            # None of this feeds duration math above.
             "timestamps": {
-                "listening_start": self.listening_start_time.isoformat() if self.listening_start_time else None,
-                "stt_first_transcript": self.stt_first_transcript_time.isoformat() if self.stt_first_transcript_time else None,
-                "speech_end": self.speech_end_time.isoformat() if self.speech_end_time else None,
-                "llm_start": self.llm_start_time.isoformat() if self.llm_start_time else None,
-                "llm_first_token": self.llm_first_token_time.isoformat() if self.llm_first_token_time else None,
-                "llm_end": self.llm_end_time.isoformat() if self.llm_end_time else None,
-                "tts_start": self.tts_start_time.isoformat() if self.tts_start_time else None,
-                "tts_first_chunk": self.tts_first_chunk_time.isoformat() if self.tts_first_chunk_time else None,
-                "response_start": self.response_start_time.isoformat() if self.response_start_time else None,
-                "audio_start": self.audio_start_time.isoformat() if self.audio_start_time else None
+                "listening_start": self._iso(self.listening_start_time),
+                "stt_first_transcript": self._iso(self.stt_first_transcript_time),
+                "speech_end": self._iso(self.speech_end_time),
+                "llm_start": self._iso(self.llm_start_time),
+                "llm_first_token": self._iso(self.llm_first_token_time),
+                "llm_end": self._iso(self.llm_end_time),
+                "tts_start": self._iso(self.tts_start_time),
+                "tts_first_chunk": self._iso(self.tts_first_chunk_time),
+                "response_start": self._iso(self.response_start_time),
+                "audio_start": self._iso(self.audio_start_time)
             }
         }
 
@@ -192,13 +215,19 @@ class LatencyTracker:
         existing = self._metrics.get(call_id)
         if existing and existing.turn_id == turn_id:
             if existing.listening_start_time is None:
-                existing.listening_start_time = datetime.utcnow()
+                existing.listening_start_time = time.monotonic()
             return
 
+        now_mono = time.monotonic()
         metrics = LatencyMetrics(
             call_id=call_id,
             turn_id=turn_id,
-            listening_start_time=datetime.utcnow(),
+            listening_start_time=now_mono,
+            # Wall-clock anchor captured once, here, purely so to_dict() can
+            # still render absolute time-of-day for logs. All duration math
+            # uses the monotonic marks, never this.
+            wall_clock_anchor=datetime.utcnow(),
+            monotonic_anchor=now_mono,
         )
         self._metrics[call_id] = metrics
         
@@ -210,52 +239,52 @@ class LatencyTracker:
     def mark_llm_start(self, call_id: str) -> None:
         """Mark when LLM processing starts."""
         if call_id in self._metrics:
-            self._metrics[call_id].llm_start_time = datetime.utcnow()
+            self._metrics[call_id].llm_start_time = time.monotonic()
 
     def mark_listening_start(self, call_id: str) -> None:
         """Mark when turn listening window starts."""
         if call_id in self._metrics and self._metrics[call_id].listening_start_time is None:
-            self._metrics[call_id].listening_start_time = datetime.utcnow()
+            self._metrics[call_id].listening_start_time = time.monotonic()
 
     def mark_stt_first_transcript(self, call_id: str) -> None:
         """Mark first transcript for the active turn if unset."""
         if call_id in self._metrics and self._metrics[call_id].stt_first_transcript_time is None:
-            self._metrics[call_id].stt_first_transcript_time = datetime.utcnow()
+            self._metrics[call_id].stt_first_transcript_time = time.monotonic()
 
     def mark_speech_end(self, call_id: str) -> None:
         """Mark end-of-turn (speech end)."""
         if call_id in self._metrics:
-            self._metrics[call_id].speech_end_time = datetime.utcnow()
+            self._metrics[call_id].speech_end_time = time.monotonic()
 
     def mark_llm_first_token(self, call_id: str) -> None:
         """Mark first LLM token for the active turn if unset."""
         if call_id in self._metrics and self._metrics[call_id].llm_first_token_time is None:
-            self._metrics[call_id].llm_first_token_time = datetime.utcnow()
-    
+            self._metrics[call_id].llm_first_token_time = time.monotonic()
+
     def mark_llm_end(self, call_id: str) -> None:
         """Mark when LLM processing ends."""
         if call_id in self._metrics:
-            self._metrics[call_id].llm_end_time = datetime.utcnow()
-    
+            self._metrics[call_id].llm_end_time = time.monotonic()
+
     def mark_tts_start(self, call_id: str) -> None:
         """Mark when TTS synthesis starts."""
         if call_id in self._metrics:
-            self._metrics[call_id].tts_start_time = datetime.utcnow()
+            self._metrics[call_id].tts_start_time = time.monotonic()
 
     def mark_tts_first_chunk(self, call_id: str) -> None:
         """Mark first TTS audio chunk for the active turn if unset."""
         if call_id in self._metrics and self._metrics[call_id].tts_first_chunk_time is None:
-            self._metrics[call_id].tts_first_chunk_time = datetime.utcnow()
-    
+            self._metrics[call_id].tts_first_chunk_time = time.monotonic()
+
     def mark_tts_end(self, call_id: str) -> None:
         """Mark when TTS synthesis completes."""
         if call_id in self._metrics and self._metrics[call_id].tts_end_time is None:
-            self._metrics[call_id].tts_end_time = datetime.utcnow()
-    
+            self._metrics[call_id].tts_end_time = time.monotonic()
+
     def mark_audio_start(self, call_id: str) -> None:
         """Mark when first audio chunk is sent to caller."""
         if call_id in self._metrics and self._metrics[call_id].audio_start_time is None:
-            self._metrics[call_id].audio_start_time = datetime.utcnow()
+            self._metrics[call_id].audio_start_time = time.monotonic()
 
     def mark_response_start(self, call_id: str) -> None:
         """
@@ -263,7 +292,7 @@ class LatencyTracker:
         Keeps audio_start_time in sync for backward-compatible calculations.
         """
         if call_id in self._metrics:
-            now = datetime.utcnow()
+            now = time.monotonic()
             if self._metrics[call_id].response_start_time is None:
                 self._metrics[call_id].response_start_time = now
             if self._metrics[call_id].audio_start_time is None:

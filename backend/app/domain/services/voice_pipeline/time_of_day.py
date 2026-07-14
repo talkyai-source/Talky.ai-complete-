@@ -17,9 +17,6 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_TZ = "Europe/London"
-
-
 def greeting_for_hour(hour: int) -> str:
     """UK-natural greeting word for a 0-23 local hour."""
     if 5 <= hour < 12:
@@ -32,9 +29,20 @@ def greeting_for_hour(hour: int) -> str:
 
 
 def local_hour(tz_name: Optional[str], *, _now: Optional[datetime] = None) -> Optional[int]:
-    """Current hour (0-23) in ``tz_name``; None if the zone can't be resolved.
-    ``_now`` is injectable for tests (avoids the sandbox clock restriction)."""
-    name = (tz_name or _DEFAULT_TZ).strip() or _DEFAULT_TZ
+    """Current hour (0-23) in ``tz_name``; None if the zone is missing or
+    can't be resolved. ``_now`` is injectable for tests (avoids the sandbox
+    clock restriction).
+
+    A None/empty ``tz_name`` returns None directly — it used to silently
+    fall back to Europe/London, so a non-UK campaign with no configured
+    timezone got a confidently-wrong UK time-of-day greeting (a 5pm call
+    greeted with "Morning"). An unknown-but-present tz string (e.g. a typo)
+    still goes through ZoneInfo and falls back to None via the except below,
+    same as before.
+    """
+    name = (tz_name or "").strip()
+    if not name:
+        return None
     try:
         from zoneinfo import ZoneInfo
         now = _now or datetime.now(timezone.utc)

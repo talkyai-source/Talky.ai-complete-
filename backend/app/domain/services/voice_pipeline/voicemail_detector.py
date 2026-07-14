@@ -73,15 +73,35 @@ async def detect_and_hang_up_voicemail(
         )
         _flag_session_voicemail(call_id)
 
+        hung_up = False
         try:
             from app.domain.services.telephony.lifecycle import _bridge
             adapter = _bridge()._adapter
             if adapter is not None:
                 await adapter.hangup(str(call_id))
+                hung_up = True
+            else:
+                logger.warning(
+                    "voicemail_hangup_no_adapter call=%s — no bridge adapter "
+                    "available",
+                    str(call_id)[:12],
+                )
         except Exception as hang_exc:  # pragma: no cover - defensive
             logger.warning(
                 "voicemail_hangup_failed call=%s err=%s",
                 str(call_id)[:12], hang_exc,
+            )
+        if not hung_up:
+            # Surface loudly rather than silently claiming success: the call
+            # is flagged VOICEMAIL and the caller will stop processing this
+            # transcript either way, but if the hangup itself did not happen
+            # the call may still be live with the agent silent — that must be
+            # catchable in logs/metrics, not indistinguishable from a clean
+            # hangup (2026-07-14 fix).
+            logger.error(
+                "voicemail_hangup_failed_surfaced call=%s turn=%s — voicemail "
+                "flagged but the call was NOT actually hung up",
+                str(call_id)[:12], turn_index,
             )
         return True
     except Exception as exc:  # pragma: no cover - defensive

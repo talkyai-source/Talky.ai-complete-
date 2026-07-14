@@ -40,6 +40,7 @@ _ENV_VAR_BY_PROVIDER: dict[str, str] = {
     "elevenlabs": "ELEVENLABS_API_KEY",
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
+    "xai": "XAI_API_KEY",
 }
 
 

@@ -56,6 +56,63 @@ AGENT_NAMES = [
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Tenant system_prompt budget cap.
+#
+# ``additional_instructions`` (the campaign/tenant ROLE + GOAL text, entered
+# by the operator) is composed into the system prompt for EVERY turn of
+# EVERY call on that campaign. It was previously uncapped and production
+# campaigns have been observed running ~2.9k-7k tokens of operator text —
+# a single runaway/copy-pasted operator prompt can silently bloat token
+# cost and latency on every turn of every call for that tenant. Cap it here,
+# before it enters composition, using an approximate chars-per-token ratio
+# for English voice-prompt text (~4 chars/token) so the char budget below
+# maps to roughly ``TELEPHONY_TENANT_PROMPT_MAX_CHARS / 4`` tokens.
+# Env-overridable so it can be tuned per deployment without a redeploy.
+# ---------------------------------------------------------------------------
+_DEFAULT_TENANT_PROMPT_MAX_CHARS = 6000  # ~1500 tokens at ~4 chars/token
+
+
+def _tenant_prompt_char_budget() -> int:
+    raw = os.getenv("TELEPHONY_TENANT_PROMPT_MAX_CHARS")
+    if not raw:
+        return _DEFAULT_TENANT_PROMPT_MAX_CHARS
+    try:
+        budget = int(raw)
+    except (TypeError, ValueError):
+        return _DEFAULT_TENANT_PROMPT_MAX_CHARS
+    return budget if budget > 0 else _DEFAULT_TENANT_PROMPT_MAX_CHARS
+
+
+def _cap_tenant_additional_instructions(text, *, campaign_id=None):
+    """Cap the tenant-authored ``additional_instructions`` (campaign Goal /
+    operator ROLE text) to an approximate token budget before it enters
+    prompt composition, so one runaway operator prompt can't bloat every
+    turn of every call on that campaign.
+
+    Truncation is boundary-safe — it cuts back to the last whitespace so a
+    word is never severed mid-token — and logs a WARNING with the original
+    vs. capped size whenever truncation actually happens. Text at or under
+    budget (the normal case) is returned completely untouched: no
+    truncation, no log line.
+    """
+    if not text:
+        return text
+    budget = _tenant_prompt_char_budget()
+    original_len = len(text)
+    if original_len <= budget:
+        return text
+    head = text[:budget]
+    cut = head.rsplit(" ", 1)[0] if " " in head else head
+    capped = cut.rstrip()
+    logger.warning(
+        "telephony_tenant_prompt_capped campaign=%s original_chars=%d "
+        "capped_chars=%d budget_chars=%d",
+        campaign_id, original_len, len(capped), budget,
+    )
+    return capped
+
+
 def _telephony_mute_during_tts_default() -> bool:
     """Whether to mute STT during AI playback on telephony calls.
 
@@ -489,13 +546,21 @@ def build_telephony_session_config(
     else:
         agent_name = random.choice(AGENT_NAMES)
 
+    # Cap the tenant-authored ROLE/GOAL text once, up front, so both the
+    # primary compose attempt and the knowledge-driven retry below (see
+    # PromptCompositionError handling) use the same capped text.
+    _tenant_additional_instructions = _cap_tenant_additional_instructions(
+        script_config.get("additional_instructions"),
+        campaign_id=_campaign_id(campaign),
+    )
+
     def _compose(kd: bool) -> str:
         return compose_prompt(
             persona_type=persona_type,
             agent_name=agent_name,
             company_name=company_name,
             campaign_slots=script_config.get("campaign_slots") or {},
-            additional_instructions=script_config.get("additional_instructions"),
+            additional_instructions=_tenant_additional_instructions,
             direction=direction.value,
             knowledge_driven=kd,
         )

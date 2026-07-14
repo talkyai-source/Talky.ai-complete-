@@ -15,7 +15,6 @@ from typing import Optional
 from fastapi import WebSocket
 
 from app.core.container import get_container
-from app.core.postgres_adapter import Client as PostgresAdapterClient
 from app.core.telemetry import pipeline_span, voice_span
 from app.domain.models.conversation import MessageRole
 from app.domain.models.session import CallSession, CallState
@@ -30,6 +29,52 @@ from app.domain.services.voice_pipeline.turn_helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Sentinel distinguishing "not yet resolved" from a resolved-but-None cache
+# value on the session (a non-campaign call legitimately resolves to None).
+_UNRESOLVED = object()
+
+
+def _resolve_transcript_target_call_id(session) -> Optional[str]:
+    """Resolve the dialer's real ``calls.id`` for this session's live call.
+
+    For an outbound campaign call the ``calls`` row was inserted by the dialer
+    worker under its OWN UUID and keyed to the PBX channel via
+    ``external_call_uuid``; ``session.call_id`` is a separately-minted
+    voice-session UUID that matches NO ``calls`` row. A per-turn
+    ``UPDATE calls ... WHERE id = session.call_id`` therefore matched zero rows
+    and the incremental transcript silently never persisted for outbound calls.
+
+    ``bind_telephony_call`` already resolved that id (via a
+    ``WHERE external_call_uuid`` lookup) at answer-time and stashed it as
+    ``_dialer_call_id`` on the telephony ``VoiceSession``. We read it back here
+    — equivalent to, but cheaper than, re-running recording.py's lookup — by
+    finding the VoiceSession whose ``call_session`` is this session.
+
+    Returns ``None`` for non-telephony (browser / ask_ai — not registered in the
+    telephony session map) and non-campaign calls, so the flush falls back to
+    ``session.call_id`` (its historical, correct target for those flows). The
+    result is cached on the session: binding completes once, before the first
+    turn, so a single resolve per call suffices. Fail-soft — any error yields
+    ``None`` and the flush degrades to the legacy target.
+    """
+    cached = getattr(session, "_transcript_target_call_id", _UNRESOLVED)
+    if cached is not _UNRESOLVED:
+        return cached
+    target = None
+    try:
+        from app.domain.services.telephony.lifecycle import _state
+        for _pbx_channel, vs in _state().iter_voice_session_items():
+            if getattr(vs, "call_session", None) is session:
+                target = getattr(vs, "_dialer_call_id", None)
+                break
+    except Exception:
+        target = None
+    try:
+        session._transcript_target_call_id = target
+    except Exception:
+        pass
+    return target
 
 
 class TurnEnder:
@@ -489,16 +534,22 @@ class TurnEnder:
                     except Exception as e:
                         logger.warning(f"Failed to send turn_complete to websocket: {e}")
 
-                # Flush transcript to DB incrementally
+                # Flush transcript to DB incrementally so the live-call view
+                # updates mid-call. POOLED async path — the old path built a
+                # postgres_adapter Client whose .execute() blocked the event
+                # loop on a thread-pool .result() and opened a fresh unpooled
+                # asyncpg.connect PER TURN, stalling every concurrent call.
+                # target_call_id maps to the dialer's real calls.id so OUTBOUND
+                # transcripts actually persist (session.call_id != calls.id).
                 try:
                     container = get_container()
                     if container.is_initialized:
-                        postgres_client = PostgresAdapterClient(container.db_pool)
                         await self._p.transcript_service.flush_to_database(
                             call_id=call_id,
-                            db_client=postgres_client,
+                            db_pool=container.db_pool,
                             tenant_id=tenant_id,
                             talklee_call_id=session.talklee_call_id,
+                            target_call_id=_resolve_transcript_target_call_id(session),
                         )
                 except Exception as e:
                     logger.warning(f"Failed to flush transcript for {call_id}: {e}")

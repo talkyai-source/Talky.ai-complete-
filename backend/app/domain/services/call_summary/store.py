@@ -49,9 +49,14 @@ async def generate_and_store(
         or None when the call row is missing or has no transcript.
     """
     async with acquire_with_tenant(pool, tenant_id) as conn:
+        # Defense-in-depth: `acquire_with_tenant` already sets the RLS GUC and
+        # `calls` has a tenant-isolation policy, but pin the predicate here too
+        # so object-level scoping holds even if RLS were ever disabled/misset.
         row = await conn.fetchrow(
-            "SELECT transcript, summary_json FROM calls WHERE id = $1",
+            "SELECT transcript, summary_json FROM calls "
+            "WHERE id = $1 AND tenant_id = $2::uuid",
             call_id,
+            tenant_id,
         )
 
     if row is None:
@@ -115,11 +120,12 @@ async def generate_and_store(
                SET summary_json = $2::jsonb,
                    summary      = $3,
                    updated_at   = NOW()
-             WHERE id = $1
+             WHERE id = $1 AND tenant_id = $4::uuid
             """,
             call_id,
             json.dumps(summary),
             summary.get("headline", ""),
+            tenant_id,
         )
 
     # The AI just judged the call — if it reads as a lead (goal achieved),
@@ -174,9 +180,12 @@ async def mark_lead_from_summary(
                  WHERE c.id = $1
                    AND l.id = c.lead_id
                    AND l.is_lead = false
+                   AND c.tenant_id = $3::uuid
+                   AND l.tenant_id = $3::uuid
                 """,
                 call_id,
                 note or "Lead — please follow up.",
+                tenant_id,
             )
         flagged = result.endswith("1") if isinstance(result, str) else False
         if flagged:

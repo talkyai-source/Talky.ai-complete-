@@ -239,6 +239,13 @@ async def _send_outbound_greeting(voice_session) -> None:
         session.conversation_history.append(
             Message(role=MessageRole.ASSISTANT, content=_spoken_text)
         )
+        # Flip the same flag turn_runner sets after the first LLM-generated
+        # reply (see turn_runner.py) so live_state.py's per-turn LIVE STATE
+        # block reflects reality. Without this, agent-first calls leave
+        # _has_introduced False after the greeting plays, and the next turn's
+        # LIVE STATE tells the model it hasn't introduced itself yet — inviting
+        # a second, duplicate introduction.
+        session._has_introduced = True
     except Exception as exc:
         logger.warning(f"Outbound greeting failed for {call_id[:12]}: {exc}")
     finally:

@@ -31,7 +31,16 @@ def is_repetitive_transcript(text: str) -> bool:
 # would not say about themselves in their first breath. Deliberately EXCLUDED as
 # too ambiguous: bare "you've reached" / "you have reached" (a business answers
 # "You've reached [Company]"), bare "please leave" ("please leave me alone"),
-# and bare "is not available" (a receptionist: "he's not available").
+# and any "not available" / "can't come to the phone" / "unable to take your
+# call" wording (2026-07-14 fix: "not available right now", "unable to take
+# your call", "can't/cannot take your call right now" were removed — a live
+# receptionist screening a transferred call routinely says exactly this in her
+# FIRST breath, e.g. "John is not available right now" or "he's unable to take
+# your call right now, can I take a message", which was hanging up on a real
+# human. Genuine voicemail greetings that say this ALSO carry independent
+# machine evidence below — the beep/tone/"leave a message" instruction, the
+# carrier "forwarded to voicemail" wording, or "the person you are trying to
+# reach" IVR phrasing — so recall on real voicemail is unaffected).
 _VOICEMAIL_PHRASES = (
     "leave a message",
     "leave your message",
@@ -46,10 +55,6 @@ _VOICEMAIL_PHRASES = (
     "has been forwarded to",
     "the person you are trying to reach",
     "person you're trying to reach",
-    "not available right now",
-    "unable to take your call",
-    "can't take your call right now",
-    "cannot take your call right now",
     "you have reached the voicemail",
     "you've reached the voicemail",
     "reached the voicemail",

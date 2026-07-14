@@ -167,7 +167,10 @@ async def _store_idempotency_result(
         tenant_id,
         operation,
         idempotency_key,
-        json.dumps(response_body),
+        # Raw dict — the pool's jsonb codec (app.core.db) encodes via
+        # json.dumps on write; a pre-dumped string here would be
+        # double-encoded into a JSON string scalar.
+        response_body,
         status_code,
         resource_type,
         resource_id,

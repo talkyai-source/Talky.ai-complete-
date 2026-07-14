@@ -704,19 +704,19 @@ class TelephonyMediaGateway(MediaGateway):
     async def flush_tts_buffer(self, call_id: str) -> None:
         """
         Flush any remaining buffered TTS audio at the end of synthesis.
-        
+
         Pads the final packet to 160 bytes with silence if needed.
         """
         session = self._sessions.get(call_id)
         if not session or not session.is_active:
             return
-        
+
         if len(session.tts_buffer) > 0:
             # Pad to 160 bytes with silence (0x7F is μ-law silence)
             PACKET_SIZE = 160
             padding_needed = PACKET_SIZE - len(session.tts_buffer)
             final_packet = session.tts_buffer + (b'\x7F' * padding_needed)
-            
+
             try:
                 logger.info(f"[TelephonyGW] Flushing final {len(session.tts_buffer)} bytes (padded to 160) for {call_id[:12]}")
                 await session.adapter.send_tts_audio(session.pbx_call_id, final_packet)
@@ -725,6 +725,22 @@ class TelephonyMediaGateway(MediaGateway):
                 session.tts_buffer = b""
             except Exception as exc:
                 logger.warning(f"[TelephonyGW] flush_tts_buffer failed for {call_id[:12]}: {exc}")
+
+        # This is a NORMAL (non-barge-in) end of utterance — the TTS provider
+        # stream is exhausted, so any orphan partial-sample fragment left in
+        # _tts_pending_bytes has no completing bytes coming (mirrors the
+        # "single trailing orphan byte at stream end... is dropped rather
+        # than carried" behavior in agent_first.prepare_pre_originate_
+        # greeting). Carrying it forward would prepend stale bytes onto the
+        # NEXT utterance's first chunk and byte-shift that whole stream, the
+        # same corruption a barge-in causes if left uncleared.
+        if session._tts_pending_bytes:
+            logger.debug(
+                "[TelephonyGW] flush_tts_buffer: discarding %d orphan pending "
+                "byte(s) for %s (end of utterance, no completing bytes coming)",
+                len(session._tts_pending_bytes), call_id[:12],
+            )
+            session._tts_pending_bytes = b""
 
     def set_barge_in_event(self, call_id: str, event: asyncio.Event) -> None:
         """
@@ -776,6 +792,22 @@ class TelephonyMediaGateway(MediaGateway):
         session.tts_buffer = b""
         # Reset real-time pacing cursor so the next utterance gets a fresh burst window.
         session._tts_send_deadline = None
+        # Discard any orphan partial-sample fragment carried by send_audio()
+        # (see _tts_pending_bytes' field docstring). A barge-in truncates the
+        # TTS stream mid-chunk-boundary, so 1-3 stale bytes can be sitting
+        # here waiting for a "next chunk" that will never arrive (this
+        # utterance is being thrown away). If left uncleared, those bytes get
+        # silently prepended to the FIRST chunk of the *next* utterance and
+        # byte-shift the whole f32le float stream — permanent loud static for
+        # the rest of the call. Reset here, in the same synchronous block as
+        # the two clears above (no `await` between them and this line), so a
+        # concurrent send_audio() call can't observe a half-cleared session:
+        # send_audio() only ever WRITES _tts_pending_bytes synchronously at
+        # the very top of its own call (before any `await`), so whichever of
+        # the two writes happens last — in real execution order — wins, with
+        # no interleaving possible mid-assignment on a single-threaded event
+        # loop.
+        session._tts_pending_bytes = b""
         # Tell the C++ gateway to discard its buffered TTS queue immediately.
         # Without this, audio already sent to the gateway continues to play
         # until its internal buffer drains — the caller hears the AI speaking

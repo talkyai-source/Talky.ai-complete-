@@ -243,7 +243,7 @@ class OpenAIRealtimeSession:
 
         Never raises — on any failure it logs, tears down, and returns False.
         """
-        url = _REALTIME_URL_TMPL.format(model=self._model)
+        url = self._build_url()
         # websockets==13.1 default connect() is the LEGACY client → extra_headers.
         # (Matches the Deepgram STT idiom in app/infrastructure/stt/deepgram_flux.py.)
         headers = {
@@ -308,6 +308,17 @@ class OpenAIRealtimeSession:
             self._call_id, self._model, self._voice, len(self._tools),
         )
         return True
+
+    def _build_url(self) -> str:
+        """Wire URL for this session's WebSocket connect().
+
+        Extension point: pulled out of connect() ONLY so a Realtime-compatible
+        provider adapter (e.g. xAI Grok Voice — see
+        app/infrastructure/realtime/xai_realtime.py) can subclass and target a
+        different host/query shape while reusing connect()'s handshake/retry
+        logic byte-for-byte. Behaviour for OpenAI itself is unchanged.
+        """
+        return _REALTIME_URL_TMPL.format(model=self._model)
 
     def _build_session_update(self, *, include_reasoning: bool = True) -> Dict[str, Any]:
         """The session.update payload. audio/pcmu in+out (no resampling),

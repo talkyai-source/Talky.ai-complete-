@@ -166,8 +166,12 @@ class EmergencyAccess:
                 """,
                 request_id, request.created_at, requestor_uuid, scenario.value,
                 justification, required_access, approvers_required,
-                json.dumps([]), EmergencyStatus.PENDING.value, expires_at,
-                json.dumps([])
+                # Pass raw Python objects, not pre-dumped JSON strings — the
+                # pool's jsonb codec (app.core.db) already encodes via
+                # json.dumps on write. Passing an already-serialized string
+                # here would get double-encoded into a JSON string scalar.
+                [], EmergencyStatus.PENDING.value, expires_at,
+                []
             )
 
         # Notify potential approvers via Redis
@@ -230,8 +234,13 @@ class EmergencyAccess:
             if row["requestor_id"] == approver_uuid:
                 raise ValueError("Cannot approve your own emergency request")
 
-            # Load existing approvals
-            approvals = json.loads(row["approvals"]) if row["approvals"] else []
+            # Load existing approvals. The pool's jsonb codec (app.core.db)
+            # already decodes this to a list; guard covers pools/paths
+            # that still hand back a raw JSON string.
+            raw_approvals = row["approvals"]
+            approvals = raw_approvals if isinstance(raw_approvals, list) else (
+                json.loads(raw_approvals) if raw_approvals else []
+            )
 
             # Check if already approved by this person
             if any(a["approver_id"] == str(approver_uuid) for a in approvals):
@@ -262,13 +271,13 @@ class EmergencyAccess:
                     SET approvals = $1, status = $2, approved_at = $3, expires_at = $4
                     WHERE request_id = $5
                     """,
-                    json.dumps(approvals), EmergencyStatus.APPROVED.value,
+                    approvals, EmergencyStatus.APPROVED.value,
                     datetime.utcnow(), new_expires_at, request_uuid
                 )
             else:
                 await conn.execute(
                     "UPDATE emergency_access_requests SET approvals = $1 WHERE request_id = $2",
-                    json.dumps(approvals), request_uuid
+                    approvals, request_uuid
                 )
 
         # Notify requestor if fully approved
@@ -433,12 +442,12 @@ class EmergencyAccess:
                 WHERE request_id = $3
                 """,
                 datetime.utcnow(),
-                json.dumps([{
+                [{
                     "action": "terminated",
                     "by": str(terminator_uuid) if terminator_uuid else "system",
                     "at": datetime.utcnow().isoformat(),
                     "reason": reason
-                }]),
+                }],
                 request_uuid
             )
 
@@ -466,7 +475,7 @@ class EmergencyAccess:
                 SET actions_taken = actions_taken || $1::jsonb
                 WHERE request_id = $2
                 """,
-                json.dumps([action_entry]), request_uuid
+                [action_entry], request_uuid
             )
 
         return True
@@ -526,7 +535,10 @@ class EmergencyAccess:
 
     def _row_to_model(self, row: asyncpg.Record) -> EmergencyAccessRequest:
         """Convert database row to EmergencyAccessRequest"""
-        approvals_data = json.loads(row["approvals"]) if row["approvals"] else []
+        raw_approvals = row["approvals"]
+        approvals_data = raw_approvals if isinstance(raw_approvals, list) else (
+            json.loads(raw_approvals) if raw_approvals else []
+        )
         approvals = [
             ApprovalInfo(
                 approver_id=a["approver_id"],
@@ -552,7 +564,10 @@ class EmergencyAccess:
             session_created_at=row["session_created_at"],
             session_terminated_at=row["session_terminated_at"],
             session_token_hash=row["session_token_hash"],
-            actions_taken=json.loads(row["actions_taken"]) if row["actions_taken"] else [],
+            actions_taken=(
+                row["actions_taken"] if isinstance(row["actions_taken"], list)
+                else (json.loads(row["actions_taken"]) if row["actions_taken"] else [])
+            ),
             reviewed_at=row["reviewed_at"],
             reviewed_by=row["reviewed_by"],
             review_notes=row["review_notes"],

@@ -485,7 +485,6 @@ async def create_abuse_rule(
     db_pool=Depends(get_db_pool),
 ):
     """Create a new abuse detection rule."""
-    import json
 
     # Validate rule_type
     valid_types = {
@@ -529,7 +528,10 @@ async def create_abuse_rule(
             tenant_id,
             rule.rule_name,
             rule.rule_type,
-            json.dumps(rule.parameters),
+            # Raw dict — the pool's jsonb codec (app.core.db) encodes via
+            # json.dumps on write; a pre-dumped string would be
+            # double-encoded into a JSON string scalar.
+            rule.parameters,
             rule.warn_threshold,
             rule.block_threshold,
             rule.action_on_trigger,
@@ -567,7 +569,6 @@ async def update_abuse_rule(
     db_pool=Depends(get_db_pool),
 ):
     """Update an abuse detection rule."""
-    import json
 
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -589,7 +590,8 @@ async def update_abuse_rule(
             rule_id,
             rule.rule_name,
             rule.rule_type,
-            json.dumps(rule.parameters),
+            # Raw dict — see create-path comment above.
+            rule.parameters,
             rule.warn_threshold,
             rule.block_threshold,
             rule.action_on_trigger,

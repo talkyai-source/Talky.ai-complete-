@@ -1,7 +1,6 @@
 """Route policy endpoints — list / create / update / activate / deactivate."""
 from __future__ import annotations
 
-import json
 import logging
 from typing import Optional
 from uuid import UUID
@@ -248,7 +247,11 @@ async def create_route_policy(
                     payload.strip_digits,
                     payload.prepend_digits,
                     payload.is_active,
-                    json.dumps(payload.metadata),
+                    # Raw dict — the pool's jsonb codec (app.core.db) encodes
+                    # via json.dumps on write; a pre-dumped string here would
+                    # be double-encoded into a JSON string scalar and break
+                    # every later read (metadata: Dict[str, Any] pydantic field).
+                    payload.metadata,
                     current_user.id,
                 )
             except asyncpg.UniqueViolationError:
@@ -434,7 +437,9 @@ async def update_route_policy(
                     strip_digits,
                     prepend_digits,
                     is_active,
-                    json.dumps(metadata),
+                    # Raw dict — see create-path comment above; the jsonb
+                    # codec handles JSON encoding on write.
+                    metadata,
                     current_user.id,
                 )
             except asyncpg.UniqueViolationError:

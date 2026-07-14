@@ -241,13 +241,23 @@ async def update_security_event(
     if not assignments:
         raise HTTPException(status_code=400, detail="No updates provided")
 
-    params.extend([event_id])
+    # Object-level authz: security_events has no RLS, so scope the mutation to
+    # the caller's tenant. A cross-tenant event_id then updates zero rows and
+    # returns not-found — indistinguishable from a nonexistent event. A caller
+    # with no tenant in their token (platform admin) stays unscoped, matching
+    # the read endpoints above.
+    params.append(event_id)
+    tenant_clause = f"WHERE event_id = ${idx}"
+    scoped_tenant_id = current_user.get("tenant_id")
+    if scoped_tenant_id:
+        params.append(scoped_tenant_id)
+        tenant_clause += f" AND tenant_id = ${idx + 1}"
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
             f"""
             UPDATE security_events
                SET {', '.join(assignments)}
-             WHERE event_id = ${idx}
+             {tenant_clause}
              RETURNING *
             """,
             *params,
@@ -280,21 +290,26 @@ async def resolve_security_event(
     db_pool=Depends(get_db_pool),
 ):
     """Mark a security event as resolved"""
+    # Scope to the caller's tenant so another tenant's event resolves as
+    # not-found rather than being mutated (security_events has no RLS).
+    params = [datetime.utcnow(), current_user["id"], resolution_notes, event_id]
+    tenant_clause = "WHERE event_id = $4"
+    scoped_tenant_id = current_user.get("tenant_id")
+    if scoped_tenant_id:
+        params.append(scoped_tenant_id)
+        tenant_clause += " AND tenant_id = $5"
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
-            """
+            f"""
             UPDATE security_events
                SET status = 'resolved',
                    resolved_at = $1,
                    resolved_by = $2,
                    resolution_notes = $3
-             WHERE event_id = $4
+             {tenant_clause}
              RETURNING *
             """,
-            datetime.utcnow(),
-            current_user["id"],
-            resolution_notes,
-            event_id,
+            *params,
         )
     if not row:
         raise HTTPException(status_code=404, detail="Event not found")
@@ -384,20 +399,27 @@ async def escalate_event(
     db_pool=Depends(get_db_pool),
 ):
     """Escalate a security event to senior team"""
+    # Scope to the caller's tenant so a cross-tenant event_id escalates zero
+    # rows and returns not-found (security_events has no RLS).
+    params = [reason, event_id]
+    tenant_clause = "WHERE event_id = $2"
+    scoped_tenant_id = current_user.get("tenant_id")
+    if scoped_tenant_id:
+        params.append(scoped_tenant_id)
+        tenant_clause += " AND tenant_id = $3"
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
-            """
+            f"""
             UPDATE security_events
                SET status = 'escalated',
                    resolution_notes = CASE
                        WHEN resolution_notes IS NULL OR resolution_notes = '' THEN $1
                        ELSE resolution_notes || E'\n\nEscalation: ' || $1
                    END
-             WHERE event_id = $2
+             {tenant_clause}
              RETURNING *
             """,
-            reason,
-            event_id,
+            *params,
         )
     if not row:
         raise HTTPException(status_code=404, detail="Event not found")

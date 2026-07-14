@@ -1056,17 +1056,19 @@ async def receive_gateway_audio(session_id: str, request: Request):
 
     _sb = get_state_backend()
 
-    # Direct lookup first (fast path — registered in _on_new_call).
+    # EXACT lookup only (registered in _on_new_call). We intentionally do NOT
+    # fall back to a truncated-prefix match here: session ids are
+    # ``asterisk-<call_id[:12]>-<port>`` and for outbound ids of the form
+    # ``talky-out-<uuid>`` the first 12 chars are ``talky-out-`` (10 fixed
+    # chars) + 2 hex — only ~8 bits of entropy. A prefix fallback would
+    # therefore let two concurrent calls whose ids collide in those bytes cross
+    # audio (one prospect's words entering another call's STT + recording), and
+    # it CACHED the first prefix hit permanently, making the mis-route stick for
+    # the rest of the call. Instead, audio that arrives before the exact mapping
+    # exists is buffered by its full session_id (below) and replayed by
+    # _on_new_call once the session registers — so early audio can never bind to
+    # the wrong session; at worst a few opening packets are briefly queued.
     matched_call_id: Optional[str] = _sb.get_call_id_for_gateway_session(session_id)
-
-    # Fallback: prefix match for race conditions before mapping is registered.
-    if not matched_call_id:
-        for call_id, _vs in _sb.iter_voice_session_items():
-            if session_id.startswith(f"asterisk-{call_id[:12]}"):
-                matched_call_id = call_id
-                # Cache it to speed up future lookups.
-                _sb.set_call_id_for_gateway_session(session_id, call_id)
-                break
 
     if matched_call_id:
         await _on_audio_received(matched_call_id, audio_bytes)

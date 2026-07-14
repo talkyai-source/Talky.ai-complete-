@@ -50,6 +50,10 @@ _LEASE_KEY_PREFIX = "telephony:lease:"
 # typically sub-5m; cap-wise watchdog sweeps every 60s.
 _LEASE_TTL_SECONDS = 600
 
+# Value stamped on a lease key by refresh_lease. Only its existence matters for
+# counting; the value is a human-readable marker for `redis-cli` inspection.
+_LEASE_REFRESHED_VALUE = "refreshed"
+
 
 # ──────────────────────────────────────────────────────────────────────────
 # Env-resolution helper
@@ -182,19 +186,38 @@ async def refresh_lease(
     every call still in the per-pod dict. Keeps long calls from having
     their lease expire underneath them.
 
-    If the lease key is missing (e.g. Redis restart), we re-create it
-    so the next watchdog sweep doesn't count the call as orphaned.
+    If the lease key is missing (e.g. Redis restart / eviction), we
+    RE-CREATE it so the next watchdog sweep doesn't count the call as
+    orphaned and drop it from the global tally.
     """
     if redis_client is None:
         return
     try:
-        # `EXPIRE` only touches a key if it exists — preserving that
-        # semantic would miss the "Redis restart lost the key" case,
-        # so we SET the key fresh with a short script-like pipeline.
+        # BUG 3 fix: recreate the lease key UNCONDITIONALLY with a plain
+        # `SET ... EX`. The old code used `SET ... XX` (write only if the key
+        # already exists), so after a Redis restart/eviction — exactly when the
+        # key is GONE — the SET was a no-op, the EXPIRE (also only-if-exists)
+        # was a no-op, and the SADD merely re-added set membership with no
+        # backing lease. `reconcile_orphans` then saw membership + missing lease
+        # and removed the (still-live) call from the active set → the global
+        # count UNDER-reported live calls → the dialer originated ABOVE the cap.
+        # A plain SET actually restores the key, so the count reflects reality.
+        #
+        # Resurrection-safety: the watchdog only calls refresh_lease for calls
+        # still in its live per-pod session dict. A call that ended is removed
+        # from that dict BEFORE release_lease runs, so a released call is never
+        # refreshed — this SET can't resurrect a slot that was legitimately
+        # freed.
+        #
+        # Ordering vs. reconcile: because the key now genuinely exists after
+        # refresh, as long as the watchdog refreshes live calls before it
+        # reconciles (its normal order) reconcile sees the key and keeps the
+        # membership. Even in the reverse order the worst case is a one-tick
+        # undercount that the next refresh self-heals — never a persistent
+        # undercount, and never an overcount.
         async with redis_client.pipeline(transaction=True) as pipe:
             pipe.sadd(_ACTIVE_SET_KEY, call_id)
-            pipe.expire(_lease_key(call_id), _LEASE_TTL_SECONDS)
-            pipe.set(_lease_key(call_id), "refreshed", ex=_LEASE_TTL_SECONDS, xx=True)
+            pipe.set(_lease_key(call_id), _LEASE_REFRESHED_VALUE, ex=_LEASE_TTL_SECONDS)
             await pipe.execute()
     except Exception as exc:
         logger.debug(

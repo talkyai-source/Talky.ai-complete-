@@ -40,11 +40,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
 _WIRE_RATE = 8000  # OpenAI Realtime audio/pcmu is μ-law @ 8 kHz
+
+# Per-node char budget for the realtime knowledge function-result. The
+# source-first render (full node content) can be large; cap each node on a
+# safe boundary so a giant KB section can't balloon the model's tool result
+# (and its latency). Env-overridable.
+_REALTIME_NODE_CHARS = int(os.getenv("KNOWLEDGE_REALTIME_NODE_CHARS", "2000"))
 
 
 class RealtimeBridge:
@@ -398,19 +405,31 @@ class RealtimeBridge:
         retrieve_knowledge — the cascaded per-turn retrieval."""
         if not query or not self._knowledge_pool or not self._campaign_id:
             return "No company information is available for that."
+        # SECURITY — fail closed (issue #5): a missing/empty tenant must NEVER
+        # reach retrieve_knowledge. acquire_with_tenant treats tenant_id=None as
+        # an RLS BYPASS (app.bypass_rls='on'), so a tenantless realtime session
+        # would read ACROSS tenants. Without a validated tenant we decline the
+        # lookup entirely rather than risk cross-tenant KB exposure — we do NOT
+        # pass None through to get a bypass.
+        tenant_id = (self._tenant_id or "").strip()
+        if not tenant_id:
+            logger.warning(
+                "realtime_bridge KB lookup BLOCKED — no tenant on session call=%s "
+                "(refusing RLS-bypass cross-tenant read)", self._call_id,
+            )
+            return "I don't have specific information on that."
         try:
-            from app.services.scripts.knowledge.retrieval import retrieve_knowledge
+            from app.services.scripts.knowledge.retrieval import (
+                render_node_answer,
+                retrieve_knowledge,
+            )
             nodes = await retrieve_knowledge(
                 self._knowledge_pool,
-                # Pass None (not "") when tenant is unknown. acquire_with_tenant
-                # treats None as "bypass RLS", but an empty string is fed to
-                # _validate_uuid("") which raises → retrieve_knowledge swallows
-                # it and returns [] → the model silently gets "no info". This is
-                # the same tenant semantics the cascaded path uses.
-                tenant_id=self._tenant_id or None,
+                tenant_id=tenant_id,
                 campaign_id=self._campaign_id,
                 query=query,
                 k=2,
+                bump_hits=False,
             )
         except Exception as exc:  # noqa: BLE001
             logger.debug("realtime_bridge knowledge lookup err: %s", exc)
@@ -419,8 +438,10 @@ class RealtimeBridge:
             return "I don't have specific information on that."
         parts = []
         for n in nodes:
-            body = (n.get("voice_answer") or n.get("summary")
-                    or n.get("content") or "").strip()
+            # Source-first (issue #1): the FACT comes from the node's own
+            # content (retrieval can match a fact anywhere in the node), not the
+            # enricher's top-of-node voice_answer summary.
+            body = render_node_answer(n, max_chars=_REALTIME_NODE_CHARS)
             head = (n.get("heading") or "").strip()
             if body:
                 parts.append(f"{head}: {body}" if head else body)

@@ -1,4 +1,3 @@
-import json
 import logging
 from uuid import UUID
 from typing import Optional, Any, Dict
@@ -38,10 +37,12 @@ class AuditLogger:
                 RETURNING id
                 """
                 
-                # Convert dicts to JSON strings for asyncpg
-                metadata_json = json.dumps(metadata or {})
-                prev_json = json.dumps(previous_values or {})
-                new_json = json.dumps(new_values or {})
+                # Raw dicts — the pool's jsonb codec (app.core.db) encodes
+                # via json.dumps on write; pre-dumped strings here would be
+                # double-encoded into JSON string scalars.
+                metadata_json = metadata or {}
+                prev_json = previous_values or {}
+                new_json = new_values or {}
                 
                 row = await conn.fetchrow(
                     query,
@@ -87,8 +88,9 @@ class AuditLogger:
                 RETURNING id
                 """
                 
-                metadata_json = json.dumps(metadata or {})
-                
+                # Raw dict — see AuditLogger.log comment above.
+                metadata_json = metadata or {}
+
                 row = await conn.fetchrow(
                     query,
                     event_type,

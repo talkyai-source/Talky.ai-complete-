@@ -822,7 +822,10 @@ class DeepgramFluxSTTProvider(STTProvider):
                                 chunk = TranscriptChunk(
                                     text=transcript_text.strip(),
                                     is_final=False,  # Not final yet
-                                    confidence=data.get("end_of_turn_confidence", 0.5),
+                                    # end_of_turn_confidence is a turn-boundary
+                                    # probability, NOT word/recognition confidence.
+                                    # Do not leak it into the turn-0 confidence gate.
+                                    confidence=None,
                                     metadata={"eager": True}
                                 )
                                 await transcript_queue.put(chunk)
@@ -863,7 +866,9 @@ class DeepgramFluxSTTProvider(STTProvider):
                                 chunk = TranscriptChunk(
                                     text=transcript_text.strip(),
                                     is_final=True,
-                                    confidence=data.get("end_of_turn_confidence", 1.0)
+                                    # Turn-boundary probability, not recognition
+                                    # confidence — keep it out of the word gate.
+                                    confidence=None
                                 )
                                 await transcript_queue.put(chunk)
                             
@@ -875,7 +880,9 @@ class DeepgramFluxSTTProvider(STTProvider):
                             end_chunk = TranscriptChunk(
                                 text="",
                                 is_final=True,
-                                confidence=1.0
+                                # Empty end-of-turn control marker: no recognition
+                                # confidence to report.
+                                confidence=None
                             )
                             await transcript_queue.put(end_chunk)
                         
@@ -885,7 +892,9 @@ class DeepgramFluxSTTProvider(STTProvider):
                                 chunk = TranscriptChunk(
                                     text=transcript_text.strip(),
                                     is_final=False,
-                                    confidence=data.get("end_of_turn_confidence")
+                                    # Turn-boundary probability, not recognition
+                                    # confidence — keep it out of the word gate.
+                                    confidence=None
                                 )
                                 await transcript_queue.put(chunk)
                     

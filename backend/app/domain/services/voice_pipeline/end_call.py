@@ -8,13 +8,22 @@ voicemails all dragged on, burning minutes and sounding unprofessional.
 
 Mechanism: a text sentinel, not tool-calling. The prompt (see
 :func:`call_control_rules`) tells the model to end its FINAL sentence with
-the exact token ``[[END_CALL]]`` when the conversation is over. The single
-TTS choke point (``synthesize_and_send_audio``) strips the token from every
-outgoing sentence via :func:`extract_end_call` and flags the session; the
-turn finisher then performs a real hangup after the goodbye audio has
-played. A sentinel survives every model in the curated menu (no
-function-calling support needed) and streams cleanly (the token rides the
-last sentence).
+the exact token ``[[END_CALL]]`` when the conversation is over.
+
+2026-07-13 root-cause fix: the sentinel used to be read in
+``synthesize_and_send_audio`` — AFTER ``turn_streamer`` had already run every
+sentence through ``guardrails.clean_response`` (audio-tag stripping). That
+stripper's bracket-tag regex treats ``[[END_CALL]]`` as a (double-bracketed)
+audio tag and erases it on every non-``eleven_v3`` voice, so
+``extract_end_call`` only ever saw an empty ``[]`` remnant and the flag was
+never set — the agent said its goodbye and then just... didn't hang up.
+
+The fix is ordering, not a regex patch: :func:`strip_and_flag` is now called
+by ``turn_streamer`` on the RAW model text for a sentence/tail/aggregate
+BEFORE that text is ever handed to ``clean_response`` (or anything else).
+This module remains the one authoritative place that knows the sentinel's
+shape; ``strip_and_flag`` is the one place a caller should reach for both the
+extraction and the session flag-set, so the two never drift apart.
 
 Pure helpers — no I/O — so the stripping logic is unit-testable.
 """
@@ -42,6 +51,34 @@ def extract_end_call(text: str) -> tuple[str, bool]:
     if not hits:
         return (text, False)
     return (cleaned.strip(), True)
+
+
+def strip_and_flag(session, text: str) -> str:
+    """Extract the END_CALL sentinel from RAW model text and, if present,
+    flag ``session`` so the turn finisher hangs up once this reply's audio
+    has played. Returns the sentinel-free text.
+
+    Callers MUST invoke this on text as soon as it leaves the model —
+    before any TTS-directed cleaning (audio-tag stripping etc.) touches it.
+    ``clean_response`` treats a bracketed sentinel as an audio tag and would
+    silently erase it, which is exactly the bug this function's ordering
+    fixes (see module docstring).
+
+    The flag-set is synchronous (no ``await``), so calling this on a turn's
+    synchronous streaming path guarantees it happens-before that same turn's
+    finisher reads ``session._end_call_requested`` — no race window where the
+    turn could be judged "over" before the flag lands. Idempotent: safe to
+    call more than once across a turn's several text slices (per sentence,
+    trailing tail, full aggregate) — a slice with no sentinel is returned
+    unchanged and never clears a flag a prior slice already set.
+    """
+    clean, requested = extract_end_call(text)
+    if requested:
+        try:
+            session._end_call_requested = True
+        except Exception:
+            pass
+    return clean
 
 
 # Appended by the prompt composer for every campaign (before the compliance

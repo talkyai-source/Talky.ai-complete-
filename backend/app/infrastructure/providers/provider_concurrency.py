@@ -24,7 +24,21 @@ Sized via env vars:
   DEEPGRAM_MAX_CONCURRENT, CARTESIA_MAX_CONCURRENT,
   GOOGLE_TTS_MAX_CONCURRENT.
 
-Defaults are conservative (40-200) — increase when account caps are uplifted.
+Defaults are conservative (8-200) — increase when account caps are uplifted.
+
+ElevenLabs specifically: self-service Flash plans cap `concurrent_requests`
+at roughly 4-30 depending on tier (see https://elevenlabs.io/pricing), far
+below what a generic default here should assume. The guard's job is to make
+callers WAIT (visibly, via `snapshot()`/wait-timeout logging) instead of
+fanning out past the account cap and eating invisible 429s. Two independent
+ceilings exist and BOTH must stay above the guard for it to mean anything:
+  1. the ElevenLabs account's `concurrent_requests` limit (contractual), and
+  2. aiohttp's `TCPConnector(limit_per_host=...)` in elevenlabs_tts.py
+     (currently 50) — a per-process TCP-connection cap that queues requests
+     silently inside aiohttp with NO guard-visible wait if the guard number
+     is set higher than this.
+Keep ELEVENLABS_MAX_CONCURRENT <= account cap AND <= limit_per_host so the
+guard is the first (and only visible) place callers queue.
 """
 
 from __future__ import annotations
@@ -40,7 +54,14 @@ logger = logging.getLogger(__name__)
 
 _DEFAULTS: dict[str, int] = {
     "groq": 80,
-    "elevenlabs": 200,
+    # Self-service ElevenLabs Flash plans cap concurrent_requests at ~4-30
+    # (plan-dependent); 200 silently overshot every self-service tier, so
+    # requests queued invisibly inside the aiohttp connector
+    # (limit_per_host=50, see elevenlabs_tts.py) instead of at this guard,
+    # where wait time/timeouts are logged. 8 is a safe floor for the
+    # smallest paid tiers — raise via ELEVENLABS_MAX_CONCURRENT to match
+    # your actual account cap, but never above limit_per_host (50).
+    "elevenlabs": 8,
     "deepgram": 80,
     "cartesia": 80,
     "google_tts": 200,

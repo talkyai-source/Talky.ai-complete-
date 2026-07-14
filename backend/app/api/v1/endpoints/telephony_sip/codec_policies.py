@@ -1,7 +1,6 @@
 """Codec policy endpoints — list / create / update / activate / deactivate."""
 from __future__ import annotations
 
-import json
 import logging
 from typing import Optional
 from uuid import UUID
@@ -240,7 +239,10 @@ async def create_codec_policy(
                     payload.ptime_ms,
                     payload.max_bitrate_kbps,
                     payload.jitter_buffer_ms,
-                    json.dumps(payload.metadata),
+                    # Raw dict — the pool's jsonb codec (app.core.db) encodes
+                    # via json.dumps on write; a pre-dumped string here would
+                    # be double-encoded into a JSON string scalar.
+                    payload.metadata,
                     current_user.id,
                 )
             except asyncpg.UniqueViolationError:
@@ -437,7 +439,8 @@ async def update_codec_policy(
                     ptime_ms,
                     max_bitrate_kbps,
                     jitter_buffer_ms,
-                    json.dumps(metadata),
+                    # Raw dict — see create-path comment above.
+                    metadata,
                     current_user.id,
                 )
             except asyncpg.UniqueViolationError:

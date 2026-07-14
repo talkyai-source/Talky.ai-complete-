@@ -326,26 +326,6 @@ class DialerWorker:
             # the cap and wedged all calls. (register_call_start/end remain on
             # the rules engine for unit tests.)
 
-            # 4.5. Run Call Guard validation before initiating call
-            guard_decision = await self._evaluate_call_guard(job, rules)
-            if guard_decision != "allow":
-                logger.warning(f"Call guard decision for job {job.job_id}: {guard_decision}")
-
-                if guard_decision == "block":
-                    # Block the call - mark job as blocked, don't retry
-                    await self._update_job_status(job.job_id, JobStatus.BLOCKED, reason="call_guard_blocked")
-                    return
-                elif guard_decision == "throttle":
-                    # Throttle - reschedule with delay
-                    await self.queue_service.schedule_retry(job, delay_seconds=60)
-                    await self._update_job_status(job.job_id, JobStatus.SKIPPED, reason="call_guard_throttled")
-                    return
-                elif guard_decision == "queue":
-                    # Queue - reschedule to retry later
-                    await self.queue_service.schedule_retry(job, delay_seconds=30)
-                    await self._update_job_status(job.job_id, JobStatus.SKIPPED, reason="call_guard_queued")
-                    return
-
             # Re-check campaign status immediately before originating. The
             # validation above (rules / scheduling / guard) can take 100-200ms,
             # and the user may hit Stop in that window. Without this, a job that
@@ -432,6 +412,47 @@ class DialerWorker:
                     job.job_id, JobStatus.RETRY_SCHEDULED, reason="tenant_gap",
                 )
                 return
+
+            # 4.95. Run Call Guard validation. Moved here (2026-07-13) from
+            # BEFORE the batch/call_gap/tenant_gap gates above:
+            # CallGuard.evaluate() INCRs the fixed-window rate-limit counter
+            # in telephony_rate_limiter as a side effect, plus writes a
+            # call_guard_decisions row (~15 DB round-trips). Evaluating it
+            # before those gates meant every job any later gate went on to
+            # DEFER got counted anyway, with no decrement — the counter
+            # tracked churn (re-evaluations) instead of actual dials, so a
+            # big campaign could climb to throttle on volume it never
+            # originated. Running the guard here — after EVERY deferral
+            # gate, including the tenant pacing claim, right before the
+            # originate call — means only a job that is actually about to
+            # dial gets counted.
+            #
+            # Slot-leak note: the tenant pacing slot above is already
+            # CLAIMED at this point (SET NX EX — see claim_tenant_dial_
+            # slot), so every early-return below (block/throttle/queue)
+            # explicitly releases it first. Without that release the slot
+            # would sit claimed for the full tenant-gap window even though
+            # nothing was dialed, needlessly pacing out the next legitimate
+            # job from ANY campaign on this tenant.
+            guard_decision = await self._evaluate_call_guard(job, rules)
+            if guard_decision != "allow":
+                logger.warning(f"Call guard decision for job {job.job_id}: {guard_decision}")
+                await release_tenant_dial_slot(self._redis, job.tenant_id)
+
+                if guard_decision == "block":
+                    # Block the call - mark job as blocked, don't retry
+                    await self._update_job_status(job.job_id, JobStatus.BLOCKED, reason="call_guard_blocked")
+                    return
+                elif guard_decision == "throttle":
+                    # Throttle - reschedule with delay
+                    await self.queue_service.schedule_retry(job, delay_seconds=60)
+                    await self._update_job_status(job.job_id, JobStatus.SKIPPED, reason="call_guard_throttled")
+                    return
+                elif guard_decision == "queue":
+                    # Queue - reschedule to retry later
+                    await self.queue_service.schedule_retry(job, delay_seconds=30)
+                    await self._update_job_status(job.job_id, JobStatus.SKIPPED, reason="call_guard_queued")
+                    return
 
             try:
                 # 5. Initiate the call via the provider/PBX.
@@ -1117,8 +1138,9 @@ class DialerWorker:
                     """
                     INSERT INTO calls (
                         id, tenant_id, campaign_id, lead_id, phone_number,
-                        external_call_uuid, status, talklee_call_id, created_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+                        external_call_uuid, status, talklee_call_id,
+                        dialer_job_id, created_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
                     """,
                     internal_call_id,
                     job.tenant_id,
@@ -1128,6 +1150,12 @@ class DialerWorker:
                     provider_call_id,
                     "initiated",
                     talklee_call_id,
+                    # 2026-07-13 fix: this was never written, so the pooled
+                    # teardown path (call_service._handle_call_status_pooled)
+                    # could never resolve dialer_job_id from the calls row —
+                    # leads/dialer_jobs were never finalized on the
+                    # production (pooled) teardown path. See call_service.py.
+                    job.job_id,
                 )
                 logger.debug(
                     "Created call record internal=%s provider=%s talklee=%s",

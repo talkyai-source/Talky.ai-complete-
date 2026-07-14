@@ -8,10 +8,43 @@ save when the DB context is unavailable.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
+
+
+def _session_tenant_uuid(voice_session) -> UUID | None:
+    """Best-effort authoritative tenant id for a live call, as a ``UUID``.
+
+    Used to tenant-scope the ``external_call_uuid`` -> ``calls.id`` resolution
+    so a recording can only ever bind to a call owned by the tenant this
+    session was serving. Priority mirrors the rest of the teardown path:
+
+    1. ``voice_session._dialer_tenant_id`` — stamped at answer-time binding
+       (``call_transcript_persister.bind_telephony_call``); the canonical
+       tenant for a dialer/outbound call.
+    2. ``voice_session.config.tenant_id`` — the session config, when resolved.
+    3. ``voice_session.call_session.tenant_id`` — the live CallSession.
+
+    Returns ``None`` when no tenant is known or the value isn't a valid UUID
+    (e.g. the ``"default"`` sentinel), in which case the caller leaves the
+    lookup unscoped rather than risk breaking a legitimate resolution.
+    """
+    candidates = [getattr(voice_session, "_dialer_tenant_id", None)]
+    cfg = getattr(voice_session, "config", None)
+    candidates.append(getattr(cfg, "tenant_id", None) if cfg else None)
+    cs = getattr(voice_session, "call_session", None)
+    candidates.append(getattr(cs, "tenant_id", None) if cs else None)
+    for value in candidates:
+        if not value:
+            continue
+        try:
+            return value if isinstance(value, UUID) else UUID(str(value))
+        except (ValueError, AttributeError, TypeError):
+            continue
+    return None
 
 
 async def _save_call_recording(voice_session, call_id: str) -> None:
@@ -44,6 +77,23 @@ async def _save_call_recording(voice_session, call_id: str) -> None:
         logger.debug(f"No recording data for {call_id[:12]}")
         return
 
+    # Snapshot the gateway's live buffers into new list objects now, in the
+    # same synchronous stretch (no `await` yet) as the calls above. The mix
+    # below runs in a worker thread further down, and `get_recording_buffer`
+    # / `get_tts_recording_buffer` hand back the gateway session's *live*
+    # lists (see telephony_media_gateway.py — no copy is made there). Once
+    # we `await` to offload the mix, the event loop is free to run
+    # `end_session()` / `clear_recording_buffer()` for this same call
+    # concurrently, which `.clear()`s those exact list objects in place —
+    # a thread reading them mid-clear would see a truncated/empty buffer or
+    # (worst case) race a `.clear()` mutation while iterating. `list(...)`
+    # takes a shallow copy in one atomic, non-yielding step; the bytes/tuple
+    # elements inside are immutable, so the copies are fully independent and
+    # stable for the rest of this call's lifetime — nothing else ever holds
+    # a reference to them.
+    caller_chunks = list(caller_chunks) if caller_chunks else []
+    agent_chunks = list(agent_chunks) if agent_chunks else []
+
     # Resolve sample rate from the live session so this stays correct after
     # the 8kHz -> 16kHz telephony migration. The recording buffers are written
     # at the gateway's INTERNAL rate (gateway._sample_rate), so prefer that as
@@ -68,10 +118,29 @@ async def _save_call_recording(voice_session, call_id: str) -> None:
     except Exception:
         rec_sample_rate = 16000
 
-    # Mix caller (left) + agent (right) into a stereo WAV
-    wav_bytes = mix_stereo_recording(
-        caller_chunks=caller_chunks or [],
-        agent_chunks=agent_chunks or [],
+    # Mix caller (left) + agent (right) into a stereo WAV.
+    #
+    # ROOT CAUSE FIX (2026-07-13): mix_stereo_recording does a per-sample
+    # Python loop (backend/app/domain/services/recording_service.py, the
+    # `for i in range(total_samples): ...` interleave loop) over the WHOLE
+    # call's audio. For a multi-minute call at 16kHz stereo that's several
+    # million iterations of pure-Python bytearray slicing — tens to
+    # hundreds of ms of the single asyncio event loop being 100% CPU-bound,
+    # during which EVERY other in-flight call's audio pump, STT/TTS
+    # websocket reads, and silence timers starve. Offload it to a worker
+    # thread via asyncio.to_thread so the loop is free to keep servicing
+    # every other live call while this one call's recording is mixed.
+    # `caller_chunks`/`agent_chunks` were already snapshotted into
+    # independent list copies above, so the thread never touches state that
+    # concurrent teardown (`clear_recording_buffer`, `end_session`) can
+    # mutate. A raise here propagates out of `_save_call_recording()` to
+    # the caller's `try/except` in `lifecycle._on_call_ended`, which logs
+    # it and continues teardown (end_session still runs — see the call
+    # site) — identical failure isolation to the previous synchronous call.
+    wav_bytes = await asyncio.to_thread(
+        mix_stereo_recording,
+        caller_chunks=caller_chunks,
+        agent_chunks=agent_chunks,
         sample_rate=rec_sample_rate,
     )
 
@@ -123,11 +192,28 @@ async def _save_call_recording(voice_session, call_id: str) -> None:
     try:
         from app.core.db import get_db
 
+        # Object-level authz (2026-07-13): external_call_uuid (the PBX channel
+        # id) is NOT unique in `calls` — channel ids get reused across calls,
+        # and over time the table accumulates multiple rows sharing one value
+        # across DIFFERENT tenants. A bare `LIMIT 1` with no tenant predicate
+        # and no ordering could therefore resolve THIS recording onto another
+        # tenant's historical call row and persist the audio under the wrong
+        # tenant. Scope the lookup to the tenant this live session actually
+        # belongs to (authoritative source: `_dialer_tenant_id`, stamped at
+        # answer-time binding; falls back to the session config / call-session
+        # tenant). When none is known — rare dev/standalone calls that never
+        # bound to a dialer row — the predicate is permissive (unchanged
+        # behaviour, and there is no session tenant to cross). ORDER BY
+        # created_at DESC deterministically picks the freshest matching row.
+        expected_tenant = _session_tenant_uuid(voice_session)
         async with get_db() as conn:
             row = await conn.fetchrow(
                 "SELECT id, tenant_id, campaign_id FROM calls "
-                "WHERE external_call_uuid = $1 LIMIT 1",
+                "WHERE external_call_uuid = $1 "
+                "AND ($2::uuid IS NULL OR tenant_id = $2) "
+                "ORDER BY created_at DESC LIMIT 1",
                 call_id,
+                expected_tenant,
             )
         if row:
             internal_call_id = str(row["id"])

@@ -1366,16 +1366,36 @@ class VoiceOrchestrator:
                 build_realtime_instructions,
             )
 
-            api_key = await get_credential_resolver().resolve(
-                "openai", tenant_id=config.tenant_id,
-            )
-            if not api_key:
-                logger.error(
-                    "realtime session call_id=%s: no OPENAI_API_KEY resolved "
-                    "(tenant=%s) — cannot start realtime", call_id[:8],
-                    config.tenant_id,
+            # Provider selection — STRICTLY opt-in, per-tenant/campaign. Rides
+            # the EXISTING realtime_settings JSONB dict (no new DB column):
+            # realtime_settings["provider"] = "openai" (default, unchanged) |
+            # "xai". Every existing tenant/campaign that has never set this
+            # key gets byte-for-byte the same OpenAI path as before.
+            rt_settings = config.realtime_settings or {}
+            provider = str(rt_settings.get("provider") or "openai").strip().lower()
+
+            if provider == "xai":
+                api_key = await get_credential_resolver().resolve(
+                    "xai", tenant_id=config.tenant_id,
                 )
-                return None
+                if not api_key:
+                    logger.error(
+                        "realtime session call_id=%s: no XAI_API_KEY resolved "
+                        "(tenant=%s) — cannot start xai realtime", call_id[:8],
+                        config.tenant_id,
+                    )
+                    return None
+            else:
+                api_key = await get_credential_resolver().resolve(
+                    "openai", tenant_id=config.tenant_id,
+                )
+                if not api_key:
+                    logger.error(
+                        "realtime session call_id=%s: no OPENAI_API_KEY resolved "
+                        "(tenant=%s) — cannot start realtime", call_id[:8],
+                        config.tenant_id,
+                    )
+                    return None
 
             # Persona/company/goal → clean realtime instructions. Pull from the
             # campaign agent_config when present; fall back to sane defaults.
@@ -1387,15 +1407,42 @@ class VoiceOrchestrator:
             gateway = await self._create_media_gateway(config)
             internal_rate = getattr(gateway, "_sample_rate", config.gateway_sample_rate)
 
-            rt = OpenAIRealtimeSession(
-                api_key=api_key,
-                model=config.realtime_model or "gpt-realtime-2",
-                voice=config.realtime_voice or "marin",
-                instructions=instructions,
-                tools=[knowledge_lookup_tool()],
-                settings=config.realtime_settings,
-                call_id=call_id,
-            )
+            if provider == "xai":
+                from app.infrastructure.realtime.xai_realtime import (
+                    XAIRealtimeSession,
+                    XAI_DEFAULT_MODEL,
+                )
+                # config.realtime_model defaults to the OpenAI model name
+                # ("gpt-realtime-2") for every tenant that hasn't touched
+                # this field, so that value is NOT a meaningful xAI override.
+                # Precedence: explicit realtime_settings["model"] > a
+                # realtime_model the operator actually customised > the xAI
+                # default.
+                xai_model = (
+                    rt_settings.get("model")
+                    or (config.realtime_model
+                        if config.realtime_model and config.realtime_model != "gpt-realtime-2"
+                        else XAI_DEFAULT_MODEL)
+                )
+                rt = XAIRealtimeSession(
+                    api_key=api_key,
+                    model=xai_model,
+                    agent_id=rt_settings.get("agent_id"),
+                    instructions=instructions,
+                    tools=[knowledge_lookup_tool()],
+                    settings=config.realtime_settings,
+                    call_id=call_id,
+                )
+            else:
+                rt = OpenAIRealtimeSession(
+                    api_key=api_key,
+                    model=config.realtime_model or "gpt-realtime-2",
+                    voice=config.realtime_voice or "marin",
+                    instructions=instructions,
+                    tools=[knowledge_lookup_tool()],
+                    settings=config.realtime_settings,
+                    call_id=call_id,
+                )
             connected = await rt.connect()
             if not connected:
                 logger.warning(

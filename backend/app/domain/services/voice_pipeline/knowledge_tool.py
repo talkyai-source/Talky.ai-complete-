@@ -140,7 +140,8 @@ async def run_knowledge_lookup(session: CallSession, query: str) -> str:
         try:
             hits = await asyncio.wait_for(
                 retrieve_knowledge(
-                    pool, session.tenant_id, session.campaign_id, q, k=_KB_MAX_CHUNKS
+                    pool, session.tenant_id, session.campaign_id, q, k=_KB_MAX_CHUNKS,
+                    bump_hits=False,
                 ),
                 timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
             )

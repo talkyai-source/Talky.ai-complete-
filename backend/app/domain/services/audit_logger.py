@@ -565,7 +565,10 @@ class AuditLogger:
                 tenant_uuid,
                 session_uuid,
                 detection_source,
-                json.dumps(evidence) if evidence else None,
+                # Raw dict — the pool's jsonb codec (app.core.db) encodes
+                # via json.dumps on write; a pre-dumped string here would
+                # be double-encoded into a JSON string scalar.
+                evidence if evidence else None,
                 title or event_type.replace("_", " ").title(),
                 "open",
                 alert_type,
@@ -599,9 +602,10 @@ class AuditLogger:
                 e["tenant_id"], e["resource_type"], e["resource_id"], e["ip_address"],
                 e["user_agent"], e["session_id"], e["device_fingerprint"],
                 e["country_code"], e["action"], e["description"],
-                json.dumps(e["before_state"]) if e["before_state"] else None,
-                json.dumps(e["after_state"]) if e["after_state"] else None,
-                json.dumps(e["metadata"]) if e["metadata"] else None,
+                # Raw dicts — see log_security_event comment above.
+                e["before_state"] if e["before_state"] else None,
+                e["after_state"] if e["after_state"] else None,
+                e["metadata"] if e["metadata"] else None,
                 e["previous_hash"], e["entry_hash"], e["signature"],
                 e["compliance_tags"], e["retention_until"],
             )

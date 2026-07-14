@@ -21,9 +21,10 @@ _KB_TOTAL_CHARS = int(os.getenv("VOICE_KB_TOTAL_CHARS", "1500"))
 
 # Hard cap on the per-turn knowledge lookup so a slow/contended DB can never add
 # more than this to time-to-first-token. On timeout we skip knowledge for the
-# turn — the agent still answers from persona + history. Retrieval runs
-# CONCURRENTLY with the LLM's first-token latency, so a larger budget here adds
-# ~0 perceived delay but sharply cuts silent "timed-out → no knowledge" turns.
+# turn — the agent still answers from persona + history. Retrieval is awaited
+# SERIALLY before the LLM iterator starts, so this budget sits directly on the
+# first-token critical path: keep it tight, but large enough to avoid silent
+# "timed-out → no knowledge" turns.
 _KNOWLEDGE_RETRIEVE_TIMEOUT_S = float(os.getenv("KNOWLEDGE_RETRIEVE_TIMEOUT_MS", "500")) / 1000.0
 
 

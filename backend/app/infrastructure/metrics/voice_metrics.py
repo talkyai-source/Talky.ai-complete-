@@ -127,6 +127,24 @@ _barge_in_stop_ms = _histogram_buckets(
     buckets=_BARGE_IN_STOP_BUCKETS_MS,
 )
 
+# Event-loop scheduling lag, in SECONDS. The primary "knee" metric for load
+# testing and a standing production signal: a 10ms heartbeat measures how far
+# past its deadline the loop actually wakes it. Under CPU contention / a
+# blocking call this climbs long before per-turn latency degrades. The per-turn
+# latency buckets start at 250ms and cannot resolve a 20ms p99, so loop lag gets
+# its own fine-grained buckets (1ms → 320ms).
+_EVENT_LOOP_LAG_BUCKETS_S: tuple[float, ...] = (
+    0.001, 0.0025, 0.005, 0.010, 0.020, 0.040, 0.080, 0.160, 0.320,
+)
+_event_loop_lag = _histogram_buckets(
+    "voice_event_loop_lag_seconds",
+    "Event-loop scheduling lag: how long past its 10ms deadline the heartbeat "
+    "task actually woke (seconds). The knee metric for loop saturation — climbs "
+    "under CPU contention / blocking calls before per-turn latency degrades.",
+    labelnames=(),
+    buckets=_EVENT_LOOP_LAG_BUCKETS_S,
+)
+
 _turn_0_rejections = _counter(
     "voice_turn_0_rejection_total",
     "Turn-0 transcripts dropped by the T2.4 floor (too short / "
@@ -257,6 +275,20 @@ def observe_tts_first_chunk_seconds(seconds: float) -> None:
     if seconds is None or seconds < 0:
         return
     _tts_first_chunk.observe(seconds)
+
+
+def observe_event_loop_lag_seconds(lag_s: float) -> None:
+    """Record one event-loop scheduling-lag sample (seconds).
+
+    Fail-soft by contract: this is driven by a hot heartbeat task, so a bad
+    value or any metrics-layer error must never propagate back and disturb the
+    loop it is measuring. All failures are swallowed."""
+    try:
+        if lag_s is None or lag_s < 0:
+            return
+        _event_loop_lag.observe(lag_s)
+    except Exception:
+        return
 
 
 def observe_barge_in_stop_ms(ms: float) -> None:

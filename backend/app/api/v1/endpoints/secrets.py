@@ -142,7 +142,7 @@ async def get_secret(
     if user_tenant_id and str(tenant_id) != str(user_tenant_id):
         raise HTTPException(status_code=403, detail="Cannot access other tenant secrets")
 
-    metadata = await secrets_manager.get_metadata(secret_id)
+    metadata = await secrets_manager.get_metadata(secret_id, tenant_id=tenant_id)
 
     if not metadata or str(metadata.tenant_id) != str(tenant_id):
         raise HTTPException(status_code=404, detail="Secret not found")
@@ -164,11 +164,18 @@ async def rotate_secret(
     if user_tenant_id and str(tenant_id) != str(user_tenant_id):
         raise HTTPException(status_code=403, detail="Cannot rotate other tenant secrets")
 
-    new_secret_id = await secrets_manager.rotate(
-        secret_id=secret_id,
-        rotated_by=current_user["id"],
-        grace_period_hours=data.grace_period_hours,
-    )
+    # Scope the rotation to the path tenant so a secret owned by another
+    # tenant reads as not-found (tenant_secrets has no RLS). rotate() raises
+    # ValueError when the scoped secret doesn't exist.
+    try:
+        new_secret_id = await secrets_manager.rotate(
+            secret_id=secret_id,
+            rotated_by=current_user["id"],
+            grace_period_hours=data.grace_period_hours,
+            tenant_id=tenant_id,
+        )
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Secret not found")
 
     await audit_logger.log(
         event_type=AuditEvent.SECRET_ROTATED,
@@ -206,6 +213,7 @@ async def revoke_secret(
         secret_id=secret_id,
         revoked_by=current_user["id"],
         reason=reason,
+        tenant_id=tenant_id,
     )
 
     if not result:
@@ -242,6 +250,7 @@ async def mark_secret_compromised(
         secret_id=secret_id,
         reported_by=current_user["id"],
         reason=reason,
+        tenant_id=tenant_id,
     )
 
     if not result:
@@ -365,6 +374,15 @@ async def get_expiring_secrets(
     current_user: dict = Depends(require_permissions(["secrets:read"])),
     secrets_manager: SecretsManager = Depends(get_secrets_manager),
 ):
-    """Get secrets expiring within specified days"""
-    secrets = await secrets_manager.get_expiring_secrets(days=days)
+    """Get secrets expiring within specified days (scoped to the caller's tenant).
+
+    ``secrets:read`` is a tenant-level permission, so this endpoint must only
+    return the caller's own expiring secrets. A caller without a tenant in
+    their token (platform admin) sees all tenants, matching the other
+    platform-scoped list endpoints.
+    """
+    secrets = await secrets_manager.get_expiring_secrets(
+        days=days,
+        tenant_id=current_user.get("tenant_id"),
+    )
     return {"secrets": secrets, "count": len(secrets)}

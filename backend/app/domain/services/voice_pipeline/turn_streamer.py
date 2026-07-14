@@ -35,6 +35,7 @@ from app.domain.services.end_session_action import (
     build_end_session_tool_instructions,
     parse_end_session_action,
 )
+from app.domain.services.voice_pipeline.end_call import strip_and_flag
 from app.domain.services.llm_guardrails import get_guardrails
 from app.domain.services.voice_pipeline import expressive_caps
 from app.services.scripts.prompts.guardrails import (
@@ -152,7 +153,7 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
         _t0 = time.monotonic()
         try:
             hits = await asyncio.wait_for(
-                retrieve_knowledge(pool, session.tenant_id, session.campaign_id, query, k=_KB_MAX_CHUNKS),
+                retrieve_knowledge(pool, session.tenant_id, session.campaign_id, query, k=_KB_MAX_CHUNKS, bump_hits=False),
                 timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
@@ -588,11 +589,21 @@ class TurnStreamer:
                     if idx < 0:
                         break
 
+                    raw_sentence = buf[:idx + 1].strip()
+                    buf = buf[idx + 2:] if idx + 2 <= len(buf) else ""
+
+                    # Extract-first (root cause, not a regex patch): pull the
+                    # END_CALL sentinel out of the RAW model text before
+                    # clean_response's audio-tag stripper ever sees it — that
+                    # stripper treats "[[END_CALL]]" as a bracket tag and
+                    # erases it, which used to leave the flag unset and the
+                    # call never hanging up. See end_call.py module docstring.
+                    raw_sentence = strip_and_flag(session, raw_sentence)
+
                     sentence = guardrails.clean_response(
-                        buf[:idx + 1].strip(), tts_model_id=_tts_model_id,
+                        raw_sentence, tts_model_id=_tts_model_id,
                         protected_values=_protected_readback,
                     )
-                    buf = buf[idx + 2:] if idx + 2 <= len(buf) else ""
 
                     if not sentence or len(sentence) < 6:
                         continue
@@ -652,6 +663,14 @@ class TurnStreamer:
         self._p.latency_tracker.mark_llm_end(call_id)
 
         raw_response_text = "".join(all_tokens)
+        # Extract-first on the full aggregate too: all_tokens (unlike buf) was
+        # never touched by the per-sentence extraction above, so without this
+        # the sentinel would still be sitting in raw_response_text and
+        # clean_response would mangle it into a stray "[]" in full_text —
+        # which becomes the stored transcript below. Idempotent with the
+        # per-sentence/tail calls (harmless no-op where they already caught
+        # it); this is the one place that protects the aggregate/history copy.
+        raw_response_text = strip_and_flag(session, raw_response_text)
         ask_ai_end_action = (
             parse_end_session_action(raw_response_text)
             if self._p._supports_llm_end_session_action(session)
@@ -669,8 +688,14 @@ class TurnStreamer:
         if not ask_ai_end_action and not tts_was_interrupted and buf.strip():
             if not _barged():
                 if not max_sentences or sentences_done < max_sentences:
+                    # Same extract-first ordering as the per-sentence loop:
+                    # this trailing tail is the MOST common place the sentinel
+                    # actually lands (the model's closing line ends in
+                    # punctuation, which flushes as a full sentence above, and
+                    # " [[END_CALL]]" is left over as the unterminated tail).
+                    raw_tail = strip_and_flag(session, buf.strip())
                     sentence = guardrails.clean_response(
-                        buf.strip(), tts_model_id=_tts_model_id,
+                        raw_tail, tts_model_id=_tts_model_id,
                         protected_values=_protected_readback,
                     )
                     if sentence:

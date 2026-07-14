@@ -22,6 +22,16 @@ from app.infrastructure.tts.elevenlabs_tts import _SingleKeyLease
 
 logger = logging.getLogger(__name__)
 
+# How long a sentence's WS lock wait is allowed to block before we give up
+# waiting on it and force a fresh lock. The lock is normally released within
+# a handful of event-loop ticks even when a barge-in abandons a generation
+# without explicitly closing it (Python's asyncgen finalizer eventually
+# calls aclose(), which sends a Cartesia context cancel — see
+# _stream_over_ws). This is a safety net for the pathological case where
+# that finalization is delayed, so one abandoned generation can never stall
+# every subsequent sentence on a call.
+_WS_LOCK_ACQUIRE_TIMEOUT_S = 2.0
+
 
 class CartesiaTTSProvider(TTSProvider):
     """Cartesia Sonic-3 TTS provider with WebSocket streaming for jitter-free audio"""
@@ -50,6 +60,12 @@ class CartesiaTTSProvider(TTSProvider):
         # call ends. This avoids cross-key WS multiplexing (Cartesia ties the WS
         # to the api_key in the URL).
         self._call_keys: Dict[str, str] = {}
+        # Tracks the context_id of the generation currently (or most
+        # recently) in flight per call. Used only by the lock-timeout
+        # fallback in stream_synthesize to best-effort cancel a generation
+        # that a barge-in abandoned, when we can't wait for its own cleanup
+        # to finish naturally.
+        self._call_active_context: Dict[str, str] = {}
         self._pool: Optional[KeyPool] = None
         self._guard = get_provider_guard("cartesia")
 
@@ -174,6 +190,7 @@ class CartesiaTTSProvider(TTSProvider):
         ws = self._call_ws.pop(call_id, None)
         self._call_ws_locks.pop(call_id, None)
         self._call_keys.pop(call_id, None)
+        self._call_active_context.pop(call_id, None)
         if ws is not None and not ws.closed:
             try:
                 await ws.close()
@@ -233,44 +250,83 @@ class CartesiaTTSProvider(TTSProvider):
         if call_id:
             # Persistent per-call WebSocket path — single handshake per call.
             lock = self._call_ws_locks.setdefault(call_id, asyncio.Lock())
-            async with lock, self._guard.acquire():
-                ws = await self._get_or_open_ws(call_id)
-                if ws is None:
-                    # Fallback to transient WS if connect failed
-                    async for chunk in self._stream_transient(payload, sample_rate):
-                        yield chunk
-                    return
-                chunks_yielded = False
-                try:
-                    async for chunk in self._stream_over_ws(ws, payload, sample_rate):
-                        chunks_yielded = True
-                        yield chunk
-                    return
-                except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as exc:
-                    # If any chunks were already yielded the caller has partial
-                    # audio; retrying would duplicate it.  Surface the error.
-                    if chunks_yielded:
-                        await self.disconnect_for_call(call_id)
-                        raise RuntimeError(
-                            f"Cartesia WS failed mid-generation: {exc}"
-                        )
-                    # Clean reset — WS died before any audio.  Reconnect + retry
-                    # once with a fresh context_id.
-                    logger.warning(
-                        "cartesia_ws_reconnect call_id=%s reason=%s", call_id, exc
-                    )
-                    await self.disconnect_for_call(call_id)
+            try:
+                await asyncio.wait_for(
+                    lock.acquire(), timeout=_WS_LOCK_ACQUIRE_TIMEOUT_S
+                )
+            except asyncio.TimeoutError:
+                # The lock is still held after _WS_LOCK_ACQUIRE_TIMEOUT_S —
+                # almost certainly a generation a barge-in abandoned without
+                # closing (tts_playback.py stops consuming on interruption
+                # but does not call aclose() on the generator, so its own
+                # cleanup only runs once Python's asyncgen finalizer gets to
+                # it). Don't let that stall THIS turn indefinitely: best-
+                # effort cancel the stale context on Cartesia's side and
+                # swap in a fresh lock. The orphaned lock/generator still
+                # releases/cleans itself up independently once finalized —
+                # this only unblocks the caller waiting on it now.
+                stale_ctx = self._call_active_context.get(call_id)
+                logger.warning(
+                    "cartesia_lock_stale call_id=%s stale_context=%s — "
+                    "forcing fresh lock",
+                    call_id, stale_ctx,
+                )
+                if stale_ctx:
+                    stale_ws = self._call_ws.get(call_id)
+                    if stale_ws is not None and not stale_ws.closed:
+                        try:
+                            await stale_ws.send_str(
+                                json.dumps({"context_id": stale_ctx, "cancel": True})
+                            )
+                        except Exception:
+                            pass
+                lock = asyncio.Lock()
+                self._call_ws_locks[call_id] = lock
+                await lock.acquire()
+            try:
+                async with self._guard.acquire():
+                    self._call_active_context[call_id] = payload["context_id"]
                     ws = await self._get_or_open_ws(call_id)
                     if ws is None:
+                        # Fallback to transient WS if connect failed
                         async for chunk in self._stream_transient(payload, sample_rate):
                             yield chunk
                         return
-                    payload = self._build_payload(
-                        text, selected_voice_id, sample_rate, language, speed, emotion
-                    )
-                    async for chunk in self._stream_over_ws(ws, payload, sample_rate):
-                        yield chunk
-                    return
+                    chunks_yielded = False
+                    try:
+                        async for chunk in self._stream_over_ws(ws, payload, sample_rate):
+                            chunks_yielded = True
+                            yield chunk
+                        return
+                    except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as exc:
+                        # If any chunks were already yielded the caller has partial
+                        # audio; retrying would duplicate it.  Surface the error.
+                        if chunks_yielded:
+                            await self.disconnect_for_call(call_id)
+                            raise RuntimeError(
+                                f"Cartesia WS failed mid-generation: {exc}"
+                            )
+                        # Clean reset — WS died before any audio.  Reconnect + retry
+                        # once with a fresh context_id.
+                        logger.warning(
+                            "cartesia_ws_reconnect call_id=%s reason=%s", call_id, exc
+                        )
+                        await self.disconnect_for_call(call_id)
+                        ws = await self._get_or_open_ws(call_id)
+                        if ws is None:
+                            async for chunk in self._stream_transient(payload, sample_rate):
+                                yield chunk
+                            return
+                        payload = self._build_payload(
+                            text, selected_voice_id, sample_rate, language, speed, emotion
+                        )
+                        self._call_active_context[call_id] = payload["context_id"]
+                        async for chunk in self._stream_over_ws(ws, payload, sample_rate):
+                            yield chunk
+                        return
+            finally:
+                self._call_active_context.pop(call_id, None)
+                lock.release()
 
         # No call_id → legacy transient WS (one handshake per synthesis).
         async with self._guard.acquire():
@@ -308,37 +364,79 @@ class CartesiaTTSProvider(TTSProvider):
         payload: Dict[str, Any],
         sample_rate: int,
     ) -> AsyncIterator[AudioChunk]:
-        """Send one generation and yield its audio chunks until `done` or error."""
-        await ws.send_str(json.dumps(payload))
-        async for msg in ws:
-            if msg.type == aiohttp.WSMsgType.TEXT:
-                data = json.loads(msg.data)
+        """Send one generation and yield its audio chunks until `done` or error.
 
-                if data.get("data"):
-                    audio_bytes = base64.b64decode(data["data"])
-                    if not audio_bytes:
+        Cartesia multiplexes multiple generations over one persistent WS by
+        `context_id`, and every server message echoes its own `context_id`.
+        A generation abandoned mid-stream (e.g. barge-in stops the caller
+        from consuming this generator — see tts_playback.py — without
+        closing it) can still have `data`/`done` frames arrive interleaved
+        with a NEW generation that starts reading the same socket. Every
+        inbound message is matched against THIS generation's own
+        context_id; anything else is a stale frame from another context and
+        is discarded rather than treated as our audio or our completion
+        signal — that is exactly how an interrupted turn could otherwise
+        bleed into the next one.
+        """
+        context_id = payload.get("context_id")
+        await ws.send_str(json.dumps(payload))
+        finished = False
+        try:
+            async for msg in ws:
+                if msg.type == aiohttp.WSMsgType.TEXT:
+                    data = json.loads(msg.data)
+                    msg_context_id = data.get("context_id")
+                    if context_id and msg_context_id and msg_context_id != context_id:
+                        logger.debug(
+                            "cartesia_stale_context_frame discarded expected=%s got=%s",
+                            context_id, msg_context_id,
+                        )
                         continue
-                    if len(audio_bytes) % 2 != 0:
-                        audio_bytes = audio_bytes[:-1]
-                    int16_arr = np.frombuffer(audio_bytes, dtype=np.int16)
-                    float32_data = (int16_arr.astype(np.float32) / 32768.0).tobytes()
-                    yield AudioChunk(
-                        data=float32_data,
-                        sample_rate=sample_rate,
-                        channels=1,
+
+                    if data.get("data"):
+                        audio_bytes = base64.b64decode(data["data"])
+                        if not audio_bytes:
+                            continue
+                        if len(audio_bytes) % 2 != 0:
+                            audio_bytes = audio_bytes[:-1]
+                        int16_arr = np.frombuffer(audio_bytes, dtype=np.int16)
+                        float32_data = (int16_arr.astype(np.float32) / 32768.0).tobytes()
+                        yield AudioChunk(
+                            data=float32_data,
+                            sample_rate=sample_rate,
+                            channels=1,
+                        )
+                    elif data.get("done"):
+                        # Generation complete; WS stays open for the next context_id.
+                        finished = True
+                        return
+                    elif data.get("type") == "error":
+                        logger.error("[Cartesia WS] Error: %s", data)
+                        raise RuntimeError(f"Cartesia WS error: {data}")
+                elif msg.type in (
+                    aiohttp.WSMsgType.CLOSED,
+                    aiohttp.WSMsgType.ERROR,
+                ):
+                    logger.warning("[Cartesia WS] Connection closed: %s", msg)
+                    raise RuntimeError("Cartesia WS closed mid-generation")
+        finally:
+            # Reached whenever this generation ends WITHOUT its own `done`:
+            # an error/closed-WS above, OR — the barge-in case — the caller
+            # simply stops iterating and this generator is later closed
+            # (aclose()/GC finalizer). Tell Cartesia to stop producing more
+            # frames for this context so stale audio isn't left queuing up
+            # for the NEXT generation to have to filter out. Best-effort
+            # only: cancellation must never crash the turn.
+            if not finished and context_id and ws is not None and not ws.closed:
+                try:
+                    await ws.send_str(
+                        json.dumps({"context_id": context_id, "cancel": True})
                     )
-                elif data.get("done"):
-                    # Generation complete; WS stays open for the next context_id.
-                    return
-                elif data.get("type") == "error":
-                    logger.error("[Cartesia WS] Error: %s", data)
-                    raise RuntimeError(f"Cartesia WS error: {data}")
-            elif msg.type in (
-                aiohttp.WSMsgType.CLOSED,
-                aiohttp.WSMsgType.ERROR,
-            ):
-                logger.warning("[Cartesia WS] Connection closed: %s", msg)
-                raise RuntimeError("Cartesia WS closed mid-generation")
+                except Exception as _cancel_exc:
+                    logger.debug(
+                        "cartesia_cancel_context_failed context_id=%s err=%s",
+                        context_id, _cancel_exc,
+                    )
     
     async def stream_synthesize_websocket(
         self,

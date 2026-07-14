@@ -9,13 +9,63 @@ Usage:
         row = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
 """
 import os
+import json
 import logging
 import asyncio
+import uuid
 import asyncpg
 from typing import Optional, Any, List, Dict
 from contextlib import asynccontextmanager
 
 logger = logging.getLogger(__name__)
+
+# Sentinel used for `app.current_tenant_id` when there's no real tenant in
+# scope (internal/system callers, or RLS-bypass paths). RLS policies cast
+# this GUC to ::uuid, so it must be a syntactically valid UUID — never ''.
+# Mirrors `app.core.db_utils._NIL_UUID`.
+_NIL_TENANT_UUID = "00000000-0000-0000-0000-000000000000"
+
+
+def _validate_tenant_uuid(value: str) -> str:
+    """Raise ValueError if ``value`` isn't a parseable UUID.
+
+    Guards the `set_config()` call below — a malformed tenant id would
+    otherwise reach Postgres as an opaque string and only fail later
+    (confusingly) at the first RLS policy that casts it to ::uuid.
+    """
+    uuid.UUID(value)
+    return value
+
+
+async def _apply_rls_context(conn: asyncpg.Connection, tenant_id, bypass_rls: bool) -> None:
+    """Set the `app.current_tenant_id` / `app.bypass_rls` GUCs for the
+    caller's statement(s).
+
+    Must be called *inside* an open transaction (`conn.transaction()`) —
+    `SET LOCAL` / the transaction-local form of `set_config(..., true)`
+    both silently no-op outside one, which is the bug this helper fixes.
+
+    Uses `set_config()` with a bound parameter instead of a string-built
+    `SET LOCAL app.x = '...'` so a tenant id can never be interpreted as
+    SQL syntax; the value is validated as a UUID first regardless, since
+    RLS policies cast it to ::uuid.
+    """
+    if bypass_rls:
+        await conn.execute("SELECT set_config('app.bypass_rls', 'true', true)")
+        await conn.execute(
+            "SELECT set_config('app.current_tenant_id', $1, true)", _NIL_TENANT_UUID
+        )
+    elif tenant_id:
+        _validate_tenant_uuid(str(tenant_id))
+        await conn.execute(
+            "SELECT set_config('app.current_tenant_id', $1, true)", str(tenant_id)
+        )
+        await conn.execute("SELECT set_config('app.bypass_rls', 'false', true)")
+    else:
+        await conn.execute(
+            "SELECT set_config('app.current_tenant_id', $1, true)", _NIL_TENANT_UUID
+        )
+        await conn.execute("SELECT set_config('app.bypass_rls', 'false', true)")
 
 # Bounded wait for a connection when the pool is exhausted. Without this,
 # `pool.acquire()` blocks forever — a saturated pool (e.g. a slow query
@@ -60,6 +110,51 @@ def _pool_kwargs() -> dict:
     return extras
 
 
+async def _register_jsonb_codecs(conn: asyncpg.Connection) -> None:
+    """Pool ``init`` hook: decode jsonb/json columns to dict/list on read.
+
+    Root-cause fix — raw asyncpg otherwise hands back JSONB/JSON columns as
+    JSON *strings*, unlike the old blocking postgres_adapter which decoded
+    them. That mismatch caused a production incident (campaign identity
+    lost) plus several latent AttributeError/500 sites that did dict-style
+    access on what they assumed was already a dict.
+
+    asyncpg's pool ``init=`` callback runs exactly once per physical
+    connection, at the moment the pool creates it — not on every
+    `acquire()` — so this can't double-register on a connection that's
+    simply being checked out again. ``set_type_codec`` itself is also
+    idempotent (re-registering the same codec just overwrites it), so even
+    a defensive re-call is harmless.
+
+    ``format='text'`` is required for jsonb: asyncpg's binary wire format
+    prefixes jsonb with a 1-byte version marker that a plain
+    ``json.loads`` decoder can't handle. ``json`` has no such prefix but
+    is set the same way for symmetry.
+    """
+    # Pass-through-if-string encoder. The whole codebase's jsonb write sites
+    # historically pass a pre-serialized JSON *string* (``json.dumps(payload)``)
+    # as the bind parameter. A naive ``encoder=json.dumps`` would serialize that
+    # string a SECOND time — the column would store a quoted JSON string
+    # (``"{\"k\": 1}"``) instead of an object, silently corrupting every write.
+    # Passing the value through untouched when it's already a ``str`` keeps those
+    # existing string-writes correct, while ``json.dumps`` still handles the
+    # newer sites that bind a raw dict/list. Both write styles now land as proper
+    # jsonb, so no write site needs to change. ``default=str`` mirrors the
+    # serialization the old ``postgres_adapter._coerce_value`` applied to jsonb
+    # dicts (datetime/UUID -> str); without it a raw-dict write carrying such a
+    # value — which the adapter now routes here instead of pre-serializing —
+    # would raise TypeError.
+    encoder = lambda v: v if isinstance(v, str) else json.dumps(v, default=str)
+    for typename in ("jsonb", "json"):
+        await conn.set_type_codec(
+            typename,
+            schema="pg_catalog",
+            encoder=encoder,
+            decoder=json.loads,
+            format="text",
+        )
+
+
 async def init_db_pool() -> asyncpg.Pool:
     """Create the asyncpg connection pool(s). Called once at startup.
 
@@ -82,6 +177,7 @@ async def init_db_pool() -> asyncpg.Pool:
         max_size=max_size,
         command_timeout=60,
         server_settings={"application_name": "talkyai-backend"},
+        init=_register_jsonb_codecs,
         **_pool_kwargs(),
     )
     logger.info(
@@ -98,6 +194,7 @@ async def init_db_pool() -> asyncpg.Pool:
             max_size=ro_max,
             command_timeout=60,
             server_settings={"application_name": "talkyai-backend-ro"},
+            init=_register_jsonb_codecs,
             **_pool_kwargs(),
         )
         logger.info(
@@ -175,17 +272,18 @@ async def get_read_db():
         tenant_id = get_current_tenant_id()
         bypass_rls = get_bypass_rls()
 
-        if bypass_rls:
-            await conn.execute("SET LOCAL app.bypass_rls = 'true'")
-            await conn.execute("SET LOCAL app.current_tenant_id = ''")
-        elif tenant_id:
-            await conn.execute(f"SET LOCAL app.current_tenant_id = '{tenant_id}'")
-            await conn.execute("SET LOCAL app.bypass_rls = 'false'")
-        else:
-            await conn.execute("SET LOCAL app.current_tenant_id = ''")
-            await conn.execute("SET LOCAL app.bypass_rls = 'false'")
-
-        yield conn
+        # `SET LOCAL` / `set_config(..., true)` only take effect inside an
+        # open transaction — outside one Postgres discards the setting
+        # (with a warning), so the GUCs never actually reached the query
+        # before this wrap. `readonly=True` documents (and, once a real
+        # RLS-enforcing role is in front of this pool, enforces) that this
+        # path is for read-only work; it's a no-op against today's
+        # superuser pool. Every current caller issues exactly one
+        # statement, so committing on the way out is equivalent to the
+        # previous un-transacted single-statement behavior.
+        async with conn.transaction(readonly=True):
+            await _apply_rls_context(conn, tenant_id, bypass_rls)
+            yield conn
     finally:
         await pool.release(conn)
 
@@ -217,18 +315,17 @@ async def get_db():
         tenant_id = get_current_tenant_id()
         bypass_rls = get_bypass_rls()
 
-        # Set RLS context in PostgreSQL session
-        if bypass_rls:
-            await conn.execute("SET LOCAL app.bypass_rls = 'true'")
-            await conn.execute("SET LOCAL app.current_tenant_id = ''")
-        elif tenant_id:
-            await conn.execute(f"SET LOCAL app.current_tenant_id = '{tenant_id}'")
-            await conn.execute("SET LOCAL app.bypass_rls = 'false'")
-        else:
-            await conn.execute("SET LOCAL app.current_tenant_id = ''")
-            await conn.execute("SET LOCAL app.bypass_rls = 'false'")
-
-        yield conn
+        # See get_read_db()'s comment: the GUCs below only stick if set
+        # inside an open transaction, so the RLS context is applied here
+        # and the caller's statement(s) run inside the same transaction.
+        # Every current caller issues exactly one statement, so committing
+        # on the way out (normal exit) or rolling back (exception) is
+        # equivalent to the previous un-transacted single-statement
+        # behavior — no caller relies on a partial multi-statement write
+        # surviving an error.
+        async with conn.transaction():
+            await _apply_rls_context(conn, tenant_id, bypass_rls)
+            yield conn
     finally:
         await pool.release(conn)
 

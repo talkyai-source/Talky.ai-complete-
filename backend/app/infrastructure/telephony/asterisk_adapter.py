@@ -43,6 +43,20 @@ logger = logging.getLogger(__name__)
 _SESSION_FINAL_TIMEOUT_MS = int(os.getenv("TELEPHONY_SESSION_FINAL_TIMEOUT_MS", "7200000"))
 
 
+class TtsDeliveryError(RuntimeError):
+    """Raised by send_tts_audio when a TTS packet could NOT be delivered to the
+    caller (no live gateway session, or the gateway POST failed / timed out).
+
+    Surfacing this as an exception — instead of swallowing it — lets the media
+    gateway's send loop treat the packet as *not played*: it will not advance
+    ``chunks_sent`` / ``total_bytes_sent`` / ``first_tts_logged`` for audio the
+    caller never actually heard, so the transcript/history stop claiming a
+    sentence was spoken while the caller sat in silence. Every call site in
+    ``telephony_media_gateway`` already wraps ``send_tts_audio`` in try/except,
+    so raising cannot crash the audio path.
+    """
+
+
 @dataclass
 class _UnicastRtpCacheEntry:
     created_key: str
@@ -211,6 +225,67 @@ class AsteriskAdapter(CallControlAdapter):
         channel_id = next(iter(self._originated_channels))
         self._originated_channels.discard(channel_id)
         return channel_id
+
+    async def _correlate_trunk_leg(self, actual_channel_id: str) -> Optional[str]:
+        """Pair a trunk-created Stasis leg with the SPECIFIC origination it
+        belongs to, and consume that origination.
+
+        Deterministic path: read ``CHANNEL(linkedid)`` off the leg. Because we
+        originate with ``channelId=<pre_id>``, the origination channel's
+        uniqueid — and therefore the whole call's linkedid — is that pre_id, so
+        the linkedid returned here equals the pending origination id even though
+        the leg's own id differs. This lets two calls dialing at once map to the
+        right parents regardless of the order their legs enter Stasis.
+
+        Fallback: if the linkedid can't be read or matches no pending
+        origination (older Asterisk, or the id genuinely wasn't honoured), we
+        fall back to the legacy oldest-pending (FIFO) guess and log when that is
+        ambiguous (>1 pending) so the residual cross-wire risk is observable.
+
+        Returns the origination id to alias to (already removed from the pending
+        set), or ``None`` when there is nothing to consume.
+        """
+        linked: Optional[str] = None
+        try:
+            res = await self._ari(
+                "GET", f"/channels/{actual_channel_id}/variable",
+                params={"variable": "CHANNEL(linkedid)"},
+            )
+            linked = str((res or {}).get("value") or "") or None
+        except Exception as exc:  # noqa: BLE001 — fall back to FIFO on any read error
+            logger.debug(
+                "AsteriskAdapter: linkedid read failed for trunk leg %s: %s",
+                actual_channel_id[:12], exc,
+            )
+
+        if linked and linked in self._originated_channels:
+            self._discard_originated_channel(linked)
+            return linked
+
+        pending = max(len(self._originated_channel_order), len(self._originated_channels))
+        if pending > 1:
+            logger.warning(
+                "AsteriskAdapter: trunk leg %s not correlated by linkedid "
+                "(linkedid=%s) — falling back to FIFO among %d pending "
+                "originations (cross-wire risk while >1 pending)",
+                actual_channel_id[:12], linked or "unknown", pending,
+            )
+        return self._consume_oldest_originated_channel()
+
+    async def _start_trunk_leg(self, channel_id: str) -> None:
+        """Correlate a trunk-created leg to its origination, then run the normal
+        outbound-stasis setup. Runs as its own task because the correlation
+        needs an async ARI read; the consume + alias happen here (post-read) so
+        concurrent legs each claim their OWN origination."""
+        pre_id = await self._correlate_trunk_leg(channel_id)
+        if pre_id is None:
+            return
+        self._emit_outbound_channel_alias(pre_id, channel_id)
+        logger.info(
+            f"AsteriskAdapter: matched trunk-created channel "
+            f"{channel_id[:12]} to originated {pre_id[:12]}"
+        )
+        await self._on_outbound_stasis_start(channel_id)
 
     def get_hangup_cause(self, channel_id: str) -> Optional[str]:
         """Return (and consume) the captured Q.850 hangup cause for a channel.
@@ -688,17 +763,17 @@ class AsteriskAdapter(CallControlAdapter):
 
             if is_our_originated or arg0 == "outbound" or is_trunk_leg:
                 if is_trunk_leg:
-                    # Consume the oldest pending originated ID since this is
-                    # its trunk leg. The queue keeps concurrent outbound calls
-                    # deterministic instead of relying on set iteration order.
-                    stale_id = self._consume_oldest_originated_channel()
-                    if stale_id is None:
-                        return
-                    self._emit_outbound_channel_alias(stale_id, channel_id)
-                    logger.info(
-                        f"AsteriskAdapter: matched trunk-created channel "
-                        f"{channel_id[:12]} to originated {stale_id[:12]}"
-                    )
+                    # A trunk-created leg entered Stasis with an id different
+                    # from the one we requested. Match it to its SPECIFIC
+                    # origination via CHANNEL(linkedid) — a deterministic key
+                    # that ties every leg of a call together — instead of
+                    # guessing the oldest pending origination (FIFO), which
+                    # cross-wires when two calls are dialing at once and their
+                    # legs enter Stasis / are answered out of origination order.
+                    # The correlating read is async, so the consume + alias +
+                    # outbound-start all run inside the task (see below).
+                    asyncio.create_task(self._start_trunk_leg(channel_id))
+                    return
                 elif not is_our_originated and arg0 == "outbound" and len(self._originated_channels) == 1:
                     stale_id = self._consume_oldest_originated_channel()
                     if stale_id is not None:
@@ -1279,6 +1354,19 @@ class AsteriskAdapter(CallControlAdapter):
             except Exception:
                 pass
 
+        # Ensure the parent (caller) leg is torn down. This teardown may have
+        # been triggered by the EXTERNAL media leg dying (its id is a value in
+        # _ext_channels, dispatched with the PARENT id) while the parent PJSIP
+        # channel is still Up — deleting the bridge does NOT hang the parent up,
+        # so without this the caller is left on dead air (and billed) until a
+        # reaper sweeps it. In the normal case (the parent's own terminal event
+        # drove this teardown) the channel is already gone and the DELETE is a
+        # harmless 404, so this never hangs up a healthy call. Idempotent.
+        try:
+            await self._ari("DELETE", f"/channels/{channel_id}", ok=(200, 204, 404))
+        except Exception as exc:
+            logger.debug(f"AsteriskAdapter: parent hangup on teardown ({channel_id[:12]}): {exc}")
+
         if session_info:
             await self._release_rtp_port(session_info["listen_port"])
 
@@ -1388,10 +1476,17 @@ class AsteriskAdapter(CallControlAdapter):
         """
         session_id = self._gateway_sessions.get(call_id)
         if not session_id:
-            logger.warning(
-                f"[AsteriskAdapter] send_tts_audio: no gateway session for call_id={call_id[:12]}"
-            )
-            return
+            # No live gateway session — the packet cannot reach the caller.
+            # Rate-limit our own log (this fires transiently during teardown),
+            # but RAISE so the caller does not count silence as played audio.
+            count = self._tts_error_counts.get(call_id, 0) + 1
+            self._tts_error_counts[call_id] = count
+            if count == 1 or count % 50 == 0:
+                logger.warning(
+                    f"[AsteriskAdapter] send_tts_audio: no gateway session for "
+                    f"call_id={call_id[:12]} (undelivered packets={count})"
+                )
+            raise TtsDeliveryError(f"no gateway session for call_id={call_id[:12]}")
 
         import base64
         try:
@@ -1418,6 +1513,11 @@ class AsteriskAdapter(CallControlAdapter):
                     f"[AsteriskAdapter] send_tts_audio still failing for {call_id[:12]} "
                     f"({count} errors total) — last error: {exc}"
                 )
+            # Re-raise so the media-gateway send loop treats this packet as
+            # undelivered (does not advance chunks_sent / history). The caller
+            # already guards every send_tts_audio call in try/except, so this
+            # does not crash the audio path. TtsDeliveryError wraps the cause.
+            raise TtsDeliveryError(str(exc)) from exc
 
     async def interrupt_tts(self, call_id: str) -> None:
         """

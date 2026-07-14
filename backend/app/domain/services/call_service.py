@@ -26,6 +26,16 @@ from app.domain.repositories.lead_repository import LeadRepository
 logger = logging.getLogger(__name__)
 
 
+class WebhookTargetMismatch(Exception):
+    """A webhook body referenced a lead that does not belong to the scoped call.
+
+    Raised by ``mark_as_spam`` when a caller — even one holding the correct
+    per-tenant webhook secret — supplies a ``lead_id`` that is not the lead
+    of the ``call_id`` they named. The route maps this to a 400 (client
+    error), distinct from the 404 used for not-found / cross-tenant ids.
+    """
+
+
 # Retry timing + per-disposition caps now live in
 # ``app.workers.disposition_policy`` (the single source of truth for
 # post-answer retry cadence). The old flat RETRY_DELAY_SECONDS /
@@ -291,6 +301,18 @@ class CallService:
         None or the positional-argument tuple for `_schedule_retry`,
         deferred until AFTER the transaction commits (Redis I/O must never
         happen while holding a pooled DB connection).
+
+        2026-07-13 fix: this used to only resolve `dialer_job_id` (and only
+        update the `leads` row) on the "call row not found on the first
+        SELECT" fallback branch — which never happens for dialer calls
+        (they always pre-create the row via `dialer_worker._create_call_
+        record`). That left `leads.status` stuck on "calling" forever and
+        `dialer_jobs` stuck PROCESSING forever on the production pooled
+        path. There is now exactly one lookup + one write path; job_id is
+        resolved from `calls.dialer_job_id` (now populated at INSERT — see
+        `dialer_worker._create_call_record`) and the lead update always
+        runs when a lead_id is present, matching the legacy
+        `_sequential_update` behavior this method otherwise mirrors.
         """
         bypass = get_bypass_rls()
         tenant_id = get_current_tenant_id()
@@ -318,53 +340,44 @@ class CallService:
                 None if bypass else tenant_id,
                 timeout=_ACQUIRE_TIMEOUT_S,
             ) as conn:
-                # ---- Step 1: atomic-style call update ----------------------
-                # Mirrors postgres_adapter._rpc_update_call_status exactly —
-                # including that it does NOT touch `leads` and does not
-                # return a job id. That is the fast path's existing
-                # behavior; we preserve it rather than changing it here.
+                # ---- Step 1: resolve the call row ---------------------------
                 row = await conn.fetchrow(
-                    "SELECT id, lead_id, campaign_id FROM calls WHERE id = $1",
+                    """
+                    SELECT id, lead_id, campaign_id, dialer_job_id, status
+                    FROM calls WHERE id = $1
+                    """,
                     call_uuid,
                 )
+                if row is None:
+                    logger.warning(f"Call not found: {call_uuid}")
+                    return None, None, None
 
-                if row is not None:
-                    await self._update_call_row_pooled(
-                        conn, call_uuid, outcome_value, duration,
+                # Idempotency guard: teardown can be driven twice for the
+                # same call (the adapter's pre-Stasis terminal arm racing a
+                # later StasisEnd/ChannelDestroyed, or an in-process guard
+                # — `lifecycle._ended_calls_in_flight` / the adapter's
+                # `_end_dispatched` — getting reset by a worker restart).
+                # Once this row is already `completed`, a repeat run must
+                # NOT re-increment `leads.call_attempts`, re-bump campaign
+                # counters, or re-schedule a retry job. First writer wins;
+                # only transition out of a non-terminal status once.
+                if row["status"] == "completed":
+                    logger.info(
+                        "handle_call_status: call %s already completed — "
+                        "skipping duplicate teardown", call_uuid,
                     )
-                    lead_id = str(row["lead_id"]) if row["lead_id"] else None
-                    campaign_id = str(row["campaign_id"]) if row["campaign_id"] else None
-                    job_id = None  # not returned on this path — matches the RPC shim
-                else:
-                    # ---- Step 1b: fallback — full sequential-update -------
-                    # Mirrors `_sequential_update` + `_update_lead_status`:
-                    # unlike the atomic path above, this DOES resolve
-                    # dialer_job_id and DOES update the lead row.
-                    fb_row = await conn.fetchrow(
-                        """
-                        SELECT id, lead_id, campaign_id, dialer_job_id
-                        FROM calls WHERE id = $1
-                        """,
-                        call_uuid,
-                    )
-                    if fb_row is None:
-                        logger.warning(f"Call not found: {call_uuid}")
-                        return None, None, None
+                    return None, None, None
 
-                    await self._update_call_row_pooled(
-                        conn, call_uuid, outcome_value, duration,
-                    )
+                await self._update_call_row_pooled(
+                    conn, call_uuid, outcome_value, duration,
+                )
 
-                    lead_id = str(fb_row["lead_id"]) if fb_row["lead_id"] else None
-                    campaign_id = (
-                        str(fb_row["campaign_id"]) if fb_row["campaign_id"] else None
-                    )
-                    job_id = (
-                        str(fb_row["dialer_job_id"]) if fb_row["dialer_job_id"] else None
-                    )
+                lead_id = str(row["lead_id"]) if row["lead_id"] else None
+                campaign_id = str(row["campaign_id"]) if row["campaign_id"] else None
+                job_id = str(row["dialer_job_id"]) if row["dialer_job_id"] else None
 
-                    if lead_id:
-                        await self._update_lead_status_pooled(conn, lead_id, outcome)
+                if lead_id:
+                    await self._update_lead_status_pooled(conn, lead_id, outcome)
 
                 # ---- Step 2: campaign counters ------------------------------
                 if campaign_id:
@@ -513,26 +526,41 @@ class CallService:
         )
         outcome_value = outcome.value if hasattr(outcome, 'value') else str(outcome)
 
+        # Idempotency guard (defense in depth, alongside the calls.status
+        # check in `_handle_call_status_pooled`): only ever transition a job
+        # OUT of PROCESSING once. If a duplicate teardown somehow reaches
+        # this far, `updated_job_id` comes back None and we must NOT
+        # re-schedule a second retry for the same job.
         if decision.should_retry:
-            await conn.execute(
+            updated_job_id = await conn.fetchval(
                 """
                 UPDATE dialer_jobs
                 SET status = $2, last_outcome = $3, failure_reason = $4,
                     updated_at = NOW()
-                WHERE id = $1
+                WHERE id = $1 AND status = 'processing'
+                RETURNING id
                 """,
                 job_id, final_status_value, outcome_value, decision.reason,
             )
         else:
-            await conn.execute(
+            updated_job_id = await conn.fetchval(
                 """
                 UPDATE dialer_jobs
                 SET status = $2, last_outcome = $3, failure_reason = $4,
                     updated_at = NOW(), completed_at = NOW()
-                WHERE id = $1
+                WHERE id = $1 AND status = 'processing'
+                RETURNING id
                 """,
                 job_id, final_status_value, outcome_value, decision.reason,
             )
+
+        if updated_job_id is None:
+            logger.info(
+                "job_completion job=%s already finalized (status was not "
+                "'processing') — skipping duplicate finalize/retry-schedule",
+                job_id,
+            )
+            return None
 
         logger.info(
             "job_completion job=%s final=%s %s",
@@ -761,84 +789,175 @@ class CallService:
     # Goal Achievement & Spam Marking
     # =========================================================================
     
-    async def mark_goal_achieved(self, call_id: str) -> dict:
+    async def mark_goal_achieved(self, tenant_id: str, call_id: str) -> Optional[dict]:
         """
-        Mark a call as having achieved its goal.
-        
-        Updates both the call record and the associated dialer job to prevent
-        future retry attempts.
-        
+        Mark a call as having achieved its goal — SCOPED to ``tenant_id``.
+
+        SECURITY (object-level authz, P0): every UPDATE is constrained by
+        BOTH the object id AND the verified ``tenant_id``, so a caller who
+        holds tenant A's webhook secret can never mutate tenant B's rows by
+        naming B's ``call_id``. A call that does not exist OR belongs to
+        another tenant matches zero rows and returns ``None`` — the route
+        maps that to a 404 identical to a genuinely-nonexistent id, so a
+        foreign id is indistinguishable from a missing one (no existence
+        leak).
+
         Args:
-            call_id: The call UUID
-            
+            tenant_id: The verified tenant (authenticated via the webhook
+                HMAC secret) that owns the row being mutated.
+            call_id: The call UUID.
+
         Returns:
-            dict with confirmation message
+            Confirmation dict on a real write, or ``None`` when no row
+            matched (not-found / cross-tenant) so a 200 always means an
+            actual write happened.
         """
-        # Update call
-        self._db_client.table("calls").update({
+        # Atomic, tenant-scoped write. RETURNING * (via the adapter) hands
+        # back the affected rows AND dialer_job_id in one round trip.
+        call_res = self._db_client.table("calls").update({
             "goal_achieved": True,
             "outcome": CallOutcome.GOAL_ACHIEVED.value,
-            "updated_at": datetime.utcnow().isoformat()
-        }).eq("id", call_id).execute()
-        
-        # Update dialer job if exists
-        call_response = self._db_client.table("calls").select("dialer_job_id").eq("id", call_id).execute()
-        if call_response.data and call_response.data[0].get("dialer_job_id"):
-            job_id = call_response.data[0]["dialer_job_id"]
-            self._db_client.table("dialer_jobs").update({
+            "updated_at": datetime.utcnow().isoformat(),
+        }).eq("id", call_id).eq("tenant_id", tenant_id).execute()
+
+        call_rows = call_res.data or []
+        if not call_rows:
+            # Zero affected rows == nonexistent OR another tenant's call.
+            logger.warning(
+                "mark_goal_achieved: no call matched id=%s tenant=%s "
+                "(not found or cross-tenant) — nothing written",
+                call_id, tenant_id,
+            )
+            return None
+
+        # Scope the derived dialer_jobs update by tenant_id too — never
+        # trust the call's job pointer to escape the tenant boundary.
+        job_id = call_rows[0].get("dialer_job_id")
+        if job_id:
+            job_res = self._db_client.table("dialer_jobs").update({
                 "status": JobStatus.GOAL_ACHIEVED.value,
                 "last_outcome": CallOutcome.GOAL_ACHIEVED.value,
-                "completed_at": datetime.utcnow().isoformat()
-            }).eq("id", job_id).execute()
-        
-        logger.info(f"Goal achieved for call {call_id}")
+                "completed_at": datetime.utcnow().isoformat(),
+            }).eq("id", job_id).eq("tenant_id", tenant_id).execute()
+            if not (job_res.data or []):
+                logger.warning(
+                    "mark_goal_achieved: call %s updated but dialer_job %s "
+                    "not updated for tenant %s (row missing/foreign)",
+                    call_id, job_id, tenant_id,
+                )
+
+        logger.info("Goal achieved for call %s (tenant %s)", call_id, tenant_id)
         return {"message": "Goal marked as achieved", "call_id": call_id}
-    
+
     async def mark_as_spam(
         self,
+        tenant_id: str,
         call_id: Optional[str] = None,
         lead_id: Optional[str] = None,
-        reason: str = "spam"
-    ) -> dict:
+        reason: str = "spam",
+    ) -> Optional[dict]:
         """
-        Mark a call/lead as spam — prevents future calls.
-        
-        Args:
-            call_id: Optional call UUID
-            lead_id: Optional lead UUID (resolved from call if not provided)
-            reason: Reason for marking (spam, invalid, unavailable, disconnected)
-            
-        Returns:
-            dict with confirmation
+        Mark a call/lead as spam — prevents future calls. SCOPED to ``tenant_id``.
+
+        SECURITY (object-level authz, P0): both the ``calls`` and ``leads``
+        writes carry an ``AND tenant_id = $`` predicate, so tenant A can
+        never spam-mark / DNC tenant B's rows. Ownership of the call is
+        validated BEFORE any mutation, so a cross-tenant or mismatched
+        request writes NOTHING (no partial update). A supplied ``lead_id``
+        that is not the scoped call's own lead is rejected
+        (``WebhookTargetMismatch`` → 400) rather than silently DNC-ing an
+        unrelated lead.
+
+        Returns the confirmation dict on a real write, or ``None`` when no
+        row matched (not-found / cross-tenant) so a 200 always means an
+        actual write happened.
         """
         outcome_map = {
             "spam": CallOutcome.SPAM,
             "invalid": CallOutcome.INVALID,
             "unavailable": CallOutcome.UNAVAILABLE,
-            "disconnected": CallOutcome.DISCONNECTED
+            "disconnected": CallOutcome.DISCONNECTED,
         }
         outcome = outcome_map.get(reason, CallOutcome.SPAM)
-        
+
+        resolved_lead_id: Optional[str] = None
+
         if call_id:
-            self._db_client.table("calls").update({
+            # Validate ownership FIRST (tenant-scoped) so a foreign/mismatched
+            # request never performs a partial write.
+            sel = self._db_client.table("calls").select("id, lead_id").eq(
+                "id", call_id).eq("tenant_id", tenant_id).single().execute()
+            call_row = sel.data
+            if not call_row:
+                logger.warning(
+                    "mark_as_spam: no call matched id=%s tenant=%s "
+                    "(not found or cross-tenant) — nothing written",
+                    call_id, tenant_id,
+                )
+                return None
+
+            real_lead = call_row.get("lead_id")
+            real_lead_str = str(real_lead) if real_lead is not None else None
+            # A caller may not piggyback a spam-mark of an unrelated lead
+            # onto a call they legitimately own.
+            if lead_id is not None and str(lead_id) != real_lead_str:
+                raise WebhookTargetMismatch(
+                    "lead_id does not belong to the specified call"
+                )
+
+            upd = self._db_client.table("calls").update({
                 "outcome": outcome.value,
-                "updated_at": datetime.utcnow().isoformat()
-            }).eq("id", call_id).execute()
-            
-            # Get lead_id from call if not provided
-            if not lead_id:
-                call_response = self._db_client.table("calls").select("lead_id").eq("id", call_id).execute()
-                if call_response.data:
-                    lead_id = call_response.data[0].get("lead_id")
-        
-        if lead_id:
-            self._db_client.table("leads").update({
+                "updated_at": datetime.utcnow().isoformat(),
+            }).eq("id", call_id).eq("tenant_id", tenant_id).execute()
+            if not (upd.data or []):
+                # Row vanished / changed tenant between select and update.
+                logger.warning(
+                    "mark_as_spam: call %s no longer matched tenant %s at "
+                    "update time — nothing written", call_id, tenant_id,
+                )
+                return None
+
+            resolved_lead_id = real_lead_str
+        else:
+            # Lead-only request: the supplied lead_id is only ever acted on
+            # under the tenant predicate below.
+            resolved_lead_id = str(lead_id) if lead_id is not None else None
+
+        if resolved_lead_id:
+            lead_res = self._db_client.table("leads").update({
                 "status": "dnc",
-                "updated_at": datetime.utcnow().isoformat()
-            }).eq("id", lead_id).execute()
-        
-        logger.info(f"Marked as {reason}: call={call_id}, lead={lead_id}")
-        return {"message": f"Marked as {reason}", "call_id": call_id, "lead_id": lead_id}
+                "updated_at": datetime.utcnow().isoformat(),
+            }).eq("id", resolved_lead_id).eq("tenant_id", tenant_id).execute()
+            if not (lead_res.data or []):
+                if not call_id:
+                    # Lead-only request, foreign/nonexistent lead → nothing
+                    # written → 404 (indistinguishable from not-found).
+                    logger.warning(
+                        "mark_as_spam: no lead matched id=%s tenant=%s "
+                        "(not found or cross-tenant) — nothing written",
+                        resolved_lead_id, tenant_id,
+                    )
+                    return None
+                # Call was marked, but its lead row is missing/foreign — a
+                # data anomaly, not a client-facing error.
+                logger.warning(
+                    "mark_as_spam: call %s marked but lead %s not updated "
+                    "for tenant %s", call_id, resolved_lead_id, tenant_id,
+                )
+
+        if not call_id and not resolved_lead_id:
+            # Neither identifier supplied — nothing to do; do not fake success.
+            return None
+
+        logger.info(
+            "Marked as %s: call=%s lead=%s tenant=%s",
+            reason, call_id, resolved_lead_id, tenant_id,
+        )
+        return {
+            "message": f"Marked as {reason}",
+            "call_id": call_id,
+            "lead_id": resolved_lead_id,
+        }
 
 
 def get_call_service(db_client: Client, queue_service: Optional[DialerQueueService] = None) -> CallService:

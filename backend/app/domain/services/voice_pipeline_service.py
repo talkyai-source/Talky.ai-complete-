@@ -725,20 +725,20 @@ class VoicePipelineService:
         Kept as a method so external callers (pipeline.synthesize_and_send_audio)
         and tests that mock it are unchanged; the barge-in event is resolved here
         and passed in.
+
+        NOTE on the END_CALL sentinel: this used to be the site that stripped
+        it (`extract_end_call`), but that ran AFTER turn_streamer had already
+        piped the sentence through `guardrails.clean_response` — whose
+        audio-tag stripper erases a bracketed sentinel before it ever got
+        here, so the flag was silently never set (2026-07-13 root-cause fix).
+        Extraction now happens in turn_streamer, on the RAW model text,
+        before clean_response runs — see
+        `voice_pipeline.end_call.strip_and_flag`, the one authoritative site.
+        Every other caller of this method (greetings, canned nudges/apologies,
+        end-session farewells) hands it text that was never LLM output
+        carrying this token, so there is nothing left for this method to
+        strip.
         """
-        # Agent END_CALL sentinel — this is the single choke point every piece
-        # of agent speech flows through (streamed sentences, greetings,
-        # nudges), so the token is stripped here and can never be spoken.
-        # The turn finisher performs the actual hangup after audio completes.
-        from app.domain.services.voice_pipeline.end_call import extract_end_call
-        text, _wants_end = extract_end_call(text)
-        if _wants_end:
-            try:
-                session._end_call_requested = True
-            except Exception:
-                pass
-            if not text:
-                return False  # token-only reply: nothing to speak
         return await self._tts_playback.synthesize_and_send(
             session,
             text,

@@ -23,6 +23,20 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 
+def _coerce_tenant_uuid(tenant_id: "UUID | str | None") -> Optional[UUID]:
+    """Normalize an optional tenant id to a ``UUID`` (or ``None``).
+
+    Used to scope secret reads/mutations to a single tenant. ``None`` means
+    "no tenant predicate" — reserved for platform-admin call paths that are
+    already gated by a platform-level permission. Any tenant-facing route
+    MUST pass the authenticated tenant here so ``tenant_secrets`` (which has
+    no RLS policy) can't be mutated across tenants by secret id alone.
+    """
+    if tenant_id is None:
+        return None
+    return UUID(tenant_id) if isinstance(tenant_id, str) else tenant_id
+
+
 class SecretType(str, Enum):
     """Types of secrets"""
     PLATFORM = "PLATFORM"              # Platform-level secrets (DB credentials, etc.)
@@ -243,7 +257,11 @@ class SecretsManager:
                 secret_id, tenant_id, creator_uuid, secret_type.value,
                 secret_name or f"{secret_type.value}_{secret_id}",
                 description, ciphertext, encrypted_dek, iv, "AES-256-GCM",
-                json.dumps(permissions) if permissions else '{}',
+                # Raw dict, not a pre-dumped string — the pool's jsonb codec
+                # (app.core.db) encodes via json.dumps on write; passing an
+                # already-serialized string here would be double-encoded
+                # into a JSON string scalar instead of a JSON object.
+                permissions or {},
                 1, expires_at, True
             )
 
@@ -365,9 +383,16 @@ class SecretsManager:
     async def get_metadata(
         self,
         secret_id: UUID | str,
+        tenant_id: Optional[UUID | str] = None,
     ) -> Optional[SecretMetadata]:
-        """Get secret metadata without decrypting value"""
+        """Get secret metadata without decrypting value.
+
+        ``tenant_id`` scopes the lookup so another tenant's secret reads as
+        not-found (returns ``None``) rather than leaking its metadata into the
+        route layer. ``None`` preserves the platform-admin cross-tenant read.
+        """
         secret_uuid = UUID(secret_id) if isinstance(secret_id, str) else secret_id
+        tenant_uuid = _coerce_tenant_uuid(tenant_id)
 
         async with self.db_pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -377,9 +402,9 @@ class SecretsManager:
                        access_count, is_active, is_compromised, permissions,
                        rotated_from, rotated_to, revoked_at
                 FROM tenant_secrets
-                WHERE secret_id = $1
+                WHERE secret_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)
                 """,
-                secret_uuid
+                secret_uuid, tenant_uuid,
             )
 
         if not row:
@@ -423,6 +448,7 @@ class SecretsManager:
         rotated_by: UUID | str,
         grace_period_hours: int = 24,
         new_value: Optional[dict] = None,
+        tenant_id: Optional[UUID | str] = None,
     ) -> UUID:
         """
         Rotate a secret to a new value.
@@ -432,18 +458,27 @@ class SecretsManager:
             rotated_by: User performing rotation
             grace_period_hours: Hours old secret remains valid
             new_value: New secret value (if None, generates new)
+            tenant_id: When provided, the secret MUST belong to this tenant or
+                the rotation is refused (object-level authz). ``tenant_secrets``
+                has no RLS policy, so without this predicate any authenticated
+                tenant could rotate another tenant's secret by its id alone.
+                Left ``None`` only by platform-admin callers that legitimately
+                operate across tenants (already gated by ``platform:admin``).
 
         Returns:
             new_secret_id: UUID of new secret version
         """
         secret_uuid = UUID(secret_id) if isinstance(secret_id, str) else secret_id
         admin_uuid = UUID(rotated_by) if isinstance(rotated_by, str) else rotated_by
+        tenant_uuid = _coerce_tenant_uuid(tenant_id)
 
         async with self.db_pool.acquire() as conn:
-            # Get current secret
+            # Get current secret — scoped to the caller's tenant when supplied
+            # so a cross-tenant secret is indistinguishable from a missing one.
             row = await conn.fetchrow(
-                "SELECT * FROM tenant_secrets WHERE secret_id = $1",
-                secret_uuid
+                "SELECT * FROM tenant_secrets "
+                "WHERE secret_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)",
+                secret_uuid, tenant_uuid,
             )
 
             if not row:
@@ -516,6 +551,7 @@ class SecretsManager:
         secret_id: UUID | str,
         revoked_by: UUID | str,
         reason: str,
+        tenant_id: Optional[UUID | str] = None,
     ) -> bool:
         """
         Revoke a secret immediately.
@@ -524,17 +560,23 @@ class SecretsManager:
             secret_id: Secret to revoke
             revoked_by: User revoking the secret
             reason: Reason for revocation
+            tenant_id: When provided, the secret must belong to this tenant or
+                the call returns ``False`` (treated as not-found). Prevents a
+                tenant from revoking another tenant's secret by id alone —
+                ``tenant_secrets`` has no RLS to fall back on.
 
         Returns:
             True if revoked successfully
         """
         secret_uuid = UUID(secret_id) if isinstance(secret_id, str) else secret_id
         admin_uuid = UUID(revoked_by) if isinstance(revoked_by, str) else revoked_by
+        tenant_uuid = _coerce_tenant_uuid(tenant_id)
 
         async with self.db_pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT tenant_id FROM tenant_secrets WHERE secret_id = $1",
-                secret_uuid
+                "SELECT tenant_id FROM tenant_secrets "
+                "WHERE secret_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)",
+                secret_uuid, tenant_uuid,
             )
 
             if not row:
@@ -572,6 +614,7 @@ class SecretsManager:
         secret_id: UUID | str,
         reported_by: UUID | str,
         reason: str,
+        tenant_id: Optional[UUID | str] = None,
     ) -> bool:
         """
         Mark a secret as compromised and revoke immediately.
@@ -580,17 +623,22 @@ class SecretsManager:
             secret_id: Secret to mark
             reported_by: User reporting compromise
             reason: Description of compromise
+            tenant_id: When provided, the secret must belong to this tenant or
+                the call returns ``False`` (not-found). Stops a tenant from
+                flagging/revoking another tenant's secret by id alone.
 
         Returns:
             True if marked successfully
         """
         secret_uuid = UUID(secret_id) if isinstance(secret_id, str) else secret_id
         reporter_uuid = UUID(reported_by) if isinstance(reported_by, str) else reported_by
+        tenant_uuid = _coerce_tenant_uuid(tenant_id)
 
         async with self.db_pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT tenant_id FROM tenant_secrets WHERE secret_id = $1",
-                secret_uuid
+                "SELECT tenant_id FROM tenant_secrets "
+                "WHERE secret_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)",
+                secret_uuid, tenant_uuid,
             )
 
             if not row:
@@ -804,9 +852,18 @@ class SecretsManager:
     async def get_expiring_secrets(
         self,
         days: int = 7,
+        tenant_id: Optional[UUID | str] = None,
     ) -> list[SecretMetadata]:
-        """Get secrets expiring within specified days"""
+        """Get secrets expiring within specified days.
+
+        ``tenant_id`` scopes the result to a single tenant. Without it this
+        method returns expiring-secret metadata across ALL tenants — the
+        caller (the ``secrets:read`` /expiring route) is a tenant-level
+        endpoint, so it must pass the caller's tenant. ``None`` is reserved
+        for platform-admin callers that legitimately span tenants.
+        """
         cutoff = datetime.utcnow() + timedelta(days=days)
+        tenant_uuid = _coerce_tenant_uuid(tenant_id)
 
         async with self.db_pool.acquire() as conn:
             rows = await conn.fetch(
@@ -819,9 +876,10 @@ class SecretsManager:
                 WHERE is_active = TRUE
                 AND expires_at IS NOT NULL
                 AND expires_at <= $1
+                AND ($2::uuid IS NULL OR tenant_id = $2)
                 ORDER BY expires_at
                 """,
-                cutoff
+                cutoff, tenant_uuid,
             )
 
         return [self._row_to_metadata(row) for row in rows]

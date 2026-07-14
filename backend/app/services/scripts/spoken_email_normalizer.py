@@ -91,8 +91,23 @@ def extract_email_from_speech(utterance: str) -> Optional[str]:
             return None
         local = local_tokens[0]
 
-    rest = re.sub(r"\s+", "", rest).rstrip(".?!,;:")
-    candidate = f"{local}@{rest}"
+    # The domain: take the longest DOMAIN-SYNTAX prefix of `rest` — not
+    # everything left in the utterance. Once the "dot"/"period" substitutions
+    # above collapse a legitimate spoken domain into one token (e.g.
+    # "gmail . com" -> "gmail.com", "yahoo . co . uk" -> "yahoo.co.uk"), that
+    # token never contains a raw space or word character outside
+    # [a-z0-9.-]; a leftover word after a space ("please", "thanks",
+    # "cheers", "yeah", "okay", the next sentence) is conversational filler,
+    # not part of the domain, and must never fuse onto the TLD. Anchoring on
+    # domain syntax (must end in ".<label>") rather than blanket whitespace
+    # removal is what stops "bob at gmail dot com please" from becoming
+    # bob@gmail.complease. This mirrors the longest-valid-domain match
+    # extract_email_from_agent_readback already uses below.
+    rest = rest.strip()
+    domain_match = re.match(r"[a-z0-9][a-z0-9.\-]*\.[a-z0-9\-]+", rest)
+    if not domain_match:
+        return None
+    candidate = f"{local}@{domain_match.group(0)}"
 
     match = _EMAIL_RE.search(candidate)
     if not match:
@@ -217,6 +232,32 @@ _PHONE_CANDIDATE_RE = re.compile(r"\+?\d[\d\s().\-]{5,}\d")
 _MIN_PHONE_DIGITS = 7
 _MAX_PHONE_DIGITS = 15  # E.164 maximum
 
+# Extra spoken forms that only make sense for phone numbers, not email: "oh"
+# read as the digit zero ("oh seven..." -> "0 7..."), and "double"/"triple"
+# doubling/tripling the digit that immediately follows ("double two" -> "22",
+# "triple five" -> "555"). Kept phone-only and NOT folded into the shared
+# _SUBSTITUTIONS table above: "oh" is an ordinary interjection in speech ("oh,
+# and also send it to..."), and extract_email_from_speech /
+# extract_email_from_agent_readback apply every entry in _SUBSTITUTIONS
+# unconditionally, so adding it there would corrupt email parsing. "double"/
+# "triple" expansion runs AFTER the digit-word substitution below so it can
+# match either a spoken digit word ("double seven") or a literal digit
+# ("double 7") the same way.
+_PHONE_OH_RE = re.compile(r"\boh\b")
+_PHONE_DOUBLE_RE = re.compile(r"\bdouble\s+(\d)\b")
+_PHONE_TRIPLE_RE = re.compile(r"\btriple\s+(\d)\b")
+
+
+def _expand_phone_repeats(s: str) -> str:
+    """Expand 'double <digit>' -> that digit twice, 'triple <digit>' -> three
+    times. Only fires when a single digit immediately follows the word, so
+    ordinary speech ("double check", "triple the size") is left untouched —
+    there is no digit for the regex to anchor on, so it simply doesn't match.
+    """
+    s = _PHONE_DOUBLE_RE.sub(lambda m: m.group(1) * 2, s)
+    s = _PHONE_TRIPLE_RE.sub(lambda m: m.group(1) * 3, s)
+    return s
+
 
 def extract_phone_from_speech(utterance: str) -> Optional[str]:
     """Pin a canonical phone/callback number ONLY when it is unambiguous.
@@ -227,6 +268,13 @@ def extract_phone_from_speech(utterance: str) -> Optional[str]:
     length (7–15). Returns None for an email turn, an address, or a stray short
     number, so it never fires where it shouldn't. Correctness lives in the read-
     back loop (like email), not in a greedy guess.
+
+    Handles the common spoken phone forms beyond bare "zero"–"nine" (2026-07-14
+    fix — a probe found "oh seven..." losing its leading zero and "double"
+    collapsing entirely): "oh" reads as digit zero, "double <digit>" repeats
+    that digit twice, "triple <digit>" repeats it three times. So "oh seven
+    double two triple five" -> "0722555...". "double"/"triple" not immediately
+    followed by a digit (e.g. "double check") is left as ordinary words.
     """
     if not utterance or not utterance.strip():
         return None
@@ -239,6 +287,12 @@ def extract_phone_from_speech(utterance: str) -> Optional[str]:
     for pattern, repl in _SUBSTITUTIONS:
         if repl.isdigit():
             s = re.sub(pattern, repl, s)
+    # Phone-only spoken forms (see _expand_phone_repeats docstring for why
+    # these stay out of _SUBSTITUTIONS): "oh" as zero, then "double"/"triple"
+    # digit doubling/tripling. Must run AFTER the digit-word substitution above
+    # so "double seven" / "double 7" both resolve the same way.
+    s = _PHONE_OH_RE.sub("0", s)
+    s = _expand_phone_repeats(s)
     # A leading spoken "plus" is the international "+" prefix; glue it to the digits.
     s = re.sub(r"\bplus\b\s*", "+", s)
 

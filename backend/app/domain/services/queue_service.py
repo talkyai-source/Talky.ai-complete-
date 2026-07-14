@@ -44,10 +44,35 @@ class DialerQueueService:
     TENANT_QUEUE_PREFIX = "dialer:tenant:{tenant_id}:queue"
     SCHEDULED_ZSET = "dialer:scheduled"
     PROCESSING_ZSET = "dialer:processing"
+    # Durable in-flight store (BUG 1 crash-safety). A job is moved OUT of its
+    # queue and INTO this list in a SINGLE atomic LMOVE, so a worker that dies
+    # anywhere after the pop still leaves the payload here — never in limbo.
+    # INFLIGHT_HASH indexes job_id -> payload so a terminal mark (which only
+    # knows the job_id) can LREM the exact list entry, and so a paused/quota
+    # skip can re-enqueue the original job non-destructively (BUG 2).
+    INFLIGHT_LIST = "dialer:inflight"
+    INFLIGHT_HASH = "dialer:inflight:payloads"
     STATS_KEY = "dialer:stats"
-    
+
+    # Skip reasons that are NOT terminal: the campaign is merely paused, or the
+    # tenant is temporarily out of plan minutes. A lead in one of these states
+    # must SURVIVE (be re-deferred), never be turned into a terminal SKIPPED
+    # that a resume / top-up can't recover (BUG 2).
+    NON_TERMINAL_SKIP_REASONS = frozenset({"campaign_stopped", "out_of_minutes"})
+
     # Default priority threshold (8+ goes to priority queue)
     HIGH_PRIORITY_THRESHOLD = 8
+
+    @staticmethod
+    def _pause_redefer_seconds() -> int:
+        """Delay before a paused/quota-blocked lead is retried. Long enough to
+        avoid tight churn when a paused campaign shares a tenant with an active
+        one, short enough that a resume / minutes top-up continues promptly."""
+        import os
+        try:
+            return max(5, int(os.getenv("DIALER_PAUSE_REDEFER_S", "120")))
+        except (TypeError, ValueError):
+            return 120
     
     def __init__(self, redis_client=None):
         """
@@ -172,28 +197,37 @@ class DialerQueueService:
         """
         if not self._initialized:
             await self.initialize()
-        
+
         try:
-            # 1. Check priority queue first
-            job_data = await self._redis.lpop(self.PRIORITY_QUEUE)
-            if job_data:
-                job = DialerJob.from_redis_dict(json.loads(job_data))
-                await self._mark_processing(job.job_id)
+            # FAIL-SAFE (BUG 2): an explicit EMPTY tenant list means "there are
+            # NO active tenants this tick" → dequeue NOTHING. Only `None` (the
+            # argument was not supplied) means "scan every queue". The dialer
+            # worker passes `[]` when no campaign is running/active OR when the
+            # active-tenant DB lookup failed, so we must fail SAFE here and never
+            # drain paused/idle/quota-blocked queues (which would then be turned
+            # into terminal SKIPPED jobs downstream and lost). This gate also
+            # protects the priority queue, whose jobs likewise belong to
+            # campaigns that are all paused when no tenant is active.
+            if tenant_ids is not None and len(tenant_ids) == 0:
+                return None
+
+            # 1. Priority queue first (atomic, crash-safe move).
+            job = await self._pop_and_track(self.PRIORITY_QUEUE)
+            if job is not None:
                 logger.info(f"Dequeued high-priority job {job.job_id}")
                 return job
-            
-            # 2. Check tenant queues
-            if tenant_ids:
+
+            # 2. Tenant queues.
+            if tenant_ids is not None:
                 for tenant_id in tenant_ids:
                     queue_key = self.TENANT_QUEUE_PREFIX.format(tenant_id=tenant_id)
-                    job_data = await self._redis.lpop(queue_key)
-                    if job_data:
-                        job = DialerJob.from_redis_dict(json.loads(job_data))
-                        await self._mark_processing(job.job_id)
+                    job = await self._pop_and_track(queue_key)
+                    if job is not None:
                         logger.debug(f"Dequeued job {job.job_id} from tenant {tenant_id}")
                         return job
             else:
-                # No specific tenants - scan for any tenant queue with jobs
+                # Explicit "scan all" (tenant_ids is None) — kept for tests /
+                # callers that really do want every queue.
                 cursor = 0
                 while True:
                     cursor, keys = await self._redis.scan(
@@ -202,19 +236,53 @@ class DialerQueueService:
                         count=10
                     )
                     for key in keys:
-                        job_data = await self._redis.lpop(key)
-                        if job_data:
-                            job = DialerJob.from_redis_dict(json.loads(job_data))
-                            await self._mark_processing(job.job_id)
+                        job = await self._pop_and_track(key)
+                        if job is not None:
                             return job
                     if cursor == 0:
                         break
-            
+
             return None
-            
+
         except Exception as e:
             logger.error(f"Failed to dequeue job: {e}")
             return None
+
+    async def _pop_and_track(self, source_key: str) -> Optional[DialerJob]:
+        """Crash-safe dequeue from one queue (BUG 1).
+
+        The payload is moved OUT of ``source_key`` and INTO the durable
+        ``INFLIGHT_LIST`` with a single atomic ``LMOVE``. Before this fix the
+        code did ``LPOP`` (which DELETES the only copy) and only THEN wrote the
+        processing marker — a worker death, a deserialization error, or a Redis
+        hiccup in that gap left the job gone from every structure while the lead
+        stayed 'pending' forever. With the atomic move, a crash at ANY point
+        after the pop leaves the payload in ``INFLIGHT_LIST``, where
+        ``reap_stale_processing`` reclaims it (re-enqueues it) on the next tick.
+
+        The ZSET timestamp + payload-hash written by ``_mark_processing`` are
+        pure bookkeeping: their absence is exactly what marks a list entry as a
+        crash-orphan to be reclaimed, so a crash between the move and the mark is
+        self-healing rather than a lost job.
+        """
+        payload = await self._redis.lmove(
+            source_key, self.INFLIGHT_LIST, "LEFT", "RIGHT"
+        )
+        if not payload:
+            return None
+        try:
+            job = DialerJob.from_redis_dict(json.loads(payload))
+        except Exception as exc:  # noqa: BLE001
+            # Un-decodable payload can never reach a terminal mark, so it would
+            # wedge the inflight list forever — drop it loudly instead.
+            logger.error("dequeue: dropping undecodable inflight payload: %s", exc)
+            try:
+                await self._redis.lrem(self.INFLIGHT_LIST, 0, payload)
+            except Exception:  # noqa: BLE001
+                pass
+            return None
+        await self._mark_processing(job.job_id, payload)
+        return job
     
     async def schedule_retry(self, job: DialerJob, delay_seconds: int = 7200) -> bool:
         """
@@ -249,8 +317,11 @@ class DialerQueueService:
             
             job_data = json.dumps(job.to_redis_dict())
             await self._redis.zadd(self.SCHEDULED_ZSET, {job_data: execute_at})
-            
-            # Remove from the in-flight ZSET (rescheduled, no longer processing).
+
+            # Rescheduled → no longer in flight. Drop the durable inflight copy
+            # (list + payload index) AND the processing-ZSET marker so the job
+            # isn't reclaimed as a crash-orphan while it waits in the schedule.
+            await self._untrack_inflight(job.job_id)
             await self._redis.zrem(self.PROCESSING_ZSET, job.job_id)
             
             logger.info(
@@ -287,14 +358,32 @@ class DialerQueueService:
             
             count = 0
             for job_data in due_jobs:
+                # CLAIM the job by removing it from the scheduled set FIRST and
+                # only proceeding if WE were the remover. ZREM returns the number
+                # of members actually removed, so exactly one caller can win —
+                # two workers (or a double tick) can never both promote the same
+                # entry and double-dial the lead.
+                claimed = await self._redis.zrem(self.SCHEDULED_ZSET, job_data)
+                if not claimed:
+                    continue  # already promoted / cleared by someone else
+
                 job = DialerJob.from_redis_dict(json.loads(job_data))
                 job.status = JobStatus.PENDING
-                
-                # Remove from scheduled set
-                await self._redis.zrem(self.SCHEDULED_ZSET, job_data)
-                
-                # Re-enqueue
-                await self.enqueue_job(job)
+
+                # Re-enqueue. If this FAILS after we've claimed (removed) the
+                # entry, put it straight back into the scheduled set so the lead
+                # is never lost — the next tick retries the promotion. This
+                # closes the old ZREM-before-enqueue lose-it window: the job is
+                # only ever absent from BOTH structures for the duration of one
+                # in-process enqueue call, and any failure re-adds it.
+                enqueued = await self.enqueue_job(job)
+                if not enqueued:
+                    await self._redis.zadd(self.SCHEDULED_ZSET, {job_data: now})
+                    logger.warning(
+                        "process_scheduled_jobs: re-enqueue failed for job %s — "
+                        "restored to scheduled set (not lost)", job.job_id,
+                    )
+                    continue
                 count += 1
             
             if count > 0:
@@ -307,55 +396,187 @@ class DialerQueueService:
             return 0
     
     async def mark_completed(self, job_id: str, outcome: str = "completed") -> None:
-        """Mark a job as completed (removes it from the in-flight ZSET)."""
+        """Mark a job as completed (removes it from the in-flight tracking)."""
+        await self._untrack_inflight(job_id)
         await self._redis.zrem(self.PROCESSING_ZSET, job_id)
         await self._redis.hincrby(self.STATS_KEY, "total_completed", 1)
         await self._redis.hincrby(self.STATS_KEY, f"outcome_{outcome}", 1)
         logger.debug(f"Job {job_id} marked completed: {outcome}")
 
     async def mark_failed(self, job_id: str, error: str) -> None:
-        """Mark a job as failed (removes it from the in-flight ZSET)."""
+        """Mark a job as failed (removes it from the in-flight tracking)."""
+        await self._untrack_inflight(job_id)
         await self._redis.zrem(self.PROCESSING_ZSET, job_id)
         await self._redis.hincrby(self.STATS_KEY, "total_failed", 1)
         logger.debug(f"Job {job_id} marked failed: {error}")
 
     async def mark_skipped(self, job_id: str, reason: str = "skipped") -> None:
-        """Mark a dequeued job as skipped without treating it as a failure."""
+        """Skip a dequeued job without treating it as a failure.
+
+        BUG 2 fail-safe: if the skip is only because the campaign is PAUSED or
+        the tenant is temporarily OUT OF MINUTES (``NON_TERMINAL_SKIP_REASONS``),
+        the lead must NOT be dropped — pausing/topping-up must be able to
+        continue where it stopped. In that case we RE-DEFER the original job
+        (from its durable inflight copy) into the scheduled set instead of
+        destroying it. Any other reason is a genuine terminal skip.
+        """
+        if reason in self.NON_TERMINAL_SKIP_REASONS:
+            if await self._redefer_inflight(job_id, reason):
+                # Counted as skipped-this-tick for stats, but the LEAD lives on
+                # in the scheduled set and will be retried after the delay.
+                await self._redis.hincrby(self.STATS_KEY, "total_skipped", 1)
+                await self._redis.hincrby(self.STATS_KEY, f"outcome_{reason}", 1)
+                return
+            # No inflight copy to re-defer (e.g. a genuinely STOPPED campaign
+            # whose queue was already purged by clear_campaign_jobs) → fall
+            # through to a plain terminal skip.
+        await self._untrack_inflight(job_id)
         await self._redis.zrem(self.PROCESSING_ZSET, job_id)
         await self._redis.hincrby(self.STATS_KEY, "total_skipped", 1)
         await self._redis.hincrby(self.STATS_KEY, f"outcome_{reason}", 1)
         logger.debug(f"Job {job_id} marked skipped: {reason}")
 
-    async def _mark_processing(self, job_id: str) -> None:
-        """Mark a job as currently being processed.
+    async def _mark_processing(self, job_id: str, payload: str) -> None:
+        """Record a just-moved job as in flight.
 
-        Stored in a ZSET scored by the enqueue-to-processing timestamp so a
-        job that never reaches a terminal mark (e.g. a successfully-originated
-        call whose end-of-call finalisation ran without a wired queue_service)
-        can be AGED OUT by ``reap_stale_processing`` instead of leaking forever.
-        This is what let dialer:processing pile up to hundreds of stale members.
+        Writes the payload index (job_id → payload) BEFORE the processing-ZSET
+        timestamp, so that whenever a job is "tracked" (present in the ZSET) its
+        payload is guaranteed retrievable for a later LREM. The ZSET score is the
+        pop time so a job that never reaches a terminal mark (e.g. a
+        successfully-originated call whose end-of-call finalisation ran without a
+        wired queue_service) is AGED OUT by ``reap_stale_processing`` instead of
+        leaking. A job present in ``INFLIGHT_LIST`` but ABSENT from the ZSET is a
+        crash-orphan (died in the pop→mark gap) and is reclaimed, not aged out.
         """
+        await self._redis.hset(self.INFLIGHT_HASH, job_id, payload)
         await self._redis.zadd(self.PROCESSING_ZSET, {job_id: time.time()})
         await self._redis.hincrby(self.STATS_KEY, "total_dequeued", 1)
 
+    async def _untrack_inflight(self, job_id: str) -> None:
+        """Remove a job's durable inflight copy (list entry) + payload index.
+        Tolerant of a missing index (older in-flight jobs from before this
+        upgrade, or an already-cleaned entry)."""
+        try:
+            payload = await self._redis.hget(self.INFLIGHT_HASH, job_id)
+            if payload is not None:
+                await self._redis.lrem(self.INFLIGHT_LIST, 0, payload)
+                await self._redis.hdel(self.INFLIGHT_HASH, job_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("untrack_inflight failed job=%s err=%s", job_id, exc)
+
+    async def _redefer_inflight(self, job_id: str, reason: str) -> bool:
+        """Non-destructively re-schedule a paused/quota-blocked job.
+
+        Reads the ORIGINAL payload from the inflight index, re-schedules it into
+        the scheduled ZSET after a short delay (WITHOUT bumping attempt_number —
+        this is a defer, not a retry, so it never burns the retry budget), and
+        clears the inflight tracking. Returns True if the job was re-deferred,
+        False if there was no inflight copy to recover.
+        """
+        try:
+            payload = await self._redis.hget(self.INFLIGHT_HASH, job_id)
+            if not payload:
+                return False
+            job = DialerJob.from_redis_dict(json.loads(payload))
+            job.status = JobStatus.PENDING
+            delay = self._pause_redefer_seconds()
+            execute_at = datetime.now(timezone.utc).timestamp() + delay
+            new_payload = json.dumps(job.to_redis_dict())
+            await self._redis.zadd(self.SCHEDULED_ZSET, {new_payload: execute_at})
+            # Only now drop the inflight copy — the lead is safely staged in the
+            # scheduled set, so there is no window where it exists nowhere.
+            await self._redis.lrem(self.INFLIGHT_LIST, 0, payload)
+            await self._redis.hdel(self.INFLIGHT_HASH, job_id)
+            await self._redis.zrem(self.PROCESSING_ZSET, job_id)
+            logger.info(
+                "re-deferred job %s (%s) for %ss — lead preserved, NOT "
+                "terminal-skipped", job_id, reason, delay,
+            )
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("redefer_inflight failed job=%s err=%s", job_id, exc)
+            return False
+
     async def reap_stale_processing(self, max_age_seconds: int = 900) -> int:
-        """Self-heal the in-flight ZSET: drop members older than the max plausible
-        job lifetime (default 15 min ≫ ring + hard call ceiling). A member older
-        than this is a zombie — its call ended without the entry being removed —
-        so it's safe to evict. O(log n + m); safe to call on every worker tick.
-        Returns the number reaped."""
+        """Self-heal the in-flight tracking. Two jobs in one pass:
+
+        1. RECLAIM crash-orphans (BUG 1 recovery): a payload sitting in
+           ``INFLIGHT_LIST`` whose job_id is NOT in the processing ZSET was moved
+           out of its queue but died before the mark landed (the pop→mark gap).
+           It never dialed, so it is re-enqueued — the lead is recovered, not
+           lost. Success-path jobs are ALWAYS in the ZSET (marked at dequeue),
+           so this can never re-dial a live/answered call.
+
+        2. AGE OUT tracked zombies (hygiene): a ZSET member older than the max
+           plausible job lifetime (default 15 min ≫ ring + hard call ceiling)
+           whose call ended without a terminal mark. Evicted (and its inflight
+           copy cleaned) — never re-dialed. O(log n + m); safe every tick.
+
+        Returns the total number of entries reclaimed + evicted.
+        """
         if not self._redis:
             return 0
+        reclaimed = 0
+        try:
+            reclaimed = await self._reclaim_untracked_inflight()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("inflight reclaim failed: %s", exc)
         try:
             cutoff = time.time() - int(max_age_seconds)
-            removed = await self._redis.zremrangebyscore(self.PROCESSING_ZSET, 0, cutoff)
-            n = int(removed or 0)
+            stale_ids = await self._redis.zrangebyscore(self.PROCESSING_ZSET, 0, cutoff)
+            for job_id in (stale_ids or []):
+                await self._untrack_inflight(job_id)
+                await self._redis.zrem(self.PROCESSING_ZSET, job_id)
+            n = len(stale_ids or [])
             if n:
-                logger.info("reaper: evicted %d stale dialer:processing member(s) (>%ss)", n, max_age_seconds)
-            return n
+                logger.info(
+                    "reaper: evicted %d stale dialer:processing member(s) (>%ss)",
+                    n, max_age_seconds,
+                )
+            return reclaimed + n
         except Exception as exc:  # noqa: BLE001 — never let hygiene break dispatch
             logger.warning("reap_stale_processing failed: %s", exc)
+            return reclaimed
+
+    async def _reclaim_untracked_inflight(self) -> int:
+        """Re-enqueue inflight payloads that were moved out of a queue but never
+        marked in the processing ZSET (BUG 1 crash-orphans). See
+        ``reap_stale_processing`` for why this is safe against re-dialing live
+        calls. Returns the number reclaimed."""
+        entries = await self._redis.lrange(self.INFLIGHT_LIST, 0, -1)
+        if not entries:
             return 0
+        reclaimed = 0
+        for payload in entries:
+            try:
+                data = json.loads(payload)
+                job_id = data.get("job_id")
+            except Exception:  # noqa: BLE001
+                # Corrupt entry — evict so it can't wedge the list.
+                await self._redis.lrem(self.INFLIGHT_LIST, 0, payload)
+                continue
+            if not job_id:
+                await self._redis.lrem(self.INFLIGHT_LIST, 0, payload)
+                continue
+            # Tracked (mark landed) → leave it to the age-out path.
+            if await self._redis.zscore(self.PROCESSING_ZSET, job_id) is not None:
+                continue
+            # Untracked → the pop→mark gap crash. Never dialed; re-enqueue it.
+            try:
+                job = DialerJob.from_redis_dict(data)
+            except Exception as exc:  # noqa: BLE001
+                await self._redis.lrem(self.INFLIGHT_LIST, 0, payload)
+                logger.error("reclaim: dropping undecodable inflight job: %s", exc)
+                continue
+            await self._redis.lrem(self.INFLIGHT_LIST, 0, payload)
+            await self._redis.hdel(self.INFLIGHT_HASH, job_id)
+            await self.enqueue_job(job)
+            reclaimed += 1
+            logger.warning(
+                "reclaimed crash-orphaned job %s from inflight → re-enqueued "
+                "(recovered a job lost in the pop→mark gap)", job_id,
+            )
+        return reclaimed
     
     async def get_queue_stats(self) -> dict:
         """Get queue statistics."""
@@ -371,14 +592,18 @@ class DialerQueueService:
             
             # Get processing count
             processing_count = await self._redis.zcard(self.PROCESSING_ZSET)
-            
+
+            # Durable in-flight copies (crash-recoverable payloads).
+            inflight_count = await self._redis.llen(self.INFLIGHT_LIST)
+
             # Get stats hash
             stats = await self._redis.hgetall(self.STATS_KEY) or {}
-            
+
             return {
                 "priority_queue_length": priority_len,
                 "scheduled_jobs": scheduled_count,
                 "processing_jobs": processing_count,
+                "inflight_jobs": inflight_count,
                 "total_enqueued": int(stats.get("total_enqueued", 0)),
                 "total_dequeued": int(stats.get("total_dequeued", 0)),
                 "total_completed": int(stats.get("total_completed", 0)),
@@ -460,10 +685,12 @@ class DialerQueueService:
                     if cursor == 0:
                         break
                 
-                # Clear scheduled and processing
+                # Clear scheduled, processing, and the durable inflight store.
                 await self._redis.delete(self.SCHEDULED_ZSET)
                 await self._redis.delete(self.PROCESSING_ZSET)
-            
+                await self._redis.delete(self.INFLIGHT_LIST)
+                await self._redis.delete(self.INFLIGHT_HASH)
+
             logger.info(f"Cleared {count} jobs from queue")
             return count
             
@@ -475,8 +702,12 @@ class DialerQueueService:
         """
         Remove queued and scheduled jobs for a specific campaign.
 
-        Processing jobs are intentionally left alone; the worker enforces the
-        stop at originate time for anything already dequeued.
+        Also purges the campaign's DURABLE INFLIGHT copies so that a job which
+        was dequeued moments before a STOP cannot be re-deferred back into the
+        schedule by ``mark_skipped`` (which would otherwise cycle a
+        stopped-campaign lead forever). Purging inflight here means the
+        subsequent ``mark_skipped(campaign_stopped)`` finds no copy and takes the
+        plain terminal path.
         """
         if not self._initialized:
             await self.initialize()
@@ -498,6 +729,7 @@ class DialerQueueService:
                     break
 
             removed += await self._remove_campaign_jobs_from_scheduled(campaign_id)
+            await self._remove_campaign_jobs_from_inflight(campaign_id)
 
             logger.info("Cleared %s queued jobs for campaign %s", removed, campaign_id)
             return removed
@@ -548,6 +780,29 @@ class DialerQueueService:
                 await self._redis.zrem(self.SCHEDULED_ZSET, entry)
                 removed += 1
 
+        return removed
+
+    async def _remove_campaign_jobs_from_inflight(self, campaign_id: str) -> int:
+        """Drop a campaign's durable inflight copies (list entry + payload index
+        + processing marker). Used on STOP so an already-dequeued job can't be
+        re-deferred and cycle forever."""
+        removed = 0
+        try:
+            index = await self._redis.hgetall(self.INFLIGHT_HASH) or {}
+            if not isinstance(index, dict):
+                return removed
+            for job_id, payload in index.items():
+                try:
+                    if json.loads(payload).get("campaign_id") != campaign_id:
+                        continue
+                except Exception:  # noqa: BLE001
+                    continue
+                await self._redis.lrem(self.INFLIGHT_LIST, 0, payload)
+                await self._redis.hdel(self.INFLIGHT_HASH, job_id)
+                await self._redis.zrem(self.PROCESSING_ZSET, job_id)
+                removed += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("remove_campaign_inflight failed campaign=%s err=%s", campaign_id, exc)
         return removed
 
     async def close(self) -> None:

@@ -31,6 +31,73 @@ logger = logging.getLogger(__name__)
 _WORD_SIM_FLOOR = float(os.getenv("KNOWLEDGE_WORD_SIM_FLOOR", "0.35"))
 
 
+def _truncate_on_boundary(text: str, max_chars: int) -> str:
+    """Trim ``text`` to ``<= max_chars`` WITHOUT cutting a fact mid-line.
+
+    Char-slicing a rendered KB block halves a number/email and lops the tail
+    off a sentence. Instead we cut at the last SAFE boundary at or under the
+    limit — preferring a line break, then a sentence terminator, then a word
+    gap — so whatever survives is a whole, readable fact. The ``max_chars//2``
+    floors stop us returning a useless sliver when the only boundary sits right
+    at the start.
+    """
+    if max_chars <= 0:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    window = text[:max_chars]
+    half = max_chars // 2
+    nl = window.rfind("\n")
+    if nl >= half:
+        return window[:nl].rstrip()
+    best = -1
+    for sep in (". ", "! ", "? ", "; ", ": "):
+        best = max(best, window.rfind(sep))
+    if best >= half:
+        return window[: best + 1].rstrip()
+    sp = window.rfind(" ")
+    if sp >= half:
+        return window[:sp].rstrip()
+    return window.rstrip()
+
+
+def render_node_answer(node: dict, *, max_chars: Optional[int] = None) -> str:
+    """Render a matched knowledge node SOURCE-FIRST for the voice model.
+
+    The FACT must come from the node's own ``content`` — the source text that
+    FTS/pg_trgm actually matched, and retrieval can match a fact ANYWHERE in
+    the node — NOT from the enricher's ``voice_answer``, which only summarises
+    the TOP of the node. Leading with ``voice_answer`` silently drops any fact
+    below the first sentence (the "KB was bad even on the realtime model" bug).
+
+    So we LEAD with the source ``content`` and only fall back to
+    voice_answer/summary when the node has no source text. When there is room
+    we append the short spoken ``voice_answer`` as phrasing help, but the fact
+    is always grounded in the source.
+    """
+    source = (node.get("content") or "").strip()
+    phrasing = (node.get("voice_answer") or "").strip()
+    summary = (node.get("summary") or "").strip()
+
+    if not source:
+        # No source text on this node — the enrichment is all we have.
+        body = phrasing or summary
+        if body and max_chars is not None:
+            body = _truncate_on_boundary(body, max_chars)
+        return body
+
+    body = source
+    # Append the spoken phrasing as a natural-wording hint, but only when it
+    # adds wording the source doesn't already contain and there's budget for it.
+    if phrasing and phrasing.lower() not in source.lower():
+        candidate = f"{source}\n{phrasing}"
+        if max_chars is None or len(candidate) <= max_chars:
+            body = candidate
+    if max_chars is not None and len(body) > max_chars:
+        body = _truncate_on_boundary(body, max_chars)
+    return body
+
+
 def knowledge_enabled() -> bool:
     """Master gate for the campaign-knowledge layer (CAMPAIGN_KNOWLEDGE_ENABLED).
 
@@ -62,6 +129,19 @@ async def retrieve_knowledge(
     """
     q = (query or "").strip()
     if not q:
+        return []
+    # SECURITY — fail closed: a missing/empty tenant must NOT reach
+    # acquire_with_tenant, which treats tenant_id=None as an RLS BYPASS
+    # (cross-tenant read). No KB caller legitimately wants a cross-tenant read
+    # (every caller — per-turn, realtime, admin diagnostics — is tenant-scoped),
+    # so we decline here. This is the shared choke point, so it also protects
+    # the per-turn path (turn_streamer passes session.tenant_id, which could be
+    # None) without that module needing to change.
+    if tenant_id is None or not str(tenant_id).strip():
+        logger.warning(
+            "retrieve_knowledge blocked: missing tenant (campaign=%s) — refusing "
+            "RLS-bypass cross-tenant read", str(campaign_id)[:12],
+        )
         return []
     try:
         async with acquire_with_tenant(pool, tenant_id) as conn:
@@ -124,7 +204,15 @@ async def compact_tree(
     """Render enabled nodes as an indented outline for inline injection.
 
     skeleton_only=True (map_retrieve): heading + summary only (the "table of
-    contents"). False (inline): heading + summary/voice_answer + content.
+    contents"). False (inline): heading + SOURCE content (fact-complete), with
+    the spoken voice_answer appended as phrasing help (see render_node_answer).
+
+    Budgeting is done at NODE granularity: nodes are emitted WHOLE, best-first
+    (priority/path order), until ``max_chars`` is reached, and the remaining
+    nodes are dropped as whole units with a loud log. We never char-slice the
+    joined string — that would cut a fact mid-line and silently swallow later
+    topics. Only if the very FIRST node alone exceeds the budget do we emit a
+    boundary-truncated slice of it (so the call is never left with zero KB).
     """
     try:
         async with acquire_with_tenant(pool, tenant_id) as conn:
@@ -141,15 +229,42 @@ async def compact_tree(
         logger.warning("compact_tree failed campaign=%s: %s", str(campaign_id)[:12], exc)
         return ""
 
-    lines: List[str] = []
-    for r in rows:
+    blocks: List[str] = []
+    used = 0
+    dropped = 0
+    for i, r in enumerate(rows):
         indent = "  " * max(0, int(r["depth"]))
-        head = r["heading"]
+        head = (r["heading"] or "").strip()
         if skeleton_only:
             tail = f" — {r['summary']}" if r["summary"] else ""
-            lines.append(f"{indent}- {head}{tail}")
+            block = f"{indent}- {head}{tail}"
         else:
-            body = (r["voice_answer"] or r["summary"] or r["content"] or "").strip().replace("\n", " ")
-            lines.append(f"{indent}- {head}: {body}" if body else f"{indent}- {head}")
-    out = "\n".join(lines)
-    return out[:max_chars]
+            body = render_node_answer(dict(r))
+            if body:
+                # Keep the outline readable: indent continuation lines beneath
+                # the bullet instead of collapsing newlines into one long line
+                # (collapsing would also defeat the line-boundary truncation).
+                body = body.replace("\n", f"\n{indent}  ")
+                block = f"{indent}- {head}: {body}" if head else f"{indent}- {body}"
+            else:
+                block = f"{indent}- {head}"
+        sep = 1 if blocks else 0  # the "\n".join adds one char between blocks
+        if used + sep + len(block) > max_chars:
+            if not blocks:
+                # First node alone blows the budget: emit a boundary-truncated
+                # slice (never zero knowledge), then stop.
+                blocks.append(_truncate_on_boundary(block, max_chars))
+                dropped = len(rows) - 1
+            else:
+                dropped = len(rows) - i
+            break
+        blocks.append(block)
+        used += sep + len(block)
+
+    if dropped > 0:
+        logger.warning(
+            "compact_tree budget: dropped %d trailing node(s) over max_chars=%d "
+            "campaign=%s skeleton=%s (topics omitted from injection)",
+            dropped, max_chars, str(campaign_id)[:12], skeleton_only,
+        )
+    return "\n".join(blocks)
