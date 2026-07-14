@@ -112,6 +112,43 @@ def test_never_raises_when_compact_tree_blows_up(monkeypatch):
     assert cs.system_prompt == "PERSONA"
 
 
+def test_inline_bake_failure_falls_back_to_retrieve(monkeypatch, caplog):
+    """Issue #4: an inline-load failure must NOT leave the session marked
+    'inline' (the turn loop skips per-turn retrieval for inline → zero KB). It
+    falls back to 'retrieve' so per-turn retrieval still serves the KB, and logs
+    the failure loudly (ERROR), not swallowed."""
+    import logging
+    monkeypatch.setenv("CAMPAIGN_KNOWLEDGE_ENABLED", "true")
+
+    async def _boom(*a, **k):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(session_inject, "compact_tree", _boom)
+    cs = _session()
+    with caplog.at_level(logging.ERROR):
+        _run(session_inject.apply_campaign_knowledge(cs, _row("inline"), pool=object()))
+    assert cs.knowledge_mode == "retrieve"     # NOT left as "inline"
+    assert cs.tenant_id == "t1"                 # tenant still stamped for retrieval
+    assert cs.system_prompt == "PERSONA"        # nothing baked
+    assert "FALLING BACK to per-turn retrieve" in caplog.text
+
+
+def test_inline_empty_tree_falls_back_to_retrieve(monkeypatch):
+    """A compact_tree that returns '' (e.g. it swallowed a DB error) must not
+    leave the call marked 'inline' with nothing baked — that would skip per-turn
+    retrieval. Fall back to 'retrieve'."""
+    monkeypatch.setenv("CAMPAIGN_KNOWLEDGE_ENABLED", "true")
+
+    async def _empty(*a, **k):
+        return ""
+
+    monkeypatch.setattr(session_inject, "compact_tree", _empty)
+    cs = _session()
+    _run(session_inject.apply_campaign_knowledge(cs, _row("inline"), pool=object()))
+    assert cs.knowledge_mode == "retrieve"
+    assert cs.system_prompt == "PERSONA"
+
+
 def test_does_not_clobber_existing_tenant(monkeypatch):
     monkeypatch.setenv("CAMPAIGN_KNOWLEDGE_ENABLED", "true")
     monkeypatch.setattr(session_inject, "compact_tree", _fake_compact_tree)

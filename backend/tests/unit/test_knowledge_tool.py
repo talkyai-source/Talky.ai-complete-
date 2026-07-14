@@ -112,9 +112,88 @@ def test_lookup_budget_and_format(monkeypatch):
     assert "…" in out                              # huge bodies were trimmed
 
 
+def test_lookup_passes_bump_hits_false(monkeypatch):
+    """Voice hot path must NOT write hit_count on the answer connection — the
+    per-turn UPDATE was serializing on popular nodes. Assert the tool lookup
+    calls retrieve_knowledge with bump_hits=False."""
+    seen = {}
+
+    async def fake_retrieve(*a, **k):
+        seen["kwargs"] = k
+        return [{"heading": "N", "voice_answer": "hi", "summary": None, "content": None}]
+
+    class _Pool: ...
+    class _DB: pool = _Pool()
+    class _Container:
+        is_initialized = True
+        db_client = _DB()
+
+    monkeypatch.setattr("app.core.container.get_container", lambda: _Container())
+    monkeypatch.setattr(
+        "app.services.scripts.knowledge.retrieval.retrieve_knowledge", fake_retrieve
+    )
+    asyncio.run(kt.run_knowledge_lookup(_Session(), "what is the price"))
+    assert seen["kwargs"].get("bump_hits") is False
+
+
 def test_lookup_empty_query_returns_sentinel():
     out = asyncio.run(kt.run_knowledge_lookup(_Session(), "   "))
     assert "No specific information" in out
+
+
+# ---------------------------------------------------------------------------
+# retrieve_knowledge — bump_hits gates the hit_count UPDATE (voice hot path)
+# ---------------------------------------------------------------------------
+class _FakeConn:
+    def __init__(self, rows):
+        self._rows = rows
+        self.executed = []
+
+    async def fetch(self, *a, **k):
+        return self._rows
+
+    async def execute(self, *a, **k):
+        self.executed.append((a, k))
+
+
+class _FakeAcquire:
+    def __init__(self, conn):
+        self._conn = conn
+
+    async def __aenter__(self):
+        return self._conn
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+def _run_retrieve(monkeypatch, *, bump_hits):
+    import app.services.scripts.knowledge.retrieval as retr
+
+    rows = [{
+        "id": "00000000-0000-0000-0000-000000000001",
+        "heading": "H", "summary": "S", "voice_answer": None,
+        "content": "C", "fts": 0.1, "sim": 0.2,
+    }]
+    conn = _FakeConn(rows)
+    monkeypatch.setattr(retr, "acquire_with_tenant", lambda pool, tenant: _FakeAcquire(conn))
+    out = asyncio.run(retr.retrieve_knowledge(
+        object(), "t1", "c1", "price", k=2, bump_hits=bump_hits,
+    ))
+    return out, conn
+
+
+def test_retrieve_bump_false_runs_no_update(monkeypatch):
+    out, conn = _run_retrieve(monkeypatch, bump_hits=False)
+    assert conn.executed == []              # the hit_count UPDATE is short-circuited
+    assert out and out[0]["heading"] == "H"  # rows returned unchanged by the flag
+
+
+def test_retrieve_bump_true_still_updates(monkeypatch):
+    """Default (diagnostic/UI) callers keep the hit_count bump."""
+    out, conn = _run_retrieve(monkeypatch, bump_hits=True)
+    assert len(conn.executed) == 1          # UPDATE fired
+    assert out and out[0]["heading"] == "H"  # same returned shape as bump_hits=False
 
 
 def test_lookup_no_hits_returns_sentinel(monkeypatch):

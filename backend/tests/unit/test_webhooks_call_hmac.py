@@ -18,11 +18,14 @@ SECRET = "whsec_test_p0_5_secret"
 def _client(monkeypatch, *, secret):
     """Minimal app mounting the webhooks router, with the secret lookup mocked."""
     import app.api.v1.endpoints.webhooks as wh
+    # The secret lookup now happens inside the shared verify helper that lives
+    # in webhooks_secure, so patch it there.
+    import app.api.v1.endpoints.webhooks_secure as ws
 
     async def _fake_secret(tenant_id, name):
         return secret
 
-    monkeypatch.setattr(wh, "get_webhook_secret_from_db", _fake_secret)
+    monkeypatch.setattr(ws, "get_webhook_secret_from_db", _fake_secret)
 
     app = FastAPI()
     app.include_router(wh.router, prefix="/api/v1")
@@ -77,7 +80,7 @@ def test_goal_achieved_accepts_valid_signature(monkeypatch):
     client = _client(monkeypatch, secret=SECRET)
 
     class _CS:
-        async def mark_goal_achieved(self, call_id):
+        async def mark_goal_achieved(self, tenant_id, call_id):
             return {"ok": True, "call_id": call_id}
 
     class _Container:

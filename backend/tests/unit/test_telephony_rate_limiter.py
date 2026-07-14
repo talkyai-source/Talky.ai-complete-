@@ -179,7 +179,9 @@ class FakeConn:
                     "window_seconds": int(window_seconds),
                     "block_ttl_seconds": int(block_ttl_seconds),
                     "request_id": request_id,
-                    "details": json.loads(details_json),
+                    # The real pool's jsonb codec (app.core.db) hands this a
+                    # dict on write already — no json.loads needed.
+                    "details": details_json,
                     "created_by": created_by,
                 }
             )

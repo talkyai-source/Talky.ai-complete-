@@ -87,3 +87,27 @@ async def test_registry_reads_env_var(monkeypatch):
     monkeypatch.setenv("CARTESIA_MAX_CONCURRENT", "13")
     g = get_provider_guard("cartesia")
     assert g.max_concurrent == 13
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_default_guard_is_below_self_service_account_caps():
+    """The old default (200) sat above every self-service ElevenLabs plan's
+    concurrent_requests cap (~4-30) AND above the aiohttp connector's
+    limit_per_host=50 in elevenlabs_tts.py, so requests queued invisibly
+    inside aiohttp instead of at this guard. The default must stay small
+    enough to be a realistic account cap, and must not exceed the connector's
+    limit_per_host=50 (see elevenlabs_tts.py's TCPConnector)."""
+    g = get_provider_guard("elevenlabs")
+    assert g.max_concurrent <= 30, (
+        "default must fit within realistic self-service account tiers"
+    )
+    assert g.max_concurrent <= 50, (
+        "default must not exceed the aiohttp connector limit_per_host"
+    )
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_guard_is_env_overridable(monkeypatch):
+    monkeypatch.setenv("ELEVENLABS_MAX_CONCURRENT", "25")
+    g = get_provider_guard("elevenlabs")
+    assert g.max_concurrent == 25

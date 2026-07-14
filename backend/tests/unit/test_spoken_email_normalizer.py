@@ -64,6 +64,25 @@ def test_extract_email_positive(speech, expected):
     assert extract_email_from_speech(speech) == expected
 
 
+# 2026-07-13 fix: trailing conversational filler after the domain must NOT
+# fuse into the TLD ("bob@gmail.complease"). The domain boundary is the
+# longest domain-syntax prefix ("label.label...tld"), not "everything left
+# in the utterance with whitespace stripped".
+@pytest.mark.parametrize("speech,expected", [
+    ("bob at gmail dot com please", "bob@gmail.com"),
+    ("bob at gmail dot com thank you", "bob@gmail.com"),
+    ("bob at gmail dot com thanks", "bob@gmail.com"),
+    ("bob at gmail dot com cheers", "bob@gmail.com"),
+    ("bob at gmail dot com okay", "bob@gmail.com"),
+    ("bob at gmail dot com yeah", "bob@gmail.com"),
+    ("john at gmail dot com, that's it", "john@gmail.com"),
+    # multi-part domain still glues correctly even with trailing filler
+    ("bob at yahoo dot co dot uk please", "bob@yahoo.co.uk"),
+])
+def test_extract_email_trailing_filler_does_not_fuse_into_domain(speech, expected):
+    assert extract_email_from_speech(speech) == expected
+
+
 @pytest.mark.parametrize("speech", [
     "",
     "I don't want to give my email",

@@ -696,6 +696,177 @@ class TestBuildTelephonySessionConfig:
         assert "GREETING RESPONSE" not in config.system_prompt
 
 
+class TestTenantPromptCap:
+    """Uncapped tenant-authored additional_instructions (campaign ROLE/GOAL
+    text) was observed at ~2.9k-7k tokens in production, injected into EVERY
+    turn's system prompt. The cap bounds it before composition, truncating on
+    a whitespace boundary and logging a WARNING with before/after size —
+    normal, small prompts must pass through completely untouched."""
+
+    _LOGGER_NAME = "app.domain.services.telephony_session_config"
+
+    def _mock_global_config(self):
+        cfg = MagicMock()
+        cfg.tts_provider = "cartesia"
+        cfg.tts_voice_id = "test-voice-id"
+        cfg.tts_model = "sonic-3"
+        cfg.llm_model = "llama-3.1-8b-instant"
+        cfg.llm_temperature = 0.6
+        cfg.llm_max_tokens = 90
+        return cfg
+
+    # ── unit tests on the helper directly ────────────────────────────────
+
+    def test_default_budget_is_6000_chars(self):
+        from app.domain.services.telephony_session_config import _tenant_prompt_char_budget
+        assert _tenant_prompt_char_budget() == 6000
+
+    def test_budget_is_env_overridable(self, monkeypatch):
+        from app.domain.services.telephony_session_config import _tenant_prompt_char_budget
+        monkeypatch.setenv("TELEPHONY_TENANT_PROMPT_MAX_CHARS", "1234")
+        assert _tenant_prompt_char_budget() == 1234
+
+    def test_invalid_env_value_falls_back_to_default(self, monkeypatch):
+        from app.domain.services.telephony_session_config import _tenant_prompt_char_budget
+        monkeypatch.setenv("TELEPHONY_TENANT_PROMPT_MAX_CHARS", "not-a-number")
+        assert _tenant_prompt_char_budget() == 6000
+
+    def test_none_and_empty_text_pass_through_untouched(self):
+        from app.domain.services.telephony_session_config import (
+            _cap_tenant_additional_instructions,
+        )
+        assert _cap_tenant_additional_instructions(None) is None
+        assert _cap_tenant_additional_instructions("") == ""
+
+    def test_small_prompt_is_untouched_and_does_not_warn(self, caplog, monkeypatch):
+        import logging
+        from app.domain.services.telephony_session_config import (
+            _cap_tenant_additional_instructions,
+        )
+        monkeypatch.delenv("TELEPHONY_TENANT_PROMPT_MAX_CHARS", raising=False)
+        text = "Ask about their roofing needs and offer a free estimate."
+        caplog.set_level(logging.WARNING, logger=self._LOGGER_NAME)
+        result = _cap_tenant_additional_instructions(text, campaign_id="c1")
+        assert result == text
+        assert not any(
+            "telephony_tenant_prompt_capped" in r.message for r in caplog.records
+        )
+
+    def test_oversized_prompt_is_capped_at_word_boundary_and_warns(
+        self, caplog, monkeypatch
+    ):
+        import logging
+        from app.domain.services.telephony_session_config import (
+            _cap_tenant_additional_instructions,
+        )
+        monkeypatch.setenv("TELEPHONY_TENANT_PROMPT_MAX_CHARS", "50")
+        text = "word " * 20  # 100 chars, well over the 50-char budget
+        caplog.set_level(logging.WARNING, logger=self._LOGGER_NAME)
+        result = _cap_tenant_additional_instructions(text, campaign_id="c2")
+
+        assert len(result) <= 50
+        # Boundary-safe: the capped text must be a clean prefix ending on a
+        # whole word, never a word severed mid-token.
+        assert text.startswith(result)
+        assert not result.endswith("wor")
+
+        warnings = [
+            r for r in caplog.records if "telephony_tenant_prompt_capped" in r.message
+        ]
+        assert len(warnings) == 1
+        assert "original_chars=100" in warnings[0].message
+        assert "campaign=c2" in warnings[0].message
+        assert "budget_chars=50" in warnings[0].message
+
+    def test_seven_thousand_token_prompt_is_capped_and_logged(self, caplog):
+        """~7000 tokens (~28,000 chars at ~4 chars/token) — the high end of
+        the measured production range — must be capped to the default
+        budget and logged with the original vs. capped size."""
+        import logging
+        from app.domain.services.telephony_session_config import (
+            _cap_tenant_additional_instructions,
+        )
+        huge = "Please always mention our financing options and warranty terms. " * 400
+        assert len(huge) > 20000
+        caplog.set_level(logging.WARNING, logger=self._LOGGER_NAME)
+        result = _cap_tenant_additional_instructions(huge, campaign_id="runaway")
+
+        assert len(result) <= 6000
+        warnings = [
+            r for r in caplog.records if "telephony_tenant_prompt_capped" in r.message
+        ]
+        assert warnings
+        assert f"original_chars={len(huge)}" in warnings[0].message
+
+    # ── integration through build_telephony_session_config ────────────────
+
+    def test_oversized_campaign_prompt_capped_in_composed_system_prompt(
+        self, monkeypatch, caplog
+    ):
+        import logging
+        from app.domain.services.telephony_session_config import (
+            build_telephony_session_config,
+        )
+        monkeypatch.setenv("TELEPHONY_TENANT_PROMPT_MAX_CHARS", "500")
+        huge = (
+            "Mention our roofing warranty and financing plan every single "
+            "time you speak. "
+        ) * 50
+        assert len(huge) > 500
+        campaign = {
+            "id": "cap-integration-campaign",
+            "script_config": {
+                "persona_type": "lead_gen",
+                "knowledge_driven": True,
+                "company_name": "Acme",
+                "agent_names": ["Alex"],
+                "additional_instructions": huge,
+            },
+        }
+        caplog.set_level(logging.WARNING, logger=self._LOGGER_NAME)
+        with patch(
+            "app.domain.services.telephony_session_config.get_global_config",
+            return_value=self._mock_global_config(),
+        ):
+            config = build_telephony_session_config(campaign=campaign)
+
+        assert huge not in config.system_prompt
+        warnings = [
+            r for r in caplog.records if "telephony_tenant_prompt_capped" in r.message
+        ]
+        assert warnings
+
+    def test_small_campaign_prompt_is_unaffected(self, monkeypatch, caplog):
+        import logging
+        from app.domain.services.telephony_session_config import (
+            build_telephony_session_config,
+        )
+        monkeypatch.delenv("TELEPHONY_TENANT_PROMPT_MAX_CHARS", raising=False)
+        small = "Offer a free roof inspection and ask for a callback time."
+        campaign = {
+            "id": "normal-campaign",
+            "script_config": {
+                "persona_type": "lead_gen",
+                "knowledge_driven": True,
+                "company_name": "Acme",
+                "agent_names": ["Alex"],
+                "additional_instructions": small,
+            },
+        }
+        caplog.set_level(logging.WARNING, logger=self._LOGGER_NAME)
+        with patch(
+            "app.domain.services.telephony_session_config.get_global_config",
+            return_value=self._mock_global_config(),
+        ):
+            config = build_telephony_session_config(campaign=campaign)
+
+        assert small in config.system_prompt
+        warnings = [
+            r for r in caplog.records if "telephony_tenant_prompt_capped" in r.message
+        ]
+        assert not warnings
+
+
 class TestPipelineModeThreading:
     """The realtime pipeline_mode + its knobs must survive from the tenant
     AI-Options config (and optional per-campaign override) all the way onto the

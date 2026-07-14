@@ -2,6 +2,8 @@
 Unit Tests for Latency Tracker
 Tests latency metrics tracking and logging
 """
+import time
+
 import pytest
 from datetime import datetime, timedelta
 from app.domain.services.latency_tracker import (
@@ -10,108 +12,142 @@ from app.domain.services.latency_tracker import (
     get_latency_tracker
 )
 
+# LatencyMetrics marks are monotonic-clock seconds (time.monotonic()), not
+# wall-clock datetimes — see latency_tracker.py docstring. Tests below use a
+# plain float "now" and add durations in seconds (ms / 1000) to build
+# fixtures, mirroring how time.monotonic() deltas actually behave.
+NOW = 1_000_000.0  # arbitrary monotonic base; only deltas matter
+
+
+def _ms(offset_ms: float) -> float:
+    return NOW + offset_ms / 1000.0
+
 
 class TestLatencyMetrics:
     """Tests for LatencyMetrics dataclass."""
-    
+
     def test_total_latency_calculation(self):
         """Test total latency is correctly calculated."""
-        now = datetime.utcnow()
-        
         metrics = LatencyMetrics(
             call_id="test-call",
             turn_id=1,
-            speech_end_time=now,
-            audio_start_time=now + timedelta(milliseconds=500)
+            speech_end_time=_ms(0),
+            audio_start_time=_ms(500),
         )
-        
+
         assert metrics.total_latency_ms == pytest.approx(500, abs=1)
-    
+
     def test_llm_latency_calculation(self):
         """Test LLM latency is correctly calculated."""
-        now = datetime.utcnow()
-        
         metrics = LatencyMetrics(
             call_id="test-call",
             turn_id=1,
-            llm_start_time=now,
-            llm_end_time=now + timedelta(milliseconds=200)
+            llm_start_time=_ms(0),
+            llm_end_time=_ms(200),
         )
-        
+
         assert metrics.llm_latency_ms == pytest.approx(200, abs=1)
-    
+
     def test_tts_latency_calculation(self):
         """Test TTS latency is correctly calculated."""
-        now = datetime.utcnow()
-        
         metrics = LatencyMetrics(
             call_id="test-call",
             turn_id=1,
-            tts_start_time=now,
-            tts_end_time=now + timedelta(milliseconds=100)
+            tts_start_time=_ms(0),
+            tts_end_time=_ms(100),
         )
-        
+
         assert metrics.tts_latency_ms == pytest.approx(100, abs=1)
-    
+
     def test_within_target_true(self):
         """Test target check passes for fast response."""
-        now = datetime.utcnow()
-        
         metrics = LatencyMetrics(
             call_id="test-call",
             turn_id=1,
-            speech_end_time=now,
-            audio_start_time=now + timedelta(milliseconds=400)
+            speech_end_time=_ms(0),
+            audio_start_time=_ms(400),
         )
-        
+
         assert metrics.is_within_target == True
-    
+
     def test_within_target_false(self):
         """Test target check fails for slow response."""
-        now = datetime.utcnow()
-        
         metrics = LatencyMetrics(
             call_id="test-call",
             turn_id=1,
-            speech_end_time=now,
-            audio_start_time=now + timedelta(milliseconds=800)
+            speech_end_time=_ms(0),
+            audio_start_time=_ms(800),
         )
-        
+
         assert metrics.is_within_target == False
-    
+
     def test_to_dict(self):
         """Test dictionary conversion."""
-        now = datetime.utcnow()
-        
         metrics = LatencyMetrics(
             call_id="test-call",
             turn_id=1,
-            speech_end_time=now,
-            audio_start_time=now + timedelta(milliseconds=500)
+            speech_end_time=_ms(0),
+            audio_start_time=_ms(500),
         )
-        
+
         d = metrics.to_dict()
-        
+
         assert d["call_id"] == "test-call"
         assert d["turn_id"] == 1
         assert d["total_latency_ms"] == pytest.approx(500, abs=1)
         assert "timestamps" in d
 
-    def test_ws_d_stage_latencies(self):
-        """Test WS-D stage latency calculations."""
-        now = datetime.utcnow()
-
+    def test_to_dict_timestamps_use_wall_clock_anchor(self):
+        """to_dict()'s 'timestamps' block is the one genuinely-needed
+        absolute time-of-day view — it must render real ISO8601 strings
+        when a wall-clock anchor is present (as LatencyTracker.start_turn
+        always sets), while duration math above stays monotonic-only."""
+        anchor = datetime(2026, 1, 1, 12, 0, 0)
         metrics = LatencyMetrics(
             call_id="test-call",
             turn_id=1,
-            listening_start_time=now,
-            stt_first_transcript_time=now + timedelta(milliseconds=120),
-            speech_end_time=now + timedelta(milliseconds=700),
-            llm_start_time=now + timedelta(milliseconds=710),
-            llm_first_token_time=now + timedelta(milliseconds=860),
-            tts_start_time=now + timedelta(milliseconds=980),
-            tts_first_chunk_time=now + timedelta(milliseconds=1110),
-            response_start_time=now + timedelta(milliseconds=1110),
+            speech_end_time=_ms(0),
+            audio_start_time=_ms(500),
+            wall_clock_anchor=anchor,
+            monotonic_anchor=NOW,
+        )
+
+        d = metrics.to_dict()
+        assert d["timestamps"]["speech_end"] == anchor.isoformat()
+        assert d["timestamps"]["audio_start"] == (anchor + timedelta(milliseconds=500)).isoformat()
+        # No anchor at all → gracefully None, never a crash.
+        bare = LatencyMetrics(call_id="c", turn_id=1, speech_end_time=_ms(0))
+        assert bare.to_dict()["timestamps"]["speech_end"] is None
+
+    def test_duration_survives_wall_clock_step(self):
+        """The whole point of the monotonic fix: an NTP-style wall-clock
+        step between two marks must NOT corrupt the computed duration,
+        because the marks are monotonic seconds, not datetimes."""
+        metrics = LatencyMetrics(
+            call_id="test-call",
+            turn_id=1,
+            speech_end_time=_ms(0),
+            audio_start_time=_ms(500),
+        )
+        # Simulate a wall clock that jumped backwards an hour mid-turn by
+        # asserting the duration is computed purely from the monotonic
+        # marks — there is no wall-clock field in this math at all.
+        assert metrics.total_latency_ms == pytest.approx(500, abs=1)
+        assert metrics.total_latency_ms >= 0
+
+    def test_ws_d_stage_latencies(self):
+        """Test WS-D stage latency calculations."""
+        metrics = LatencyMetrics(
+            call_id="test-call",
+            turn_id=1,
+            listening_start_time=_ms(0),
+            stt_first_transcript_time=_ms(120),
+            speech_end_time=_ms(700),
+            llm_start_time=_ms(710),
+            llm_first_token_time=_ms(860),
+            tts_start_time=_ms(980),
+            tts_first_chunk_time=_ms(1110),
+            response_start_time=_ms(1110),
         )
 
         assert metrics.stt_first_transcript_ms == pytest.approx(120, abs=1)
@@ -148,7 +184,7 @@ class TestLatencyTracker:
         metrics = tracker.get_metrics("call-1")
         assert metrics is not None
         original_listening_start = metrics.listening_start_time
-        metrics.stt_first_transcript_time = datetime.utcnow()
+        metrics.stt_first_transcript_time = time.monotonic()
 
         tracker.start_turn("call-1", turn_id=1)
 
@@ -204,15 +240,15 @@ class TestLatencyTracker:
     def test_average_latency(self):
         """Test average latency calculation."""
         tracker = LatencyTracker()
-        now = datetime.utcnow()
-        
+        now = time.monotonic()
+
         # Simulate 3 turns
         for i in range(3):
             tracker.start_turn("call-1", turn_id=i + 1)
             metrics = tracker.get_metrics("call-1")
             # Manually set timestamps for testing
             metrics.speech_end_time = now
-            metrics.audio_start_time = now + timedelta(milliseconds=400 + i * 100)
+            metrics.audio_start_time = now + (400 + i * 100) / 1000.0
             tracker.log_metrics("call-1")
         
         avg = tracker.get_average_latency("call-1")
@@ -252,7 +288,7 @@ class TestLatencyTracker:
     def test_percentiles_and_baseline_snapshot(self):
         """Test WS-D percentile helpers for baseline reporting."""
         tracker = LatencyTracker()
-        now = datetime.utcnow()
+        now = time.monotonic()
 
         values = [300, 500, 900]
         for idx, response_latency in enumerate(values, start=1):
@@ -260,13 +296,13 @@ class TestLatencyTracker:
             metrics = tracker.get_metrics("call-wsd")
             assert metrics is not None
             metrics.listening_start_time = now
-            metrics.stt_first_transcript_time = now + timedelta(milliseconds=100)
+            metrics.stt_first_transcript_time = now + 100 / 1000.0
             metrics.speech_end_time = now
-            metrics.llm_start_time = now + timedelta(milliseconds=10)
-            metrics.llm_first_token_time = now + timedelta(milliseconds=160)
-            metrics.tts_start_time = now + timedelta(milliseconds=170)
-            metrics.tts_first_chunk_time = now + timedelta(milliseconds=290)
-            metrics.response_start_time = now + timedelta(milliseconds=response_latency)
+            metrics.llm_start_time = now + 10 / 1000.0
+            metrics.llm_first_token_time = now + 160 / 1000.0
+            metrics.tts_start_time = now + 170 / 1000.0
+            metrics.tts_first_chunk_time = now + 290 / 1000.0
+            metrics.response_start_time = now + response_latency / 1000.0
             metrics.audio_start_time = metrics.response_start_time
             tracker.log_metrics("call-wsd")
 
@@ -288,15 +324,15 @@ class TestFirstTurnLatencyLog:
         tracker.start_turn(call_id, turn_id=0)
         m = tracker.get_metrics(call_id)
         # Use synthetic timestamps so the log-line numbers are deterministic.
-        base = datetime.utcnow()
+        base = time.monotonic()
         m.speech_end_time = base
-        m.llm_start_time = base + timedelta(milliseconds=10)
-        m.llm_first_token_time = base + timedelta(milliseconds=120)
-        m.llm_end_time = base + timedelta(milliseconds=300)
-        m.tts_start_time = base + timedelta(milliseconds=130)
-        m.tts_first_chunk_time = base + timedelta(milliseconds=250)
-        m.tts_end_time = base + timedelta(milliseconds=600)
-        m.audio_start_time = base + timedelta(milliseconds=260)
+        m.llm_start_time = base + 10 / 1000.0
+        m.llm_first_token_time = base + 120 / 1000.0
+        m.llm_end_time = base + 300 / 1000.0
+        m.tts_start_time = base + 130 / 1000.0
+        m.tts_first_chunk_time = base + 250 / 1000.0
+        m.tts_end_time = base + 600 / 1000.0
+        m.audio_start_time = base + 260 / 1000.0
         tracker.mark_completed(call_id)
 
     def test_emits_once_then_silent(self, caplog):

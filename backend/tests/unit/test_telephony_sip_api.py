@@ -217,7 +217,9 @@ class FakeTelephonyConn:
                 "is_active": False,
                 "auth_username": auth_username,
                 "auth_password_encrypted": auth_password_encrypted,
-                "metadata": json.loads(metadata_json),
+                # The real pool's jsonb codec (app.core.db) hands the
+                # endpoint a dict on write already — no json.loads needed.
+                "metadata": metadata_json,
                 "created_at": now,
                 "updated_at": now,
                 "created_by": created_by,
@@ -263,7 +265,9 @@ class FakeTelephonyConn:
                     "direction": direction,
                     "auth_username": auth_username,
                     "auth_password_encrypted": auth_password_encrypted,
-                    "metadata": json.loads(metadata_json),
+                    # The real pool's jsonb codec (app.core.db) hands the
+                # endpoint a dict on write already — no json.loads needed.
+                "metadata": metadata_json,
                     "updated_at": datetime.now(timezone.utc),
                     "updated_by": updated_by,
                 }
@@ -317,7 +321,9 @@ class FakeTelephonyConn:
                 "max_bitrate_kbps": max_bitrate_kbps,
                 "jitter_buffer_ms": jitter_buffer_ms,
                 "is_active": False,
-                "metadata": json.loads(metadata_json),
+                # The real pool's jsonb codec (app.core.db) hands the
+                # endpoint a dict on write already — no json.loads needed.
+                "metadata": metadata_json,
                 "created_at": now,
                 "updated_at": now,
                 "created_by": created_by,
@@ -359,7 +365,9 @@ class FakeTelephonyConn:
                     "ptime_ms": ptime_ms,
                     "max_bitrate_kbps": max_bitrate_kbps,
                     "jitter_buffer_ms": jitter_buffer_ms,
-                    "metadata": json.loads(metadata_json),
+                    # The real pool's jsonb codec (app.core.db) hands the
+                # endpoint a dict on write already — no json.loads needed.
+                "metadata": metadata_json,
                     "updated_at": datetime.now(timezone.utc),
                     "updated_by": updated_by,
                 }
@@ -429,7 +437,9 @@ class FakeTelephonyConn:
                 "strip_digits": strip_digits,
                 "prepend_digits": prepend_digits,
                 "is_active": bool(is_active),
-                "metadata": json.loads(metadata_json),
+                # The real pool's jsonb codec (app.core.db) hands the
+                # endpoint a dict on write already — no json.loads needed.
+                "metadata": metadata_json,
                 "created_at": now,
                 "updated_at": now,
                 "created_by": created_by,
@@ -488,7 +498,9 @@ class FakeTelephonyConn:
                     "strip_digits": strip_digits,
                     "prepend_digits": prepend_digits,
                     "is_active": bool(is_active),
-                    "metadata": json.loads(metadata_json),
+                    # The real pool's jsonb codec (app.core.db) hands the
+                # endpoint a dict on write already — no json.loads needed.
+                "metadata": metadata_json,
                     "updated_at": datetime.now(timezone.utc),
                     "updated_by": updated_by,
                 }
@@ -539,7 +551,9 @@ class FakeTelephonyConn:
             key = (tenant_id, operation, idem_key)
             entry = self.idempotency.get(key)
             if entry:
-                entry.response_body = json.loads(response_body_json)
+                # The real pool's jsonb codec (app.core.db) hands this a
+                # dict on write already — no json.loads needed.
+                entry.response_body = response_body_json
                 entry.status_code = int(status_code)
             return "UPDATE 1"
         if normalized.startswith("INSERT INTO tenant_telephony_quota_events"):
@@ -569,7 +583,8 @@ class FakeTelephonyConn:
                     "window_seconds": int(window_seconds),
                     "block_ttl_seconds": int(block_ttl_seconds),
                     "request_id": request_id,
-                    "details": json.loads(details_json),
+                    # The real pool's jsonb codec hands this a dict already.
+                    "details": details_json,
                     "created_by": created_by,
                 }
             )

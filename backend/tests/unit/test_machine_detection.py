@@ -36,8 +36,15 @@ def test_screening_detected():
     assert _a("If you record your name and reason for calling, I'll see if this person is available.") == "screening"
 
 
-def test_screening_stay_on_line():
-    assert _a("Thanks. Please stay on the line.", turn=2) == "screening"
+def test_stay_on_line_is_not_screening():
+    # 2026-07-13 fix: "please stay on the line" is a LIVE-TRANSFER cue (a real
+    # receptionist says this while putting you through) — it must NOT arm the
+    # screening/machine_end endgame.
+    assert _a("Thanks. Please stay on the line.", turn=2) == "none"
+
+
+def test_connecting_you_now_is_not_screening():
+    assert _a("Connecting you now.", turn=2) == "none"
 
 
 # ── post-screening endgame → hang up ────────────────────────────────────
@@ -52,6 +59,27 @@ def test_no_machine_end_without_screening():
     # A live receptionist: "he's not available" — screening never seen, so
     # this can NEVER hang up the call.
     assert _a("I'm sorry, he's not available right now", turn=4) == "none"
+
+
+def test_live_transfer_hold_then_not_available_never_hangs_up():
+    # The exact false-positive sequence from the 2026-07-13 bug report: a
+    # LIVE receptionist says "please stay on the line" while transferring,
+    # then comes back with "he is not available". Neither turn may arm or
+    # fire machine_end — that would hang up on a human.
+    first = _a("Please stay on the line.", turn=1, screening=False)
+    assert first == "none"
+    # screening_seen reflects what a real session would carry forward: since
+    # the first turn did NOT arm screening, the second turn is assessed with
+    # screening_seen=False, exactly like a live call would.
+    second = _a("Thanks for holding, he is not available at the moment.", turn=2, screening=False)
+    assert second == "none"
+
+
+def test_is_not_available_alone_is_not_machine_end_even_with_screening():
+    # "is not available" alone is generic — a live human says it too. Even
+    # once a genuine screening bot WAS heard, that phrase alone (with no
+    # actual voicemail/beep evidence) must not fire machine_end.
+    assert _a("I'm sorry, this person is not available right now.", turn=4, screening=True) == "none"
 
 
 # ── normal humans never match ────────────────────────────────────────────

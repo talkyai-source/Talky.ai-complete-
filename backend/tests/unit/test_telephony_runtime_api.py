@@ -424,7 +424,13 @@ class FakeRuntimeConn:
         if normalized.startswith("UPDATE tenant_telephony_idempotency SET response_body"):
             tenant_id, operation, key, body_json, status_code, _resource_type, _resource_id = args
             entry = self.idempotency[(tenant_id, operation, key)]
-            entry.response_body = json.loads(body_json)
+            # _store_idempotency_result now binds a raw dict for the jsonb
+            # column (the pool's codec encodes it — see app.core.db); mirror
+            # the codec here so the fake conn accepts dict OR legacy str.
+            entry.response_body = (
+                body_json if isinstance(body_json, (dict, list))
+                else json.loads(body_json)
+            )
             entry.status_code = int(status_code)
             return "UPDATE 1"
 

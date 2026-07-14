@@ -1,10 +1,11 @@
 """Tests for the realtime (gpt-realtime-2) quality pass.
 
 Covers the five fixes:
-  FIX 1 — knowledge: the bridge's knowledge lookup passes tenant_id=None (not
-          "") when the tenant is unknown, so acquire_with_tenant bypasses RLS
-          instead of crashing on _validate_uuid(""); retrieve_knowledge is the
-          callable used.
+  FIX 1 — knowledge: the bridge's knowledge lookup FAILS CLOSED when the tenant
+          is unknown — it does NOT call retrieve_knowledge (passing tenant_id=
+          None would trip acquire_with_tenant's RLS bypass → cross-tenant read).
+          With a valid tenant it renders SOURCE-FIRST (the matched node content,
+          not the top-of-node voice_answer summary) and never bumps hit_count.
   FIX 2 — transcript: the model pump accumulates ONLY finalised agent + caller
           transcripts (role-tagged, in order) into a TranscriptService; deltas
           do not double-count.
@@ -85,13 +86,16 @@ def test_instructions_dependency_free():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_lookup_knowledge_passes_none_tenant_not_empty(monkeypatch):
-    captured = {}
+async def test_lookup_knowledge_fails_closed_on_missing_tenant(monkeypatch):
+    """SECURITY (fail closed): with NO tenant, the bridge must NOT call
+    retrieve_knowledge at all — passing tenant_id=None trips acquire_with_tenant
+    into RLS bypass (a cross-tenant read). It returns a graceful 'no info'
+    string instead."""
+    called = {"n": 0}
 
-    async def _fake_retrieve(pool, *, tenant_id, campaign_id, query, k):
-        captured["tenant_id"] = tenant_id
-        captured["campaign_id"] = campaign_id
-        return [{"heading": "Hours", "voice_answer": "9 to 5"}]
+    async def _fake_retrieve(pool, *, tenant_id, campaign_id, query, k, bump_hits=True):
+        called["n"] += 1
+        return [{"heading": "Hours", "content": "9 to 5"}]
 
     import app.services.scripts.knowledge.retrieval as retr
     monkeypatch.setattr(retr, "retrieve_knowledge", _fake_retrieve)
@@ -101,14 +105,51 @@ async def test_lookup_knowledge_passes_none_tenant_not_empty(monkeypatch):
         realtime_session=object(),
         media_gateway=object(),
         internal_sample_rate=8000,
-        knowledge_pool=object(),   # non-None so the lookup proceeds
-        tenant_id=None,            # unknown tenant
+        knowledge_pool=object(),   # non-None so we get past the pool guard
+        tenant_id=None,            # unknown tenant → must fail closed
         campaign_id="camp-1",
     )
     out = await bridge._lookup_knowledge("what are your hours")
-    assert captured["tenant_id"] is None      # NOT "" (would crash _validate_uuid)
+    assert called["n"] == 0                     # retrieve NEVER called (no bypass)
+    assert "don't have specific information" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_lookup_knowledge_valid_tenant_returns_source_first(monkeypatch):
+    """With a valid tenant, the lookup surfaces the SOURCE content fact (not the
+    top-of-node voice_answer summary) and never bumps hit_count."""
+    captured = {}
+
+    async def _fake_retrieve(pool, *, tenant_id, campaign_id, query, k, bump_hits=True):
+        captured["tenant_id"] = tenant_id
+        captured["campaign_id"] = campaign_id
+        captured["bump_hits"] = bump_hits
+        # voice_answer summarises the TOP; the caller's fact lives in content.
+        return [{
+            "heading": "Coverage",
+            "voice_answer": "We serve many areas.",
+            "summary": None,
+            "content": "We cover Texas, and we also cover Ohio and Florida.",
+        }]
+
+    import app.services.scripts.knowledge.retrieval as retr
+    monkeypatch.setattr(retr, "retrieve_knowledge", _fake_retrieve)
+
+    tid = "11111111-1111-1111-1111-111111111111"
+    bridge = RealtimeBridge(
+        call_id="c1",
+        realtime_session=object(),
+        media_gateway=object(),
+        internal_sample_rate=8000,
+        knowledge_pool=object(),
+        tenant_id=tid,
+        campaign_id="camp-1",
+    )
+    out = await bridge._lookup_knowledge("do you cover florida")
+    assert captured["tenant_id"] == tid         # the validated tenant, no bypass
     assert captured["campaign_id"] == "camp-1"
-    assert "9 to 5" in out
+    assert captured["bump_hits"] is False       # voice hot path: no hit_count write
+    assert "Florida" in out                     # the SOURCE fact, not "many areas"
 
 
 @pytest.mark.asyncio

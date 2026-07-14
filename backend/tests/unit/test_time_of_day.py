@@ -27,3 +27,15 @@ def test_morning_uk():
 
 def test_unknown_tz_is_empty():
     assert time_of_day_line("Not/AZone") == ""
+
+
+def test_none_tz_returns_none_hour_and_empty_line():
+    # A None timezone (no configured campaign tz) must NOT silently assume
+    # Europe/London — it should produce no time-specific greeting at all.
+    assert local_hour(None) is None
+    assert time_of_day_line(None) == ""
+
+
+def test_empty_string_tz_returns_none_hour_and_empty_line():
+    assert local_hour("") is None
+    assert time_of_day_line("   ") == ""
