@@ -10,6 +10,8 @@
 //   - VG-25: TTS queue overflow must report frames RETAINED, not submitted.
 
 #include "voice_gateway/session.h"
+#include "voice_gateway/session_registry.h"
+#include "voice_gateway/http_server.h"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -23,6 +25,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -252,12 +255,85 @@ void test_stt_reorder_ordering() {
     }
 }
 
+// Send a raw HTTP request to 127.0.0.1:port and return the full response.
+std::string http_roundtrip(const uint16_t port, const std::string& raw) {
+    const int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) {
+        return "";
+    }
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+    const timeval tv{2, 0};
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    if (connect(fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) != 0) {
+        close(fd);
+        return "";
+    }
+    (void)send(fd, raw.data(), raw.size(), 0);
+    std::string resp;
+    char buf[2048];
+    ssize_t n;
+    while ((n = recv(fd, buf, sizeof(buf), 0)) > 0) {
+        resp.append(buf, static_cast<std::size_t>(n));
+        if (resp.size() > 65536) {
+            break;
+        }
+    }
+    close(fd);
+    return resp;
+}
+
+std::string post_request(const std::string& path, const std::string& body) {
+    std::ostringstream o;
+    o << "POST " << path << " HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n"
+      << "Content-Length: " << body.size() << "\r\nConnection: close\r\n\r\n"
+      << body;
+    return o.str();
+}
+
+// VG-18 (+ VG-11 start path, + VG-19/VG-03 shutdown): drive the real HttpServer
+// end to end. A CRLF-laced callback URL must be rejected; a clean start must
+// succeed with auth off (default); /health is unauthenticated.
+void test_control_plane_callback_validation() {
+    voice_gateway::SessionRegistry registry;
+    voice_gateway::HttpServer server("127.0.0.1", 18099, registry);
+    std::string err;
+    check(server.start(err), "vg18_server_start");
+    std::thread server_thread([&server] { server.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+
+    const std::string bad_body =
+        "{\"session_id\":\"vg18-bad\",\"listen_ip\":\"127.0.0.1\",\"listen_port\":41700,"
+        "\"remote_ip\":\"127.0.0.1\",\"remote_port\":41701,\"codec\":\"pcmu\",\"ptime_ms\":20,"
+        "\"audio_callback_url\":\"http://127.0.0.1:8000/x\\r\\nX-Injected: 1\"}";
+    const std::string bad_resp = http_roundtrip(18099, post_request("/v1/sessions/start", bad_body));
+    check(bad_resp.find("callback_url_not_allowed") != std::string::npos, "vg18_crlf_callback_rejected");
+
+    const std::string ok_body =
+        "{\"session_id\":\"vg18-ok\",\"listen_ip\":\"127.0.0.1\",\"listen_port\":41702,"
+        "\"remote_ip\":\"127.0.0.1\",\"remote_port\":41703,\"codec\":\"pcmu\",\"ptime_ms\":20}";
+    const std::string ok_resp = http_roundtrip(18099, post_request("/v1/sessions/start", ok_body));
+    check(ok_resp.find("\"status\":\"started\"") != std::string::npos, "vg18_valid_start_ok");
+    (void)http_roundtrip(18099, post_request("/v1/sessions/stop", "{\"session_id\":\"vg18-ok\"}"));
+
+    const std::string health =
+        http_roundtrip(18099, "GET /health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+    check(health.find("\"status\":\"ok\"") != std::string::npos, "vg18_health_unauthenticated_ok");
+
+    server.stop();  // exercises the VG-19/VG-03 graceful drain path
+    server_thread.join();
+}
+
 }  // namespace
 
 int main() {
     test_tts_overflow_accounting();
     test_jitter_flood_no_deadlock();
     test_stt_reorder_ordering();
+    test_control_plane_callback_validation();
     std::cout << "passed=" << g_pass << " failed=" << g_fail << "\n";
     return g_fail == 0 ? 0 : 1;
 }

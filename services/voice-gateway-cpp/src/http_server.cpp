@@ -552,12 +552,31 @@ bool http_post(const std::string& url, const std::string& json_body) {
         remaining -= static_cast<std::size_t>(sent);
     }
 
-    // Drain response (just enough to not leave the server in CLOSE_WAIT)
-    char drain[256];
-    while (recv(fd, drain, sizeof(drain), 0) > 0) {}
-
+    // Read the response and parse its status line. Previously the response was
+    // drained without inspection and the function always returned true, so a
+    // backend 500 / timeout / reset looked identical to success — silent STT
+    // audio loss with no signal (VG-10). Now non-2xx (or no parseable response)
+    // is a delivery failure the caller can surface.
+    std::string resp;
+    char rbuf[512];
+    ssize_t rn;
+    while ((rn = recv(fd, rbuf, sizeof(rbuf), 0)) > 0) {
+        resp.append(rbuf, static_cast<std::size_t>(rn));
+        if (resp.size() >= 4096) {
+            break;  // the status line is well within the first read
+        }
+    }
     close(fd);
-    return true;
+
+    if (resp.compare(0, 5, "HTTP/") != 0) {
+        return false;
+    }
+    const std::size_t sp = resp.find(' ');
+    if (sp == std::string::npos) {
+        return false;
+    }
+    const int status = std::atoi(resp.c_str() + sp + 1);
+    return status >= 200 && status < 300;
 }
 
 // One long-lived sender thread per session that drains a bounded FIFO queue of
@@ -634,7 +653,18 @@ private:
             }
             // Sequential send outside the lock preserves strict FIFO ordering
             // (single thread, dequeue order) without holding up enqueue().
-            http_post(url_, body);
+            // consecutive_failures_ is touched only here (single worker), so it
+            // needs no lock. Surface a dead/erroring backend instead of dropping
+            // STT audio silently (VG-10), rate-limited so it can't flood logs.
+            if (http_post(url_, body)) {
+                consecutive_failures_ = 0;
+            } else {
+                ++consecutive_failures_;
+                if (consecutive_failures_ == 1 || consecutive_failures_ % 100 == 0) {
+                    std::cerr << "event=stt_callback_delivery_failed url=" << url_
+                              << " consecutive_failures=" << consecutive_failures_ << "\n";
+                }
+            }
         }
     }
 
@@ -643,6 +673,7 @@ private:
     std::condition_variable cv_;
     std::deque<std::string> queue_;
     bool stop_{false};
+    int consecutive_failures_{0};  // worker-thread-only; no lock needed
     std::thread worker_;  // declared last: constructed after the fields run() touches
 };
 
@@ -669,6 +700,73 @@ std::optional<std::string> extract_session_id_from_path(const std::string& path)
         return std::nullopt;
     }
     return session_id;
+}
+
+// --- Control-plane auth + callback allowlisting (VG-18) ---
+// Both are OPT-IN via environment so default behavior is unchanged (the control
+// plane is localhost-bound today). Set VOICE_GATEWAY_AUTH_TOKEN to require
+// "Authorization: Bearer <token>" on every request except GET /health; set
+// VOICE_GATEWAY_CALLBACK_HOST to restrict the audio_callback_url host. Read once.
+const std::string& gateway_auth_token() {
+    static const std::string token = [] {
+        const char* v = std::getenv("VOICE_GATEWAY_AUTH_TOKEN");
+        return (v != nullptr) ? std::string(v) : std::string();
+    }();
+    return token;
+}
+
+const std::string& callback_host_allowlist() {
+    static const std::string host = [] {
+        const char* v = std::getenv("VOICE_GATEWAY_CALLBACK_HOST");
+        return (v != nullptr && *v != '\0') ? std::string(v) : std::string();
+    }();
+    return host;
+}
+
+bool request_authorized(const HttpRequest& request) {
+    const std::string& token = gateway_auth_token();
+    if (token.empty()) {
+        return true;  // auth disabled (default)
+    }
+    const auto it = request.headers.find("authorization");
+    if (it == request.headers.end()) {
+        return false;
+    }
+    static const std::string kPrefix = "Bearer ";
+    const std::string& value = it->second;
+    if (value.size() != kPrefix.size() + token.size()) {
+        return false;
+    }
+    if (value.compare(0, kPrefix.size(), kPrefix) != 0) {
+        return false;
+    }
+    return value.compare(kPrefix.size(), token.size(), token) == 0;
+}
+
+// Acceptable iff it has no control characters (blocks CRLF request-line injection
+// into the outbound POST), uses plaintext http:// (the only scheme http_post
+// actually speaks), and — when the allowlist env is set — targets that host
+// (SSRF/audio-exfiltration containment).
+bool is_allowed_callback_url(const std::string& url) {
+    for (const unsigned char c : url) {
+        if (c < 0x20 || c == 0x7F) {
+            return false;
+        }
+    }
+    static const std::string kScheme = "http://";
+    if (url.size() <= kScheme.size() || url.compare(0, kScheme.size(), kScheme) != 0) {
+        return false;
+    }
+    const std::string& allowed = callback_host_allowlist();
+    if (allowed.empty()) {
+        return true;  // host allowlist disabled (default)
+    }
+    const std::size_t host_start = kScheme.size();
+    const std::size_t host_end = url.find_first_of(":/", host_start);
+    const std::string host = (host_end == std::string::npos)
+                                 ? url.substr(host_start)
+                                 : url.substr(host_start, host_end - host_start);
+    return host == allowed;
 }
 
 }  // namespace
@@ -825,6 +923,14 @@ void HttpServer::handle_client(const int client_fd) {
         return;
     }
 
+    // Auth gate (VG-18): everything except the liveness probe requires a valid
+    // bearer token when VOICE_GATEWAY_AUTH_TOKEN is configured; a no-op otherwise.
+    if (!(request->method == "GET" && request->path == "/health") && !request_authorized(request.value())) {
+        write_response(client_fd, 401, "Unauthorized", "{\"error\":\"unauthorized\"}");
+        close(client_fd);
+        return;
+    }
+
     if (request->method == "GET" && request->path == "/health") {
         const bool is_healthy = healthy();
         const std::string body = std::string("{\"status\":\"") + (is_healthy ? "ok" : "degraded") + "\",\"io_loop_healthy\":" + (is_healthy ? "true" : "false") + "}";
@@ -940,6 +1046,13 @@ void HttpServer::handle_client(const int client_fd) {
             config.tts_max_queue_frames = static_cast<std::size_t>(tts_max_queue_frames.value());
         }
         if (audio_callback_url.has_value()) {
+            // Reject control-char / non-http / off-allowlist callback URLs before
+            // the gateway will POST caller audio to them (VG-18).
+            if (!is_allowed_callback_url(audio_callback_url.value())) {
+                write_response(client_fd, 400, "Bad Request", "{\"error\":\"callback_url_not_allowed\"}");
+                close(client_fd);
+                return;
+            }
             config.audio_callback_url = audio_callback_url.value();
         }
         if (audio_callback_batch_frames.has_value() && audio_callback_batch_frames.value() > 0) {
