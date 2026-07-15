@@ -121,6 +121,14 @@ std::optional<HttpRequest> read_request(const int client_fd) {
         }
     }
 
+    // Cap the declared body so a large (or bogus) Content-Length cannot drive
+    // unbounded body accumulation and exhaust RAM (VG-04). 8 MiB is far above any
+    // legitimate base64 TTS chunk while bounding the worst case.
+    constexpr std::size_t kMaxBodyBytes = 8u * 1024u * 1024u;
+    if (content_length > kMaxBodyBytes) {
+        return std::nullopt;
+    }
+
     const std::size_t body_offset = header_end + 4;
     if (raw.size() > body_offset) {
         request.body = raw.substr(body_offset);
@@ -155,7 +163,9 @@ void write_response(const int client_fd, const int status_code, const std::strin
     std::size_t remaining = wire.size();
 
     while (remaining > 0) {
-        const ssize_t n = send(client_fd, ptr, remaining, 0);
+        // MSG_NOSIGNAL: a peer reset must surface as EPIPE here, never as a
+        // process-killing SIGPIPE (VG-14).
+        const ssize_t n = send(client_fd, ptr, remaining, MSG_NOSIGNAL);
         if (n <= 0) {
             break;
         }
@@ -278,13 +288,32 @@ std::optional<bool> json_get_bool(const std::string& body, const std::string& ke
 }
 
 std::string escape_json(const std::string& s) {
+    // Escape ", \, and ALL control characters. The previous version escaped only
+    // quote/backslash, so a newline (or other control char) in a session_id or
+    // reason produced structurally invalid JSON on the wire and allowed log
+    // injection via embedded CR/LF (VG-29).
+    static const char* hex = "0123456789abcdef";
     std::string out;
     out.reserve(s.size() + 8);
-    for (const char c : s) {
-        if (c == '\\' || c == '"') {
-            out.push_back('\\');
+    for (const unsigned char c : s) {
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\b': out += "\\b"; break;
+            case '\f': out += "\\f"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (c < 0x20) {
+                    out += "\\u00";
+                    out.push_back(hex[(c >> 4) & 0xF]);
+                    out.push_back(hex[c & 0xF]);
+                } else {
+                    out.push_back(static_cast<char>(c));
+                }
+                break;
         }
-        out.push_back(c);
     }
     return out;
 }
@@ -389,7 +418,12 @@ std::optional<std::vector<uint8_t>> base64_decode(const std::string& input) {
     }();
 
     std::vector<uint8_t> output;
-    int val = 0;
+    // Unsigned, masked accumulator. The previous `int val = (val << 6) + …`
+    // overflowed the signed int after only a few base64 chars (guaranteed on any
+    // 160-byte audio frame) — undefined behavior under g++ -O2 even where it
+    // happened to wrap correctly (VG-09). uint32 shifts are well-defined; the
+    // 24-bit mask bounds the live window (we never read above bit ~12).
+    uint32_t val = 0;
     int valb = -8;
     for (const unsigned char c : input) {
         if (std::isspace(c) != 0) {
@@ -402,10 +436,10 @@ std::optional<std::vector<uint8_t>> base64_decode(const std::string& input) {
         if (decoded < 0) {
             return std::nullopt;
         }
-        val = (val << 6) + decoded;
+        val = ((val << 6) | static_cast<uint32_t>(decoded)) & 0xFFFFFFu;
         valb += 6;
         if (valb >= 0) {
-            output.push_back(static_cast<uint8_t>((val >> valb) & 0xFF));
+            output.push_back(static_cast<uint8_t>((val >> valb) & 0xFFu));
             valb -= 8;
         }
     }
@@ -419,18 +453,21 @@ std::string base64_encode(const std::vector<uint8_t>& input) {
         "0123456789+/";
     std::string output;
     output.reserve(((input.size() + 2) / 3) * 4);
-    int val = 0;
+    // Unsigned, masked accumulator — same signed-overflow UB fix as the decoder
+    // (VG-09). The tail shifts (val << 8) which fits in uint32 given the 24-bit
+    // mask; the previous signed int overflowed on any multi-byte input.
+    uint32_t val = 0;
     int valb = -6;
     for (const uint8_t c : input) {
-        val = (val << 8) + static_cast<int>(c);
+        val = ((val << 8) | static_cast<uint32_t>(c)) & 0xFFFFFFu;
         valb += 8;
         while (valb >= 0) {
-            output.push_back(chars[(val >> valb) & 0x3F]);
+            output.push_back(chars[(val >> valb) & 0x3Fu]);
             valb -= 6;
         }
     }
     if (valb > -6) {
-        output.push_back(chars[((val << 8) >> (valb + 8)) & 0x3F]);
+        output.push_back(chars[((val << 8) >> (valb + 8)) & 0x3Fu]);
     }
     while (output.size() % 4 != 0) {
         output.push_back('=');
@@ -504,7 +541,9 @@ bool http_post(const std::string& url, const std::string& json_body) {
     const char* ptr = wire.c_str();
     std::size_t remaining = wire.size();
     while (remaining > 0) {
-        const ssize_t sent = send(fd, ptr, remaining, 0);
+        // MSG_NOSIGNAL: a backend reset must return EPIPE, not kill the gateway
+        // (VG-14).
+        const ssize_t sent = send(fd, ptr, remaining, MSG_NOSIGNAL);
         if (sent <= 0) {
             close(fd);
             return false;
@@ -687,6 +726,7 @@ bool HttpServer::start(std::string& error) {
 }
 
 void HttpServer::run() {
+    int accept_backoff_ms = 0;
     while (running_.load()) {
         sockaddr_in client_addr{};
         socklen_t client_len = sizeof(client_addr);
@@ -699,11 +739,44 @@ void HttpServer::run() {
             if (errno == EINTR) {
                 continue;
             }
+            // Transient/overload errors (EMFILE/ENFILE/ECONNABORTED/ENOBUFS):
+            // mark unhealthy and back off (capped) so a persistent failure such
+            // as fd exhaustion does not become a 100%-CPU spin (VG-21).
             healthy_.store(false);
+            accept_backoff_ms = accept_backoff_ms == 0 ? 5 : std::min(accept_backoff_ms * 2, 200);
+            std::this_thread::sleep_for(std::chrono::milliseconds(accept_backoff_ms));
             continue;
         }
 
-        std::thread(&HttpServer::handle_client, this, client_fd).detach();
+        // A successful accept means the listener recovered.
+        accept_backoff_ms = 0;
+        healthy_.store(true);
+
+        // Bound the client's read/write time so a slow-loris client cannot pin a
+        // handler thread indefinitely (VG-04).
+        const timeval io_timeout{5, 0};
+        setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &io_timeout, sizeof(io_timeout));
+        setsockopt(client_fd, SOL_SOCKET, SO_SNDTIMEO, &io_timeout, sizeof(io_timeout));
+
+        // Admission control: cap concurrent handlers, and contain a thread-spawn
+        // failure so it can never escape run() and std::terminate the gateway
+        // (VG-04). The handler decrements the counter when it finishes.
+        if (active_handlers_.fetch_add(1) + 1 > kMaxActiveHandlers) {
+            active_handlers_.fetch_sub(1);
+            write_response(client_fd, 503, "Service Unavailable", "{\"error\":\"too_many_connections\"}");
+            close(client_fd);
+            continue;
+        }
+        try {
+            std::thread([this, client_fd] {
+                handle_client(client_fd);
+                active_handlers_.fetch_sub(1);
+            }).detach();
+        } catch (...) {
+            active_handlers_.fetch_sub(1);
+            write_response(client_fd, 503, "Service Unavailable", "{\"error\":\"handler_spawn_failed\"}");
+            close(client_fd);
+        }
     }
 }
 
@@ -713,10 +786,12 @@ void HttpServer::stop() {
 }
 
 bool HttpServer::healthy() const {
-    if (!healthy_.load()) {
-        return false;
-    }
-    return registry_.all_sessions_healthy();
+    // /health is a PROCESS/listener liveness signal: is the accept loop alive and
+    // able to serve requests. It deliberately does NOT aggregate per-session
+    // health — a single failed call must never flip /health to 503 and trigger an
+    // orchestrator restart that kills every other live call (VG-20). Per-session
+    // state/outcome is exposed via /stats and the per-session stats endpoint.
+    return healthy_.load();
 }
 
 void HttpServer::handle_client(const int client_fd) {
@@ -769,6 +844,7 @@ void HttpServer::handle_client(const int client_fd) {
         const auto tts_max_queue_frames = json_get_int(request->body, "tts_max_queue_frames");
         const auto audio_callback_url = json_get_string(request->body, "audio_callback_url");
         const auto audio_callback_batch_frames = json_get_int(request->body, "audio_callback_batch_frames");
+        const auto enforce_rtp_source = json_get_bool(request->body, "enforce_rtp_source");
 
         if (!session_id.has_value() || !listen_ip.has_value() || !listen_port.has_value() ||
             !remote_ip.has_value() || !remote_port.has_value() || !codec.has_value() || !ptime_ms.has_value()) {
@@ -843,56 +919,56 @@ void HttpServer::handle_client(const int client_fd) {
         if (audio_callback_batch_frames.has_value() && audio_callback_batch_frames.value() > 0) {
             config.audio_callback_batch_frames = audio_callback_batch_frames.value();
         }
+        if (enforce_rtp_source.has_value()) {
+            config.enforce_rtp_source = enforce_rtp_source.value();
+        }
+
+        // Build the STT audio callback (if requested) BEFORE starting the
+        // session, and hand it to start_session so it is installed before the
+        // receiver thread can process the first RTP packet. This removes both
+        // the early-audio-lost window and the old get_session()-after-start race
+        // where a concurrent stop returned 200 with no callback attached (VG-11).
+        // The closure captures only per-call state (id, batch size, buffer,
+        // sender) — never the session — so it is safe to build before creation.
+        RtpSession::AudioCallback audio_cb;
+        if (!config.audio_callback_url.empty()) {
+            const std::string cb_session_id = config.session_id;
+            const int batch_frames = config.audio_callback_batch_frames;
+
+            struct BatchState {
+                std::vector<uint8_t> buffer;
+                int frame_count{0};
+            };
+            auto state = std::make_shared<BatchState>();
+            // Owned solely by this closure, which lives in RtpSession::
+            // audio_callback_, so the sender (and its worker thread) is destroyed
+            // and JOINED when the session is destroyed. No detached thread
+            // outlives the session.
+            auto sender = std::make_shared<AudioCallbackSender>(config.audio_callback_url);
+
+            audio_cb = [cb_session_id, batch_frames, state, sender](
+                           const std::string& /*sid*/, const std::vector<uint8_t>& pcmu) {
+                state->buffer.insert(state->buffer.end(), pcmu.begin(), pcmu.end());
+                state->frame_count++;
+                if (state->frame_count >= batch_frames) {
+                    const std::string b64 = base64_encode(state->buffer);
+                    std::string body =
+                        "{\"session_id\":\"" + escape_json(cb_session_id) +
+                        "\",\"pcmu_base64\":\"" + b64 +
+                        "\",\"codec\":\"pcmu\"}";
+                    state->buffer.clear();
+                    state->frame_count = 0;
+                    // Non-blocking hand-off; never blocks the RTP receiver thread
+                    // on network I/O.
+                    sender->enqueue(std::move(body));
+                }
+            };
+        }
 
         std::string error;
-        const auto result = registry_.start_session(config, error);
+        const auto result = registry_.start_session(config, error, std::move(audio_cb));
 
         if (result == StartSessionResult::Started) {
-            // If an audio_callback_url was requested, register it on the live session.
-            // The callback POSTs each received audio frame as base64 JSON to the backend.
-            if (!config.audio_callback_url.empty()) {
-                const auto session = registry_.get_session(config.session_id);
-                if (session) {
-                    const std::string cb_session_id = config.session_id;
-                    const int batch_frames = config.audio_callback_batch_frames;
-
-                    // Accumulate frames per session; hand each full batch to a
-                    // single long-lived sender thread that POSTs in strict FIFO
-                    // order (see AudioCallbackSender). Each RtpSession gets its
-                    // own closure (no shared state between sessions).
-                    struct BatchState {
-                        std::vector<uint8_t> buffer;
-                        int frame_count{0};
-                    };
-                    auto state = std::make_shared<BatchState>();
-                    // Owned solely by this callback closure. The closure lives
-                    // inside RtpSession::audio_callback_, so the sender (and its
-                    // worker thread) is destroyed — and cleanly JOINED — when the
-                    // session is destroyed (registry erase via /stop or the
-                    // reaper). No detached thread outlives the session.
-                    auto sender = std::make_shared<AudioCallbackSender>(config.audio_callback_url);
-
-                    session->set_audio_callback(
-                        [cb_session_id, batch_frames, state, sender](
-                            const std::string& /*sid*/, const std::vector<uint8_t>& pcmu) {
-                            state->buffer.insert(state->buffer.end(), pcmu.begin(), pcmu.end());
-                            state->frame_count++;
-                            if (state->frame_count >= batch_frames) {
-                                const std::string b64 = base64_encode(state->buffer);
-                                std::string body =
-                                    "{\"session_id\":\"" + escape_json(cb_session_id) +
-                                    "\",\"pcmu_base64\":\"" + b64 +
-                                    "\",\"codec\":\"pcmu\"}";
-                                state->buffer.clear();
-                                state->frame_count = 0;
-                                // Non-blocking hand-off; never blocks the RTP
-                                // receiver thread on network I/O.
-                                sender->enqueue(std::move(body));
-                            }
-                        });
-                }
-            }
-
             write_response(client_fd, 200, "OK", "{\"status\":\"started\",\"session_id\":\"" + escape_json(config.session_id) + "\"}");
             close(client_fd);
             return;

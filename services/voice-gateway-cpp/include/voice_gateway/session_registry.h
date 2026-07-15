@@ -55,7 +55,10 @@ public:
     SessionRegistry(const SessionRegistry&) = delete;
     SessionRegistry& operator=(const SessionRegistry&) = delete;
 
-    StartSessionResult start_session(const SessionConfig& config, std::string& error);
+    // audio_cb, when set, is installed on the session BEFORE its receiver thread
+    // starts, so no early caller RTP is processed before the STT sink exists
+    // (VG-11). Defaulted so existing 2-arg callers are unaffected.
+    StartSessionResult start_session(const SessionConfig& config, std::string& error, RtpSession::AudioCallback audio_cb = {});
     bool stop_session(const std::string& session_id, const std::string& reason, bool& already_stopped);
 
     [[nodiscard]] RtpSessionPtr get_session(const std::string& session_id) const;
@@ -71,6 +74,11 @@ public:
 private:
     static bool validate_config(const SessionConfig& config, std::string& error);
 
+    // Snapshot of the live session shared_ptrs taken under mutex_ and returned by
+    // value, so callers can invoke per-session methods without holding the
+    // registry lock (VG-30).
+    std::vector<RtpSessionPtr> collect_sessions_locked_copy() const;
+
     void reaper_loop();
 
     // A self-stopped session is reaped once observed not-running for at least
@@ -79,6 +87,11 @@ private:
     // stop epilogue (socket close + thread joins) is still in flight.
     static constexpr int64_t kReapGraceMs = 60000;
     static constexpr int64_t kReapSweepIntervalMs = 10000;
+
+    // Hard ceiling on live sessions. Each session runs 3–4 threads and holds two
+    // UDP sockets, so an unbounded count would exhaust threads/fds and take the
+    // whole gateway down (VG-17). Sized well above realistic concurrent-call load.
+    static constexpr std::size_t kMaxConcurrentSessions = 500;
 
     mutable std::mutex mutex_;
     std::unordered_map<std::string, RtpSessionPtr> sessions_;

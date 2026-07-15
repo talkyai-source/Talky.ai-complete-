@@ -17,8 +17,13 @@ void handle_signal(const int) {
 }
 
 uint16_t parse_port(const std::string& value) {
-    const int parsed = std::stoi(value);
-    if (parsed <= 0 || parsed > 65535) {
+    // Reject any trailing/non-digit junk ("18080abc" used to parse as 18080)
+    // (VG-35).
+    if (value.empty() || value.find_first_not_of("0123456789") != std::string::npos) {
+        throw std::out_of_range("port must be a positive integer");
+    }
+    const unsigned long parsed = std::stoul(value);
+    if (parsed == 0 || parsed > 65535) {
         throw std::out_of_range("port out of range");
     }
     return static_cast<uint16_t>(parsed);
@@ -49,6 +54,11 @@ int main(int argc, char** argv) {
             std::cout << "Usage: voice_gateway [--host 127.0.0.1] [--port 18080]" << std::endl;
             return 0;
         }
+        // Fail closed on anything unrecognized or a flag missing its value,
+        // rather than silently starting on defaults (VG-35).
+        std::cerr << "Unknown or malformed argument: " << arg << std::endl;
+        std::cerr << "Usage: voice_gateway [--host 127.0.0.1] [--port 18080]" << std::endl;
+        return 2;
     }
 
     voice_gateway::SessionRegistry registry;
@@ -61,6 +71,11 @@ int main(int argc, char** argv) {
     }
 
     g_server = &server;
+    // A peer that resets the TCP connection mid-write would otherwise raise
+    // SIGPIPE, whose default disposition terminates the whole gateway and drops
+    // every live call. Ignore it process-wide; write paths additionally pass
+    // MSG_NOSIGNAL and handle EPIPE/ECONNRESET locally (VG-14).
+    std::signal(SIGPIPE, SIG_IGN);
     std::signal(SIGINT, handle_signal);
     std::signal(SIGTERM, handle_signal);
 

@@ -50,8 +50,20 @@ struct SessionConfig {
     bool jitter_buffer_enabled{true};
     std::size_t jitter_buffer_capacity_frames{64};
     std::size_t jitter_buffer_prefetch_frames{3};
-    bool echo_enabled{true};
+    // Loopback of caller audio back to the caller. MUST be false for a voice
+    // agent — otherwise, whenever the TTS queue underruns, buffered caller audio
+    // is spliced into the agent's speech (heard as echo/buzz/fragments, VG-07).
+    // Production (asterisk_adapter.py) already sets this false explicitly; the
+    // default is false so no caller/test path accidentally echoes.
+    bool echo_enabled{false};
     std::size_t tts_max_queue_frames{400};
+    // When the TTS queue underruns WHILE the agent is mid-utterance (a chunk was
+    // sent within this window but the next hasn't arrived yet), emit µ-law
+    // silence frames to keep the 20 ms RTP cadence continuous instead of leaving
+    // a hole the far end renders as a gap/buzz (VG-06). Measured from the last
+    // TTS frame sent, so a short trailing silence follows each burst and then TX
+    // goes idle. 0 disables. Telephony-standard continuity; safe with Asterisk.
+    int tts_underrun_fill_ms{500};
     // When set, every received RTP audio frame (G.711 µ-law, 160 bytes) is
     // base64-encoded and POSTed to this URL as JSON:
     //   {"session_id":"...","pcmu_base64":"...","codec":"pcmu"}
@@ -61,6 +73,13 @@ struct SessionConfig {
     // Maximum number of audio frames to batch into a single callback POST.
     // 1 = one POST per 20 ms frame (lowest latency). Default: 1.
     int audio_callback_batch_frames{1};
+    // When true, the receiver locks onto the (source IP, source port, SSRC) of
+    // the first accepted RTP packet and drops any later packet that does not
+    // match — closing off-path audio injection / session-keepalive attacks
+    // (VG-08). Default OFF: today the gateway binds to a trusted localhost/
+    // Asterisk peer, and strict pinning could drop a legitimate mid-call source
+    // change. Enable before exposing RTP to any untrusted network.
+    bool enforce_rtp_source{false};
 };
 
 struct SessionStatsSnapshot {
@@ -159,6 +178,7 @@ private:
     static bool is_rtcp_packet(const uint8_t* data, std::size_t len);
     void fire_audio_callback(const std::vector<uint8_t>& pcmu_batch);
     void reset_jitter_buffer_locked();
+    void clear_all_jitter_slots_locked();
     std::size_t jitter_index(uint16_t sequence_number) const;
     bool insert_jitter_frame_locked(const QueuedRtpFrame& frame);
     bool pop_next_jitter_frame_locked(QueuedRtpFrame& frame);
@@ -182,11 +202,25 @@ private:
     std::deque<QueuedTtsFrame> tts_queue_;
     std::unordered_map<uint32_t, TtsSegmentState> tts_segments_;
     uint32_t next_tts_segment_id_{1};
+    // Bumped every time the TTS queue is cleared (barge-in / interrupt / replace
+    // / stop). The transmitter captures this when it dequeues a frame and drops
+    // that frame if the epoch changed before it is sent, so a frame already
+    // popped at barge-in time is not spoken (VG-24).
+    uint64_t tts_generation_{0};
     std::string tts_last_stop_reason_{"none"};
 
+    // Latches on the first start() call. RtpSession is single-use (its worker
+    // std::threads are one-shot); a second start() would assign over joinable
+    // thread members and std::terminate. The registry always constructs a fresh
+    // session, so this only guards misuse of the public API (VG-32).
+    std::atomic<bool> ever_started_{false};
     std::atomic<bool> running_{false};
     std::atomic<bool> rx_healthy_{true};
     std::atomic<bool> tx_healthy_{true};
+    // True once the session terminated via a failure (socket_error /
+    // internal_error) rather than a clean stop. Lets healthy() report a failed
+    // session as unhealthy instead of masking it behind running_==false (VG-20).
+    std::atomic<bool> ended_in_failure_{false};
 
     // Latches the join+close teardown epilogue to a SINGLE external caller.
     // Separate from running_ because the running_ winner may be a worker thread
@@ -230,6 +264,12 @@ private:
 
     std::chrono::steady_clock::time_point last_rtp_rx_time_;
     std::chrono::steady_clock::time_point last_rtp_tx_time_;
+    // Time the last real TTS frame was sent. Drives the VG-06 underrun silence
+    // fill: silence is emitted only within tts_underrun_fill_ms of this instant,
+    // so gaps between chunks of one utterance are bridged but TX still idles
+    // shortly after the agent stops speaking. Default-constructed (epoch) so fill
+    // is inactive until the first TTS frame is sent.
+    std::chrono::steady_clock::time_point last_tts_sent_at_{};
     std::chrono::steady_clock::time_point started_at_;
     SessionState state_{SessionState::Created};
     std::string stop_reason_{"running"};
@@ -240,6 +280,13 @@ private:
     bool last_played_seq_valid_{false};
     uint16_t last_played_seq_{0};
     bool has_prev_arrival_{false};
+    // RTP source pinning (only consulted when config_.enforce_rtp_source). Locked
+    // to the first accepted packet's source tuple + SSRC; later mismatches are
+    // dropped as injected (VG-08).
+    bool rtp_source_locked_{false};
+    uint32_t locked_source_ip_{0};
+    uint16_t locked_source_port_{0};
+    uint32_t locked_ssrc_{0};
     uint32_t prev_rtp_timestamp_{0};
     std::chrono::steady_clock::time_point prev_arrival_time_{};
     std::chrono::steady_clock::time_point last_rtcp_report_sent_at_{};

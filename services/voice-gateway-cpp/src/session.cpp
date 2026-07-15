@@ -87,6 +87,14 @@ RtpSession::~RtpSession() {
 }
 
 bool RtpSession::start(std::string& error) {
+    // Single-use guard: the exchange winner is the only caller that proceeds.
+    // Concurrent double-start is serialized here, and a start-stop-start is
+    // rejected outright, so worker threads are never re-created over joinable
+    // members (VG-32).
+    if (ever_started_.exchange(true)) {
+        error = "RtpSession is single-use; construct a new instance to start again";
+        return false;
+    }
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (running_.load()) {
@@ -147,8 +155,25 @@ bool RtpSession::start(std::string& error) {
     int reuse = 1;
     setsockopt(rx_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
 
-    const timeval read_timeout{0, static_cast<suseconds_t>(config_.watchdog_tick_ms * 1000)};
-    setsockopt(rx_fd, SOL_SOCKET, SO_RCVTIMEO, &read_timeout, sizeof(read_timeout));
+    // The RX timeout only needs to be small enough that recvfrom() wakes
+    // promptly to observe running_==false during teardown. Bound it to
+    // [50, 1000] ms and split into a NORMALIZED timeval (tv_usec always in
+    // [0, 1e6)). The previous {0, tick*1000} produced tv_usec >= 1e6 for any
+    // tick >= 1000 ms, which Linux rejects with EINVAL; that error was ignored,
+    // leaving recvfrom() with no timeout so it blocked forever and stop()'s
+    // join() of the receiver hung the session (VG-05). Also check the syscall.
+    const int recv_timeout_ms = std::clamp(config_.watchdog_tick_ms, 50, 1000);
+    timeval read_timeout{};
+    read_timeout.tv_sec = recv_timeout_ms / 1000;
+    read_timeout.tv_usec = static_cast<suseconds_t>((recv_timeout_ms % 1000) * 1000);
+    if (setsockopt(rx_fd, SOL_SOCKET, SO_RCVTIMEO, &read_timeout, sizeof(read_timeout)) != 0) {
+        error = std::string("failed to set RX socket timeout: ") + std::strerror(errno);
+        close(rx_fd);
+        close(tx_fd);
+        rx_socket_.store(-1);
+        tx_socket_.store(-1);
+        return false;
+    }
 
     if (bind(rx_fd, reinterpret_cast<const sockaddr*>(&listen_addr), sizeof(listen_addr)) < 0) {
         error = std::string("failed to bind RX socket: ") + std::strerror(errno);
@@ -180,6 +205,10 @@ bool RtpSession::start(std::string& error) {
         last_received_seq_valid_ = false;
         last_played_seq_valid_ = false;
         has_prev_arrival_ = false;
+        rtp_source_locked_ = false;
+        locked_source_ip_ = 0;
+        locked_source_port_ = 0;
+        locked_ssrc_ = 0;
         prev_rtp_timestamp_ = 0;
         interarrival_jitter_ts_units_ = 0.0;
         last_rtcp_report_sent_at_ = started_at_;
@@ -202,7 +231,10 @@ bool RtpSession::running() const {
 
 bool RtpSession::healthy() const {
     if (!running_.load()) {
-        return true;
+        // A cleanly stopped session is "healthy" (it did its job and left); a
+        // session that DIED (socket_error/internal_error) must not masquerade as
+        // healthy (VG-20).
+        return !ended_in_failure_.load();
     }
     return rx_healthy_.load() && tx_healthy_.load();
 }
@@ -279,12 +311,24 @@ bool RtpSession::enqueue_tts_ulaw(
     }
 
     const std::size_t frame_count = ulaw_audio.size() / static_cast<std::size_t>(kPcmuTimestampStep);
-    const uint32_t segment_id = next_tts_segment_id_++;
-    tts_segments_[segment_id] = TtsSegmentState{frame_count, false};
-    tts_segments_started_total_.fetch_add(1);
-    tts_frames_enqueued_total_.fetch_add(frame_count);
+    const std::size_t cap = config_.tts_max_queue_frames;
 
-    for (std::size_t i = 0; i < frame_count; ++i) {
+    // If this single submission alone exceeds the queue capacity, only its LAST
+    // `cap` frames could ever survive the drop-oldest trim below. Skip the
+    // leading frames instead of copying them just to immediately evict them —
+    // this avoids a transient allocation/lock-hold spike on an oversized body
+    // and makes the accounting honest. The leading (skipped) frames are the
+    // START of the utterance and are genuinely not spoken; that is reported to
+    // the caller via queued_frames rather than masked (VG-25).
+    const std::size_t skip_leading = (frame_count > cap) ? (frame_count - cap) : 0;
+    const std::size_t submit_count = frame_count - skip_leading;
+
+    const uint32_t segment_id = next_tts_segment_id_++;
+    tts_segments_[segment_id] = TtsSegmentState{submit_count, false};
+    tts_segments_started_total_.fetch_add(1);
+    tts_frames_enqueued_total_.fetch_add(submit_count);
+
+    for (std::size_t i = skip_leading; i < frame_count; ++i) {
         const std::size_t offset = i * static_cast<std::size_t>(kPcmuTimestampStep);
         QueuedTtsFrame frame{};
         frame.segment_id = segment_id;
@@ -295,13 +339,20 @@ bool RtpSession::enqueue_tts_ulaw(
         tts_queue_.push_back(std::move(frame));
     }
 
-    while (tts_queue_.size() > config_.tts_max_queue_frames) {
+    // Trim to capacity by dropping the oldest queued frames. Count how many of
+    // THIS submission are evicted so queued_frames reflects only what actually
+    // remains to be played — never the raw submitted count.
+    std::size_t dropped_from_this = 0;
+    while (tts_queue_.size() > cap) {
         const auto dropped = tts_queue_.front();
         tts_queue_.pop_front();
+        if (dropped.segment_id == segment_id) {
+            ++dropped_from_this;
+        }
         mark_tts_frame_dropped_locked(dropped.segment_id);
     }
 
-    queued_frames = frame_count;
+    queued_frames = submit_count - dropped_from_this;
     tts_last_stop_reason_ = "running";
     queue_cv_.notify_one();
     return true;
@@ -328,12 +379,20 @@ void RtpSession::fire_audio_callback(const std::vector<uint8_t>& pcmu_batch) {
         cb = audio_callback_;
     }
     if (cb) {
-        cb(config_.session_id, pcmu_batch);
+        try {
+            cb(config_.session_id, pcmu_batch);
+        } catch (...) {
+            // The callback base64-encodes and builds JSON on the RTP receiver
+            // thread; a std::bad_alloc (or any other exception) must never escape
+            // to the thread entry and std::terminate the whole gateway (VG-12).
+            // Drop this batch and keep receiving.
+        }
     }
 }
 
 void RtpSession::receiver_loop() {
     t_owning_session = this;
+    try {
     while (running_.load()) {
         uint8_t buffer[2048]{};
         sockaddr_in from{};
@@ -383,6 +442,51 @@ void RtpSession::receiver_loop() {
         {
             std::lock_guard<std::mutex> lock(mutex_);
             const auto arrival = std::chrono::steady_clock::now();
+
+            // Optional RTP source pinning (VG-08). Lock onto the first accepted
+            // packet's (source IP, source port, SSRC); drop any later packet from
+            // a different origin as injected. Off by default — see
+            // SessionConfig::enforce_rtp_source. Dropped here BEFORE liveness so a
+            // foreign flood cannot keep the session alive.
+            if (config_.enforce_rtp_source) {
+                const uint32_t src_ip = static_cast<uint32_t>(from.sin_addr.s_addr);
+                const uint16_t src_port = ntohs(from.sin_port);
+                if (!rtp_source_locked_) {
+                    rtp_source_locked_ = true;
+                    locked_source_ip_ = src_ip;
+                    locked_source_port_ = src_port;
+                    locked_ssrc_ = parsed->ssrc;
+                } else if (src_ip != locked_source_ip_ ||
+                           src_port != locked_source_port_ ||
+                           parsed->ssrc != locked_ssrc_) {
+                    invalid_packets_.fetch_add(1);
+                    continue;
+                }
+            }
+
+            // Reject stale (already-played) sequence numbers BEFORE anything
+            // touches liveness, state, or jitter. A stream of late / duplicate /
+            // injected packets must never refresh last_rtp_rx_time_ — otherwise
+            // it silently suppresses the no-RTP watchdog while no new caller
+            // audio is actually arriving (VG-08), and pollutes the jitter
+            // estimate with non-forward packets (VG-31).
+            if (last_played_seq_valid_ && sequence_diff(parsed->sequence_number, last_played_seq_) <= 0) {
+                jitter_buffer_late_drops_.fetch_add(1);
+                dropped_packets_.fetch_add(1);
+                continue;
+            }
+
+            QueuedRtpFrame frame{};
+            frame.sequence_number = parsed->sequence_number;
+            frame.timestamp = parsed->timestamp;
+            frame.payload_size = parsed->payload.size();
+            std::memcpy(frame.payload.data(), parsed->payload.data(), frame.payload_size);
+            if (!insert_jitter_frame_locked(frame)) {
+                // Duplicate of a still-buffered frame: not forward progress.
+                continue;
+            }
+
+            // --- Accepted forward audio from here on ---
             last_rtp_rx_time_ = arrival;
 
             if (!first_rtp_seen_) {
@@ -403,12 +507,6 @@ void RtpSession::receiver_loop() {
             prev_rtp_timestamp_ = parsed->timestamp;
             has_prev_arrival_ = true;
 
-            if (last_played_seq_valid_ && sequence_diff(parsed->sequence_number, last_played_seq_) <= 0) {
-                jitter_buffer_late_drops_.fetch_add(1);
-                dropped_packets_.fetch_add(1);
-                continue;
-            }
-
             if (last_received_seq_valid_) {
                 const uint16_t expected_next = static_cast<uint16_t>(last_received_seq_ + 1);
                 if (parsed->sequence_number != expected_next) {
@@ -420,15 +518,6 @@ void RtpSession::receiver_loop() {
             } else {
                 last_received_seq_valid_ = true;
                 last_received_seq_ = parsed->sequence_number;
-            }
-
-            QueuedRtpFrame frame{};
-            frame.sequence_number = parsed->sequence_number;
-            frame.timestamp = parsed->timestamp;
-            frame.payload_size = parsed->payload.size();
-            std::memcpy(frame.payload.data(), parsed->payload.data(), frame.payload_size);
-            if (!insert_jitter_frame_locked(frame)) {
-                continue;
             }
 
             if (playout_started_) {
@@ -447,6 +536,14 @@ void RtpSession::receiver_loop() {
         if (!parsed->payload.empty()) {
             fire_audio_callback(parsed->payload);
         }
+    }
+    } catch (...) {
+        // Nothing in the loop is expected to throw (the callback is already
+        // guarded; RtpPacket::parse's allocation is the only other source), but
+        // if anything does, fail the session cleanly rather than let it reach
+        // the thread entry and std::terminate the gateway (VG-12).
+        rx_healthy_.store(false);
+        request_stop("internal_error", false);
     }
 }
 
@@ -467,10 +564,12 @@ void RtpSession::transmitter_loop() {
         std::size_t payload_size = 0;
         uint32_t tts_segment_id = 0;
         bool sending_tts = false;
+        uint64_t tts_gen = 0;
 
         {
             std::unique_lock<std::mutex> lock(mutex_);
-            queue_cv_.wait(lock, [this] {
+
+            const auto has_output_ready = [this] {
                 if (!running_.load()) {
                     return true;
                 }
@@ -490,7 +589,22 @@ void RtpSession::transmitter_loop() {
                     return true;
                 }
                 return jitter_buffer_size_ >= config_.jitter_buffer_prefetch_frames;
-            });
+            };
+
+            // Within the underrun-fill window we cannot block indefinitely: we
+            // must wake at the next 20 ms boundary to emit a silence frame that
+            // bridges the gap between TTS chunks (VG-06). Outside the window,
+            // block until there is real audio to send.
+            const bool within_fill_window =
+                config_.tts_underrun_fill_ms > 0 &&
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - last_tts_sent_at_).count() < config_.tts_underrun_fill_ms;
+
+            if (within_fill_window) {
+                queue_cv_.wait_until(lock, next_send_time, has_output_ready);
+            } else {
+                queue_cv_.wait(lock, has_output_ready);
+            }
 
             if (!running_.load()) {
                 break;
@@ -502,11 +616,8 @@ void RtpSession::transmitter_loop() {
                 payload_size = static_cast<std::size_t>(kPcmuTimestampStep);
                 tts_segment_id = tts_frame.segment_id;
                 sending_tts = true;
-            } else {
-                if (!config_.echo_enabled || jitter_buffer_size_ == 0) {
-                    continue;
-                }
-
+                tts_gen = tts_generation_;
+            } else if (config_.echo_enabled && jitter_buffer_size_ > 0) {
                 if (!playout_started_) {
                     playout_started_ = true;
                     if (state_ == SessionState::Buffering || state_ == SessionState::Starting || state_ == SessionState::Degraded) {
@@ -522,6 +633,19 @@ void RtpSession::transmitter_loop() {
                 last_played_seq_ = frame.sequence_number;
                 payload = frame.payload;
                 payload_size = frame.payload_size;
+            } else {
+                // Nothing queued. If we are still within the underrun-fill window
+                // (agent mid-utterance), emit one µ-law silence frame to hold the
+                // RTP cadence; otherwise idle until real audio arrives (VG-06).
+                const bool fill_now =
+                    config_.tts_underrun_fill_ms > 0 &&
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - last_tts_sent_at_).count() < config_.tts_underrun_fill_ms;
+                if (!fill_now) {
+                    continue;
+                }
+                payload.fill(static_cast<uint8_t>(0xFF));  // PCMU digital silence
+                payload_size = static_cast<std::size_t>(kPcmuTimestampStep);
             }
         }
 
@@ -539,6 +663,13 @@ void RtpSession::transmitter_loop() {
         RtpPacket outbound;
         {
             std::lock_guard<std::mutex> lock(mutex_);
+            if (sending_tts && tts_generation_ != tts_gen) {
+                // A barge-in / interrupt / replace cleared the queue after this
+                // frame was dequeued. Drop it rather than speak stale agent audio,
+                // and do NOT consume a sequence number (VG-24).
+                mark_tts_frame_dropped_locked(tts_segment_id);
+                continue;
+            }
             outbound = sequencer_.next_packet({}, 0);
         }
         constexpr std::size_t kRtpHeaderSize = 12;
@@ -584,8 +715,10 @@ void RtpSession::transmitter_loop() {
 
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            last_rtp_tx_time_ = std::chrono::steady_clock::now();
+            const auto tx_now = std::chrono::steady_clock::now();
+            last_rtp_tx_time_ = tx_now;
             if (sending_tts) {
+                last_tts_sent_at_ = tx_now;  // arms the VG-06 underrun silence fill
                 mark_tts_frame_sent_locked(tts_segment_id);
             }
         }
@@ -636,11 +769,15 @@ void RtpSession::watchdog_loop() {
                     transition_state_locked(SessionState::Degraded);
                 }
 
-                if (config_.hold_no_rtp_timeout_ms > 0 &&
-                    config_.hold_no_rtp_timeout_ms <= config_.active_no_rtp_timeout_ms &&
-                    elapsed_since_rx_ms >= config_.hold_no_rtp_timeout_ms) {
-                    timeout_reason = "no_rtp_timeout_hold";
-                } else if (elapsed_since_rx_ms >= config_.active_no_rtp_timeout_ms) {
+                // Hard no-RTP timeout governs on active_no_rtp_timeout_ms.
+                // hold_no_rtp_timeout_ms is intentionally NOT honored: there is
+                // no hold/unhold signal to know a call is genuinely parked, and
+                // its 45s default exceeds active, so the former `hold <= active`
+                // branch was unreachable — it advertised a 45s tolerance while
+                // calls actually ended at 8s (VG-33). Governing solely on active
+                // keeps the real, tested behavior explicit. A longer parked-call
+                // ceiling would require wiring an actual hold state first.
+                if (elapsed_since_rx_ms >= config_.active_no_rtp_timeout_ms) {
                     timeout_reason = "no_rtp_timeout";
                 }
             }
@@ -654,6 +791,9 @@ void RtpSession::watchdog_loop() {
 }
 
 void RtpSession::clear_tts_queue_locked(const std::string& reason) {
+    // Invalidate any TTS frame the transmitter has already dequeued but not yet
+    // sent, so a barge-in/replace/stop cannot leak one stale frame (VG-24).
+    ++tts_generation_;
     const bool had_tts_activity = !tts_queue_.empty() || !tts_segments_.empty();
     while (!tts_queue_.empty()) {
         const auto frame = tts_queue_.front();
@@ -734,6 +874,7 @@ void RtpSession::request_stop(const std::string& reason, const bool timeout_even
         // transition block, so state_ is never Stopped here.
         const bool failed_state = (reason == "socket_error" || reason == "internal_error");
         if (failed_state) {
+            ended_in_failure_.store(true);
             transition_state_locked(SessionState::Failed);
         }
         transition_state_locked(SessionState::Stopping);
@@ -860,6 +1001,25 @@ void RtpSession::reset_jitter_buffer_locked() {
     jitter_min_seq_ = 0;
 }
 
+// Mark every slot free WITHOUT reallocating, restoring the invariant
+// jitter_buffer_size_ == (number of occupied slots) == 0. Used as the recovery
+// path when the min-seq linear scan cannot reach a still-occupied slot (a
+// sequence discontinuity larger than the ring can represent, e.g. an SSRC
+// restart). Leaving those slots occupied while zeroing the size is what let
+// drop_oldest_jitter_frame_locked() early-return on size==0 while a slot stayed
+// occupied, spinning insert_jitter_frame_locked()'s eviction loop forever under
+// mutex_ (VG-02). Safe to call from insert/pop/drop: it never reallocates
+// jitter_slots_, so any &jitter_slots_[index] the caller re-derives afterward
+// stays valid.
+void RtpSession::clear_all_jitter_slots_locked() {
+    for (auto& slot : jitter_slots_) {
+        slot.occupied = false;
+    }
+    jitter_buffer_size_ = 0;
+    jitter_min_seq_valid_ = false;
+    jitter_min_seq_ = 0;
+}
+
 std::size_t RtpSession::jitter_index(const uint16_t sequence_number) const {
     return static_cast<std::size_t>(sequence_number) & (config_.jitter_buffer_capacity_frames - 1);
 }
@@ -876,8 +1036,17 @@ bool RtpSession::insert_jitter_frame_locked(const QueuedRtpFrame& frame) {
         return false;
     }
 
+    std::size_t evict_guard = 0;
     while (jitter_buffer_size_ >= config_.jitter_buffer_capacity_frames || slot->occupied) {
         drop_oldest_jitter_frame_locked();
+        // Guarantee forward progress. drop_oldest_jitter_frame_locked() +
+        // advance_jitter_min_seq_locked() now always either free a slot or clear
+        // the whole ring, so this loop terminates; the guard is a hard backstop
+        // against any future bookkeeping drift re-introducing the VG-02 spin.
+        if (++evict_guard > config_.jitter_buffer_capacity_frames) {
+            clear_all_jitter_slots_locked();
+            break;
+        }
         index = jitter_index(frame.sequence_number);
         slot = &jitter_slots_[index];
         if (slot->occupied && slot->frame.sequence_number == frame.sequence_number) {
@@ -886,6 +1055,11 @@ bool RtpSession::insert_jitter_frame_locked(const QueuedRtpFrame& frame) {
         }
     }
 
+    // Re-derive after the eviction loop: clear_all_jitter_slots_locked() may have
+    // run above, and although it never reallocates, recomputing keeps the write
+    // target unambiguous.
+    index = jitter_index(frame.sequence_number);
+    slot = &jitter_slots_[index];
     slot->occupied = true;
     slot->frame = frame;
     ++jitter_buffer_size_;
@@ -967,8 +1141,12 @@ void RtpSession::advance_jitter_min_seq_locked() {
         }
     }
 
-    jitter_min_seq_valid_ = false;
-    jitter_buffer_size_ = 0;
+    // No reachable successor within the ring's representable window. Any slots
+    // still marked occupied are stranded beyond that window (a >capacity
+    // sequence jump / stream restart) and can never be popped or dropped by
+    // seq-directed logic. Clear them outright so size stays consistent with
+    // occupancy; otherwise the next colliding insert() spins forever (VG-02).
+    clear_all_jitter_slots_locked();
 }
 
 void RtpSession::maybe_send_rtcp_report(

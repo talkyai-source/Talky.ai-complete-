@@ -22,7 +22,7 @@ SessionRegistry::~SessionRegistry() {
     }
 }
 
-StartSessionResult SessionRegistry::start_session(const SessionConfig& config, std::string& error) {
+StartSessionResult SessionRegistry::start_session(const SessionConfig& config, std::string& error, RtpSession::AudioCallback audio_cb) {
     if (!validate_config(config, error)) {
         return StartSessionResult::InvalidConfig;
     }
@@ -33,7 +33,16 @@ StartSessionResult SessionRegistry::start_session(const SessionConfig& config, s
         return StartSessionResult::AlreadyExists;
     }
 
+    if (sessions_.size() >= kMaxConcurrentSessions) {
+        error = "maximum concurrent sessions reached";
+        return StartSessionResult::InternalError;
+    }
+
     auto session = std::make_shared<RtpSession>(config);
+    // Install the STT sink BEFORE start() launches the receiver thread (VG-11).
+    if (audio_cb) {
+        session->set_audio_callback(std::move(audio_cb));
+    }
     if (!session->start(error)) {
         return StartSessionResult::InternalError;
     }
@@ -74,19 +83,33 @@ RtpSessionPtr SessionRegistry::get_session(const std::string& session_id) const 
     return it->second;
 }
 
-std::vector<SessionStatsSnapshot> SessionRegistry::list_sessions() const {
-    std::vector<SessionStatsSnapshot> rows;
+// Copy the live session shared_ptrs under mutex_, then release it. Callers below
+// invoke per-session snapshot()/healthy() (which take the SESSION mutex) OUTSIDE
+// the registry lock, so a single slow/stuck session can no longer hold up
+// unrelated start/stop/lookup by blocking behind the registry lock (VG-30).
+std::vector<RtpSessionPtr> SessionRegistry::collect_sessions_locked_copy() const {
+    std::vector<RtpSessionPtr> sessions_copy;
     std::lock_guard<std::mutex> lock(mutex_);
-    rows.reserve(sessions_.size());
+    sessions_copy.reserve(sessions_.size());
     for (const auto& [_, session] : sessions_) {
+        sessions_copy.push_back(session);
+    }
+    return sessions_copy;
+}
+
+std::vector<SessionStatsSnapshot> SessionRegistry::list_sessions() const {
+    const std::vector<RtpSessionPtr> sessions_copy = collect_sessions_locked_copy();
+    std::vector<SessionStatsSnapshot> rows;
+    rows.reserve(sessions_copy.size());
+    for (const auto& session : sessions_copy) {
         rows.push_back(session->snapshot());
     }
     return rows;
 }
 
 bool SessionRegistry::all_sessions_healthy() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    for (const auto& [_, session] : sessions_) {
+    const std::vector<RtpSessionPtr> sessions_copy = collect_sessions_locked_copy();
+    for (const auto& session : sessions_copy) {
         if (!session->healthy()) {
             return false;
         }
@@ -97,14 +120,22 @@ bool SessionRegistry::all_sessions_healthy() const {
 ProcessStatsSnapshot SessionRegistry::snapshot() const {
     ProcessStatsSnapshot snap;
 
-    std::lock_guard<std::mutex> lock(mutex_);
-    snap.sessions_started_total = sessions_started_total_;
-    snap.sessions_stopped_total = sessions_stopped_total_;
-    snap.sessions_reaped_total = sessions_reaped_total_;
+    std::vector<RtpSessionPtr> sessions_copy;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        snap.sessions_started_total = sessions_started_total_;
+        snap.sessions_stopped_total = sessions_stopped_total_;
+        snap.sessions_reaped_total = sessions_reaped_total_;
+        sessions_copy.reserve(sessions_.size());
+        for (const auto& [_, session] : sessions_) {
+            sessions_copy.push_back(session);
+        }
+    }
+
     snap.active_sessions = 0;
     snap.stopped_sessions = 0;
 
-    for (const auto& [_, session] : sessions_) {
+    for (const auto& session : sessions_copy) {
         const SessionStatsSnapshot session_stats = session->snapshot();
         if (session->running()) {
             ++snap.active_sessions;
@@ -194,8 +225,21 @@ void SessionRegistry::reap_once() {
 }
 
 bool SessionRegistry::validate_config(const SessionConfig& config, std::string& error) {
+    // Upper bounds turn "valid lower-bound / correct type" into actual resource
+    // governance: without them a single well-formed request can size a
+    // billion-slot jitter ring or a giant TTS queue and OOM the process (VG-17).
+    constexpr std::size_t kMaxJitterBufferCapacityFrames = 4096;  // ~82s @ 20ms
+    constexpr std::size_t kMaxTtsQueueFrames = 3000;              // ~60s @ 20ms
+    constexpr std::size_t kMaxSessionIdLength = 128;
+    constexpr int kMaxAudioCallbackBatchFrames = 100;            // ~2s @ 20ms
+
     if (config.session_id.empty()) {
         error = "session_id is required";
+        return false;
+    }
+
+    if (config.session_id.size() > kMaxSessionIdLength) {
+        error = "session_id exceeds maximum length";
         return false;
     }
 
@@ -241,13 +285,18 @@ bool SessionRegistry::validate_config(const SessionConfig& config, std::string& 
         return false;
     }
 
-    if (config.watchdog_tick_ms < 50) {
-        error = "watchdog_tick_ms must be >= 50";
+    if (config.watchdog_tick_ms < 50 || config.watchdog_tick_ms > 5000) {
+        error = "watchdog_tick_ms must be between 50 and 5000";
         return false;
     }
 
     if (config.jitter_buffer_capacity_frames == 0 || (config.jitter_buffer_capacity_frames & (config.jitter_buffer_capacity_frames - 1)) != 0) {
         error = "jitter_buffer_capacity_frames must be a non-zero power of two";
+        return false;
+    }
+
+    if (config.jitter_buffer_capacity_frames > kMaxJitterBufferCapacityFrames) {
+        error = "jitter_buffer_capacity_frames exceeds maximum";
         return false;
     }
 
@@ -258,6 +307,16 @@ bool SessionRegistry::validate_config(const SessionConfig& config, std::string& 
 
     if (config.tts_max_queue_frames == 0) {
         error = "tts_max_queue_frames must be >= 1";
+        return false;
+    }
+
+    if (config.tts_max_queue_frames > kMaxTtsQueueFrames) {
+        error = "tts_max_queue_frames exceeds maximum";
+        return false;
+    }
+
+    if (config.audio_callback_batch_frames < 1 || config.audio_callback_batch_frames > kMaxAudioCallbackBatchFrames) {
+        error = "audio_callback_batch_frames must be between 1 and its maximum";
         return false;
     }
 
