@@ -46,29 +46,39 @@ async def schedule_reminder(
     """
     Schedule a reminder for a meeting or lead.
 
-    Day 28: Integrates with AssistantAgentService for workflow orchestration.
+    Inserts a row into `reminders`, which the background reminder_worker picks up
+    and delivers (SMS to the lead's number if present, else email). When a
+    meeting_id is given, an `offset` like '-1h'/'-10m' is applied relative to the
+    meeting's start_time; otherwise `scheduled_at` (absolute) or a 1h default.
+
+    Delegates to the SAME module-level `schedule_reminder` used by
+    execute_action_plan (assistant_plan_steps), so the tool path and the
+    action-plan path can't drift. (Previously this called a nonexistent
+    AssistantAgentService method and always failed.)
     """
     try:
-        from app.services.assistant_agent_service import get_assistant_agent_service
+        from app.services.assistant_plan_steps import schedule_reminder as _schedule_reminder_step
 
-        service = get_assistant_agent_service(db_client)
-
-        # If meeting_id provided, get meeting details for chaining
-        chained_result = {}
+        # If meeting_id is provided, pull its start_time/title/link so an offset
+        # can be applied relative to the meeting.
+        chained_result: Dict[str, Any] = {}
         if meeting_id:
-            meeting_response = db_client.table("meetings").select(
-                "id, title, start_time, join_link"
-            ).eq("id", meeting_id).eq("tenant_id", tenant_id).single().execute()
+            try:
+                meeting_response = db_client.table("meetings").select(
+                    "id, title, start_time, join_link"
+                ).eq("id", meeting_id).eq("tenant_id", tenant_id).single().execute()
+                if meeting_response.data:
+                    chained_result = {
+                        "meeting_id": meeting_response.data["id"],
+                        "title": meeting_response.data.get("title"),
+                        "start_time": meeting_response.data.get("start_time"),
+                        "join_link": meeting_response.data.get("join_link"),
+                    }
+            except Exception as me:  # noqa: BLE001
+                logger.warning("schedule_reminder: meeting lookup failed: %s", me)
 
-            if meeting_response.data:
-                chained_result = {
-                    "meeting_id": meeting_response.data["id"],
-                    "title": meeting_response.data.get("title"),
-                    "start_time": meeting_response.data.get("start_time"),
-                    "join_link": meeting_response.data.get("join_link")
-                }
-
-        result = await service._schedule_reminder(
+        return await _schedule_reminder_step(
+            db_client=db_client,
             tenant_id=tenant_id,
             params={
                 "meeting_id": meeting_id,
@@ -76,13 +86,11 @@ async def schedule_reminder(
                 "offset": offset,
                 "scheduled_at": scheduled_at,
                 "message": message,
-                "reminder_type": reminder_type
+                "reminder_type": reminder_type,
             },
             chained_result=chained_result,
-            conversation_id=conversation_id
+            conversation_id=conversation_id,
         )
-
-        return result
 
     except Exception as e:
         logger.error(f"Error scheduling reminder: {e}")

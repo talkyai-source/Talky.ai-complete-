@@ -213,7 +213,18 @@ class GoogleCalendarConnector(CalendarProvider):
                     "conferenceSolutionKey": {"type": "hangoutsMeet"}
                 }
             }
-        
+
+        # Calendar-native reminders ("meeting timer") so the event itself alerts
+        # the organizer/attendees ahead of time — a popup 10 min before and an
+        # email 30 min before — instead of relying on the account's defaults.
+        event_body["reminders"] = {
+            "useDefault": False,
+            "overrides": [
+                {"method": "popup", "minutes": 10},
+                {"method": "email", "minutes": 30},
+            ],
+        }
+
         params = {}
         if add_video_conference:
             params["conferenceDataVersion"] = "1"

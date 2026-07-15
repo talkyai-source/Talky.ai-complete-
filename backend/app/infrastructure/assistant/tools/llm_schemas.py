@@ -69,6 +69,80 @@ GROQ_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "get_qualified_leads",
+            "description": "Recently-qualified leads (newest first) WITH phone numbers and follow-up notes. Use for 'any new leads?', 'who qualified today/during this campaign?', or to alert the client about qualified leads — always read out name + number + follow-up.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "campaign_id": {"type": "string", "description": "Optional: only leads from this campaign"},
+                    "limit": {"type": "integer", "description": "Max leads to return (default 10)"}
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_emails",
+            "description": "List recent emails (subject, sender, snippet, id) from the connected Gmail inbox. Optional Gmail search `query` (e.g. 'from:jane@acme.com', 'subject:demo', 'newer_than:2d') and unread_only. Read-only — then call read_email for a full message.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Gmail search string (optional)"},
+                    "unread_only": {"type": "boolean", "description": "Only unread emails"},
+                    "max_results": {"type": "integer", "description": "How many to list (default 10, max 25)"}
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_email",
+            "description": "Read ONE email's full body by its message_id (obtained from read_emails). Read-only.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message_id": {"type": "string", "description": "The email's message id from read_emails"}
+                },
+                "required": ["message_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "drive_list_files",
+            "description": "List/search files in the connected Google Drive (name, type, link, id). Optional `query` matches file names. Read-only — then call drive_read_file to read a text file's contents.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search term matched against file names (optional)"},
+                    "max_results": {"type": "integer", "description": "How many to list (default 20, max 50)"}
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "drive_read_file",
+            "description": "Read a text-like Drive file's contents by file_id (from drive_list_files). Non-text/oversized files return a link instead of content. Read-only.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_id": {"type": "string", "description": "The file id from drive_list_files"}
+                },
+                "required": ["file_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_campaigns",
             "description": "Get all campaigns with status and progress",
             "parameters": {

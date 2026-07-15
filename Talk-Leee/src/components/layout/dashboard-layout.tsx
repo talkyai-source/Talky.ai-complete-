@@ -21,6 +21,7 @@ import { isWithinFreshLoginGrace } from "@/lib/http-client";
 // Next 15 + Webpack `dynamic({ ssr: false })` chunk-graph quirk that
 // produced "Cannot read properties of undefined (reading 'call')".
 import { FloatingAssistant } from "@/components/assistant/floating-assistant";
+import { QualifiedLeadAlerts } from "@/components/notifications/qualified-lead-alerts";
 
 interface DashboardLayoutProps {
     children: React.ReactNode;
@@ -208,6 +209,9 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
 
             {/* Floating text assistant — bottom-right across the app. */}
             <FloatingAssistant />
+
+            {/* Real-time qualified-lead toasts (reuses the Event Stream poll). */}
+            <QualifiedLeadAlerts />
         </div>
     );
 }

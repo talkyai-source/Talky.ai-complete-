@@ -149,6 +149,46 @@ def _outcome_is_lead(outcome: str) -> bool:
     return o.startswith("qualified") or o.startswith("callback")
 
 
+def _lead_display_name(row: dict) -> str:
+    name = " ".join(p for p in [(row.get("first_name") or "").strip(), (row.get("last_name") or "").strip()] if p).strip()
+    return name or (row.get("phone_number") or "New lead")
+
+
+async def _emit_qualified_lead_alert(conn, tenant_id: str, call_id: str, row: dict, note: str) -> None:
+    """Write a qualified-lead row to the Event Stream (best-effort, never raises).
+
+    Runs on the SAME tenant-scoped connection as the qualify UPDATE so the
+    stream_events INSERT is under the correct RLS context.
+    """
+    try:
+        from app.domain.services.event_emitter import emit_event
+
+        name = _lead_display_name(row)
+        phone = (row.get("phone_number") or "").strip()
+        campaign_id = row.get("campaign_id")
+        title = f"Qualified lead: {name}" + (f" · {phone}" if phone else "")
+        await emit_event(
+            conn,
+            tenant_id=tenant_id,
+            category="alert",
+            severity="info",
+            title=title,
+            description=note,
+            related_campaign_id=str(campaign_id) if campaign_id else None,
+            related_call_id=call_id,
+            metadata={
+                "kind": "qualified_lead",
+                "lead_id": str(row.get("lead_id")) if row.get("lead_id") else None,
+                "name": name,
+                "phone_number": phone or None,
+                "follow_up_note": note,
+                "campaign_id": str(campaign_id) if campaign_id else None,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 — alerting must never break qualification
+        logger.warning("qualified_lead alert emit failed for call %s: %s", call_id, exc)
+
+
 async def mark_lead_from_summary(
     pool, tenant_id: str, call_id: str, summary: dict
 ) -> bool:
@@ -167,8 +207,11 @@ async def mark_lead_from_summary(
         tips = summary.get("follow_up_tips") or []
         first_tip = (tips[0].strip() if tips and isinstance(tips[0], str) else "")
         note = (first_tip or summary.get("next_step") or summary.get("headline") or "").strip()
+        note = note or "Lead — please follow up."
         async with acquire_with_tenant(pool, tenant_id) as conn:
-            result = await conn.execute(
+            # RETURNING gives us the lead's identity so we can raise a real-time
+            # alert with the name + number, not just silently flip the flag.
+            row = await conn.fetchrow(
                 """
                 UPDATE leads AS l
                    SET is_lead          = true,
@@ -182,12 +225,20 @@ async def mark_lead_from_summary(
                    AND l.is_lead = false
                    AND c.tenant_id = $3::uuid
                    AND l.tenant_id = $3::uuid
+                RETURNING l.id AS lead_id, l.first_name, l.last_name,
+                          l.phone_number, l.campaign_id
                 """,
                 call_id,
-                note or "Lead — please follow up.",
+                note,
                 tenant_id,
             )
-        flagged = result.endswith("1") if isinstance(result, str) else False
+            flagged = row is not None
+            if flagged:
+                # Alert the client in real time (Event Stream, already polled by
+                # the dashboard) so a qualified lead during an active campaign is
+                # surfaced immediately with the contact's name + number — instead
+                # of the flag sitting unseen until someone opens Contacts.
+                await _emit_qualified_lead_alert(conn, tenant_id, call_id, dict(row), note)
         if flagged:
             logger.info("lead_marked call=%s tenant=%s note=%r", call_id, tenant_id, note)
         return flagged

@@ -232,7 +232,11 @@ class OutlookCalendarConnector(CalendarProvider):
             # Create as Teams meeting
             event_body["isOnlineMeeting"] = True
             event_body["onlineMeetingProvider"] = "teamsForBusiness"
-        
+
+        # Calendar-native reminder ("meeting timer"): alert 15 minutes before.
+        event_body["isReminderOn"] = True
+        event_body["reminderMinutesBeforeStart"] = 15
+
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{self.API_BASE_URL}/me/calendar/events",

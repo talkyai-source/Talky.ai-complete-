@@ -71,6 +71,53 @@ async def get_leads(
         return {"error": str(e)}
 
 
+async def get_qualified_leads(
+    tenant_id: str,
+    db_client: Client,
+    campaign_id: Optional[str] = None,
+    limit: int = 10,
+) -> Dict[str, Any]:
+    """Recently-qualified leads, newest first, WITH phone numbers + follow-up.
+
+    This is the "who just became a lead?" tool — it powers alerting the client
+    about qualified leads during active campaigns (name, number, and what the
+    follow-up is). Ordered by qualified_at so the freshest wins.
+    """
+    try:
+        capped = max(1, min(int(limit or 10), 50))
+        query = (
+            db_client.table("leads")
+            .select(_LEAD_LIST_COLS + ", campaign_id, qualified_call_id")
+            .eq("tenant_id", tenant_id)
+            .neq("status", "deleted")
+            .eq("is_lead", True)
+        )
+        if campaign_id:
+            query = query.eq("campaign_id", campaign_id)
+        response = query.order("qualified_at", desc=True).limit(capped).execute()
+
+        leads = []
+        for r in (response.data or []):
+            leads.append({
+                "id": r.get("id"),
+                "name": _full_name(r),
+                "phone_number": r.get("phone_number"),
+                "email": r.get("email"),
+                "campaign_id": r.get("campaign_id"),
+                "follow_up_note": r.get("follow_up_note"),
+                "qualified_at": r.get("qualified_at"),
+                "last_call_result": r.get("last_call_result"),
+            })
+        return {
+            "count": len(leads),
+            "qualified_leads": leads,
+            "note": "Present each by NAME and NUMBER with the follow-up. These are the leads to alert the client about.",
+        }
+    except Exception as e:
+        logger.error(f"Error getting qualified leads: {e}")
+        return {"error": str(e)}
+
+
 class GetLeadFollowupInput(BaseModel):
     """Input for get_lead_followup tool. Provide ONE of the identifiers."""
     lead_id: Optional[str] = Field(None, description="Lead/contact id")
