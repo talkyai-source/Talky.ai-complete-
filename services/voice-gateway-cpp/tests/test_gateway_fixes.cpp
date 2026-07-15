@@ -327,6 +327,47 @@ void test_control_plane_callback_validation() {
     server_thread.join();
 }
 
+// Batch C (VG-03/#1): a handler stuck in read_request's recv() (client declared a
+// body but sent none) must be force-unblocked by stop()'s socket shutdown, so
+// shutdown drains it and returns instead of hanging or proceeding while it runs.
+void test_shutdown_drains_inflight_handler() {
+    voice_gateway::SessionRegistry registry;
+    voice_gateway::HttpServer server("127.0.0.1", 18098, registry);
+    std::string err;
+    check(server.start(err), "vg03_server_start");
+    std::thread server_thread([&server] { server.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+
+    const int fd = socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(18098);
+    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+    check(connect(fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == 0, "vg03_client_connected");
+
+    // Declares a 100-byte body but sends none -> the handler blocks in recv().
+    const std::string partial = "POST /v1/sessions/start HTTP/1.1\r\nHost: x\r\nContent-Length: 100\r\n\r\n";
+    (void)send(fd, partial.data(), partial.size(), 0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));  // let the handler reach recv()
+
+    auto stop_fut = std::async(std::launch::async, [&server] {
+        server.stop();  // must shutdown the stuck client socket and drain, no timeout escape
+        return true;
+    });
+    const bool stopped = stop_fut.wait_for(std::chrono::seconds(10)) == std::future_status::ready;
+    check(stopped, "vg03_stop_drains_stuck_handler_no_hang");
+    if (stopped) {
+        (void)stop_fut.get();
+        server_thread.join();
+    }
+
+    // After drain, the server closed our socket (finish_request) — recv sees EOF.
+    char buf[8];
+    const ssize_t n = recv(fd, buf, sizeof(buf), 0);
+    check(n <= 0, "vg03_client_socket_closed_by_server");
+    close(fd);
+}
+
 }  // namespace
 
 int main() {
@@ -334,6 +375,7 @@ int main() {
     test_jitter_flood_no_deadlock();
     test_stt_reorder_ordering();
     test_control_plane_callback_validation();
+    test_shutdown_drains_inflight_handler();
     std::cout << "passed=" << g_pass << " failed=" << g_fail << "\n";
     return g_fail == 0 ? 0 : 1;
 }

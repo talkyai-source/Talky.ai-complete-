@@ -200,7 +200,13 @@ void SessionRegistry::reaper_loop() {
             break;
         }
         lock.unlock();
-        reap_once();
+        try {
+            reap_once();
+        } catch (...) {
+            // A single failed sweep (e.g. std::bad_alloc) must not escape the
+            // thread entry and std::terminate the gateway (#2); skip and retry
+            // next interval.
+        }
         lock.lock();
     }
 }

@@ -16,6 +16,7 @@
 #include <cstring>
 #include <deque>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <sstream>
@@ -637,6 +638,7 @@ public:
 
 private:
     void run() {
+      try {
         for (;;) {
             std::string body;
             {
@@ -666,6 +668,10 @@ private:
                 }
             }
         }
+      } catch (...) {
+        // Contain any exception (e.g. std::bad_alloc building the JSON) so it
+        // cannot reach the thread entry and std::terminate the gateway (#2).
+      }
     }
 
     const std::string url_;
@@ -871,39 +877,83 @@ void HttpServer::run() {
         setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &io_timeout, sizeof(io_timeout));
         setsockopt(client_fd, SOL_SOCKET, SO_SNDTIMEO, &io_timeout, sizeof(io_timeout));
 
-        // Admission control: cap concurrent handlers, and contain a thread-spawn
-        // failure so it can never escape run() and std::terminate the gateway
-        // (VG-04). The handler decrements the counter when it finishes.
+        // Admission control (VG-04): cap concurrent handlers. The fd is NOT yet
+        // tracked here, so reject paths close it directly.
         if (active_handlers_.fetch_add(1) + 1 > kMaxActiveHandlers) {
             active_handlers_.fetch_sub(1);
             write_response(client_fd, 503, "Service Unavailable", "{\"error\":\"too_many_connections\"}");
-            close(client_fd);
+            ::close(client_fd);
             continue;
         }
+
+        // Track the fd so shutdown can force it closed (VG-03). Refuse to start a
+        // handler once draining has begun so the handler count cannot rise after
+        // shutdown starts.
+        {
+            std::lock_guard<std::mutex> lk(handlers_mutex_);
+            if (draining_) {
+                active_handlers_.fetch_sub(1);
+                ::close(client_fd);
+                continue;
+            }
+            active_client_fds_.insert(client_fd);
+        }
+
         try {
             std::thread([this, client_fd] {
-                handle_client(client_fd);
-                active_handlers_.fetch_sub(1);
+                // RAII: finish_request runs on EVERY exit (normal or exception),
+                // so the fd is untracked+closed and the count/CV updated exactly
+                // once. shared_ptr(nullptr, deleter) fires the deleter at scope end.
+                const std::shared_ptr<void> cleanup(nullptr, [this, client_fd](void*) {
+                    finish_request(client_fd);
+                });
+                try {
+                    handle_client(client_fd);
+                } catch (...) {
+                    // Contain any handler exception (e.g. std::bad_alloc, or a
+                    // std::system_error from spawning the callback-sender worker)
+                    // so it cannot escape the thread entry and std::terminate the
+                    // whole gateway (finding #2 / VG-04). cleanup still runs.
+                }
             }).detach();
         } catch (...) {
-            active_handlers_.fetch_sub(1);
+            // Thread spawn itself failed; the fd is already tracked, so
+            // finish_request untracks + closes it and rebalances the count.
             write_response(client_fd, 503, "Service Unavailable", "{\"error\":\"handler_spawn_failed\"}");
-            close(client_fd);
+            finish_request(client_fd);
         }
+    }
+}
+
+void HttpServer::finish_request(int client_fd) {
+    bool erased;
+    {
+        std::lock_guard<std::mutex> lk(handlers_mutex_);
+        erased = active_client_fds_.erase(client_fd) > 0;
+        if (erased) {
+            ::close(client_fd);
+        }
+    }
+    if (erased) {
+        active_handlers_.fetch_sub(1);
+        handlers_cv_.notify_all();
     }
 }
 
 void HttpServer::stop() {
     running_.store(false);
-    // Drain in-flight handlers so none is still executing (touching this server /
-    // the registry) when they get destroyed after we return (VG-03). Bounded:
-    // every client socket carries a 5s SO_RCVTIMEO/SNDTIMEO, so each handler
-    // finishes within ~5s; wait a little past that, then proceed regardless so
-    // shutdown always terminates. The listener fd is closed by the destructor,
-    // after run() has been joined.
-    for (int waited_ms = 0; active_handlers_.load() > 0 && waited_ms < 8000; waited_ms += 20) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    // Stop admission, force every in-flight handler's client socket to return
+    // from recv/send, then wait — with NO timeout escape — until every handler
+    // has finished (untracked itself). This guarantees no detached handler is
+    // still touching this server / the registry when they are destroyed after we
+    // return (VG-03 / finding #1). The socket shutdown bounds the wait; the
+    // listener fd is closed by the destructor once run() has been joined.
+    std::unique_lock<std::mutex> lk(handlers_mutex_);
+    draining_ = true;
+    for (const int fd : active_client_fds_) {
+        ::shutdown(fd, SHUT_RDWR);
     }
+    handlers_cv_.wait(lk, [this] { return active_client_fds_.empty(); });
 }
 
 bool HttpServer::healthy() const {
@@ -919,7 +969,7 @@ void HttpServer::handle_client(const int client_fd) {
     const auto request = read_request(client_fd);
     if (!request.has_value()) {
         write_response(client_fd, 400, "Bad Request", "{\"error\":\"invalid_http_request\"}");
-        close(client_fd);
+        finish_request(client_fd);
         return;
     }
 
@@ -927,7 +977,7 @@ void HttpServer::handle_client(const int client_fd) {
     // bearer token when VOICE_GATEWAY_AUTH_TOKEN is configured; a no-op otherwise.
     if (!(request->method == "GET" && request->path == "/health") && !request_authorized(request.value())) {
         write_response(client_fd, 401, "Unauthorized", "{\"error\":\"unauthorized\"}");
-        close(client_fd);
+        finish_request(client_fd);
         return;
     }
 
@@ -935,19 +985,19 @@ void HttpServer::handle_client(const int client_fd) {
         const bool is_healthy = healthy();
         const std::string body = std::string("{\"status\":\"") + (is_healthy ? "ok" : "degraded") + "\",\"io_loop_healthy\":" + (is_healthy ? "true" : "false") + "}";
         write_response(client_fd, is_healthy ? 200 : 503, is_healthy ? "OK" : "Service Unavailable", body);
-        close(client_fd);
+        finish_request(client_fd);
         return;
     }
 
     if (request->method == "GET" && request->path == "/stats") {
         write_response(client_fd, 200, "OK", process_stats_json(registry_.snapshot()));
-        close(client_fd);
+        finish_request(client_fd);
         return;
     }
 
     if (request->method == "GET" && request->path == "/v1/sessions") {
         write_response(client_fd, 200, "OK", sessions_list_json(registry_.list_sessions()));
-        close(client_fd);
+        finish_request(client_fd);
         return;
     }
 
@@ -981,14 +1031,14 @@ void HttpServer::handle_client(const int client_fd) {
         if (!session_id.has_value() || !listen_ip.has_value() || !listen_port.has_value() ||
             !remote_ip.has_value() || !remote_port.has_value() || !codec.has_value() || !ptime_ms.has_value()) {
             write_response(client_fd, 400, "Bad Request", "{\"error\":\"missing_required_start_fields\"}");
-            close(client_fd);
+            finish_request(client_fd);
             return;
         }
 
         if (listen_port.value() <= 0 || listen_port.value() > 65535 ||
             remote_port.value() <= 0 || remote_port.value() > 65535) {
             write_response(client_fd, 400, "Bad Request", "{\"error\":\"invalid_port_range\"}");
-            close(client_fd);
+            finish_request(client_fd);
             return;
         }
 
@@ -1021,7 +1071,7 @@ void HttpServer::handle_client(const int client_fd) {
         if (jitter_buffer_capacity_frames.has_value()) {
             if (jitter_buffer_capacity_frames.value() <= 0) {
                 write_response(client_fd, 400, "Bad Request", "{\"error\":\"invalid_jitter_buffer_capacity_frames\"}");
-                close(client_fd);
+                finish_request(client_fd);
                 return;
             }
             config.jitter_buffer_capacity_frames = static_cast<std::size_t>(jitter_buffer_capacity_frames.value());
@@ -1029,7 +1079,7 @@ void HttpServer::handle_client(const int client_fd) {
         if (jitter_buffer_prefetch_frames.has_value()) {
             if (jitter_buffer_prefetch_frames.value() <= 0) {
                 write_response(client_fd, 400, "Bad Request", "{\"error\":\"invalid_jitter_buffer_prefetch_frames\"}");
-                close(client_fd);
+                finish_request(client_fd);
                 return;
             }
             config.jitter_buffer_prefetch_frames = static_cast<std::size_t>(jitter_buffer_prefetch_frames.value());
@@ -1040,7 +1090,7 @@ void HttpServer::handle_client(const int client_fd) {
         if (tts_max_queue_frames.has_value()) {
             if (tts_max_queue_frames.value() <= 0) {
                 write_response(client_fd, 400, "Bad Request", "{\"error\":\"invalid_tts_max_queue_frames\"}");
-                close(client_fd);
+                finish_request(client_fd);
                 return;
             }
             config.tts_max_queue_frames = static_cast<std::size_t>(tts_max_queue_frames.value());
@@ -1050,7 +1100,7 @@ void HttpServer::handle_client(const int client_fd) {
             // the gateway will POST caller audio to them (VG-18).
             if (!is_allowed_callback_url(audio_callback_url.value())) {
                 write_response(client_fd, 400, "Bad Request", "{\"error\":\"callback_url_not_allowed\"}");
-                close(client_fd);
+                finish_request(client_fd);
                 return;
             }
             config.audio_callback_url = audio_callback_url.value();
@@ -1118,24 +1168,24 @@ void HttpServer::handle_client(const int client_fd) {
 
         if (result == StartSessionResult::Started) {
             write_response(client_fd, 200, "OK", "{\"status\":\"started\",\"session_id\":\"" + escape_json(config.session_id) + "\"}");
-            close(client_fd);
+            finish_request(client_fd);
             return;
         }
 
         if (result == StartSessionResult::AlreadyExists) {
             write_response(client_fd, 409, "Conflict", "{\"status\":\"already_exists\",\"error\":\"" + escape_json(error) + "\"}");
-            close(client_fd);
+            finish_request(client_fd);
             return;
         }
 
         if (result == StartSessionResult::InternalError) {
             write_response(client_fd, 500, "Internal Server Error", "{\"status\":\"failed\",\"error\":\"" + escape_json(error) + "\"}");
-            close(client_fd);
+            finish_request(client_fd);
             return;
         }
 
         write_response(client_fd, 400, "Bad Request", "{\"status\":\"failed\",\"error\":\"" + escape_json(error) + "\"}");
-        close(client_fd);
+        finish_request(client_fd);
         return;
     }
 
@@ -1144,7 +1194,7 @@ void HttpServer::handle_client(const int client_fd) {
         const auto reason = json_get_string(request->body, "reason");
         if (!session_id.has_value()) {
             write_response(client_fd, 400, "Bad Request", "{\"error\":\"missing_session_id\"}");
-            close(client_fd);
+            finish_request(client_fd);
             return;
         }
 
@@ -1152,12 +1202,12 @@ void HttpServer::handle_client(const int client_fd) {
         registry_.stop_session(session_id.value(), reason.value_or("stopped_by_request"), already_stopped);
         if (already_stopped) {
             write_response(client_fd, 200, "OK", "{\"status\":\"already_stopped\",\"session_id\":\"" + escape_json(session_id.value()) + "\"}");
-            close(client_fd);
+            finish_request(client_fd);
             return;
         }
 
         write_response(client_fd, 200, "OK", "{\"status\":\"stopped\",\"session_id\":\"" + escape_json(session_id.value()) + "\"}");
-        close(client_fd);
+        finish_request(client_fd);
         return;
     }
 
@@ -1167,21 +1217,21 @@ void HttpServer::handle_client(const int client_fd) {
         const auto clear_existing = json_get_bool(request->body, "clear_existing");
         if (!session_id.has_value() || !pcmu_base64.has_value()) {
             write_response(client_fd, 400, "Bad Request", "{\"error\":\"missing_tts_play_fields\"}");
-            close(client_fd);
+            finish_request(client_fd);
             return;
         }
 
         const auto session = registry_.get_session(session_id.value());
         if (!session) {
             write_response(client_fd, 404, "Not Found", "{\"error\":\"session_not_found\"}");
-            close(client_fd);
+            finish_request(client_fd);
             return;
         }
 
         const auto decoded = base64_decode(pcmu_base64.value());
         if (!decoded.has_value()) {
             write_response(client_fd, 400, "Bad Request", "{\"error\":\"invalid_pcmu_base64\"}");
-            close(client_fd);
+            finish_request(client_fd);
             return;
         }
 
@@ -1189,7 +1239,7 @@ void HttpServer::handle_client(const int client_fd) {
         std::size_t queued_frames = 0;
         if (!session->enqueue_tts_ulaw(decoded.value(), clear_existing.value_or(false), queued_frames, error)) {
             write_response(client_fd, 400, "Bad Request", "{\"error\":\"" + escape_json(error) + "\"}");
-            close(client_fd);
+            finish_request(client_fd);
             return;
         }
 
@@ -1201,7 +1251,7 @@ void HttpServer::handle_client(const int client_fd) {
             "{\"status\":\"queued\",\"session_id\":\"" + escape_json(session_id.value()) +
                 "\",\"queued_frames\":" + std::to_string(queued_frames) +
                 ",\"tts_queue_depth_frames\":" + std::to_string(snap.tts_queue_depth_frames) + "}");
-        close(client_fd);
+        finish_request(client_fd);
         return;
     }
 
@@ -1210,14 +1260,14 @@ void HttpServer::handle_client(const int client_fd) {
         const auto reason = json_get_string(request->body, "reason");
         if (!session_id.has_value()) {
             write_response(client_fd, 400, "Bad Request", "{\"error\":\"missing_session_id\"}");
-            close(client_fd);
+            finish_request(client_fd);
             return;
         }
 
         const auto session = registry_.get_session(session_id.value());
         if (!session) {
             write_response(client_fd, 404, "Not Found", "{\"error\":\"session_not_found\"}");
-            close(client_fd);
+            finish_request(client_fd);
             return;
         }
 
@@ -1231,7 +1281,7 @@ void HttpServer::handle_client(const int client_fd) {
             "{\"status\":\"interrupted\",\"session_id\":\"" + escape_json(session_id.value()) +
                 "\",\"dropped_frames\":" + std::to_string(dropped_frames) +
                 ",\"interrupted_segments\":" + std::to_string(interrupted_segments) + "}");
-        close(client_fd);
+        finish_request(client_fd);
         return;
     }
 
@@ -1241,17 +1291,17 @@ void HttpServer::handle_client(const int client_fd) {
             const auto session = registry_.get_session(session_id.value());
             if (!session) {
                 write_response(client_fd, 404, "Not Found", "{\"error\":\"session_not_found\"}");
-                close(client_fd);
+                finish_request(client_fd);
                 return;
             }
             write_response(client_fd, 200, "OK", session_stats_json(session->snapshot()));
-            close(client_fd);
+            finish_request(client_fd);
             return;
         }
     }
 
     write_response(client_fd, 404, "Not Found", "{\"error\":\"route_not_found\"}");
-    close(client_fd);
+    finish_request(client_fd);
 }
 
 void HttpServer::close_listener() {

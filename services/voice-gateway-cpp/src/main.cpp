@@ -96,7 +96,14 @@ int main(int argc, char** argv) {
     // (now handler-free) server and registry destruct. This guarantees no
     // detached handler is still touching the server/registry when they are
     // destroyed (VG-03).
-    std::thread server_thread([&server] { server.run(); });
+    std::thread server_thread([&server] {
+        // Contain any exception so it cannot reach the thread entry and
+        // std::terminate the process (#2).
+        try {
+            server.run();
+        } catch (...) {
+        }
+    });
 
     while (g_stop_requested == 0) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));

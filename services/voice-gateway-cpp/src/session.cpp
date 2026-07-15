@@ -222,9 +222,51 @@ bool RtpSession::start(std::string& error) {
         last_rtcp_report_sent_at_ = started_at_;
     }
 
-    receiver_thread_ = std::thread(&RtpSession::receiver_loop, this);
-    transmitter_thread_ = std::thread(&RtpSession::transmitter_loop, this);
-    watchdog_thread_ = std::thread(&RtpSession::watchdog_loop, this);
+    // Two-phase startup (#3). Construct all three workers first; each parks at
+    // its loop entry on the start gate and does NO work yet. If any construction
+    // throws (e.g. thread exhaustion), abort cleanly: clear running_ so the
+    // parked workers exit, join whatever was constructed, close the sockets, and
+    // return an error — never a half-started session with a live receiver, and
+    // never a throw propagating out of start().
+    try {
+        receiver_thread_ = std::thread(&RtpSession::receiver_loop, this);
+        transmitter_thread_ = std::thread(&RtpSession::transmitter_loop, this);
+        watchdog_thread_ = std::thread(&RtpSession::watchdog_loop, this);
+    } catch (...) {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            running_.store(false);  // parked workers will observe this and exit
+        }
+        queue_cv_.notify_all();
+        if (receiver_thread_.joinable()) {
+            receiver_thread_.join();
+        }
+        if (transmitter_thread_.joinable()) {
+            transmitter_thread_.join();
+        }
+        if (watchdog_thread_.joinable()) {
+            watchdog_thread_.join();
+        }
+        const int rx_fd_abort = rx_socket_.exchange(-1);
+        if (rx_fd_abort >= 0) {
+            shutdown(rx_fd_abort, SHUT_RDWR);
+            close(rx_fd_abort);
+        }
+        const int tx_fd_abort = tx_socket_.exchange(-1);
+        if (tx_fd_abort >= 0) {
+            shutdown(tx_fd_abort, SHUT_RDWR);
+            close(tx_fd_abort);
+        }
+        error = "failed to start session worker threads";
+        return false;
+    }
+
+    // Commit: release the gate so the parked workers begin processing.
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        start_gate_committed_ = true;
+    }
+    queue_cv_.notify_all();
 
     return true;
 }
@@ -401,6 +443,15 @@ void RtpSession::fire_audio_callback(const std::vector<uint8_t>& pcmu_batch) {
 void RtpSession::receiver_loop() {
     t_owning_session = this;
     try {
+    // Park until start() commits all three workers (or aborts) — two-phase
+    // startup (#3). Until then this thread processes no RTP and fires no callback.
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        queue_cv_.wait(lock, [this] { return start_gate_committed_ || !running_.load(); });
+    }
+    if (!running_.load()) {
+        return;
+    }
     // STT sequence-ordered reorder window (VG-01). Receiver-thread-local: only
     // this loop inserts/drains/emits, so it needs no lock and adds no contention.
     // Ascending by sequence (wrap-aware via sequence_diff). Bounded to
@@ -617,6 +668,15 @@ void RtpSession::receiver_loop() {
 
 void RtpSession::transmitter_loop() {
     t_owning_session = this;
+    try {
+    // Park until start() commits (or aborts) — two-phase startup (#3).
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        queue_cv_.wait(lock, [this] { return start_gate_committed_ || !running_.load(); });
+    }
+    if (!running_.load()) {
+        return;
+    }
     bool remote_ok = false;
     const sockaddr_in remote_addr = make_sockaddr(config_.remote_ip, config_.remote_port, remote_ok);
     if (!remote_ok) {
@@ -808,10 +868,25 @@ void RtpSession::transmitter_loop() {
 
         next_send_time += std::chrono::milliseconds(config_.ptime_ms);
     }
+    } catch (...) {
+        // No exception is expected here, but contain any so it cannot reach the
+        // thread entry and std::terminate the gateway (#2).
+        tx_healthy_.store(false);
+        request_stop("internal_error", false);
+    }
 }
 
 void RtpSession::watchdog_loop() {
     t_owning_session = this;
+    try {
+    // Park until start() commits (or aborts) — two-phase startup (#3).
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        queue_cv_.wait(lock, [this] { return start_gate_committed_ || !running_.load(); });
+    }
+    if (!running_.load()) {
+        return;
+    }
     const int tick_ms = std::max(50, config_.watchdog_tick_ms);
 
     while (running_.load()) {
@@ -855,6 +930,11 @@ void RtpSession::watchdog_loop() {
             request_stop(timeout_reason, true);
             break;
         }
+    }
+    } catch (...) {
+        // Contain any exception so it cannot reach the thread entry and
+        // std::terminate the gateway (#2).
+        request_stop("internal_error", false);
     }
 }
 

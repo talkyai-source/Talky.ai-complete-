@@ -288,6 +288,12 @@ private:
     std::chrono::steady_clock::time_point started_at_;
     SessionState state_{SessionState::Created};
     std::string stop_reason_{"running"};
+    // Two-phase startup gate (finding #3). Workers park at loop entry until
+    // start() has successfully constructed ALL three threads and sets this true.
+    // If a later thread construction throws, start() leaves it false and clears
+    // running_, so the parked workers exit without processing any packet — no
+    // half-started session with a live receiver already firing callbacks.
+    bool start_gate_committed_{false};
     bool first_rtp_seen_{false};
     bool playout_started_{false};
     bool last_received_seq_valid_{false};
