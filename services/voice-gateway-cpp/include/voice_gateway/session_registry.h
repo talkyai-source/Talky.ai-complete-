@@ -8,6 +8,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "voice_gateway/session.h"
@@ -95,6 +96,11 @@ private:
 
     mutable std::mutex mutex_;
     std::unordered_map<std::string, RtpSessionPtr> sessions_;
+    // Ids removed from sessions_ by stop_session() but still being torn down
+    // (sockets closing / threads joining). A new start on the same id is rejected
+    // while the id is here, so it cannot rebind the port before the old session's
+    // sockets are actually closed (VG-16).
+    std::unordered_set<std::string> stopping_;
     // session_id -> first steady_clock time the reaper observed it not-running.
     std::unordered_map<std::string, std::chrono::steady_clock::time_point> stopped_since_;
     uint64_t sessions_started_total_{0};

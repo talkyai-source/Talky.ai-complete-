@@ -3,17 +3,22 @@
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
+#include <chrono>
 #include <iostream>
 #include <string>
+#include <thread>
 
 namespace {
 
-voice_gateway::HttpServer* g_server = nullptr;
+// Set by the signal handler, polled by the main thread. `volatile
+// sig_atomic_t` is the only object a signal handler may safely touch; the
+// handler does NOTHING else, so it stays async-signal-safe. The old handler
+// called HttpServer::stop() directly (closing the listener fd while the accept
+// loop was mid-syscall on it) — a signal-context race that VG-19 flagged.
+volatile std::sig_atomic_t g_stop_requested = 0;
 
 void handle_signal(const int) {
-    if (g_server != nullptr) {
-        g_server->stop();
-    }
+    g_stop_requested = 1;
 }
 
 uint16_t parse_port(const std::string& value) {
@@ -70,7 +75,6 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    g_server = &server;
     // A peer that resets the TCP connection mid-write would otherwise raise
     // SIGPIPE, whose default disposition terminates the whole gateway and drops
     // every live call. Ignore it process-wide; write paths additionally pass
@@ -86,7 +90,23 @@ int main(int argc, char** argv) {
               << " ptime_ms=20"
               << std::endl;
 
-    server.run();
+    // Run the accept loop on a background thread so the main thread can wait for
+    // a shutdown signal and then perform an ORDERLY teardown (VG-19): stop
+    // accepting -> drain in-flight HTTP handlers -> return, at which point the
+    // (now handler-free) server and registry destruct. This guarantees no
+    // detached handler is still touching the server/registry when they are
+    // destroyed (VG-03).
+    std::thread server_thread([&server] { server.run(); });
+
+    while (g_stop_requested == 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    std::cout << "voice-gateway-cpp shutting down (signal received)" << std::endl;
+    server.stop();  // stops accepting + drains active handlers (bounded)
+    if (server_thread.joinable()) {
+        server_thread.join();
+    }
 
     std::cout << "voice-gateway-cpp stopped" << std::endl;
     return 0;

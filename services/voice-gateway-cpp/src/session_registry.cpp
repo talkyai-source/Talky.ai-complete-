@@ -33,6 +33,14 @@ StartSessionResult SessionRegistry::start_session(const SessionConfig& config, s
         return StartSessionResult::AlreadyExists;
     }
 
+    // Reject a restart while a previous session with this id is still tearing
+    // down — its listen port is not yet released, so binding would race the old
+    // socket (VG-16). The caller should retry once teardown completes.
+    if (stopping_.find(config.session_id) != stopping_.end()) {
+        error = "session is still stopping";
+        return StartSessionResult::AlreadyExists;
+    }
+
     if (sessions_.size() >= kMaxConcurrentSessions) {
         error = "maximum concurrent sessions reached";
         return StartSessionResult::InternalError;
@@ -61,16 +69,32 @@ bool SessionRegistry::stop_session(const std::string& session_id, const std::str
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = sessions_.find(session_id);
         if (it == sessions_.end()) {
+            // Either it never existed, or a concurrent stopper already claimed it
+            // (removed it from sessions_). Erasing under the lock is the SINGLE-
+            // WINNER gate: exactly one racer removes the entry; all others land
+            // here and report already_stopped.
             already_stopped = true;
             return true;
         }
         session = it->second;
-        sessions_.erase(it);
-        stopped_since_.erase(session_id);
+        sessions_.erase(it);            // single-winner claim
+        stopping_.insert(session_id);   // reserve the id/port until teardown done
         ++sessions_stopped_total_;
     }
 
+    // Tear the session down to completion (sockets closed, worker threads joined)
+    // OUTSIDE the registry lock so a thread join never stalls unrelated registry
+    // ops (VG-30). The id stays in stopping_ across this, so a same-id start is
+    // rejected until the old sockets are actually closed (VG-16). stop() is
+    // idempotent via the session teardown latch, so any concurrent stop()/reaper
+    // is safe.
     session->stop(reason.empty() ? "stopped_by_request" : reason);
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        stopping_.erase(session_id);
+        stopped_since_.erase(session_id);  // clear any reaper bookkeeping for this id
+    }
     return true;
 }
 
@@ -186,6 +210,7 @@ void SessionRegistry::reap_once() {
     // BEFORE the shared_ptrs destruct. Dropping the last reference runs
     // ~RtpSession (which joins the session's threads); doing that outside mutex_
     // keeps start/stop/snapshot from stalling behind a thread join.
+    std::vector<RtpSessionPtr> to_teardown;  // deferred epilogue to run now (VG-15)
     std::vector<RtpSessionPtr> to_destroy;
     const auto now = std::chrono::steady_clock::now();
 
@@ -203,7 +228,15 @@ void SessionRegistry::reap_once() {
 
             auto since = stopped_since_.find(id);
             if (since == stopped_since_.end()) {
+                // First observation of a self-stopped session (watchdog timeout /
+                // socket_error): its worker flipped running_=false but did NOT run
+                // the join+close epilogue (a worker must never tear down its own
+                // session). Drive that epilogue now, outside the lock, so the two
+                // UDP sockets + three threads are released within one sweep
+                // instead of lingering the full 60s reap grace (VG-15). The map
+                // entry stays until grace for stats visibility.
                 stopped_since_.emplace(id, now);
+                to_teardown.push_back(session);
                 ++it;
                 continue;
             }
@@ -220,6 +253,12 @@ void SessionRegistry::reap_once() {
             it = sessions_.erase(it);
             ++sessions_reaped_total_;
         }
+    }
+    // Outside mutex_: force the deferred teardown epilogue for freshly
+    // self-stopped sessions (bounded join+close), then let reaped sessions
+    // destruct. stop() is idempotent, so racing an external /stop is safe.
+    for (const auto& session : to_teardown) {
+        session->stop("reaper_teardown");
     }
     // to_destroy destructs here, outside mutex_.
 }

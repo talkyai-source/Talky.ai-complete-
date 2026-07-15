@@ -678,6 +678,10 @@ HttpServer::HttpServer(std::string host, uint16_t port, SessionRegistry& registr
 
 HttpServer::~HttpServer() {
     stop();
+    // Close the listener only AFTER stop() has drained handlers and the caller
+    // has joined run() (main does). Doing it here — not in stop() — avoids
+    // closing the fd while the accept loop may still be mid-syscall on it (VG-19).
+    close_listener();
 }
 
 bool HttpServer::start(std::string& error) {
@@ -720,6 +724,12 @@ bool HttpServer::start(std::string& error) {
         return false;
     }
 
+    // Bound accept() so the loop periodically re-checks running_ and exits on
+    // shutdown WITHOUT another thread having to close the listener fd out from
+    // under a blocked accept() — the signal-context / fd-reuse race VG-19 raised.
+    const timeval accept_timeout{0, 250000};  // 250 ms
+    setsockopt(server_fd_, SOL_SOCKET, SO_RCVTIMEO, &accept_timeout, sizeof(accept_timeout));
+
     running_.store(true);
     healthy_.store(true);
     return true;
@@ -737,6 +747,11 @@ void HttpServer::run() {
                 break;
             }
             if (errno == EINTR) {
+                continue;
+            }
+            // The 250ms accept timeout expiring is normal (it exists so we
+            // re-check running_ on shutdown) — not an error condition (VG-19).
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 continue;
             }
             // Transient/overload errors (EMFILE/ENFILE/ECONNABORTED/ENOBUFS):
@@ -782,7 +797,15 @@ void HttpServer::run() {
 
 void HttpServer::stop() {
     running_.store(false);
-    close_listener();
+    // Drain in-flight handlers so none is still executing (touching this server /
+    // the registry) when they get destroyed after we return (VG-03). Bounded:
+    // every client socket carries a 5s SO_RCVTIMEO/SNDTIMEO, so each handler
+    // finishes within ~5s; wait a little past that, then proceed regardless so
+    // shutdown always terminates. The listener fd is closed by the destructor,
+    // after run() has been joined.
+    for (int waited_ms = 0; active_handlers_.load() > 0 && waited_ms < 8000; waited_ms += 20) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
 }
 
 bool HttpServer::healthy() const {

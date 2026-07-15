@@ -394,6 +394,51 @@ void test_concurrent_snapshot_during_churn() {
     expect(churn_iterations.load() > 0, "snapshot_churn: churn thread should have made progress during the hammer window");
 }
 
+// ---------------------------------------------------------------------------
+// Test 5: STOP-then-RESTART the SAME session id on the SAME listen port while a
+// reaper thread hammers reap_once() (targets VG-16 stop-before-erase teardown
+// ordering + VG-15 reaper-driven prompt teardown).
+//
+// Under TSan any data race, and under ASan any use-after-free / double-close in
+// the teardown/erase/rebind interleaving, aborts. Functional invariant: because
+// stop_session() now fully tears the old session down (sockets closed, threads
+// joined) BEFORE releasing its id, a fresh start on the same port must always
+// succeed to rebind — so every cycle reports Started.
+// ---------------------------------------------------------------------------
+void test_stop_start_same_id_port_race() {
+    constexpr uint16_t kListenPort = 33900;
+    constexpr uint16_t kRemotePort = 33901;
+    constexpr int kCycles = 40;
+
+    SessionRegistry registry;
+
+    std::atomic<bool> stop_reaper{false};
+    std::thread reaper([&registry, &stop_reaper]() {
+        while (!stop_reaper.load()) {
+            registry.reap_once();
+            (void)registry.snapshot();
+        }
+    });
+
+    int restarted_ok = 0;
+    for (int i = 0; i < kCycles; ++i) {
+        SessionConfig cfg = make_config("reuse", kListenPort, kRemotePort);
+        cfg.watchdog_tick_ms = 50;  // fast worker wake -> bounded teardown join
+        std::string err;
+        if (registry.start_session(cfg, err) == StartSessionResult::Started) {
+            ++restarted_ok;
+        }
+        bool already = false;
+        registry.stop_session("reuse", "cycle", already);
+    }
+
+    stop_reaper.store(true);
+    reaper.join();
+
+    expect(restarted_ok == kCycles,
+           "stop_start_same_id_port: every restart on the reused port must succeed after full teardown");
+}
+
 }  // namespace
 
 int main() {
@@ -405,6 +450,7 @@ int main() {
         {"start_stop_churn_with_live_neighbors", test_start_stop_churn_with_live_neighbors},
         {"reaper_self_stopped_session_not_erased_before_grace", test_reaper_self_stopped_session_not_erased_before_grace},
         {"concurrent_snapshot_during_churn", test_concurrent_snapshot_during_churn},
+        {"stop_start_same_id_port_race", test_stop_start_same_id_port_race},
     };
 
     for (const auto& [name, fn] : tests) {
