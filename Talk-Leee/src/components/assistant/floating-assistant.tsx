@@ -26,12 +26,13 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Loader2, MessageCircle, Send, X } from "lucide-react";
+import { Bot, Loader2, MessageCircle, Mic, Send, X } from "lucide-react";
 import { apiBaseUrl } from "@/lib/env";
 import { useAccessToken } from "@/lib/auth-hooks";
 import { useAuth } from "@/lib/auth-context";
 import { getAssistantWsToken } from "@/lib/assistant-model-api";
 import { AssistantModelPicker } from "./assistant-model-picker";
+import { AssistantVoiceMode } from "./voice-mode";
 import { MarkdownMessage } from "./markdown-message";
 import {
     EditProposalCard,
@@ -97,6 +98,10 @@ function uid(): string {
 // clear of UI chrome.
 export function FloatingAssistant() {
     const [open, setOpen] = useState(false);
+    // Voice mode: tapping the mic swaps the text chat body for the live
+    // voice-agent transcript (our STT/TTS + the same tool agent). The text WS
+    // is torn down while in voice mode so the two don't run concurrently.
+    const [voiceMode, setVoiceMode] = useState(false);
     const [status, setStatus] = useState<WsStatus>("idle");
     const [typing, setTyping] = useState(false);
     const [messages, setMessages] = useState<ChatMessage[]>([
@@ -476,7 +481,9 @@ export function FloatingAssistant() {
     // and the user's chat continues seamlessly across the 15-minute
     // JWT TTL boundary.
     useEffect(() => {
-        if (open) {
+        // Voice mode owns its OWN socket (/assistant/voice); tear the text WS
+        // down while it's active so the two never run concurrently.
+        if (open && !voiceMode) {
             // Fresh open → reset the backoff so a prior exhausted reconnect
             // sequence doesn't prevent this open from connecting.
             reconnectAttemptsRef.current = 0;
@@ -488,7 +495,7 @@ export function FloatingAssistant() {
             // The effect's cleanup also runs on unmount.
             closeSocket();
         };
-    }, [open, connect, closeSocket]);
+    }, [open, voiceMode, connect, closeSocket]);
 
     // Auto-scroll on new messages.
     useEffect(() => {
@@ -628,7 +635,23 @@ export function FloatingAssistant() {
                                 </span>
                             </div>
                         </div>
-                        <AssistantModelPicker />
+                        {!voiceMode && <AssistantModelPicker />}
+                        {isAuthed && (
+                            <button
+                                type="button"
+                                onClick={() => setVoiceMode((v) => !v)}
+                                aria-label={voiceMode ? "Switch to text chat" : "Talk to the assistant"}
+                                aria-pressed={voiceMode}
+                                title={voiceMode ? "Switch to text chat" : "Talk to the assistant"}
+                                className={`rounded-md p-1.5 transition-colors ${
+                                    voiceMode
+                                        ? "bg-cyan-600 text-white hover:bg-cyan-500"
+                                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                                }`}
+                            >
+                                <Mic className="h-4 w-4" />
+                            </button>
+                        )}
                         <button
                             type="button"
                             onClick={() => setOpen(false)}
@@ -639,6 +662,16 @@ export function FloatingAssistant() {
                         </button>
                     </div>
 
+                    {voiceMode ? (
+                        <AssistantVoiceMode
+                            conversationId={conversationIdRef.current}
+                            onClose={() => setVoiceMode(false)}
+                            onConversationId={(id) => {
+                                conversationIdRef.current = id;
+                            }}
+                        />
+                    ) : (
+                    <>
                     {/* Messages */}
                     <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
                         {messages.map((msg) => (
@@ -697,6 +730,8 @@ export function FloatingAssistant() {
                             </button>
                         </div>
                     </div>
+                    </>
+                    )}
                 </div>
             )}
         </>

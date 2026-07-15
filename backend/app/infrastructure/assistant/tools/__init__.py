@@ -22,6 +22,9 @@ from app.infrastructure.assistant.tools.campaigns import (
     get_campaigns,
     start_campaign,
 )
+from app.infrastructure.assistant.tools.campaign_create import (
+    create_campaign,
+)
 from app.infrastructure.assistant.tools.calls import (
     InitiateCallInput,
     get_recent_calls,
@@ -204,6 +207,19 @@ ACTION_TOOLS = {
         "description": "Execute a multi-step action plan for complex workflows like 'book meeting + send confirmation + schedule reminder'.",
         "input_schema": ExecuteActionPlanInput
     },
+    # Create a brand-new campaign (confirm pattern). The agent collects the
+    # fields one at a time (voice or text) then previews a confirm card.
+    "create_campaign": {
+        "function": create_campaign,
+        "description": (
+            "Create a NEW campaign. Collect the fields ONE AT A TIME first "
+            "(name, goal, type=lead_gen|customer_support|receptionist, "
+            "company_name, agent_names), then call with confirm=False to show a "
+            "confirm card; confirm=True actually creates it. Voice defaults to "
+            "the tenant's configured voice — do not ask the user for a voice id."
+        ),
+        "input_schema": None,
+    },
     # Campaign admin edit tools (confirm pattern)
     "update_campaign_config": {
         "function": update_campaign_config,
@@ -270,6 +286,7 @@ __all__ = [
     "get_campaigns",
     "get_recent_calls",
     "get_actions_today",
+    "create_campaign",
     # Action tool functions
     "send_email",
     "send_sms",

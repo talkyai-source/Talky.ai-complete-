@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 # Edit tools eligible for the proposal flow. Each returns the standard preview
 # shape when called with confirm=false.
 PROPOSAL_TOOLS = {
+    "create_campaign",
     "update_campaign_config",
     "update_knowledge_node",
     "manage_lead",

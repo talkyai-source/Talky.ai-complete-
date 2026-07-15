@@ -189,6 +189,49 @@ GROQ_TOOL_SCHEMAS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_campaign",
+            "description": (
+                "Create a NEW campaign. IMPORTANT: collect the fields from the user "
+                "ONE AT A TIME (ask for the next only after the previous is answered): "
+                "1) name, 2) goal, 3) type (lead_gen | customer_support | receptionist), "
+                "4) company_name (the company the agent represents), 5) agent_names "
+                "(the name the AI agent uses on calls). Do NOT ask for a voice — it "
+                "defaults to the tenant's configured voice. Once you have all five, call "
+                "with confirm=false to show a confirm card; the user's approval re-calls "
+                "with confirm=true to actually create it."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Campaign name"},
+                    "goal": {"type": "string", "description": "What the campaign is trying to achieve"},
+                    "persona_type": {
+                        "type": "string",
+                        "enum": ["lead_gen", "customer_support", "receptionist"],
+                        "description": "Campaign type / agent persona",
+                    },
+                    "company_name": {"type": "string", "description": "Company the agent represents"},
+                    "agent_names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "One or more names the AI agent may use on calls",
+                    },
+                    "additional_instructions": {
+                        "type": "string",
+                        "description": "Optional extra guidance for the agent's script",
+                    },
+                    "confirm": {
+                        "type": "boolean",
+                        "description": "false to preview a confirm card; true to actually create",
+                    },
+                },
+                "required": ["name", "goal", "persona_type", "company_name", "agent_names"],
+            }
+        }
+    },
     # -------------------------------------------------------------------------
     # Campaign-admin READ tools
     # -------------------------------------------------------------------------

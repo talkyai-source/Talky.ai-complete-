@@ -18,6 +18,7 @@ from app.api.v1.endpoints.campaign_test_ws import router as campaign_test_ws_rou
 
 # --- WebSocket / AI endpoints ---
 from app.api.v1.endpoints.assistant_config import router as assistant_config_router
+from app.api.v1.endpoints.assistant_voice_ws import router as assistant_voice_ws_router
 from app.api.v1.endpoints.assistant_ws import router as assistant_ws_router
 from app.api.v1.endpoints.auth import router as auth_router
 from app.api.v1.endpoints.billing import router as billing_router
@@ -85,6 +86,7 @@ api_router.include_router(webhooks_router)
 api_router.include_router(webhooks_secure_router)
 api_router.include_router(assistant_config_router)
 api_router.include_router(assistant_ws_router)
+api_router.include_router(assistant_voice_ws_router)
 api_router.include_router(ask_ai_ws_router)
 api_router.include_router(campaign_test_ws_router)
 api_router.include_router(ai_options_router)
