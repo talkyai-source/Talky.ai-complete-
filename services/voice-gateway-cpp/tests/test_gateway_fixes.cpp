@@ -368,6 +368,48 @@ void test_shutdown_drains_inflight_handler() {
     close(fd);
 }
 
+// Batch B (#11): a truncated request (client sends a partial header then closes
+// its write side) must make the handler return and close the connection promptly
+// — not hang — and clean up via finish_request.
+void test_truncated_request_no_hang() {
+    voice_gateway::SessionRegistry registry;
+    voice_gateway::HttpServer server("127.0.0.1", 18097, registry);
+    std::string err;
+    check(server.start(err), "vgB_server_start");
+    std::thread server_thread([&server] { server.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+
+    const int fd = socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(18097);
+    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+    check(connect(fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == 0, "vgB_connected");
+
+    const std::string junk = "GET /nope HTTP/1.1\r\nHost: x\r\n";  // no terminating blank line
+    (void)send(fd, junk.data(), junk.size(), 0);
+    ::shutdown(fd, SHUT_WR);  // EOF -> server recv returns 0 -> read_request bails
+
+    auto fut = std::async(std::launch::async, [fd] {
+        char b[512];
+        std::string r;
+        ssize_t n;
+        while ((n = recv(fd, b, sizeof(b), 0)) > 0) {
+            r.append(b, static_cast<std::size_t>(n));
+        }
+        return r;
+    });
+    const bool done = fut.wait_for(std::chrono::seconds(8)) == std::future_status::ready;
+    check(done, "vgB_truncated_request_handler_completes_no_hang");
+    if (done) {
+        (void)fut.get();
+    }
+
+    server.stop();
+    server_thread.join();
+    close(fd);
+}
+
 }  // namespace
 
 int main() {
@@ -376,6 +418,7 @@ int main() {
     test_stt_reorder_ordering();
     test_control_plane_callback_validation();
     test_shutdown_drains_inflight_handler();
+    test_truncated_request_no_hang();
     std::cout << "passed=" << g_pass << " failed=" << g_fail << "\n";
     return g_fail == 0 ? 0 : 1;
 }

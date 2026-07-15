@@ -1,7 +1,9 @@
 #include "voice_gateway/http_server.h"
 
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -62,6 +64,11 @@ std::optional<HttpRequest> read_request(const int client_fd) {
     char buffer[2048];
     std::size_t header_end = std::string::npos;
 
+    // Absolute deadline for the WHOLE request read. The per-recv SO_RCVTIMEO only
+    // bounds each recv, so a slowloris client trickling one byte just under it
+    // could hold the handler indefinitely (finding #11). This bounds the total.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+
     for (;;) {
         const ssize_t n = recv(client_fd, buffer, sizeof(buffer), 0);
         if (n <= 0) {
@@ -75,6 +82,9 @@ std::optional<HttpRequest> read_request(const int client_fd) {
         }
 
         if (raw.size() > 1024 * 1024) {
+            return std::nullopt;
+        }
+        if (std::chrono::steady_clock::now() > deadline) {
             return std::nullopt;
         }
     }
@@ -141,6 +151,9 @@ std::optional<HttpRequest> read_request(const int client_fd) {
             return std::nullopt;
         }
         request.body.append(buffer, static_cast<std::size_t>(n));
+        if (std::chrono::steady_clock::now() > deadline) {
+            return std::nullopt;  // slowloris body trickle (finding #11)
+        }
     }
 
     if (request.body.size() > content_length) {
@@ -163,7 +176,15 @@ void write_response(const int client_fd, const int status_code, const std::strin
     const char* ptr = wire.c_str();
     std::size_t remaining = wire.size();
 
+    // Absolute deadline so a client that stops reading (making send block, then
+    // return partial within SO_SNDTIMEO each time) cannot pin the handler on the
+    // write side indefinitely (finding #11).
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+
     while (remaining > 0) {
+        if (std::chrono::steady_clock::now() > deadline) {
+            break;
+        }
         // MSG_NOSIGNAL: a peer reset must surface as EPIPE here, never as a
         // process-killing SIGPIPE (VG-14).
         const ssize_t n = send(client_fd, ptr, remaining, MSG_NOSIGNAL);
@@ -518,17 +539,44 @@ bool http_post(const std::string& url, const std::string& json_body) {
         return false;
     }
 
-    // Connect with a short timeout
-    timeval tv{0, 200000};  // 200 ms
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    // ONE absolute deadline covers the whole exchange: nonblocking connect ->
+    // full request write -> status-line read. Per-operation SO_*TIMEO would let a
+    // peer that trickles one byte just under each timeout keep the call alive
+    // indefinitely and block session teardown (VG-10 / finding #7). O_NONBLOCK +
+    // poll enforces the total bound.
+    const int fl = fcntl(fd, F_GETFL, 0);
+    if (fl >= 0) {
+        fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+    }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+    const auto remaining_ms = [&deadline]() -> int {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) {
+            return 0;
+        }
+        return static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count());
+    };
 
+    // Nonblocking connect, bounded by the deadline.
     if (connect(fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) != 0) {
-        close(fd);
-        return false;
+        if (errno != EINPROGRESS) {
+            close(fd);
+            return false;
+        }
+        pollfd pfd{fd, POLLOUT, 0};
+        if (poll(&pfd, 1, remaining_ms()) <= 0) {
+            close(fd);
+            return false;
+        }
+        int soerr = 0;
+        socklen_t soerr_len = sizeof(soerr);
+        if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &soerr, &soerr_len) != 0 || soerr != 0) {
+            close(fd);
+            return false;
+        }
     }
 
-    // Build HTTP/1.0 POST (no keep-alive, simple)
+    // Build HTTP/1.0 POST (Connection: close).
     std::ostringstream req;
     req << "POST " << path << " HTTP/1.0\r\n"
         << "Host: " << host_port << "\r\n"
@@ -537,34 +585,51 @@ bool http_post(const std::string& url, const std::string& json_body) {
         << "Connection: close\r\n"
         << "\r\n"
         << json_body;
-
     const std::string wire = req.str();
-    const char* ptr = wire.c_str();
-    std::size_t remaining = wire.size();
-    while (remaining > 0) {
-        // MSG_NOSIGNAL: a backend reset must return EPIPE, not kill the gateway
-        // (VG-14).
-        const ssize_t sent = send(fd, ptr, remaining, MSG_NOSIGNAL);
-        if (sent <= 0) {
+
+    // Write the full request within the deadline. MSG_NOSIGNAL: a backend reset
+    // must return EPIPE, not kill the gateway (VG-14).
+    std::size_t off = 0;
+    while (off < wire.size()) {
+        pollfd pfd{fd, POLLOUT, 0};
+        if (poll(&pfd, 1, remaining_ms()) <= 0) {
             close(fd);
             return false;
         }
-        ptr += sent;
-        remaining -= static_cast<std::size_t>(sent);
+        const ssize_t s = send(fd, wire.data() + off, wire.size() - off, MSG_NOSIGNAL);
+        if (s > 0) {
+            off += static_cast<std::size_t>(s);
+        } else if (s < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
+            continue;
+        } else {
+            close(fd);
+            return false;
+        }
     }
 
-    // Read the response and parse its status line. Previously the response was
-    // drained without inspection and the function always returned true, so a
-    // backend 500 / timeout / reset looked identical to success — silent STT
-    // audio loss with no signal (VG-10). Now non-2xx (or no parseable response)
-    // is a delivery failure the caller can surface.
+    // Read only up to the status line (first newline) within the deadline; do NOT
+    // wait for the body / connection close once a valid status is available.
+    // Previously the response was drained without inspection and always returned
+    // true, so a backend 500/timeout/reset looked identical to success — silent
+    // STT loss (VG-10). Non-2xx (or no parseable status) is now a failure.
     std::string resp;
-    char rbuf[512];
-    ssize_t rn;
-    while ((rn = recv(fd, rbuf, sizeof(rbuf), 0)) > 0) {
-        resp.append(rbuf, static_cast<std::size_t>(rn));
-        if (resp.size() >= 4096) {
-            break;  // the status line is well within the first read
+    while (resp.find('\n') == std::string::npos && resp.size() < 512) {
+        pollfd pfd{fd, POLLIN, 0};
+        if (poll(&pfd, 1, remaining_ms()) <= 0) {
+            close(fd);
+            return false;
+        }
+        char rbuf[256];
+        const ssize_t r = recv(fd, rbuf, sizeof(rbuf), 0);
+        if (r > 0) {
+            resp.append(rbuf, static_cast<std::size_t>(r));
+        } else if (r == 0) {
+            break;  // peer closed
+        } else if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+            continue;
+        } else {
+            close(fd);
+            return false;
         }
     }
     close(fd);
