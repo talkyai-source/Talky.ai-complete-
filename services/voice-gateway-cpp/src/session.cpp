@@ -42,6 +42,14 @@ bool rtp_tx_debug_logging_enabled() {
     return enabled;
 }
 
+// One buffered frame in the receiver's STT reorder window (VG-01). Held only on
+// the receiver thread, so no synchronization is needed.
+struct SttReorderEntry {
+    uint16_t sequence_number{0};
+    std::chrono::steady_clock::time_point arrival;
+    std::vector<uint8_t> payload;
+};
+
 // Identifies, per thread, which RtpSession this thread is a worker loop for.
 // Set as the first statement of each worker loop (before any path can reach
 // request_stop), so a worker stopping its OWN session is detected WITHOUT
@@ -393,6 +401,48 @@ void RtpSession::fire_audio_callback(const std::vector<uint8_t>& pcmu_batch) {
 void RtpSession::receiver_loop() {
     t_owning_session = this;
     try {
+    // STT sequence-ordered reorder window (VG-01). Receiver-thread-local: only
+    // this loop inserts/drains/emits, so it needs no lock and adds no contention.
+    // Ascending by sequence (wrap-aware via sequence_diff). Bounded to
+    // window+1 entries because every insert is immediately followed by a drain.
+    const bool stt_reorder = config_.stt_reorder_enabled;
+    const std::size_t reorder_window =
+        std::max<std::size_t>(1, static_cast<std::size_t>(std::max(1, config_.stt_reorder_window_frames)));
+    const int64_t reorder_hold_ms = std::max(0, config_.stt_reorder_hold_ms);
+    std::deque<SttReorderEntry> reorder;
+
+    const auto reorder_insert = [&](const uint16_t seq, const std::vector<uint8_t>& payload,
+                                    const std::chrono::steady_clock::time_point now) {
+        auto it = reorder.begin();
+        while (it != reorder.end() && sequence_diff(seq, it->sequence_number) > 0) {
+            ++it;
+        }
+        if (it != reorder.end() && it->sequence_number == seq) {
+            return;  // duplicate already buffered
+        }
+        SttReorderEntry entry;
+        entry.sequence_number = seq;
+        entry.arrival = now;
+        entry.payload = payload;
+        reorder.insert(it, std::move(entry));
+    };
+
+    // Emit (in ascending sequence order) every frame that is either past the
+    // window depth or older than the hold deadline; flush_all drains everything.
+    const auto reorder_drain = [&](const std::chrono::steady_clock::time_point now, const bool flush_all) {
+        while (!reorder.empty()) {
+            const bool over_window = reorder.size() > reorder_window;
+            const bool aged = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                  now - reorder.front().arrival).count() >= reorder_hold_ms;
+            if (!flush_all && !over_window && !aged) {
+                break;
+            }
+            const std::vector<uint8_t> payload = std::move(reorder.front().payload);
+            reorder.pop_front();
+            fire_audio_callback(payload);
+        }
+    };
+
     while (running_.load()) {
         uint8_t buffer[2048]{};
         sockaddr_in from{};
@@ -411,6 +461,12 @@ void RtpSession::receiver_loop() {
                 break;
             }
             if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+                // Idle wake: flush any reorder-window tail whose hold deadline has
+                // passed, so the last frames of an utterance reach STT during the
+                // caller's silence rather than waiting for the next packet (VG-01).
+                if (stt_reorder) {
+                    reorder_drain(std::chrono::steady_clock::now(), false);
+                }
                 continue;
             }
             rx_healthy_.store(false);
@@ -530,12 +586,24 @@ void RtpSession::receiver_loop() {
 
         queue_cv_.notify_one();
 
-        // Fire audio callback with the received payload so the AI pipeline
-        // (STT) can process caller speech. The callback runs outside the
-        // mutex to avoid blocking the jitter buffer / TTS paths.
+        // Deliver the payload to the AI pipeline (STT). The callback runs outside
+        // the mutex to avoid blocking the jitter buffer / TTS paths. With
+        // stt_reorder enabled, feed a small sequence-ordered window so STT sees
+        // caller audio in spoken order (fixes transposed digits/emails, VG-01);
+        // otherwise deliver in raw arrival order (legacy default).
         if (!parsed->payload.empty()) {
-            fire_audio_callback(parsed->payload);
+            if (stt_reorder) {
+                const auto now = std::chrono::steady_clock::now();
+                reorder_insert(parsed->sequence_number, parsed->payload, now);
+                reorder_drain(now, false);
+            } else {
+                fire_audio_callback(parsed->payload);
+            }
         }
+    }
+    // Drain whatever remains so the final frames of the call still reach STT.
+    if (stt_reorder) {
+        reorder_drain(std::chrono::steady_clock::now(), true);
     }
     } catch (...) {
         // Nothing in the loop is expected to throw (the callback is already

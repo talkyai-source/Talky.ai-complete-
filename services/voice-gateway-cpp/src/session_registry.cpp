@@ -320,6 +320,16 @@ bool SessionRegistry::validate_config(const SessionConfig& config, std::string& 
         return false;
     }
 
+    if (config.stt_reorder_window_frames < 1 || config.stt_reorder_window_frames > 25) {
+        error = "stt_reorder_window_frames must be between 1 and 25";
+        return false;
+    }
+
+    if (config.stt_reorder_hold_ms < 0 || config.stt_reorder_hold_ms > 1000) {
+        error = "stt_reorder_hold_ms must be between 0 and 1000";
+        return false;
+    }
+
     return true;
 }
 

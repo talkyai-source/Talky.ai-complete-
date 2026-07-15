@@ -80,6 +80,21 @@ struct SessionConfig {
     // Asterisk peer, and strict pinning could drop a legitimate mid-call source
     // change. Enable before exposing RTP to any untrusted network.
     bool enforce_rtp_source{false};
+    // VG-01 (fixes S1: garbled spoken emails/phone digits). When true, caller
+    // audio is delivered to the STT callback in RTP SEQUENCE order via a small
+    // reorder window, instead of raw network-arrival order. Adds up to
+    // stt_reorder_window_frames * 20 ms of transcription latency. Default OFF —
+    // enable per-call after validating on a test call, since it is a real
+    // latency<->correctness tradeoff.
+    bool stt_reorder_enabled{false};
+    // Reorder window depth in 20 ms frames (3 = 60 ms). Steady-state STT latency
+    // added ~= this * 20 ms; also the max out-of-order distance corrected.
+    int stt_reorder_window_frames{3};
+    // Max time a frame may wait in the reorder window before being emitted even
+    // if the window is not full — flushes the tail of an utterance during the
+    // caller's silence (e.g. the final digits of a phone number). Must exceed
+    // the steady-state window hold (window_frames * 20 ms) to avoid early emit.
+    int stt_reorder_hold_ms{80};
 };
 
 struct SessionStatsSnapshot {

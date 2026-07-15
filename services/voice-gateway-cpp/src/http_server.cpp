@@ -845,6 +845,9 @@ void HttpServer::handle_client(const int client_fd) {
         const auto audio_callback_url = json_get_string(request->body, "audio_callback_url");
         const auto audio_callback_batch_frames = json_get_int(request->body, "audio_callback_batch_frames");
         const auto enforce_rtp_source = json_get_bool(request->body, "enforce_rtp_source");
+        const auto stt_reorder_enabled = json_get_bool(request->body, "stt_reorder_enabled");
+        const auto stt_reorder_window_frames = json_get_int(request->body, "stt_reorder_window_frames");
+        const auto stt_reorder_hold_ms = json_get_int(request->body, "stt_reorder_hold_ms");
 
         if (!session_id.has_value() || !listen_ip.has_value() || !listen_port.has_value() ||
             !remote_ip.has_value() || !remote_port.has_value() || !codec.has_value() || !ptime_ms.has_value()) {
@@ -921,6 +924,15 @@ void HttpServer::handle_client(const int client_fd) {
         }
         if (enforce_rtp_source.has_value()) {
             config.enforce_rtp_source = enforce_rtp_source.value();
+        }
+        if (stt_reorder_enabled.has_value()) {
+            config.stt_reorder_enabled = stt_reorder_enabled.value();
+        }
+        if (stt_reorder_window_frames.has_value()) {
+            config.stt_reorder_window_frames = stt_reorder_window_frames.value();
+        }
+        if (stt_reorder_hold_ms.has_value()) {
+            config.stt_reorder_hold_ms = stt_reorder_hold_ms.value();
         }
 
         // Build the STT audio callback (if requested) BEFORE starting the

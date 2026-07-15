@@ -21,6 +21,8 @@
 #include <cstring>
 #include <future>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -43,10 +45,12 @@ void check(const bool cond, const std::string& name) {
     }
 }
 
-// Send one 160-byte PCMU RTP packet (PT0) to dst.
-void send_rtp(const int fd, const sockaddr_in& dst, const uint16_t seq, const uint32_t ts, const uint32_t ssrc) {
+// Send one 160-byte PCMU RTP packet (PT0) to dst. payload_marker fills the
+// payload (its first byte lets a test identify which packet was delivered).
+void send_rtp(const int fd, const sockaddr_in& dst, const uint16_t seq, const uint32_t ts, const uint32_t ssrc,
+              const uint8_t payload_marker = 0xFF) {
     uint8_t pkt[12 + 160];
-    std::memset(pkt, 0xFF, sizeof(pkt));  // payload = µ-law silence
+    std::memset(pkt, payload_marker, sizeof(pkt));
     pkt[0] = 0x80;
     pkt[1] = 0x00;
     pkt[2] = static_cast<uint8_t>(seq >> 8);
@@ -178,11 +182,82 @@ void test_jitter_flood_no_deadlock() {
     }
 }
 
+// VG-01: with stt_reorder enabled, caller RTP delivered out of order must reach
+// the STT callback in ascending SEQUENCE order. Each payload's first byte encodes
+// its sequence, so the callback can record the delivered order.
+void test_stt_reorder_ordering() {
+    const int dummy = make_udp_bound(34302);  // absorb nothing (echo off), keep symmetry
+    (void)dummy;
+
+    SessionConfig cfg = base_config("reorder", 34301, 34302);
+    cfg.echo_enabled = false;
+    cfg.stt_reorder_enabled = true;
+    cfg.stt_reorder_window_frames = 3;
+    cfg.stt_reorder_hold_ms = 60;
+    cfg.watchdog_tick_ms = 50;  // frequent idle wakes -> prompt tail flush
+    RtpSession session(cfg);
+
+    auto recorded = std::make_shared<std::vector<int>>();
+    auto rec_mutex = std::make_shared<std::mutex>();
+    session.set_audio_callback([recorded, rec_mutex](const std::string&, const std::vector<uint8_t>& pl) {
+        if (!pl.empty()) {
+            std::lock_guard<std::mutex> lk(*rec_mutex);
+            recorded->push_back(static_cast<int>(pl[0]));
+        }
+    });
+
+    std::string err;
+    check(session.start(err), "vg01_start");
+
+    const int tx = socket(AF_INET, SOCK_DGRAM, 0);
+    sockaddr_in dst{};
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons(34301);
+    inet_pton(AF_INET, "127.0.0.1", &dst.sin_addr);
+
+    // Deliberately out of order: the 102-before-101 and 105-before-104 swaps are
+    // exactly the arrival-order corruption VG-01 fixes.
+    const uint16_t seqs[] = {100, 102, 101, 103, 105, 104};
+    uint32_t ts = 0;
+    for (const uint16_t s : seqs) {
+        send_rtp(tx, dst, s, ts, 0x2222u, static_cast<uint8_t>(s & 0xFF));
+        ts += 160;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(600));  // window drain + aged tail flush
+
+    std::vector<int> got;
+    {
+        std::lock_guard<std::mutex> lk(*rec_mutex);
+        got = *recorded;
+    }
+
+    check(got.size() == 6, "vg01_all_frames_delivered (got=" + std::to_string(got.size()) + ")");
+    bool ascending = got.size() == 6;
+    for (std::size_t i = 1; i < got.size(); ++i) {
+        if (got[i] <= got[i - 1]) {
+            ascending = false;
+        }
+    }
+    check(ascending, "vg01_delivered_in_sequence_order");
+    if (got.size() >= 3) {
+        check(got[0] == 100 && got[1] == 101 && got[2] == 102, "vg01_reordered_100_101_102");
+    }
+
+    session.stop("test_done");
+    close(tx);
+    if (dummy >= 0) {
+        close(dummy);
+    }
+}
+
 }  // namespace
 
 int main() {
     test_tts_overflow_accounting();
     test_jitter_flood_no_deadlock();
+    test_stt_reorder_ordering();
     std::cout << "passed=" << g_pass << " failed=" << g_fail << "\n";
     return g_fail == 0 ? 0 : 1;
 }
