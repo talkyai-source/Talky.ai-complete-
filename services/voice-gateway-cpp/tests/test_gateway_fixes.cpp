@@ -361,7 +361,7 @@ void test_shutdown_drains_inflight_handler() {
         server_thread.join();
     }
 
-    // After drain, the server closed our socket (finish_request) — recv sees EOF.
+    // After drain, the handler closed our socket on its exit path — recv sees EOF.
     char buf[8];
     const ssize_t n = recv(fd, buf, sizeof(buf), 0);
     check(n <= 0, "vg03_client_socket_closed_by_server");
@@ -433,9 +433,301 @@ void test_stt_reorder_rejects_late_after_emit() {
     close(tx);
 }
 
+// Review #4: ONE same-SSRC packet with a huge forward sequence jump must not
+// poison liveness. The old classifier advanced the forward watermark to the
+// jump, after which every legitimate packet was "not forward", last_rtp_rx
+// froze, and the watchdog killed the live call at active_no_rtp_timeout_ms.
+// The anomaly packet itself must also never reach STT (unqualified jump).
+void test_anomaly_jump_keeps_liveness() {
+    SessionConfig cfg = base_config("anomaly", 34501, 34502);
+    cfg.echo_enabled = false;
+    cfg.stt_reorder_enabled = true;
+    cfg.stt_reorder_window_frames = 3;
+    cfg.stt_reorder_hold_ms = 100;
+    cfg.watchdog_tick_ms = 50;
+    cfg.startup_no_rtp_timeout_ms = 1000;
+    cfg.active_no_rtp_timeout_ms = 400;  // trips fast if liveness freezes
+    cfg.session_final_timeout_ms = 100000;
+    RtpSession session(cfg);
+
+    auto recorded = std::make_shared<std::vector<int>>();
+    auto rec_mutex = std::make_shared<std::mutex>();
+    session.set_audio_callback([recorded, rec_mutex](const std::string&, const std::vector<uint8_t>& pl) {
+        if (!pl.empty()) {
+            std::lock_guard<std::mutex> lk(*rec_mutex);
+            recorded->push_back(static_cast<int>(pl[0]));
+        }
+    });
+
+    std::string err;
+    check(session.start(err), "rev4_start");
+
+    const int tx = socket(AF_INET, SOCK_DGRAM, 0);
+    sockaddr_in dst{};
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons(34501);
+    inet_pton(AF_INET, "127.0.0.1", &dst.sin_addr);
+
+    uint32_t ts = 0;
+    // Establish the stream, inject the anomaly, then keep streaming legitimate
+    // audio for ~1.2s — well past the 400ms no-RTP timeout.
+    send_rtp(tx, dst, 1000, ts, 0x4444u, static_cast<uint8_t>(1000 & 0xFF));
+    ts += 160;
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    send_rtp(tx, dst, 50000, ts, 0x4444u, static_cast<uint8_t>(50000 & 0xFF));  // marker 80
+    ts += 160;
+    for (uint16_t s = 1001; s <= 1060; ++s) {
+        send_rtp(tx, dst, s, ts, 0x4444u, static_cast<uint8_t>(s & 0xFF));
+        ts += 160;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+
+    check(session.running(), "rev4_liveness_survives_anomalous_jump");
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));  // drain tail
+    bool anomaly_delivered = false;
+    std::size_t delivered = 0;
+    {
+        std::lock_guard<std::mutex> lk(*rec_mutex);
+        delivered = recorded->size();
+        for (const int m : *recorded) {
+            if (m == 80) {  // 50000 & 0xFF
+                anomaly_delivered = true;
+            }
+        }
+    }
+    check(!anomaly_delivered, "rev4_unqualified_jump_packet_not_fed_to_stt");
+    check(delivered >= 50, "rev4_legitimate_audio_still_delivered (n=" + std::to_string(delivered) + ")");
+
+    session.stop("test_done");
+    close(tx);
+}
+
+// Batch A wrap coverage (review: no wrap-boundary test existed): frames across
+// the 16-bit wrap must be delivered in true extended-sequence order.
+void test_wrap_boundary_ordering() {
+    SessionConfig cfg = base_config("wrap", 34601, 34602);
+    cfg.echo_enabled = false;
+    cfg.stt_reorder_enabled = true;
+    cfg.stt_reorder_window_frames = 3;
+    cfg.stt_reorder_hold_ms = 60;
+    cfg.watchdog_tick_ms = 50;
+    RtpSession session(cfg);
+
+    auto recorded = std::make_shared<std::vector<int>>();
+    auto rec_mutex = std::make_shared<std::mutex>();
+    session.set_audio_callback([recorded, rec_mutex](const std::string&, const std::vector<uint8_t>& pl) {
+        if (!pl.empty()) {
+            std::lock_guard<std::mutex> lk(*rec_mutex);
+            recorded->push_back(static_cast<int>(pl[0]));
+        }
+    });
+
+    std::string err;
+    check(session.start(err), "wrap_start");
+
+    const int tx = socket(AF_INET, SOCK_DGRAM, 0);
+    sockaddr_in dst{};
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons(34601);
+    inet_pton(AF_INET, "127.0.0.1", &dst.sin_addr);
+
+    const uint16_t seqs[] = {65534, 65535, 0, 1};
+    uint32_t ts = 0;
+    for (const uint16_t s : seqs) {
+        send_rtp(tx, dst, s, ts, 0x5555u, static_cast<uint8_t>(s & 0xFF));
+        ts += 160;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+
+    std::vector<int> got;
+    {
+        std::lock_guard<std::mutex> lk(*rec_mutex);
+        got = *recorded;
+    }
+    const std::vector<int> expected = {254, 255, 0, 1};
+    check(got == expected, "wrap_delivered_in_extended_order (n=" + std::to_string(got.size()) + ")");
+
+    session.stop("test_done");
+    close(tx);
+}
+
+// Review #5: an SSRC restart with a NONEMPTY reorder window must flush the old
+// epoch first and must NOT let its (huge) extended sequences poison the fresh
+// epoch's emission floor — and the probation packet must be replayed, not lost.
+void test_ssrc_restart_epoch_flush() {
+    SessionConfig cfg = base_config("epoch", 34701, 34702);
+    cfg.echo_enabled = false;
+    cfg.stt_reorder_enabled = true;
+    cfg.stt_reorder_window_frames = 3;
+    cfg.stt_reorder_hold_ms = 500;  // hold the old epoch in the window across the restart
+    cfg.watchdog_tick_ms = 50;
+    RtpSession session(cfg);
+
+    auto recorded = std::make_shared<std::vector<int>>();
+    auto rec_mutex = std::make_shared<std::mutex>();
+    session.set_audio_callback([recorded, rec_mutex](const std::string&, const std::vector<uint8_t>& pl) {
+        if (!pl.empty()) {
+            std::lock_guard<std::mutex> lk(*rec_mutex);
+            recorded->push_back(static_cast<int>(pl[0]));
+        }
+    });
+
+    std::string err;
+    check(session.start(err), "epoch_start");
+
+    const int tx = socket(AF_INET, SOCK_DGRAM, 0);
+    sockaddr_in dst{};
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons(34701);
+    inet_pton(AF_INET, "127.0.0.1", &dst.sin_addr);
+
+    uint32_t ts = 0;
+    const auto burst = [&](const uint16_t s, const uint32_t ssrc) {
+        send_rtp(tx, dst, s, ts, ssrc, static_cast<uint8_t>(s & 0xFF));
+        ts += 160;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    };
+    // Old stream A: two frames buffered in the window (not yet emitted).
+    burst(60000, 0xAAAAu);  // marker 96
+    burst(60001, 0xAAAAu);  // marker 97
+    // New stream B: 100 starts probation (buffered), 101 commits the restart.
+    burst(100, 0xBBBBu);
+    burst(101, 0xBBBBu);
+    burst(102, 0xBBBBu);
+    burst(103, 0xBBBBu);
+    std::this_thread::sleep_for(std::chrono::milliseconds(800));  // aged tail flush
+
+    std::vector<int> got;
+    {
+        std::lock_guard<std::mutex> lk(*rec_mutex);
+        got = *recorded;
+    }
+    // Old epoch flushed in order, probation frame replayed, then the new stream
+    // — nothing rejected against the dead epoch's floor, nothing lost.
+    const std::vector<int> expected = {96, 97, 100, 101, 102, 103};
+    check(got == expected, "epoch_old_flushed_probe_replayed_new_admitted (n=" + std::to_string(got.size()) + ")");
+
+    session.stop("test_done");
+    close(tx);
+}
+
+// Review #14: destroying a registry with many live sessions must signal them
+// ALL first and only then join — total ~max(single teardown), not the sum.
+// 10 sessions with a 1000ms receiver wake would take ~5s average serially.
+void test_registry_parallel_shutdown() {
+    auto registry = std::make_unique<voice_gateway::SessionRegistry>();
+    for (int i = 0; i < 10; ++i) {
+        SessionConfig cfg = base_config("bulk-" + std::to_string(i),
+                                        static_cast<uint16_t>(42000 + i * 2),
+                                        static_cast<uint16_t>(42001 + i * 2));
+        cfg.watchdog_tick_ms = 1000;              // 1000ms receiver wake = serial worst case
+        cfg.startup_no_rtp_timeout_ms = 3600000;  // keep sessions alive for the test
+        cfg.active_no_rtp_timeout_ms = 3600000;
+        cfg.hold_no_rtp_timeout_ms = 3600000;
+        cfg.session_final_timeout_ms = 3600000;
+        std::string err;
+        check(registry->start_session(cfg, err) == voice_gateway::StartSessionResult::Started,
+              "bulk_start_" + std::to_string(i));
+    }
+
+    const auto t0 = std::chrono::steady_clock::now();
+    registry.reset();  // ~SessionRegistry: signal-all pass, then join-all pass
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::steady_clock::now() - t0).count();
+    check(elapsed_ms < 4000,
+          "bulk_shutdown_parallel_not_serial (took " + std::to_string(elapsed_ms) + "ms)");
+}
+
+// Review: HttpServer is single-use — start() after stop() must be refused, not
+// leak the old listener / serve with draining_ latched.
+void test_server_single_use() {
+    voice_gateway::SessionRegistry registry;
+    voice_gateway::HttpServer server("127.0.0.1", 18096, registry);
+    std::string err;
+    check(server.start(err), "single_use_first_start_ok");
+    std::thread server_thread([&server] { server.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    server.stop();
+    server_thread.join();
+    std::string err2;
+    check(!server.start(err2), "single_use_restart_refused");
+}
+
+// Review #7 (deterministic half): stop() issued BEFORE start() must win — the
+// session must refuse to start, and destruction must be clean (no terminate).
+void test_stop_before_start_wins() {
+    SessionConfig cfg = base_config("early-stop", 34801, 34802);
+    RtpSession session(cfg);
+    session.stop("stopped_before_start");
+    std::string err;
+    check(!session.start(err), "stop_before_start_start_refused");
+    check(!session.running(), "stop_before_start_not_running");
+}
+
+// Batch B / review #11: a slowloris client that trickles header bytes forever
+// (never sending the terminator) must be cut off at the ABSOLUTE 10s deadline.
+// The old per-recv timeout never fired as long as bytes kept arriving. This
+// test intentionally runs ~11s of wall clock.
+void test_slowloris_header_deadline() {
+    voice_gateway::SessionRegistry registry;
+    voice_gateway::HttpServer server("127.0.0.1", 18095, registry);
+    std::string err;
+    check(server.start(err), "slowloris_server_start");
+    std::thread server_thread([&server] { server.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+
+    const int fd = socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(18095);
+    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+    check(connect(fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == 0, "slowloris_connected");
+
+    const auto t0 = std::chrono::steady_clock::now();
+    const std::string opener = "GET /health HTTP/1.1\r\nHost: x\r\nX-Drip: ";
+    (void)send(fd, opener.data(), opener.size(), MSG_NOSIGNAL);
+
+    // Reader watches for the server cutting us off (EOF/reset).
+    auto closed_at = std::async(std::launch::async, [fd, t0] {
+        char b[512];
+        for (;;) {
+            const ssize_t n = recv(fd, b, sizeof(b), 0);
+            if (n <= 0) {
+                break;
+            }
+        }
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::steady_clock::now() - t0).count();
+    });
+
+    // Drip one byte every 250ms — always inside any per-recv timeout.
+    for (int i = 0; i < 60; ++i) {
+        if (send(fd, "a", 1, MSG_NOSIGNAL) <= 0) {
+            break;  // server already reset the connection
+        }
+        if (closed_at.wait_for(std::chrono::milliseconds(250)) == std::future_status::ready) {
+            break;
+        }
+    }
+
+    const bool cut = closed_at.wait_for(std::chrono::seconds(14)) == std::future_status::ready;
+    check(cut, "slowloris_connection_cut");
+    if (cut) {
+        const auto ms = closed_at.get();
+        check(ms >= 8000 && ms <= 13000,
+              "slowloris_cut_at_absolute_deadline (" + std::to_string(ms) + "ms)");
+    }
+    close(fd);
+
+    server.stop();
+    server_thread.join();
+}
+
 // Batch B (#11): a truncated request (client sends a partial header then closes
 // its write side) must make the handler return and close the connection promptly
-// — not hang — and clean up via finish_request.
+// — not hang — and clean up via the owned-handler exit path.
 void test_truncated_request_no_hang() {
     voice_gateway::SessionRegistry registry;
     voice_gateway::HttpServer server("127.0.0.1", 18097, registry);
@@ -482,9 +774,16 @@ int main() {
     test_jitter_flood_no_deadlock();
     test_stt_reorder_ordering();
     test_stt_reorder_rejects_late_after_emit();
+    test_anomaly_jump_keeps_liveness();
+    test_wrap_boundary_ordering();
+    test_ssrc_restart_epoch_flush();
+    test_stop_before_start_wins();
+    test_registry_parallel_shutdown();
+    test_server_single_use();
     test_control_plane_callback_validation();
     test_shutdown_drains_inflight_handler();
     test_truncated_request_no_hang();
+    test_slowloris_header_deadline();
     std::cout << "passed=" << g_pass << " failed=" << g_fail << "\n";
     return g_fail == 0 ? 0 : 1;
 }

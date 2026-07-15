@@ -83,6 +83,35 @@ build fixes-asan "$OUT/fixes_asan" $SAN_ASAN $LIB tests/test_gateway_fixes.cpp
 run conc-asan  env ASAN_OPTIONS="abort_on_error=1 detect_leaks=1" UBSAN_OPTIONS="halt_on_error=1 print_stacktrace=1" "$OUT/conc_asan"
 run fixes-asan env ASAN_OPTIONS="abort_on_error=1 detect_leaks=1" UBSAN_OPTIONS="halt_on_error=1 print_stacktrace=1" "$OUT/fixes_asan"
 
+# ---- Gateway binary under sanitizers (main.cpp was previously uncovered) ----
+build gateway-tsan "$OUT/vg_tsan" $SAN_TSAN $LIB src/main.cpp
+build gateway-asan "$OUT/vg_asan" $SAN_ASAN $LIB src/main.cpp
+
+# Signal-path shutdown smoke under ASan+UBSan: start, probe /health over
+# /dev/tcp, SIGTERM, require a clean (0) orderly-shutdown exit.
+echo "== run:gateway-asan-shutdown-smoke =="
+ASAN_OPTIONS="abort_on_error=1 detect_leaks=1" UBSAN_OPTIONS="halt_on_error=1 print_stacktrace=1" \
+    "$OUT/vg_asan" --host 127.0.0.1 --port 18094 >"$OUT/vg_smoke.log" 2>&1 &
+VG_PID=$!
+sleep 1
+if exec 3<>/dev/tcp/127.0.0.1/18094; then
+    printf 'GET /health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n' >&3
+    HEALTH=$(timeout 5 cat <&3 || true)
+    exec 3<&- 3>&-
+else
+    HEALTH=""
+fi
+kill -TERM "$VG_PID" 2>/dev/null
+SMOKE_RC=1
+if wait "$VG_PID"; then SMOKE_RC=0; fi
+if [ "$SMOKE_RC" -eq 0 ] && printf '%s' "$HEALTH" | grep -q '"status":"ok"'; then
+    echo "  [OK]"
+else
+    echo "  [FAIL] gateway-asan-shutdown-smoke (exit=${SMOKE_RC}, health=${HEALTH:0:80})"
+    sed 's/^/    /' "$OUT/vg_smoke.log"
+    fail=1
+fi
+
 echo "======================================"
 if [ "$fail" -eq 0 ]; then
     echo "GATE: PASS"

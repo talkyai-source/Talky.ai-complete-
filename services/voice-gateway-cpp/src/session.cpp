@@ -56,15 +56,24 @@ struct SttClassification {
     bool feed_stt{false};        // admit to the reorder window
     int64_t ext_seq{0};          // extended sequence (valid iff feed_stt)
     bool advanced{false};        // advanced the forward watermark -> refresh liveness
-    bool restart_committed{false};  // a qualified SSRC restart just committed
+    bool restart_committed{false};  // a qualified restart (SSRC or jump) just committed
+    bool probe_candidate{false};    // packet recorded as a probation member (droppable-but-bufferable)
+    bool floor_rejected{false};     // rejected at/behind the STT emission floor
 };
 
 // Receiver-thread-local sequence tracker for the STT tap (Batch A, review
-// findings #5/#8/#10/#12). Unwraps 16-bit RTP sequence numbers into an extended
-// (int64) space RFC3550-style, enforces a DUAL watermark — a hard STT emission
-// floor plus a separate forward-progress watermark for liveness — and qualifies
-// an SSRC restart via probation instead of resetting on any SSRC change. All
-// state is touched only by the receiver thread, so it needs no lock.
+// findings #4/#5/#8/#10/#12). Unwraps 16-bit RTP sequence numbers into an
+// extended (int64) space RFC3550-style, enforces a DUAL watermark — a hard STT
+// emission floor plus a separate forward-progress watermark for liveness — and
+// qualifies BOTH kinds of stream discontinuity via probation instead of
+// trusting the first packet:
+//   - an SSRC change (new stream / injected packet), and
+//   - an RFC3550 large sequence jump on the SAME SSRC (bad_seq probation).
+// The first packet of either discontinuity is never fed and never advances the
+// forward watermark — one spoofed/anomalous packet can no longer push
+// highest_received_ext far ahead and freeze liveness for every legitimate
+// packet behind it (review #4). All state is touched only by the receiver
+// thread, so it needs no lock.
 struct SttSequencer {
     static constexpr int64_t kSeqMod = 0x10000;      // 2^16
     static constexpr uint16_t kMaxDropout = 3000;    // RFC3550
@@ -78,10 +87,17 @@ struct SttSequencer {
     int64_t highest_received_ext{-1};  // forward-progress watermark (liveness)
     int64_t stt_emitted_high{-1};      // hard floor: reject ext_seq <= this
 
+    // SSRC-change probation.
     bool probing{false};
     uint32_t probe_ssrc{0};
     uint16_t probe_max_seq{0};
     int probe_count{0};
+
+    // Same-SSRC large-jump (bad_seq) probation, RFC3550 style: the jump commits
+    // only when the immediately following packet continues it sequentially.
+    bool jump_probing{false};
+    uint16_t jump_next_seq{0};
+    int jump_count{0};
 
     void init_stream(const uint32_t s, const uint16_t seq) {
         ssrc = s;
@@ -91,6 +107,8 @@ struct SttSequencer {
         stt_emitted_high = -1;       // advanced only on emit
         probing = false;
         probe_count = 0;
+        jump_probing = false;
+        jump_count = 0;
         initialized = true;
     }
 
@@ -126,27 +144,53 @@ struct SttSequencer {
                 probe_max_seq = seq;
                 probe_count = 1;
             }
-            return r;  // unqualified new-SSRC packet: dropped
+            r.probe_candidate = true;  // buffered by the receiver, replayed on commit
+            return r;                  // unqualified new-SSRC packet: not fed
         }
 
-        // Same SSRC as the accepted stream: any candidate probation is stale.
+        // Same SSRC as the accepted stream: any candidate SSRC probation is stale.
         probing = false;
         probe_count = 0;
 
         const uint16_t udelta = static_cast<uint16_t>(seq - max_seq);
         int64_t ext;
         if (udelta < kMaxDropout) {
-            // In order (with a permissible small gap). Detect the wrap.
+            // In order (with a permissible small gap). Detect the wrap. A real
+            // in-order packet also cancels any pending jump probation — a lone
+            // spoofed jump packet cannot survive interleaved legitimate audio.
+            jump_probing = false;
+            jump_count = 0;
             if (seq < max_seq) {
                 cycles += kSeqMod;
             }
             max_seq = seq;
             ext = cycles + seq;
         } else if (udelta <= kSeqMod - kMaxMisorder) {
-            // Very large forward jump for the SAME SSRC — an anomaly, not a
-            // normal reorder. Compute in the current cycle; the dual-watermark
-            // reject below still protects STT ordering.
-            ext = cycles + seq;
+            // Very large forward jump for the SAME SSRC. NEVER feed or advance
+            // on the first such packet (review #4): the old code advanced the
+            // forward watermark to the jump, after which every legitimate
+            // packet was "not forward" and liveness froze until the watchdog
+            // killed the call. RFC3550 bad_seq probation instead: remember the
+            // jump and commit only if the next packet continues it sequentially
+            // (a genuine sender resync), treating the commit as a restart.
+            if (jump_probing && seq == jump_next_seq) {
+                ++jump_count;
+                if (jump_count >= kMinSequential) {
+                    init_stream(pkt_ssrc, seq);
+                    r.feed_stt = true;
+                    r.ext_seq = seq;
+                    r.advanced = true;
+                    r.restart_committed = true;
+                    return r;
+                }
+                jump_next_seq = static_cast<uint16_t>(seq + 1);
+            } else {
+                jump_probing = true;
+                jump_next_seq = static_cast<uint16_t>(seq + 1);
+                jump_count = 1;
+            }
+            r.probe_candidate = true;
+            return r;  // unqualified jump packet: not fed, does NOT advance
         } else {
             // Small backward step: a reordered or duplicate packet. If seq is
             // ABOVE max_seq it is a delayed packet from the PREVIOUS cycle
@@ -158,6 +202,7 @@ struct SttSequencer {
         // (that is exactly what produced "...,100,99"). NO lateness allowance
         // below the emission watermark (#5).
         if (ext <= stt_emitted_high) {
+            r.floor_rejected = true;
             return r;  // feed_stt=false
         }
         r.feed_stt = true;
@@ -223,6 +268,30 @@ bool RtpSession::start(std::string& error) {
         error = "RtpSession is single-use; construct a new instance to start again";
         return false;
     }
+
+    // Serialize the whole prepare/commit against any concurrent teardown
+    // epilogue (review #7): a stop() racing this start() can no longer scan the
+    // thread members mid-assignment, miss them, and leave three joinable
+    // threads to std::terminate the process at destruction. The epilogue takes
+    // the same mutex, so it runs strictly before or strictly after start().
+    std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+    if (teardown_started_.load()) {
+        error = "session was stopped before start";
+        return false;
+    }
+
+    // Marks the session honestly dead when startup fails partway: not running,
+    // Failed state, real stop_reason, unhealthy — instead of a corpse that
+    // still reports Starting/"running"/healthy (review: misleading state).
+    const auto fail_start = [this, &error](const std::string& why) {
+        error = why;
+        std::lock_guard<std::mutex> lock(mutex_);
+        ended_in_failure_.store(true);
+        stop_reason_ = "start_failed";
+        transition_state_locked(SessionState::Failed);
+        return false;
+    };
+
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (running_.load()) {
@@ -232,32 +301,27 @@ bool RtpSession::start(std::string& error) {
     }
 
     if (!is_power_of_two(config_.jitter_buffer_capacity_frames) || config_.jitter_buffer_capacity_frames == 0) {
-        error = "jitter_buffer_capacity_frames must be a non-zero power of two";
-        return false;
+        return fail_start("jitter_buffer_capacity_frames must be a non-zero power of two");
     }
 
     if (config_.jitter_buffer_prefetch_frames == 0 || config_.jitter_buffer_prefetch_frames > config_.jitter_buffer_capacity_frames) {
-        error = "jitter_buffer_prefetch_frames must be between 1 and jitter_buffer_capacity_frames";
-        return false;
+        return fail_start("jitter_buffer_prefetch_frames must be between 1 and jitter_buffer_capacity_frames");
     }
 
     if (config_.tts_max_queue_frames == 0) {
-        error = "tts_max_queue_frames must be >= 1";
-        return false;
+        return fail_start("tts_max_queue_frames must be >= 1");
     }
 
     bool listen_ip_ok = false;
     const sockaddr_in listen_addr = make_sockaddr(config_.listen_ip, config_.listen_port, listen_ip_ok);
     if (!listen_ip_ok) {
-        error = "invalid listen_ip";
-        return false;
+        return fail_start("invalid listen_ip");
     }
 
     bool remote_ip_ok = false;
     make_sockaddr(config_.remote_ip, config_.remote_port, remote_ip_ok);
     if (!remote_ip_ok) {
-        error = "invalid remote_ip";
-        return false;
+        return fail_start("invalid remote_ip");
     }
 
     // Sockets are std::atomic<int> (so request_stop can close each exactly once
@@ -267,17 +331,15 @@ bool RtpSession::start(std::string& error) {
     const int rx_fd = socket(AF_INET, SOCK_DGRAM, 0);
     rx_socket_.store(rx_fd);
     if (rx_fd < 0) {
-        error = std::string("failed to create RX socket: ") + std::strerror(errno);
-        return false;
+        return fail_start(std::string("failed to create RX socket: ") + std::strerror(errno));
     }
 
     const int tx_fd = socket(AF_INET, SOCK_DGRAM, 0);
     tx_socket_.store(tx_fd);
     if (tx_fd < 0) {
-        error = std::string("failed to create TX socket: ") + std::strerror(errno);
         close(rx_fd);
         rx_socket_.store(-1);
-        return false;
+        return fail_start(std::string("failed to create TX socket: ") + std::strerror(errno));
     }
 
     int reuse = 1;
@@ -290,26 +352,31 @@ bool RtpSession::start(std::string& error) {
     // tick >= 1000 ms, which Linux rejects with EINVAL; that error was ignored,
     // leaving recvfrom() with no timeout so it blocked forever and stop()'s
     // join() of the receiver hung the session (VG-05). Also check the syscall.
-    const int recv_timeout_ms = std::clamp(config_.watchdog_tick_ms, 50, 1000);
+    // With the STT reorder window enabled the idle wake is also what flushes an
+    // aged reorder tail, so it must be comparable to the hold deadline — a 200ms+
+    // wake would add up to a second of tail latency on the last frames of an
+    // utterance (review: hold is not a true idle deadline). 20ms matches the RTP
+    // frame cadence; without reorder, teardown responsiveness is the only need.
+    const int recv_timeout_ms = config_.stt_reorder_enabled
+                                    ? 20
+                                    : std::clamp(config_.watchdog_tick_ms, 50, 1000);
     timeval read_timeout{};
     read_timeout.tv_sec = recv_timeout_ms / 1000;
     read_timeout.tv_usec = static_cast<suseconds_t>((recv_timeout_ms % 1000) * 1000);
     if (setsockopt(rx_fd, SOL_SOCKET, SO_RCVTIMEO, &read_timeout, sizeof(read_timeout)) != 0) {
-        error = std::string("failed to set RX socket timeout: ") + std::strerror(errno);
         close(rx_fd);
         close(tx_fd);
         rx_socket_.store(-1);
         tx_socket_.store(-1);
-        return false;
+        return fail_start(std::string("failed to set RX socket timeout: ") + std::strerror(errno));
     }
 
     if (bind(rx_fd, reinterpret_cast<const sockaddr*>(&listen_addr), sizeof(listen_addr)) < 0) {
-        error = std::string("failed to bind RX socket: ") + std::strerror(errno);
         close(rx_fd);
         close(tx_fd);
         rx_socket_.store(-1);
         tx_socket_.store(-1);
-        return false;
+        return fail_start(std::string("failed to bind RX socket: ") + std::strerror(errno));
     }
 
     {
@@ -336,7 +403,6 @@ bool RtpSession::start(std::string& error) {
         rtp_source_locked_ = false;
         locked_source_ip_ = 0;
         locked_source_port_ = 0;
-        locked_ssrc_ = 0;
         prev_rtp_timestamp_ = 0;
         interarrival_jitter_ts_units_ = 0.0;
         last_rtcp_report_sent_at_ = started_at_;
@@ -377,8 +443,7 @@ bool RtpSession::start(std::string& error) {
             shutdown(tx_fd_abort, SHUT_RDWR);
             close(tx_fd_abort);
         }
-        error = "failed to start session worker threads";
-        return false;
+        return fail_start("failed to start session worker threads");
     }
 
     // Commit: release the gate so the parked workers begin processing.
@@ -393,6 +458,12 @@ bool RtpSession::start(std::string& error) {
 
 void RtpSession::stop(const std::string& reason) {
     request_stop(stop_reason_or_default(reason), false);
+}
+
+void RtpSession::stop_async(const std::string& reason) {
+    // Signal-only: flips running_/state and wakes workers, but neither claims
+    // nor waits on the teardown epilogue (review #14 bulk shutdown).
+    request_stop(stop_reason_or_default(reason), false, false);
 }
 
 bool RtpSession::running() const {
@@ -451,6 +522,10 @@ SessionStatsSnapshot RtpSession::snapshot() const {
     snap.tts_frames_enqueued_total = tts_frames_enqueued_total_.load();
     snap.tts_frames_sent_total = tts_frames_sent_total_.load();
     snap.tts_frames_dropped_total = tts_frames_dropped_total_.load();
+    snap.stt_frames_emitted_total = stt_frames_emitted_total_.load();
+    snap.stt_floor_dropped_total = stt_floor_dropped_total_.load();
+    snap.stt_probation_dropped_total = stt_probation_dropped_total_.load();
+    snap.stt_restarts_committed_total = stt_restarts_committed_total_.load();
 
     return snap;
 }
@@ -524,7 +599,9 @@ bool RtpSession::enqueue_tts_ulaw(
 
     queued_frames = submit_count - dropped_from_this;
     tts_last_stop_reason_ = "running";
-    queue_cv_.notify_one();
+    // notify_all, not notify_one: the watchdog waits on the same cv, and a
+    // notify_one it consumed would be a lost wakeup for the transmitter.
+    queue_cv_.notify_all();
     return true;
 }
 
@@ -533,7 +610,7 @@ bool RtpSession::interrupt_tts(const std::string& reason, std::size_t& dropped_f
     dropped_frames = tts_queue_.size();
     interrupted_segments = tts_segments_.size();
     clear_tts_queue_locked(reason.empty() ? "barge_in" : reason);
-    queue_cv_.notify_one();
+    queue_cv_.notify_all();  // watchdog shares the cv; see enqueue_tts_ulaw
     return true;
 }
 
@@ -551,6 +628,7 @@ void RtpSession::fire_audio_callback(const std::vector<uint8_t>& pcmu_batch) {
     if (cb) {
         try {
             cb(config_.session_id, pcmu_batch);
+            stt_frames_emitted_total_.fetch_add(1);
         } catch (...) {
             // The callback base64-encodes and builds JSON on the RTP receiver
             // thread; a std::bad_alloc (or any other exception) must never escape
@@ -582,6 +660,13 @@ void RtpSession::receiver_loop() {
     const int64_t reorder_hold_ms = std::max(0, config_.stt_reorder_hold_ms);
     std::deque<SttReorderEntry> reorder;
     SttSequencer stt_seq;
+    // Payloads of the CURRENT probation chain (SSRC change or large jump),
+    // buffered so a committed restart replays them and loses no audio (review:
+    // restart lost the first probation frame). Receiver-thread-local. A chain
+    // holds at most kMinSequential-1 packets before it commits; the cap is a
+    // defensive bound, never reached by a well-formed chain.
+    std::vector<std::vector<uint8_t>> probe_payloads;
+    constexpr std::size_t kMaxProbePayloads = 4;
 
     const auto reorder_insert = [&](const int64_t ext_seq, const std::vector<uint8_t>& payload,
                                     const std::chrono::steady_clock::time_point now) {
@@ -668,7 +753,10 @@ void RtpSession::receiver_loop() {
 
         // Optional RTP source pinning (VG-08), OUTSIDE the lock (state is
         // receiver-local). Runs BEFORE classify() so an injected/foreign packet
-        // can neither pollute the sequence tracker nor refresh liveness.
+        // can neither pollute the sequence tracker nor refresh liveness. Pins
+        // the (IP, port) tuple ONLY: an SSRC change from the trusted tuple must
+        // reach the sequencer's restart probation instead of being dropped here
+        // (review #6 — pinning and probation were mutually exclusive before).
         if (config_.enforce_rtp_source) {
             const uint32_t src_ip = static_cast<uint32_t>(from.sin_addr.s_addr);
             const uint16_t src_port = ntohs(from.sin_port);
@@ -676,9 +764,7 @@ void RtpSession::receiver_loop() {
                 rtp_source_locked_ = true;
                 locked_source_ip_ = src_ip;
                 locked_source_port_ = src_port;
-                locked_ssrc_ = parsed->ssrc;
-            } else if (src_ip != locked_source_ip_ || src_port != locked_source_port_ ||
-                       parsed->ssrc != locked_ssrc_) {
+            } else if (src_ip != locked_source_ip_ || src_port != locked_source_port_) {
                 invalid_packets_.fetch_add(1);
                 if (stt_reorder) {
                     reorder_drain(std::chrono::steady_clock::now(), false);
@@ -690,9 +776,12 @@ void RtpSession::receiver_loop() {
         packets_in_.fetch_add(1);
         bytes_in_.fetch_add(parsed->payload.size());
 
-        // Classify for the STT tap: extended sequence + dual watermark + SSRC
-        // restart probation. Receiver-thread-local, so done OUTSIDE the lock.
+        // Classify for the STT tap: extended sequence + dual watermark + SSRC/
+        // jump restart probation. Receiver-thread-local, so done OUTSIDE the lock.
         const auto cls = stt_seq.classify(parsed->ssrc, parsed->sequence_number);
+        if (cls.floor_rejected) {
+            stt_floor_dropped_total_.fetch_add(1);
+        }
 
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -768,13 +857,55 @@ void RtpSession::receiver_loop() {
             }
         }
 
-        queue_cv_.notify_one();
+        queue_cv_.notify_all();
 
         // Deliver to STT OUTSIDE the mutex. With stt_reorder, feed the extended-
         // sequence reorder window (spoken order, VG-01); otherwise arrival order
-        // (legacy default). Draining every iteration honors the hold deadline.
+        // (legacy default — deliberately byte-identical behavior when the flag
+        // is off). Draining every iteration honors the hold deadline.
         if (stt_reorder) {
             const auto now = std::chrono::steady_clock::now();
+            if (cls.restart_committed) {
+                // A qualified restart: the buffered entries belong to the RETIRED
+                // epoch. Flush them in their own (ascending old-extended) order
+                // WITHOUT letting them move the fresh epoch's emission floor —
+                // otherwise the old tail (huge ext values) would flush after the
+                // new stream started and poison the floor so every new-stream
+                // packet was rejected (review #5).
+                while (!reorder.empty()) {
+                    const std::vector<uint8_t> payload = std::move(reorder.front().payload);
+                    reorder.pop_front();
+                    fire_audio_callback(payload);
+                }
+                // Replay the probation packets (sequential by construction) so a
+                // restart loses no audio, then floor the fresh epoch just below
+                // the committing packet so a duplicate probe cannot re-emit.
+                for (const auto& probe : probe_payloads) {
+                    fire_audio_callback(probe);
+                }
+                probe_payloads.clear();
+                stt_seq.stt_emitted_high = cls.ext_seq - 1;
+                stt_restarts_committed_total_.fetch_add(1);
+            } else if (cls.probe_candidate) {
+                // First packet(s) of an unqualified discontinuity: hold the
+                // payload for replay-on-commit. A NEW chain (length 1) replaces
+                // any previous candidate buffer.
+                const int chain_len = stt_seq.probing ? stt_seq.probe_count
+                                                      : (stt_seq.jump_probing ? stt_seq.jump_count : 0);
+                if (chain_len == 1) {
+                    stt_probation_dropped_total_.fetch_add(probe_payloads.size());
+                    probe_payloads.clear();
+                }
+                if (probe_payloads.size() < kMaxProbePayloads) {
+                    probe_payloads.push_back(parsed->payload);
+                } else {
+                    stt_probation_dropped_total_.fetch_add(1);
+                }
+            } else if (!stt_seq.probing && !stt_seq.jump_probing && !probe_payloads.empty()) {
+                // The accepted stream kept flowing: the candidate chain is stale.
+                stt_probation_dropped_total_.fetch_add(probe_payloads.size());
+                probe_payloads.clear();
+            }
             if (cls.feed_stt && !parsed->payload.empty()) {
                 reorder_insert(cls.ext_seq, parsed->payload, now);
             }
@@ -1021,7 +1152,17 @@ void RtpSession::watchdog_loop() {
     const int tick_ms = std::max(50, config_.watchdog_tick_ms);
 
     while (running_.load()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(tick_ms));
+        // Interruptible tick: a stop() notifies queue_cv_, so the watchdog wakes
+        // and exits immediately instead of sleeping out the remainder of its
+        // tick — the largest single contributor to per-session teardown latency
+        // (review #14; a 5000ms tick meant a 5s join). Uses the shared cv, which
+        // is why every waker must notify_all: a notify_one could be consumed
+        // here and starve the transmitter.
+        {
+            std::unique_lock<std::mutex> lock(mutex_);
+            queue_cv_.wait_for(lock, std::chrono::milliseconds(tick_ms),
+                               [this] { return !running_.load(); });
+        }
         if (!running_.load()) {
             break;
         }
@@ -1120,7 +1261,7 @@ void RtpSession::mark_tts_frame_dropped_locked(const uint32_t segment_id) {
     }
 }
 
-void RtpSession::request_stop(const std::string& reason, const bool timeout_event) {
+void RtpSession::request_stop(const std::string& reason, const bool timeout_event, const bool run_epilogue) {
     // request_stop() is reachable from several threads: the session's own worker
     // loops (watchdog timeout, receiver/transmitter socket_error) and EXTERNAL
     // callers (POST /stop via stop_session, an HTTP handler, the registry reaper,
@@ -1176,24 +1317,58 @@ void RtpSession::request_stop(const std::string& reason, const bool timeout_even
         return;
     }
 
+    // Signal-only callers (stop_async / bulk shutdown pass 1) stop here.
+    if (!run_epilogue) {
+        return;
+    }
+
     // External caller: claim the epilogue latch so exactly ONE external caller
     // runs the join+close, even when several call stop() on the same session
-    // concurrently (the stress test does). A caller that loses the claim returns
-    // immediately; it holds its own shared_ptr reference (or, for ~RtpSession,
-    // runs only at refcount 0, so no concurrent external caller exists), so the
-    // object stays alive until the claiming caller's epilogue completes.
+    // concurrently (the stress test does). A LOSING caller does NOT return
+    // early: it waits until the winner publishes completion, so every external
+    // stop() return means "sockets closed, threads joined". This closes the
+    // latch-loser race where SessionRegistry::stop_session released its
+    // stopping_ (id/port) reservation while a direct racer's teardown was still
+    // in flight, letting a same-port restart bind against the old socket.
     if (teardown_started_.exchange(true)) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        queue_cv_.wait(lock, [this] { return teardown_done_; });
         return;
+    }
+
+    // Epilogue, serialized against start() (review #7). If a concurrent start()
+    // is mid-construction, this blocks until its threads exist and its gate
+    // decision is made, then joins them; without this ordering the joinable()
+    // scan below could race the thread assignments and miss all three.
+    std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+
+    // A stop() that latched BEFORE start() flipped running_ would have skipped
+    // the signal block above (was_running == false), letting the session start
+    // and run afterwards with the epilogue latch already spent — the workers
+    // would then be joined here while still live, blocking forever. Re-assert
+    // the stop now that start() can no longer be mid-flight: stop always wins.
+    if (running_.exchange(false)) {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            clear_tts_queue_locked(reason);
+            transition_state_locked(SessionState::Stopping);
+            if (stop_reason_ == "running") {
+                stop_reason_ = stop_reason_or_default(reason);
+            }
+            transition_state_locked(SessionState::Stopped);
+        }
+        queue_cv_.notify_all();
     }
 
     // Join every worker thread BEFORE closing the sockets, so no thread is inside
     // recvfrom()/sendto() on an fd when it is closed (which would be UB per POSIX
     // and could let the fd be recycled under a blocked reader). The workers are
-    // never blocked forever — recvfrom returns within SO_RCVTIMEO (~200ms), the
-    // transmitter woke on the cv above, the watchdog on its tick — so each join
-    // is bounded. The claiming caller's join() of each now-finished worker thread
-    // is also the barrier that guarantees this object outlives every worker
-    // thread (workers hold no shared_ptr, so ~RtpSession never runs on one).
+    // never blocked forever — recvfrom returns within SO_RCVTIMEO (bounded), the
+    // transmitter woke on the cv above, the watchdog waits on the same cv — so
+    // each join is bounded. The claiming caller's join() of each now-finished
+    // worker thread is also the barrier that guarantees this object outlives
+    // every worker thread (workers hold no shared_ptr, so ~RtpSession never
+    // runs on one).
     if (receiver_thread_.joinable()) {
         receiver_thread_.join();
     }
@@ -1215,6 +1390,13 @@ void RtpSession::request_stop(const std::string& reason, const bool timeout_even
         shutdown(tx_fd, SHUT_RDWR);
         close(tx_fd);
     }
+
+    // Publish completion for any waiting latch-losers.
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        teardown_done_ = true;
+    }
+    queue_cv_.notify_all();
 }
 
 void RtpSession::transition_state_locked(const SessionState next_state) {

@@ -439,6 +439,46 @@ void test_stop_start_same_id_port_race() {
            "stop_start_same_id_port: every restart on the reused port must succeed after full teardown");
 }
 
+// ---------------------------------------------------------------------------
+// Test 6: CONCURRENT start() vs stop() ON THE SAME SESSION (review #7).
+//
+// Before the lifecycle mutex, a stop() racing a concurrent start() could scan
+// and join the std::thread members WHILE start() was assigning them (a TSan-
+// visible data race), find nothing joinable, and leave three joinable threads
+// behind — std::terminate at destruction. Now the epilogue and start()'s
+// prepare/commit are serialized: whatever the interleaving, stop wins, all
+// workers are joined, and destruction is clean. Any regression aborts the
+// process (terminate/TSan/ASan) or hangs the joins (caught by the gate's
+// process-level timeout).
+// ---------------------------------------------------------------------------
+void test_concurrent_start_stop_same_session() {
+    constexpr int kIterations = 100;
+    constexpr uint16_t kListenPort = 38500;
+    constexpr uint16_t kRemotePort = 38501;
+
+    for (int i = 0; i < kIterations; ++i) {
+        auto session = std::make_shared<voice_gateway::RtpSession>(
+            make_config("ss-race", kListenPort, kRemotePort));
+
+        std::thread starter([session]() {
+            std::string error;
+            (void)session->start(error);  // may legitimately fail if stop won
+        });
+        std::thread stopper([session]() {
+            session->stop("race_stop");
+        });
+        starter.join();
+        stopper.join();
+
+        // Whatever the interleaving: the session must end not-running with a
+        // completed teardown, so this (idempotent) stop and the destructor are
+        // clean. stop() returning implies teardown_done_ (loser-wait), so the
+        // next iteration can rebind the same port immediately.
+        session->stop("cleanup");
+        expect(!session->running(), "start_stop_race: session must not be running after both racers finish");
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -451,6 +491,7 @@ int main() {
         {"reaper_self_stopped_session_not_erased_before_grace", test_reaper_self_stopped_session_not_erased_before_grace},
         {"concurrent_snapshot_during_churn", test_concurrent_snapshot_during_churn},
         {"stop_start_same_id_port_race", test_stop_start_same_id_port_race},
+        {"concurrent_start_stop_same_session", test_concurrent_start_stop_same_session},
     };
 
     for (const auto& [name, fn] : tests) {

@@ -73,12 +73,15 @@ struct SessionConfig {
     // Maximum number of audio frames to batch into a single callback POST.
     // 1 = one POST per 20 ms frame (lowest latency). Default: 1.
     int audio_callback_batch_frames{1};
-    // When true, the receiver locks onto the (source IP, source port, SSRC) of
-    // the first accepted RTP packet and drops any later packet that does not
-    // match — closing off-path audio injection / session-keepalive attacks
-    // (VG-08). Default OFF: today the gateway binds to a trusted localhost/
-    // Asterisk peer, and strict pinning could drop a legitimate mid-call source
-    // change. Enable before exposing RTP to any untrusted network.
+    // When true, the receiver locks onto the (source IP, source port) of the
+    // first accepted RTP packet and drops any later packet from a different
+    // tuple — closing off-path audio injection / session-keepalive attacks
+    // (VG-08). SSRC is deliberately NOT part of the pin: a legitimate mid-call
+    // SSRC restart from the trusted tuple must be able to reach the sequencer's
+    // probation logic instead of being dropped before it (review #6). Default
+    // OFF: today the gateway binds to a trusted localhost/Asterisk peer, and
+    // strict pinning could drop a legitimate mid-call source change. Enable
+    // before exposing RTP to any untrusted network.
     bool enforce_rtp_source{false};
     // VG-01 (fixes S1: garbled spoken emails/phone digits). When true, caller
     // audio is delivered to the STT callback in RTP SEQUENCE order via a small
@@ -92,8 +95,9 @@ struct SessionConfig {
     int stt_reorder_window_frames{3};
     // Max time a frame may wait in the reorder window before being emitted even
     // if the window is not full — flushes the tail of an utterance during the
-    // caller's silence (e.g. the final digits of a phone number). Must exceed
-    // the steady-state window hold (window_frames * 20 ms) to avoid early emit.
+    // caller's silence (e.g. the final digits of a phone number). Must be at
+    // least the steady-state window hold (window_frames * 20 ms) to avoid
+    // early emit; validated only when stt_reorder_enabled.
     int stt_reorder_hold_ms{80};
 };
 
@@ -128,6 +132,14 @@ struct SessionStatsSnapshot {
     uint64_t tts_frames_dropped_total{0};
     uint64_t tts_queue_depth_frames{0};
     std::string tts_last_stop_reason;
+    // STT-tap observability (review: Batch A had none). Frames handed to the
+    // audio callback, frames rejected at/behind the emission floor, packets
+    // dropped while a restart/jump probation was unqualified, and committed
+    // stream restarts (SSRC change or RFC3550 large-jump resync).
+    uint64_t stt_frames_emitted_total{0};
+    uint64_t stt_floor_dropped_total{0};
+    uint64_t stt_probation_dropped_total{0};
+    uint64_t stt_restarts_committed_total{0};
 };
 
 class RtpSession {
@@ -140,6 +152,13 @@ public:
 
     bool start(std::string& error);
     void stop(const std::string& reason);
+    // Signal-only stop: flips running_, records the reason/state, and wakes the
+    // workers, but does NOT run the join+close teardown epilogue. Lets a bulk
+    // shutdown (SessionRegistry destructor) signal EVERY session first and only
+    // then run the epilogues, so total shutdown time is ~max(single teardown)
+    // instead of the sum across sessions (review #14). Callers must still
+    // invoke stop() (or destroy the session) afterwards to reclaim resources.
+    void stop_async(const std::string& reason);
 
     [[nodiscard]] bool running() const;
     [[nodiscard]] bool healthy() const;
@@ -184,7 +203,7 @@ private:
     void clear_tts_queue_locked(const std::string& reason);
     void mark_tts_frame_sent_locked(uint32_t segment_id);
     void mark_tts_frame_dropped_locked(uint32_t segment_id);
-    void request_stop(const std::string& reason, bool timeout_event = false);
+    void request_stop(const std::string& reason, bool timeout_event = false, bool run_epilogue = true);
     void transition_state_locked(SessionState next_state);
     static bool can_transition(SessionState from, SessionState to);
     static int16_t sequence_diff(uint16_t lhs, uint16_t rhs);
@@ -242,10 +261,24 @@ private:
     // self-stopping (which must never run the epilogue: it cannot join itself
     // and could touch this object after ~RtpSession frees it). The epilogue is
     // instead claimed once by whichever EXTERNAL caller (stop_session, an HTTP
-    // handler, the reaper, or ~RtpSession) reaches it first; later external
-    // callers observe true and skip. This also serializes the concurrent direct
-    // RtpSession::stop() callers exercised by the concurrency stress test.
+    // handler, the reaper, or ~RtpSession) reaches it first. A LOSING external
+    // caller no longer returns immediately — it BLOCKS on queue_cv_ until the
+    // winner sets teardown_done_, so "stop() returned" now means "teardown
+    // complete" for every external caller. That is what lets stop_session()
+    // hold its stopping_ reservation until the sockets are truly closed even
+    // when a direct racer claimed the epilogue (the latch-loser race).
     std::atomic<bool> teardown_started_{false};
+    // Set (under mutex_) by the epilogue winner after all joins + socket closes;
+    // losing external stoppers wait on queue_cv_ for it.
+    bool teardown_done_{false};
+
+    // Serializes start()'s prepare/commit against the teardown epilogue. Without
+    // it, a stop() racing a concurrent start() could scan/join the thread
+    // members WHILE start() assigns them (a data race), conclude there is
+    // nothing to join, and leave three joinable threads behind — std::terminate
+    // at destruction (review #7). Worker threads never take this mutex, so the
+    // epilogue's joins cannot deadlock on it.
+    std::mutex lifecycle_mutex_;
 
     std::thread receiver_thread_;
     std::thread transmitter_thread_;
@@ -276,6 +309,11 @@ private:
     std::atomic<uint64_t> tts_frames_enqueued_total_{0};
     std::atomic<uint64_t> tts_frames_sent_total_{0};
     std::atomic<uint64_t> tts_frames_dropped_total_{0};
+    // STT-tap counters (Batch A observability; needed before the reorder canary).
+    std::atomic<uint64_t> stt_frames_emitted_total_{0};
+    std::atomic<uint64_t> stt_floor_dropped_total_{0};
+    std::atomic<uint64_t> stt_probation_dropped_total_{0};
+    std::atomic<uint64_t> stt_restarts_committed_total_{0};
 
     std::chrono::steady_clock::time_point last_rtp_rx_time_;
     std::chrono::steady_clock::time_point last_rtp_tx_time_;
@@ -301,13 +339,14 @@ private:
     bool last_played_seq_valid_{false};
     uint16_t last_played_seq_{0};
     bool has_prev_arrival_{false};
-    // RTP source pinning (only consulted when config_.enforce_rtp_source). Locked
-    // to the first accepted packet's source tuple + SSRC; later mismatches are
-    // dropped as injected (VG-08).
+    // RTP source pinning (only consulted when config_.enforce_rtp_source).
+    // Locked to the first packet's (source IP, source port); later mismatches
+    // are dropped as injected (VG-08). SSRC is intentionally NOT pinned here —
+    // SSRC changes from the trusted tuple go through the sequencer's restart
+    // probation instead (review #6).
     bool rtp_source_locked_{false};
     uint32_t locked_source_ip_{0};
     uint16_t locked_source_port_{0};
-    uint32_t locked_ssrc_{0};
     uint32_t prev_rtp_timestamp_{0};
     std::chrono::steady_clock::time_point prev_arrival_time_{};
     std::chrono::steady_clock::time_point last_rtcp_report_sent_at_{};

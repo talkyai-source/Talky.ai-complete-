@@ -20,6 +20,21 @@ SessionRegistry::~SessionRegistry() {
     if (reaper_thread_.joinable()) {
         reaper_thread_.join();
     }
+
+    // Two-pass bulk shutdown (review #14): SIGNAL every live session first so
+    // all their workers begin exiting in parallel, THEN run the join+close
+    // epilogues. Serial member destruction alone would signal session N+1 only
+    // after N fully joined — worst case minutes across hundreds of sessions;
+    // this makes total shutdown ~max(single teardown), not the sum.
+    const std::vector<RtpSessionPtr> all = collect_sessions_locked_copy();
+    for (const auto& session : all) {
+        session->stop_async("registry_shutdown");
+    }
+    for (const auto& session : all) {
+        session->stop("registry_shutdown");
+    }
+    // sessions_ then destructs; every epilogue already ran, so each ~RtpSession
+    // is a no-op through its teardown latch.
 }
 
 StartSessionResult SessionRegistry::start_session(const SessionConfig& config, std::string& error, RtpSession::AudioCallback audio_cb) {
@@ -51,11 +66,25 @@ StartSessionResult SessionRegistry::start_session(const SessionConfig& config, s
     if (audio_cb) {
         session->set_audio_callback(std::move(audio_cb));
     }
+
+    // Register BEFORE releasing the workers (review #8): start() commits the
+    // session's start gate, after which queued RTP can fire externally
+    // observable callbacks — so the registration must already exist. The old
+    // order (start, then emplace) let an emplace() failure orphan a session
+    // that had already delivered audio for a start that "never happened".
+    // The map insert can throw only BEFORE start() ran (nothing to undo), and
+    // erase-by-iterator on failure is noexcept. get_session cannot observe the
+    // not-yet-started entry: we hold mutex_ throughout.
+    const auto [it, inserted] = sessions_.emplace(config.session_id, session);
+    if (!inserted) {
+        error = "session already exists";
+        return StartSessionResult::AlreadyExists;
+    }
     if (!session->start(error)) {
+        sessions_.erase(it);
         return StartSessionResult::InternalError;
     }
 
-    sessions_.emplace(config.session_id, session);
     stopped_since_.erase(config.session_id);  // defensive: no stale reaper record
     ++sessions_started_total_;
     return StartSessionResult::Started;
@@ -184,6 +213,10 @@ ProcessStatsSnapshot SessionRegistry::snapshot() const {
         snap.tts_frames_sent_total += session_stats.tts_frames_sent_total;
         snap.tts_frames_dropped_total += session_stats.tts_frames_dropped_total;
         snap.tts_queue_depth_frames += session_stats.tts_queue_depth_frames;
+        snap.stt_frames_emitted_total += session_stats.stt_frames_emitted_total;
+        snap.stt_floor_dropped_total += session_stats.stt_floor_dropped_total;
+        snap.stt_probation_dropped_total += session_stats.stt_probation_dropped_total;
+        snap.stt_restarts_committed_total += session_stats.stt_restarts_committed_total;
     }
 
     return snap;
@@ -241,8 +274,13 @@ void SessionRegistry::reap_once() {
                 // UDP sockets + three threads are released within one sweep
                 // instead of lingering the full 60s reap grace (VG-15). The map
                 // entry stays until grace for stats visibility.
-                stopped_since_.emplace(id, now);
+                //
+                // Order matters (review: partially-committed recovery): reserve
+                // the teardown FIRST — if push_back throws, no stopped_since_
+                // record exists yet and the next sweep retries the prompt
+                // teardown instead of silently downgrading to the 60s grace.
                 to_teardown.push_back(session);
+                stopped_since_.emplace(id, now);
                 ++it;
                 continue;
             }
@@ -365,18 +403,23 @@ bool SessionRegistry::validate_config(const SessionConfig& config, std::string& 
         return false;
     }
 
-    if (config.stt_reorder_window_frames < 1 || config.stt_reorder_window_frames > 25) {
-        error = "stt_reorder_window_frames must be between 1 and 25";
-        return false;
-    }
+    // Reorder parameters are validated ONLY when the feature is enabled —
+    // validating a disabled feature's knobs rejected previously-valid start
+    // payloads for no behavioral reason (review: compat regression).
+    if (config.stt_reorder_enabled) {
+        if (config.stt_reorder_window_frames < 1 || config.stt_reorder_window_frames > 25) {
+            error = "stt_reorder_window_frames must be between 1 and 25";
+            return false;
+        }
 
-    // The hold deadline must be at least the steady-state window hold
-    // (window_frames * 20ms), or frames age out before the window can reorder
-    // them and the feature degrades to arrival order (findings #12/#16).
-    if (config.stt_reorder_hold_ms < config.stt_reorder_window_frames * 20 ||
-        config.stt_reorder_hold_ms > 1000) {
-        error = "stt_reorder_hold_ms must be between window_frames*20 and 1000";
-        return false;
+        // The hold deadline must be AT LEAST the steady-state window hold
+        // (window_frames * 20ms), or frames age out before the window can
+        // reorder them and the feature degrades to arrival order (#12/#16).
+        if (config.stt_reorder_hold_ms < config.stt_reorder_window_frames * 20 ||
+            config.stt_reorder_hold_ms > 1000) {
+            error = "stt_reorder_hold_ms must be between window_frames*20 and 1000";
+            return false;
+        }
     }
 
     return true;

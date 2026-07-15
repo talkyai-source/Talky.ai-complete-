@@ -1,5 +1,6 @@
 #include "voice_gateway/http_server.h"
 
+#include <atomic>
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
@@ -96,25 +97,39 @@ int main(int argc, char** argv) {
     // (now handler-free) server and registry destruct. This guarantees no
     // detached handler is still touching the server/registry when they are
     // destroyed (VG-03).
-    std::thread server_thread([&server] {
+    // If the accept loop dies (exception or unexpected return), main must NOT
+    // keep waiting for a signal while serving nothing — a live-but-dead process
+    // (review: server-exception zombie). The flag makes main tear down and exit
+    // non-zero so the supervisor restarts the gateway.
+    std::atomic<bool> server_thread_exited{false};
+
+    std::thread server_thread([&server, &server_thread_exited] {
         // Contain any exception so it cannot reach the thread entry and
-        // std::terminate the process (#2).
+        // std::terminate the process (#2) — but never die silently.
         try {
             server.run();
+        } catch (const std::exception& ex) {
+            std::cerr << "event=http_accept_loop_died error=" << ex.what() << std::endl;
         } catch (...) {
+            std::cerr << "event=http_accept_loop_died error=unknown" << std::endl;
         }
+        server_thread_exited.store(true);
     });
 
-    while (g_stop_requested == 0) {
+    while (g_stop_requested == 0 && !server_thread_exited.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
-    std::cout << "voice-gateway-cpp shutting down (signal received)" << std::endl;
+    const bool died_unexpectedly = server_thread_exited.load() && g_stop_requested == 0;
+    std::cout << (died_unexpectedly
+                      ? "voice-gateway-cpp shutting down (accept loop exited unexpectedly)"
+                      : "voice-gateway-cpp shutting down (signal received)")
+              << std::endl;
     server.stop();  // stops accepting + drains active handlers (bounded)
     if (server_thread.joinable()) {
         server_thread.join();
     }
 
     std::cout << "voice-gateway-cpp stopped" << std::endl;
-    return 0;
+    return died_unexpectedly ? 1 : 0;
 }

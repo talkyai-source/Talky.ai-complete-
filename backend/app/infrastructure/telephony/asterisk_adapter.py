@@ -470,10 +470,21 @@ class AsteriskAdapter(CallControlAdapter):
     ) -> Any:
         if not self._session:
             raise RuntimeError("AsteriskAdapter not connected")
+        # Bearer auth for the C++ gateway control plane (VG-18). The gateway
+        # requires "Authorization: Bearer <token>" on every endpoint except
+        # GET /health when VOICE_GATEWAY_AUTH_TOKEN is set in its environment;
+        # sending the same env var from here keeps the pair in lockstep. When
+        # the var is unset the header is omitted and the gateway (auth off)
+        # ignores it — enabling auth is a coordinated env change on both sides.
+        headers: Optional[Dict[str, str]] = None
+        token = os.getenv("VOICE_GATEWAY_AUTH_TOKEN", "").strip()
+        if token:
+            headers = {"Authorization": f"Bearer {token}"}
         async with self._session.request(
             method,
             f"{self._gateway_base_url}{path}",
             json=payload,
+            headers=headers,
             timeout=aiohttp.ClientTimeout(total=10),
         ) as resp:
             if resp.status not in ok:

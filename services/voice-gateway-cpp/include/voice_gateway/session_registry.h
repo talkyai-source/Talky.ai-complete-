@@ -46,6 +46,11 @@ struct ProcessStatsSnapshot {
     uint64_t tts_frames_sent_total{0};
     uint64_t tts_frames_dropped_total{0};
     uint64_t tts_queue_depth_frames{0};
+    // STT-tap observability (Batch A review).
+    uint64_t stt_frames_emitted_total{0};
+    uint64_t stt_floor_dropped_total{0};
+    uint64_t stt_probation_dropped_total{0};
+    uint64_t stt_restarts_committed_total{0};
 };
 
 class SessionRegistry {
