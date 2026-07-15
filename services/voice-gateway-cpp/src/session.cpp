@@ -42,12 +42,132 @@ bool rtp_tx_debug_logging_enabled() {
     return enabled;
 }
 
-// One buffered frame in the receiver's STT reorder window (VG-01). Held only on
-// the receiver thread, so no synchronization is needed.
+// One buffered frame in the receiver's STT reorder window (VG-01), keyed on the
+// EXTENDED (unwrapped) sequence number so ordering is a true total order across
+// 16-bit wraps. Held only on the receiver thread, so no synchronization needed.
 struct SttReorderEntry {
-    uint16_t sequence_number{0};
+    int64_t ext_seq{0};
     std::chrono::steady_clock::time_point arrival;
     std::vector<uint8_t> payload;
+};
+
+// Outcome of classifying one received RTP packet for the STT path.
+struct SttClassification {
+    bool feed_stt{false};        // admit to the reorder window
+    int64_t ext_seq{0};          // extended sequence (valid iff feed_stt)
+    bool advanced{false};        // advanced the forward watermark -> refresh liveness
+    bool restart_committed{false};  // a qualified SSRC restart just committed
+};
+
+// Receiver-thread-local sequence tracker for the STT tap (Batch A, review
+// findings #5/#8/#10/#12). Unwraps 16-bit RTP sequence numbers into an extended
+// (int64) space RFC3550-style, enforces a DUAL watermark — a hard STT emission
+// floor plus a separate forward-progress watermark for liveness — and qualifies
+// an SSRC restart via probation instead of resetting on any SSRC change. All
+// state is touched only by the receiver thread, so it needs no lock.
+struct SttSequencer {
+    static constexpr int64_t kSeqMod = 0x10000;      // 2^16
+    static constexpr uint16_t kMaxDropout = 3000;    // RFC3550
+    static constexpr uint16_t kMaxMisorder = 100;    // RFC3550
+    static constexpr int kMinSequential = 2;         // RFC3550 probation
+
+    bool initialized{false};
+    uint32_t ssrc{0};
+    uint16_t max_seq{0};
+    int64_t cycles{0};
+    int64_t highest_received_ext{-1};  // forward-progress watermark (liveness)
+    int64_t stt_emitted_high{-1};      // hard floor: reject ext_seq <= this
+
+    bool probing{false};
+    uint32_t probe_ssrc{0};
+    uint16_t probe_max_seq{0};
+    int probe_count{0};
+
+    void init_stream(const uint32_t s, const uint16_t seq) {
+        ssrc = s;
+        max_seq = seq;
+        cycles = 0;
+        highest_received_ext = seq;  // first packet is forward
+        stt_emitted_high = -1;       // advanced only on emit
+        probing = false;
+        probe_count = 0;
+        initialized = true;
+    }
+
+    SttClassification classify(const uint32_t pkt_ssrc, const uint16_t seq) {
+        SttClassification r;
+        if (!initialized) {
+            init_stream(pkt_ssrc, seq);
+            r.feed_stt = true;
+            r.ext_seq = seq;
+            r.advanced = true;
+            return r;
+        }
+
+        if (pkt_ssrc != ssrc) {
+            // A different SSRC: qualify a restart via probation rather than
+            // trusting the first packet (which could be injected / a stale
+            // reflection). Only kMinSequential in-order packets commit the reset.
+            if (probing && pkt_ssrc == probe_ssrc &&
+                seq == static_cast<uint16_t>(probe_max_seq + 1)) {
+                probe_max_seq = seq;
+                ++probe_count;
+                if (probe_count >= kMinSequential) {
+                    init_stream(pkt_ssrc, seq);
+                    r.feed_stt = true;
+                    r.ext_seq = seq;
+                    r.advanced = true;
+                    r.restart_committed = true;
+                    return r;
+                }
+            } else {
+                probing = true;
+                probe_ssrc = pkt_ssrc;
+                probe_max_seq = seq;
+                probe_count = 1;
+            }
+            return r;  // unqualified new-SSRC packet: dropped
+        }
+
+        // Same SSRC as the accepted stream: any candidate probation is stale.
+        probing = false;
+        probe_count = 0;
+
+        const uint16_t udelta = static_cast<uint16_t>(seq - max_seq);
+        int64_t ext;
+        if (udelta < kMaxDropout) {
+            // In order (with a permissible small gap). Detect the wrap.
+            if (seq < max_seq) {
+                cycles += kSeqMod;
+            }
+            max_seq = seq;
+            ext = cycles + seq;
+        } else if (udelta <= kSeqMod - kMaxMisorder) {
+            // Very large forward jump for the SAME SSRC — an anomaly, not a
+            // normal reorder. Compute in the current cycle; the dual-watermark
+            // reject below still protects STT ordering.
+            ext = cycles + seq;
+        } else {
+            // Small backward step: a reordered or duplicate packet. If seq is
+            // ABOVE max_seq it is a delayed packet from the PREVIOUS cycle
+            // (e.g. 65535 arriving after we already wrapped to 0).
+            ext = (seq > max_seq) ? (cycles - kSeqMod + seq) : (cycles + seq);
+        }
+
+        // Hard floor: never hand STT a sequence at or behind one already emitted
+        // (that is exactly what produced "...,100,99"). NO lateness allowance
+        // below the emission watermark (#5).
+        if (ext <= stt_emitted_high) {
+            return r;  // feed_stt=false
+        }
+        r.feed_stt = true;
+        r.ext_seq = ext;
+        if (ext > highest_received_ext) {
+            highest_received_ext = ext;  // forward progress -> refresh liveness
+            r.advanced = true;
+        }
+        return r;
+    }
 };
 
 // Identifies, per thread, which RtpSession this thread is a worker loop for.
@@ -452,34 +572,37 @@ void RtpSession::receiver_loop() {
     if (!running_.load()) {
         return;
     }
-    // STT sequence-ordered reorder window (VG-01). Receiver-thread-local: only
-    // this loop inserts/drains/emits, so it needs no lock and adds no contention.
-    // Ascending by sequence (wrap-aware via sequence_diff). Bounded to
-    // window+1 entries because every insert is immediately followed by a drain.
+    // STT reorder window (VG-01 / Batch A). Receiver-thread-local: only this loop
+    // touches the sequencer + deque, so no lock, no contention. The deque is keyed
+    // on the EXTENDED sequence (int64) for a true total order, and bounded to
+    // window+1 entries because every insert is followed by a drain.
     const bool stt_reorder = config_.stt_reorder_enabled;
     const std::size_t reorder_window =
         std::max<std::size_t>(1, static_cast<std::size_t>(std::max(1, config_.stt_reorder_window_frames)));
     const int64_t reorder_hold_ms = std::max(0, config_.stt_reorder_hold_ms);
     std::deque<SttReorderEntry> reorder;
+    SttSequencer stt_seq;
 
-    const auto reorder_insert = [&](const uint16_t seq, const std::vector<uint8_t>& payload,
+    const auto reorder_insert = [&](const int64_t ext_seq, const std::vector<uint8_t>& payload,
                                     const std::chrono::steady_clock::time_point now) {
         auto it = reorder.begin();
-        while (it != reorder.end() && sequence_diff(seq, it->sequence_number) > 0) {
+        while (it != reorder.end() && ext_seq > it->ext_seq) {
             ++it;
         }
-        if (it != reorder.end() && it->sequence_number == seq) {
-            return;  // duplicate already buffered
+        if (it != reorder.end() && it->ext_seq == ext_seq) {
+            return;  // duplicate already buffered (exact extended-seq match)
         }
         SttReorderEntry entry;
-        entry.sequence_number = seq;
+        entry.ext_seq = ext_seq;
         entry.arrival = now;
         entry.payload = payload;
         reorder.insert(it, std::move(entry));
     };
 
-    // Emit (in ascending sequence order) every frame that is either past the
-    // window depth or older than the hold deadline; flush_all drains everything.
+    // Emit (in ascending extended-sequence order) every frame past the window
+    // depth or older than the hold deadline; flush_all drains everything. Each
+    // emit advances the hard emission floor so a later, lower packet is rejected
+    // by classify() instead of being emitted out of order (#5).
     const auto reorder_drain = [&](const std::chrono::steady_clock::time_point now, const bool flush_all) {
         while (!reorder.empty()) {
             const bool over_window = reorder.size() > reorder_window;
@@ -488,6 +611,7 @@ void RtpSession::receiver_loop() {
             if (!flush_all && !over_window && !aged) {
                 break;
             }
+            stt_seq.stt_emitted_high = reorder.front().ext_seq;
             const std::vector<uint8_t> payload = std::move(reorder.front().payload);
             reorder.pop_front();
             fire_audio_callback(payload);
@@ -526,130 +650,137 @@ void RtpSession::receiver_loop() {
         }
 
         if (is_rtcp_packet(buffer, static_cast<std::size_t>(n))) {
+            if (stt_reorder) {
+                reorder_drain(std::chrono::steady_clock::now(), false);  // don't starve the tail (#12)
+            }
             continue;
         }
 
         const auto parsed = RtpPacket::parse(buffer, static_cast<std::size_t>(n));
-        if (!parsed.has_value()) {
+        if (!parsed.has_value() || parsed->payload_type != 0 ||
+            parsed->payload.size() != static_cast<std::size_t>(kPcmuTimestampStep)) {
             invalid_packets_.fetch_add(1);
+            if (stt_reorder) {
+                reorder_drain(std::chrono::steady_clock::now(), false);  // honor the hold deadline (#12)
+            }
             continue;
         }
-        if (parsed->payload_type != 0) {
-            invalid_packets_.fetch_add(1);
-            continue;
-        }
-        if (parsed->payload.size() != static_cast<std::size_t>(kPcmuTimestampStep)) {
-            invalid_packets_.fetch_add(1);
-            continue;
+
+        // Optional RTP source pinning (VG-08), OUTSIDE the lock (state is
+        // receiver-local). Runs BEFORE classify() so an injected/foreign packet
+        // can neither pollute the sequence tracker nor refresh liveness.
+        if (config_.enforce_rtp_source) {
+            const uint32_t src_ip = static_cast<uint32_t>(from.sin_addr.s_addr);
+            const uint16_t src_port = ntohs(from.sin_port);
+            if (!rtp_source_locked_) {
+                rtp_source_locked_ = true;
+                locked_source_ip_ = src_ip;
+                locked_source_port_ = src_port;
+                locked_ssrc_ = parsed->ssrc;
+            } else if (src_ip != locked_source_ip_ || src_port != locked_source_port_ ||
+                       parsed->ssrc != locked_ssrc_) {
+                invalid_packets_.fetch_add(1);
+                if (stt_reorder) {
+                    reorder_drain(std::chrono::steady_clock::now(), false);
+                }
+                continue;
+            }
         }
 
         packets_in_.fetch_add(1);
         bytes_in_.fetch_add(parsed->payload.size());
 
+        // Classify for the STT tap: extended sequence + dual watermark + SSRC
+        // restart probation. Receiver-thread-local, so done OUTSIDE the lock.
+        const auto cls = stt_seq.classify(parsed->ssrc, parsed->sequence_number);
+
         {
             std::lock_guard<std::mutex> lock(mutex_);
             const auto arrival = std::chrono::steady_clock::now();
 
-            // Optional RTP source pinning (VG-08). Lock onto the first accepted
-            // packet's (source IP, source port, SSRC); drop any later packet from
-            // a different origin as injected. Off by default — see
-            // SessionConfig::enforce_rtp_source. Dropped here BEFORE liveness so a
-            // foreign flood cannot keep the session alive.
-            if (config_.enforce_rtp_source) {
-                const uint32_t src_ip = static_cast<uint32_t>(from.sin_addr.s_addr);
-                const uint16_t src_port = ntohs(from.sin_port);
-                if (!rtp_source_locked_) {
-                    rtp_source_locked_ = true;
-                    locked_source_ip_ = src_ip;
-                    locked_source_port_ = src_port;
-                    locked_ssrc_ = parsed->ssrc;
-                } else if (src_ip != locked_source_ip_ ||
-                           src_port != locked_source_port_ ||
-                           parsed->ssrc != locked_ssrc_) {
-                    invalid_packets_.fetch_add(1);
-                    continue;
+            // A qualified SSRC restart: reset the echo jitter ring + sequence
+            // bookkeeping so the new stream is not rejected against the old one.
+            if (cls.restart_committed) {
+                reset_jitter_buffer_locked();
+                last_played_seq_valid_ = false;
+                last_received_seq_valid_ = false;
+                has_prev_arrival_ = false;
+            }
+
+            // Liveness / state / interarrival-jitter update ONLY on forward STT
+            // progress (a packet that advanced the received watermark). Stale,
+            // backward, duplicate or injected packets never refresh liveness now
+            // (#8/#10) nor pollute the jitter estimate (#31).
+            if (cls.advanced) {
+                last_rtp_rx_time_ = arrival;
+                if (!first_rtp_seen_) {
+                    first_rtp_seen_ = true;
+                    transition_state_locked(SessionState::Buffering);
+                } else if (state_ == SessionState::Degraded) {
+                    transition_state_locked(SessionState::Active);
                 }
-            }
-
-            // Reject stale (already-played) sequence numbers BEFORE anything
-            // touches liveness, state, or jitter. A stream of late / duplicate /
-            // injected packets must never refresh last_rtp_rx_time_ — otherwise
-            // it silently suppresses the no-RTP watchdog while no new caller
-            // audio is actually arriving (VG-08), and pollutes the jitter
-            // estimate with non-forward packets (VG-31).
-            if (last_played_seq_valid_ && sequence_diff(parsed->sequence_number, last_played_seq_) <= 0) {
-                jitter_buffer_late_drops_.fetch_add(1);
-                dropped_packets_.fetch_add(1);
-                continue;
-            }
-
-            QueuedRtpFrame frame{};
-            frame.sequence_number = parsed->sequence_number;
-            frame.timestamp = parsed->timestamp;
-            frame.payload_size = parsed->payload.size();
-            std::memcpy(frame.payload.data(), parsed->payload.data(), frame.payload_size);
-            if (!insert_jitter_frame_locked(frame)) {
-                // Duplicate of a still-buffered frame: not forward progress.
-                continue;
-            }
-
-            // --- Accepted forward audio from here on ---
-            last_rtp_rx_time_ = arrival;
-
-            if (!first_rtp_seen_) {
-                first_rtp_seen_ = true;
-                transition_state_locked(SessionState::Buffering);
-            } else if (state_ == SessionState::Degraded) {
-                transition_state_locked(SessionState::Active);
-            }
-
-            if (has_prev_arrival_) {
-                const double arrival_delta_seconds = std::chrono::duration<double>(arrival - prev_arrival_time_).count();
-                const double arrival_delta_rtp_units = arrival_delta_seconds * static_cast<double>(kPcmuClockRateHz);
-                const int32_t rtp_delta = static_cast<int32_t>(parsed->timestamp - prev_rtp_timestamp_);
-                const double d = std::fabs(arrival_delta_rtp_units - static_cast<double>(rtp_delta));
-                interarrival_jitter_ts_units_ += (d - interarrival_jitter_ts_units_) / 16.0;
-            }
-            prev_arrival_time_ = arrival;
-            prev_rtp_timestamp_ = parsed->timestamp;
-            has_prev_arrival_ = true;
-
-            if (last_received_seq_valid_) {
-                const uint16_t expected_next = static_cast<uint16_t>(last_received_seq_ + 1);
-                if (parsed->sequence_number != expected_next) {
-                    out_of_order_packets_.fetch_add(1);
+                if (has_prev_arrival_) {
+                    const double arrival_delta_seconds = std::chrono::duration<double>(arrival - prev_arrival_time_).count();
+                    const double arrival_delta_rtp_units = arrival_delta_seconds * static_cast<double>(kPcmuClockRateHz);
+                    const int32_t rtp_delta = static_cast<int32_t>(parsed->timestamp - prev_rtp_timestamp_);
+                    const double d = std::fabs(arrival_delta_rtp_units - static_cast<double>(rtp_delta));
+                    interarrival_jitter_ts_units_ += (d - interarrival_jitter_ts_units_) / 16.0;
                 }
-                if (sequence_diff(parsed->sequence_number, last_received_seq_) > 0) {
-                    last_received_seq_ = parsed->sequence_number;
-                }
-            } else {
-                last_received_seq_valid_ = true;
-                last_received_seq_ = parsed->sequence_number;
+                prev_arrival_time_ = arrival;
+                prev_rtp_timestamp_ = parsed->timestamp;
+                has_prev_arrival_ = true;
             }
 
-            if (playout_started_) {
-                const std::size_t target_depth = std::min(kDefaultJitterTargetDepthFrames, config_.jitter_buffer_capacity_frames);
-                while (jitter_buffer_size_ > target_depth) {
-                    drop_oldest_jitter_frame_locked();
+            // Echo jitter ring — only meaningful when echo is enabled (it is off
+            // in production). Kept independent of the STT tap, so a jitter dup/
+            // reject can never drop a valid STT frame (#5 decoupling).
+            if (config_.echo_enabled) {
+                if (last_played_seq_valid_ && sequence_diff(parsed->sequence_number, last_played_seq_) <= 0) {
+                    jitter_buffer_late_drops_.fetch_add(1);
+                    dropped_packets_.fetch_add(1);
+                } else {
+                    QueuedRtpFrame frame{};
+                    frame.sequence_number = parsed->sequence_number;
+                    frame.timestamp = parsed->timestamp;
+                    frame.payload_size = parsed->payload.size();
+                    std::memcpy(frame.payload.data(), parsed->payload.data(), frame.payload_size);
+                    if (insert_jitter_frame_locked(frame)) {
+                        if (last_received_seq_valid_) {
+                            const uint16_t expected_next = static_cast<uint16_t>(last_received_seq_ + 1);
+                            if (parsed->sequence_number != expected_next) {
+                                out_of_order_packets_.fetch_add(1);
+                            }
+                            if (sequence_diff(parsed->sequence_number, last_received_seq_) > 0) {
+                                last_received_seq_ = parsed->sequence_number;
+                            }
+                        } else {
+                            last_received_seq_valid_ = true;
+                            last_received_seq_ = parsed->sequence_number;
+                        }
+                        if (playout_started_) {
+                            const std::size_t target_depth = std::min(kDefaultJitterTargetDepthFrames, config_.jitter_buffer_capacity_frames);
+                            while (jitter_buffer_size_ > target_depth) {
+                                drop_oldest_jitter_frame_locked();
+                            }
+                        }
+                    }
                 }
             }
         }
 
         queue_cv_.notify_one();
 
-        // Deliver the payload to the AI pipeline (STT). The callback runs outside
-        // the mutex to avoid blocking the jitter buffer / TTS paths. With
-        // stt_reorder enabled, feed a small sequence-ordered window so STT sees
-        // caller audio in spoken order (fixes transposed digits/emails, VG-01);
-        // otherwise deliver in raw arrival order (legacy default).
-        if (!parsed->payload.empty()) {
-            if (stt_reorder) {
-                const auto now = std::chrono::steady_clock::now();
-                reorder_insert(parsed->sequence_number, parsed->payload, now);
-                reorder_drain(now, false);
-            } else {
-                fire_audio_callback(parsed->payload);
+        // Deliver to STT OUTSIDE the mutex. With stt_reorder, feed the extended-
+        // sequence reorder window (spoken order, VG-01); otherwise arrival order
+        // (legacy default). Draining every iteration honors the hold deadline.
+        if (stt_reorder) {
+            const auto now = std::chrono::steady_clock::now();
+            if (cls.feed_stt && !parsed->payload.empty()) {
+                reorder_insert(cls.ext_seq, parsed->payload, now);
             }
+            reorder_drain(now, false);
+        } else if (!parsed->payload.empty()) {
+            fire_audio_callback(parsed->payload);
         }
     }
     // Drain whatever remains so the final frames of the call still reach STT.

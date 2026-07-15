@@ -370,8 +370,12 @@ bool SessionRegistry::validate_config(const SessionConfig& config, std::string& 
         return false;
     }
 
-    if (config.stt_reorder_hold_ms < 0 || config.stt_reorder_hold_ms > 1000) {
-        error = "stt_reorder_hold_ms must be between 0 and 1000";
+    // The hold deadline must be at least the steady-state window hold
+    // (window_frames * 20ms), or frames age out before the window can reorder
+    // them and the feature degrades to arrival order (findings #12/#16).
+    if (config.stt_reorder_hold_ms < config.stt_reorder_window_frames * 20 ||
+        config.stt_reorder_hold_ms > 1000) {
+        error = "stt_reorder_hold_ms must be between window_frames*20 and 1000";
         return false;
     }
 

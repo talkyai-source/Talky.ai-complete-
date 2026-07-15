@@ -368,6 +368,71 @@ void test_shutdown_drains_inflight_handler() {
     close(fd);
 }
 
+// Batch A (#5): once STT has been handed a frame, a LATER packet with a lower
+// sequence must be REJECTED (hard emission floor), never emitted backwards.
+void test_stt_reorder_rejects_late_after_emit() {
+    SessionConfig cfg = base_config("reorder2", 34401, 34402);
+    cfg.echo_enabled = false;
+    cfg.stt_reorder_enabled = true;
+    cfg.stt_reorder_window_frames = 3;
+    cfg.stt_reorder_hold_ms = 60;
+    cfg.watchdog_tick_ms = 50;
+    RtpSession session(cfg);
+
+    auto recorded = std::make_shared<std::vector<int>>();
+    auto rec_mutex = std::make_shared<std::mutex>();
+    session.set_audio_callback([recorded, rec_mutex](const std::string&, const std::vector<uint8_t>& pl) {
+        if (!pl.empty()) {
+            std::lock_guard<std::mutex> lk(*rec_mutex);
+            recorded->push_back(static_cast<int>(pl[0]));
+        }
+    });
+
+    std::string err;
+    check(session.start(err), "vg01b_start");
+
+    const int tx = socket(AF_INET, SOCK_DGRAM, 0);
+    sockaddr_in dst{};
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons(34401);
+    inet_pton(AF_INET, "127.0.0.1", &dst.sin_addr);
+
+    uint32_t ts = 0;
+    const auto burst = [&](const uint16_t s) {
+        send_rtp(tx, dst, s, ts, 0x3333u, static_cast<uint8_t>(s & 0xFF));
+        ts += 160;
+    };
+    burst(100);
+    burst(101);
+    burst(102);
+    burst(103);  // window=3 -> the 4th pushes 100 out to STT
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    burst(99);  // arrives AFTER 100 was emitted -> must be rejected
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+    std::vector<int> got;
+    {
+        std::lock_guard<std::mutex> lk(*rec_mutex);
+        got = *recorded;
+    }
+
+    bool has99 = false;
+    bool ascending = true;
+    for (std::size_t i = 0; i < got.size(); ++i) {
+        if (got[i] == 99) {
+            has99 = true;
+        }
+        if (i > 0 && got[i] <= got[i - 1]) {
+            ascending = false;
+        }
+    }
+    check(!has99, "vg01b_late_packet_after_emit_rejected");
+    check(ascending, "vg01b_emitted_strictly_ascending");
+
+    session.stop("test_done");
+    close(tx);
+}
+
 // Batch B (#11): a truncated request (client sends a partial header then closes
 // its write side) must make the handler return and close the connection promptly
 // — not hang — and clean up via finish_request.
@@ -416,6 +481,7 @@ int main() {
     test_tts_overflow_accounting();
     test_jitter_flood_no_deadlock();
     test_stt_reorder_ordering();
+    test_stt_reorder_rejects_late_after_emit();
     test_control_plane_callback_validation();
     test_shutdown_drains_inflight_handler();
     test_truncated_request_no_hang();
