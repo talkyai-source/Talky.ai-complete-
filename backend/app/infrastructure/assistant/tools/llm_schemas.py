@@ -291,15 +291,19 @@ GROQ_TOOL_SCHEMAS = [
                 "ONE AT A TIME (ask for the next only after the previous is answered): "
                 "1) name, 2) goal, 3) type (lead_gen | customer_support | receptionist), "
                 "4) company_name (the company the agent represents), 5) agent_names "
-                "(the name the AI agent uses on calls). These five are the ONLY "
-                "questions — NEVER invent extra ones (industry, services, target "
-                "audience, script details). If the user volunteers extra detail, put "
-                "it in additional_instructions instead of asking follow-ups. Do NOT "
-                "ask for a voice — it defaults to the tenant's configured voice. The "
-                "moment all five are known you MUST immediately call this tool with "
-                "confirm=false (a JSON boolean, not a quoted string) — the confirm "
-                "card IS the preview, never describe it in words first; the user's "
-                "approval re-calls with confirm=true to actually create it."
+                "(the name the AI agent uses on calls), and for lead_gen ONLY also "
+                "6) industry, 7) services_description (what it offers). These are the "
+                "ONLY questions — NEVER invent extra ones (audience, coverage, script "
+                "details); the rest of the script is auto-filled with editable "
+                "defaults shown in the draft. customer_support/receptionist campaigns "
+                "are created knowledge-driven automatically — no extra questions. If "
+                "the user volunteers extra detail, put it in additional_instructions. "
+                "Do NOT ask for a voice — it defaults to the tenant's configured "
+                "voice. The moment the last field is known you MUST immediately call "
+                "this tool with confirm=false (a JSON boolean, not a quoted string) — "
+                "the card shows the FULL DRAFT with Create campaign / Cancel buttons; "
+                "never describe the draft in words instead of calling. The user's "
+                "Create button re-calls with confirm=true."
             ),
             "parameters": {
                 "type": "object",
@@ -316,6 +320,14 @@ GROQ_TOOL_SCHEMAS = [
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "One or more names the AI agent may use on calls",
+                    },
+                    "industry": {
+                        "type": "string",
+                        "description": "lead_gen only: the industry the company operates in",
+                    },
+                    "services_description": {
+                        "type": "string",
+                        "description": "lead_gen only: what products/services the company offers",
                     },
                     "additional_instructions": {
                         "type": "string",

@@ -133,6 +133,33 @@ async def _resolve_provider_and_voice(
     return {"provider": provider, "voice_id": chosen}
 
 
+def _default_lead_gen_slots(
+    goal: str, company_name: str, industry: str, services_description: str
+) -> Dict[str, Any]:
+    """Fill the lead_gen persona's required slots from what the user told us.
+
+    Voice collects the two facts only the user knows (industry + services);
+    everything else derives from the goal/company or gets an editable default.
+    The confirm card shows ALL of it so the human approves the full draft.
+    """
+    goal_text = (goal or "").strip()
+    return {
+        "industry": industry,
+        "services_description": services_description,
+        "coverage_area": "all areas the company serves",
+        "company_differentiator": goal_text or f"what makes {company_name} stand out",
+        "value_proposition": goal_text or f"how {company_name} can help them",
+        "call_reason": goal_text or f"to introduce {company_name}",
+        "qualification_questions": [
+            "Is this something you're currently looking into?",
+            "When would you like to get started?",
+            "Are you the right person to speak with about this?",
+        ],
+        "disqualifying_answers": ["not interested", "already have a provider", "do not call"],
+        "calendar_booking_type": "a follow-up call with a specialist",
+    }
+
+
 async def create_campaign(
     tenant_id: str,
     db_client: Client,
@@ -142,6 +169,8 @@ async def create_campaign(
     company_name: str = "",
     agent_names: Union[str, List[str], None] = None,
     goal: Optional[str] = None,
+    industry: Optional[str] = None,
+    services_description: Optional[str] = None,
     description: Optional[str] = None,
     additional_instructions: Optional[str] = None,
     tts_provider: Optional[str] = None,
@@ -156,6 +185,8 @@ async def create_campaign(
     company_name = (company_name or "").strip()
     persona = _normalize_persona(persona_type)
     names = _normalize_agent_names(agent_names)
+    industry_text = (industry or "").strip()
+    services_text = (services_description or "").strip()
 
     # The agent is instructed to collect these one at a time; if it calls early,
     # tell it exactly what's still missing so it asks for just that, in order.
@@ -170,6 +201,13 @@ async def create_campaign(
         missing.append("the company the agent represents")
     if not names:
         missing.append("the agent's name")
+    # lead_gen scripts need two facts only the user knows; everything else in
+    # the persona's slot set is derived/defaulted below and shown in the draft.
+    if persona == "lead_gen":
+        if not industry_text:
+            missing.append("the industry the company operates in")
+        if not services_text:
+            missing.append("what products/services the company offers")
     if missing:
         return {
             "error": (
@@ -187,6 +225,19 @@ async def create_campaign(
             )
         }
 
+    # --- assemble the persona's slot set -------------------------------------
+    # customer_support / receptionist scripts need 9-11 factual slots (address,
+    # hours, policies…) that a voice flow can't reasonably collect — those
+    # campaigns are created knowledge-driven: a lean identity prompt whose
+    # substance comes from the campaign's uploaded knowledge base.
+    campaign_slots: Dict[str, Any] = {}
+    if persona == "lead_gen":
+        campaign_slots = _default_lead_gen_slots(
+            goal or "", company_name, industry_text, services_text
+        )
+    else:
+        knowledge_driven = True
+
     # --- build the validated script_config (shared with the REST endpoint) --
     try:
         from app.domain.services.campaign_prompt_service import (
@@ -198,7 +249,7 @@ async def create_campaign(
             persona_type=persona,
             company_name=company_name,
             agent_names=names,
-            campaign_slots={},
+            campaign_slots=campaign_slots,
             additional_instructions=(additional_instructions or "").strip(),
             knowledge_driven=knowledge_driven,
         )
@@ -217,25 +268,59 @@ async def create_campaign(
 
     # A single ProposalCampaign-shaped diff drives the confirm card AND the
     # applied summary. before=None marks each row as a creation (the diff card
-    # renders these as plain "after" values, no strike-through).
+    # renders these as plain "after" values, no strike-through). This is the
+    # FULL DRAFT the human approves — including every derived/default value.
+    changes = [
+        {"field": "name", "before": None, "after": name},
+        {"field": "goal", "before": None, "after": goal},
+        {"field": "type", "before": None, "after": persona},
+        {"field": "company_name", "before": None, "after": company_name},
+        {"field": "agent_names", "before": None, "after": ", ".join(names)},
+        {"field": "voice", "before": None, "after": f"{provider} · {chosen_voice}"},
+    ]
+    if persona == "lead_gen":
+        changes.extend(
+            [
+                {"field": "industry", "before": None, "after": campaign_slots["industry"]},
+                {"field": "services", "before": None, "after": campaign_slots["services_description"]},
+                {"field": "coverage area", "before": None, "after": campaign_slots["coverage_area"]},
+                {"field": "value proposition", "before": None, "after": campaign_slots["value_proposition"]},
+                {"field": "reason for calling", "before": None, "after": campaign_slots["call_reason"]},
+                {
+                    "field": "qualification questions",
+                    "before": None,
+                    "after": " · ".join(campaign_slots["qualification_questions"]),
+                },
+                {
+                    "field": "disqualifying answers",
+                    "before": None,
+                    "after": ", ".join(campaign_slots["disqualifying_answers"]),
+                },
+                {"field": "next step offered", "before": None, "after": campaign_slots["calendar_booking_type"]},
+            ]
+        )
+    else:
+        changes.append(
+            {
+                "field": "content source",
+                "before": None,
+                "after": "Knowledge-driven — upload documents to the campaign's knowledge base before starting",
+            }
+        )
     diff = {
         "campaign_id": "new",
         "name": name,
-        "changes": [
-            {"field": "name", "before": None, "after": name},
-            {"field": "goal", "before": None, "after": goal},
-            {"field": "type", "before": None, "after": persona},
-            {"field": "company_name", "before": None, "after": company_name},
-            {"field": "agent_names", "before": None, "after": ", ".join(names)},
-            {"field": "voice", "before": None, "after": f"{provider} · {chosen_voice}"},
-        ],
+        "changes": changes,
     }
 
     if not confirm:
+        note = "New campaign — not created yet. Review the full draft and press Create campaign (or Cancel)."
+        if persona == "lead_gen":
+            note += " Auto-filled defaults are included; everything can be edited after creation."
         return {
             "preview": True,
             "campaigns": [diff],
-            "note": "New campaign — not created yet. Confirm to create it.",
+            "note": note,
         }
 
     # --- apply: create the campaign (mirrors POST /campaigns/) ---------------

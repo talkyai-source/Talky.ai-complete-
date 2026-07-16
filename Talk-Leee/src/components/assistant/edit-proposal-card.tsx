@@ -32,7 +32,14 @@ const TOOL_TITLES: Record<string, string> = {
     manage_lead: "Update contact",
     apply_campaign_voice: "Change voice",
     send_email: "Send email",
+    create_campaign: "New campaign — full draft",
 };
+
+// Per-tool action labels; creation reads as Create/Cancel, edits as Apply/Reject.
+const TOOL_ACTIONS: Record<string, { apply: string; reject: string; applied: string }> = {
+    create_campaign: { apply: "Create campaign", reject: "Cancel", applied: "Created" },
+};
+const DEFAULT_ACTIONS = { apply: "Apply", reject: "Reject", applied: "Applied" };
 
 export function EditProposalCard({
     proposal,
@@ -45,6 +52,7 @@ export function EditProposalCard({
 }) {
     const { proposalId, tool, warnings, changes, campaigns, status, error } = proposal;
     const title = TOOL_TITLES[tool] ?? "Proposed change";
+    const actions = TOOL_ACTIONS[tool] ?? DEFAULT_ACTIONS;
     const pending = status === "pending";
 
     return (
@@ -53,7 +61,7 @@ export function EditProposalCard({
                 <span className="font-semibold text-foreground">{title}</span>
                 {status === "applied" && (
                     <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                        <CheckCircle2 className="h-3.5 w-3.5" />Applied
+                        <CheckCircle2 className="h-3.5 w-3.5" />{actions.applied}
                     </span>
                 )}
                 {status === "rejected" && (
@@ -103,14 +111,14 @@ export function EditProposalCard({
                         onClick={() => onApply(proposalId)}
                         className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-500"
                     >
-                        <Check className="h-3.5 w-3.5" />Apply
+                        <Check className="h-3.5 w-3.5" />{actions.apply}
                     </button>
                     <button
                         type="button"
                         onClick={() => onReject(proposalId)}
                         className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted"
                     >
-                        <X className="h-3.5 w-3.5" />Reject
+                        <X className="h-3.5 w-3.5" />{actions.reject}
                     </button>
                 </div>
             )}
