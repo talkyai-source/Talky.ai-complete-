@@ -358,7 +358,10 @@ class GoogleCalendarConnector(CalendarProvider):
             )
             
             if response.status_code != 200:
-                raise ValueError(f"List events failed: {response.text}")
+                from app.infrastructure.connectors.google_errors import (
+                    google_api_error_from_response,
+                )
+                raise google_api_error_from_response("google_calendar", response, "list_events")
             
             data = response.json()
             events = []

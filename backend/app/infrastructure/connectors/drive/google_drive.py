@@ -13,6 +13,7 @@ import httpx
 
 from app.infrastructure.connectors.base import ConnectorFactory, OAuthTokens
 from app.infrastructure.connectors.drive.base import DriveProvider, DriveFile
+from app.infrastructure.connectors.google_errors import google_api_error_from_response
 
 logger = logging.getLogger(__name__)
 
@@ -150,8 +151,15 @@ class GoogleDriveConnector(DriveProvider):
             )
             
             if response.status_code != 200:
-                logger.error(f"Token refresh failed: {response.text}")
-                raise ValueError(f"Token refresh failed: {response.text}")
+                error = google_api_error_from_response(
+                    "google_drive", response, "refresh_tokens", token_endpoint=True
+                )
+                logger.error(
+                    "Drive token refresh failed status=%s category=%s",
+                    response.status_code,
+                    error.category,
+                )
+                raise error
             
             token_data = response.json()
             
@@ -225,7 +233,7 @@ class GoogleDriveConnector(DriveProvider):
             )
 
             if response.status_code != 200:
-                raise ValueError(f"Download file failed: {response.text}")
+                raise google_api_error_from_response("google_drive", response, "download_file")
 
             return response.content
 
@@ -243,7 +251,7 @@ class GoogleDriveConnector(DriveProvider):
             )
 
             if response.status_code != 200:
-                raise ValueError(f"Export file failed: {response.text}")
+                raise google_api_error_from_response("google_drive", response, "export_file")
 
             return response.content
     
@@ -275,7 +283,7 @@ class GoogleDriveConnector(DriveProvider):
             )
             
             if response.status_code != 200:
-                raise ValueError(f"List files failed: {response.text}")
+                raise google_api_error_from_response("google_drive", response, "list_files")
             
             data = response.json()
             return [self._parse_file(f) for f in data.get("files", [])]
@@ -326,7 +334,7 @@ class GoogleDriveConnector(DriveProvider):
             )
             
             if response.status_code != 200:
-                raise ValueError(f"Get file failed: {response.text}")
+                raise google_api_error_from_response("google_drive", response, "get_file")
             
             return self._parse_file(response.json())
     

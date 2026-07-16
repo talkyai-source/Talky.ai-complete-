@@ -143,6 +143,25 @@ GROQ_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "read_calendar_events",
+            "description": (
+                "List upcoming events from the connected calendar (now to +days_ahead). "
+                "Use for 'any meetings today/right now/this week?'. Returns title, start/end "
+                "time, location, attendees. Timed events only. Read-only."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days_ahead": {"type": ["integer", "string"], "description": "How many days ahead to look (default 7, max 31). Use 1 for 'today/right now'."},
+                    "max_results": {"type": ["integer", "string"], "description": "Max events to return (default 10, max 25)"}
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_campaigns",
             "description": "Get all campaigns with status and progress",
             "parameters": {

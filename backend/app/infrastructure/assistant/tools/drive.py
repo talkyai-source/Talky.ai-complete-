@@ -6,12 +6,77 @@ confirm card. Binary/large files are described but not dumped into the context.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict, Optional
 
+import httpx
+
 from app.core.postgres_adapter import Client
+from app.infrastructure.connectors.base import ConnectorProviderError
 
 logger = logging.getLogger(__name__)
+
+
+def _drive_provider_error(exc: Exception, *, opening_file: bool = False) -> Dict[str, Any]:
+    """Honest user-facing Drive errors — a Google rejection is NOT 'not connected'."""
+    if isinstance(exc, ConnectorProviderError):
+        logger.error(
+            "Drive provider failure operation=%s category=%s status=%s",
+            exc.operation,
+            exc.category,
+            exc.status_code,
+        )
+        if exc.category == "authentication":
+            return {
+                "success": False,
+                "error": "Google Drive rejected the saved authorization. Please reconnect Drive from the Connectors page (left sidebar).",
+                "drive_required": True,
+                "error_code": "drive_authentication_failed",
+            }
+        if exc.category == "permission":
+            return {
+                "success": False,
+                "error": "Google Drive denied access. Make sure the Google Drive API is enabled in the Google Cloud project and Drive permission was granted.",
+                "error_code": "drive_permission_denied",
+            }
+        if exc.category == "rate_limit":
+            return {
+                "success": False,
+                "error": "Google Drive is rate-limiting requests right now. Please wait a moment and try again.",
+                "error_code": "drive_rate_limited",
+            }
+        if exc.category == "not_found" and opening_file:
+            return {
+                "success": False,
+                "error": "That file is no longer available; it may have been moved or deleted.",
+                "error_code": "drive_not_found",
+            }
+        if exc.category in {"temporary", "configuration"}:
+            message = (
+                "Google Drive is temporarily unavailable. Please try again in a moment."
+                if exc.category == "temporary"
+                else "Drive access is not configured correctly. An administrator needs to check the Google integration."
+            )
+            return {"success": False, "error": message, "error_code": f"drive_{exc.category}_error"}
+
+    if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError, TimeoutError)):
+        return {
+            "success": False,
+            "error": "Google Drive took too long to respond. Please try again.",
+            "error_code": "drive_timeout",
+        }
+    if isinstance(exc, httpx.RequestError):
+        return {
+            "success": False,
+            "error": "Google Drive could not be reached. Please try again in a moment.",
+            "error_code": "drive_network_error",
+        }
+    return {
+        "success": False,
+        "error": "Couldn't read Drive just now. Please try again in a moment.",
+        "error_code": "drive_provider_error",
+    }
 
 _MAX_TEXT_CHARS = 6000        # cap a file's returned text for the LLM context
 _MAX_DOWNLOAD_BYTES = 512 * 1024  # never pull more than 512 KiB into memory
@@ -80,8 +145,8 @@ async def drive_list_files(
         capped = max(1, min(int(max_results or 20), 50))
         files = await connector.list_files(query=query, max_results=capped)
     except Exception as exc:
-        logger.error("drive_list_files failed: %s", exc)
-        return {"success": False, "error": "Couldn't read Drive just now. Try reconnecting it in the Connectors page (left sidebar)."}
+        logger.error("drive_list_files failed type=%s", type(exc).__name__)
+        return _drive_provider_error(exc)
 
     out = []
     for f in files:
@@ -126,8 +191,8 @@ async def drive_read_file(
     try:
         meta = await connector.get_file(file_id.strip())
     except Exception as exc:
-        logger.error("drive_read_file metadata failed: %s", exc)
-        return {"success": False, "error": "Couldn't find that file — it may have been removed, or Drive needs reconnecting."}
+        logger.error("drive_read_file metadata failed type=%s", type(exc).__name__)
+        return _drive_provider_error(exc, opening_file=True)
 
     if meta.is_folder:
         return {"success": False, "error": f"'{meta.name}' is a folder, not a file. Use drive_list_files to see what's inside."}
@@ -174,8 +239,8 @@ async def drive_read_file(
         else:
             raw = await connector.download_file(file_id.strip())
     except Exception as exc:
-        logger.error("drive_read_file download failed: %s", exc)
-        return {"success": False, "error": "Couldn't download that file's contents."}
+        logger.error("drive_read_file download failed type=%s", type(exc).__name__)
+        return _drive_provider_error(exc, opening_file=True)
 
     text = ""
     try:

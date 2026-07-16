@@ -26,6 +26,9 @@ from app.infrastructure.assistant.tools.drive import (
     drive_list_files,
     drive_read_file,
 )
+from app.infrastructure.assistant.tools.calendar_read import (
+    read_calendar_events,
+)
 from app.infrastructure.assistant.tools.campaigns import (
     StartCampaignInput,
     get_campaigns,
@@ -137,6 +140,15 @@ QUERY_TOOLS = {
         "description": (
             "Read a text-like Drive file's contents by file_id (from drive_list_files). Non-text or "
             "oversized files return a link instead of content. Read-only."
+        ),
+        "input_schema": None,
+    },
+    "read_calendar_events": {
+        "function": read_calendar_events,
+        "description": (
+            "List upcoming events from the connected calendar (now to +days_ahead, default 7, "
+            "max 31). Use for 'any meetings today/now/this week?'. Returns title, start/end time, "
+            "location, attendees. Timed events only. Read-only."
         ),
         "input_schema": None,
     },
@@ -340,6 +352,7 @@ __all__ = [
     "read_email",
     "drive_list_files",
     "drive_read_file",
+    "read_calendar_events",
     "get_campaigns",
     "get_recent_calls",
     "get_actions_today",

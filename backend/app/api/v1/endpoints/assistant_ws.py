@@ -344,7 +344,10 @@ async def assistant_chat(
             try:
                 if current_conversation_id:
                     db_client.table("assistant_conversations").update({
-                        "messages": messages_history,
+                        # asyncpg binds jsonb params as JSON TEXT — a raw list
+                        # raises DataError('expected str, got list') and the
+                        # conversation silently never persists.
+                        "messages": json.dumps(messages_history),
                         "message_count": len(messages_history),
                         "last_message_at": datetime.utcnow().isoformat()
                     }).eq("id", current_conversation_id).execute()
@@ -355,7 +358,7 @@ async def assistant_chat(
                     new_conv = db_client.table("assistant_conversations").insert({
                         "tenant_id": tenant_id,
                         "user_id": user_id,
-                        "messages": messages_history,
+                        "messages": json.dumps(messages_history),
                         "message_count": len(messages_history),
                         "title": title,
                         "started_at": datetime.utcnow().isoformat(),
