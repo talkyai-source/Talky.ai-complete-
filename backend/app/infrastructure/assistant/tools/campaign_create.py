@@ -21,6 +21,7 @@ one. There is deliberately no second creation code path to drift.
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
@@ -332,7 +333,10 @@ async def create_campaign(
         "voice_id": chosen_voice,
         "tts_provider": provider or None,
         "goal": (goal or "").strip() or None,
-        "script_config": script_config,
+        # asyncpg's builtin jsonb codec on this client requires JSON TEXT — a
+        # raw dict raises DataError('expected str, got dict') and the create
+        # fails at the very last step (live failure 2026-07-16).
+        "script_config": json.dumps(script_config),
     }
 
     try:
@@ -361,12 +365,14 @@ async def create_campaign(
             "triggered_by": "chat",
             "conversation_id": conversation_id,
             "campaign_id": new_id,
-            "input_data": {
+            "input_data": json.dumps({
                 "name": name,
                 "persona_type": persona,
                 "company_name": company_name,
-            },
-            "output_data": {"campaign_id": new_id, "voice_id": chosen_voice, "provider": provider},
+            }),
+            "output_data": json.dumps(
+                {"campaign_id": new_id, "voice_id": chosen_voice, "provider": provider}
+            ),
             "completed_at": datetime.utcnow().isoformat(),
         }).execute()
     except Exception as exc:  # pragma: no cover - audit is best-effort

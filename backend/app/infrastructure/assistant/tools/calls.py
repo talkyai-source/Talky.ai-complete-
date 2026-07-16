@@ -1,6 +1,7 @@
 """
 Call query and action tools for the assistant agent.
 """
+import json
 import logging
 from typing import Optional, Dict, Any
 from datetime import date
@@ -70,11 +71,11 @@ async def initiate_call(
             "conversation_id": conversation_id,
             "campaign_id": campaign_id,
             "lead_id": lead_id,
-            "input_data": {
+            "input_data": json.dumps({
                 "phone_number": phone_number,
                 "campaign_id": campaign_id,
                 "lead_id": lead_id
-            }
+            })
         }
 
         action_response = db_client.table("assistant_actions").insert(action_data).execute()

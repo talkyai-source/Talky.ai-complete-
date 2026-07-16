@@ -1,6 +1,7 @@
 """
 Email and SMS communication tools for the assistant agent.
 """
+import json
 import logging
 import os
 from typing import Optional, List, Dict, Any
@@ -353,11 +354,11 @@ async def send_sms(
             "triggered_by": "chat",
             "conversation_id": conversation_id,
             "connector_id": connector_id,
-            "input_data": {
+            "input_data": json.dumps({
                 "to": to,
                 "message": message,
                 "lead_ids": lead_ids
-            }
+            })
         }
 
         action_response = db_client.table("assistant_actions").insert(action_data).execute()
@@ -369,7 +370,7 @@ async def send_sms(
             db_client.table("assistant_actions").update({
                 "status": "completed",
                 "completed_at": datetime.utcnow().isoformat(),
-                "output_data": {"message": "SMS queued for delivery"}
+                "output_data": json.dumps({"message": "SMS queued for delivery"})
             }).eq("id", action_id).execute()
 
         return {

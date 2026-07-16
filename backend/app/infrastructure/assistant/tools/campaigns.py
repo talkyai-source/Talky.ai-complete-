@@ -1,6 +1,7 @@
 """
 Campaign query and action tools for the assistant agent.
 """
+import json
 import logging
 from typing import Optional, Dict, Any
 from datetime import datetime
@@ -79,8 +80,8 @@ async def start_campaign(
             "triggered_by": "chat",
             "conversation_id": conversation_id,
             "campaign_id": campaign_id,
-            "input_data": {"campaign_id": campaign_id},
-            "output_data": {"previous_status": current_status},
+            "input_data": json.dumps({"campaign_id": campaign_id}),
+            "output_data": json.dumps({"previous_status": current_status}),
             "completed_at": datetime.utcnow().isoformat()
         }).execute()
 

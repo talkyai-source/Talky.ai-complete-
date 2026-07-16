@@ -90,6 +90,53 @@ async def test_support_campaign_is_knowledge_driven_with_five_fields():
     assert "Knowledge-driven" in fields["content source"]
 
 
+class _InsertCaptureDB:
+    """Captures insert payloads per table; every execute returns one row."""
+
+    def __init__(self):
+        self.payloads: dict[str, list] = {}
+
+    def table(self, name: str):
+        outer = self
+
+        class _Table:
+            def insert(self, payload):
+                outer.payloads.setdefault(name, []).append(payload)
+
+                class _Query:
+                    def execute(self_q):
+                        return SimpleNamespace(data=[{"id": "camp-1"}], error=None)
+
+                return _Query()
+
+        return _Table()
+
+
+@pytest.mark.asyncio
+async def test_confirmed_create_binds_jsonb_columns_as_json_text():
+    """asyncpg's builtin jsonb codec needs JSON TEXT — a raw dict kills the
+    insert at the last step (live failure: 'expected str, got dict')."""
+    import json
+
+    db = _InsertCaptureDB()
+    result = await create_campaign(
+        "t1",
+        db,
+        **_CORE,
+        industry="the hair industry",
+        services_description="AI area estimation services",
+        confirm=True,
+    )
+
+    assert result.get("applied") is True, result
+    campaign_payload = db.payloads["campaigns"][0]
+    assert isinstance(campaign_payload["script_config"], str)
+    assert json.loads(campaign_payload["script_config"])["persona_type"] == "lead_gen"
+    audit_payload = db.payloads["assistant_actions"][0]
+    assert isinstance(audit_payload["input_data"], str)
+    assert isinstance(audit_payload["output_data"], str)
+
+
 @pytest.mark.asyncio
 async def test_receptionist_campaign_is_knowledge_driven_with_five_fields():
     result = await create_campaign(
