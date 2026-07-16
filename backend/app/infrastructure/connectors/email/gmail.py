@@ -6,7 +6,9 @@ Day 24: Unified Connector System
 """
 import os
 import base64
+import binascii
 import logging
+import re
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
@@ -14,10 +16,97 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import httpx
 
-from app.infrastructure.connectors.base import ConnectorFactory, OAuthTokens
+from app.infrastructure.connectors.base import (
+    ConnectorFactory,
+    ConnectorProviderError,
+    OAuthTokens,
+)
 from app.infrastructure.connectors.email.base import EmailProvider, EmailMessage
 
 logger = logging.getLogger(__name__)
+
+_GMAIL_HTTP_TIMEOUT = httpx.Timeout(10.0, connect=3.0)
+_MAX_SUBJECT_CHARS = 500
+_MAX_FROM_HEADER_CHARS = 512
+_MAX_RECIPIENT_HEADER_CHARS = 2048
+
+
+def _bounded_header(value: Any, max_chars: int) -> str:
+    """Normalize and bound provider-controlled RFC header text."""
+    normalized = re.sub(r"[\r\n]+", " ", str(value or "")).strip()
+    if len(normalized) <= max_chars:
+        return normalized
+    return normalized[: max_chars - 1] + "…"
+
+
+def _gmail_error_from_response(
+    response: httpx.Response,
+    operation: str,
+    *,
+    token_endpoint: bool = False,
+) -> ConnectorProviderError:
+    """Convert a Google response into a stable, non-stringly-typed error."""
+    payload: Any = None
+    try:
+        payload = response.json()
+    except Exception:
+        payload = None
+
+    provider_code = ""
+    provider_message = ""
+    if isinstance(payload, dict):
+        raw_error = payload.get("error")
+        if isinstance(raw_error, dict):
+            provider_code = str(raw_error.get("status") or raw_error.get("code") or "")
+            provider_message = str(raw_error.get("message") or "")
+            details = raw_error.get("errors") or []
+            if details and isinstance(details[0], dict):
+                provider_code = str(details[0].get("reason") or provider_code)
+        elif raw_error:
+            provider_code = str(raw_error)
+            provider_message = str(payload.get("error_description") or "")
+
+    status = response.status_code
+    normalized_code = provider_code.lower()
+    # Token-endpoint client failures describe this deployment's OAuth client,
+    # not the user's grant. Google commonly returns invalid_client with 401;
+    # classify it before the generic 401 branch so we never expire a healthy
+    # user connector for a rotated/misconfigured client secret.
+    if token_endpoint and normalized_code in {
+        "invalid_client",
+        "unauthorized_client",
+        "redirect_uri_mismatch",
+    }:
+        category = "configuration"
+    elif status == 401 or (token_endpoint and normalized_code == "invalid_grant"):
+        category = "authentication"
+    elif status == 403 and normalized_code in {
+        "ratelimitexceeded",
+        "userratelimitexceeded",
+        "quotaexceeded",
+        "dailylimitexceeded",
+    }:
+        category = "rate_limit"
+    elif status == 403:
+        category = "permission"
+    elif status == 404:
+        category = "not_found"
+    elif status == 429:
+        category = "rate_limit"
+    elif status >= 500:
+        category = "temporary"
+    else:
+        category = "unknown"
+
+    safe_message = provider_message or provider_code or f"Google returned HTTP {status}"
+    return ConnectorProviderError(
+        provider="gmail",
+        operation=operation,
+        category=category,
+        message=safe_message,
+        status_code=status,
+        retry_after=response.headers.get("Retry-After"),
+    )
 
 
 class GmailConnector(EmailProvider):
@@ -108,7 +197,7 @@ class GmailConnector(EmailProvider):
         if code_verifier:
             data["code_verifier"] = code_verifier
         
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=_GMAIL_HTTP_TIMEOUT) as client:
             response = await client.post(
                 self.OAUTH_TOKEN_URL,
                 data=data,
@@ -116,8 +205,13 @@ class GmailConnector(EmailProvider):
             )
             
             if response.status_code != 200:
-                logger.error(f"Token exchange failed: {response.text}")
-                raise ValueError(f"Token exchange failed: {response.text}")
+                error = _gmail_error_from_response(response, "exchange_code", token_endpoint=True)
+                logger.error(
+                    "Gmail token exchange failed status=%s category=%s",
+                    response.status_code,
+                    error.category,
+                )
+                raise error
             
             token_data = response.json()
             
@@ -145,7 +239,7 @@ class GmailConnector(EmailProvider):
             "grant_type": "refresh_token"
         }
         
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=_GMAIL_HTTP_TIMEOUT) as client:
             response = await client.post(
                 self.OAUTH_TOKEN_URL,
                 data=data,
@@ -153,8 +247,13 @@ class GmailConnector(EmailProvider):
             )
             
             if response.status_code != 200:
-                logger.error(f"Token refresh failed: {response.text}")
-                raise ValueError(f"Token refresh failed: {response.text}")
+                error = _gmail_error_from_response(response, "refresh_tokens", token_endpoint=True)
+                logger.error(
+                    "Gmail token refresh failed status=%s category=%s",
+                    response.status_code,
+                    error.category,
+                )
+                raise error
             
             token_data = response.json()
             
@@ -210,7 +309,7 @@ class GmailConnector(EmailProvider):
         # Encode message
         raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
         
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=_GMAIL_HTTP_TIMEOUT) as client:
             response = await client.post(
                 f"{self.API_BASE_URL}/users/me/messages/send",
                 json={"raw": raw_message},
@@ -218,8 +317,13 @@ class GmailConnector(EmailProvider):
             )
             
             if response.status_code not in (200, 201):
-                logger.error(f"Send email failed: {response.text}")
-                raise ValueError(f"Send email failed: {response.text}")
+                error = _gmail_error_from_response(response, "send_email")
+                logger.error(
+                    "Gmail send failed status=%s category=%s",
+                    response.status_code,
+                    error.category,
+                )
+                raise error
             
             data = response.json()
             
@@ -237,7 +341,7 @@ class GmailConnector(EmailProvider):
     
     async def get_email(self, message_id: str) -> EmailMessage:
         """Get a single email by ID."""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=_GMAIL_HTTP_TIMEOUT) as client:
             response = await client.get(
                 f"{self.API_BASE_URL}/users/me/messages/{message_id}",
                 params={"format": "full"},
@@ -245,7 +349,7 @@ class GmailConnector(EmailProvider):
             )
             
             if response.status_code != 200:
-                raise ValueError(f"Get email failed: {response.text}")
+                raise _gmail_error_from_response(response, "get_email")
             
             data = response.json()
             return self._parse_message(data)
@@ -267,7 +371,7 @@ class GmailConnector(EmailProvider):
         if q_parts:
             params["q"] = " ".join(q_parts)
         
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=_GMAIL_HTTP_TIMEOUT) as client:
             response = await client.get(
                 f"{self.API_BASE_URL}/users/me/messages",
                 params=params,
@@ -275,37 +379,118 @@ class GmailConnector(EmailProvider):
             )
             
             if response.status_code != 200:
-                raise ValueError(f"List emails failed: {response.text}")
+                raise _gmail_error_from_response(response, "list_emails")
             
             data = response.json()
             messages = []
             
             for msg in data.get("messages", []):
                 try:
-                    full_msg = await self.get_email(msg["id"])
-                    messages.append(full_msg)
+                    # List mode only needs headers + Gmail's bounded snippet.
+                    # Fetching format=full for 25 attacker-controlled messages
+                    # can retain huge MIME bodies before the tool truncates the
+                    # preview. Reserve full payloads for get_email(message_id).
+                    summary_response = await client.get(
+                        f"{self.API_BASE_URL}/users/me/messages/{msg['id']}",
+                        params=[
+                            ("format", "metadata"),
+                            ("metadataHeaders", "From"),
+                            ("metadataHeaders", "To"),
+                            ("metadataHeaders", "Cc"),
+                            ("metadataHeaders", "Subject"),
+                        ],
+                        headers=self._get_auth_headers(),
+                    )
+                    if summary_response.status_code != 200:
+                        raise _gmail_error_from_response(
+                            summary_response, "list_email_metadata"
+                        )
+                    messages.append(self._parse_message(summary_response.json()))
+                except ConnectorProviderError as exc:
+                    # A message can disappear between list and get; that one
+                    # item is safe to skip.  Auth, permission, quota, and
+                    # provider failures affect the whole operation and must be
+                    # surfaced instead of returning a deceptive empty inbox.
+                    if exc.category != "not_found":
+                        raise
+                    logger.info("Gmail message disappeared before fetch: %s", msg["id"])
+                except (httpx.RequestError, TimeoutError):
+                    # A transport failure is operation-wide, not evidence that
+                    # every listed message vanished. Propagate it so callers do
+                    # not report a deceptive successful empty/partial inbox.
+                    raise
                 except Exception as e:
-                    logger.warning(f"Failed to get message {msg['id']}: {e}")
+                    logger.warning(
+                        "Failed to parse Gmail message id=%s type=%s",
+                        msg.get("id"),
+                        type(e).__name__,
+                    )
+                    raise ConnectorProviderError(
+                        provider="gmail",
+                        operation="list_emails",
+                        category="temporary",
+                        message="A listed Gmail message could not be read safely.",
+                    ) from e
             
             return messages
     
     def _parse_message(self, data: Dict[str, Any]) -> EmailMessage:
         """Parse Gmail API message response."""
-        headers = {h["name"].lower(): h["value"] for h in data.get("payload", {}).get("headers", [])}
-        
-        body = ""
-        body_html = None
-        
+        header_limits = {
+            "subject": _MAX_SUBJECT_CHARS,
+            "from": _MAX_FROM_HEADER_CHARS,
+            "to": _MAX_RECIPIENT_HEADER_CHARS,
+            "cc": _MAX_RECIPIENT_HEADER_CHARS,
+        }
+        headers: Dict[str, str] = {}
+        raw_headers = data.get("payload", {}).get("headers", [])
+        for header in raw_headers if isinstance(raw_headers, list) else []:
+            if not isinstance(header, dict):
+                continue
+            name = str(header.get("name") or "").casefold()
+            if name in header_limits and name not in headers:
+                headers[name] = _bounded_header(
+                    header.get("value"), header_limits[name]
+                )
+
+        plain_parts: List[str] = []
+        html_parts: List[str] = []
+
+        def decode_part(encoded: Any) -> Optional[str]:
+            if not isinstance(encoded, str) or not encoded:
+                return None
+            try:
+                padded = encoded + ("=" * (-len(encoded) % 4))
+                raw = base64.urlsafe_b64decode(padded)
+                # MIME charset metadata is inconsistent in Gmail payloads.
+                # Replacement decoding preserves a readable result instead of
+                # dropping the entire message on one non-UTF8 byte.
+                return raw.decode("utf-8", errors="replace")
+            except (ValueError, binascii.Error):
+                return None
+
+        def walk_part(part: Dict[str, Any]) -> None:
+            mime_type = str(part.get("mimeType") or "").lower()
+            decoded = decode_part((part.get("body") or {}).get("data"))
+            if decoded is not None:
+                if mime_type == "text/html":
+                    html_parts.append(decoded)
+                elif mime_type in {"", "text/plain"}:
+                    plain_parts.append(decoded)
+            for child in part.get("parts") or []:
+                if isinstance(child, dict):
+                    walk_part(child)
+
         payload = data.get("payload", {})
-        if "body" in payload and payload["body"].get("data"):
-            body = base64.urlsafe_b64decode(payload["body"]["data"]).decode()
-        elif "parts" in payload:
-            for part in payload["parts"]:
-                if part.get("mimeType") == "text/plain" and part.get("body", {}).get("data"):
-                    body = base64.urlsafe_b64decode(part["body"]["data"]).decode()
-                elif part.get("mimeType") == "text/html" and part.get("body", {}).get("data"):
-                    body_html = base64.urlsafe_b64decode(part["body"]["data"]).decode()
-        
+        if isinstance(payload, dict):
+            walk_part(payload)
+        body = "\n".join(part for part in plain_parts if part).strip()
+        body_html = "\n".join(part for part in html_parts if part).strip() or None
+        if not body:
+            # Gmail's top-level snippet is already plain text and remains
+            # available for attachment-only, malformed, or HTML-only messages.
+            body = str(data.get("snippet") or "").strip()
+
         return EmailMessage(
             id=data["id"],
             thread_id=data.get("threadId"),
@@ -320,14 +505,14 @@ class GmailConnector(EmailProvider):
     
     async def get_profile(self) -> Dict[str, str]:
         """Get user's Gmail profile (email address)."""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=_GMAIL_HTTP_TIMEOUT) as client:
             response = await client.get(
                 f"{self.API_BASE_URL}/users/me/profile",
                 headers=self._get_auth_headers()
             )
             
             if response.status_code != 200:
-                raise ValueError(f"Get profile failed: {response.text}")
+                raise _gmail_error_from_response(response, "get_profile")
             
             return response.json()
 

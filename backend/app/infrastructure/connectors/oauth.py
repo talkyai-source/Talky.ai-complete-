@@ -221,7 +221,10 @@ class OAuthStateManager:
             if redis:
                 # Use Redis
                 key = f"{self.STATE_KEY_PREFIX}{state}"
-                data = await redis.get(key)
+                # GETDEL is atomic. A GET followed by DELETE lets two callback
+                # workers consume the same OAuth state concurrently, exchange
+                # the same code twice, and race credential-row cleanup.
+                data = await redis.getdel(key)
                 
                 if not data:
                     logger.warning(f"OAuth state not found or expired: {state[:8]}...")
@@ -229,8 +232,6 @@ class OAuthStateManager:
                 
                 state_data = json.loads(data)
                 
-                # Delete state (one-time use)
-                await redis.delete(key)
             else:
                 # Use in-memory storage
                 if state not in _memory_state_storage:

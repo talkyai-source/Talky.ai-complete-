@@ -13,20 +13,39 @@ their existing dedicated services.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Tuple
 
-from app.infrastructure.connectors.base import BaseConnector, ConnectorFactory
+import httpx
+
+from app.infrastructure.connectors.base import (
+    BaseConnector,
+    ConnectorFactory,
+    ConnectorProviderError,
+)
 from app.infrastructure.connectors.encryption import get_encryption_service
 
 logger = logging.getLogger(__name__)
+
+_TOKEN_REFRESH_SAFETY_SECONDS = 90
 
 
 class ConnectorNotConnectedError(Exception):
     """No active connector of the requested type for this tenant."""
 
-    def __init__(self, connector_type: str, message: str | None = None):
+    def __init__(
+        self,
+        connector_type: str,
+        message: str | None = None,
+        *,
+        connector_id: str | None = None,
+        provider_confirmed: bool = False,
+        reason: str | None = None,
+    ):
         self.connector_type = connector_type
+        self.connector_id = connector_id
+        self.provider_confirmed = provider_confirmed
+        self.reason = reason
         self.message = message or (
             f"No {connector_type} integration is connected. "
             f"Connect it from the Connectors page (left sidebar)."
@@ -49,25 +68,62 @@ class ConnectorLookupError(Exception):
         super().__init__(self.message)
 
 
+class _ConnectorTokenStoreError(Exception):
+    """A refreshed token could not be durably written back."""
+
+
+def _token_needs_refresh(expires_at: Any, *, force: bool = False) -> bool:
+    """Refresh before expiry, treating malformed stored expiries as unsafe."""
+    if force:
+        return True
+    if not expires_at:
+        return False
+    try:
+        parsed = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        else:
+            parsed = parsed.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return True
+    refresh_at = parsed - timedelta(seconds=_TOKEN_REFRESH_SAFETY_SECONDS)
+    return datetime.now(timezone.utc) >= refresh_at
+
+
 async def _refresh_and_store(
     db_client: Any,
     connector: BaseConnector,
     connector_id: str,
-    refresh_token_encrypted: str,
+    account_id: str,
+    tenant_id: str,
+    refresh_token: str,
 ) -> str:
     """Refresh the OAuth token, persist the new tokens, return the access token."""
     enc = get_encryption_service()
-    refresh_token = enc.decrypt(refresh_token_encrypted)
     new_tokens = await connector.refresh_tokens(refresh_token)
+    if not getattr(new_tokens, "access_token", None):
+        raise ConnectorProviderError(
+            provider=connector.provider_name,
+            operation="refresh_tokens",
+            category="authentication",
+            message="The provider returned no access token.",
+        )
     try:
-        db_client.table("connector_accounts").update({
+        write = db_client.table("connector_accounts").update({
             "access_token_encrypted": enc.encrypt(new_tokens.access_token),
             "refresh_token_encrypted": enc.encrypt(new_tokens.refresh_token or refresh_token),
             "token_expires_at": new_tokens.expires_at.isoformat() if getattr(new_tokens, "expires_at", None) else None,
-            "last_refreshed_at": datetime.utcnow().isoformat(),
-        }).eq("connector_id", connector_id).execute()
-    except Exception as exc:  # persistence is best-effort; the token still works now
-        logger.warning("connector_resolver: token write-back failed for %s: %s", connector_id, exc)
+            "last_refreshed_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", account_id).eq("connector_id", connector_id).eq(
+            "tenant_id", tenant_id
+        ).execute()
+    except Exception as exc:
+        logger.error("connector_resolver: token write-back raised for %s: %s", connector_id, exc)
+        raise _ConnectorTokenStoreError(str(exc)) from exc
+    if getattr(write, "error", None) or not getattr(write, "data", None):
+        detail = str(getattr(write, "error", None) or "no matching account row")
+        logger.error("connector_resolver: token write-back failed for %s: %s", connector_id, detail)
+        raise _ConnectorTokenStoreError(detail)
     return new_tokens.access_token
 
 
@@ -75,6 +131,8 @@ async def resolve_active_connector(
     db_client: Any,
     tenant_id: str,
     connector_type: str,
+    *,
+    force_refresh: bool = False,
 ) -> Tuple[BaseConnector, str, str]:
     """Return ``(connector, connector_id, provider)`` for the tenant's active
     connector of ``connector_type`` ("email" | "drive" | "calendar" | ...),
@@ -107,18 +165,25 @@ async def resolve_active_connector(
     if not rows:
         raise ConnectorNotConnectedError(connector_type)
 
-    # Repeat "Connect" clicks can leave several active connector rows (there is
-    # no unique (tenant,type) constraint). The UI shows the NEWEST; pick the
-    # newest one that actually has a usable token row so resolver + UI agree.
+    # Repeat "Connect" clicks can leave several active connector rows. The
+    # newest connector is authoritative: falling back across connector IDs can
+    # expose a different mailbox (for example, old personal Gmail after a work
+    # Gmail reconnect). Validate it and fail visibly rather than crossing
+    # account identity boundaries.
     enc = get_encryption_service()
     connector_id = None
     provider = None
     acc_data = None
-    for row in rows:
+    access_token = None
+    refresh_token = None
+    should_refresh = False
+    first_failure_id = str(rows[0]["id"])
+    first_failure_reason = "access_unusable"
+    for row in rows[:1]:
         cid = str(row["id"])
         acc = (
             db_client.table("connector_accounts")
-            .select("access_token_encrypted, refresh_token_encrypted, token_expires_at, last_refreshed_at")
+            .select("id, access_token_encrypted, refresh_token_encrypted, token_expires_at, last_refreshed_at")
             .eq("connector_id", cid)
             .eq("status", "active")
             .order("last_refreshed_at", desc=True)
@@ -132,47 +197,105 @@ async def resolve_active_connector(
             )
             raise ConnectorLookupError(connector_type, str(acc.error))
         adata = acc.data
-        arow = (adata[0] if isinstance(adata, list) and adata else (adata if isinstance(adata, dict) else None))
-        if arow:
+        account_rows = adata if isinstance(adata, list) else ([adata] if isinstance(adata, dict) else [])
+        for arow in account_rows:
+            try:
+                candidate_access = enc.decrypt(arow["access_token_encrypted"])
+                if not candidate_access:
+                    raise ValueError("empty access token")
+            except Exception as exc:
+                logger.error(
+                    "connector_resolver: skipping undecryptable access token connector=%s type=%s",
+                    cid,
+                    type(exc).__name__,
+                )
+                continue
+
+            candidate_should_refresh = _token_needs_refresh(
+                arow.get("token_expires_at"), force=force_refresh
+            )
+            candidate_refresh = None
+            if candidate_should_refresh:
+                encrypted_refresh = arow.get("refresh_token_encrypted")
+                if not encrypted_refresh:
+                    if cid == first_failure_id:
+                        first_failure_reason = "refresh_unavailable"
+                    continue
+                try:
+                    candidate_refresh = enc.decrypt(encrypted_refresh)
+                    if not candidate_refresh:
+                        raise ValueError("empty refresh token")
+                except Exception as exc:
+                    logger.error(
+                        "connector_resolver: skipping undecryptable refresh token connector=%s type=%s",
+                        cid,
+                        type(exc).__name__,
+                    )
+                    if cid == first_failure_id:
+                        first_failure_reason = "refresh_unavailable"
+                    continue
+
             connector_id, provider, acc_data = cid, row["provider"], arow
+            access_token = candidate_access
+            refresh_token = candidate_refresh
+            should_refresh = candidate_should_refresh
+            break
+        if acc_data is not None:
             break
 
     if acc_data is None:
+        unavailable_message = (
+            f"Your {connector_type} credentials cannot be refreshed. Please reconnect."
+            if first_failure_reason == "refresh_unavailable"
+            else f"Your {connector_type} connection needs to be reconnected."
+        )
         raise ConnectorNotConnectedError(
             connector_type,
-            f"Your {connector_type} connection expired. Please reconnect from the Connectors page (left sidebar).",
-        )
-    acc = type("_Acc", (), {"data": acc_data})()  # keep the existing .data accessors below working
-
-    try:
-        access_token = enc.decrypt(acc.data["access_token_encrypted"])
-    except Exception as exc:
-        logger.error("connector_resolver: token decrypt failed for %s: %s", connector_id, exc)
-        raise ConnectorNotConnectedError(
-            connector_type, f"Your {connector_type} connection needs to be reconnected."
+            unavailable_message,
+            connector_id=first_failure_id,
+            reason=first_failure_reason,
         )
 
     connector = ConnectorFactory.create(provider=provider, tenant_id=tenant_id, connector_id=connector_id)
 
-    # Refresh a stale token before handing the connector back.
-    expires_at = acc.data.get("token_expires_at")
-    is_expired = False
-    if expires_at:
-        try:
-            exp = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
-            is_expired = datetime.utcnow() >= exp.replace(tzinfo=None)
-        except Exception:
-            is_expired = False
-    if is_expired and acc.data.get("refresh_token_encrypted"):
+    # Refresh slightly before expiry so the token cannot die during a provider
+    # round trip.  ``force_refresh`` is used for one bounded retry after a 401.
+    if should_refresh:
         try:
             access_token = await _refresh_and_store(
-                db_client, connector, connector_id, acc.data["refresh_token_encrypted"]
+                db_client,
+                connector,
+                connector_id,
+                str(acc_data["id"]),
+                tenant_id,
+                refresh_token,
             )
+        except _ConnectorTokenStoreError as exc:
+            raise ConnectorLookupError(connector_type, str(exc)) from exc
+        except ConnectorProviderError as exc:
+            logger.error(
+                "connector_resolver: refresh failed for %s category=%s status=%s",
+                connector_id,
+                exc.category,
+                exc.status_code,
+            )
+            if exc.category == "authentication":
+                raise ConnectorNotConnectedError(
+                    connector_type,
+                    f"Your {connector_type} authorization expired. Please reconnect.",
+                    connector_id=connector_id,
+                    provider_confirmed=True,
+                ) from exc
+            raise
+        except (httpx.TimeoutException, httpx.RequestError):
+            raise
         except Exception as exc:
-            logger.error("connector_resolver: refresh failed for %s: %s", connector_id, exc)
-            raise ConnectorNotConnectedError(
-                connector_type, f"Your {connector_type} connection expired. Please reconnect."
+            logger.error(
+                "connector_resolver: refresh failed for %s type=%s",
+                connector_id,
+                type(exc).__name__,
             )
+            raise ConnectorLookupError(connector_type, str(exc)) from exc
 
     await connector.set_access_token(access_token)
     return connector, connector_id, provider

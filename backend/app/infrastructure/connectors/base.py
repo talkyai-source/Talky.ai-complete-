@@ -6,12 +6,39 @@ Day 24: Unified Connector System
 """
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional, Type
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+
+class ConnectorProviderError(Exception):
+    """Structured failure returned by an external connector provider.
+
+    Connector tools must not infer that every provider failure means the user
+    disconnected their account.  The category lets callers distinguish a
+    revoked credential from missing permissions, rate limiting, and transient
+    provider outages without parsing provider-specific error strings.
+    """
+
+    def __init__(
+        self,
+        *,
+        provider: str,
+        operation: str,
+        category: str,
+        message: str,
+        status_code: Optional[int] = None,
+        retry_after: Optional[str] = None,
+    ) -> None:
+        self.provider = provider
+        self.operation = operation
+        self.category = category
+        self.status_code = status_code
+        self.retry_after = retry_after
+        super().__init__(message)
 
 
 class ConnectorCapability(str, Enum):
@@ -183,4 +210,3 @@ class ConnectorFactory:
     def is_registered(cls, provider_name: str) -> bool:
         """Check whether a provider is registered."""
         return provider_name in cls._registry
-

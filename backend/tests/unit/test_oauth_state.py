@@ -22,6 +22,7 @@ class TestOAuthStateManager:
         mock = AsyncMock()
         mock.setex = AsyncMock()
         mock.get = AsyncMock()
+        mock.getdel = AsyncMock()
         mock.delete = AsyncMock()
         return mock
     
@@ -77,8 +78,7 @@ class TestOAuthStateManager:
             "code_verifier": "test_verifier_value",
             "created_at": "2024-01-01T00:00:00"
         }
-        mock_redis.get.return_value = json.dumps(stored_data)
-        mock_redis.delete.return_value = 1
+        mock_redis.getdel.return_value = json.dumps(stored_data)
         
         result = await manager.validate_state(
             state="test-state-uuid",
@@ -89,8 +89,9 @@ class TestOAuthStateManager:
         assert result["tenant_id"] == "tenant-123"
         assert result["code_verifier"] == "test_verifier_value"
         
-        # State should be deleted after use
-        mock_redis.delete.assert_called_once()
+        # State is retrieved and deleted as one atomic operation.
+        mock_redis.getdel.assert_awaited_once_with("oauth_state:test-state-uuid")
+        mock_redis.delete.assert_not_called()
     
     @pytest.mark.asyncio
     async def test_state_not_found_returns_error(self, mock_redis):
@@ -99,7 +100,7 @@ class TestOAuthStateManager:
         
         manager = OAuthStateManager()
         manager._redis = mock_redis
-        mock_redis.get.return_value = None
+        mock_redis.getdel.return_value = None
         
         with pytest.raises(OAuthStateError) as exc_info:
             await manager.validate_state(
@@ -124,7 +125,7 @@ class TestOAuthStateManager:
             "provider": "google_calendar",
             "code_verifier": "test_verifier"
         }
-        mock_redis.get.return_value = json.dumps(stored_data)
+        mock_redis.getdel.return_value = json.dumps(stored_data)
         
         with pytest.raises(OAuthStateError) as exc_info:
             await manager.validate_state(

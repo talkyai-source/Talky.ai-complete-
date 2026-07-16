@@ -6,8 +6,9 @@ Day 24: Unified Connector System
 """
 import os
 import logging
-from typing import Optional, List
-from datetime import datetime
+import re
+from typing import Optional, List, Any
+from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
@@ -22,11 +23,11 @@ from app.infrastructure.connectors.oauth import get_oauth_state_manager, OAuthSt
 from app.infrastructure.connectors.encryption import get_encryption_service
 
 # Import providers to register them
-from app.infrastructure.connectors.calendar.google_calendar import GoogleCalendarConnector
-from app.infrastructure.connectors.calendar.outlook_calendar import OutlookCalendarConnector
-from app.infrastructure.connectors.email.gmail import GmailConnector
-from app.infrastructure.connectors.crm.hubspot import HubSpotConnector
-from app.infrastructure.connectors.drive.google_drive import GoogleDriveConnector
+from app.infrastructure.connectors.calendar.google_calendar import GoogleCalendarConnector  # noqa: F401
+from app.infrastructure.connectors.calendar.outlook_calendar import OutlookCalendarConnector  # noqa: F401
+from app.infrastructure.connectors.email.gmail import GmailConnector  # noqa: F401
+from app.infrastructure.connectors.crm.hubspot import HubSpotConnector  # noqa: F401
+from app.infrastructure.connectors.drive.google_drive import GoogleDriveConnector  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +214,92 @@ DEFAULT_PROVIDER_BY_TYPE = {
 
 _KNOWN_TYPES = set(DEFAULT_PROVIDER_BY_TYPE.keys())
 
+_GMAIL_READ_SCOPES = {
+    "https://mail.google.com/",
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/gmail.readonly",
+}
+_GMAIL_SEND_SCOPES = {
+    "https://mail.google.com/",
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/gmail.compose",
+    "https://www.googleapis.com/auth/gmail.send",
+}
+
+
+def _normalize_scopes(raw_scopes: Any) -> set[str]:
+    if not raw_scopes:
+        return set()
+    if isinstance(raw_scopes, str):
+        return {part for part in re.split(r"[\s,]+", raw_scopes.strip()) if part}
+    if isinstance(raw_scopes, (list, tuple, set)):
+        return {str(part).strip() for part in raw_scopes if str(part).strip()}
+    return set()
+
+
+def _response_has_rows(response: Any) -> bool:
+    data = getattr(response, "data", None)
+    return bool(data) and not getattr(response, "error", None)
+
+
+def _missing_operation_scopes(provider: str, granted: set[str]) -> set[str]:
+    if provider != "gmail":
+        return set()
+    missing = set()
+    if not (granted & _GMAIL_READ_SCOPES):
+        missing.add("https://www.googleapis.com/auth/gmail.readonly")
+    if not (granted & _GMAIL_SEND_SCOPES):
+        missing.add("https://www.googleapis.com/auth/gmail.send")
+    return missing
+
+
+def _active_account_health(provider: str, account: Optional[dict]) -> tuple[str, Optional[str]]:
+    """Assess locally usable credentials without making a provider call."""
+    if not account:
+        return "error", "The connector has no active credential record. Reconnect it."
+
+    if not account.get("access_token_encrypted"):
+        return "error", "The connector has no saved access credential. Reconnect it."
+    if provider == "gmail" and not account.get("refresh_token_encrypted"):
+        return "error", "The Gmail authorization cannot be refreshed. Reconnect it."
+
+    # Ciphertext presence alone is not health: a rotated/mismatched encryption
+    # key otherwise leaves the dashboard green while every resolver call fails.
+    # Validate locally, never log or return the decrypted values.
+    try:
+        encryption = get_encryption_service()
+        if not encryption.decrypt(account["access_token_encrypted"]):
+            raise ValueError("empty access credential")
+        encrypted_refresh = account.get("refresh_token_encrypted")
+        if encrypted_refresh and not encryption.decrypt(encrypted_refresh):
+            raise ValueError("empty refresh credential")
+    except Exception:
+        logger.error("Connector credential health check failed provider=%s", provider)
+        return "error", "The saved authorization cannot be used. Reconnect the connector."
+
+    missing = _missing_operation_scopes(provider, _normalize_scopes(account.get("scopes")))
+    if missing:
+        return (
+            "error",
+            "The connection is missing required permissions. Connect it again and grant all requested access.",
+        )
+
+    expires_at = account.get("token_expires_at")
+    if expires_at:
+        try:
+            parsed = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            else:
+                parsed = parsed.astimezone(timezone.utc)
+        except (TypeError, ValueError):
+            return "error", "The saved credential expiry is invalid. Reconnect the connector."
+        if parsed <= datetime.now(timezone.utc):
+            if not account.get("refresh_token_encrypted"):
+                return "expired", "The authorization expired and cannot be refreshed. Reconnect it."
+
+    return "connected", None
+
 
 def _ui_status(db_status: Optional[str]) -> str:
     if db_status == "active":
@@ -258,40 +345,102 @@ async def list_connector_statuses(
         .order("created_at", desc=True)
         .execute()
     )
+    if getattr(response, "error", None):
+        logger.error(
+            "Connector status lookup failed tenant=%s: %s",
+            str(current_user.tenant_id)[:8],
+            response.error,
+        )
+        raise HTTPException(status_code=503, detail="Connector status is temporarily unavailable")
 
-    latest_by_type: dict = {}
+    connectors_by_type: dict[str, list[dict]] = {
+        type_name: [] for type_name in DEFAULT_PROVIDER_BY_TYPE
+    }
     for conn in (response.data or []):
         t = conn.get("type")
-        if t in _KNOWN_TYPES and t not in latest_by_type:
-            latest_by_type[t] = conn
+        if t in _KNOWN_TYPES:
+            connectors_by_type[t].append(conn)
 
     items: List[ConnectorTypeStatus] = []
     for type_name in DEFAULT_PROVIDER_BY_TYPE:
-        conn = latest_by_type.get(type_name)
-        if not conn:
+        candidates = connectors_by_type[type_name]
+        if not candidates:
             items.append(ConnectorTypeStatus(type=type_name, status="disconnected", provider=None))
             continue
 
+        # The newest active connector is authoritative. Do not fall back across
+        # connector IDs: an older row may be a different Gmail account and
+        # silently selecting it could expose the wrong mailbox.
+        active_candidates = [row for row in candidates if row.get("status") == "active"]
+        conn = candidates[0]
         last_sync: Optional[str] = None
-        if conn["status"] == "active":
+        status = _ui_status(conn.get("status"))
+        error_message: Optional[str] = None
+        first_active_result: Optional[tuple[dict, str, Optional[str], Optional[str]]] = None
+        selected_active_result: Optional[tuple[dict, str, Optional[str], Optional[str]]] = None
+        for active_conn in active_candidates[:1]:
             acc = (
                 db_client.table("connector_accounts")
-                .select("last_refreshed_at")
-                .eq("connector_id", conn["id"])
+                .select(
+                    "access_token_encrypted, refresh_token_encrypted, token_expires_at, "
+                    "scopes, last_refreshed_at"
+                )
+                .eq("connector_id", active_conn["id"])
                 .eq("status", "active")
+                .order("last_refreshed_at", desc=True)
                 .limit(1)
                 .execute()
             )
-            if acc.data:
-                refreshed = acc.data[0].get("last_refreshed_at")
-                if refreshed:
-                    last_sync = refreshed if isinstance(refreshed, str) else refreshed.isoformat()
+            if getattr(acc, "error", None):
+                result = (
+                    active_conn,
+                    "error",
+                    "Connector credentials could not be checked right now.",
+                    None,
+                )
+            else:
+                account_data = acc.data
+                accounts = (
+                    account_data
+                    if isinstance(account_data, list)
+                    else ([account_data] if isinstance(account_data, dict) else [])
+                )
+                result = (
+                    active_conn,
+                    "error",
+                    "The connector has no usable active credential. Reconnect it.",
+                    None,
+                )
+                for account in accounts:
+                    account_status, account_error = _active_account_health(
+                        active_conn.get("provider"), account
+                    )
+                    refreshed = account.get("last_refreshed_at")
+                    account_sync = (
+                        refreshed
+                        if isinstance(refreshed, str)
+                        else (refreshed.isoformat() if refreshed else None)
+                    )
+                    result = (active_conn, account_status, account_error, account_sync)
+                    if account_status == "connected":
+                        break
+
+            if first_active_result is None:
+                first_active_result = result
+            if result[1] == "connected":
+                selected_active_result = result
+                break
+
+        chosen = selected_active_result or first_active_result
+        if chosen is not None:
+            conn, status, error_message, last_sync = chosen
 
         items.append(ConnectorTypeStatus(
             type=type_name,
-            status=_ui_status(conn.get("status")),
+            status=status,
             provider=conn.get("provider"),
             last_sync=last_sync,
+            error_message=error_message,
         ))
 
     return ConnectorStatusListResponse(items=items)
@@ -411,6 +560,16 @@ async def authorize_connector(
             status_code=400,
             detail=f"Unknown provider: {request.provider}"
         )
+
+    expected_type = PROVIDER_METADATA.get(request.provider, {}).get("type")
+    if request.type not in _KNOWN_TYPES or request.type != expected_type:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Provider {request.provider} belongs to connector type "
+                f"{expected_type or 'unknown'}, not {request.type}"
+            ),
+        )
     
     # Create pending connector record
     connector_data = {
@@ -496,7 +655,6 @@ async def oauth_callback(
             raise OAuthStateError("Invalid or expired OAuth state")
         
         tenant_id = state_data["tenant_id"]
-        user_id = state_data["user_id"]
         provider = state_data["provider"]
         redirect_uri = state_data["redirect_uri"]
         code_verifier = state_data["code_verifier"]
@@ -513,13 +671,54 @@ async def oauth_callback(
         # assistant_ws.py uses for its WebSocket writes).
         from app.core.security.tenant_isolation import set_current_tenant_id
         set_current_tenant_id(tenant_id)
-        
+
+        connector_row = (
+            db_client.table("connectors")
+            .select("id, type, provider, status")
+            .eq("id", connector_id)
+            .eq("tenant_id", tenant_id)
+            .single()
+            .execute()
+        )
+        if getattr(connector_row, "error", None) or not connector_row.data:
+            logger.error("OAuth callback: connector lookup failed for %s", connector_id)
+            return RedirectResponse(
+                _frontend_callback_url(frontend_url, status="error", error="connector_not_found")
+            )
+        if connector_row.data.get("provider") != provider:
+            logger.error("OAuth callback: provider mismatch for %s", connector_id)
+            return RedirectResponse(
+                _frontend_callback_url(frontend_url, status="error", error="connector_mismatch")
+            )
+        conn_type = connector_row.data.get("type")
+        expected_type = PROVIDER_METADATA.get(provider, {}).get("type")
+        if conn_type != expected_type:
+            logger.error(
+                "OAuth callback: type/provider mismatch connector=%s type=%s provider=%s",
+                connector_id,
+                conn_type,
+                provider,
+            )
+            return RedirectResponse(
+                _frontend_callback_url(frontend_url, status="error", error="connector_mismatch")
+            )
+
         # Create connector instance
         connector = ConnectorFactory.create(
             provider=provider,
             tenant_id=tenant_id,
             connector_id=connector_id
         )
+        if connector.connector_type != conn_type:
+            logger.error(
+                "OAuth callback: registered provider type mismatch connector=%s expected=%s actual=%s",
+                connector_id,
+                conn_type,
+                connector.connector_type,
+            )
+            return RedirectResponse(
+                _frontend_callback_url(frontend_url, status="error", error="connector_mismatch")
+            )
         
         # Exchange code for tokens
         tokens = await connector.exchange_code(
@@ -528,22 +727,74 @@ async def oauth_callback(
             code_verifier=code_verifier
         )
         
+        if not getattr(tokens, "access_token", None):
+            raise ValueError("OAuth provider returned no access token")
+
+        granted_scopes = _normalize_scopes(tokens.scope)
+        # OAuth 2.0 permits the token response to omit ``scope`` when the
+        # granted set is unchanged.  Enforce omissions only when Google
+        # explicitly returned a scope set; the live Gmail probe below verifies
+        # read capability either way.
+        missing_scopes = (
+            _missing_operation_scopes(provider, granted_scopes) if granted_scopes else set()
+        )
+        if missing_scopes:
+            logger.warning(
+                "OAuth callback: required scopes missing connector=%s provider=%s missing=%s",
+                connector_id,
+                provider,
+                sorted(missing_scopes),
+            )
+            db_client.table("connectors").update({"status": "error"}).eq("id", connector_id).eq(
+                "tenant_id", tenant_id
+            ).execute()
+            return RedirectResponse(
+                _frontend_callback_url(frontend_url, status="error", error="insufficient_scope")
+            )
+
+        # A new Gmail authorization without an offline refresh token will look
+        # healthy for about an hour and then fail permanently.  Do not activate
+        # that half-connection.
+        if provider == "gmail" and not tokens.refresh_token:
+            logger.warning(
+                "OAuth callback: Gmail returned no refresh token connector=%s", connector_id
+            )
+            db_client.table("connectors").update({"status": "error"}).eq("id", connector_id).eq(
+                "tenant_id", tenant_id
+            ).execute()
+            return RedirectResponse(
+                _frontend_callback_url(frontend_url, status="error", error="missing_refresh_token")
+            )
+
+        # Verify the token against the actual Gmail resource before showing a
+        # green connection.  This catches disabled APIs and denied scopes even
+        # when OAuth token exchange itself succeeded.
+        account_email = None
+        await connector.set_access_token(tokens.access_token)
+        if provider == "gmail":
+            try:
+                profile = await connector.get_profile()
+                account_email = profile.get("emailAddress")
+            except Exception as exc:
+                logger.warning(
+                    "OAuth callback: Gmail capability check failed connector=%s type=%s",
+                    connector_id,
+                    type(exc).__name__,
+                )
+                db_client.table("connectors").update({"status": "error"}).eq("id", connector_id).eq(
+                    "tenant_id", tenant_id
+                ).execute()
+                return RedirectResponse(
+                    _frontend_callback_url(
+                        frontend_url, status="error", error="capability_check_failed"
+                    )
+                )
+
         # Encrypt tokens
         encryption = get_encryption_service()
         access_token_encrypted = encryption.encrypt(tokens.access_token)
         refresh_token_encrypted = encryption.encrypt(tokens.refresh_token or "")
-        
-        # Get account email if available (for Google providers)
-        account_email = None
-        if provider in ["gmail", "google_calendar", "google_drive"]:
-            try:
-                await connector.set_access_token(tokens.access_token)
-                if hasattr(connector, "get_profile"):
-                    profile = await connector.get_profile()
-                    account_email = profile.get("emailAddress")
-            except Exception as e:
-                logger.warning(f"Failed to get account email: {e}")
-        
+
         # Store tokens in connector_accounts
         account_data = {
             "connector_id": connector_id,
@@ -551,56 +802,112 @@ async def oauth_callback(
             "access_token_encrypted": access_token_encrypted,
             "refresh_token_encrypted": refresh_token_encrypted,
             "token_expires_at": tokens.expires_at.isoformat() if tokens.expires_at else None,
-            "scopes": tokens.scope.split(" ") if tokens.scope else connector.oauth_scopes,
+            "scopes": sorted(granted_scopes) if granted_scopes else connector.oauth_scopes,
             "account_email": account_email,
             "status": "active",
-            "last_refreshed_at": datetime.utcnow().isoformat()
+            "last_refreshed_at": datetime.now(timezone.utc).isoformat(),
         }
-        
-        # Idempotent + de-duplicating activation. Repeat "Connect" clicks and
-        # reconnects leave stale rows; retire any OTHER active connector of this
-        # (tenant, type) and its accounts first so exactly one stays active and
-        # the resolver/UI can never disagree (agent finding). Then write the
-        # token row and flip THIS connector active — checking BOTH writes so we
-        # never redirect "success" on a half-connected state (green connector
-        # with no token, or a live token on a still-pending connector).
-        try:
-            conn_type = state_data.get("type")
-            if not conn_type:
-                row = db_client.table("connectors").select("type").eq("id", connector_id).single().execute()
-                conn_type = (row.data or {}).get("type") if row.data else None
-            if conn_type:
-                dupes = (
-                    db_client.table("connectors")
-                    .select("id")
-                    .eq("tenant_id", tenant_id)
-                    .eq("type", conn_type)
-                    .eq("status", "active")
-                    .neq("id", connector_id)
-                    .execute()
-                )
-                for d in (dupes.data or []):
-                    old_id = d["id"]
-                    db_client.table("connector_accounts").delete().eq("connector_id", old_id).execute()
-                    db_client.table("connectors").update({"status": "revoked"}).eq("id", old_id).execute()
-        except Exception as dedup_err:  # de-dup is best-effort; never fail the connect
-            logger.warning(f"connector de-dup skipped for {connector_id}: {dedup_err}")
 
-        # Clear any prior account rows for THIS connector, then insert the fresh one.
-        db_client.table("connector_accounts").delete().eq("connector_id", connector_id).execute()
+        # Insert and activate the replacement before retiring the old working
+        # connector.  OAuth callback writes are separate DB transactions, so
+        # this ordering prevents a failed reconnect from disconnecting Gmail.
         acc_resp = db_client.table("connector_accounts").insert(account_data).execute()
-        if getattr(acc_resp, "error", None) or not getattr(acc_resp, "data", None):
-            logger.error(f"OAuth callback: token store failed for {connector_id}: {getattr(acc_resp,'error',None)}")
-            db_client.table("connectors").update({"status": "error"}).eq("id", connector_id).execute()
-            return RedirectResponse(_frontend_callback_url(frontend_url, status="error", error="token_store_failed"))
+        if not _response_has_rows(acc_resp):
+            logger.error(
+                f"OAuth callback: token store failed for {connector_id}: {getattr(acc_resp, 'error', None)}"
+            )
+            db_client.table("connectors").update({"status": "error"}).eq("id", connector_id).eq(
+                "tenant_id", tenant_id
+            ).execute()
+            return RedirectResponse(
+                _frontend_callback_url(frontend_url, status="error", error="token_store_failed")
+            )
 
-        conn_resp = db_client.table("connectors").update({"status": "active"}).eq("id", connector_id).execute()
-        if getattr(conn_resp, "error", None):
-            logger.error(f"OAuth callback: activate failed for {connector_id}: {conn_resp.error}")
-            # Roll back the token row so we don't leave a live token on a
-            # non-active connector.
-            db_client.table("connector_accounts").delete().eq("connector_id", connector_id).execute()
-            return RedirectResponse(_frontend_callback_url(frontend_url, status="error", error="activate_failed"))
+        new_account_id = acc_resp.data[0]["id"]
+        conn_resp = (
+            db_client.table("connectors")
+            .update({"status": "active"})
+            .eq("id", connector_id)
+            .eq("tenant_id", tenant_id)
+            .execute()
+        )
+        if not _response_has_rows(conn_resp):
+            logger.error(
+                "OAuth callback: activate failed for %s: %s",
+                connector_id,
+                getattr(conn_resp, "error", None),
+            )
+            db_client.table("connector_accounts").delete().eq("id", new_account_id).eq(
+                "connector_id", connector_id
+            ).execute()
+            return RedirectResponse(
+                _frontend_callback_url(frontend_url, status="error", error="activate_failed")
+            )
+
+        # The new connector is usable.  Cleanup is deliberately post-activation
+        # and best-effort: a cleanup failure may leave harmless stale rows, but
+        # it cannot destroy the last known-good connection.
+        cleanup = (
+            db_client.table("connector_accounts")
+            .delete()
+            .eq("connector_id", connector_id)
+            .neq("id", new_account_id)
+            .execute()
+        )
+        if getattr(cleanup, "error", None):
+            logger.warning("OAuth callback: old account cleanup failed connector=%s", connector_id)
+
+        if conn_type:
+            active_rows = (
+                db_client.table("connectors")
+                .select("id, created_at")
+                .eq("tenant_id", tenant_id)
+                .eq("type", conn_type)
+                .eq("status", "active")
+                .execute()
+            )
+            if getattr(active_rows, "error", None):
+                logger.warning(
+                    "OAuth callback: connector de-dup lookup failed connector=%s", connector_id
+                )
+            else:
+                # Concurrent callbacks on different workers must choose the
+                # same winner.  Newest authorization wins; UUID breaks the
+                # vanishingly-small created_at tie.  Querying ALL active rows
+                # (including this callback's row) prevents two callbacks from
+                # revoking each other.
+                def activation_order(row: dict) -> tuple[str, str]:
+                    return (str(row.get("created_at") or ""), str(row["id"]))
+
+                active = active_rows.data or []
+                winner = max(active, key=activation_order) if active else None
+                for duplicate in active:
+                    old_id = duplicate["id"]
+                    if winner and str(old_id) == str(winner["id"]):
+                        continue
+                    revoke = (
+                        db_client.table("connectors")
+                        .update({"status": "revoked"})
+                        .eq("id", old_id)
+                        .eq("tenant_id", tenant_id)
+                        .execute()
+                    )
+                    if not _response_has_rows(revoke):
+                        logger.warning(
+                            "OAuth callback: could not retire duplicate connector=%s", old_id
+                        )
+                        continue
+                    old_accounts = (
+                        db_client.table("connector_accounts")
+                        .delete()
+                        .eq("connector_id", old_id)
+                        .execute()
+                    )
+                    if getattr(old_accounts, "error", None):
+                        logger.warning(
+                            "OAuth callback: retired connector token cleanup failed connector=%s",
+                            old_id,
+                        )
 
         logger.info(f"OAuth completed for {provider}, connector {connector_id}")
 
@@ -738,11 +1045,20 @@ async def refresh_connector_tokens(
     new_access_encrypted = encryption.encrypt(new_tokens.access_token)
     new_refresh_encrypted = encryption.encrypt(new_tokens.refresh_token or refresh_token)
     
-    db_client.table("connector_accounts").update({
+    update_response = db_client.table("connector_accounts").update({
         "access_token_encrypted": new_access_encrypted,
         "refresh_token_encrypted": new_refresh_encrypted,
         "token_expires_at": new_tokens.expires_at.isoformat() if new_tokens.expires_at else None,
-        "last_refreshed_at": datetime.utcnow().isoformat()
-    }).eq("id", account_id).execute()
+        "last_refreshed_at": datetime.now(timezone.utc).isoformat()
+    }).eq("id", account_id).eq("connector_id", connector_id).eq(
+        "tenant_id", current_user.tenant_id
+    ).execute()
+    if not _response_has_rows(update_response):
+        logger.error(
+            "Manual connector refresh write-back failed connector=%s: %s",
+            connector_id,
+            getattr(update_response, "error", None),
+        )
+        raise HTTPException(status_code=503, detail="Token refreshed but could not be saved; please try again")
     
     return {"success": True, "message": "Tokens refreshed"}
