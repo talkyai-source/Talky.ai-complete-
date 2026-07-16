@@ -380,41 +380,13 @@ async def disconnect_connector_by_type(
     return {"success": True, "message": "Connector disconnected", "removed": len(ids)}
 
 
-@router.get("/{connector_id}", response_model=ConnectorResponse)
-async def get_connector(
-    connector_id: str,
-    current_user: CurrentUser = Depends(get_current_user),
-    db_client: Client = Depends(get_db_client)
-):
-    """Get a specific connector's details."""
-    response = db_client.table("connectors").select(
-        "id, type, provider, name, status, created_at"
-    ).eq("id", connector_id).eq("tenant_id", current_user.tenant_id).single().execute()
-    
-    if not response.data:
-        raise HTTPException(status_code=404, detail="Connector not found")
-    
-    conn = response.data
-    
-    # Get account email
-    account_email = None
-    if conn["status"] == "active":
-        acc_response = db_client.table("connector_accounts").select(
-            "account_email"
-        ).eq("connector_id", conn["id"]).eq("status", "active").limit(1).execute()
-        
-        if acc_response.data:
-            account_email = acc_response.data[0].get("account_email")
-    
-    return ConnectorResponse(
-        id=str(conn["id"]),
-        type=conn["type"],
-        provider=conn["provider"],
-        name=conn.get("name"),
-        status=conn["status"],
-        account_email=account_email,
-        created_at=conn["created_at"]
-    )
+# NOTE: the dynamic GET /{connector_id} route is deliberately registered LATER
+# in this file (right after the OAuth /callback route). A single-segment catch-
+# all like /{connector_id} matches in registration order, so declaring it here
+# would shadow the static GET /callback — Google's OAuth redirect to
+# /connectors/callback resolved to get_connector("callback"), which 404'd
+# ("Connector not found") and silently broke every connector connection. Keep
+# all static single-segment GET routes ABOVE the catch-all.
 
 
 @router.post("/authorize", response_model=OAuthAuthorizeResponse, dependencies=[Depends(require_permission(Permission.CONNECTORS_CREATE))])
@@ -529,9 +501,18 @@ async def oauth_callback(
         redirect_uri = state_data["redirect_uri"]
         code_verifier = state_data["code_verifier"]
         connector_id = state_data.get("connector_id")
-        
+
         if not connector_id:
             raise ValueError("Missing connector_id in state")
+
+        # This endpoint is an UNAUTHENTICATED OAuth redirect (no get_current_user),
+        # so the per-request RLS tenant context that middleware normally sets is
+        # absent — every db_client.table() write below would otherwise run as the
+        # NIL tenant and be silently rejected by RLS, leaving the connector stuck
+        # "pending". Set it explicitly from the trusted OAuth state (same pattern
+        # assistant_ws.py uses for its WebSocket writes).
+        from app.core.security.tenant_isolation import set_current_tenant_id
+        set_current_tenant_id(tenant_id)
         
         # Create connector instance
         connector = ConnectorFactory.create(
@@ -593,6 +574,46 @@ async def oauth_callback(
     except Exception as e:
         logger.error(f"OAuth callback error: {e}")
         return RedirectResponse(_frontend_callback_url(frontend_url, status="error", error="callback_failed"))
+
+
+# Registered AFTER /callback (and every other static single-segment route) so the
+# dynamic catch-all can't shadow them. See the note where the POST /authorize
+# route is declared above.
+@router.get("/{connector_id}", response_model=ConnectorResponse)
+async def get_connector(
+    connector_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client)
+):
+    """Get a specific connector's details."""
+    response = db_client.table("connectors").select(
+        "id, type, provider, name, status, created_at"
+    ).eq("id", connector_id).eq("tenant_id", current_user.tenant_id).single().execute()
+
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Connector not found")
+
+    conn = response.data
+
+    # Get account email
+    account_email = None
+    if conn["status"] == "active":
+        acc_response = db_client.table("connector_accounts").select(
+            "account_email"
+        ).eq("connector_id", conn["id"]).eq("status", "active").limit(1).execute()
+
+        if acc_response.data:
+            account_email = acc_response.data[0].get("account_email")
+
+    return ConnectorResponse(
+        id=str(conn["id"]),
+        type=conn["type"],
+        provider=conn["provider"],
+        name=conn.get("name"),
+        status=conn["status"],
+        account_email=account_email,
+        created_at=conn["created_at"]
+    )
 
 
 @router.delete("/{connector_id}", dependencies=[Depends(require_permission(Permission.CONNECTORS_DELETE))])
