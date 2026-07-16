@@ -87,7 +87,9 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    image: talky-backend:local
+    # CI/CD supplies a pinned GHCR SHA tag. Local development keeps the
+    # existing image name when BACKEND_IMAGE is not set.
+    image: ${BACKEND_IMAGE:-talky-backend:local}
     <<: [*restart_policy, *default_logging]
     env_file:
       - ./backend/.env

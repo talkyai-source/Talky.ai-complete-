@@ -150,7 +150,10 @@ class TelephonyRateLimiter:
         if not cleaned:
             cleaned = "default"
         cleaned = cleaned[:max_len]
-        digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:10]
+        # This digest only shortens a Redis key; it is not a security primitive.
+        digest = hashlib.sha1(
+            value.encode("utf-8"), usedforsecurity=False
+        ).hexdigest()[:10]
         return f"{cleaned}:{digest}"
 
     def _counter_key(self, tenant_id: str, policy_scope: str, metric_key: str, window_bucket: int) -> str:

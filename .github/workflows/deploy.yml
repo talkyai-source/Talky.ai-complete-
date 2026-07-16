@@ -1,9 +1,12 @@
 name: Deploy — Build, Push & Deploy
 
 on:
-  push:
+  # Automatic deploys are downstream of the blocking CI workflow. A direct
+  # push can no longer build or deploy while its CI run is red.
+  workflow_run:
+    workflows: ["CI — Lint, Test, Build, Scan"]
+    types: [completed]
     branches: [main]
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
       environment:
@@ -15,61 +18,696 @@ on:
           - staging
           - production
       rollback_sha:
-        description: "SHA to rollback to (leave empty for normal deploy)"
+        description: "7-character SHA image tag to rollback to (leave empty for normal deploy)"
         required: false
         type: string
 
 env:
   REGISTRY: ghcr.io
-  BACKEND_IMAGE: ghcr.io/${{ github.repository }}/backend
-  PYTHON_VERSION: "3.10"
+  # Keep the package name independent of the repository slug.  The repository
+  # currently ends in "-", which is not a valid OCI repository component.
+  BACKEND_IMAGE: ghcr.io/${{ github.repository_owner }}/talky-backend
+
+concurrency:
+  # Never let two Compose/SCP mutations target the same environment at once.
+  group: talky-deploy-${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'staging' }}
+  cancel-in-progress: false
 
 jobs:
+  # ──────────────────────────────────────────────────────────────────
+  # Resolve and validate the event before any privileged deployment job.
+  # ──────────────────────────────────────────────────────────────────
+  request-check:
+    name: Validate deployment request
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      mode: ${{ steps.request.outputs.mode }}
+      deploy_sha: ${{ steps.request.outputs.deploy_sha }}
+      target_environment: ${{ steps.request.outputs.target_environment }}
+
+    steps:
+      - name: Resolve trusted deployment input
+        id: request
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF_VALUE: ${{ github.ref }}
+          GITHUB_SHA_VALUE: ${{ github.sha }}
+          GITHUB_API_URL_VALUE: ${{ github.api_url }}
+          GITHUB_TOKEN_VALUE: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          TARGET_ENVIRONMENT_INPUT: ${{ inputs.environment }}
+          ROLLBACK_SHA_INPUT: ${{ inputs.rollback_sha }}
+          RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
+          RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          mode="skip"
+          deploy_sha=""
+          target_environment="staging"
+
+          github_api_get() {
+            curl --fail --silent --show-error --location --retry 3 \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN_VALUE}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "$1"
+          }
+
+          current_main_sha() {
+            github_api_get \
+              "${GITHUB_API_URL_VALUE}/repos/${REPOSITORY}/git/ref/heads/main" |
+              jq -er '.object.sha | ascii_downcase'
+          }
+
+          has_successful_main_ci() {
+            expected_sha="$1"
+            github_api_get \
+              "${GITHUB_API_URL_VALUE}/repos/${REPOSITORY}/actions/workflows/ci.yml/runs?branch=main&status=success&head_sha=${expected_sha}&per_page=100" |
+              jq -e --arg sha "${expected_sha}" '
+                any(.workflow_runs[];
+                  ((.head_sha | ascii_downcase) == $sha) and
+                  (.head_branch == "main") and
+                  (.event == "push") and
+                  (.status == "completed") and
+                  (.conclusion == "success"))
+              ' > /dev/null
+          }
+
+          if [ "${EVENT_NAME}" = "workflow_run" ]; then
+            # A failed/cancelled CI run deliberately produces no deploy job.
+            if [ "${RUN_CONCLUSION}" = "success" ]; then
+              if [ "${RUN_EVENT}" != "push" ] || \
+                 [ "${RUN_HEAD_BRANCH}" != "main" ] || \
+                 [ "${RUN_HEAD_REPOSITORY}" != "${REPOSITORY}" ]; then
+                echo "Refusing untrusted workflow_run source" >&2
+                exit 1
+              fi
+              mode="deploy"
+              deploy_sha="${RUN_HEAD_SHA}"
+            fi
+          elif [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            target_environment="${TARGET_ENVIRONMENT_INPUT}"
+            if [ "${target_environment}" = "production" ] && \
+               [ "${GITHUB_REF_VALUE}" != "refs/heads/main" ]; then
+              echo "Production deploys and rollbacks must be dispatched from main" >&2
+              exit 1
+            fi
+
+            deploy_sha="${GITHUB_SHA_VALUE}"
+            if [ -n "${ROLLBACK_SHA_INPUT}" ]; then
+              mode="rollback"
+            else
+              mode="deploy"
+            fi
+          else
+            echo "Unsupported deployment event: ${EVENT_NAME}" >&2
+            exit 1
+          fi
+
+          if [ "${mode}" != "skip" ] && \
+             [[ ! "${deploy_sha}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "Resolved deployment SHA is not a full commit SHA" >&2
+            exit 1
+          fi
+
+          if [ "${mode}" != "skip" ]; then
+            deploy_sha="${deploy_sha,,}"
+          fi
+
+          if [ "${EVENT_NAME}" = "workflow_run" ] && [ "${mode}" = "deploy" ]; then
+            main_sha="$(current_main_sha)"
+            if [ "${deploy_sha}" != "${main_sha}" ]; then
+              echo "Skipping stale CI completion for ${deploy_sha}; main is now ${main_sha}."
+              mode="skip"
+              deploy_sha=""
+            fi
+          fi
+
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ] && \
+             [ "${target_environment}" = "production" ]; then
+            main_sha="$(current_main_sha)"
+            if [ "${deploy_sha}" != "${main_sha}" ]; then
+              echo "Production SHA ${deploy_sha} is not the current main SHA ${main_sha}." >&2
+              exit 1
+            fi
+            if ! has_successful_main_ci "${deploy_sha}"; then
+              echo "No successful main push CI run exists for production SHA ${deploy_sha}." >&2
+              exit 1
+            fi
+          fi
+
+          {
+            echo "mode=${mode}"
+            echo "deploy_sha=${deploy_sha}"
+            echo "target_environment=${target_environment}"
+          } >> "${GITHUB_OUTPUT}"
+
   # ──────────────────────────────────────────────────────────────────
   # Rollback path — re-deploy a specific previous SHA
   # ──────────────────────────────────────────────────────────────────
   rollback:
     name: Rollback
     runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.rollback_sha != '' }}
+    needs: request-check
+    if: ${{ needs.request-check.outputs.mode == 'rollback' }}
+    permissions:
+      actions: read
+      contents: read
     environment:
-      name: ${{ github.event.inputs.environment || 'staging' }}
+      name: ${{ needs.request-check.outputs.target_environment }}
 
     steps:
-      - name: Rollback to previous image
-        uses: appleboy/ssh-action@v1
+      - name: Revalidate production deployment authorization
+        if: ${{ needs.request-check.outputs.target_environment == 'production' }}
+        shell: bash
+        env:
+          DEPLOY_SHA: ${{ needs.request-check.outputs.deploy_sha }}
+          GITHUB_API_URL_VALUE: ${{ github.api_url }}
+          GITHUB_TOKEN_VALUE: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          expected_sha="${DEPLOY_SHA,,}"
+          api_headers=(
+            -H "Accept: application/vnd.github+json"
+            -H "Authorization: Bearer ${GITHUB_TOKEN_VALUE}"
+            -H "X-GitHub-Api-Version: 2022-11-28"
+          )
+          main_sha="$(curl --fail --silent --show-error --location --retry 3 \
+            "${api_headers[@]}" \
+            "${GITHUB_API_URL_VALUE}/repos/${REPOSITORY}/git/ref/heads/main" |
+            jq -er '.object.sha | ascii_downcase')"
+          if [ "${expected_sha}" != "${main_sha}" ]; then
+            echo "Production deployment became stale: expected ${expected_sha}, main is ${main_sha}." >&2
+            exit 1
+          fi
+
+          curl --fail --silent --show-error --location --retry 3 \
+            "${api_headers[@]}" \
+            "${GITHUB_API_URL_VALUE}/repos/${REPOSITORY}/actions/workflows/ci.yml/runs?branch=main&status=success&head_sha=${expected_sha}&per_page=100" |
+            jq -e --arg sha "${expected_sha}" '
+              any(.workflow_runs[];
+                ((.head_sha | ascii_downcase) == $sha) and
+                (.head_branch == "main") and
+                (.event == "push") and
+                (.status == "completed") and
+                (.conclusion == "success"))
+            ' > /dev/null || {
+              echo "Successful exact-SHA CI authorization is no longer present." >&2
+              exit 1
+            }
+
+      - name: Validate rollback image tag
+        id: rollback_sha
+        shell: bash
+        env:
+          ROLLBACK_SHA: ${{ inputs.rollback_sha }}
+        run: |
+          if [[ ! "${ROLLBACK_SHA}" =~ ^[0-9a-fA-F]{7}$ ]]; then
+            echo "rollback_sha must be the 7-character hexadecimal tag produced by this workflow" >&2
+            exit 1
+          fi
+          echo "value=${ROLLBACK_SHA,,}" >> "${GITHUB_OUTPUT}"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.request-check.outputs.deploy_sha }}
+
+      - name: Upload candidate deployment definition
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345 # v1.0.0
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          source: docker-compose.yml
+          target: ${{ format('{0}/.deploy-upload-{1}-{2}', secrets.DEPLOY_PATH || '/opt/talky', github.run_id, github.run_attempt) }}
+          overwrite: true
+
+      - name: Rollback to previous image
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/talky' }}
+          UPLOAD_DIR: ${{ format('{0}/.deploy-upload-{1}-{2}', secrets.DEPLOY_PATH || '/opt/talky', github.run_id, github.run_attempt) }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: DEPLOY_PATH,UPLOAD_DIR
           script: |
-            set -e
-            cd ${{ secrets.DEPLOY_PATH || '/opt/talky' }}
-            ROLLBACK_SHA="${{ github.event.inputs.rollback_sha }}"
+            set -eu
+            cd -- "${DEPLOY_PATH}"
+            ROLLBACK_SHA="${{ steps.rollback_sha.outputs.value }}"
             ROLLBACK_IMAGE="${{ env.BACKEND_IMAGE }}:${ROLLBACK_SHA}"
+            CANDIDATE_COMPOSE="${UPLOAD_DIR}/docker-compose.yml"
+
+            COMPOSE_BACKUP=""
+            ENV_BACKUP=""
+            SHA_MARKER_BACKUP=""
+            IMAGE_MARKER_BACKUP=""
+            ENV_TMP=""
+            SHA_MARKER_TMP=""
+            IMAGE_MARKER_TMP=""
+            RECOVERY_COMPOSE_TMP=""
+            RECOVERY_ENV_TMP=""
+            RECOVERY_IMAGE_MARKER_TMP=""
+            PRIOR_BACKEND_IMAGE_ID=""
+            PRIOR_BACKEND_CONFIG_IMAGE=""
+            PRIOR_PERSISTED_RECOVERY_TAG=""
+            RECOVERY_IMAGE_TAG="talky-recovery:${{ github.run_id }}-${{ github.run_attempt }}-rollback"
+            PRIOR_SHA_MARKER_PRESENT=false
+            PRIOR_IMAGE_MARKER_PRESENT=false
+            DEPLOYMENT_MUTATED=false
+            BACKEND_REPLACED=false
+            PERSISTENCE_STARTED=false
+            PRESERVE_BACKUPS=false
+            RECOVERY_TAG_CREATED=false
+            RECOVERY_REFERENCE_PERSISTED=false
+
+            cleanup_deploy_artifacts() {
+              cleanup_failed=false
+              cleanup_file() {
+                [ -z "$1" ] || rm -f -- "$1" || cleanup_failed=true
+              }
+
+              # Secret-bearing environment copies go first. Every removal is
+              # attempted even if an earlier path is unexpectedly undeletable.
+              if [ "${PRESERVE_BACKUPS}" != "true" ]; then
+                cleanup_file "${ENV_BACKUP}"
+              fi
+              cleanup_file "${ENV_TMP}"
+              cleanup_file "${RECOVERY_ENV_TMP}"
+              cleanup_file "${CANDIDATE_COMPOSE}"
+              cleanup_file "${SHA_MARKER_TMP}"
+              cleanup_file "${IMAGE_MARKER_TMP}"
+              cleanup_file "${RECOVERY_COMPOSE_TMP}"
+              cleanup_file "${RECOVERY_IMAGE_MARKER_TMP}"
+              if [ "${PRESERVE_BACKUPS}" = "true" ]; then
+                for backup_path in \
+                  "${COMPOSE_BACKUP}" "${ENV_BACKUP}" \
+                  "${SHA_MARKER_BACKUP}" "${IMAGE_MARKER_BACKUP}"; do
+                  if [ -n "${backup_path}" ] && [ -e "${backup_path}" ]; then
+                    echo "Preserved recovery artifact: ${backup_path}" >&2
+                  fi
+                done
+              else
+                cleanup_file "${COMPOSE_BACKUP}"
+                cleanup_file "${SHA_MARKER_BACKUP}"
+                cleanup_file "${IMAGE_MARKER_BACKUP}"
+              fi
+              rmdir -- "${UPLOAD_DIR}" 2>/dev/null || true
+              if [ "${cleanup_failed}" = "true" ]; then
+                echo "One or more deployment artifacts could not be removed." >&2
+                return 1
+              fi
+            }
+
+            remove_recovery_tag() {
+              if [ "${RECOVERY_TAG_CREATED}" = "true" ]; then
+                if docker image rm "${RECOVERY_IMAGE_TAG}" > /dev/null 2>&1; then
+                  RECOVERY_TAG_CREATED=false
+                else
+                  return 1
+                fi
+              fi
+            }
+
+            remove_prior_persisted_recovery_tag() {
+              if [ -n "${PRIOR_PERSISTED_RECOVERY_TAG}" ] && \
+                 [ "${PRIOR_PERSISTED_RECOVERY_TAG}" != "${RECOVERY_IMAGE_TAG}" ]; then
+                if prior_recovery_image_id="$(
+                  docker image inspect --format '{{.Id}}' \
+                    "${PRIOR_PERSISTED_RECOVERY_TAG}" 2>/dev/null
+                )"; then
+                  if [ "${prior_recovery_image_id}" != "${PRIOR_BACKEND_IMAGE_ID}" ]; then
+                    return 1
+                  fi
+                  docker image rm "${PRIOR_PERSISTED_RECOVERY_TAG}" > /dev/null 2>&1 || return 1
+                fi
+              fi
+            }
+
+            persist_recovery_reference() {
+              RECOVERY_COMPOSE_TMP="$(
+                mktemp "${DEPLOY_PATH}/.docker-compose.recovery.XXXXXX"
+              )" || return 1
+              if ! awk -v image="${RECOVERY_IMAGE_TAG}" '
+                function emit_image() {
+                  if (!image_written) {
+                    print "    image: " image
+                    image_written = 1
+                  }
+                }
+                BEGIN { in_backend = 0; found_backend = 0; image_written = 0 }
+                /^  backend:[[:space:]]*(#.*)?$/ {
+                  in_backend = 1
+                  found_backend = 1
+                  print
+                  next
+                }
+                in_backend && /^    image:[[:space:]]*/ {
+                  emit_image()
+                  next
+                }
+                in_backend && (/^  [[:alnum:]_.-]+:[[:space:]]*(#.*)?$/ || /^[^[:space:]#]/) {
+                  emit_image()
+                  in_backend = 0
+                }
+                { print }
+                END {
+                  if (in_backend) emit_image()
+                  if (!found_backend || !image_written) exit 42
+                }
+              ' "${DEPLOY_PATH}/docker-compose.yml" > "${RECOVERY_COMPOSE_TMP}"; then
+                return 1
+              fi
+              chmod --reference="${DEPLOY_PATH}/docker-compose.yml" \
+                "${RECOVERY_COMPOSE_TMP}" 2>/dev/null || return 1
+              mv -f -- "${RECOVERY_COMPOSE_TMP}" \
+                "${DEPLOY_PATH}/docker-compose.yml" || return 1
+              RECOVERY_COMPOSE_TMP=""
+
+              RECOVERY_ENV_TMP="$(mktemp "${DEPLOY_PATH}/.env.recovery.XXXXXX")" || return 1
+              if ! awk -v image="${RECOVERY_IMAGE_TAG}" '
+                BEGIN { written = 0 }
+                /^BACKEND_IMAGE=/ {
+                  if (!written) { print "BACKEND_IMAGE=" image; written = 1 }
+                  next
+                }
+                { print }
+                END { if (!written) print "BACKEND_IMAGE=" image }
+              ' "${DEPLOY_PATH}/.env" > "${RECOVERY_ENV_TMP}"; then
+                return 1
+              fi
+              chmod 600 "${RECOVERY_ENV_TMP}" || return 1
+              mv -f -- "${RECOVERY_ENV_TMP}" "${DEPLOY_PATH}/.env" || return 1
+              RECOVERY_ENV_TMP=""
+
+              RECOVERY_IMAGE_MARKER_TMP="$(
+                mktemp "${DEPLOY_PATH}/.last_deployed_image.recovery.XXXXXX"
+              )" || return 1
+              printf '%s\n' "${RECOVERY_IMAGE_TAG}" > "${RECOVERY_IMAGE_MARKER_TMP}" || return 1
+              mv -f -- "${RECOVERY_IMAGE_MARKER_TMP}" \
+                "${DEPLOY_PATH}/.last_deployed_image" || return 1
+              RECOVERY_IMAGE_MARKER_TMP=""
+              BACKEND_IMAGE="${RECOVERY_IMAGE_TAG}" docker compose config --quiet || return 1
+              RECOVERY_REFERENCE_PERSISTED=true
+            }
+
+            recovered_backend_is_exact_and_ready() {
+              recovered_container_id="$(
+                BACKEND_IMAGE="${RECOVERY_IMAGE_TAG}" docker compose ps -q backend
+              )" || return 1
+              if [ -z "${recovered_container_id}" ]; then
+                echo "Recovered backend container is missing." >&2
+                return 1
+              fi
+              recovered_image_id="$(
+                docker inspect --format '{{.Image}}' "${recovered_container_id}"
+              )" || return 1
+              if [ "${recovered_image_id}" != "${PRIOR_BACKEND_IMAGE_ID}" ]; then
+                echo "Recovered backend image ID does not match the captured image." >&2
+                return 1
+              fi
+
+              for recovery_attempt in $(seq 1 30); do
+                if docker exec "${recovered_container_id}" \
+                     curl -fsS --max-time 2 \
+                     http://localhost:8000/api/v1/healthz/deep > /dev/null 2>&1; then
+                  return 0
+                fi
+                echo "  Recovery readiness attempt ${recovery_attempt}/30..." >&2
+                sleep 5
+              done
+              echo "Recovered backend failed deep readiness." >&2
+              return 1
+            }
+
+            restore_previous_deployment() {
+              failure_status=$?
+              trap - EXIT
+              set +e
+              recovery_failed=false
+              compose_restored=false
+
+              if [ "${DEPLOYMENT_MUTATED}" = "true" ]; then
+                echo "Deployment failed; restoring the previous backend state." >&2
+
+                if mv -f -- "${COMPOSE_BACKUP}" "${DEPLOY_PATH}/docker-compose.yml"; then
+                  COMPOSE_BACKUP=""
+                  compose_restored=true
+                else
+                  recovery_failed=true
+                  PRESERVE_BACKUPS=true
+                  echo "Compose restore failed; backup retained at ${COMPOSE_BACKUP}." >&2
+                fi
+
+                if [ "${PERSISTENCE_STARTED}" = "true" ]; then
+                  if mv -f -- "${ENV_BACKUP}" "${DEPLOY_PATH}/.env"; then
+                    ENV_BACKUP=""
+                  else
+                    recovery_failed=true
+                    PRESERVE_BACKUPS=true
+                    echo "Environment restore failed; backup retained at ${ENV_BACKUP}." >&2
+                  fi
+
+                  if [ "${PRIOR_SHA_MARKER_PRESENT}" = "true" ]; then
+                    if mv -f -- "${SHA_MARKER_BACKUP}" "${DEPLOY_PATH}/.last_deployed_sha"; then
+                      SHA_MARKER_BACKUP=""
+                    else
+                      recovery_failed=true
+                      PRESERVE_BACKUPS=true
+                      echo "SHA marker restore failed; backup retained at ${SHA_MARKER_BACKUP}." >&2
+                    fi
+                  elif ! rm -f -- "${DEPLOY_PATH}/.last_deployed_sha"; then
+                    recovery_failed=true
+                  fi
+
+                  if [ "${PRIOR_IMAGE_MARKER_PRESENT}" = "true" ]; then
+                    if mv -f -- "${IMAGE_MARKER_BACKUP}" "${DEPLOY_PATH}/.last_deployed_image"; then
+                      IMAGE_MARKER_BACKUP=""
+                    else
+                      recovery_failed=true
+                      PRESERVE_BACKUPS=true
+                      echo "Image marker restore failed; backup retained at ${IMAGE_MARKER_BACKUP}." >&2
+                    fi
+                  elif ! rm -f -- "${DEPLOY_PATH}/.last_deployed_image"; then
+                    recovery_failed=true
+                  fi
+                fi
+
+                if [ "${compose_restored}" = "true" ]; then
+                  if [ "${BACKEND_REPLACED}" = "true" ] && \
+                     ! BACKEND_IMAGE="${RECOVERY_IMAGE_TAG}" docker compose up -d \
+                       --no-build --no-deps --force-recreate backend; then
+                    recovery_failed=true
+                  fi
+                  if ! recovered_backend_is_exact_and_ready; then
+                    recovery_failed=true
+                  elif ! persist_recovery_reference; then
+                    recovery_failed=true
+                  fi
+                fi
+
+                if [ "${recovery_failed}" = "true" ]; then
+                  echo "Previous backend recovery was incomplete; operator intervention is required." >&2
+                  if [ "${RECOVERY_TAG_CREATED}" = "true" ]; then
+                    echo "Immutable recovery image retained as ${RECOVERY_IMAGE_TAG}." >&2
+                  fi
+                  if [ "${RECOVERY_REFERENCE_PERSISTED}" = "true" ]; then
+                    echo "The immutable recovery reference was persisted in .env and the image marker." >&2
+                  fi
+                else
+                  echo "Previous backend is exact and deeply ready; ${RECOVERY_IMAGE_TAG} is retained in .env and the image marker." >&2
+                fi
+              elif ! remove_recovery_tag; then
+                echo "Pre-mutation cleanup failed; image retained as ${RECOVERY_IMAGE_TAG}." >&2
+              fi
+
+              cleanup_deploy_artifacts
+              exit "${failure_status}"
+            }
+            trap restore_previous_deployment EXIT
+
+            test -f "${CANDIDATE_COMPOSE}"
+            BACKEND_IMAGE="${ROLLBACK_IMAGE}" docker compose \
+              --project-directory "${DEPLOY_PATH}" \
+              -f "${CANDIDATE_COMPOSE}" config --quiet
+
+            # Snapshot every persistent value that changes, plus the actual
+            # running image. Refuse a non-recoverable mutation if no backend is
+            # currently running.
+            test -f "${DEPLOY_PATH}/docker-compose.yml"
+            test -f "${DEPLOY_PATH}/.env"
+            PRIOR_BACKEND_CONTAINER_ID="$(docker compose ps -q backend)"
+            if [ -z "${PRIOR_BACKEND_CONTAINER_ID}" ]; then
+              echo "No running backend container; refusing a deployment without automatic recovery." >&2
+              exit 1
+            fi
+            PRIOR_BACKEND_IMAGE_ID="$(docker inspect --format '{{.Image}}' "${PRIOR_BACKEND_CONTAINER_ID}")"
+            if ! echo "${PRIOR_BACKEND_IMAGE_ID}" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+              echo "Could not capture an immutable running backend image ID." >&2
+              exit 1
+            fi
+            PRIOR_BACKEND_CONFIG_IMAGE="$(
+              docker inspect --format '{{.Config.Image}}' "${PRIOR_BACKEND_CONTAINER_ID}"
+            )"
+            case "${PRIOR_BACKEND_CONFIG_IMAGE}" in
+              talky-recovery:*|docker.io/library/talky-recovery:*)
+                if prior_persisted_image_id="$(
+                  docker image inspect --format '{{.Id}}' \
+                    "${PRIOR_BACKEND_CONFIG_IMAGE}" 2>/dev/null
+                )" && [ "${prior_persisted_image_id}" = "${PRIOR_BACKEND_IMAGE_ID}" ]; then
+                  PRIOR_PERSISTED_RECOVERY_TAG="${PRIOR_BACKEND_CONFIG_IMAGE}"
+                fi
+                ;;
+            esac
+            if [ -z "${PRIOR_PERSISTED_RECOVERY_TAG}" ] && \
+               [ -f "${DEPLOY_PATH}/.last_deployed_image" ]; then
+              prior_marker_image=""
+              IFS= read -r prior_marker_image \
+                < "${DEPLOY_PATH}/.last_deployed_image" || true
+              case "${prior_marker_image}" in
+                talky-recovery:*|docker.io/library/talky-recovery:*)
+                  if prior_marker_image_id="$(
+                    docker image inspect --format '{{.Id}}' \
+                      "${prior_marker_image}" 2>/dev/null
+                  )" && [ "${prior_marker_image_id}" = "${PRIOR_BACKEND_IMAGE_ID}" ]; then
+                    PRIOR_PERSISTED_RECOVERY_TAG="${prior_marker_image}"
+                  fi
+                  ;;
+              esac
+            fi
+
+            COMPOSE_BACKUP="$(mktemp "${DEPLOY_PATH}/.docker-compose.backup.XXXXXX")"
+            ENV_BACKUP="$(mktemp "${DEPLOY_PATH}/.env.backup.XXXXXX")"
+            SHA_MARKER_BACKUP="$(mktemp "${DEPLOY_PATH}/.last-deployed-sha.backup.XXXXXX")"
+            IMAGE_MARKER_BACKUP="$(mktemp "${DEPLOY_PATH}/.last-deployed-image.backup.XXXXXX")"
+            cp -p -- "${DEPLOY_PATH}/docker-compose.yml" "${COMPOSE_BACKUP}"
+            cp -- "${DEPLOY_PATH}/.env" "${ENV_BACKUP}"
+            chmod 600 "${ENV_BACKUP}"
+            if [ -f "${DEPLOY_PATH}/.last_deployed_sha" ]; then
+              cp -p -- "${DEPLOY_PATH}/.last_deployed_sha" "${SHA_MARKER_BACKUP}"
+              PRIOR_SHA_MARKER_PRESENT=true
+            fi
+            if [ -f "${DEPLOY_PATH}/.last_deployed_image" ]; then
+              cp -p -- "${DEPLOY_PATH}/.last_deployed_image" "${IMAGE_MARKER_BACKUP}"
+              PRIOR_IMAGE_MARKER_PRESENT=true
+            fi
+
+            # Pin the exact image object before any pull can retarget a mutable
+            # repository tag. This local tag is unique to this workflow run.
+            docker image inspect "${PRIOR_BACKEND_IMAGE_ID}" > /dev/null
+            docker image tag "${PRIOR_BACKEND_IMAGE_ID}" "${RECOVERY_IMAGE_TAG}"
+            RECOVERY_TAG_CREATED=true
+
+            mv -f -- "${CANDIDATE_COMPOSE}" "${DEPLOY_PATH}/docker-compose.yml"
+            DEPLOYMENT_MUTATED=true
+            rmdir -- "${UPLOAD_DIR}" 2>/dev/null || true
 
             echo "🔄 Rolling back to image: ${ROLLBACK_IMAGE}"
 
             # Pull the specific SHA image
             docker pull "${ROLLBACK_IMAGE}"
 
-            # Update .env to point to rollback image
-            sed -i "s|BACKEND_IMAGE=.*|BACKEND_IMAGE=${ROLLBACK_IMAGE}|" .env || true
+            # Validate connector-critical configuration with the exact image
+            # before replacing the running backend. No secret values are
+            # printed; only missing variable names or validation errors.
+            docker run --rm --network none --read-only --cap-drop ALL \
+              --security-opt no-new-privileges:true \
+              --env-file "${DEPLOY_PATH}/backend/.env" \
+              -e ENVIRONMENT=production \
+              --entrypoint python "${ROLLBACK_IMAGE}" -c '
+            import os
+            from app.infrastructure.connectors.encryption import TokenEncryptionService
+            google_vars = ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET")
+            missing = [name for name in google_vars if not os.getenv(name, "").strip() or os.getenv(name, "").startswith("REPLACE_WITH_")]
+            if missing:
+                raise SystemExit("Missing connector settings: " + ", ".join(missing))
+            TokenEncryptionService()
+            print("Connector configuration preflight passed")
+            '
 
             # Restart with rollback image (no --build, use the pulled image)
-            BACKEND_IMAGE="${ROLLBACK_IMAGE}" docker compose up -d backend
+            BACKEND_REPLACED=true
+            BACKEND_IMAGE="${ROLLBACK_IMAGE}" docker compose up -d --no-build --no-deps backend
 
-            echo "Waiting for health check..."
+            # Fail the deployment if Compose ignored the requested image.
+            BACKEND_CONTAINER_ID="$(BACKEND_IMAGE="${ROLLBACK_IMAGE}" docker compose ps -q backend)"
+            if [ -z "${BACKEND_CONTAINER_ID}" ]; then
+              echo "❌ Backend container was not created"
+              exit 1
+            fi
+            RUNNING_IMAGE="$(docker inspect --format '{{.Config.Image}}' "${BACKEND_CONTAINER_ID}")"
+            if [ "${RUNNING_IMAGE}" != "${ROLLBACK_IMAGE}" ]; then
+              echo "❌ Image mismatch: expected ${ROLLBACK_IMAGE}, running ${RUNNING_IMAGE}"
+              exit 1
+            fi
+
+            echo "Waiting for deep readiness check..."
+            HEALTHY=false
             for i in $(seq 1 30); do
-              if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
-                echo "✅ Rollback successful! Now running: ${ROLLBACK_IMAGE}"
-                exit 0
+              if docker exec "${BACKEND_CONTAINER_ID}" \
+                   curl -fsS --max-time 2 \
+                   http://localhost:8000/api/v1/healthz/deep > /dev/null 2>&1; then
+                HEALTHY=true
+                break
               fi
               echo "  Attempt $i/30..."
               sleep 5
             done
-            echo "❌ Rollback failed health check"
-            exit 1
+            if [ "${HEALTHY}" != "true" ]; then
+              echo "❌ Rollback failed deep readiness check"
+              docker compose logs --tail=50 backend || true
+              exit 1
+            fi
+
+            # Persist the proven image without exposing or replacing the rest
+            # of the server's secret-bearing .env file.
+            PERSISTENCE_STARTED=true
+            ENV_TMP="$(mktemp "${DEPLOY_PATH}/.env.tmp.XXXXXX")"
+            awk -v image="${ROLLBACK_IMAGE}" '
+              BEGIN { written = 0 }
+              /^BACKEND_IMAGE=/ {
+                if (!written) { print "BACKEND_IMAGE=" image; written = 1 }
+                next
+              }
+              { print }
+              END { if (!written) print "BACKEND_IMAGE=" image }
+            ' .env > "${ENV_TMP}"
+            chmod --reference=.env "${ENV_TMP}" 2>/dev/null || chmod 600 "${ENV_TMP}"
+            mv -f -- "${ENV_TMP}" .env
+
+            SHA_MARKER_TMP="$(mktemp "${DEPLOY_PATH}/.last_deployed_sha.tmp.XXXXXX")"
+            IMAGE_MARKER_TMP="$(mktemp "${DEPLOY_PATH}/.last_deployed_image.tmp.XXXXXX")"
+            printf '%s\n' "${ROLLBACK_SHA}" > "${SHA_MARKER_TMP}"
+            printf '%s\n' "${ROLLBACK_IMAGE}" > "${IMAGE_MARKER_TMP}"
+            mv -f -- "${SHA_MARKER_TMP}" .last_deployed_sha
+            mv -f -- "${IMAGE_MARKER_TMP}" .last_deployed_image
+
+            # Readiness and every persistent marker have committed. Only now
+            # disarm recovery and remove the secret-bearing backup files.
+            trap - EXIT
+            recovery_tag_cleanup_failed=false
+            if ! remove_recovery_tag; then
+              recovery_tag_cleanup_failed=true
+            fi
+            if ! remove_prior_persisted_recovery_tag; then
+              recovery_tag_cleanup_failed=true
+            fi
+            cleanup_deploy_artifacts
+            if [ "${recovery_tag_cleanup_failed}" = "true" ]; then
+              echo "Deployment succeeded, but one or more local recovery tags could not be removed." >&2
+              exit 1
+            fi
+            echo "✅ Rollback successful! Now running: ${ROLLBACK_IMAGE}"
 
   # ──────────────────────────────────────────────────────────────────
   # Build & Push Docker Images
@@ -77,7 +715,8 @@ jobs:
   build-and-push:
     name: Build & Push
     runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.rollback_sha == '' }}
+    needs: request-check
+    if: ${{ needs.request-check.outputs.mode == 'deploy' }}
     permissions:
       contents: read
       packages: write
@@ -88,11 +727,21 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.request-check.outputs.deploy_sha }}
 
       - name: Compute SHA tag
         id: sha_tag
-        # FIX: always produce a short-SHA tag for exact rollback targeting
-        run: echo "tag=$(echo $GITHUB_SHA | cut -c1-7)" >> $GITHUB_OUTPUT
+        shell: bash
+        env:
+          DEPLOY_SHA: ${{ needs.request-check.outputs.deploy_sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${DEPLOY_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid deployment SHA" >&2
+            exit 1
+          fi
+          echo "tag=${DEPLOY_SHA:0:7}" >> "${GITHUB_OUTPUT}"
 
       - name: Log in to Container Registry
         uses: docker/login-action@v3
@@ -107,10 +756,7 @@ jobs:
         with:
           images: ${{ env.BACKEND_IMAGE }}
           tags: |
-            type=ref,event=branch
-            type=sha,prefix=,format=short
-            type=semver,pattern={{version}}
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ steps.sha_tag.outputs.tag }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -121,7 +767,9 @@ jobs:
           context: ./backend
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          labels: |
+            ${{ steps.meta.outputs.labels }}
+            org.opencontainers.image.revision=${{ needs.request-check.outputs.deploy_sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -131,37 +779,454 @@ jobs:
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
-    needs: build-and-push
-    if: ${{ github.event.inputs.rollback_sha == '' }}
+    needs: [request-check, build-and-push]
+    if: ${{ needs.request-check.outputs.mode == 'deploy' }}
+    permissions:
+      actions: read
+      contents: read
     environment:
-      name: ${{ github.event.inputs.environment || 'staging' }}
+      name: ${{ needs.request-check.outputs.target_environment }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Revalidate protected deployment authorization
+        if: ${{ github.event_name == 'workflow_run' || needs.request-check.outputs.target_environment == 'production' }}
+        shell: bash
+        env:
+          DEPLOY_SHA: ${{ needs.request-check.outputs.deploy_sha }}
+          GITHUB_API_URL_VALUE: ${{ github.api_url }}
+          GITHUB_TOKEN_VALUE: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          expected_sha="${DEPLOY_SHA,,}"
+          api_headers=(
+            -H "Accept: application/vnd.github+json"
+            -H "Authorization: Bearer ${GITHUB_TOKEN_VALUE}"
+            -H "X-GitHub-Api-Version: 2022-11-28"
+          )
+          main_sha="$(curl --fail --silent --show-error --location --retry 3 \
+            "${api_headers[@]}" \
+            "${GITHUB_API_URL_VALUE}/repos/${REPOSITORY}/git/ref/heads/main" |
+            jq -er '.object.sha | ascii_downcase')"
+          if [ "${expected_sha}" != "${main_sha}" ]; then
+            echo "Deployment became stale: expected ${expected_sha}, main is ${main_sha}." >&2
+            exit 1
+          fi
 
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1
+          curl --fail --silent --show-error --location --retry 3 \
+            "${api_headers[@]}" \
+            "${GITHUB_API_URL_VALUE}/repos/${REPOSITORY}/actions/workflows/ci.yml/runs?branch=main&status=success&head_sha=${expected_sha}&per_page=100" |
+            jq -e --arg sha "${expected_sha}" '
+              any(.workflow_runs[];
+                ((.head_sha | ascii_downcase) == $sha) and
+                (.head_branch == "main") and
+                (.event == "push") and
+                (.status == "completed") and
+                (.conclusion == "success"))
+            ' > /dev/null || {
+              echo "Successful exact-SHA CI authorization is no longer present." >&2
+              exit 1
+            }
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.request-check.outputs.deploy_sha }}
+
+      - name: Upload candidate deployment definition
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345 # v1.0.0
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          source: docker-compose.yml
+          target: ${{ format('{0}/.deploy-upload-{1}-{2}', secrets.DEPLOY_PATH || '/opt/talky', github.run_id, github.run_attempt) }}
+          overwrite: true
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/talky' }}
+          UPLOAD_DIR: ${{ format('{0}/.deploy-upload-{1}-{2}', secrets.DEPLOY_PATH || '/opt/talky', github.run_id, github.run_attempt) }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: DEPLOY_PATH,UPLOAD_DIR
           script: |
-            set -e
-            cd ${{ secrets.DEPLOY_PATH || '/opt/talky' }}
+            set -eu
+            cd -- "${DEPLOY_PATH}"
 
             # Use the exact SHA tag for this deploy — never 'latest'
-            # FIX: deploy pinned SHA image, not latest
             SHA_TAG="${{ needs.build-and-push.outputs.image_sha_tag }}"
             DEPLOY_IMAGE="${{ env.BACKEND_IMAGE }}:${SHA_TAG}"
+            CANDIDATE_COMPOSE="${UPLOAD_DIR}/docker-compose.yml"
+
+            COMPOSE_BACKUP=""
+            ENV_BACKUP=""
+            SHA_MARKER_BACKUP=""
+            IMAGE_MARKER_BACKUP=""
+            ENV_TMP=""
+            SHA_MARKER_TMP=""
+            IMAGE_MARKER_TMP=""
+            RECOVERY_COMPOSE_TMP=""
+            RECOVERY_ENV_TMP=""
+            RECOVERY_IMAGE_MARKER_TMP=""
+            PRIOR_BACKEND_IMAGE_ID=""
+            PRIOR_BACKEND_CONFIG_IMAGE=""
+            PRIOR_PERSISTED_RECOVERY_TAG=""
+            RECOVERY_IMAGE_TAG="talky-recovery:${{ github.run_id }}-${{ github.run_attempt }}-deploy"
+            PRIOR_SHA_MARKER_PRESENT=false
+            PRIOR_IMAGE_MARKER_PRESENT=false
+            DEPLOYMENT_MUTATED=false
+            BACKEND_REPLACED=false
+            PERSISTENCE_STARTED=false
+            PRESERVE_BACKUPS=false
+            RECOVERY_TAG_CREATED=false
+            RECOVERY_REFERENCE_PERSISTED=false
+
+            cleanup_deploy_artifacts() {
+              cleanup_failed=false
+              cleanup_file() {
+                [ -z "$1" ] || rm -f -- "$1" || cleanup_failed=true
+              }
+
+              # Secret-bearing environment copies go first. Every removal is
+              # attempted even if an earlier path is unexpectedly undeletable.
+              if [ "${PRESERVE_BACKUPS}" != "true" ]; then
+                cleanup_file "${ENV_BACKUP}"
+              fi
+              cleanup_file "${ENV_TMP}"
+              cleanup_file "${RECOVERY_ENV_TMP}"
+              cleanup_file "${CANDIDATE_COMPOSE}"
+              cleanup_file "${SHA_MARKER_TMP}"
+              cleanup_file "${IMAGE_MARKER_TMP}"
+              cleanup_file "${RECOVERY_COMPOSE_TMP}"
+              cleanup_file "${RECOVERY_IMAGE_MARKER_TMP}"
+              if [ "${PRESERVE_BACKUPS}" = "true" ]; then
+                for backup_path in \
+                  "${COMPOSE_BACKUP}" "${ENV_BACKUP}" \
+                  "${SHA_MARKER_BACKUP}" "${IMAGE_MARKER_BACKUP}"; do
+                  if [ -n "${backup_path}" ] && [ -e "${backup_path}" ]; then
+                    echo "Preserved recovery artifact: ${backup_path}" >&2
+                  fi
+                done
+              else
+                cleanup_file "${COMPOSE_BACKUP}"
+                cleanup_file "${SHA_MARKER_BACKUP}"
+                cleanup_file "${IMAGE_MARKER_BACKUP}"
+              fi
+              rmdir -- "${UPLOAD_DIR}" 2>/dev/null || true
+              if [ "${cleanup_failed}" = "true" ]; then
+                echo "One or more deployment artifacts could not be removed." >&2
+                return 1
+              fi
+            }
+
+            remove_recovery_tag() {
+              if [ "${RECOVERY_TAG_CREATED}" = "true" ]; then
+                if docker image rm "${RECOVERY_IMAGE_TAG}" > /dev/null 2>&1; then
+                  RECOVERY_TAG_CREATED=false
+                else
+                  return 1
+                fi
+              fi
+            }
+
+            remove_prior_persisted_recovery_tag() {
+              if [ -n "${PRIOR_PERSISTED_RECOVERY_TAG}" ] && \
+                 [ "${PRIOR_PERSISTED_RECOVERY_TAG}" != "${RECOVERY_IMAGE_TAG}" ]; then
+                if prior_recovery_image_id="$(
+                  docker image inspect --format '{{.Id}}' \
+                    "${PRIOR_PERSISTED_RECOVERY_TAG}" 2>/dev/null
+                )"; then
+                  if [ "${prior_recovery_image_id}" != "${PRIOR_BACKEND_IMAGE_ID}" ]; then
+                    return 1
+                  fi
+                  docker image rm "${PRIOR_PERSISTED_RECOVERY_TAG}" > /dev/null 2>&1 || return 1
+                fi
+              fi
+            }
+
+            persist_recovery_reference() {
+              RECOVERY_COMPOSE_TMP="$(
+                mktemp "${DEPLOY_PATH}/.docker-compose.recovery.XXXXXX"
+              )" || return 1
+              if ! awk -v image="${RECOVERY_IMAGE_TAG}" '
+                function emit_image() {
+                  if (!image_written) {
+                    print "    image: " image
+                    image_written = 1
+                  }
+                }
+                BEGIN { in_backend = 0; found_backend = 0; image_written = 0 }
+                /^  backend:[[:space:]]*(#.*)?$/ {
+                  in_backend = 1
+                  found_backend = 1
+                  print
+                  next
+                }
+                in_backend && /^    image:[[:space:]]*/ {
+                  emit_image()
+                  next
+                }
+                in_backend && (/^  [[:alnum:]_.-]+:[[:space:]]*(#.*)?$/ || /^[^[:space:]#]/) {
+                  emit_image()
+                  in_backend = 0
+                }
+                { print }
+                END {
+                  if (in_backend) emit_image()
+                  if (!found_backend || !image_written) exit 42
+                }
+              ' "${DEPLOY_PATH}/docker-compose.yml" > "${RECOVERY_COMPOSE_TMP}"; then
+                return 1
+              fi
+              chmod --reference="${DEPLOY_PATH}/docker-compose.yml" \
+                "${RECOVERY_COMPOSE_TMP}" 2>/dev/null || return 1
+              mv -f -- "${RECOVERY_COMPOSE_TMP}" \
+                "${DEPLOY_PATH}/docker-compose.yml" || return 1
+              RECOVERY_COMPOSE_TMP=""
+
+              RECOVERY_ENV_TMP="$(mktemp "${DEPLOY_PATH}/.env.recovery.XXXXXX")" || return 1
+              if ! awk -v image="${RECOVERY_IMAGE_TAG}" '
+                BEGIN { written = 0 }
+                /^BACKEND_IMAGE=/ {
+                  if (!written) { print "BACKEND_IMAGE=" image; written = 1 }
+                  next
+                }
+                { print }
+                END { if (!written) print "BACKEND_IMAGE=" image }
+              ' "${DEPLOY_PATH}/.env" > "${RECOVERY_ENV_TMP}"; then
+                return 1
+              fi
+              chmod 600 "${RECOVERY_ENV_TMP}" || return 1
+              mv -f -- "${RECOVERY_ENV_TMP}" "${DEPLOY_PATH}/.env" || return 1
+              RECOVERY_ENV_TMP=""
+
+              RECOVERY_IMAGE_MARKER_TMP="$(
+                mktemp "${DEPLOY_PATH}/.last_deployed_image.recovery.XXXXXX"
+              )" || return 1
+              printf '%s\n' "${RECOVERY_IMAGE_TAG}" > "${RECOVERY_IMAGE_MARKER_TMP}" || return 1
+              mv -f -- "${RECOVERY_IMAGE_MARKER_TMP}" \
+                "${DEPLOY_PATH}/.last_deployed_image" || return 1
+              RECOVERY_IMAGE_MARKER_TMP=""
+              BACKEND_IMAGE="${RECOVERY_IMAGE_TAG}" docker compose config --quiet || return 1
+              RECOVERY_REFERENCE_PERSISTED=true
+            }
+
+            recovered_backend_is_exact_and_ready() {
+              recovered_container_id="$(
+                BACKEND_IMAGE="${RECOVERY_IMAGE_TAG}" docker compose ps -q backend
+              )" || return 1
+              if [ -z "${recovered_container_id}" ]; then
+                echo "Recovered backend container is missing." >&2
+                return 1
+              fi
+              recovered_image_id="$(
+                docker inspect --format '{{.Image}}' "${recovered_container_id}"
+              )" || return 1
+              if [ "${recovered_image_id}" != "${PRIOR_BACKEND_IMAGE_ID}" ]; then
+                echo "Recovered backend image ID does not match the captured image." >&2
+                return 1
+              fi
+
+              for recovery_attempt in $(seq 1 30); do
+                if docker exec "${recovered_container_id}" \
+                     curl -fsS --max-time 2 \
+                     http://localhost:8000/api/v1/healthz/deep > /dev/null 2>&1; then
+                  return 0
+                fi
+                echo "  Recovery readiness attempt ${recovery_attempt}/30..." >&2
+                sleep 5
+              done
+              echo "Recovered backend failed deep readiness." >&2
+              return 1
+            }
+
+            restore_previous_deployment() {
+              failure_status=$?
+              trap - EXIT
+              set +e
+              recovery_failed=false
+              compose_restored=false
+
+              if [ "${DEPLOYMENT_MUTATED}" = "true" ]; then
+                echo "Deployment failed; restoring the previous backend state." >&2
+
+                if mv -f -- "${COMPOSE_BACKUP}" "${DEPLOY_PATH}/docker-compose.yml"; then
+                  COMPOSE_BACKUP=""
+                  compose_restored=true
+                else
+                  recovery_failed=true
+                  PRESERVE_BACKUPS=true
+                  echo "Compose restore failed; backup retained at ${COMPOSE_BACKUP}." >&2
+                fi
+
+                if [ "${PERSISTENCE_STARTED}" = "true" ]; then
+                  if mv -f -- "${ENV_BACKUP}" "${DEPLOY_PATH}/.env"; then
+                    ENV_BACKUP=""
+                  else
+                    recovery_failed=true
+                    PRESERVE_BACKUPS=true
+                    echo "Environment restore failed; backup retained at ${ENV_BACKUP}." >&2
+                  fi
+
+                  if [ "${PRIOR_SHA_MARKER_PRESENT}" = "true" ]; then
+                    if mv -f -- "${SHA_MARKER_BACKUP}" "${DEPLOY_PATH}/.last_deployed_sha"; then
+                      SHA_MARKER_BACKUP=""
+                    else
+                      recovery_failed=true
+                      PRESERVE_BACKUPS=true
+                      echo "SHA marker restore failed; backup retained at ${SHA_MARKER_BACKUP}." >&2
+                    fi
+                  elif ! rm -f -- "${DEPLOY_PATH}/.last_deployed_sha"; then
+                    recovery_failed=true
+                  fi
+
+                  if [ "${PRIOR_IMAGE_MARKER_PRESENT}" = "true" ]; then
+                    if mv -f -- "${IMAGE_MARKER_BACKUP}" "${DEPLOY_PATH}/.last_deployed_image"; then
+                      IMAGE_MARKER_BACKUP=""
+                    else
+                      recovery_failed=true
+                      PRESERVE_BACKUPS=true
+                      echo "Image marker restore failed; backup retained at ${IMAGE_MARKER_BACKUP}." >&2
+                    fi
+                  elif ! rm -f -- "${DEPLOY_PATH}/.last_deployed_image"; then
+                    recovery_failed=true
+                  fi
+                fi
+
+                if [ "${compose_restored}" = "true" ]; then
+                  if [ "${BACKEND_REPLACED}" = "true" ] && \
+                     ! BACKEND_IMAGE="${RECOVERY_IMAGE_TAG}" docker compose up -d \
+                       --no-build --no-deps --force-recreate backend; then
+                    recovery_failed=true
+                  fi
+                  if ! recovered_backend_is_exact_and_ready; then
+                    recovery_failed=true
+                  elif ! persist_recovery_reference; then
+                    recovery_failed=true
+                  fi
+                fi
+
+                if [ "${recovery_failed}" = "true" ]; then
+                  echo "Previous backend recovery was incomplete; operator intervention is required." >&2
+                  if [ "${RECOVERY_TAG_CREATED}" = "true" ]; then
+                    echo "Immutable recovery image retained as ${RECOVERY_IMAGE_TAG}." >&2
+                  fi
+                  if [ "${RECOVERY_REFERENCE_PERSISTED}" = "true" ]; then
+                    echo "The immutable recovery reference was persisted in .env and the image marker." >&2
+                  fi
+                else
+                  echo "Previous backend is exact and deeply ready; ${RECOVERY_IMAGE_TAG} is retained in .env and the image marker." >&2
+                fi
+              elif ! remove_recovery_tag; then
+                echo "Pre-mutation cleanup failed; image retained as ${RECOVERY_IMAGE_TAG}." >&2
+              fi
+
+              cleanup_deploy_artifacts
+              exit "${failure_status}"
+            }
+            trap restore_previous_deployment EXIT
+
+            test -f "${CANDIDATE_COMPOSE}"
+            BACKEND_IMAGE="${DEPLOY_IMAGE}" docker compose \
+              --project-directory "${DEPLOY_PATH}" \
+              -f "${CANDIDATE_COMPOSE}" config --quiet
+
+            # Snapshot every persistent value that changes, plus the actual
+            # running image. Refuse a non-recoverable mutation if no backend is
+            # currently running.
+            test -f "${DEPLOY_PATH}/docker-compose.yml"
+            test -f "${DEPLOY_PATH}/.env"
+            PRIOR_BACKEND_CONTAINER_ID="$(docker compose ps -q backend)"
+            if [ -z "${PRIOR_BACKEND_CONTAINER_ID}" ]; then
+              echo "No running backend container; refusing a deployment without automatic recovery." >&2
+              exit 1
+            fi
+            PRIOR_BACKEND_IMAGE_ID="$(docker inspect --format '{{.Image}}' "${PRIOR_BACKEND_CONTAINER_ID}")"
+            if ! echo "${PRIOR_BACKEND_IMAGE_ID}" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+              echo "Could not capture an immutable running backend image ID." >&2
+              exit 1
+            fi
+            PRIOR_BACKEND_CONFIG_IMAGE="$(
+              docker inspect --format '{{.Config.Image}}' "${PRIOR_BACKEND_CONTAINER_ID}"
+            )"
+            case "${PRIOR_BACKEND_CONFIG_IMAGE}" in
+              talky-recovery:*|docker.io/library/talky-recovery:*)
+                if prior_persisted_image_id="$(
+                  docker image inspect --format '{{.Id}}' \
+                    "${PRIOR_BACKEND_CONFIG_IMAGE}" 2>/dev/null
+                )" && [ "${prior_persisted_image_id}" = "${PRIOR_BACKEND_IMAGE_ID}" ]; then
+                  PRIOR_PERSISTED_RECOVERY_TAG="${PRIOR_BACKEND_CONFIG_IMAGE}"
+                fi
+                ;;
+            esac
+            if [ -z "${PRIOR_PERSISTED_RECOVERY_TAG}" ] && \
+               [ -f "${DEPLOY_PATH}/.last_deployed_image" ]; then
+              prior_marker_image=""
+              IFS= read -r prior_marker_image \
+                < "${DEPLOY_PATH}/.last_deployed_image" || true
+              case "${prior_marker_image}" in
+                talky-recovery:*|docker.io/library/talky-recovery:*)
+                  if prior_marker_image_id="$(
+                    docker image inspect --format '{{.Id}}' \
+                      "${prior_marker_image}" 2>/dev/null
+                  )" && [ "${prior_marker_image_id}" = "${PRIOR_BACKEND_IMAGE_ID}" ]; then
+                    PRIOR_PERSISTED_RECOVERY_TAG="${prior_marker_image}"
+                  fi
+                  ;;
+              esac
+            fi
+
+            COMPOSE_BACKUP="$(mktemp "${DEPLOY_PATH}/.docker-compose.backup.XXXXXX")"
+            ENV_BACKUP="$(mktemp "${DEPLOY_PATH}/.env.backup.XXXXXX")"
+            SHA_MARKER_BACKUP="$(mktemp "${DEPLOY_PATH}/.last-deployed-sha.backup.XXXXXX")"
+            IMAGE_MARKER_BACKUP="$(mktemp "${DEPLOY_PATH}/.last-deployed-image.backup.XXXXXX")"
+            cp -p -- "${DEPLOY_PATH}/docker-compose.yml" "${COMPOSE_BACKUP}"
+            cp -- "${DEPLOY_PATH}/.env" "${ENV_BACKUP}"
+            chmod 600 "${ENV_BACKUP}"
+            if [ -f "${DEPLOY_PATH}/.last_deployed_sha" ]; then
+              cp -p -- "${DEPLOY_PATH}/.last_deployed_sha" "${SHA_MARKER_BACKUP}"
+              PRIOR_SHA_MARKER_PRESENT=true
+            fi
+            if [ -f "${DEPLOY_PATH}/.last_deployed_image" ]; then
+              cp -p -- "${DEPLOY_PATH}/.last_deployed_image" "${IMAGE_MARKER_BACKUP}"
+              PRIOR_IMAGE_MARKER_PRESENT=true
+            fi
+
+            # Pin the exact image object before any pull can retarget a mutable
+            # repository tag. This local tag is unique to this workflow run.
+            docker image inspect "${PRIOR_BACKEND_IMAGE_ID}" > /dev/null
+            docker image tag "${PRIOR_BACKEND_IMAGE_ID}" "${RECOVERY_IMAGE_TAG}"
+            RECOVERY_TAG_CREATED=true
+
+            mv -f -- "${CANDIDATE_COMPOSE}" "${DEPLOY_PATH}/docker-compose.yml"
+            DEPLOYMENT_MUTATED=true
+            rmdir -- "${UPLOAD_DIR}" 2>/dev/null || true
 
             echo "🚀 Deploying image: ${DEPLOY_IMAGE}"
 
-            # Record the SHA being deployed for rollback reference
-            echo "${SHA_TAG}" > .last_deployed_sha
-            echo "${DEPLOY_IMAGE}" > .last_deployed_image
-
             # Pull the specific SHA image
             docker pull "${DEPLOY_IMAGE}"
+
+            # Fail before restart when the shared token key-ring or Google
+            # OAuth credentials are missing/malformed. The candidate image
+            # executes its own encryption implementation for this validation.
+            docker run --rm --network none --read-only --cap-drop ALL \
+              --security-opt no-new-privileges:true \
+              --env-file "${DEPLOY_PATH}/backend/.env" \
+              -e ENVIRONMENT=production \
+              --entrypoint python "${DEPLOY_IMAGE}" -c '
+            import os
+            from app.infrastructure.connectors.encryption import TokenEncryptionService
+            google_vars = ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET")
+            missing = [name for name in google_vars if not os.getenv(name, "").strip() or os.getenv(name, "").startswith("REPLACE_WITH_")]
+            if missing:
+                raise SystemExit("Missing connector settings: " + ", ".join(missing))
+            TokenEncryptionService()
+            print("Connector configuration preflight passed")
+            '
 
             # FIX: Run database migrations before restarting the backend
             # This replaces the broken init.sql re-run approach.
@@ -169,44 +1234,112 @@ jobs:
             # Once Alembic is set up, uncomment the line below and remove the note.
             # docker run --rm --env-file .env "${DEPLOY_IMAGE}" alembic upgrade head
 
-            # Zero-downtime restart using the pinned SHA image
-            BACKEND_IMAGE="${DEPLOY_IMAGE}" docker compose up -d --no-build backend
+            # Replace only the backend; dependency containers are not part of
+            # an application-image deploy.
+            BACKEND_REPLACED=true
+            BACKEND_IMAGE="${DEPLOY_IMAGE}" docker compose up -d --no-build --no-deps backend
 
-            # FIX: Do NOT restart Redis on every deploy — no reason to
-            # (removed: docker compose restart redis)
+            # Prove that Compose used the requested SHA-tagged image rather than
+            # silently falling back to the local development image.
+            BACKEND_CONTAINER_ID="$(BACKEND_IMAGE="${DEPLOY_IMAGE}" docker compose ps -q backend)"
+            if [ -z "${BACKEND_CONTAINER_ID}" ]; then
+              echo "❌ Backend container was not created"
+              exit 1
+            fi
+            RUNNING_IMAGE="$(docker inspect --format '{{.Config.Image}}' "${BACKEND_CONTAINER_ID}")"
+            if [ "${RUNNING_IMAGE}" != "${DEPLOY_IMAGE}" ]; then
+              echo "❌ Image mismatch: expected ${DEPLOY_IMAGE}, running ${RUNNING_IMAGE}"
+              exit 1
+            fi
 
-            # Wait for health check
-            echo "Waiting for backend health check..."
+            echo "Waiting for backend deep readiness check..."
+            HEALTHY=false
             for i in $(seq 1 30); do
-              if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
-                echo "✅ Backend is healthy! SHA: ${SHA_TAG}"
-                exit 0
+              if docker exec "${BACKEND_CONTAINER_ID}" \
+                   curl -fsS --max-time 2 \
+                   http://localhost:8000/api/v1/healthz/deep > /dev/null 2>&1; then
+                HEALTHY=true
+                break
               fi
               echo "  Attempt $i/30..."
               sleep 5
             done
+            if [ "${HEALTHY}" != "true" ]; then
+              echo "❌ Backend failed deep readiness check after deploy"
+              docker compose logs --tail=50 backend || true
+              exit 1
+            fi
 
-            echo "❌ Backend failed health check after deploy"
-            echo "Last deployed SHA was: $(cat .last_deployed_sha 2>/dev/null || echo 'unknown')"
-            docker compose logs --tail=50 backend
-            exit 1
+            # Persist only a proven image. A failed candidate therefore cannot
+            # replace the last-known-good image in .env or marker files.
+            PERSISTENCE_STARTED=true
+            ENV_TMP="$(mktemp "${DEPLOY_PATH}/.env.tmp.XXXXXX")"
+            awk -v image="${DEPLOY_IMAGE}" '
+              BEGIN { written = 0 }
+              /^BACKEND_IMAGE=/ {
+                if (!written) { print "BACKEND_IMAGE=" image; written = 1 }
+                next
+              }
+              { print }
+              END { if (!written) print "BACKEND_IMAGE=" image }
+            ' .env > "${ENV_TMP}"
+            chmod --reference=.env "${ENV_TMP}" 2>/dev/null || chmod 600 "${ENV_TMP}"
+            mv -f -- "${ENV_TMP}" .env
+
+            SHA_MARKER_TMP="$(mktemp "${DEPLOY_PATH}/.last_deployed_sha.tmp.XXXXXX")"
+            IMAGE_MARKER_TMP="$(mktemp "${DEPLOY_PATH}/.last_deployed_image.tmp.XXXXXX")"
+            printf '%s\n' "${SHA_TAG}" > "${SHA_MARKER_TMP}"
+            printf '%s\n' "${DEPLOY_IMAGE}" > "${IMAGE_MARKER_TMP}"
+            mv -f -- "${SHA_MARKER_TMP}" .last_deployed_sha
+            mv -f -- "${IMAGE_MARKER_TMP}" .last_deployed_image
+
+            # Readiness and every persistent marker have committed. Only now
+            # disarm recovery and remove the secret-bearing backup files.
+            trap - EXIT
+            recovery_tag_cleanup_failed=false
+            if ! remove_recovery_tag; then
+              recovery_tag_cleanup_failed=true
+            fi
+            if ! remove_prior_persisted_recovery_tag; then
+              recovery_tag_cleanup_failed=true
+            fi
+            cleanup_deploy_artifacts
+            if [ "${recovery_tag_cleanup_failed}" = "true" ]; then
+              echo "Deployment succeeded, but one or more local recovery tags could not be removed." >&2
+              exit 1
+            fi
+            echo "✅ Backend is deeply ready! SHA: ${SHA_TAG}"
 
       - name: Verify deployment
-        uses: appleboy/ssh-action@v1
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        env:
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/talky' }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: DEPLOY_PATH
           script: |
+            set -eu
             echo "=== Service Status ==="
-            cd ${{ secrets.DEPLOY_PATH || '/opt/talky' }}
+            cd -- "${DEPLOY_PATH}"
             docker compose ps
+            BACKEND_CONTAINER_ID="$(docker compose ps -q backend)"
+            test -n "${BACKEND_CONTAINER_ID}"
             echo ""
             echo "=== Deployed Image ==="
-            cat .last_deployed_image 2>/dev/null || echo "unknown"
+            EXPECTED_IMAGE="$(cat .last_deployed_image)"
+            RUNNING_IMAGE="$(docker inspect --format '{{.Config.Image}}' "${BACKEND_CONTAINER_ID}")"
+            if [ "${RUNNING_IMAGE}" != "${EXPECTED_IMAGE}" ]; then
+              echo "Image mismatch: expected ${EXPECTED_IMAGE}, running ${RUNNING_IMAGE}" >&2
+              exit 1
+            fi
+            echo "${RUNNING_IMAGE}"
             echo ""
-            echo "=== Health Check ==="
-            curl -sf http://localhost:8000/health | python3 -m json.tool || echo "Health check failed"
+            echo "=== Deep Readiness Check ==="
+            docker exec "${BACKEND_CONTAINER_ID}" \
+              curl -fsS --max-time 2 \
+              http://localhost:8000/api/v1/healthz/deep
             echo ""
             echo "=== Recent Logs ==="
             docker compose logs --tail=10 backend
@@ -217,8 +1350,8 @@ jobs:
   notify:
     name: Notify
     runs-on: ubuntu-latest
-    needs: [deploy]
-    if: always()
+    needs: [request-check, build-and-push, deploy]
+    if: ${{ always() && needs.request-check.outputs.mode == 'deploy' }}
 
     steps:
       - name: Notify Slack on success
@@ -227,7 +1360,7 @@ jobs:
         with:
           payload: |
             {
-              "text": "✅ *Talky.ai deployed successfully*\n*Image:* `${{ env.BACKEND_IMAGE }}:${{ needs.build-and-push.outputs.image_sha_tag }}`\n*Environment:* `${{ github.event.inputs.environment || 'staging' }}`\n*Triggered by:* ${{ github.actor }}"
+              "text": "✅ *Talky.ai deployed successfully*\n*Image:* `${{ env.BACKEND_IMAGE }}:${{ needs.build-and-push.outputs.image_sha_tag }}`\n*Environment:* `${{ needs.request-check.outputs.target_environment }}`\n*Triggered by:* ${{ github.actor }}"
             }
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
@@ -239,7 +1372,25 @@ jobs:
         with:
           payload: |
             {
-              "text": "❌ *Talky.ai deploy FAILED*\n*Branch:* `${{ github.ref_name }}`\n*Environment:* `${{ github.event.inputs.environment || 'staging' }}`\n*Triggered by:* ${{ github.actor }}\n*Logs:* ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              "text": "❌ *Talky.ai deploy FAILED*\n*Environment:* `${{ needs.request-check.outputs.target_environment }}`\n*Triggered by:* ${{ github.actor }}\n*Logs:* ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true
+
+  notify-rollback:
+    name: Notify rollback
+    runs-on: ubuntu-latest
+    needs: [request-check, rollback]
+    if: ${{ always() && needs.request-check.outputs.mode == 'rollback' }}
+
+    steps:
+      - name: Notify Slack of rollback result
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "${{ needs.rollback.result == 'success' && '✅' || '❌' }} *Talky.ai rollback ${{ needs.rollback.result }}*\n*Image:* `${{ env.BACKEND_IMAGE }}:${{ inputs.rollback_sha }}`\n*Environment:* `${{ needs.request-check.outputs.target_environment }}`\n*Triggered by:* ${{ github.actor }}\n*Logs:* ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             }
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
