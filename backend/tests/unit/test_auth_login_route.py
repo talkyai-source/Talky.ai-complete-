@@ -12,15 +12,28 @@ from app.api.v1.dependencies import get_audit_logger, get_db_client
 from app.api.v1.endpoints.auth.login import router
 
 
+def _find_api_route(app: FastAPI, path: str) -> APIRoute:
+    """Locate an APIRoute by full path on any FastAPI/starlette version —
+    modern starlette wraps included routers in app.routes instead of
+    flattening their APIRoutes into it."""
+
+    def walk(routes, prefix=""):
+        for route in routes:
+            if isinstance(route, APIRoute):
+                yield prefix + route.path, route
+            inner = getattr(route, "original_router", None)
+            if inner is not None:
+                ctx = getattr(route, "include_context", None)
+                yield from walk(inner.routes, prefix + (getattr(ctx, "prefix", "") or ""))
+
+    return next(route for full_path, route in walk(app.routes) if full_path == path)
+
+
 def test_login_payload_is_registered_as_request_body():
     app = FastAPI()
     app.include_router(router, prefix="/auth")
 
-    route = next(
-        route
-        for route in app.routes
-        if isinstance(route, APIRoute) and route.path == "/auth/login"
-    )
+    route = _find_api_route(app, "/auth/login")
 
     assert [param.name for param in route.dependant.body_params] == ["body"]
     assert "body" not in [param.name for param in route.dependant.query_params]

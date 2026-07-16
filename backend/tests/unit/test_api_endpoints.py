@@ -178,7 +178,20 @@ class TestEndpointImports:
     @pytest.mark.skipif(not IMPORT_SUCCESS, reason="App not available")
     def test_all_routes_registered(self):
         """Verify all expected routes are registered"""
-        routes = [route.path for route in app.routes]
+
+        # Modern starlette wraps included routers in app.routes instead of
+        # flattening their APIRoutes into it; walk both shapes.
+        def _paths(routes, prefix=""):
+            for route in routes:
+                path = getattr(route, "path", None)
+                if path is not None:
+                    yield prefix + path
+                inner = getattr(route, "original_router", None)
+                if inner is not None:
+                    ctx = getattr(route, "include_context", None)
+                    yield from _paths(inner.routes, prefix + (getattr(ctx, "prefix", "") or ""))
+
+        routes = list(_paths(app.routes))
         
         # Check essential routes exist (with or without trailing slash)
         assert any("/api/v1/auth/me" in r for r in routes)
