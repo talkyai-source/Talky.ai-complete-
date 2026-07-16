@@ -539,4 +539,13 @@ async def stream_assistant_reply(
 
     except Exception as exc:
         logger.error("stream_assistant_reply fatal: %s", exc, exc_info=True)
-        yield {"type": "error", "content": f"I encountered an error: {exc}"}
+        # Never surface raw exception text: provider validation errors and
+        # internals read as gibberish (or worse, leak details) in chat/voice.
+        if isinstance(exc, APIError) and _is_tool_use_failed(exc):
+            content = (
+                "I had trouble filling in that action correctly. "
+                "Could you say that once more (a simple yes/no helps), and I'll retry?"
+            )
+        else:
+            content = "Something went wrong on my side. Please try that again."
+        yield {"type": "error", "content": content}

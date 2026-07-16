@@ -273,9 +273,12 @@ async def agent_node(state: AgentState) -> Dict[str, Any]:
             return {"messages": [ai_message]}
     
     except Exception as e:
-        logger.error(f"Agent error: {e}")
-        # Return error as AIMessage
-        error_message = AIMessage(content=f"I encountered an error: {str(e)}. Please try again.")
+        logger.error(f"Agent error: {e}", exc_info=True)
+        # Return a sanitized error as AIMessage — raw exception text can leak
+        # provider/schema internals into user-visible chat.
+        error_message = AIMessage(
+            content="Something went wrong on my side. Please try that again."
+        )
         return {"messages": [error_message]}
 
 

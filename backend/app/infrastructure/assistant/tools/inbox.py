@@ -15,6 +15,7 @@ from typing import Any, Awaitable, Callable, Dict, Optional, TypeVar
 import httpx
 
 from app.core.postgres_adapter import Client
+from app.infrastructure.assistant.tools.coercion import coerce_bool
 from app.infrastructure.connectors.base import BaseConnector, ConnectorProviderError
 
 logger = logging.getLogger(__name__)
@@ -217,7 +218,8 @@ async def read_emails(
             operation=lambda current: current.list_emails(
                 max_results=capped,
                 query=query,
-                unread_only=bool(unread_only),
+                # coerce, don't bool(): bool("false") is True
+                unread_only=coerce_bool(unread_only),
             ),
         )
     except ConnectorLookupError as exc:

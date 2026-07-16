@@ -43,7 +43,7 @@ GROQ_TOOL_SCHEMAS = [
                 "properties": {
                     "campaign_id": {"type": "string", "description": "Filter by campaign ID"},
                     "status": {"type": "string", "description": "Filter by status"},
-                    "only_leads": {"type": "boolean", "description": "Only return contacts flagged as qualified leads", "default": False},
+                    "only_leads": {"type": ["boolean", "string"], "description": "Only return contacts flagged as qualified leads", "default": False},
                     "limit": {"type": "integer", "description": "Max leads to return (max 100)", "default": 25}
                 },
                 "required": []
@@ -90,7 +90,7 @@ GROQ_TOOL_SCHEMAS = [
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Gmail search string (optional)"},
-                    "unread_only": {"type": "boolean", "description": "Only unread emails"},
+                    "unread_only": {"type": ["boolean", "string"], "description": "Only unread emails"},
                     "max_results": {"type": "integer", "description": "How many to list (default 10, max 25)"}
                 },
                 "required": []
@@ -162,7 +162,7 @@ GROQ_TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "today_only": {"type": "boolean", "description": "Only show today's calls", "default": True},
+                    "today_only": {"type": ["boolean", "string"], "description": "Only show today's calls", "default": True},
                     "limit": {"type": "integer", "default": 10}
                 },
                 "required": []
@@ -196,7 +196,7 @@ GROQ_TOOL_SCHEMAS = [
                     "body": {"type": "string", "description": "Email body (ignored if using template)"},
                     "template_name": {"type": "string", "description": "Template to use: meeting_confirmation, follow_up, or reminder"},
                     "template_context": {"type": "object", "description": "Variables for template (e.g., attendee_name, title, date, time)"},
-                    "confirm": {"type": "boolean", "description": "false = preview only (default); the Apply button sends. Do not set true.", "default": False}
+                    "confirm": {"type": ["boolean", "string"], "description": "false = preview only (default); the Apply button sends. Do not set true.", "default": False}
                 },
                 "required": ["subject", "body"]
             }
@@ -272,10 +272,15 @@ GROQ_TOOL_SCHEMAS = [
                 "ONE AT A TIME (ask for the next only after the previous is answered): "
                 "1) name, 2) goal, 3) type (lead_gen | customer_support | receptionist), "
                 "4) company_name (the company the agent represents), 5) agent_names "
-                "(the name the AI agent uses on calls). Do NOT ask for a voice — it "
-                "defaults to the tenant's configured voice. Once you have all five, call "
-                "with confirm=false to show a confirm card; the user's approval re-calls "
-                "with confirm=true to actually create it."
+                "(the name the AI agent uses on calls). These five are the ONLY "
+                "questions — NEVER invent extra ones (industry, services, target "
+                "audience, script details). If the user volunteers extra detail, put "
+                "it in additional_instructions instead of asking follow-ups. Do NOT "
+                "ask for a voice — it defaults to the tenant's configured voice. The "
+                "moment all five are known you MUST immediately call this tool with "
+                "confirm=false (a JSON boolean, not a quoted string) — the confirm "
+                "card IS the preview, never describe it in words first; the user's "
+                "approval re-calls with confirm=true to actually create it."
             ),
             "parameters": {
                 "type": "object",
@@ -298,7 +303,7 @@ GROQ_TOOL_SCHEMAS = [
                         "description": "Optional extra guidance for the agent's script",
                     },
                     "confirm": {
-                        "type": "boolean",
+                        "type": ["boolean", "string"],
                         "description": "false to preview a confirm card; true to actually create",
                     },
                 },
@@ -385,7 +390,7 @@ GROQ_TOOL_SCHEMAS = [
                         )
                     },
                     "confirm": {
-                        "type": "boolean",
+                        "type": ["boolean", "string"],
                         "description": "false = preview only; true = apply after user approval"
                     }
                 },
@@ -414,7 +419,7 @@ GROQ_TOOL_SCHEMAS = [
                         )
                     },
                     "confirm": {
-                        "type": "boolean",
+                        "type": ["boolean", "string"],
                         "description": "false = preview only; true = apply after user approval"
                     }
                 },
@@ -448,7 +453,7 @@ GROQ_TOOL_SCHEMAS = [
                     "email": {"type": "string", "description": "Email address (for add or update)"},
                     "lead_id": {"type": "string", "description": "Lead UUID (required for remove and update)"},
                     "confirm": {
-                        "type": "boolean",
+                        "type": ["boolean", "string"],
                         "description": "false = preview only; true = apply after user approval"
                     }
                 },
@@ -467,7 +472,7 @@ GROQ_TOOL_SCHEMAS = [
                     "campaign_ids": {"type": "array", "items": {"type": "string"}, "description": "Campaign ids to apply to"},
                     "tts_provider": {"type": "string", "description": "TTS provider, e.g. google, elevenlabs, cartesia, deepgram"},
                     "voice_id": {"type": "string", "description": "Voice name OR id (e.g. 'Orus', 'andromeda', 'Sarah', or a full id). A name is resolved to the id; call list_voices first if unsure."},
-                    "confirm": {"type": "boolean", "description": "false = preview only; true = apply after user approval"}
+                    "confirm": {"type": ["boolean", "string"], "description": "false = preview only; true = apply after user approval"}
                 },
                 "required": ["campaign_ids", "tts_provider", "voice_id"]
             }

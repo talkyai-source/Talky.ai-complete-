@@ -127,7 +127,9 @@ class TestStreaming:
             events = await _collect(**_BASE)
 
         assert events and events[-1]["type"] == "error"
-        assert "groq down" in events[-1]["content"]
+        # Raw exception text must NOT leak into user-visible chat/voice.
+        assert "groq down" not in events[-1]["content"]
+        assert events[-1]["content"] == "Something went wrong on my side. Please try that again."
 
     async def test_explicit_email_read_is_dispatched_before_model_text(self):
         """The model cannot skip read_emails for an unambiguous inbox request."""

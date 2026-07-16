@@ -262,9 +262,13 @@ ACTION_TOOLS = {
         "description": (
             "Create a NEW campaign. Collect the fields ONE AT A TIME first "
             "(name, goal, type=lead_gen|customer_support|receptionist, "
-            "company_name, agent_names), then call with confirm=False to show a "
-            "confirm card; confirm=True actually creates it. Voice defaults to "
-            "the tenant's configured voice — do not ask the user for a voice id."
+            "company_name, agent_names) — these five are the ONLY questions; "
+            "never invent extras (industry, services, audience). Volunteered "
+            "detail goes in additional_instructions. The moment all five are "
+            "known, immediately call with confirm=False to show the confirm "
+            "card (the card IS the preview — don't describe it in words); "
+            "confirm=True actually creates it. Voice defaults to the tenant's "
+            "configured voice — do not ask the user for a voice id."
         ),
         "input_schema": None,
     },

@@ -13,12 +13,19 @@ import logging
 from typing import Any, Dict, Optional
 
 from app.infrastructure.assistant.tools import ALL_TOOLS
+from app.infrastructure.assistant.tools.coercion import coerce_bool
 
 logger = logging.getLogger(__name__)
 
 # Tools that accept a ``conversation_id`` kwarg (for action attribution /
 # audit). Every other tool is called with just (tenant_id, db_client, **args).
 _CONVO_AWARE = {"send_email", "send_sms", "initiate_call", "start_campaign", "report_issue", "create_campaign"}
+
+# Boolean flags small models routinely emit as strings ("confirm": "true").
+# The Groq schemas accept ["boolean", "string"] for these so validation can't
+# reject the call; this funnel normalises them exactly once, with the same
+# defaults the schemas advertise.
+_BOOL_ARGS = {"confirm": False, "unread_only": False, "only_leads": False, "today_only": True}
 
 
 async def dispatch_tool(
@@ -39,7 +46,10 @@ async def dispatch_tool(
         return {"error": f"Unknown tool: {func_name}"}
 
     fn = entry["function"]
-    call_args = args if isinstance(args, dict) else {}
+    call_args = dict(args) if isinstance(args, dict) else {}
+    for key, default in _BOOL_ARGS.items():
+        if key in call_args:
+            call_args[key] = coerce_bool(call_args[key], default)
 
     try:
         if func_name in _CONVO_AWARE:
