@@ -22,6 +22,10 @@ import { useNotificationsActions } from "@/lib/notifications-client";
 
 const SEEN_KEY = "talklee.qlead.seen.v1";
 const SEEN_CAP = 500;
+// Only TOAST events fresher than this — a returning user must not get a burst
+// of stale lead toasts (those still live in the Event Stream panel and via the
+// assistant's get_qualified_leads). Toasting is for "it just happened".
+const FRESH_WINDOW_MS = 60 * 60 * 1000;
 
 export function QualifiedLeadAlerts() {
     const { data } = useEventStream("Alerts");
@@ -70,7 +74,15 @@ export function QualifiedLeadAlerts() {
 
         if (isSeed) return;
 
-        for (const e of leads) {
+        // Even past the seed, only toast FRESH qualifications; older unseen ones
+        // (e.g. from while the user was away) are absorbed silently.
+        const cutoff = Date.now() - FRESH_WINDOW_MS;
+        const fresh = leads.filter((e) => {
+            const t = Date.parse(e.createdAt);
+            return Number.isFinite(t) && t >= cutoff;
+        });
+
+        for (const e of fresh) {
             const phone = e.metadata?.phone_number;
             const note = e.description || e.metadata?.follow_up_note;
             const message = [phone ? `📞 ${phone}` : "", note ? String(note) : ""]

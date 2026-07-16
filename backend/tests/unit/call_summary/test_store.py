@@ -317,13 +317,36 @@ class TestLeadMarking:
 
     async def test_mark_lead_flags_contact_when_qualified(self):
         from app.domain.services.call_summary.store import mark_lead_from_summary
-        conn = _make_conn(None)
-        conn.execute = AsyncMock(return_value="UPDATE 1")
+        # The UPDATE now RETURNs the lead's identity so a real-time alert can be
+        # raised with the name + number.
+        conn = _make_conn({
+            "lead_id": "L1",
+            "first_name": "Jane",
+            "last_name": "Doe",
+            "phone_number": "+15551234",
+            "campaign_id": "C1",
+        })
         with _patch_acquire(conn):
             flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY)
         assert flagged is True
-        sql = conn.execute.await_args.args[0]
-        assert "UPDATE leads" in sql and "is_lead" in sql
+        sql = conn.fetchrow.await_args.args[0]
+        assert "UPDATE leads" in sql and "is_lead" in sql and "RETURNING" in sql
+        # Qualifying must also emit the qualified-lead alert into stream_events
+        # (same connection) with the lead's name + number in the title.
+        insert_calls = [c for c in conn.execute.await_args_list if "stream_events" in c.args[0]]
+        assert len(insert_calls) == 1
+        args = insert_calls[0].args
+        assert args[2] == "alert"  # category
+        assert "Jane Doe" in args[3] and "+15551234" in args[3]  # title
+
+    async def test_mark_lead_no_alert_when_nothing_flagged(self):
+        from app.domain.services.call_summary.store import mark_lead_from_summary
+        # fetchrow -> None (lead already flagged / no matching row): no alert.
+        conn = _make_conn(None)
+        with _patch_acquire(conn):
+            flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY)
+        assert flagged is False
+        conn.execute.assert_not_called()
 
     async def test_mark_lead_skips_when_not_a_lead(self):
         from app.domain.services.call_summary.store import mark_lead_from_summary
@@ -338,7 +361,23 @@ class TestLeadMarking:
     async def test_mark_lead_never_raises_on_db_error(self):
         from app.domain.services.call_summary.store import mark_lead_from_summary
         conn = _make_conn(None)
-        conn.execute = AsyncMock(side_effect=RuntimeError("db down"))
+        conn.fetchrow = AsyncMock(side_effect=RuntimeError("db down"))
         with _patch_acquire(conn):
             flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY)
         assert flagged is False  # swallowed, best-effort
+
+    async def test_alert_emit_failure_never_breaks_qualification(self):
+        from app.domain.services.call_summary.store import mark_lead_from_summary
+        # Qualify succeeds but the stream_events INSERT blows up — the lead must
+        # STILL be flagged (alerting is best-effort by design).
+        conn = _make_conn({
+            "lead_id": "L1",
+            "first_name": "Jane",
+            "last_name": "Doe",
+            "phone_number": "+15551234",
+            "campaign_id": "C1",
+        })
+        conn.execute = AsyncMock(side_effect=RuntimeError("insert failed"))
+        with _patch_acquire(conn):
+            flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY)
+        assert flagged is True

@@ -223,10 +223,28 @@ class GoogleDriveConnector(DriveProvider):
                 params={"alt": "media"},
                 headers=self._get_auth_headers()
             )
-            
+
             if response.status_code != 200:
                 raise ValueError(f"Download file failed: {response.text}")
-            
+
+            return response.content
+
+    async def export_file(self, file_id: str, mime_type: str = "text/plain") -> bytes:
+        """Export a Google-native file (Docs/Sheets/Slides) to a concrete format.
+
+        Native Google files reject the plain media download (`alt=media` returns
+        403 fileNotDownloadable); the API requires the export endpoint instead.
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self.API_BASE_URL}/files/{file_id}/export",
+                params={"mimeType": mime_type},
+                headers=self._get_auth_headers()
+            )
+
+            if response.status_code != 200:
+                raise ValueError(f"Export file failed: {response.text}")
+
             return response.content
     
     async def list_files(

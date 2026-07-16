@@ -23,7 +23,14 @@ _TEXT_MIME_EXACT = {
     "application/xml",
     "application/csv",
     "application/rtf",
-    "application/vnd.google-apps.document",  # exported as text/plain by the connector
+}
+
+# Google-native files reject the plain media download (403 fileNotDownloadable)
+# and must go through the EXPORT endpoint with a concrete target format.
+_GOOGLE_EXPORT_MIME = {
+    "application/vnd.google-apps.document": "text/plain",
+    "application/vnd.google-apps.spreadsheet": "text/csv",
+    "application/vnd.google-apps.presentation": "text/plain",
 }
 
 
@@ -41,7 +48,7 @@ def _is_texty(mime: Optional[str]) -> bool:
         return False
     if any(mime.startswith(p) for p in _TEXT_MIME_PREFIXES):
         return True
-    return mime in _TEXT_MIME_EXACT
+    return mime in _TEXT_MIME_EXACT or mime in _GOOGLE_EXPORT_MIME
 
 
 async def drive_list_files(
@@ -143,7 +150,22 @@ async def drive_read_file(
         }
 
     try:
-        raw = await connector.download_file(file_id.strip())
+        export_mime = _GOOGLE_EXPORT_MIME.get(meta.mime_type or "")
+        if export_mime:
+            # Google-native file: must use the export endpoint (plain download
+            # returns 403 fileNotDownloadable). Providers without export support
+            # gracefully return the link instead.
+            export = getattr(connector, "export_file", None)
+            if not callable(export):
+                return {
+                    "success": True,
+                    "file": base,
+                    "content": None,
+                    "note": f"'{meta.name}' is a Google-native document this connector can't export — open it via the link.",
+                }
+            raw = await export(file_id.strip(), export_mime)
+        else:
+            raw = await connector.download_file(file_id.strip())
     except Exception as exc:
         logger.error("drive_read_file download failed: %s", exc)
         return {"success": False, "error": "Couldn't download that file's contents."}

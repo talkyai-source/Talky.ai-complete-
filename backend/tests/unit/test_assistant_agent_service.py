@@ -244,14 +244,16 @@ class TestToolIntegration:
         """Verify expected number of tools"""
         from app.infrastructure.assistant.tools import ALL_TOOLS, QUERY_TOOLS, ACTION_TOOLS
 
-        # 11 query tools + 15 action tools = 26 total
+        # 16 query tools + 16 action tools = 32 total
         # query: get_dashboard_stats, get_usage_info, get_leads, get_lead_followup,
-        #        get_campaigns, get_recent_calls, get_actions_today,
+        #        get_qualified_leads, read_emails, read_email, drive_list_files,
+        #        drive_read_file, get_campaigns, get_recent_calls, get_actions_today,
         #        get_campaign_detail, get_knowledge_tree, retrieve_knowledge, list_voices
-        # action set includes report_issue (assistant-filed support reports).
-        assert len(QUERY_TOOLS) == 11
-        assert len(ACTION_TOOLS) == 15
-        assert len(ALL_TOOLS) == 26
+        # action set includes report_issue (assistant-filed support reports) and
+        # create_campaign (new-campaign confirm flow).
+        assert len(QUERY_TOOLS) == 16
+        assert len(ACTION_TOOLS) == 16
+        assert len(ALL_TOOLS) == 32
 
 
 class TestSingletonPattern:

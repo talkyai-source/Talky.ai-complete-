@@ -81,7 +81,12 @@ export function AssistantVoiceMode({
     const [micLive, setMicLive] = useState(false);
 
     const wsRef = useRef<WebSocket | null>(null);
-    const audioCtxRef = useRef<AudioContext | null>(null);
+    // Two AudioContexts on purpose: capture MUST run at 16 kHz (what the mic
+    // worklet + backend STT expect), but playing the 24 kHz TTS through that
+    // same context would silently downsample it to a 8 kHz Nyquist ceiling —
+    // audibly duller speech. A dedicated 24 kHz output context keeps fidelity.
+    const audioCtxRef = useRef<AudioContext | null>(null);      // capture @16k
+    const playbackCtxRef = useRef<AudioContext | null>(null);   // playback @24k
     const micStreamRef = useRef<MediaStream | null>(null);
     const workletRef = useRef<AudioWorkletNode | null>(null);
     const srcNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
@@ -112,6 +117,10 @@ export function AssistantVoiceMode({
             audioCtxRef.current.close().catch(() => {});
         }
         audioCtxRef.current = null;
+        if (playbackCtxRef.current && playbackCtxRef.current.state !== "closed") {
+            playbackCtxRef.current.close().catch(() => {});
+        }
+        playbackCtxRef.current = null;
         const ws = wsRef.current;
         wsRef.current = null;
         if (ws) {
@@ -132,8 +141,25 @@ export function AssistantVoiceMode({
 
     // --- TTS playback ------------------------------------------------------
     const playChunk = useCallback((buffer: ArrayBuffer) => {
-        const ctx = audioCtxRef.current;
-        if (!ctx || buffer.byteLength === 0) return;
+        if (buffer.byteLength === 0) return;
+        // Lazy 24 kHz output context (created after the mic-tap gesture, so
+        // autoplay policy is satisfied). Kept separate from the 16 kHz capture
+        // context — see the ref comments above.
+        let ctx = playbackCtxRef.current;
+        if (!ctx || ctx.state === "closed") {
+            try {
+                const AudioCtor =
+                    window.AudioContext ||
+                    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+                ctx = new AudioCtor({ sampleRate: PLAYBACK_SAMPLE_RATE });
+                playbackCtxRef.current = ctx;
+            } catch {
+                return;
+            }
+        }
+        if (ctx.state === "suspended") {
+            ctx.resume().catch(() => {});
+        }
         // Backend sends float32 PCM @24k. Guard against a truncated tail.
         const usable = buffer.byteLength - (buffer.byteLength % 4);
         if (usable <= 0) return;

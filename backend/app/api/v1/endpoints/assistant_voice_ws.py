@@ -298,8 +298,12 @@ async def _run_voice_session(
             logger.exception("assistant_voice: persist failed")
 
     # Queues bridging the loops. audio_queue: mic frames → STT; final_queue:
-    # end-of-turn user text → agent turn worker.
-    audio_queue: asyncio.Queue = asyncio.Queue()
+    # end-of-turn user text → agent turn worker. audio_queue is BOUNDED
+    # (~4s of 8ms mic frames): if the STT stream ever dies, the mic keeps
+    # producing with nothing draining, and an unbounded queue would grow
+    # without limit for the rest of the session. Overflow drops the newest
+    # frame instead (see receive_loop).
+    audio_queue: asyncio.Queue = asyncio.Queue(maxsize=512)
     final_queue: asyncio.Queue = asyncio.Queue()
 
     tenant_model = await get_tenant_assistant_model(db_client, tenant_id)
@@ -474,6 +478,14 @@ async def _run_voice_session(
                     await send_json({"type": "stt_partial", "text": text})
         except Exception as exc:
             logger.warning("assistant_voice: STT loop ended: %s", exc)
+        finally:
+            # If STT stopped while the session is still live, the user would
+            # otherwise speak into silence with no explanation. Say so.
+            if active:
+                await send_json({
+                    "type": "error",
+                    "content": "Speech recognition disconnected — close and reopen voice mode to continue.",
+                })
 
     async def turn_loop() -> None:
         """Process finalized utterances one at a time (sequential turns)."""
@@ -541,7 +553,15 @@ async def _run_voice_session(
 
             raw = message.get("bytes")
             if isinstance(raw, (bytes, bytearray)) and raw:
-                await audio_queue.put(AudioChunk(data=bytes(raw), sample_rate=_STT_SAMPLE_RATE, channels=1))
+                try:
+                    # Non-blocking: a full queue means STT stopped draining —
+                    # drop the frame rather than block this loop (which also
+                    # carries control messages) or grow memory unboundedly.
+                    audio_queue.put_nowait(
+                        AudioChunk(data=bytes(raw), sample_rate=_STT_SAMPLE_RATE, channels=1)
+                    )
+                except asyncio.QueueFull:
+                    pass
                 continue
 
             text_data = message.get("text")
@@ -582,7 +602,12 @@ async def _run_voice_session(
         logger.error("assistant_voice: session error: %s", exc, exc_info=True)
     finally:
         active = False
-        await audio_queue.put(None)
+        # Non-blocking sentinels: a full audio queue (dead STT) must not stall
+        # teardown — the task cancellation below covers the consumer anyway.
+        try:
+            audio_queue.put_nowait(None)
+        except asyncio.QueueFull:
+            pass
         await final_queue.put(None)
         for task in (stt_task, turn_task):
             if not task.done():
