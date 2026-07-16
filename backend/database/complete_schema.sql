@@ -11,7 +11,7 @@
 -- Auth: Local JWT (PyJWT + bcrypt) via app/api/v1/endpoints/auth.py
 --
 -- To apply:
---   psql postgresql://talkyai:talkyai_secret@localhost:5432/talkyai -f complete_schema.sql
+--   psql postgresql://talkyai:REPLACE_WITH_STRONG_DB_PASSWORD@localhost:5432/talkyai -f complete_schema.sql
 --
 -- Generated: February 2026
 -- =============================================================================
@@ -70,7 +70,10 @@ CREATE TABLE IF NOT EXISTS tenants (
     -- Day 8: Suspension and White Label support
     status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'pending_deletion')),
     suspended_at TIMESTAMPTZ,
-    suspended_by UUID REFERENCES user_profiles(id),
+    -- FK is added after user_profiles is created below. Keeping it inline
+    -- creates an impossible circular bootstrap: user_profiles references
+    -- tenants, while tenants would reference user_profiles first.
+    suspended_by UUID,
     suspension_reason TEXT,
     white_label_partner_id UUID, -- Will add foreign key after table creation
     
@@ -114,6 +117,37 @@ CREATE INDEX IF NOT EXISTS idx_user_profiles_email ON user_profiles(email);
 CREATE INDEX IF NOT EXISTS idx_user_profiles_has_passkey ON user_profiles(passkey_count) WHERE passkey_count > 0;
 CREATE INDEX IF NOT EXISTS idx_user_profiles_is_active ON user_profiles (is_active) WHERE is_active = FALSE;
 CREATE INDEX IF NOT EXISTS idx_user_profiles_mfa_enabled ON user_profiles (mfa_enabled) WHERE mfa_enabled = TRUE;
+
+-- Complete the tenants -> user_profiles side of the bootstrap cycle now that
+-- both tables exist. The catalog guard keeps the consolidated schema safe to
+-- re-run against an existing database.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint c
+        WHERE c.conrelid = 'tenants'::regclass
+          AND c.contype = 'f'
+          AND c.confrelid = 'user_profiles'::regclass
+          AND c.conkey = ARRAY[
+              (SELECT attnum
+               FROM pg_attribute
+               WHERE attrelid = 'tenants'::regclass
+                 AND attname = 'suspended_by')
+          ]::smallint[]
+          AND c.confkey = ARRAY[
+              (SELECT attnum
+               FROM pg_attribute
+               WHERE attrelid = 'user_profiles'::regclass
+                 AND attname = 'id')
+          ]::smallint[]
+    ) THEN
+        ALTER TABLE tenants
+            ADD CONSTRAINT tenants_suspended_by_fkey
+            FOREIGN KEY (suspended_by)
+            REFERENCES user_profiles(id);
+    END IF;
+END $$;
 
 -- 1.4 SECURITY_SESSIONS
 -- Stores server-side session records for instant revocation.
@@ -1924,11 +1958,36 @@ CREATE TABLE IF NOT EXISTS white_label_partners (
 
 CREATE INDEX IF NOT EXISTS idx_white_label_partners_status ON white_label_partners(status);
 
--- Add foreign key to tenants (already has the column from earlier Day 8 edit)
-ALTER TABLE tenants 
-    ADD CONSTRAINT fk_tenants_white_label_partner 
-    FOREIGN KEY (white_label_partner_id) 
-    REFERENCES white_label_partners(id) ON DELETE SET NULL;
+-- Add the deferred tenants -> white_label_partners FK once, including when
+-- this consolidated schema is applied over the canonical baseline (whose
+-- constraint name differs from older local schemas).
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint c
+        WHERE c.conrelid = 'tenants'::regclass
+          AND c.contype = 'f'
+          AND c.confrelid = 'white_label_partners'::regclass
+          AND c.conkey = ARRAY[
+              (SELECT attnum
+               FROM pg_attribute
+               WHERE attrelid = 'tenants'::regclass
+                 AND attname = 'white_label_partner_id')
+          ]::smallint[]
+          AND c.confkey = ARRAY[
+              (SELECT attnum
+               FROM pg_attribute
+               WHERE attrelid = 'white_label_partners'::regclass
+                 AND attname = 'id')
+          ]::smallint[]
+    ) THEN
+        ALTER TABLE tenants
+            ADD CONSTRAINT tenants_white_label_partner_id_fkey
+            FOREIGN KEY (white_label_partner_id)
+            REFERENCES white_label_partners(id) ON DELETE SET NULL;
+    END IF;
+END $$;
 
 -- 2. AUDIT_LOGS (Immutable security event log)
 CREATE TABLE IF NOT EXISTS audit_logs (
