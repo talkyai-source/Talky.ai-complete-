@@ -37,6 +37,7 @@ async def read_emails(
 
     `query` is a Gmail search string (e.g. "from:jane@acme.com", "subject:demo").
     """
+    logger.info("read_emails called tenant=%s query=%r unread=%s", str(tenant_id)[:8], query, unread_only)
     from app.services.connector_resolver import (
         ConnectorNotConnectedError,
         resolve_active_connector,
@@ -52,7 +53,7 @@ async def read_emails(
         messages = await connector.list_emails(max_results=capped, query=query, unread_only=bool(unread_only))
     except Exception as exc:
         logger.error("read_emails failed: %s", exc)
-        return {"success": False, "error": "Couldn't read the inbox just now. Try reconnecting email in Settings → Integrations."}
+        return {"success": False, "error": "Couldn't read the inbox just now. Try reconnecting email in the Connectors page (left sidebar)."}
 
     emails = []
     for m in messages:

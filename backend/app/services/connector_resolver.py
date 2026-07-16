@@ -29,7 +29,7 @@ class ConnectorNotConnectedError(Exception):
         self.connector_type = connector_type
         self.message = message or (
             f"No {connector_type} integration is connected. "
-            f"Connect it from Settings → Integrations."
+            f"Connect it from the Connectors page (left sidebar)."
         )
         super().__init__(self.message)
 
@@ -76,6 +76,10 @@ async def resolve_active_connector(
         .execute()
     )
     rows = resp.data or []
+    logger.info(
+        "resolve_active_connector tenant=%s type=%s active_connector_rows=%d",
+        str(tenant_id)[:8], connector_type, len(rows),
+    )
     if not rows:
         raise ConnectorNotConnectedError(connector_type)
 
@@ -93,7 +97,7 @@ async def resolve_active_connector(
     if not acc.data:
         raise ConnectorNotConnectedError(
             connector_type,
-            f"Your {connector_type} connection expired. Please reconnect from Settings → Integrations.",
+            f"Your {connector_type} connection expired. Please reconnect from the Connectors page (left sidebar).",
         )
 
     enc = get_encryption_service()

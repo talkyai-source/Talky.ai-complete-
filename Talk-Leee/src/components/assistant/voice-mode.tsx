@@ -88,7 +88,7 @@ export function AssistantVoiceMode({
     const audioCtxRef = useRef<AudioContext | null>(null);      // capture @16k
     const playbackCtxRef = useRef<AudioContext | null>(null);   // playback @24k
     const micStreamRef = useRef<MediaStream | null>(null);
-    const workletRef = useRef<AudioWorkletNode | null>(null);
+    const workletRef = useRef<AudioWorkletNode | ScriptProcessorNode | null>(null);
     const srcNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
     // Gapless TTS playback scheduling.
     const nextPlayRef = useRef(0);
@@ -100,7 +100,11 @@ export function AssistantVoiceMode({
     // --- teardown (idempotent) ---------------------------------------------
     const teardown = useCallback(() => {
         try {
-            workletRef.current?.disconnect();
+            const node = workletRef.current;
+            if (node && "onaudioprocess" in node) {
+                (node as ScriptProcessorNode).onaudioprocess = null;
+            }
+            node?.disconnect();
         } catch {
             /* noop */
         }
@@ -200,6 +204,16 @@ export function AssistantVoiceMode({
             setMessages((p) => [...p, { id: uid(), role: "system", content: "Microphone not available in this browser." }]);
             return;
         }
+        const sendPcm = (buf: ArrayBuffer) => {
+            const ws = wsRef.current;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                try {
+                    ws.send(buf);
+                } catch {
+                    /* socket closing */
+                }
+            }
+        };
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: {
@@ -215,25 +229,63 @@ export function AssistantVoiceMode({
                 window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
             const ctx = new AudioCtor({ sampleRate: CAPTURE_SAMPLE_RATE });
             audioCtxRef.current = ctx;
-            await ctx.audioWorklet.addModule(MIC_WORKLET_PATH);
-            const source = ctx.createMediaStreamSource(stream);
-            const worklet = new AudioWorkletNode(ctx, "pcm16-processor");
-            worklet.port.onmessage = (e: MessageEvent<ArrayBuffer>) => {
-                const ws = wsRef.current;
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    try {
-                        ws.send(e.data);
-                    } catch {
-                        /* socket closing */
-                    }
+            // CRITICAL: startMic() runs from the WS "ready" handler — many async
+            // hops after the user's tap — so this context is created OUTSIDE the
+            // user-activation window and starts "suspended". A suspended context
+            // never pulls the capture graph, so the worklet's process() never
+            // fires and NO mic audio is sent ("not listening at all"). Resume it.
+            if (ctx.state === "suspended") {
+                try {
+                    await ctx.resume();
+                } catch {
+                    /* best effort */
                 }
-            };
-            source.connect(worklet);
-            // Do NOT connect the worklet to destination — capture only, no echo.
+            }
+            const source = ctx.createMediaStreamSource(stream);
             srcNodeRef.current = source;
-            workletRef.current = worklet;
+
+            // Prefer the AudioWorklet (off-main-thread PCM16 capture); fall back
+            // to a ScriptProcessor if the worklet module can't load (older
+            // browsers / CSP / 404). Same dual-path the working test-agent uses.
+            let usedWorklet = false;
+            if (ctx.audioWorklet) {
+                try {
+                    const workletUrl = new URL(MIC_WORKLET_PATH, window.location.origin).toString();
+                    await ctx.audioWorklet.addModule(workletUrl);
+                    const worklet = new AudioWorkletNode(ctx, "pcm16-processor");
+                    worklet.port.onmessage = (e: MessageEvent<ArrayBuffer>) => sendPcm(e.data);
+                    source.connect(worklet);
+                    workletRef.current = worklet;
+                    usedWorklet = true;
+                } catch (werr) {
+                    console.warn("[voice] AudioWorklet unavailable, falling back to ScriptProcessor", werr);
+                }
+            }
+            if (!usedWorklet) {
+                const processor = ctx.createScriptProcessor(2048, 1, 1);
+                const silent = ctx.createGain();
+                silent.gain.value = 0;
+                processor.onaudioprocess = (ev) => {
+                    const input = ev.inputBuffer.getChannelData(0);
+                    const pcm = new Int16Array(input.length);
+                    for (let i = 0; i < input.length; i++) {
+                        const s = Math.max(-1, Math.min(1, input[i]));
+                        pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+                    }
+                    sendPcm(pcm.buffer);
+                };
+                source.connect(processor);
+                // A ScriptProcessor only runs while connected toward the
+                // destination; route it through a muted gain so it's pulled
+                // without echoing the mic back to the speakers.
+                processor.connect(silent);
+                silent.connect(ctx.destination);
+                workletRef.current = processor;
+            }
+            console.info("[voice] mic started; ctx.state =", ctx.state, "worklet =", usedWorklet);
             setMicLive(true);
-        } catch {
+        } catch (err) {
+            console.error("[voice] mic error", err);
             setMessages((p) => [
                 ...p,
                 { id: uid(), role: "system", content: "Couldn't access the microphone. Check the browser permission and try again." },

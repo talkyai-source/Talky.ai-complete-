@@ -62,6 +62,7 @@ async def drive_list_files(
     `query` is a plain search term matched against file names (the connector
     maps it to a Drive `name contains` query).
     """
+    logger.info("drive_list_files called tenant=%s query=%r", str(tenant_id)[:8], query)
     from app.services.connector_resolver import (
         ConnectorNotConnectedError,
         resolve_active_connector,
@@ -77,7 +78,7 @@ async def drive_list_files(
         files = await connector.list_files(query=query, max_results=capped)
     except Exception as exc:
         logger.error("drive_list_files failed: %s", exc)
-        return {"success": False, "error": "Couldn't read Drive just now. Try reconnecting it in Settings → Integrations."}
+        return {"success": False, "error": "Couldn't read Drive just now. Try reconnecting it in the Connectors page (left sidebar)."}
 
     out = []
     for f in files:
