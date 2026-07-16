@@ -297,7 +297,7 @@ async def list_connector_statuses(
     return ConnectorStatusListResponse(items=items)
 
 
-@router.get("/{type}/authorize", response_model=TypeAuthorizeResponse)
+@router.get("/{type}/authorize", response_model=TypeAuthorizeResponse, dependencies=[Depends(require_permission(Permission.CONNECTORS_CREATE))])
 async def authorize_connector_by_type(
     type: str,
     http_request: Request,
@@ -557,15 +557,53 @@ async def oauth_callback(
             "last_refreshed_at": datetime.utcnow().isoformat()
         }
         
-        db_client.table("connector_accounts").insert(account_data).execute()
-        
-        # Update connector status to active
-        db_client.table("connectors").update({
-            "status": "active"
-        }).eq("id", connector_id).execute()
-        
+        # Idempotent + de-duplicating activation. Repeat "Connect" clicks and
+        # reconnects leave stale rows; retire any OTHER active connector of this
+        # (tenant, type) and its accounts first so exactly one stays active and
+        # the resolver/UI can never disagree (agent finding). Then write the
+        # token row and flip THIS connector active — checking BOTH writes so we
+        # never redirect "success" on a half-connected state (green connector
+        # with no token, or a live token on a still-pending connector).
+        try:
+            conn_type = state_data.get("type")
+            if not conn_type:
+                row = db_client.table("connectors").select("type").eq("id", connector_id).single().execute()
+                conn_type = (row.data or {}).get("type") if row.data else None
+            if conn_type:
+                dupes = (
+                    db_client.table("connectors")
+                    .select("id")
+                    .eq("tenant_id", tenant_id)
+                    .eq("type", conn_type)
+                    .eq("status", "active")
+                    .neq("id", connector_id)
+                    .execute()
+                )
+                for d in (dupes.data or []):
+                    old_id = d["id"]
+                    db_client.table("connector_accounts").delete().eq("connector_id", old_id).execute()
+                    db_client.table("connectors").update({"status": "revoked"}).eq("id", old_id).execute()
+        except Exception as dedup_err:  # de-dup is best-effort; never fail the connect
+            logger.warning(f"connector de-dup skipped for {connector_id}: {dedup_err}")
+
+        # Clear any prior account rows for THIS connector, then insert the fresh one.
+        db_client.table("connector_accounts").delete().eq("connector_id", connector_id).execute()
+        acc_resp = db_client.table("connector_accounts").insert(account_data).execute()
+        if getattr(acc_resp, "error", None) or not getattr(acc_resp, "data", None):
+            logger.error(f"OAuth callback: token store failed for {connector_id}: {getattr(acc_resp,'error',None)}")
+            db_client.table("connectors").update({"status": "error"}).eq("id", connector_id).execute()
+            return RedirectResponse(_frontend_callback_url(frontend_url, status="error", error="token_store_failed"))
+
+        conn_resp = db_client.table("connectors").update({"status": "active"}).eq("id", connector_id).execute()
+        if getattr(conn_resp, "error", None):
+            logger.error(f"OAuth callback: activate failed for {connector_id}: {conn_resp.error}")
+            # Roll back the token row so we don't leave a live token on a
+            # non-active connector.
+            db_client.table("connector_accounts").delete().eq("connector_id", connector_id).execute()
+            return RedirectResponse(_frontend_callback_url(frontend_url, status="error", error="activate_failed"))
+
         logger.info(f"OAuth completed for {provider}, connector {connector_id}")
-        
+
         return RedirectResponse(_frontend_callback_url(frontend_url, status="success", provider=provider))
         
     except OAuthStateError as e:

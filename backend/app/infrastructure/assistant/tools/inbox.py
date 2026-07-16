@@ -39,12 +39,15 @@ async def read_emails(
     """
     logger.info("read_emails called tenant=%s query=%r unread=%s", str(tenant_id)[:8], query, unread_only)
     from app.services.connector_resolver import (
+        ConnectorLookupError,
         ConnectorNotConnectedError,
         resolve_active_connector,
     )
 
     try:
         connector, _cid, _provider = await resolve_active_connector(db_client, tenant_id, "email")
+    except ConnectorLookupError as exc:
+        return {"success": False, "error": exc.message}
     except ConnectorNotConnectedError as exc:
         return {"success": False, "error": exc.message, "email_required": True}
 
@@ -82,12 +85,15 @@ async def read_email(
         return {"success": False, "error": "Need the email's message_id (get it from read_emails first)."}
 
     from app.services.connector_resolver import (
+        ConnectorLookupError,
         ConnectorNotConnectedError,
         resolve_active_connector,
     )
 
     try:
         connector, _cid, _provider = await resolve_active_connector(db_client, tenant_id, "email")
+    except ConnectorLookupError as exc:
+        return {"success": False, "error": exc.message}
     except ConnectorNotConnectedError as exc:
         return {"success": False, "error": exc.message, "email_required": True}
 

@@ -34,6 +34,21 @@ class ConnectorNotConnectedError(Exception):
         super().__init__(self.message)
 
 
+class ConnectorLookupError(Exception):
+    """The connector lookup itself failed (DB/RLS/query error) — this is NOT the
+    same as "not connected". Surfacing it distinctly stops a transient database
+    error from telling the user to reconnect an integration that IS connected."""
+
+    def __init__(self, connector_type: str, detail: str = ""):
+        self.connector_type = connector_type
+        self.message = (
+            f"I couldn't check your {connector_type} connection just now "
+            f"(a temporary lookup error). Please try again in a moment."
+        )
+        self.detail = detail
+        super().__init__(self.message)
+
+
 async def _refresh_and_store(
     db_client: Any,
     connector: BaseConnector,
@@ -69,12 +84,21 @@ async def resolve_active_connector(
     """
     resp = (
         db_client.table("connectors")
-        .select("id, provider, status")
+        .select("id, provider, status, created_at")
         .eq("tenant_id", tenant_id)
         .eq("type", connector_type)
         .eq("status", "active")
+        .order("created_at", desc=True)  # newest-first, matching the UI's choice
         .execute()
     )
+    # A DB/RLS/connectivity error must NOT masquerade as "not connected" — the
+    # adapter swallows exceptions into resp.error with data=None (agent finding).
+    if getattr(resp, "error", None):
+        logger.error(
+            "resolve_active_connector: connectors query error tenant=%s type=%s err=%s",
+            str(tenant_id)[:8], connector_type, resp.error,
+        )
+        raise ConnectorLookupError(connector_type, str(resp.error))
     rows = resp.data or []
     logger.info(
         "resolve_active_connector tenant=%s type=%s active_connector_rows=%d",
@@ -83,24 +107,43 @@ async def resolve_active_connector(
     if not rows:
         raise ConnectorNotConnectedError(connector_type)
 
-    connector_id = str(rows[0]["id"])
-    provider = rows[0]["provider"]
+    # Repeat "Connect" clicks can leave several active connector rows (there is
+    # no unique (tenant,type) constraint). The UI shows the NEWEST; pick the
+    # newest one that actually has a usable token row so resolver + UI agree.
+    enc = get_encryption_service()
+    connector_id = None
+    provider = None
+    acc_data = None
+    for row in rows:
+        cid = str(row["id"])
+        acc = (
+            db_client.table("connector_accounts")
+            .select("access_token_encrypted, refresh_token_encrypted, token_expires_at, last_refreshed_at")
+            .eq("connector_id", cid)
+            .eq("status", "active")
+            .order("last_refreshed_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if getattr(acc, "error", None):
+            logger.error(
+                "resolve_active_connector: connector_accounts query error cid=%s err=%s",
+                cid, acc.error,
+            )
+            raise ConnectorLookupError(connector_type, str(acc.error))
+        adata = acc.data
+        arow = (adata[0] if isinstance(adata, list) and adata else (adata if isinstance(adata, dict) else None))
+        if arow:
+            connector_id, provider, acc_data = cid, row["provider"], arow
+            break
 
-    acc = (
-        db_client.table("connector_accounts")
-        .select("access_token_encrypted, refresh_token_encrypted, token_expires_at")
-        .eq("connector_id", connector_id)
-        .eq("status", "active")
-        .single()
-        .execute()
-    )
-    if not acc.data:
+    if acc_data is None:
         raise ConnectorNotConnectedError(
             connector_type,
             f"Your {connector_type} connection expired. Please reconnect from the Connectors page (left sidebar).",
         )
+    acc = type("_Acc", (), {"data": acc_data})()  # keep the existing .data accessors below working
 
-    enc = get_encryption_service()
     try:
         access_token = enc.decrypt(acc.data["access_token_encrypted"])
     except Exception as exc:

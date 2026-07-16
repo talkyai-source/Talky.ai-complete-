@@ -64,12 +64,15 @@ async def drive_list_files(
     """
     logger.info("drive_list_files called tenant=%s query=%r", str(tenant_id)[:8], query)
     from app.services.connector_resolver import (
+        ConnectorLookupError,
         ConnectorNotConnectedError,
         resolve_active_connector,
     )
 
     try:
         connector, _cid, _provider = await resolve_active_connector(db_client, tenant_id, "drive")
+    except ConnectorLookupError as exc:
+        return {"success": False, "error": exc.message}
     except ConnectorNotConnectedError as exc:
         return {"success": False, "error": exc.message, "drive_required": True}
 
@@ -108,12 +111,15 @@ async def drive_read_file(
         return {"success": False, "error": "Need the file_id (get it from drive_list_files first)."}
 
     from app.services.connector_resolver import (
+        ConnectorLookupError,
         ConnectorNotConnectedError,
         resolve_active_connector,
     )
 
     try:
         connector, _cid, _provider = await resolve_active_connector(db_client, tenant_id, "drive")
+    except ConnectorLookupError as exc:
+        return {"success": False, "error": exc.message}
     except ConnectorNotConnectedError as exc:
         return {"success": False, "error": exc.message, "drive_required": True}
 

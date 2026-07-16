@@ -77,6 +77,12 @@ router = APIRouter(prefix="/assistant", tags=["Assistant"])
 # Cartesia sonic-3 at 24 kHz (float32 out, played natively by Web Audio).
 _STT_SAMPLE_RATE = 16000
 _TTS_SAMPLE_RATE = 24000
+# The browser AudioWorklet emits 128-sample / 8ms / 256-byte frames. Deepgram
+# Flux's PCM validator REJECTS anything < 10ms, so raw worklet frames would be
+# discarded and NOTHING would ever transcribe. Aggregate to Flux's optimal
+# 40ms / 1280-byte chunk (256 divides 1280 exactly) before handing to STT —
+# the same accumulation the browser_media_gateway does for the phone path.
+_MIC_CHUNK_BYTES = 1280
 _TTS_VOICE_ID = "6ccbfb76-1fc6-48f7-b71d-91ac6298247b"  # Cartesia "Tessa"
 _TTS_MODEL_ID = "sonic-3"
 
@@ -228,7 +234,17 @@ async def _run_voice_session(
     stt = DeepgramFluxSTTProvider()
     tts = CartesiaTTSProvider()
     try:
-        await stt.initialize({"api_key": deepgram_key, "sample_rate": _STT_SAMPLE_RATE, "encoding": "linear16"})
+        # eot/eager thresholds MUST be passed — Flux's initialize() defaults to a
+        # 5s end-of-turn timeout with eager OFF when these keys are omitted, which
+        # makes every turn feel ~5s unresponsive. Match the Ask-AI voice config.
+        await stt.initialize({
+            "api_key": deepgram_key,
+            "sample_rate": _STT_SAMPLE_RATE,
+            "encoding": "linear16",
+            "eot_threshold": 0.7,
+            "eager_eot_threshold": 0.5,
+            "eot_timeout_ms": 3000,
+        })
         await tts.initialize({
             "api_key": cartesia_key,
             "voice_id": _TTS_VOICE_ID,
@@ -537,6 +553,7 @@ async def _run_voice_session(
 
     async def receive_loop() -> None:
         nonlocal active
+        mic_buf = bytearray()
         while active:
             try:
                 message = await asyncio.wait_for(websocket.receive(), timeout=60.0)
@@ -553,15 +570,22 @@ async def _run_voice_session(
 
             raw = message.get("bytes")
             if isinstance(raw, (bytes, bytearray)) and raw:
-                try:
-                    # Non-blocking: a full queue means STT stopped draining —
-                    # drop the frame rather than block this loop (which also
-                    # carries control messages) or grow memory unboundedly.
-                    audio_queue.put_nowait(
-                        AudioChunk(data=bytes(raw), sample_rate=_STT_SAMPLE_RATE, channels=1)
-                    )
-                except asyncio.QueueFull:
-                    pass
+                # Aggregate the 8ms/256-byte worklet frames into 40ms/1280-byte
+                # chunks — Flux rejects sub-10ms frames, so without this NOTHING
+                # transcribes. Emit each full 1280-byte chunk to STT.
+                mic_buf.extend(raw)
+                while len(mic_buf) >= _MIC_CHUNK_BYTES:
+                    chunk = bytes(mic_buf[:_MIC_CHUNK_BYTES])
+                    del mic_buf[:_MIC_CHUNK_BYTES]
+                    try:
+                        # Non-blocking: a full queue means STT stopped draining —
+                        # drop rather than block this loop (which also carries
+                        # control messages) or grow memory unboundedly.
+                        audio_queue.put_nowait(
+                            AudioChunk(data=chunk, sample_rate=_STT_SAMPLE_RATE, channels=1)
+                        )
+                    except asyncio.QueueFull:
+                        pass
                 continue
 
             text_data = message.get("text")
@@ -591,8 +615,15 @@ async def _run_voice_session(
 
     # Opening greeting so the user hears the assistant come alive and learns it
     # can create campaigns. Recorded in history so the model never re-greets.
+    # Emit it as an assistant_message FIRST so the greeting text lands in the
+    # chat transcript (not just spoken) — without this the intro never appears.
+    # Speak it in a BACKGROUND task so receive_loop starts immediately: if we
+    # awaited the full greeting synth first, early mic frames the client sends
+    # right after `ready` would sit unread in the transport and be processed
+    # late (agent finding). The greeting audio still streams concurrently.
     messages_history.append({"role": "assistant", "content": _VOICE_GREETING, "timestamp": datetime.utcnow().isoformat()})
-    await speak(_VOICE_GREETING)
+    await send_json({"type": "assistant_message", "content": _VOICE_GREETING})
+    greeting_task = asyncio.create_task(speak(_VOICE_GREETING))
 
     try:
         await receive_loop()
@@ -609,7 +640,7 @@ async def _run_voice_session(
         except asyncio.QueueFull:
             pass
         await final_queue.put(None)
-        for task in (stt_task, turn_task):
+        for task in (stt_task, turn_task, greeting_task):
             if not task.done():
                 task.cancel()
                 try:
