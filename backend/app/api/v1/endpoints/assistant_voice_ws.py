@@ -322,6 +322,19 @@ async def _run_voice_session(
     audio_queue: asyncio.Queue = asyncio.Queue(maxsize=512)
     final_queue: asyncio.Queue = asyncio.Queue()
 
+    # Barge-in state. speak_state["active"] is True while TTS audio streams;
+    # current_turn["task"] is the in-flight greeting/agent turn. When the user
+    # starts speaking mid-agent-speech we cancel that task (stops the backend
+    # TTS) and tell the client to stop playback.
+    speak_state = {"active": False}
+    current_turn: Dict[str, Any] = {"task": None}
+
+    async def barge_in() -> None:
+        t = current_turn["task"]
+        if t is not None and not t.done():
+            t.cancel()
+        await send_json({"type": "tts_interrupt"})
+
     tenant_model = await get_tenant_assistant_model(db_client, tenant_id)
 
     await send_json({
@@ -341,9 +354,14 @@ async def _run_voice_session(
             yield chunk
 
     async def speak(text: str) -> None:
-        """Synthesize `text` to the client as float32 @24k, framed by markers."""
+        """Synthesize `text` to the client as float32 @24k, framed by markers.
+
+        Cancellation-safe: a barge-in cancels the enclosing turn task, which
+        raises CancelledError here — we stop streaming immediately and still
+        send tts_end so the client leaves the 'speaking' state."""
         if not text.strip() or not active:
             return
+        speak_state["active"] = True
         await send_json({"type": "tts_start", "sample_rate": _TTS_SAMPLE_RATE, "encoding": "float32"})
         try:
             async for ac in tts.stream_synthesize(
@@ -352,9 +370,13 @@ async def _run_voice_session(
                 if not active:
                     break
                 await send_bytes(ac.data)  # Cartesia yields float32 PCM bytes
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             logger.warning("assistant_voice: TTS synth failed: %s", exc)
-        await send_json({"type": "tts_end"})
+        finally:
+            speak_state["active"] = False
+            await send_json({"type": "tts_end"})
 
     async def run_agent_turn(user_text: str) -> None:
         """One agent turn: stream tokens/proposals as live transcript, then speak
@@ -368,9 +390,13 @@ async def _run_voice_session(
         })
         await send_json({"type": "assistant_typing", "content": True})
 
+        # Keep a LONG window: a create-campaign flow collects 5 fields across
+        # many short voice turns (with confirmations + suggestions). A 10-message
+        # window let the earliest answers (name, goal) scroll out of context, so
+        # the model re-asked them forever. 40 short turns holds the whole flow.
         chat_messages = [
             {"role": m.get("role", "user"), "content": m.get("content", "")}
-            for m in messages_history[-10:]
+            for m in messages_history[-40:]
         ]
 
         current_msg_id: Optional[str] = None
@@ -480,8 +506,13 @@ async def _run_voice_session(
             await persist(user_text)
 
     async def stt_loop() -> None:
-        """Consume transcripts; stream partials, enqueue finalized utterances."""
+        """Consume transcripts; stream partials, enqueue finalized utterances.
+
+        Barge-in: the FIRST partial of a new utterance while the agent is
+        speaking cancels the agent's turn (stops its TTS) so the user is never
+        talked over."""
         try:
+            barged = False
             async for tc in stt.stream_transcribe(audio_gen(), language="en"):
                 if not active:
                     break
@@ -490,7 +521,11 @@ async def _run_voice_session(
                 if is_final and text.strip():
                     await send_json({"type": "stt_final", "text": text})
                     await final_queue.put(text)
+                    barged = False
                 elif text.strip():
+                    if not barged and speak_state["active"]:
+                        barged = True
+                        await barge_in()
                     await send_json({"type": "stt_partial", "text": text})
         except Exception as exc:
             logger.warning("assistant_voice: STT loop ended: %s", exc)
@@ -504,12 +539,26 @@ async def _run_voice_session(
                 })
 
     async def turn_loop() -> None:
-        """Process finalized utterances one at a time (sequential turns)."""
+        """Process finalized utterances one at a time. Each turn runs as its own
+        cancellable task so a barge-in can stop it mid-flight; if barge-in fired,
+        the interrupting utterance is the next final and starts a fresh turn."""
         while active:
             user_text = await final_queue.get()
             if user_text is None:
                 return
-            await run_agent_turn(user_text)
+            # Cancel any still-running turn before starting the next.
+            prev = current_turn["task"]
+            if prev is not None and not prev.done():
+                prev.cancel()
+                try:
+                    await prev
+                except (asyncio.CancelledError, Exception):
+                    pass
+            current_turn["task"] = asyncio.create_task(run_agent_turn(user_text))
+            try:
+                await current_turn["task"]
+            except (asyncio.CancelledError, Exception):
+                pass
 
     async def apply_proposal(proposal_id: Optional[str]) -> None:
         proposal = get_proposal(proposal_id, tenant_id) if isinstance(proposal_id, str) else None
@@ -624,6 +673,9 @@ async def _run_voice_session(
     messages_history.append({"role": "assistant", "content": _VOICE_GREETING, "timestamp": datetime.utcnow().isoformat()})
     await send_json({"type": "assistant_message", "content": _VOICE_GREETING})
     greeting_task = asyncio.create_task(speak(_VOICE_GREETING))
+    # Register the greeting as the current turn so a user barge-in during the
+    # greeting cancels it too.
+    current_turn["task"] = greeting_task
 
     try:
         await receive_loop()

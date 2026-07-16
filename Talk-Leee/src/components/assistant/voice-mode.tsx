@@ -90,8 +90,10 @@ export function AssistantVoiceMode({
     const micStreamRef = useRef<MediaStream | null>(null);
     const workletRef = useRef<AudioWorkletNode | ScriptProcessorNode | null>(null);
     const srcNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
-    // Gapless TTS playback scheduling.
+    // Gapless TTS playback scheduling. playSourcesRef tracks the currently
+    // scheduled audio nodes so a barge-in can stop them immediately.
     const nextPlayRef = useRef(0);
+    const playSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
     const scrollRef = useRef<HTMLDivElement | null>(null);
     const teardownRef = useRef<() => void>(() => {});
 
@@ -177,9 +179,27 @@ export function AssistantVoiceMode({
             const startAt = Math.max(ctx.currentTime, nextPlayRef.current);
             node.start(startAt);
             nextPlayRef.current = startAt + audioBuffer.duration;
+            // Track so barge-in can stop it; self-remove when it finishes.
+            playSourcesRef.current.add(node);
+            node.onended = () => playSourcesRef.current.delete(node);
         } catch {
             /* drop a bad frame rather than kill the stream */
         }
+    }, []);
+
+    // Barge-in: stop all scheduled TTS playback immediately (user is speaking,
+    // or the server sent tts_interrupt).
+    const stopPlayback = useCallback(() => {
+        playSourcesRef.current.forEach((n) => {
+            try {
+                n.onended = null;
+                n.stop();
+            } catch {
+                /* already stopped */
+            }
+        });
+        playSourcesRef.current.clear();
+        nextPlayRef.current = 0;
     }, []);
 
     // --- proposal actions --------------------------------------------------
@@ -356,7 +376,14 @@ export function AssistantVoiceMode({
                         if (typeof m.conversation_id === "string") onConversationId?.(m.conversation_id);
                         break;
                     case "stt_partial":
+                        // User is speaking → barge in: stop the agent's audio now
+                        // (the server also cancels its TTS on its side).
+                        if (typeof m.text === "string" && m.text.trim()) stopPlayback();
                         setPartial(typeof m.text === "string" ? m.text : "");
+                        break;
+                    case "tts_interrupt":
+                        stopPlayback();
+                        setStatus("listening");
                         break;
                     case "stt_final":
                         setPartial("");
