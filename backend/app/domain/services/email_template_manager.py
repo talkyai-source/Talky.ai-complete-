@@ -6,11 +6,34 @@ Day 26: AI Email System
 """
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
-from jinja2 import Environment, BaseLoader
+from jinja2 import Environment, BaseLoader, select_autoescape
 import logging
 import re
+from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_join_link(value: Any) -> Optional[str]:
+    """Return a web meeting URL, or ``None`` for unsafe/malformed schemes."""
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip()
+    if not candidate or "\\" in candidate or any(ord(char) < 32 for char in candidate):
+        return None
+    try:
+        parsed = urlsplit(candidate)
+        hostname = parsed.hostname
+    except ValueError:
+        return None
+    if (
+        parsed.scheme.casefold() not in {"http", "https"}
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        return None
+    return candidate
 
 
 class EmailTemplate(BaseModel):
@@ -63,7 +86,16 @@ class EmailTemplateManager:
     def __init__(self):
         """Initialize template manager with default templates."""
         self.templates: Dict[str, EmailTemplate] = {}
-        self.env = Environment(loader=BaseLoader())
+        # Plain-text subjects/bodies must remain literal, while values inserted
+        # into HTML templates must be escaped to prevent active-content injection.
+        self.text_env = Environment(
+            loader=BaseLoader(),
+            autoescape=select_autoescape(default_for_string=False, default=False),
+        )
+        self.html_env = Environment(
+            loader=BaseLoader(),
+            autoescape=select_autoescape(default_for_string=True, default=True),
+        )
         self._load_default_templates()
     
     def _load_default_templates(self):
@@ -227,20 +259,29 @@ See you soon!
             raise KeyError(f"Template '{template_name}' not found. Available: {available}")
         
         template = self.templates[template_name]
+        render_context = dict(context)
+        if "join_link" in render_context:
+            safe_link = _safe_join_link(render_context["join_link"])
+            if render_context["join_link"] and safe_link is None:
+                logger.warning(
+                    "Omitting an unsafe join_link from email template '%s'",
+                    template_name,
+                )
+            render_context["join_link"] = safe_link
         
         # Render subject
-        subject_tmpl = self.env.from_string(template.subject_template)
-        subject = subject_tmpl.render(**context)
+        subject_tmpl = self.text_env.from_string(template.subject_template)
+        subject = subject_tmpl.render(**render_context)
         
         # Render body
-        body_tmpl = self.env.from_string(template.body_template)
-        body = body_tmpl.render(**context)
+        body_tmpl = self.text_env.from_string(template.body_template)
+        body = body_tmpl.render(**render_context)
         
         # Render HTML body if available
         body_html = None
         if template.body_html_template:
-            html_tmpl = self.env.from_string(template.body_html_template)
-            body_html = html_tmpl.render(**context)
+            html_tmpl = self.html_env.from_string(template.body_html_template)
+            body_html = html_tmpl.render(**render_context)
         
         logger.debug(f"Rendered email template '{template_name}' with {len(context)} variables")
         
@@ -249,7 +290,7 @@ See you soon!
             body=body,
             body_html=body_html,
             template_name=template_name,
-            variables_used=context
+            variables_used=render_context
         )
     
     def validate_content(

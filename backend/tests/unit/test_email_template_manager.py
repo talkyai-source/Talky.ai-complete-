@@ -118,6 +118,57 @@ class TestRenderEmail:
         
         assert rendered.body_html is not None
         assert "<html>" in rendered.body_html
+
+    def test_render_escapes_html_variables_but_preserves_plain_text(self):
+        """Untrusted variables cannot inject markup into the HTML alternative."""
+        manager = EmailTemplateManager()
+        untrusted_title = '<img src=x onerror="alert(1)">'
+
+        rendered = manager.render_email(
+            "meeting_confirmation",
+            title=untrusted_title,
+            date="2026-01-08",
+            time="10:00 AM",
+        )
+
+        assert untrusted_title in rendered.body
+        assert rendered.body_html is not None
+        assert untrusted_title not in rendered.body_html
+        assert "&lt;img src=x onerror=&#34;alert(1)&#34;&gt;" in rendered.body_html
+
+    def test_render_omits_non_http_join_link(self):
+        """A meeting link cannot inject an active URL scheme into HTML mail."""
+        manager = EmailTemplateManager()
+
+        rendered = manager.render_email(
+            "meeting_confirmation",
+            title="Test Meeting",
+            date="2026-01-08",
+            time="10:00 AM",
+            join_link="javascript:alert(1)",
+        )
+
+        assert "javascript:" not in rendered.body
+        assert rendered.body_html is not None
+        assert "javascript:" not in rendered.body_html
+        assert "href=" not in rendered.body_html
+        assert rendered.variables_used["join_link"] is None
+
+    def test_render_preserves_safe_https_join_link(self):
+        manager = EmailTemplateManager()
+        link = "https://meet.example.test/room?a=1&b=2"
+
+        rendered = manager.render_email(
+            "meeting_confirmation",
+            title="Test Meeting",
+            date="2026-01-08",
+            time="10:00 AM",
+            join_link=link,
+        )
+
+        assert link in rendered.body
+        assert rendered.body_html is not None
+        assert 'href="https://meet.example.test/room?a=1&amp;b=2"' in rendered.body_html
     
     def test_render_unknown_template_raises(self):
         """Rendering unknown template raises KeyError"""
