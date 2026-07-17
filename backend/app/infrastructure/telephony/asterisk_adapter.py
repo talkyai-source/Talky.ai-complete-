@@ -504,6 +504,25 @@ class AsteriskAdapter(CallControlAdapter):
             except Exception:
                 return {}
 
+    @staticmethod
+    def _stt_reorder_config() -> Dict[str, Any]:
+        """VG-01 (fixes garbled spoken emails/phone digits): deliver caller RTP
+        to STT in SEQUENCE order via the gateway's reorder window instead of raw
+        network-arrival order. Adds ~window*20ms (default 60-80ms) of STT
+        latency — inaudible, but digits/spelled letters stop getting shuffled by
+        UDP jitter. ENABLED by default; instant kill-switch WITHOUT a redeploy:
+        set VOICE_GATEWAY_STT_REORDER=false in .env and restart talky-api.
+        Window/hold are gateway-validated (window 1-25, hold >= window*20, <=1000).
+        """
+        enabled = os.getenv("VOICE_GATEWAY_STT_REORDER", "true").strip().lower()
+        if enabled in ("0", "false", "no", "off"):
+            return {}
+        return {
+            "stt_reorder_enabled": True,
+            "stt_reorder_window_frames": int(os.getenv("VOICE_GATEWAY_STT_REORDER_WINDOW", "3")),
+            "stt_reorder_hold_ms": int(os.getenv("VOICE_GATEWAY_STT_REORDER_HOLD_MS", "80")),
+        }
+
     async def _alloc_rtp_port(self) -> int:
         async with self._rtp_lock:
             span = self._rtp_port_end - self._rtp_port_start + 1
@@ -1062,6 +1081,8 @@ class AsteriskAdapter(CallControlAdapter):
                     # we re-batched downstream; now we hand off frames at Flux's native rate so
                     # there's no re-chunking jitter and per-call resamples drop by 50%.
                     "audio_callback_batch_frames": 2,
+                    # VG-01 sequence-ordered STT tap (see _stt_reorder_config).
+                    **self._stt_reorder_config(),
                     "audio_callback_url": (
                         f"{os.getenv('BACKEND_INTERNAL_URL', 'http://127.0.0.1:8000')}"
                         f"/api/v1/sip/telephony/audio/{session_id}"
@@ -1258,6 +1279,8 @@ class AsteriskAdapter(CallControlAdapter):
                     # we re-batched downstream; now we hand off frames at Flux's native rate so
                     # there's no re-chunking jitter and per-call resamples drop by 50%.
                     "audio_callback_batch_frames": 2,
+                    # VG-01 sequence-ordered STT tap (see _stt_reorder_config).
+                    **self._stt_reorder_config(),
                     # Tell the gateway to POST audio chunks to our backend callback
                     "audio_callback_url": (
                         f"{os.getenv('BACKEND_INTERNAL_URL', 'http://127.0.0.1:8000')}"
