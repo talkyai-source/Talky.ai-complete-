@@ -73,6 +73,18 @@ export function Footer() {
           </div>
 
           <div className="flex items-center gap-6">
+            <Link
+              href="/terms"
+              className="font-medium text-gray-700 dark:text-muted-foreground hover:text-primary dark:hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md"
+            >
+              Terms of Service
+            </Link>
+            <Link
+              href="/privacy"
+              className="font-medium text-gray-700 dark:text-muted-foreground hover:text-primary dark:hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md"
+            >
+              Privacy Policy
+            </Link>
             <Link 
               href="/auth/login" 
               className="font-medium text-gray-700 dark:text-muted-foreground hover:text-primary dark:hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md"

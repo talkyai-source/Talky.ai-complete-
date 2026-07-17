@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Building2, KeyRound, Loader2, Lock, Mail, User } from "lucide-react";
+import { ArrowLeft, ArrowRight, Building2, KeyRound, Loader2, Lock, Mail, PhoneCall, ShieldCheck, User } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -477,8 +477,55 @@ export default function RegisterClientPage() {
                 </Card>
 
                 <p className="text-xs text-muted-foreground text-center mt-8">
-                    By creating an account, you agree to our Terms of Service and Privacy Policy.
+                    By creating an account, you agree to our{" "}
+                    <Link href="/terms" className="underline hover:text-foreground transition-colors">
+                        Terms of Service
+                    </Link>{" "}
+                    and{" "}
+                    <Link href="/privacy" className="underline hover:text-foreground transition-colors">
+                        Privacy Policy
+                    </Link>
+                    .
                 </p>
+
+                <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-lg border bg-card/50 p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                            <PhoneCall className="h-4 w-4 text-primary" aria-hidden />
+                            <p className="text-sm font-medium">What you get</p>
+                        </div>
+                        <ul className="space-y-1.5 text-xs text-muted-foreground leading-relaxed">
+                            <li>AI voice agents for outbound campaigns and inbound reception</li>
+                            <li>Live appointment booking with calendar and email confirmations</li>
+                            <li>Campaigns, analytics, call recordings, and transcripts</li>
+                            <li>CRM integration and developer API access</li>
+                        </ul>
+                        <Link
+                            href="/terms"
+                            className="mt-3 inline-block text-xs underline text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                            Read the full Terms of Service
+                        </Link>
+                    </div>
+                    <div className="rounded-lg border bg-card/50 p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                            <ShieldCheck className="h-4 w-4 text-primary" aria-hidden />
+                            <p className="text-sm font-medium">Your data &amp; rights</p>
+                        </div>
+                        <ul className="space-y-1.5 text-xs text-muted-foreground leading-relaxed">
+                            <li>You stay in control of your contact lists and recordings</li>
+                            <li>Call recording and calling must follow consent laws in your region</li>
+                            <li>Data-protection requests answered within 30 days</li>
+                            <li>Your credentials and API keys are never shared</li>
+                        </ul>
+                        <Link
+                            href="/privacy"
+                            className="mt-3 inline-block text-xs underline text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                            Read the full Privacy Policy
+                        </Link>
+                    </div>
+                </div>
             </div>
 
         </div>
