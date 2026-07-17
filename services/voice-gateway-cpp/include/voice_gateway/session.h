@@ -140,6 +140,10 @@ struct SessionStatsSnapshot {
     uint64_t stt_floor_dropped_total{0};
     uint64_t stt_probation_dropped_total{0};
     uint64_t stt_restarts_committed_total{0};
+    // TTS chunks refused by the utterance/chunk-seq idempotency gate (VG-13):
+    // a chunk for an interrupted (retired) utterance, or a duplicate/backwards
+    // chunk_seq. Visibility for the canary before the backend relies on it.
+    uint64_t tts_chunks_rejected_stale_total{0};
 };
 
 class RtpSession {
@@ -164,13 +168,30 @@ public:
     [[nodiscard]] bool healthy() const;
     [[nodiscard]] SessionState state() const;
     [[nodiscard]] SessionStatsSnapshot snapshot() const;
-    bool enqueue_tts_ulaw(const std::vector<uint8_t>& ulaw_audio, bool clear_existing, std::size_t& queued_frames, std::string& error);
+    // utterance_id/chunk_seq (both optional; empty/-1 = legacy behavior, VG-13):
+    // when the backend stamps them, a chunk belonging to an utterance that was
+    // already interrupted is rejected with error "utterance_interrupted", and a
+    // duplicate or backwards chunk_seq within the current utterance is rejected
+    // with "stale_or_duplicate_chunk" — so a delayed HTTP delivery can no longer
+    // re-speak audio from before a barge-in.
+    bool enqueue_tts_ulaw(const std::vector<uint8_t>& ulaw_audio, bool clear_existing, std::size_t& queued_frames, std::string& error,
+                          const std::string& utterance_id = std::string(), int64_t chunk_seq = -1);
+    // Returns only after no PRE-interrupt TTS frame can reach the wire: the
+    // queue is cleared, the generation bumped, and any frame the transmitter had
+    // already committed to send (passed its generation check) has finished its
+    // send (bounded wait) — the VG-24 send-completion barrier.
     bool interrupt_tts(const std::string& reason, std::size_t& dropped_frames, std::size_t& interrupted_segments);
 
     // Register a callback that fires with each received audio batch.
     // Called from the receiver thread; keep it non-blocking.
     using AudioCallback = std::function<void(const std::string& session_id, const std::vector<uint8_t>& pcmu_audio)>;
     void set_audio_callback(AudioCallback cb);
+    // Optional finisher the receiver thread runs ONCE when it exits (after the
+    // final reorder drain): flush any partially-batched STT audio and drain the
+    // delivery sink with a bounded deadline, so the caller's last words reach
+    // STT instead of being discarded at teardown (batch E). Must be bounded —
+    // it runs on the receiver thread and extends the stop() join by its runtime.
+    void set_audio_sink_finisher(std::function<void()> finisher);
 
 private:
     static constexpr std::size_t kDefaultJitterTargetDepthFrames = 6;
@@ -224,6 +245,8 @@ private:
     // Protected by audio_callback_mutex_ to allow set_audio_callback() at any time.
     mutable std::mutex audio_callback_mutex_;
     AudioCallback audio_callback_;
+    // Run once by the receiver thread on exit (guarded by audio_callback_mutex_).
+    std::function<void()> audio_sink_finisher_;
 
     SessionConfig config_;
 
@@ -242,6 +265,18 @@ private:
     // popped at barge-in time is not spoken (VG-24).
     uint64_t tts_generation_{0};
     std::string tts_last_stop_reason_{"none"};
+    // VG-24 send-completion barrier state (under mutex_): true from the moment
+    // the transmitter passes its generation check for a dequeued TTS frame until
+    // that frame's sendto() completed (or failed). interrupt_tts waits until no
+    // frame from a PRE-interrupt generation is in this window.
+    bool tx_tts_send_inflight_{false};
+    uint64_t tx_inflight_generation_{0};
+    // VG-13 utterance/chunk-seq idempotency state (under mutex_). The retired id
+    // is the utterance active at the last queue clear (barge-in/replace/stop);
+    // late chunks for it are rejected. -1 = no chunk seen yet this utterance.
+    std::string tts_current_utterance_id_;
+    std::string tts_retired_utterance_id_;
+    int64_t tts_last_chunk_seq_{-1};
 
     // Latches on the first start() call. RtpSession is single-use (its worker
     // std::threads are one-shot); a second start() would assign over joinable
@@ -314,6 +349,7 @@ private:
     std::atomic<uint64_t> stt_floor_dropped_total_{0};
     std::atomic<uint64_t> stt_probation_dropped_total_{0};
     std::atomic<uint64_t> stt_restarts_committed_total_{0};
+    std::atomic<uint64_t> tts_chunks_rejected_stale_total_{0};
 
     std::chrono::steady_clock::time_point last_rtp_rx_time_;
     std::chrono::steady_clock::time_point last_rtp_tx_time_;

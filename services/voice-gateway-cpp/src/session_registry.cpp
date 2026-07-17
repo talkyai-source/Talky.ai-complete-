@@ -7,7 +7,8 @@
 
 namespace voice_gateway {
 
-SessionRegistry::SessionRegistry() {
+SessionRegistry::SessionRegistry(const std::size_t max_sessions)
+    : max_sessions_(std::min(std::max<std::size_t>(1, max_sessions), kDefaultMaxConcurrentSessions)) {
     reaper_thread_ = std::thread(&SessionRegistry::reaper_loop, this);
 }
 
@@ -37,7 +38,8 @@ SessionRegistry::~SessionRegistry() {
     // is a no-op through its teardown latch.
 }
 
-StartSessionResult SessionRegistry::start_session(const SessionConfig& config, std::string& error, RtpSession::AudioCallback audio_cb) {
+StartSessionResult SessionRegistry::start_session(const SessionConfig& config, std::string& error, RtpSession::AudioCallback audio_cb,
+                                                  std::function<void()> sink_finisher) {
     if (!validate_config(config, error)) {
         return StartSessionResult::InvalidConfig;
     }
@@ -56,7 +58,11 @@ StartSessionResult SessionRegistry::start_session(const SessionConfig& config, s
         return StartSessionResult::AlreadyExists;
     }
 
-    if (sessions_.size() >= kMaxConcurrentSessions) {
+    // Resource-slot accounting (D remainder): sessions in stopping_ are out of
+    // sessions_ but still HOLD their threads and sockets until teardown
+    // completes, so admission must count them — otherwise peak resource usage
+    // could exceed the ceiling by the whole stopping set.
+    if (sessions_.size() + stopping_.size() >= max_sessions_) {
         error = "maximum concurrent sessions reached";
         return StartSessionResult::InternalError;
     }
@@ -65,6 +71,9 @@ StartSessionResult SessionRegistry::start_session(const SessionConfig& config, s
     // Install the STT sink BEFORE start() launches the receiver thread (VG-11).
     if (audio_cb) {
         session->set_audio_callback(std::move(audio_cb));
+    }
+    if (sink_finisher) {
+        session->set_audio_sink_finisher(std::move(sink_finisher));
     }
 
     // Register BEFORE releasing the workers (review #8): start() commits the
@@ -217,6 +226,7 @@ ProcessStatsSnapshot SessionRegistry::snapshot() const {
         snap.stt_floor_dropped_total += session_stats.stt_floor_dropped_total;
         snap.stt_probation_dropped_total += session_stats.stt_probation_dropped_total;
         snap.stt_restarts_committed_total += session_stats.stt_restarts_committed_total;
+        snap.tts_chunks_rejected_stale_total += session_stats.tts_chunks_rejected_stale_total;
     }
 
     return snap;

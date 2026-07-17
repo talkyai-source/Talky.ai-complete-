@@ -33,11 +33,54 @@ namespace voice_gateway {
 
 namespace {
 
+// Aggregate in-flight request-body budget (D remainder). The per-request 8 MiB
+// cap bounds ONE request, but 256 concurrent handlers x 8 MiB is ~2 GiB — a
+// coordinated flood of maximum-size bodies could OOM the process while every
+// individual request stayed "valid". This charges each body's declared length
+// against one process-wide budget for as long as the body is alive (charged
+// before the body read, released when the HttpRequest is destroyed at the end
+// of its handler) and rejects with 503 once the budget is exhausted.
+std::atomic<std::size_t> g_inflight_body_bytes{0};
+
+std::size_t max_inflight_body_bytes() {
+    // Overridable for tests/deployments; read once. Default 64 MiB: eight
+    // maximum-size bodies in flight, far above legitimate concurrent TTS load.
+    static const std::size_t budget = [] {
+        constexpr std::size_t kDefault = 64u * 1024u * 1024u;
+        const char* v = std::getenv("VOICE_GATEWAY_MAX_INFLIGHT_BODY_BYTES");
+        if (v == nullptr || *v == '\0') {
+            return kDefault;
+        }
+        char* end = nullptr;
+        const unsigned long long parsed = std::strtoull(v, &end, 10);
+        if (end == v || (end != nullptr && *end != '\0') || parsed == 0) {
+            return kDefault;
+        }
+        return static_cast<std::size_t>(parsed);
+    }();
+    return budget;
+}
+
+// RAII release of one body's budget charge. Held via shared_ptr inside the
+// HttpRequest so copies/moves of the request keep exactly one charge alive.
+struct BodyBudgetCharge {
+    std::size_t bytes{0};
+    explicit BodyBudgetCharge(const std::size_t n) : bytes(n) {}
+    ~BodyBudgetCharge() {
+        if (bytes > 0) {
+            g_inflight_body_bytes.fetch_sub(bytes);
+        }
+    }
+    BodyBudgetCharge(const BodyBudgetCharge&) = delete;
+    BodyBudgetCharge& operator=(const BodyBudgetCharge&) = delete;
+};
+
 struct HttpRequest {
     std::string method;
     std::string path;
     std::unordered_map<std::string, std::string> headers;
     std::string body;
+    std::shared_ptr<BodyBudgetCharge> budget_charge;  // released with the request
 };
 
 std::string to_lower(std::string value) {
@@ -103,7 +146,8 @@ ssize_t recv_within(const int fd, char* buf, const std::size_t len,
     }
 }
 
-std::optional<HttpRequest> read_request(const int client_fd) {
+std::optional<HttpRequest> read_request(const int client_fd, bool& over_budget) {
+    over_budget = false;
     std::string raw;
     raw.reserve(4096);
 
@@ -185,6 +229,26 @@ std::optional<HttpRequest> read_request(const int client_fd) {
         return std::nullopt;
     }
 
+    // Aggregate budget (D remainder): charge the declared length before the body
+    // is read; the charge lives as long as the returned request. fetch_add-then-
+    // check keeps the reservation atomic across concurrent handlers (a loser
+    // rolls its own addition back).
+    std::shared_ptr<BodyBudgetCharge> charge;
+    if (content_length > 0) {
+        const std::size_t new_total = g_inflight_body_bytes.fetch_add(content_length) + content_length;
+        if (new_total > max_inflight_body_bytes()) {
+            g_inflight_body_bytes.fetch_sub(content_length);
+            over_budget = true;
+            return std::nullopt;
+        }
+        try {
+            charge = std::make_shared<BodyBudgetCharge>(content_length);
+        } catch (...) {
+            g_inflight_body_bytes.fetch_sub(content_length);
+            return std::nullopt;
+        }
+    }
+
     const std::size_t body_offset = header_end + 4;
     if (raw.size() > body_offset) {
         request.body = raw.substr(body_offset);
@@ -202,6 +266,7 @@ std::optional<HttpRequest> read_request(const int client_fd) {
         request.body.resize(content_length);
     }
 
+    request.budget_charge = std::move(charge);
     return request;
 }
 
@@ -431,7 +496,8 @@ std::string session_stats_json(const SessionStatsSnapshot& stats) {
         << "\"stt_frames_emitted_total\":" << stats.stt_frames_emitted_total << ','
         << "\"stt_floor_dropped_total\":" << stats.stt_floor_dropped_total << ','
         << "\"stt_probation_dropped_total\":" << stats.stt_probation_dropped_total << ','
-        << "\"stt_restarts_committed_total\":" << stats.stt_restarts_committed_total
+        << "\"stt_restarts_committed_total\":" << stats.stt_restarts_committed_total << ','
+        << "\"tts_chunks_rejected_stale_total\":" << stats.tts_chunks_rejected_stale_total
         << "}";
     return out.str();
 }
@@ -465,7 +531,8 @@ std::string process_stats_json(const ProcessStatsSnapshot& stats) {
         << "\"stt_frames_emitted_total\":" << stats.stt_frames_emitted_total << ','
         << "\"stt_floor_dropped_total\":" << stats.stt_floor_dropped_total << ','
         << "\"stt_probation_dropped_total\":" << stats.stt_probation_dropped_total << ','
-        << "\"stt_restarts_committed_total\":" << stats.stt_restarts_committed_total
+        << "\"stt_restarts_committed_total\":" << stats.stt_restarts_committed_total << ','
+        << "\"tts_chunks_rejected_stale_total\":" << stats.tts_chunks_rejected_stale_total
         << "}";
     return out.str();
 }
@@ -804,7 +871,7 @@ public:
     void enqueue(std::string body) {
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            if (stop_) {
+            if (stop_ || finishing_) {
                 return;
             }
             while (queue_.size() >= kMaxQueue) {
@@ -815,6 +882,21 @@ public:
         cv_.notify_one();
     }
 
+    // Batch E: drain the remaining queue (the caller's final words) with a hard
+    // deadline, instead of the destructor's discard. Called from the receiver
+    // thread's exit path via the session's sink finisher, so it runs exactly
+    // once, after the last enqueue. Whatever the deadline cannot flush is shed;
+    // the worker exits once drained (or on the destructor's stop).
+    void finish(const std::chrono::milliseconds deadline) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (stop_ || finishing_) {
+            return;
+        }
+        finishing_ = true;
+        cv_.notify_all();
+        drained_cv_.wait_for(lock, deadline, [this] { return queue_.empty() && !posting_; });
+    }
+
 private:
     void run() {
       try {
@@ -822,15 +904,21 @@ private:
             std::string body;
             {
                 std::unique_lock<std::mutex> lock(mutex_);
-                cv_.wait(lock, [this] { return stop_ || !queue_.empty(); });
+                cv_.wait(lock, [this] { return stop_ || finishing_ || !queue_.empty(); });
                 if (stop_) {
                     // Session is going away: discard any remaining audio and
                     // exit promptly so the destructor's join is bounded to at
                     // most one in-flight POST (~200ms).
                     return;
                 }
+                if (queue_.empty()) {
+                    // finishing_ with nothing left: the drain is complete.
+                    drained_cv_.notify_all();
+                    return;
+                }
                 body = std::move(queue_.front());
                 queue_.pop_front();
+                posting_ = true;
             }
             // Sequential send outside the lock preserves strict FIFO ordering
             // (single thread, dequeue order) without holding up enqueue().
@@ -856,6 +944,13 @@ private:
             } catch (...) {
                 ++consecutive_failures_;
             }
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                posting_ = false;
+                if (queue_.empty()) {
+                    drained_cv_.notify_all();  // a finish() may be waiting
+                }
+            }
         }
       } catch (...) {
         // Only reachable if the mutex/cv machinery itself throws — contain it so
@@ -866,8 +961,11 @@ private:
     const std::string url_;
     std::mutex mutex_;
     std::condition_variable cv_;
+    std::condition_variable drained_cv_;
     std::deque<std::string> queue_;
     bool stop_{false};
+    bool finishing_{false};   // finish() called: drain then exit (under mutex_)
+    bool posting_{false};     // a POST is in flight outside the lock (under mutex_)
     int consecutive_failures_{0};  // worker-thread-only; no lock needed
     std::thread worker_;  // declared last: constructed after the fields run() touches
 };
@@ -1272,8 +1370,15 @@ bool HttpServer::healthy() const {
 }
 
 void HttpServer::handle_client(const int client_fd) {
-    const auto request = read_request(client_fd);
+    bool over_budget = false;
+    const auto request = read_request(client_fd, over_budget);
     if (!request.has_value()) {
+        if (over_budget) {
+            // Aggregate body budget exhausted — a load condition, not a bad
+            // request. 503 tells the backend to back off/retry.
+            write_response(client_fd, 503, "Service Unavailable", "{\"error\":\"body_budget_exhausted\"}");
+            return;
+        }
         write_response(client_fd, 400, "Bad Request", "{\"error\":\"invalid_http_request\"}");
         return;
     }
@@ -1424,6 +1529,7 @@ void HttpServer::handle_client(const int client_fd) {
         // The closure captures only per-call state (id, batch size, buffer,
         // sender) — never the session — so it is safe to build before creation.
         RtpSession::AudioCallback audio_cb;
+        std::function<void()> sink_finisher;
         if (!config.audio_callback_url.empty()) {
             const std::string cb_session_id = config.session_id;
             const int batch_frames = config.audio_callback_batch_frames;
@@ -1433,10 +1539,10 @@ void HttpServer::handle_client(const int client_fd) {
                 int frame_count{0};
             };
             auto state = std::make_shared<BatchState>();
-            // Owned solely by this closure, which lives in RtpSession::
-            // audio_callback_, so the sender (and its worker thread) is destroyed
-            // and JOINED when the session is destroyed. No detached thread
-            // outlives the session.
+            // Owned solely by these closures, which live in RtpSession::
+            // audio_callback_ / audio_sink_finisher_, so the sender (and its
+            // worker thread) is destroyed and JOINED when the session is
+            // destroyed. No detached thread outlives the session.
             auto sender = std::make_shared<AudioCallbackSender>(config.audio_callback_url);
 
             audio_cb = [cb_session_id, batch_frames, state, sender](
@@ -1456,10 +1562,29 @@ void HttpServer::handle_client(const int client_fd) {
                     sender->enqueue(std::move(body));
                 }
             };
+
+            // Batch E: runs ONCE on the receiver thread as it exits — flush the
+            // partial batch (a batch_frames > 1 config otherwise silently drops
+            // the final frames of every call) and drain the sender with a hard
+            // deadline instead of discarding whatever is still queued. Same
+            // thread as audio_cb, so BatchState needs no extra locking.
+            sink_finisher = [cb_session_id, state, sender] {
+                if (!state->buffer.empty()) {
+                    const std::string b64 = base64_encode(state->buffer);
+                    std::string body =
+                        "{\"session_id\":\"" + escape_json(cb_session_id) +
+                        "\",\"pcmu_base64\":\"" + b64 +
+                        "\",\"codec\":\"pcmu\"}";
+                    state->buffer.clear();
+                    state->frame_count = 0;
+                    sender->enqueue(std::move(body));
+                }
+                sender->finish(std::chrono::milliseconds(500));
+            };
         }
 
         std::string error;
-        const auto result = registry_.start_session(config, error, std::move(audio_cb));
+        const auto result = registry_.start_session(config, error, std::move(audio_cb), std::move(sink_finisher));
 
         if (result == StartSessionResult::Started) {
             write_response(client_fd, 200, "OK", "{\"status\":\"started\",\"session_id\":\"" + escape_json(config.session_id) + "\"}");
@@ -1503,8 +1628,15 @@ void HttpServer::handle_client(const int client_fd) {
         const auto session_id = json_get_string(request->body, "session_id");
         const auto pcmu_base64 = json_get_string(request->body, "pcmu_base64");
         const auto clear_existing = json_get_bool(request->body, "clear_existing");
+        // Optional idempotency identity (VG-13). Absent fields = legacy behavior.
+        const auto utterance_id = json_get_string(request->body, "utterance_id");
+        const auto chunk_seq = json_get_int(request->body, "chunk_seq");
         if (!session_id.has_value() || !pcmu_base64.has_value()) {
             write_response(client_fd, 400, "Bad Request", "{\"error\":\"missing_tts_play_fields\"}");
+            return;
+        }
+        if (utterance_id.has_value() && utterance_id->size() > 64) {
+            write_response(client_fd, 400, "Bad Request", "{\"error\":\"utterance_id_too_long\"}");
             return;
         }
 
@@ -1522,8 +1654,15 @@ void HttpServer::handle_client(const int client_fd) {
 
         std::string error;
         std::size_t queued_frames = 0;
-        if (!session->enqueue_tts_ulaw(decoded.value(), clear_existing.value_or(false), queued_frames, error)) {
-            write_response(client_fd, 400, "Bad Request", "{\"error\":\"" + escape_json(error) + "\"}");
+        if (!session->enqueue_tts_ulaw(decoded.value(), clear_existing.value_or(false), queued_frames, error,
+                                       utterance_id.value_or(std::string()),
+                                       chunk_seq.has_value() ? static_cast<int64_t>(chunk_seq.value()) : -1)) {
+            // Stale-chunk rejections are a CONFLICT (expected after a barge-in),
+            // distinguishable from malformed requests so the backend can treat
+            // them as benign.
+            const bool stale = (error == "utterance_interrupted" || error == "stale_or_duplicate_chunk");
+            write_response(client_fd, stale ? 409 : 400, stale ? "Conflict" : "Bad Request",
+                           "{\"error\":\"" + escape_json(error) + "\"}");
             return;
         }
 

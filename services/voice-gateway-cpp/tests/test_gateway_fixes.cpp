@@ -18,8 +18,10 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <future>
 #include <iostream>
@@ -767,9 +769,258 @@ void test_truncated_request_no_hang() {
     close(fd);
 }
 
+// Minimal HTTP sink: accepts connections, reads one full request, counts POSTs,
+// replies 200, closes. Lets the sink-finisher test observe real STT callback
+// delivery end to end.
+class MiniHttpSink {
+public:
+    explicit MiniHttpSink(const uint16_t port) {
+        fd_ = socket(AF_INET, SOCK_STREAM, 0);
+        int reuse = 1;
+        setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(port);
+        inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+        (void)bind(fd_, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
+        (void)listen(fd_, 16);
+        const timeval accept_tv{0, 200000};  // re-check running_ 5x/s
+        setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &accept_tv, sizeof(accept_tv));
+        worker_ = std::thread([this] { run(); });
+    }
+    ~MiniHttpSink() {
+        running_.store(false);
+        if (worker_.joinable()) {
+            worker_.join();
+        }
+        if (fd_ >= 0) {
+            close(fd_);
+        }
+    }
+    [[nodiscard]] int posts() const { return posts_.load(); }
+
+private:
+    void run() {
+        while (running_.load()) {
+            const int c = accept(fd_, nullptr, nullptr);
+            if (c < 0) {
+                continue;
+            }
+            const timeval tv{2, 0};
+            setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+            std::string raw;
+            char buf[4096];
+            std::size_t content_length = 0;
+            std::size_t header_end = std::string::npos;
+            for (;;) {
+                const ssize_t n = recv(c, buf, sizeof(buf), 0);
+                if (n <= 0) {
+                    break;
+                }
+                raw.append(buf, static_cast<std::size_t>(n));
+                if (header_end == std::string::npos) {
+                    header_end = raw.find("\r\n\r\n");
+                    if (header_end != std::string::npos) {
+                        const auto p = raw.find("Content-Length:");
+                        if (p != std::string::npos) {
+                            content_length = std::strtoul(raw.c_str() + p + 15, nullptr, 10);
+                        }
+                    }
+                }
+                if (header_end != std::string::npos && raw.size() >= header_end + 4 + content_length) {
+                    break;
+                }
+            }
+            if (header_end != std::string::npos && raw.rfind("POST", 0) == 0) {
+                posts_.fetch_add(1);
+            }
+            const char resp[] = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok";
+            (void)send(c, resp, sizeof(resp) - 1, MSG_NOSIGNAL);
+            close(c);
+        }
+    }
+
+    int fd_{-1};
+    std::atomic<bool> running_{true};
+    std::atomic<int> posts_{0};
+    std::thread worker_;
+};
+
+// D remainder: session admission must count sessions still tearing down — their
+// threads/sockets are held until teardown completes, so a cap that ignored them
+// let peak resource usage exceed the ceiling. Uses the max_sessions test seam.
+void test_session_cap_counts_teardown_slots() {
+    voice_gateway::SessionRegistry registry(2);
+    std::string err;
+    for (int i = 0; i < 2; ++i) {
+        SessionConfig cfg = base_config("cap-" + std::to_string(i),
+                                        static_cast<uint16_t>(43001 + i * 2),
+                                        static_cast<uint16_t>(43002 + i * 2));
+        check(registry.start_session(cfg, err) == voice_gateway::StartSessionResult::Started,
+              "cap_start_" + std::to_string(i));
+    }
+    SessionConfig extra = base_config("cap-extra", 43011, 43012);
+    check(registry.start_session(extra, err) == voice_gateway::StartSessionResult::InternalError,
+          "cap_third_rejected_at_ceiling");
+    check(err.find("maximum concurrent sessions") != std::string::npos, "cap_rejection_reason");
+
+    // stop_session returns only after teardown completed (sockets closed,
+    // stopping_ reservation released) — the freed slot must admit a new session.
+    bool already = false;
+    registry.stop_session("cap-0", "test", already);
+    check(registry.start_session(extra, err) == voice_gateway::StartSessionResult::Started,
+          "cap_slot_reusable_after_full_teardown");
+}
+
+// D remainder: the aggregate in-flight body budget must 503 an oversized total
+// (env-pinned to 8 KiB in main for this binary) while normal requests keep
+// working afterwards — the charge must be released, not leaked.
+void test_body_budget_503() {
+    voice_gateway::SessionRegistry registry;
+    voice_gateway::HttpServer server("127.0.0.1", 18091, registry);
+    std::string err;
+    check(server.start(err), "budget_server_start");
+    std::thread server_thread([&server] { server.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+
+    const std::string big(16 * 1024, 'x');  // 16 KiB > the 8 KiB test budget
+    const std::string resp = http_roundtrip(18091, post_request("/v1/sessions/stop", big));
+    check(resp.find("503") != std::string::npos &&
+              resp.find("body_budget_exhausted") != std::string::npos,
+          "budget_oversized_total_rejected_503");
+
+    const std::string ok = http_roundtrip(18091, post_request("/v1/sessions/stop", "{\"session_id\":\"none\"}"));
+    check(ok.find("already_stopped") != std::string::npos, "budget_normal_request_ok_after_release");
+
+    server.stop();
+    server_thread.join();
+}
+
+// VG-13: utterance/chunk-seq idempotency — duplicates and post-interrupt
+// stragglers must be rejected; unstamped (legacy) submissions are untouched.
+void test_tts_utterance_idempotency() {
+    SessionConfig cfg = base_config("utt", 35001, 35002);
+    RtpSession session(cfg);
+    std::string err;
+    check(session.start(err), "vg13_start");
+
+    const std::vector<uint8_t> audio(160, 0xFF);
+    std::size_t q = 0;
+    std::string e;
+    check(session.enqueue_tts_ulaw(audio, false, q, e, "u1", 0), "vg13_first_chunk_ok");
+    e.clear();
+    check(!session.enqueue_tts_ulaw(audio, false, q, e, "u1", 0) && e == "stale_or_duplicate_chunk",
+          "vg13_duplicate_seq_rejected");
+    e.clear();
+    check(session.enqueue_tts_ulaw(audio, false, q, e, "u1", 1), "vg13_next_seq_ok");
+
+    std::size_t dropped = 0;
+    std::size_t interrupted = 0;
+    session.interrupt_tts("barge_in", dropped, interrupted);
+    e.clear();
+    check(!session.enqueue_tts_ulaw(audio, false, q, e, "u1", 2) && e == "utterance_interrupted",
+          "vg13_post_interrupt_straggler_rejected");
+    e.clear();
+    check(session.enqueue_tts_ulaw(audio, false, q, e, "u2", 0), "vg13_new_utterance_admitted");
+    e.clear();
+    check(session.enqueue_tts_ulaw(audio, false, q, e), "vg13_legacy_unstamped_still_ok");
+    check(session.snapshot().tts_chunks_rejected_stale_total == 2, "vg13_stale_counter_visible");
+
+    session.stop("test_done");
+}
+
+// VG-24 completion half: once interrupt_tts() has returned, NO further
+// pre-interrupt TTS frame may reach the wire — the sent counter must freeze.
+void test_interrupt_send_barrier() {
+    const int dummy = make_udp_bound(34902);  // absorb the TTS RTP
+    SessionConfig cfg = base_config("barrier", 34901, 34902);
+    cfg.tts_underrun_fill_ms = 0;
+    RtpSession session(cfg);
+    std::string err;
+    check(session.start(err), "vg24_start");
+
+    const std::vector<uint8_t> audio(100 * 160, 0xFF);  // 2s of queued speech
+    std::size_t q = 0;
+    std::string e;
+    check(session.enqueue_tts_ulaw(audio, false, q, e), "vg24_enqueue_ok");
+
+    bool sending_observed = false;
+    for (int i = 0; i < 200; ++i) {
+        if (session.snapshot().tts_frames_sent_total >= 3) {
+            sending_observed = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    check(sending_observed, "vg24_transmission_underway");
+
+    std::size_t dropped = 0;
+    std::size_t interrupted = 0;
+    session.interrupt_tts("barge_in", dropped, interrupted);
+    const uint64_t sent_at_return = session.snapshot().tts_frames_sent_total;
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    const uint64_t sent_later = session.snapshot().tts_frames_sent_total;
+    check(sent_later == sent_at_return,
+          "vg24_no_frame_sent_after_interrupt_returned (at_return=" + std::to_string(sent_at_return) +
+              " later=" + std::to_string(sent_later) + ")");
+
+    session.stop("test_done");
+    if (dummy >= 0) {
+        close(dummy);
+    }
+}
+
+// Batch E: stopping a session must FLUSH the partially-batched STT tail and
+// drain the sender before teardown completes. batch_frames=2 with 5 frames sent
+// = 2 full batches + 1 partial; without the finisher the sink sees only 2 POSTs
+// and the caller's final frames are silently discarded.
+void test_sink_finish_flushes_tail() {
+    MiniHttpSink sink(18093);
+    voice_gateway::SessionRegistry registry;
+    voice_gateway::HttpServer server("127.0.0.1", 18092, registry);
+    std::string err;
+    check(server.start(err), "sinkE_server_start");
+    std::thread server_thread([&server] { server.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+
+    const std::string start_body =
+        "{\"session_id\":\"sink-e\",\"listen_ip\":\"127.0.0.1\",\"listen_port\":41710,"
+        "\"remote_ip\":\"127.0.0.1\",\"remote_port\":41711,\"codec\":\"pcmu\",\"ptime_ms\":20,"
+        "\"audio_callback_url\":\"http://127.0.0.1:18093/audio\",\"audio_callback_batch_frames\":2}";
+    const std::string start_resp = http_roundtrip(18092, post_request("/v1/sessions/start", start_body));
+    check(start_resp.find("\"status\":\"started\"") != std::string::npos, "sinkE_session_started");
+
+    const int tx = socket(AF_INET, SOCK_DGRAM, 0);
+    sockaddr_in dst{};
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons(41710);
+    inet_pton(AF_INET, "127.0.0.1", &dst.sin_addr);
+    uint32_t ts = 0;
+    for (uint16_t s = 100; s < 105; ++s) {  // 5 frames -> 2 batches + 1 partial
+        send_rtp(tx, dst, s, ts, 0x6666u, static_cast<uint8_t>(s & 0xFF));
+        ts += 160;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));  // full batches delivered
+
+    // Stop returns only after the receiver ran the sink finisher (partial-batch
+    // flush + bounded sender drain) — the third POST must have landed.
+    (void)http_roundtrip(18092, post_request("/v1/sessions/stop", "{\"session_id\":\"sink-e\"}"));
+    check(sink.posts() == 3,
+          "sinkE_partial_tail_flushed_at_stop (posts=" + std::to_string(sink.posts()) + ")");
+
+    close(tx);
+    server.stop();
+    server_thread.join();
+}
+
 }  // namespace
 
 int main() {
+    // Pin the aggregate body budget small for this binary so
+    // test_body_budget_503 can exhaust it with a 16 KiB request. Read once at
+    // first use; every other test's bodies are far below 8 KiB.
+    setenv("VOICE_GATEWAY_MAX_INFLIGHT_BODY_BYTES", "8192", 1);
     test_tts_overflow_accounting();
     test_jitter_flood_no_deadlock();
     test_stt_reorder_ordering();
@@ -783,6 +1034,11 @@ int main() {
     test_control_plane_callback_validation();
     test_shutdown_drains_inflight_handler();
     test_truncated_request_no_hang();
+    test_session_cap_counts_teardown_slots();
+    test_body_budget_503();
+    test_tts_utterance_idempotency();
+    test_interrupt_send_barrier();
+    test_sink_finish_flushes_tail();
     test_slowloris_header_deadline();
     std::cout << "passed=" << g_pass << " failed=" << g_fail << "\n";
     return g_fail == 0 ? 0 : 1;

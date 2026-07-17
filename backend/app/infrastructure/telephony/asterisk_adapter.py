@@ -192,6 +192,13 @@ class AsteriskAdapter(CallControlAdapter):
         # is not running — logs first error and every 50th thereafter).
         self._tts_error_counts: Dict[str, int] = {}
 
+        # Per-call TTS utterance identity (VG-13). Every /tts/play chunk is
+        # stamped with the current utterance_id + a monotonically increasing
+        # chunk_seq; interrupt_tts rotates the id, and the gateway rejects (409)
+        # any straggler chunk still carrying the retired id — so a delayed HTTP
+        # delivery can never re-speak audio from before a barge-in.
+        self._tts_utterances: Dict[str, Dict[str, Any]] = {}
+
         # Phase C — inbound routing. channel_id → {"called_did", "context",
         # "caller_number"} extracted from the inbound StasisStart event so the
         # bridge can resolve the call to a tenant/campaign. One-time debug dump
@@ -1341,6 +1348,7 @@ class AsteriskAdapter(CallControlAdapter):
         bridge_id = self._bridges.pop(channel_id, None)
         session_id = self._gateway_sessions.pop(channel_id, None)
         self._tts_error_counts.pop(channel_id, None)
+        self._tts_utterances.pop(channel_id, None)
         self._inbound_call_meta.pop(channel_id, None)
 
         if session_id:
@@ -1500,6 +1508,19 @@ class AsteriskAdapter(CallControlAdapter):
             raise TtsDeliveryError(f"no gateway session for call_id={call_id[:12]}")
 
         import base64
+        import uuid as _uuid
+
+        # Stamp the chunk with its utterance identity (VG-13). The id lives for
+        # the whole utterance; interrupt_tts rotates it, after which the gateway
+        # 409s any straggler still carrying the old id. Gaps in chunk_seq are
+        # fine — the gateway only requires monotonic increase per utterance.
+        utt = self._tts_utterances.get(call_id)
+        if utt is None:
+            utt = {"utterance_id": _uuid.uuid4().hex[:16], "seq": 0}
+            self._tts_utterances[call_id] = utt
+        chunk_seq = utt["seq"]
+        utt["seq"] = chunk_seq + 1
+
         try:
             pcmu_b64 = base64.b64encode(pcmu_audio).decode()
 
@@ -1510,14 +1531,25 @@ class AsteriskAdapter(CallControlAdapter):
                     "session_id": session_id,
                     "pcmu_base64": pcmu_b64,
                     "clear_existing": False,
+                    "utterance_id": utt["utterance_id"],
+                    "chunk_seq": chunk_seq,
                 },
             )
             # Reset error counter on first successful delivery.
             self._tts_error_counts.pop(call_id, None)
         except Exception as exc:
+            # A 409 is the idempotency gate doing its job: this chunk belongs to
+            # an utterance that was already barged-in/replaced. Expected after an
+            # interrupt — count it undelivered but don't log it as a failure.
+            stale = "409" in str(exc)
             count = self._tts_error_counts.get(call_id, 0) + 1
             self._tts_error_counts[call_id] = count
-            if count == 1:
+            if stale:
+                logger.debug(
+                    f"[AsteriskAdapter] stale TTS chunk rejected post-barge-in "
+                    f"for {call_id[:12]} (seq={chunk_seq})"
+                )
+            elif count == 1:
                 logger.error(f"[AsteriskAdapter] ❌ send_tts_audio failed: {exc}")
             elif count % 50 == 0:
                 logger.warning(
@@ -1536,19 +1568,47 @@ class AsteriskAdapter(CallControlAdapter):
 
         Endpoint: POST /v1/sessions/tts/interrupt
         Body: {"session_id": "...", "reason": "barge_in"}
+
+        A FAILED interrupt means the agent keeps talking over the caller, so
+        failures are surfaced at WARNING and retried once (they were previously
+        swallowed at debug level — invisible in production logs). The utterance
+        id is rotated in every case so post-barge-in straggler chunks are
+        rejected by the gateway's idempotency gate (VG-13) even when the
+        interrupt POST itself failed.
         """
+        import uuid as _uuid
+
         session_id = self._gateway_sessions.get(call_id)
         if not session_id:
             return
         try:
-            await self._gateway(
-                "POST",
-                "/v1/sessions/tts/interrupt",
-                payload={"session_id": session_id, "reason": "barge_in"},
-                ok=(200, 204, 404),
-            )
-        except Exception as exc:
-            logger.debug(f"AsteriskAdapter.interrupt_tts: {exc}")
+            payload = {"session_id": session_id, "reason": "barge_in"}
+            try:
+                await self._gateway(
+                    "POST", "/v1/sessions/tts/interrupt", payload=payload, ok=(200, 204, 404)
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"[AsteriskAdapter] interrupt_tts failed for {call_id[:12]} "
+                    f"(agent may keep speaking) — retrying once: {exc}"
+                )
+                try:
+                    await self._gateway(
+                        "POST", "/v1/sessions/tts/interrupt", payload=payload, ok=(200, 204, 404)
+                    )
+                except Exception as exc2:
+                    logger.error(
+                        f"[AsteriskAdapter] ❌ interrupt_tts retry failed for "
+                        f"{call_id[:12]} — stale audio may play out: {exc2}"
+                    )
+        finally:
+            # Rotate AFTER the interrupt attempt: the gateway retired the id it
+            # held as current; chunks still in flight with that id now 409,
+            # while the next agent turn's chunks carry the fresh id.
+            utt = self._tts_utterances.get(call_id)
+            if utt is not None:
+                utt["utterance_id"] = _uuid.uuid4().hex[:16]
+                utt["seq"] = 0
 
     # ------------------------------------------------------------------
     # CallControlAdapter — call control

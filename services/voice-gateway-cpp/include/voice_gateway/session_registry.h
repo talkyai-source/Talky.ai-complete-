@@ -51,11 +51,16 @@ struct ProcessStatsSnapshot {
     uint64_t stt_floor_dropped_total{0};
     uint64_t stt_probation_dropped_total{0};
     uint64_t stt_restarts_committed_total{0};
+    // TTS chunks refused by the utterance/chunk-seq idempotency gate (VG-13).
+    uint64_t tts_chunks_rejected_stale_total{0};
 };
 
 class SessionRegistry {
 public:
-    SessionRegistry();
+    // max_sessions overrides the default hard ceiling — a test seam (exercising
+    // the cap with 500 real sessions is impractical) that doubles as a future
+    // deployment knob. Values above the default are clamped to it.
+    explicit SessionRegistry(std::size_t max_sessions = kDefaultMaxConcurrentSessions);
     ~SessionRegistry();
 
     SessionRegistry(const SessionRegistry&) = delete;
@@ -63,8 +68,11 @@ public:
 
     // audio_cb, when set, is installed on the session BEFORE its receiver thread
     // starts, so no early caller RTP is processed before the STT sink exists
-    // (VG-11). Defaulted so existing 2-arg callers are unaffected.
-    StartSessionResult start_session(const SessionConfig& config, std::string& error, RtpSession::AudioCallback audio_cb = {});
+    // (VG-11). sink_finisher, when set, is installed the same way and runs on
+    // the receiver thread at session end (batch E tail flush). Defaulted so
+    // existing callers are unaffected.
+    StartSessionResult start_session(const SessionConfig& config, std::string& error, RtpSession::AudioCallback audio_cb = {},
+                                     std::function<void()> sink_finisher = {});
     bool stop_session(const std::string& session_id, const std::string& reason, bool& already_stopped);
 
     [[nodiscard]] RtpSessionPtr get_session(const std::string& session_id) const;
@@ -97,7 +105,9 @@ private:
     // Hard ceiling on live sessions. Each session runs 3–4 threads and holds two
     // UDP sockets, so an unbounded count would exhaust threads/fds and take the
     // whole gateway down (VG-17). Sized well above realistic concurrent-call load.
-    static constexpr std::size_t kMaxConcurrentSessions = 500;
+    static constexpr std::size_t kDefaultMaxConcurrentSessions = 500;
+
+    const std::size_t max_sessions_;
 
     mutable std::mutex mutex_;
     std::unordered_map<std::string, RtpSessionPtr> sessions_;

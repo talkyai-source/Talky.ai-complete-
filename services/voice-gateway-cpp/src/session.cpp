@@ -395,6 +395,11 @@ bool RtpSession::start(std::string& error) {
         tts_segments_.clear();
         next_tts_segment_id_ = 1;
         tts_last_stop_reason_ = "none";
+        tx_tts_send_inflight_ = false;
+        tx_inflight_generation_ = 0;
+        tts_current_utterance_id_.clear();
+        tts_retired_utterance_id_.clear();
+        tts_last_chunk_seq_ = -1;
         first_rtp_seen_ = false;
         playout_started_ = false;
         last_received_seq_valid_ = false;
@@ -526,6 +531,7 @@ SessionStatsSnapshot RtpSession::snapshot() const {
     snap.stt_floor_dropped_total = stt_floor_dropped_total_.load();
     snap.stt_probation_dropped_total = stt_probation_dropped_total_.load();
     snap.stt_restarts_committed_total = stt_restarts_committed_total_.load();
+    snap.tts_chunks_rejected_stale_total = tts_chunks_rejected_stale_total_.load();
 
     return snap;
 }
@@ -534,7 +540,9 @@ bool RtpSession::enqueue_tts_ulaw(
     const std::vector<uint8_t>& ulaw_audio,
     const bool clear_existing,
     std::size_t& queued_frames,
-    std::string& error) {
+    std::string& error,
+    const std::string& utterance_id,
+    const int64_t chunk_seq) {
     if (ulaw_audio.empty()) {
         error = "ulaw_audio is empty";
         return false;
@@ -553,6 +561,31 @@ bool RtpSession::enqueue_tts_ulaw(
 
     if (clear_existing) {
         clear_tts_queue_locked("clear_existing");
+    }
+
+    // VG-13 idempotency gate — only when the backend stamps an utterance id.
+    // clear_existing ran first, so a replacement submission retires the PREVIOUS
+    // utterance and then admits its own id here.
+    if (!utterance_id.empty()) {
+        if (utterance_id == tts_retired_utterance_id_) {
+            // A chunk of an utterance that was already interrupted/replaced —
+            // the delayed-delivery race that used to re-speak pre-barge-in audio.
+            tts_chunks_rejected_stale_total_.fetch_add(1);
+            error = "utterance_interrupted";
+            return false;
+        }
+        if (utterance_id != tts_current_utterance_id_) {
+            tts_current_utterance_id_ = utterance_id;
+            tts_last_chunk_seq_ = -1;
+        }
+        if (chunk_seq >= 0) {
+            if (chunk_seq <= tts_last_chunk_seq_) {
+                tts_chunks_rejected_stale_total_.fetch_add(1);
+                error = "stale_or_duplicate_chunk";
+                return false;
+            }
+            tts_last_chunk_seq_ = chunk_seq;
+        }
     }
 
     const std::size_t frame_count = ulaw_audio.size() / static_cast<std::size_t>(kPcmuTimestampStep);
@@ -606,17 +639,33 @@ bool RtpSession::enqueue_tts_ulaw(
 }
 
 bool RtpSession::interrupt_tts(const std::string& reason, std::size_t& dropped_frames, std::size_t& interrupted_segments) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     dropped_frames = tts_queue_.size();
     interrupted_segments = tts_segments_.size();
     clear_tts_queue_locked(reason.empty() ? "barge_in" : reason);
     queue_cv_.notify_all();  // watchdog shares the cv; see enqueue_tts_ulaw
+
+    // VG-24 send-completion barrier: the transmitter re-checks the generation
+    // under mutex_ before committing to a send, but the sendto() itself runs
+    // outside the lock — so without this wait a frame that passed its check
+    // just before the clear could still hit the wire AFTER this call returned.
+    // Wait (bounded; the commit->send window is microseconds) until no frame
+    // from a pre-clear generation is in that window. A frame enqueued AFTER the
+    // clear carries the bumped generation and must not be waited on.
+    queue_cv_.wait_for(lock, std::chrono::milliseconds(200), [this] {
+        return !tx_tts_send_inflight_ || tx_inflight_generation_ >= tts_generation_;
+    });
     return true;
 }
 
 void RtpSession::set_audio_callback(AudioCallback cb) {
     std::lock_guard<std::mutex> lock(audio_callback_mutex_);
     audio_callback_ = std::move(cb);
+}
+
+void RtpSession::set_audio_sink_finisher(std::function<void()> finisher) {
+    std::lock_guard<std::mutex> lock(audio_callback_mutex_);
+    audio_sink_finisher_ = std::move(finisher);
 }
 
 void RtpSession::fire_audio_callback(const std::vector<uint8_t>& pcmu_batch) {
@@ -918,6 +967,24 @@ void RtpSession::receiver_loop() {
     if (stt_reorder) {
         reorder_drain(std::chrono::steady_clock::now(), true);
     }
+    // Batch E: flush the partially-batched STT tail and drain the delivery sink
+    // (bounded deadline inside the finisher). Runs on this thread AFTER the last
+    // fire_audio_callback, so it races nothing; its runtime extends the stop()
+    // join by at most the finisher's own bound.
+    {
+        std::function<void()> finisher;
+        {
+            std::lock_guard<std::mutex> lk(audio_callback_mutex_);
+            finisher = audio_sink_finisher_;
+        }
+        if (finisher) {
+            try {
+                finisher();
+            } catch (...) {
+                // A sink-drain failure must never break teardown.
+            }
+        }
+    }
     } catch (...) {
         // Nothing in the loop is expected to throw (the callback is already
         // guarded; RtpPacket::parse's allocation is the only other source), but
@@ -1060,6 +1127,12 @@ void RtpSession::transmitter_loop() {
                 mark_tts_frame_dropped_locked(tts_segment_id);
                 continue;
             }
+            if (sending_tts) {
+                // Commit-to-send window opens: interrupt_tts's barrier waits for
+                // it to close before returning (VG-24 completion half).
+                tx_tts_send_inflight_ = true;
+                tx_inflight_generation_ = tts_gen;
+            }
             outbound = sequencer_.next_packet({}, 0);
         }
         constexpr std::size_t kRtpHeaderSize = 12;
@@ -1088,12 +1161,14 @@ void RtpSession::transmitter_loop() {
             sizeof(remote_addr));
 
         if (sent < 0) {
-            if (!running_.load()) {
-                break;
-            }
             if (sending_tts) {
                 std::lock_guard<std::mutex> lock(mutex_);
                 mark_tts_frame_dropped_locked(tts_segment_id);
+                tx_tts_send_inflight_ = false;  // barrier window closed (failed send)
+            }
+            queue_cv_.notify_all();  // release a waiting interrupt_tts barrier
+            if (!running_.load()) {
+                break;
             }
             tx_healthy_.store(false);
             request_stop("socket_error", false);
@@ -1110,7 +1185,11 @@ void RtpSession::transmitter_loop() {
             if (sending_tts) {
                 last_tts_sent_at_ = tx_now;  // arms the VG-06 underrun silence fill
                 mark_tts_frame_sent_locked(tts_segment_id);
+                tx_tts_send_inflight_ = false;  // barrier window closed (sent)
             }
+        }
+        if (sending_tts) {
+            queue_cv_.notify_all();  // release a waiting interrupt_tts barrier
         }
 
         maybe_send_rtcp_report(remote_addr, std::chrono::steady_clock::now());
@@ -1214,6 +1293,13 @@ void RtpSession::clear_tts_queue_locked(const std::string& reason) {
     // Invalidate any TTS frame the transmitter has already dequeued but not yet
     // sent, so a barge-in/replace/stop cannot leak one stale frame (VG-24).
     ++tts_generation_;
+    // Retire the active utterance (VG-13): any chunk still in flight over HTTP
+    // for it will be rejected by enqueue_tts_ulaw instead of being spoken.
+    if (!tts_current_utterance_id_.empty()) {
+        tts_retired_utterance_id_ = tts_current_utterance_id_;
+        tts_current_utterance_id_.clear();
+        tts_last_chunk_seq_ = -1;
+    }
     const bool had_tts_activity = !tts_queue_.empty() || !tts_segments_.empty();
     while (!tts_queue_.empty()) {
         const auto frame = tts_queue_.front();
@@ -1473,8 +1559,22 @@ void RtpSession::reset_jitter_buffer_locked() {
 // jitter_slots_, so any &jitter_slots_[index] the caller re-derives afterward
 // stays valid.
 void RtpSession::clear_all_jitter_slots_locked() {
+    // D-remainder accounting: the stranded frames cleared here were real received
+    // audio being discarded — count them as drops instead of vanishing silently.
+    // (A seq-rebase that preserved them is deliberately NOT attempted: with echo
+    // off in production this ring is vestigial (VG-23 moot), the frames are
+    // beyond the ring's representable window so any new base would be an
+    // arbitrary guess, and clear-all is the recovery path proven deadlock-free.)
+    uint64_t cleared = 0;
     for (auto& slot : jitter_slots_) {
+        if (slot.occupied) {
+            ++cleared;
+        }
         slot.occupied = false;
+    }
+    if (cleared > 0) {
+        jitter_buffer_overflow_drops_.fetch_add(cleared);
+        dropped_packets_.fetch_add(cleared);
     }
     jitter_buffer_size_ = 0;
     jitter_min_seq_valid_ = false;
