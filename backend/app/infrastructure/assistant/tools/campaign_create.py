@@ -21,6 +21,7 @@ one. There is deliberately no second creation code path to drift.
 """
 from __future__ import annotations
 
+import difflib
 import json
 import logging
 from datetime import datetime
@@ -134,6 +135,71 @@ async def _resolve_provider_and_voice(
     return {"provider": provider, "voice_id": chosen}
 
 
+def _norm_text(value: Any) -> str:
+    return " ".join(str(value or "").casefold().split())
+
+
+def _script_field(row: Dict[str, Any], key: str) -> Optional[str]:
+    cfg = row.get("script_config")
+    if isinstance(cfg, str):
+        try:
+            cfg = json.loads(cfg)
+        except (TypeError, ValueError):
+            cfg = None
+    value = cfg.get(key) if isinstance(cfg, dict) else None
+    return value if isinstance(value, str) else None
+
+
+# CRM-dedupe practice: fuzzy name similarity around 0.85-0.9 catches most
+# near-duplicates without flooding users with false positives.
+_SIMILAR_NAME_RATIO = 0.88
+
+
+def _find_duplicate(
+    rows: List[Any], *, name: str, company_name: str, persona: str
+) -> Optional[Dict[str, Any]]:
+    """Tiered, multi-field duplicate detection (warn — never block).
+
+    - "identical":    same normalized name AND company AND campaign type
+    - "same_name":    same normalized name, different company/type
+    - "similar_name": fuzzy name match (>= _SIMILAR_NAME_RATIO)
+    Retired campaigns (archived/deleted) are never compared against.
+    """
+    target = _norm_text(name)
+    if not target:
+        return None
+    best: Optional[tuple] = None
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        status = str(row.get("status") or "").casefold()
+        if status in {"archived", "deleted"}:
+            continue
+        existing = _norm_text(row.get("name"))
+        if not existing:
+            continue
+        if existing == target:
+            same_company = _norm_text(_script_field(row, "company_name")) == _norm_text(company_name)
+            same_persona = (_script_field(row, "persona_type") or "") == persona
+            match = "identical" if (same_company and same_persona) else "same_name"
+        elif difflib.SequenceMatcher(None, target, existing).ratio() >= _SIMILAR_NAME_RATIO:
+            match = "similar_name"
+        else:
+            continue
+        rank = {"identical": 3, "same_name": 2, "similar_name": 1}[match]
+        if best is None or rank > best[0]:
+            best = (
+                rank,
+                {
+                    "campaign_id": str(row.get("id")),
+                    "name": row.get("name"),
+                    "status": row.get("status"),
+                    "match": match,
+                },
+            )
+    return best[1] if best else None
+
+
 def _default_lead_gen_slots(
     goal: str, company_name: str, industry: str, services_description: str
 ) -> Dict[str, Any]:
@@ -177,6 +243,7 @@ async def create_campaign(
     tts_provider: Optional[str] = None,
     voice_id: Optional[str] = None,
     knowledge_driven: bool = False,
+    overwrite_campaign_id: Optional[str] = None,
     confirm: bool = False,
     conversation_id: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -225,6 +292,26 @@ async def create_campaign(
                 "lead-generation, customer-support, or a receptionist."
             )
         }
+
+    # Duplicate awareness — WARN, never block (CRM-dedupe best practice): a
+    # match decorates the preview so the HUMAN decides on the card between
+    # Create anyway / Overwrite existing / Cancel. Detection compares multiple
+    # fields (name + company + type, plus fuzzy name) and skips retired rows.
+    duplicate: Optional[Dict[str, Any]] = None
+    if not confirm:
+        try:
+            existing = (
+                db_client.table("campaigns")
+                .select("id, name, status, script_config")
+                .eq("tenant_id", tenant_id)
+                .execute()
+            )
+            rows = existing.data or []
+        except Exception:  # detection availability never blocks creation
+            rows = []
+        duplicate = _find_duplicate(
+            rows, name=name, company_name=company_name, persona=persona
+        )
 
     # --- assemble the persona's slot set -------------------------------------
     # customer_support / receptionist scripts need 9-11 factual slots (address,
@@ -318,13 +405,35 @@ async def create_campaign(
         note = "New campaign — not created yet. Review the full draft and press Create campaign (or Cancel)."
         if persona == "lead_gen":
             note += " Auto-filled defaults are included; everything can be edited after creation."
-        return {
+        out: Dict[str, Any] = {
             "preview": True,
             "campaigns": [diff],
             "note": note,
         }
+        if duplicate:
+            phrasing = {
+                "identical": (
+                    f"You already have this exact campaign — '{duplicate['name']}' "
+                    "for the same company and type"
+                ),
+                "same_name": f"A campaign named '{duplicate['name']}' already exists",
+                "similar_name": (
+                    f"A campaign with a very similar name already exists — '{duplicate['name']}'"
+                ),
+            }[duplicate["match"]]
+            out["duplicate"] = duplicate
+            out["warnings"] = [
+                f"{phrasing} (status: {duplicate.get('status') or 'unknown'}). "
+                "Choose Create anyway, Overwrite existing, or Cancel below."
+            ]
+            out["note"] = (
+                "Possible duplicate — ASK the user in one short sentence: create it "
+                "again anyway, overwrite the existing campaign with this draft, or "
+                "cancel? The card below shows all three buttons; do not pick for them."
+            )
+        return out
 
-    # --- apply: create the campaign (mirrors POST /campaigns/) ---------------
+    # --- apply: create OR overwrite (mirrors POST /campaigns/) ---------------
     insert_payload = {
         "tenant_id": tenant_id,
         "name": name,
@@ -339,21 +448,40 @@ async def create_campaign(
         "script_config": json.dumps(script_config),
     }
 
+    overwrite_id = (overwrite_campaign_id or "").strip()
     try:
-        response = db_client.table("campaigns").insert(insert_payload).execute()
+        if overwrite_id:
+            # Overwrite-existing chosen on the duplicate card: replace the
+            # existing campaign's definition with this draft (tenant-scoped;
+            # traceable via the audit row below).
+            update_payload = {k: v for k, v in insert_payload.items() if k != "tenant_id"}
+            response = (
+                db_client.table("campaigns")
+                .update(update_payload)
+                .eq("id", overwrite_id)
+                .eq("tenant_id", tenant_id)
+                .execute()
+            )
+        else:
+            response = db_client.table("campaigns").insert(insert_payload).execute()
     except Exception as exc:
-        logger.error("create_campaign: insert failed: %s", exc, exc_info=True)
+        logger.error("create_campaign: write failed: %s", exc, exc_info=True)
         return {"error": "Could not create the campaign. Please try again."}
 
     if getattr(response, "error", None):
-        logger.error("create_campaign: insert error: %s", response.error)
+        logger.error("create_campaign: write error: %s", response.error)
         return {"error": f"Could not create the campaign: {response.error}"}
     if not getattr(response, "data", None):
-        logger.error("create_campaign: insert returned no rows for tenant=%s name=%s", tenant_id, name)
+        logger.error(
+            "create_campaign: write returned no rows for tenant=%s name=%s overwrite=%s",
+            tenant_id,
+            name,
+            overwrite_id or "-",
+        )
         return {"error": "Could not create the campaign (no row returned)."}
 
     row = response.data[0]
-    new_id = str(row.get("id")) if isinstance(row, dict) else None
+    new_id = (str(row.get("id")) if isinstance(row, dict) else None) or (overwrite_id or None)
     diff["campaign_id"] = new_id or "new"
 
     # Audit log — same table/shape as start_campaign.
@@ -369,6 +497,7 @@ async def create_campaign(
                 "name": name,
                 "persona_type": persona,
                 "company_name": company_name,
+                "overwrote_campaign_id": overwrite_id or None,
             }),
             "output_data": json.dumps(
                 {"campaign_id": new_id, "voice_id": chosen_voice, "provider": provider}
@@ -378,12 +507,19 @@ async def create_campaign(
     except Exception as exc:  # pragma: no cover - audit is best-effort
         logger.warning("create_campaign: audit log failed: %s", exc)
 
+    if overwrite_id:
+        note = (
+            f"Updated the existing campaign with this draft — '{name}' now uses "
+            "the new goal, script, and settings. Contacts and knowledge were kept."
+        )
+    else:
+        note = (
+            f"Created the campaign '{name}'. It starts as a draft — you can add "
+            "contacts, upload knowledge, or change the voice next, then start it."
+        )
     return {
         "applied": True,
         "campaign_id": new_id,
         "campaigns": [diff],
-        "note": (
-            f"Created the campaign '{name}'. It starts as a draft — you can add "
-            "contacts, upload knowledge, or change the voice next, then start it."
-        ),
+        "note": note,
     }

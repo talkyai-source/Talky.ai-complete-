@@ -25,7 +25,12 @@ _CONVO_AWARE = {"send_email", "send_sms", "initiate_call", "start_campaign", "re
 # The Groq schemas accept ["boolean", "string"] for these so validation can't
 # reject the call; this funnel normalises them exactly once, with the same
 # defaults the schemas advertise.
-_BOOL_ARGS = {"confirm": False, "unread_only": False, "only_leads": False, "today_only": True}
+_BOOL_ARGS = {
+    "confirm": False,
+    "unread_only": False,
+    "only_leads": False,
+    "today_only": True,
+}
 
 
 async def dispatch_tool(

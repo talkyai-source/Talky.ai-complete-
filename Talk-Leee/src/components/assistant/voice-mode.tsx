@@ -203,14 +203,17 @@ export function AssistantVoiceMode({
     }, []);
 
     // --- proposal actions --------------------------------------------------
-    const sendProposalAction = useCallback((proposalId: string, action: "apply" | "reject") => {
+    const sendProposalAction = useCallback((proposalId: string, action: "apply" | "reject" | "overwrite") => {
         const ws = wsRef.current;
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
         try {
             ws.send(
                 JSON.stringify({
-                    type: action === "apply" ? "apply_proposal" : "reject_proposal",
+                    type: action === "reject" ? "reject_proposal" : "apply_proposal",
                     proposal_id: proposalId,
+                    // Overwrite-existing on a duplicate card; the server
+                    // resolves the target id from its stored proposal.
+                    ...(action === "overwrite" ? { mode: "overwrite" } : {}),
                 }),
             );
         } catch {
@@ -358,6 +361,7 @@ export function AssistantVoiceMode({
                     warnings?: string[];
                     changes?: DiffChange[];
                     campaigns?: ProposalCampaign[];
+                    duplicate?: ProposalData["duplicate"];
                     applied?: boolean;
                     error?: string;
                 };
@@ -442,6 +446,10 @@ export function AssistantVoiceMode({
                                     warnings: Array.isArray(m.warnings) ? m.warnings : undefined,
                                     changes: Array.isArray(m.changes) ? m.changes : undefined,
                                     campaigns: Array.isArray(m.campaigns) ? m.campaigns : undefined,
+                                    duplicate:
+                                        m.duplicate && typeof m.duplicate === "object"
+                                            ? (m.duplicate as ProposalData["duplicate"])
+                                            : undefined,
                                     status: "pending",
                                 },
                             },
@@ -528,6 +536,7 @@ export function AssistantVoiceMode({
                                     proposal={msg.proposal}
                                     onApply={(id) => sendProposalAction(id, "apply")}
                                     onReject={(id) => sendProposalAction(id, "reject")}
+                                    onOverwrite={(id) => sendProposalAction(id, "overwrite")}
                                 />
                             </div>
                         </div>

@@ -414,10 +414,12 @@ async def assistant_chat(
                 try:
                     from app.infrastructure.assistant.streaming import stream_assistant_reply
 
-                    # Last 10 messages (incl. the just-added user turn) as context.
+                    # Last 40 messages (incl. the just-added user turn) as context —
+                    # matches the voice path. The old 10-message window forgot
+                    # multi-step flows (e.g. campaign slot answers) after 5 turns.
                     chat_messages = [
                         {"role": m.get("role", "user"), "content": m.get("content", "")}
-                        for m in messages_history[-10:]
+                        for m in messages_history[-40:]
                     ]
 
                     # Streaming bubble state. The model may emit a short text
@@ -545,6 +547,7 @@ async def assistant_chat(
                                 "warnings": proposal["warnings"],
                                 "changes": proposal["changes"],
                                 "campaigns": proposal["campaigns"],
+                                "duplicate": proposal.get("duplicate"),
                             })
                             # Record a marker so reloading the thread stays coherent.
                             messages_history.append({
@@ -604,6 +607,13 @@ async def assistant_chat(
                 try:
                     from app.infrastructure.assistant.tools.dispatch import dispatch_tool
                     apply_args = {**proposal["args"], "confirm": True}
+                    # Overwrite-existing chosen on a duplicate card: resolve the
+                    # target id from the SERVER-stored proposal (never from a
+                    # client-echoed id) and switch the tool to update-in-place.
+                    if data.get("mode") == "overwrite" and proposal["tool"] == "create_campaign":
+                        dup = proposal.get("duplicate") or {}
+                        if dup.get("campaign_id"):
+                            apply_args["overwrite_campaign_id"] = dup["campaign_id"]
                     result = await dispatch_tool(
                         proposal["tool"], tenant_id, db_client,
                         current_conversation_id, apply_args,

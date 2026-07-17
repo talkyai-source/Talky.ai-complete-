@@ -73,6 +73,11 @@ def store_proposal(
         "campaigns": result.get("campaigns") or [],
         "note": result.get("note") or "",
         "warnings": result.get("warnings") or [],
+        # Duplicate-campaign info (create_campaign): lets the card offer
+        # Create anyway / Overwrite existing / Cancel, and lets apply-with-
+        # mode=overwrite resolve the target id SERVER-side (never trusting a
+        # client-echoed campaign id).
+        "duplicate": result.get("duplicate"),
         "tenant_id": tenant_id,
         "conversation_id": conversation_id,
     }

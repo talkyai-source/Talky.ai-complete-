@@ -278,11 +278,16 @@ ACTION_TOOLS = {
             "services_description) — these are the ONLY questions; never "
             "invent extras. The rest of the script is auto-filled with "
             "editable defaults shown in the draft; support/receptionist "
-            "campaigns are created knowledge-driven automatically. The moment "
-            "the last field is known, immediately call with confirm=False — "
-            "the card shows the FULL DRAFT with Create campaign / Cancel "
-            "buttons; confirm=True actually creates it. Voice defaults to the "
-            "tenant's configured voice — do not ask the user for a voice id."
+            "campaigns are created knowledge-driven automatically. Every NEW "
+            "campaign request starts a FRESH collection — never reuse answers "
+            "from a previous campaign in this conversation. The moment the "
+            "last field is known, immediately call with confirm=False — the "
+            "card shows the FULL DRAFT with Create campaign / Cancel buttons; "
+            "confirm=True actually creates it. If the preview carries a "
+            "duplicate warning, say so in one sentence — the card offers "
+            "Create anyway / Overwrite existing / Cancel and the user's "
+            "buttons decide. Voice defaults to the tenant's configured voice "
+            "— do not ask the user for a voice id."
         ),
         "input_schema": None,
     },

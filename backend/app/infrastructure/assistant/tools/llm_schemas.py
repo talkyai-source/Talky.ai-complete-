@@ -299,11 +299,18 @@ GROQ_TOOL_SCHEMAS = [
                 "are created knowledge-driven automatically — no extra questions. If "
                 "the user volunteers extra detail, put it in additional_instructions. "
                 "Do NOT ask for a voice — it defaults to the tenant's configured "
-                "voice. The moment the last field is known you MUST immediately call "
-                "this tool with confirm=false (a JSON boolean, not a quoted string) — "
-                "the card shows the FULL DRAFT with Create campaign / Cancel buttons; "
-                "never describe the draft in words instead of calling. The user's "
-                "Create button re-calls with confirm=true."
+                "voice. Every NEW campaign request starts a FRESH collection: never "
+                "reuse answers given for a PREVIOUS campaign earlier in this "
+                "conversation — re-ask from the name onward. The moment the last "
+                "field is known you MUST immediately call this tool with "
+                "confirm=false (a JSON boolean, not a quoted string) — the card "
+                "shows the FULL DRAFT with Create campaign / Cancel buttons; never "
+                "describe the draft in words instead of calling. The user's Create "
+                "button re-calls with confirm=true. If the preview includes a "
+                "duplicate warning, tell the user in ONE short sentence that a "
+                "matching campaign already exists and that the card offers Create "
+                "anyway / Overwrite existing / Cancel — the buttons decide, never "
+                "you."
             ),
             "parameters": {
                 "type": "object",

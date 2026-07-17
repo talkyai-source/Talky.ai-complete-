@@ -26,13 +26,14 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Loader2, MessageCircle, Mic, Send, X } from "lucide-react";
+import { Bot, History, Loader2, MessageCircle, Mic, Plus, Send, X } from "lucide-react";
 import { apiBaseUrl } from "@/lib/env";
 import { useAccessToken } from "@/lib/auth-hooks";
 import { useAuth } from "@/lib/auth-context";
 import { getAssistantWsToken } from "@/lib/assistant-model-api";
 import { AssistantModelPicker } from "./assistant-model-picker";
 import { AssistantVoiceMode } from "./voice-mode";
+import { ConversationHistory, type StoredMessage } from "./conversation-history";
 import { MarkdownMessage } from "./markdown-message";
 import {
     EditProposalCard,
@@ -91,6 +92,13 @@ function uid(): string {
     return `m_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+const GREETING_TEXT =
+    "Hi — I can help with your campaigns, contacts, calls, meetings and more. Try “Show me today's calls”, “Start the Q1 campaign”, or “Book a 30-min call with Daisy tomorrow at 3pm”.";
+
+function greetingMessage(): ChatMessage {
+    return { id: uid(), role: "system", content: GREETING_TEXT, ts: Date.now() };
+}
+
 // Floating assistant is anchored to the bottom-right of the viewport.
 // Right-anchoring removes the previous sidebar-overlap problem entirely
 // — no offset prop or sidebar-state subscription is needed. The header's
@@ -104,15 +112,14 @@ export function FloatingAssistant() {
     const [voiceMode, setVoiceMode] = useState(false);
     const [status, setStatus] = useState<WsStatus>("idle");
     const [typing, setTyping] = useState(false);
-    const [messages, setMessages] = useState<ChatMessage[]>([
-        {
-            id: uid(),
-            role: "system",
-            content:
-                "Hi — I can help with your campaigns, contacts, calls, meetings and more. Try “Show me today's calls”, “Start the Q1 campaign”, or “Book a 30-min call with Daisy tomorrow at 3pm”.",
-            ts: Date.now(),
-        },
-    ]);
+    const [messages, setMessages] = useState<ChatMessage[]>([greetingMessage()]);
+    // Conversation-thread management (proper per-conversation history):
+    // showHistory swaps the body for the conversation list; conversationEpoch
+    // is bumped whenever the active thread changes so wsUrl re-memoizes and
+    // the open/close effect re-binds the socket to the new conversation —
+    // the same reconnect chain a token rotation uses.
+    const [showHistory, setShowHistory] = useState(false);
+    const [conversationEpoch, setConversationEpoch] = useState(0);
     const [input, setInput] = useState("");
     const wsRef = useRef<WebSocket | null>(null);
     const conversationIdRef = useRef<string | null>(null);
@@ -154,13 +161,17 @@ export function FloatingAssistant() {
         // accessToken is in the deps below (not interpolated into the
         // URL) so a token rotation invalidates the memo identity and
         // triggers a reconnect with the new credential set.
+        // conversationEpoch does the same when the user switches threads
+        // (New chat / History open) so the socket re-binds to the new
+        // conversation_id read from the ref.
         void accessToken;
+        void conversationEpoch;
         if (!user) return null;
         const params = new URLSearchParams();
         if (conversationIdRef.current) params.set("conversation_id", conversationIdRef.current);
         const qs = params.toString();
         return `${resolveWsBase()}/assistant/chat${qs ? `?${qs}` : ""}`;
-    }, [user, accessToken]);
+    }, [user, accessToken, conversationEpoch]);
 
     const isAuthed = wsUrl !== null;
 
@@ -169,6 +180,40 @@ export function FloatingAssistant() {
     // redirect returns them to the hero instead of /dashboard. Preserve
     // the current URL as `next` so we land back exactly where the user
     // was chatting (or "/" when called from the homepage).
+    // Start a fresh thread: clear the id BEFORE bumping the epoch so the
+    // re-memoized wsUrl omits conversation_id and the backend opens a new
+    // conversation row on first persist.
+    const startNewConversation = useCallback(() => {
+        conversationIdRef.current = null;
+        setMessages([greetingMessage()]);
+        setShowHistory(false);
+        setVoiceMode(false);
+        setConversationEpoch((e) => e + 1);
+    }, []);
+
+    // Resume a stored thread: rehydrate the transcript locally and re-bind
+    // the socket so the backend loads the same history for the model.
+    const openConversation = useCallback((id: string, stored: StoredMessage[]) => {
+        conversationIdRef.current = id;
+        const mapped: ChatMessage[] = stored
+            .filter(
+                (m) =>
+                    (m?.role === "user" || m?.role === "assistant") &&
+                    typeof m?.content === "string" &&
+                    m.content.length > 0,
+            )
+            .map((m) => ({
+                id: uid(),
+                role: m.role as "user" | "assistant",
+                content: m.content as string,
+                ts: m.timestamp ? Date.parse(m.timestamp) || Date.now() : Date.now(),
+            }));
+        setMessages(mapped.length ? mapped : [greetingMessage()]);
+        setShowHistory(false);
+        setVoiceMode(false);
+        setConversationEpoch((e) => e + 1);
+    }, []);
+
     const goToSignIn = useCallback(() => {
         if (typeof window === "undefined") return;
         const currentPath = `${window.location.pathname}${window.location.search}`;
@@ -306,6 +351,7 @@ export function FloatingAssistant() {
                 warnings?: string[];
                 changes?: DiffChange[];
                 campaigns?: ProposalCampaign[];
+                duplicate?: ProposalData["duplicate"];
                 applied?: boolean;
                 error?: string;
             };
@@ -392,6 +438,10 @@ export function FloatingAssistant() {
                                 warnings: Array.isArray(payload.warnings) ? payload.warnings : undefined,
                                 changes: Array.isArray(payload.changes) ? payload.changes : undefined,
                                 campaigns: Array.isArray(payload.campaigns) ? payload.campaigns : undefined,
+                                duplicate:
+                                    payload.duplicate && typeof payload.duplicate === "object"
+                                        ? (payload.duplicate as ProposalData["duplicate"])
+                                        : undefined,
                                 status: "pending",
                             },
                         },
@@ -543,7 +593,7 @@ export function FloatingAssistant() {
     }, [connect, input]);
 
     const sendProposalAction = useCallback(
-        (proposalId: string, action: "apply" | "reject") => {
+        (proposalId: string, action: "apply" | "reject" | "overwrite") => {
             const ws = wsRef.current;
             if (!ws || ws.readyState !== WebSocket.OPEN) {
                 // Socket dropped — the proposal lives server-side (in-process),
@@ -560,12 +610,15 @@ export function FloatingAssistant() {
                 connect();
                 return;
             }
-            if (action === "apply") setTyping(true);
+            if (action !== "reject") setTyping(true);
             try {
                 ws.send(
                     JSON.stringify({
-                        type: action === "apply" ? "apply_proposal" : "reject_proposal",
+                        type: action === "reject" ? "reject_proposal" : "apply_proposal",
                         proposal_id: proposalId,
+                        // Overwrite-existing on a duplicate card; the server
+                        // resolves the target id from its stored proposal.
+                        ...(action === "overwrite" ? { mode: "overwrite" } : {}),
                     }),
                 );
             } catch {
@@ -639,6 +692,33 @@ export function FloatingAssistant() {
                         {isAuthed && (
                             <button
                                 type="button"
+                                onClick={() => setShowHistory((v) => !v)}
+                                aria-label="Conversation history"
+                                aria-pressed={showHistory}
+                                title="Conversation history"
+                                className={`rounded-md p-1.5 transition-colors ${
+                                    showHistory
+                                        ? "bg-cyan-600 text-white hover:bg-cyan-500"
+                                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                                }`}
+                            >
+                                <History className="h-4 w-4" />
+                            </button>
+                        )}
+                        {isAuthed && (
+                            <button
+                                type="button"
+                                onClick={startNewConversation}
+                                aria-label="New conversation"
+                                title="New conversation"
+                                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                            >
+                                <Plus className="h-4 w-4" />
+                            </button>
+                        )}
+                        {isAuthed && (
+                            <button
+                                type="button"
                                 onClick={() => setVoiceMode((v) => !v)}
                                 aria-label={voiceMode ? "Switch to text chat" : "Talk to the assistant"}
                                 aria-pressed={voiceMode}
@@ -669,6 +749,11 @@ export function FloatingAssistant() {
                             onConversationId={(id) => {
                                 conversationIdRef.current = id;
                             }}
+                        />
+                    ) : showHistory ? (
+                        <ConversationHistory
+                            activeId={conversationIdRef.current}
+                            onOpen={openConversation}
                         />
                     ) : (
                     <>
@@ -743,7 +828,7 @@ function MessageRow({
     onProposalAction,
 }: {
     msg: ChatMessage;
-    onProposalAction: (id: string, action: "apply" | "reject") => void;
+    onProposalAction: (id: string, action: "apply" | "reject" | "overwrite") => void;
 }) {
     if (msg.proposal) {
         return (
@@ -753,6 +838,7 @@ function MessageRow({
                         proposal={msg.proposal}
                         onApply={(id) => onProposalAction(id, "apply")}
                         onReject={(id) => onProposalAction(id, "reject")}
+                        onOverwrite={(id) => onProposalAction(id, "overwrite")}
                     />
                 </div>
             </div>

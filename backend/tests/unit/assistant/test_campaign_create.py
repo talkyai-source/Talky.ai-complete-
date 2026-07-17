@@ -90,24 +90,127 @@ async def test_support_campaign_is_knowledge_driven_with_five_fields():
     assert "Knowledge-driven" in fields["content source"]
 
 
+class _ExistingCampaignsDB:
+    """Read-only stub: SELECTs on campaigns return the given rows."""
+
+    def __init__(self, rows):
+        self._rows = list(rows)
+
+    def table(self, _name: str):
+        rows = self._rows
+
+        class _Query:
+            def select(self, *_a, **_k):
+                return self
+
+            def eq(self, *_a, **_k):
+                return self
+
+            def execute(self):
+                return SimpleNamespace(data=rows, error=None)
+
+        return _Query()
+
+
+def _campaign_row(name, *, company="AI flux", persona="lead_gen", status="draft", cid="c-1"):
+    import json
+
+    return {
+        "id": cid,
+        "name": name,
+        "status": status,
+        "script_config": json.dumps({"company_name": company, "persona_type": persona}),
+    }
+
+
+_LEAD_GEN_EXTRAS = dict(
+    industry="the hair industry",
+    services_description="AI area estimation services",
+)
+
+
+@pytest.mark.asyncio
+async def test_identical_duplicate_warns_but_never_blocks():
+    db = _ExistingCampaignsDB([_campaign_row("ai ESTIMATION")])
+    result = await create_campaign("t1", db, **_CORE, **_LEAD_GEN_EXTRAS)
+
+    assert result.get("preview") is True, result
+    assert result["duplicate"]["match"] == "identical"
+    assert result["duplicate"]["campaign_id"] == "c-1"
+    assert result["warnings"]
+    assert "Overwrite" in result["warnings"][0]
+
+
+@pytest.mark.asyncio
+async def test_same_name_different_company_is_weaker_match():
+    db = _ExistingCampaignsDB([_campaign_row("AI estimation", company="Other Co")])
+    result = await create_campaign("t1", db, **_CORE, **_LEAD_GEN_EXTRAS)
+
+    assert result.get("preview") is True
+    assert result["duplicate"]["match"] == "same_name"
+
+
+@pytest.mark.asyncio
+async def test_fuzzy_name_match_is_detected():
+    db = _ExistingCampaignsDB([_campaign_row("AI estimations")])
+    result = await create_campaign("t1", db, **_CORE, **_LEAD_GEN_EXTRAS)
+
+    assert result.get("preview") is True
+    assert result["duplicate"]["match"] == "similar_name"
+
+
+@pytest.mark.asyncio
+async def test_archived_campaigns_are_never_flagged_as_duplicates():
+    db = _ExistingCampaignsDB([_campaign_row("AI estimation", status="archived")])
+    result = await create_campaign("t1", db, **_CORE, **_LEAD_GEN_EXTRAS)
+
+    assert result.get("preview") is True
+    assert "duplicate" not in result
+
+
+@pytest.mark.asyncio
+async def test_unrelated_name_produces_no_duplicate():
+    db = _ExistingCampaignsDB([_campaign_row("Winter promo")])
+    result = await create_campaign("t1", db, **_CORE, **_LEAD_GEN_EXTRAS)
+
+    assert result.get("preview") is True
+    assert "duplicate" not in result
+
+
 class _InsertCaptureDB:
-    """Captures insert payloads per table; every execute returns one row."""
+    """Captures insert/update payloads per table; every execute returns one row."""
 
     def __init__(self):
         self.payloads: dict[str, list] = {}
+        self.updates: dict[str, list] = {}
 
     def table(self, name: str):
         outer = self
 
+        class _Query:
+            def eq(self_q, *_a, **_k):
+                return self_q
+
+            def select(self_q, *_a, **_k):
+                return self_q
+
+            def execute(self_q):
+                return SimpleNamespace(data=[{"id": "camp-1"}], error=None)
+
         class _Table:
             def insert(self, payload):
                 outer.payloads.setdefault(name, []).append(payload)
-
-                class _Query:
-                    def execute(self_q):
-                        return SimpleNamespace(data=[{"id": "camp-1"}], error=None)
-
                 return _Query()
+
+            def update(self, payload):
+                outer.updates.setdefault(name, []).append(payload)
+                return _Query()
+
+            def select(self, *_a, **_k):
+                q = _Query()
+                # duplicate-detection SELECT: no existing campaigns
+                q.execute = lambda: SimpleNamespace(data=[], error=None)  # type: ignore[method-assign]
+                return q
 
         return _Table()
 
@@ -135,6 +238,31 @@ async def test_confirmed_create_binds_jsonb_columns_as_json_text():
     audit_payload = db.payloads["assistant_actions"][0]
     assert isinstance(audit_payload["input_data"], str)
     assert isinstance(audit_payload["output_data"], str)
+
+
+@pytest.mark.asyncio
+async def test_overwrite_mode_updates_existing_campaign_instead_of_inserting():
+    db = _InsertCaptureDB()
+    result = await create_campaign(
+        "t1",
+        db,
+        **_CORE,
+        **_LEAD_GEN_EXTRAS,
+        confirm=True,
+        overwrite_campaign_id="camp-old",
+    )
+
+    assert result.get("applied") is True, result
+    assert "Updated the existing campaign" in result["note"]
+    # the campaign write went through UPDATE, not INSERT
+    assert "campaigns" in db.updates and len(db.updates["campaigns"]) == 1
+    assert "campaigns" not in db.payloads or db.payloads["campaigns"] == []
+    assert "tenant_id" not in db.updates["campaigns"][0]
+    # the audit insert still records the overwrite target
+    import json as _json
+
+    audit = db.payloads["assistant_actions"][0]
+    assert _json.loads(audit["input_data"])["overwrote_campaign_id"] == "camp-old"
 
 
 @pytest.mark.asyncio

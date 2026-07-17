@@ -476,6 +476,7 @@ async def _run_voice_session(
                         "warnings": proposal["warnings"],
                         "changes": proposal["changes"],
                         "campaigns": proposal["campaigns"],
+                        "duplicate": proposal.get("duplicate"),
                     })
                     messages_history.append({
                         "role": "assistant",
@@ -562,7 +563,7 @@ async def _run_voice_session(
             except (asyncio.CancelledError, Exception):
                 pass
 
-    async def apply_proposal(proposal_id: Optional[str]) -> None:
+    async def apply_proposal(proposal_id: Optional[str], mode: Optional[str] = None) -> None:
         proposal = get_proposal(proposal_id, tenant_id) if isinstance(proposal_id, str) else None
         if not proposal:
             await send_json({"type": "proposal_result", "proposal_id": proposal_id, "applied": False,
@@ -571,9 +572,16 @@ async def _run_voice_session(
         try:
             from app.infrastructure.assistant.tools.dispatch import dispatch_tool
 
+            apply_args = {**proposal["args"], "confirm": True}
+            # Overwrite-existing chosen on a duplicate card: resolve the target
+            # id from the SERVER-stored proposal, never a client-echoed id.
+            if mode == "overwrite" and proposal["tool"] == "create_campaign":
+                dup = proposal.get("duplicate") or {}
+                if dup.get("campaign_id"):
+                    apply_args["overwrite_campaign_id"] = dup["campaign_id"]
             result = await dispatch_tool(
                 proposal["tool"], tenant_id, db_client, current_conversation_id,
-                {**proposal["args"], "confirm": True},
+                apply_args,
             )
             applied = (
                 isinstance(result, dict)
@@ -650,7 +658,7 @@ async def _run_voice_session(
             if mtype == "ping":
                 await send_json({"type": "pong"})
             elif mtype == "apply_proposal":
-                await apply_proposal(data.get("proposal_id"))
+                await apply_proposal(data.get("proposal_id"), data.get("mode"))
             elif mtype == "reject_proposal":
                 pid = data.get("proposal_id")
                 if isinstance(pid, str):
