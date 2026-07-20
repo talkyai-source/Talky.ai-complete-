@@ -53,11 +53,30 @@ def test_enter_capture_builds_relaxed_configure():
 
 
 def test_reset_capture_restores_session_defaults():
+    # eager EOT disabled for this session (no eager_eot_threshold in config,
+    # so self._eager_eot_threshold is a *legitimate* None). Regression guard
+    # for F-04(e): reset_capture_mode must still send an explicit
+    # eager_eot_threshold (== eot_threshold, i.e. disabled) rather than
+    # silently dropping the key and leaving the live connection stuck at
+    # capture mode's relaxed 0.9 threshold forever.
     p = _init(eot_threshold=0.6, eot_timeout_ms=800)
+    assert p._eager_eot_threshold is None
     p.reset_capture_mode("call-1")
     th = p._pending_config["call-1"]["thresholds"]
     assert th["eot_timeout_ms"] == 800
     assert th["eot_threshold"] == 0.6
+    assert "eager_eot_threshold" in th
+    assert th["eager_eot_threshold"] == 0.6
+
+
+def test_reset_capture_restores_real_eager_threshold():
+    # eager EOT enabled for this session -> reset_capture_mode must pass the
+    # original float through unchanged.
+    p = _init(eot_threshold=0.6, eot_timeout_ms=800, eager_eot_threshold=0.5)
+    assert p._eager_eot_threshold == 0.5
+    p.reset_capture_mode("call-1")
+    th = p._pending_config["call-1"]["thresholds"]
+    assert th["eager_eot_threshold"] == 0.5
 
 
 def test_request_configure_noop_without_call_id():
@@ -112,3 +131,47 @@ def test_controller_silent_when_unsupported():
     # provider with no capture methods -> no crash, no state
     capture_mode.maybe_enter(object(), "c3", "What's your email?")
     assert "c3" not in capture_mode._active_calls
+
+
+# ── F-04b: post-failover capture mode must target _active, not the ──
+# ── orphaned _primary. ───────────────────────────────────────────────
+def test_controller_targets_active_after_failover():
+    """After a mid-call STT failover, _active points at the secondary
+    while _primary is orphaned. Capture mode must follow _active."""
+    capture_mode.clear("c4")
+
+    class _Resilient:
+        def __init__(self, primary, secondary):
+            self._primary = primary
+            self._secondary = secondary
+            self._active = primary
+
+    primary = _FakeFlux()
+    secondary = _FakeFlux()
+    wrapped = _Resilient(primary, secondary)
+    wrapped._active = wrapped._secondary  # simulate post-failover state
+
+    capture_mode.maybe_enter(wrapped, "c4", "What's your email?")
+    assert secondary.entered == ["c4"]
+    assert primary.entered == []
+
+
+def test_controller_no_op_when_active_lacks_capture_mode():
+    """_active is a Nova-like fake with no enter_capture_mode, and no
+    other candidate (primary included) supports it either. Per the
+    documented contract, this must be a silent no-op — no exception,
+    no state added — NOT a fall-through to an unrelated provider."""
+    capture_mode.clear("c5")
+
+    class _NovaLike:
+        pass
+
+    class _Resilient:
+        def __init__(self, primary, active):
+            self._primary = primary
+            self._active = active
+
+    wrapped = _Resilient(_NovaLike(), _NovaLike())
+
+    capture_mode.maybe_enter(wrapped, "c5", "What's your email?")
+    assert "c5" not in capture_mode._active_calls

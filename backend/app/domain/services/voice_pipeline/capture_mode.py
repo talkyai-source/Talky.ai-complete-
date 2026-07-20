@@ -52,7 +52,13 @@ def _flux(provider: Any) -> Any:
     stt_provider may be DeepgramFlux directly, or a ResilientSTTProvider
     wrapping it. Returns the object exposing enter/reset, or None.
     """
-    for obj in (provider, getattr(provider, "_primary", None), getattr(provider, "primary", None)):
+    for obj in (
+        provider,
+        getattr(provider, "_active", None),
+        getattr(provider, "active", None),
+        getattr(provider, "_primary", None),
+        getattr(provider, "primary", None),
+    ):
         if obj is not None and hasattr(obj, "enter_capture_mode"):
             return obj
     return None

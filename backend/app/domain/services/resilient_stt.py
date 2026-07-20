@@ -167,6 +167,23 @@ class ResilientSTTProvider(STTProvider):
         if primary_pre is not None:
             await primary_pre(call_id)
 
+    async def mute(self, call_id: str) -> None:
+        """Forward mute to whichever provider is live right now. Read
+        `self._active` at call time (not cached) so this follows a
+        mid-call failover instead of muting an orphaned provider."""
+        fn = getattr(self._active, "mute", None)
+        if fn is not None:
+            await fn(call_id)
+
+    async def unmute(self, call_id: str) -> None:
+        fn = getattr(self._active, "unmute", None)
+        if fn is not None:
+            await fn(call_id)
+
+    def is_muted(self, call_id: str) -> bool:
+        fn = getattr(self._active, "is_muted", None)
+        return bool(fn(call_id)) if fn is not None else False
+
     async def stream_transcribe(
         self,
         audio_stream: AsyncIterator[AudioChunk],
@@ -182,16 +199,14 @@ class ResilientSTTProvider(STTProvider):
         """
         policy = self._policy
         buffer = _ReplayBuffer(capacity_ms=policy.audio_buffer_ms)
-        chosen = self._active
 
-        # Pre-choose secondary if the circuit is open on the primary.
-        if chosen is self._primary and self._breaker.state.value == "open" and self._secondary:
-            logger.info(
-                "resilient_stt_primary_circuit_open — starting on secondary",
-                extra={"call_id": call_id},
-            )
-            chosen = self._secondary
-            self._active = self._secondary
+        # Decide the starting provider for THIS stream fresh, every call — never
+        # inherit self._active from a prior stream_transcribe() on this wrapper.
+        # self._breaker (failure/success counters, CLOSED/OPEN/HALF_OPEN state) is
+        # UNCHANGED and stays shared/process-lifetime — a genuinely-down primary
+        # stays deprioritised via the breaker, not via a sticky _active.
+        self._active = self._primary
+        chosen = self._primary
 
         async def _tee_audio() -> AsyncIterator[AudioChunk]:
             """Pass-through that also populates the replay buffer."""

@@ -210,6 +210,143 @@ async def test_stt_circuit_open_skips_primary():
     assert primary.stream_calls == 0
 
 
+class _FlakyOnceSTT(STTProvider):
+    """Raises on the FIRST stream_transcribe call only; succeeds after."""
+
+    def __init__(self, name: str, outputs: list[str]):
+        self._name = name
+        self._outputs = outputs
+        self.stream_calls = 0
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    async def initialize(self, config: dict) -> None:
+        pass
+
+    async def cleanup(self) -> None:
+        pass
+
+    async def stream_transcribe(
+        self,
+        audio_stream: AsyncIterator[AudioChunk],
+        language: str = "en",
+        context: Optional[str] = None,
+        call_id: Optional[str] = None,
+        on_eager_end_of_turn: Optional[Callable[[str], None]] = None,
+        on_barge_in: Optional[Callable[[], None]] = None,
+    ) -> AsyncIterator[TranscriptChunk]:
+        self.stream_calls += 1
+        if self.stream_calls == 1:
+            raise RuntimeError("ws dropped (first attempt only)")
+        async for chunk in audio_stream:
+            pass
+        for text in self._outputs:
+            yield TranscriptChunk(text=text, is_final=True)
+
+
+@pytest.mark.asyncio
+async def test_stt_ask_ai_singleton_retries_primary_on_next_stream():
+    """F-04c: a cached wrapper instance (ask-ai path) must re-attempt
+    primary on the NEXT stream_transcribe() call even though the prior
+    call failed over to secondary — it must not stay pinned forever."""
+    primary = _FlakyOnceSTT("primary", ["from-primary"])
+    secondary = _FakeSTT("secondary", ["from-secondary"])
+    wrapper = ResilientSTTProvider(primary, secondary)
+
+    results1 = await _drain(wrapper.stream_transcribe(_audio_stream()))
+    assert [r.text for r in results1] == ["from-secondary"]
+    assert primary.stream_calls == 1
+    assert secondary.stream_calls == 1
+
+    results2 = await _drain(wrapper.stream_transcribe(_audio_stream()))
+    assert [r.text for r in results2] == ["from-primary"]
+    assert primary.stream_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_stt_ask_ai_singleton_respects_recovery_window():
+    """While the breaker is genuinely OPEN, a fresh stream still goes
+    straight to secondary (no wasted primary attempt). Once the
+    recovery window elapses, the next stream re-attempts primary."""
+    primary = _FakeSTT("primary", ["recovered"])
+    secondary = _FakeSTT("secondary", ["direct-to-secondary"])
+    wrapper = ResilientSTTProvider(
+        primary, secondary,
+        policy=ReconnectPolicy(failure_threshold=1, recovery_timeout_seconds=0.05),
+    )
+    import time as _t
+    wrapper._breaker._state = __import__(
+        "app.utils.resilience", fromlist=["CircuitState"],
+    ).CircuitState.OPEN
+    wrapper._breaker._last_failure_time = _t.monotonic()
+
+    results1 = await _drain(wrapper.stream_transcribe(_audio_stream()))
+    assert [r.text for r in results1] == ["direct-to-secondary"]
+    assert primary.stream_calls == 0
+
+    await asyncio.sleep(0.06)
+
+    results2 = await _drain(wrapper.stream_transcribe(_audio_stream()))
+    assert [r.text for r in results2] == ["recovered"]
+    assert primary.stream_calls == 1
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Mute/unmute forwarding
+# ──────────────────────────────────────────────────────────────────────────
+
+class _FakeMuteSTT(_FakeSTT):
+    def __init__(self, name: str):
+        super().__init__(name, [])
+        self.mute_calls: list[str] = []
+        self.unmute_calls: list[str] = []
+        self._muted: set[str] = set()
+
+    async def mute(self, call_id: str) -> None:
+        self.mute_calls.append(call_id)
+        self._muted.add(call_id)
+
+    async def unmute(self, call_id: str) -> None:
+        self.unmute_calls.append(call_id)
+        self._muted.discard(call_id)
+
+    def is_muted(self, call_id: str) -> bool:
+        return call_id in self._muted
+
+
+@pytest.mark.asyncio
+async def test_mute_forwards_to_active_and_follows_failover():
+    primary = _FakeMuteSTT("primary")
+    secondary = _FakeMuteSTT("secondary")
+    wrapper = ResilientSTTProvider(primary, secondary)
+
+    await wrapper.mute("call-1")
+    assert primary.mute_calls == ["call-1"]
+    assert secondary.mute_calls == []
+    assert wrapper.is_muted("call-1") is True
+
+    await wrapper.unmute("call-1")
+    assert primary.unmute_calls == ["call-1"]
+
+    # Simulate mid-call failover.
+    wrapper._active = wrapper._secondary
+    await wrapper.mute("call-2")
+    assert secondary.mute_calls == ["call-2"]
+    assert primary.mute_calls == ["call-1"]  # unchanged
+
+
+@pytest.mark.asyncio
+async def test_is_muted_false_when_active_lacks_method():
+    primary = _FakeSTT("primary", [])  # no mute/is_muted defined
+    wrapper = ResilientSTTProvider(primary, secondary=None)
+    assert wrapper.is_muted("call-1") is False
+    # mute()/unmute() should silently no-op, not raise.
+    await wrapper.mute("call-1")
+    await wrapper.unmute("call-1")
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # TTS wrapper
 # ──────────────────────────────────────────────────────────────────────────

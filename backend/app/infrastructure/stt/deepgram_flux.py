@@ -33,7 +33,7 @@ import websockets
 import logging
 from collections import deque
 from urllib.parse import quote
-from typing import AsyncIterator, Optional, Callable, Deque
+from typing import AsyncIterator, Optional, Callable, Deque, Any
 from dataclasses import dataclass
 
 from app.domain.interfaces.stt_provider import STTProvider
@@ -60,6 +60,11 @@ FLUX_HEARTBEAT_SILENCE_MS = 100
 # premature EndOfTurn that splits the address. (Was 3000 / 0.85 — too tight.)
 CAPTURE_EOT_TIMEOUT_MS = int(os.getenv("FLUX_CAPTURE_EOT_TIMEOUT_MS", "8000"))
 CAPTURE_EOT_THRESHOLD = float(os.getenv("FLUX_CAPTURE_EOT_THRESHOLD", "0.9"))
+
+# Sentinel distinguishing "caller omitted this kwarg" from a legitimate
+# explicit None (eager EOT disabled for this session). Mirrors the
+# _UNRESOLVED idiom in turn_ender.py.
+_CONFIGURE_UNSET = object()
 
 # WebSocket reconnection configuration
 FLUX_MAX_RECONNECTS = 3          # Maximum mid-call reconnect attempts
@@ -352,7 +357,7 @@ class DeepgramFluxSTTProvider(STTProvider):
         *,
         keyterms: Optional[list] = None,
         eot_threshold: Optional[float] = None,
-        eager_eot_threshold: Optional[float] = None,
+        eager_eot_threshold: Any = _CONFIGURE_UNSET,
         eot_timeout_ms: Optional[int] = None,
     ) -> None:
         """Queue a mid-stream Configure for this call.
@@ -366,8 +371,17 @@ class DeepgramFluxSTTProvider(STTProvider):
         thresholds: dict = {}
         if eot_threshold is not None:
             thresholds["eot_threshold"] = eot_threshold
-        if eager_eot_threshold is not None:
-            thresholds["eager_eot_threshold"] = eager_eot_threshold
+        if eager_eot_threshold is not _CONFIGURE_UNSET:
+            if eager_eot_threshold is None:
+                # Explicit disable. Flux's Configure protocol has no documented
+                # "unset a threshold" message, so reuse the eager==eot technique
+                # this file already uses in enter_capture_mode (eager==eot => no
+                # early/speculative commit).
+                thresholds["eager_eot_threshold"] = (
+                    eot_threshold if eot_threshold is not None else self._eot_threshold
+                )
+            else:
+                thresholds["eager_eot_threshold"] = eager_eot_threshold
         if eot_timeout_ms is not None:
             thresholds["eot_timeout_ms"] = eot_timeout_ms
         payload: dict = {"type": "Configure"}
