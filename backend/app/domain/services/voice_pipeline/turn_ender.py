@@ -10,7 +10,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import WebSocket
 
@@ -41,6 +41,14 @@ logger = logging.getLogger(__name__)
 # Sentinel distinguishing "not yet resolved" from a resolved-but-None cache
 # value on the session (a non-campaign call legitimately resolves to None).
 _UNRESOLVED = object()
+
+# Sentinel distinguishing "caller didn't pass a confidence" from a passed
+# confidence of None (Flux deliberately emits None — that's a legitimate
+# value, not "unset"). F-05(ii): lets handle() prefer a confidence captured
+# synchronously at dispatch time over the (possibly stale-by-the-time-this-
+# detached-task-runs) live session read, while still falling back to the
+# live read for callers that don't pass one at all.
+_CONFIDENCE_UNSET = object()
 
 
 def _resolve_transcript_target_call_id(session) -> Optional[str]:
@@ -97,6 +105,7 @@ class TurnEnder:
         websocket: Optional[WebSocket] = None,
         source: str = "final",
         user_text: Optional[str] = None,
+        confidence: Any = _CONFIDENCE_UNSET,
     ) -> None:
         call_id = session.call_id
         # Prefer the transcript captured at SCHEDULE time. A barge-in can reset
@@ -125,11 +134,20 @@ class TurnEnder:
             m.role == MessageRole.USER for m in session.conversation_history
         )
         if not _has_prior_user_turn_for_floor:
-            confidence = getattr(session, "_last_transcript_confidence", None)
+            # F-05(ii): prefer the confidence captured synchronously at
+            # dispatch time (transcript_handler.py) over the live session
+            # attribute, which a later transcript event can have overwritten
+            # by the time this detached task body runs. Callers that don't
+            # pass confidence at all (e.g. the F-08 queued dispatch below,
+            # which is never turn-0) fall back to the live read unchanged.
+            resolved_confidence = (
+                confidence if confidence is not _CONFIDENCE_UNSET
+                else getattr(session, "_last_transcript_confidence", None)
+            )
             min_conf, min_chars = _resolve_turn_0_floors(session)
             reject_reason = _should_reject_turn_0(
                 full_transcript,
-                confidence,
+                resolved_confidence,
                 min_confidence=min_conf,
                 min_alpha_chars=min_chars,
             )
@@ -139,7 +157,7 @@ class TurnEnder:
                     "transcript=%r confidence=%s min_conf=%s min_chars=%d "
                     "— letting Flux re-emit",
                     reject_reason, call_id[:12], full_transcript[:40],
-                    confidence, min_conf, min_chars,
+                    resolved_confidence, min_conf, min_chars,
                 )
                 try:
                     from app.infrastructure.metrics.voice_metrics import (

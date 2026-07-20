@@ -11,7 +11,7 @@ import logging
 import os
 import time
 from dataclasses import is_dataclass
-from typing import Optional, AsyncIterator
+from typing import Any, Optional, AsyncIterator
 from datetime import datetime
 
 from fastapi import WebSocket
@@ -48,7 +48,7 @@ from app.domain.services.voice_pipeline.turn_runner import TurnRunner
 from app.domain.services.voice_pipeline.turn_streamer import TurnStreamer
 from app.domain.services.voice_pipeline.audio_ingest import AudioIngest, TerminalSTTError
 from app.domain.services.voice_pipeline.transcript_handler import TranscriptHandler
-from app.domain.services.voice_pipeline.turn_ender import TurnEnder
+from app.domain.services.voice_pipeline.turn_ender import TurnEnder, _CONFIDENCE_UNSET
 from app.core.container import get_container
 from app.core.postgres_adapter import Client as PostgresAdapterClient
 from app.core.telemetry import get_tracer, pipeline_span, record_latency, voice_span
@@ -526,6 +526,7 @@ class VoicePipelineService:
         websocket: Optional[WebSocket] = None,
         source: str = "final",
         user_text: Optional[str] = None,
+        confidence: Any = _CONFIDENCE_UNSET,
     ) -> None:
         """Run the end-of-turn LLM+TTS cycle.
 
@@ -535,9 +536,18 @@ class VoicePipelineService:
         ``user_text`` carries the transcript captured at SCHEDULE time so a
         concurrent barge-in resetting session.current_user_input can't strand
         this turn (the dropped-turn half of the silence bug).
+
+        ``confidence`` (F-05(ii)) mirrors that pattern for the turn-0
+        rejection floor: it carries the confidence captured at the SAME
+        synchronous dispatch point, so a later transcript event overwriting
+        ``session._last_transcript_confidence`` before this (detached) task
+        runs can't feed a stale value into the floor check. Defaults to the
+        turn_ender sentinel (not None — None is a legitimate confidence
+        value from Flux) so callers that don't pass it fall back to the live
+        session read, unchanged.
         """
         return await self._turn_ender.handle(
-            session, websocket, source, user_text=user_text
+            session, websocket, source, user_text=user_text, confidence=confidence
         )
 
     # ── Barge-in ──────────────────────────────────────────────────

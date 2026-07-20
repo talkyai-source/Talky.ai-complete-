@@ -546,3 +546,118 @@ def test_opener_echo_does_not_bump_seq_and_matching_eot_is_deduped():
     assert queued is None, "opener echo's EndOfTurn was queued as a spurious extra turn"
     assert turn_type == "final"
     assert kept_same_task, "duplicate must not replace the pending opener task"
+
+
+# ── 5. F-05(ii) — detached-task confidence read race ────────────────────────
+#
+# turn_ender.TurnEnder.handle used to read session._last_transcript_confidence
+# LIVE, inside the (detached, asyncio.create_task'd) turn body. By the time
+# that body actually runs, a later transcript event can have already
+# overwritten the attribute — so the turn-0 rejection floor could judge the
+# WRONG utterance's confidence. Fix: capture confidence synchronously at
+# dispatch time (transcript_handler.py, alongside the existing user_text
+# capture) and thread it through as an explicit `confidence=` kwarg, using
+# the `_CONFIDENCE_UNSET` sentinel (distinct from `_UNRESOLVED`) so a
+# legitimately-passed `None` (Flux emits it deliberately) can't be confused
+# with "caller didn't pass anything".
+
+def test_turn_0_floor_uses_passed_confidence_not_stale_session_value():
+    """Unit: TurnEnder.handle(..., confidence=X) must use X for the turn-0
+    floor decision even when session._last_transcript_confidence holds a
+    DIFFERENT value that would flip the accept/reject outcome."""
+    svc = _make_service()
+    svc._run_turn = AsyncMock(return_value=("ok", 1.0, 1.0))
+    session = _make_session()
+    # Turn-0 scenario: no prior user turn in history.
+    assert not any(m.role == MessageRole.USER for m in session.conversation_history)
+
+    # Default floor is min_confidence=0.4 (turn_helpers._TURN_0_MIN_CONFIDENCE).
+    # Stale session value (0.2) would REJECT; passed value (0.91) must ACCEPT.
+    session._last_transcript_confidence = 0.2
+    transcript = "yes I would like to schedule an appointment please"
+
+    asyncio.run(svc._turn_ender.handle(
+        session, AsyncMock(), source="final", user_text=transcript, confidence=0.91,
+    ))
+
+    svc._run_turn.assert_awaited_once()
+    passed_transcript = svc._run_turn.call_args.args[1]
+    assert passed_transcript == transcript, (
+        "turn-0 floor rejected the utterance — it used the stale session "
+        "confidence (0.2) instead of the passed confidence (0.91)"
+    )
+
+
+def test_turn_0_floor_integration_uses_confidence_captured_at_dispatch():
+    """Integration: drive TranscriptHandler.handle end-to-end with a final
+    transcript (confidence 0.9). BEFORE the detached turn task actually
+    runs, mutate session._last_transcript_confidence to a value (0.1) that
+    would flip the turn-0 floor to reject. The dispatched task must still
+    have used the confidence captured synchronously at dispatch time (0.9),
+    not the mutated live value."""
+    svc = _make_service()
+    svc._run_turn = AsyncMock(return_value=("ok", 1.0, 1.0))
+    svc.stt_provider.detect_turn_end = MagicMock(
+        side_effect=lambda t: t.is_final and not t.text
+    )
+    session = _make_session()
+    call_id = session.call_id
+    assert not any(m.role == MessageRole.USER for m in session.conversation_history)
+
+    transcript_text = "yes I would like to schedule an appointment please"
+
+    async def scenario():
+        # Final transcript chunk with is_final confidence 0.9 — stashed by
+        # transcript_handler onto session._last_transcript_confidence, and
+        # ALSO captured synchronously into the dispatched task below.
+        await svc.handle_transcript(
+            session, TranscriptChunk(text=transcript_text, is_final=True, confidence=0.9),
+        )
+        # Deepgram's always-emitted empty EndOfTurn marker triggers dispatch.
+        await svc.handle_transcript(session, TranscriptChunk(text="", is_final=True))
+
+        task = svc._pending_llm_tasks.get(call_id)
+        assert task is not None, "turn-end dispatch did not fire"
+
+        # Race window: mutate the LIVE session attribute BEFORE the detached
+        # task body has run its turn-0 floor check. If the fix regressed to
+        # a live read, this would flip the floor to reject (0.1 < 0.4).
+        session._last_transcript_confidence = 0.1
+
+        await asyncio.wait_for(task, timeout=2.0)
+
+    asyncio.run(scenario())
+
+    svc._run_turn.assert_awaited_once()
+    passed_transcript = svc._run_turn.call_args.args[1]
+    assert passed_transcript == transcript_text, (
+        "turn-0 floor rejected the utterance — the detached task read the "
+        "LIVE (post-mutation) session confidence instead of the value "
+        "captured synchronously at dispatch time"
+    )
+
+
+def test_turn_0_floor_legacy_call_without_confidence_uses_live_session_read():
+    """Regression: a caller that does NOT pass confidence= (legacy call
+    shape — e.g. the F-08 queued dispatch, or any pre-existing test/call
+    site) must behave EXACTLY as before: fall back to the live
+    session._last_transcript_confidence read."""
+    svc = _make_service()
+    svc._run_turn = AsyncMock(return_value=("ok", 1.0, 1.0))
+    svc.synthesize_and_send_audio = AsyncMock(return_value=False)  # reprompt TTS, not under test
+    session = _make_session()
+    assert not any(m.role == MessageRole.USER for m in session.conversation_history)
+
+    # Live session value is BELOW the 0.4 floor -> must reject, exactly as
+    # pre-fix behaviour, since no confidence kwarg is passed at all.
+    session._last_transcript_confidence = 0.2
+    transcript = "yes I would like to schedule an appointment please"
+
+    asyncio.run(svc._turn_ender.handle(
+        session, AsyncMock(), source="final", user_text=transcript,
+    ))
+
+    svc._run_turn.assert_not_called()
+    assert session.current_user_input == "", (
+        "turn-0 rejection should have cleared current_user_input as before"
+    )

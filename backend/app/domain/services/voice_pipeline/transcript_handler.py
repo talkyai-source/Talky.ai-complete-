@@ -243,9 +243,16 @@ class TranscriptHandler:
             # it, which would strand the turn ("Empty transcript, skipping") and
             # drop the caller's words — the dropped-turn half of the silence bug.
             _user_text = session.current_user_input
+            # F-05(ii): capture confidence at this SAME synchronous point, for
+            # the same reason as _user_text above — session._last_transcript_
+            # confidence can be overwritten by a later transcript event before
+            # the detached task body (turn_ender.handle) reads it, feeding the
+            # turn-0 rejection floor a stale value.
+            _confidence = getattr(session, "_last_transcript_confidence", None)
             task = asyncio.create_task(
                 self._p.handle_turn_end(
-                    session, websocket, source="final", user_text=_user_text
+                    session, websocket, source="final", user_text=_user_text,
+                    confidence=_confidence,
                 )
             )
             # Tag: a FINAL task answers a confirmed, completed utterance. It is
