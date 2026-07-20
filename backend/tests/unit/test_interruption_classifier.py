@@ -88,6 +88,19 @@ def test_statements(text):
     assert classify_interruption(text) is InterruptionType.STATEMENT
 
 
+@pytest.mark.parametrize("text", ["no", "nope", "nah"])
+def test_bare_negations_are_not_backchannel(text):
+    # F-17: this module used to reuse interruption_filter.is_backchannel,
+    # whose set wrongly includes "no"/"nope"/"nah" — a real disagreement
+    # would be mis-tagged as a false interruption (BACKCHANNEL) instead of a
+    # legitimate one. It now reuses voice_pipeline.backchannel.is_backchannel,
+    # which deliberately excludes these — they must register as a genuine
+    # interrupt, not be filtered out as a listening noise.
+    result = classify_interruption(text)
+    assert result is not InterruptionType.BACKCHANNEL
+    assert result is InterruptionType.STATEMENT
+
+
 def test_false_interruption_set():
     assert is_false_interruption(InterruptionType.BACKCHANNEL) is True
     assert is_false_interruption(InterruptionType.NOISE) is True

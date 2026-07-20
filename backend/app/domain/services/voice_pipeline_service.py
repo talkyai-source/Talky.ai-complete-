@@ -27,7 +27,6 @@ from app.domain.interfaces.media_gateway import MediaGateway
 from app.domain.services.conversation_engine import ConversationEngine
 from app.domain.services.transcript_service import TranscriptService
 from app.domain.services.llm_guardrails import LLMGuardrails, LLMGuardrailsConfig, get_guardrails
-from app.services.scripts.interruption_filter import is_backchannel as _is_backchannel
 from app.domain.services.latency_tracker import get_latency_tracker
 from app.domain.services.global_ai_config import get_global_config
 from app.domain.services.ask_ai_constants import TALKY_PRODUCT_INFO as _ASK_AI_PRODUCT_INFO, PRODUCT_KEYWORDS as _ASK_AI_PRODUCT_KEYWORDS

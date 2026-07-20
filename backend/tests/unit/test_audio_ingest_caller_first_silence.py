@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -121,6 +122,42 @@ async def test_caller_first_session_reaches_opening_hello_nudge():
     assert pipeline.synthesize_and_send_audio.await_args_list, (
         "caller-first session with a silent callee never nudged — "
         "_is_caller_first must be True for first_speaker='user'"
+    )
+    spoken_phrases = [
+        call.args[1] for call in pipeline.synthesize_and_send_audio.await_args_list
+    ]
+    assert "Hello?" in spoken_phrases
+
+
+@pytest.mark.asyncio
+async def test_stale_backchannel_stamp_does_not_crash_silence_monitor():
+    """F-17 — the crash site. turn_ender stamps ``session._last_backchannel_monotonic``
+    (via ``time.monotonic()``) whenever it suppresses a backchannel; every
+    ``_silence_monitor`` tick reads it back via
+    ``(_now() - _bc_at) < 2.5``. The old code stamped an AWARE
+    ``datetime.now(timezone.utc)`` but read it back with the monitor's NAIVE
+    ``_now = datetime.utcnow`` — ``TypeError: can't subtract offset-naive and
+    offset-aware datetimes`` on the very next tick. The `while
+    session.stt_active:` loop had no enclosing try/except, so that TypeError
+    silently killed the whole monitor task: no more silence nudges, no 60s
+    auto-hangup, for the rest of the call.
+
+    This drives the REAL ``_silence_monitor`` closure (not a reimplementation
+    of the comparison) with a stale (10s-old) monotonic stamp on the session,
+    exactly as turn_ender leaves it after suppressing a backchannel, and
+    proves the monitor survived by observing it still reach its normal
+    opening "Hello?" nudge. Before the fix this assertion fails outright —
+    the monitor dies on tick 1 and never nudges.
+    """
+    session = _make_session("user")
+    session._last_backchannel_monotonic = time.monotonic() - 10.0
+    pipeline = _make_pipeline()
+
+    await _run_until_silence_tick(session, pipeline)
+
+    assert pipeline.synthesize_and_send_audio.await_args_list, (
+        "silence monitor produced no nudge — it likely died on the "
+        "_last_backchannel_monotonic freshness comparison"
     )
     spoken_phrases = [
         call.args[1] for call in pipeline.synthesize_and_send_audio.await_args_list

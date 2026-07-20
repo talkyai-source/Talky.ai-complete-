@@ -18,7 +18,7 @@ from app.core.container import get_container
 from app.core.telemetry import pipeline_span, voice_span
 from app.domain.models.conversation import MessageRole
 from app.domain.models.session import CallSession, CallState
-from app.services.scripts.interruption_filter import is_backchannel as _is_backchannel
+from app.domain.services.voice_pipeline.backchannel import is_backchannel as _is_backchannel
 from app.services.scripts.echo_guard import strip_self_echo
 from app.domain.services.voice_pipeline.identity_disposition import (
     CLARIFY_SCOPE_LINE,
@@ -278,8 +278,7 @@ class TurnEnder:
             # so "Okay" doesn't get answered with "Sorry, did I lose you?"
             # eight seconds later (Lukaz call, 2026-07-08).
             try:
-                from datetime import datetime as _dt, timezone as _tz
-                session._last_backchannel_at = _dt.now(_tz.utc)
+                session._last_backchannel_monotonic = time.monotonic()
             except Exception:
                 pass
             # Clear the session's pending input so the old transcript

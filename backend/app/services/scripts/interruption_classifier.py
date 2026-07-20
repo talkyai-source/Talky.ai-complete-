@@ -16,8 +16,12 @@ but as a classified event whose right handling depends on WHAT the caller did:
 This module is the single source of truth for that label. It is PURE and
 side-effect free — callers decide what to DO with the label (today: emit the
 interruption-quality metrics in turn_ender; the barge-in / suppress decisions
-themselves are unchanged). It reuses ``interruption_filter.is_backchannel`` so
-the backchannel definition stays in one place.
+themselves are unchanged). It reuses
+``voice_pipeline.backchannel.is_backchannel`` — the SAME authority the
+barge-in path uses — so the backchannel definition stays in one place.
+(NOT ``interruption_filter.is_backchannel``: that module's set deliberately
+INCLUDES "no"/"nope"/"nah", which would wrongly classify a real disagreement
+as a false interruption.)
 
 A "false interruption" — the metric operators care about most — is when the
 agent's speech was stopped for a ``backchannel`` or ``noise`` that didn't
@@ -28,7 +32,7 @@ from __future__ import annotations
 import re
 from enum import Enum
 
-from app.services.scripts.interruption_filter import is_backchannel
+from app.domain.services.voice_pipeline.backchannel import is_backchannel
 
 
 class InterruptionType(str, Enum):

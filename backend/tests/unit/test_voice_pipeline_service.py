@@ -646,6 +646,47 @@ async def test_run_turn_commits_partial_assistant_reply_on_barge_in():
     service.transcript_service.accumulate_turn.assert_called_once()
 
 
+# --- F-17 (2026-07-20) — backchannel-authority unification -----------------
+@pytest.mark.asyncio
+async def test_bare_no_after_non_question_is_not_suppressed_as_backchannel():
+    # turn_ender used to import is_backchannel from interruption_filter, whose
+    # set wrongly includes "no"/"nope"/"nah" as backchannels — a caller saying
+    # "No" (real disagreement/content) after a NON-question agent line would
+    # be silently swallowed (early-return, never reaches the LLM) instead of
+    # becoming a real turn. The correct authority
+    # (voice_pipeline.backchannel.is_backchannel) deliberately EXCLUDES
+    # "no"/"nope"/"stop"/"wait" — they must barge in / register as real
+    # content, never be suppressed as a listening noise.
+    service = VoicePipelineService(
+        stt_provider=AsyncMock(),
+        llm_provider=AsyncMock(),
+        tts_provider=AsyncMock(),
+        media_gateway=AsyncMock(),
+        mute_during_tts=False,
+    )
+    service.latency_tracker = MagicMock()
+    service.latency_tracker.get_metrics.return_value = None
+    service.transcript_service = MagicMock()
+    service._run_turn = AsyncMock(return_value=("Got it, no problem.", 10.0, 10.0))
+
+    session = _make_session()
+    session.campaign_id = "campaign-123"
+    # Prior user turn + a non-question last assistant line — exactly the
+    # condition under which the old code wrongly suppressed a bare "No".
+    session.conversation_history.append(Message(role=MessageRole.USER, content="Hi there"))
+    session.conversation_history.append(
+        Message(role=MessageRole.ASSISTANT, content="Okay, I can help with that.")
+    )
+    session.current_user_input = "No"
+    websocket = AsyncMock()
+
+    await service.handle_turn_end(session, websocket)
+
+    service._run_turn.assert_awaited_once()
+    passed_transcript = service._run_turn.call_args.args[1]
+    assert passed_transcript == "No", passed_transcript
+
+
 # --- F-13 / F-14 / F-15 / F-11b (2026-07-20) — hardening today's disposition
 #     work against the listening-path audit --------------------------------
 @pytest.mark.asyncio
