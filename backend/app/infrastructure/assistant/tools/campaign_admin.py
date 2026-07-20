@@ -423,6 +423,19 @@ async def update_knowledge_node(
         if not updated:
             return {"error": "knowledge node not found or update failed"}
 
+        # Invalidate the retrieval cache (Case 3) — same write path as the
+        # campaign_knowledge PATCH endpoint, so it must invalidate the same
+        # way or an assistant-tool edit would keep serving a stale answer for
+        # up to the TTL. Fail-soft: never let a cache-clear problem fail an
+        # otherwise-successful edit.
+        try:
+            from app.services.scripts.knowledge import cache as _kb_cache
+            _kb_cache.invalidate_campaign(tenant_id, campaign_id)
+        except Exception as exc:
+            logger.debug(
+                "knowledge cache invalidate failed campaign=%s: %s", str(campaign_id)[:12], exc,
+            )
+
         return {"applied": True, "changes": diff_entries}
 
     except Exception as exc:

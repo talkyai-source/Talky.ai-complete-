@@ -86,13 +86,41 @@ def store_proposal(
 
 
 def get_proposal(proposal_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
-    """Return the proposal iff it exists AND belongs to this tenant."""
+    """Return the proposal iff it exists AND belongs to this tenant.
+
+    Read-only (does NOT consume). Prefer :func:`pop_proposal` on the APPLY path
+    so a proposal can be applied exactly once — get+later-clear leaves a window
+    where two connections (two browser tabs) both read the same pending proposal
+    and each fire the INSERT, double-creating the campaign.
+    """
     p = _PENDING.get(proposal_id)
     if p is None:
         return None
     if p.get("tenant_id") != tenant_id:
         logger.warning(
             "proposal tenant mismatch: proposal=%s asked_by=%s owner=%s",
+            proposal_id, tenant_id, p.get("tenant_id"),
+        )
+        return None
+    return p
+
+
+def pop_proposal(proposal_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
+    """Atomically fetch AND remove the proposal (tenant-checked), or None.
+
+    ``dict.pop`` is atomic under the GIL and talky-api runs a single worker, so
+    exactly one caller wins the pop; a concurrent second apply of the same
+    proposal_id gets None and is told "no longer available" — closing the
+    two-tab / double-click double-insert race (Case 4 hardening). A tenant
+    mismatch re-inserts the entry (it was not this tenant's to consume).
+    """
+    p = _PENDING.pop(proposal_id, None)
+    if p is None:
+        return None
+    if p.get("tenant_id") != tenant_id:
+        _PENDING[proposal_id] = p  # not ours — put it back
+        logger.warning(
+            "proposal tenant mismatch on pop: proposal=%s asked_by=%s owner=%s",
             proposal_id, tenant_id, p.get("tenant_id"),
         )
         return None

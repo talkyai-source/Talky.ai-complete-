@@ -293,6 +293,17 @@ class FakeConn:
     async def execute(self, *args, **kwargs):
         return None
 
+    def transaction(self):
+        return _FakeTxnCtx()
+
+
+class _FakeTxnCtx:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
 
 class FakeDbPool:
     def acquire(self):

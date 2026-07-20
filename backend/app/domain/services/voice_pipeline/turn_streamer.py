@@ -151,12 +151,33 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
             return ""
 
         _t0 = time.monotonic()
-        try:
+        # Cache check (Case 3): collapse N concurrent same-topic queries to ~1
+        # for the TTL window so a burst of identical questions stops amplifying
+        # DB load. A hit skips the pool-acquire + FTS entirely.
+        from app.services.scripts.knowledge import cache as _kb_cache
+        _cached = _kb_cache.get(session.tenant_id, session.campaign_id, query, now=_t0)
+        if _cached is not None:
+            hits = _cached
+            logger.info(
+                "KB_DEBUG call=%s CACHE_HIT %d rows q=%r",
+                session.call_id[:8], len(hits), last_user[:60],
+            )
+        else:
+          try:
             hits = await asyncio.wait_for(
-                retrieve_knowledge(pool, session.tenant_id, session.campaign_id, query, k=_KB_MAX_CHUNKS, bump_hits=False),
+                # Pass the retrieve budget as the pool-acquire timeout too so a
+                # saturated pool fails fast INTO the budget instead of queueing
+                # unbounded behind it (Case 3 finding: acquire had no timeout).
+                retrieve_knowledge(
+                    pool, session.tenant_id, session.campaign_id, query,
+                    k=_KB_MAX_CHUNKS, bump_hits=False,
+                    acquire_timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
+                ),
                 timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
             )
-        except asyncio.TimeoutError:
+            if hits:
+                _kb_cache.put(session.tenant_id, session.campaign_id, query, hits, now=_t0)
+          except asyncio.TimeoutError:
             # TEMP diagnostic (knowledge-not-used investigation): a timeout here
             # means FTS retrieval was too slow and the turn answered WITHOUT
             # knowledge — a prime suspect for "agent isn't using the KB".
@@ -324,6 +345,40 @@ class TurnStreamer:
             if kb_tools:
                 knowledge_block = tool_system_addendum()
             else:
+                # Case 3 prefetch-overlap investigation (2026-07-17): a
+                # prefetch launched earlier (e.g. at EagerEndOfTurn) was
+                # rejected because TurnResumed can grow the transcript after
+                # an eager prefetch started, awaiting a stale, shorter query
+                # (see transcript_handler.py — eager transcripts are stashed
+                # but NEVER start a real turn; the only entry into stream()
+                # is the CONFIRMED EndOfTurn path in transcript_handler.handle,
+                # which snapshots `_user_text` and hands it to handle_turn_end
+                # before this method is ever entered). So by the time we are
+                # HERE, `messages` is already the final, fixed transcript for
+                # this turn — no later TurnResumed can change it — and
+                # asyncio.create_task(_knowledge_block_for_turn(...)) here
+                # would be race-free by construction (same transcript, same
+                # call frame).
+                #
+                # Verified (not assumed) that overlapping it would still be a
+                # no-op: every step between this line and where knowledge_block
+                # is consumed (build_turn_prompt() below) is synchronous, pure
+                # Python — ask_ai_block/end_session_block resolution, accent/
+                # expressive-caps lookups, live_state_block string assembly,
+                # per-model addendum lookup, trailing_block join. None of it
+                # awaits the network or the DB (grepped for "await"/"async def"
+                # across prompts/build.py and voice_pipeline/knowledge_tool.py —
+                # no matches in that path). A create_task+cancel-on-early-return
+                # scaffold would only overlap ~100 lines of string formatting
+                # (sub-millisecond) against an up to 500ms retrieval budget —
+                # not a meaningful win, and it adds real cancellation-safety
+                # surface (barge-in / exception / early-return paths would all
+                # need to cancel an unawaited task). Honest no-op: keep the
+                # await in place. If a future change puts real I/O between here
+                # and the build_turn_prompt() call, re-run this measurement —
+                # the prefetch would then be worth doing (the race is already
+                # designed out; it would just be a matter of moving the launch
+                # to this line and the await down to build_turn_prompt()).
                 knowledge_block = await _knowledge_block_for_turn(session, messages) or None
 
         end_session_block = (

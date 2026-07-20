@@ -20,6 +20,14 @@ from app.domain.models.conversation import MessageRole
 from app.domain.models.session import CallSession, CallState
 from app.services.scripts.interruption_filter import is_backchannel as _is_backchannel
 from app.services.scripts.echo_guard import strip_self_echo
+from app.domain.services.voice_pipeline.identity_disposition import (
+    CLARIFY_SCOPE_LINE,
+    IdentityDisposition,
+    classify_identity_disposition,
+    contains_dnc,
+    contains_explicit_goodbye,
+    disposition_end_line,
+)
 from app.domain.services.voice_pipeline.turn_helpers import (
     _first_speaker_label,
     _persona_label,
@@ -147,6 +155,19 @@ class TurnEnder:
                     session.current_user_input = ""
                 except AttributeError:
                     pass
+                # NEVER silent (Case 2): a dropped first utterance used to return
+                # to dead air, so the caller heard nothing until they spoke again
+                # — the single highest-abandon moment of a cold call. Speak a
+                # short reprompt so rejection is never the silent path. Fail-soft:
+                # a reprompt-TTS failure must not mask the drop.
+                try:
+                    await self._p.synthesize_and_send_audio(
+                        session,
+                        "Sorry, I didn't catch that — could you say that again?",
+                        websocket,
+                    )
+                except Exception:
+                    pass
                 return
 
         # Caller-first INSTANT opener: the first bare "Hello?" is answered by
@@ -167,7 +188,12 @@ class TurnEnder:
         # where the STT model outputs repetitive nonsense text ("blah blah blah…").
         # Heuristic: if a single word accounts for >50% of a 6+ word transcript,
         # treat it as a hallucination and skip — avoids sending garbage to the LLM.
-        if self._p._is_repetitive_transcript(full_transcript):
+        # EXCEPT a directed do-not-call (F-13 fix 2026-07-20): an emphatic
+        # "no no no no no no stop calling me" is >50% one word, so this guard
+        # used to drop the opt-out before it could be classified/persisted.
+        # A real STT hallucination almost never contains a verbatim DNC phrase,
+        # so exempting it is a safe trade against silently losing an opt-out.
+        if self._p._is_repetitive_transcript(full_transcript) and not contains_dnc(full_transcript):
             logger.warning(
                 "Repetitive STT transcript likely hallucination, skipping turn",
                 extra={"call_id": call_id, "transcript": full_transcript[:80]},
@@ -374,6 +400,161 @@ class TurnEnder:
         if barge_in_event:
             barge_in_event.clear()
 
+        # Deterministic identity disposition (Case 1 fix): remove the LLM's
+        # coin-flip for the unambiguous cases. A wrong DESTINATION (wrong
+        # business / residence) or DNC ends the call with a fixed line and no
+        # LLM; a bare "wrong number" with no scope asks ONE clarifying question
+        # (once). A wrong PERSON is left to the LLM's now-non-contradictory
+        # pivot rule. The result is stashed for the reverse enforcement gate
+        # below, which strips any LLM-issued END_CALL on a wrong-person turn.
+        #
+        # Session-type gate (Defect 5): "wrong number" is a TELEPHONY concept —
+        # a deterministic hangup with a fixed close line only makes sense when
+        # there is an actual phone line to drop. Browser assistant / ask-AI
+        # sessions (campaign_id == "ask-ai") share this same handle(), and a
+        # user typing/saying "you've got the wrong number" to the in-app
+        # assistant must NOT get their chat session ended with a telephony
+        # close line. "voice-demo" sessions are gated the same way the LLM's
+        # own end_session action already is (_supports_llm_end_session_action)
+        # — a demo session has no real call to hang up either, so the same
+        # rule that suppresses the model's END_CALL there suppresses this
+        # deterministic path too. A campaign-test session (campaign_id is a
+        # real campaign UUID, see campaign_test_ws.py) deliberately runs the
+        # EXACT live-call agent for QA purposes and is NOT gated — "wrong
+        # number" there must behave exactly as it would on a real call.
+        disposition = IdentityDisposition.NONE
+        _disposition_applies = (
+            not self._p._is_ask_ai_session(session)
+            and self._p._supports_llm_end_session_action(session)
+        )
+        if _disposition_applies:
+            try:
+                prior_clarify = bool(getattr(session, "_identity_clarify_asked", False))
+                disposition = classify_identity_disposition(
+                    full_transcript, prior_clarify_asked=prior_clarify
+                )
+                if prior_clarify:
+                    # One-shot consume (F-14 fix 2026-07-20): the flag was set
+                    # but NEVER cleared, so after a single clarify it stayed
+                    # armed and biased EVERY later turn toward the aggressive
+                    # post-clarify branch for the rest of the call. Clear it the
+                    # turn we act on it, regardless of the answer.
+                    session._identity_clarify_asked = False
+            except Exception as _disp_exc:  # never let this break a turn
+                logger.debug("identity_disposition_failed err=%s", _disp_exc)
+                disposition = IdentityDisposition.NONE
+        # Always (re)stash — including the skipped-session-type branch, where
+        # it must be forced to NONE. Without this, a session that skips the
+        # classify block would simply never touch _turn_disposition, leaving
+        # a value stale from a previous turn (or a previous session type
+        # transition) live for the reverse enforcement gate below to act on.
+        session._turn_disposition = disposition
+
+        if disposition in (IdentityDisposition.WRONG_BUSINESS, IdentityDisposition.DNC):
+            end_line = disposition_end_line(disposition) or ""
+            logger.info(
+                "identity_disposition_end call=%s disposition=%s transcript=%r",
+                call_id[:12], disposition.value, full_transcript[:80],
+            )
+            if disposition == IdentityDisposition.DNC:
+                # Persist the opt-out (F-13 fix 2026-07-20 + user directive
+                # "always persist tenant-wide"): the deterministic DNC path
+                # SPOKE "I'll take you off the list" but never set this flag, so
+                # teardown's purge_lead_on_opt_out (DNC-list the number + cancel
+                # scheduled jobs + mark the lead) never ran — a promise the
+                # system didn't keep. Mirror turn_runner's LLM-JSON path exactly;
+                # the side effects run once, at hangup.
+                try:
+                    session._caller_opted_out = True
+                except Exception:
+                    pass
+                logger.info(
+                    "caller_opt_out_detected call_id=%s (deterministic DNC) — will purge at hangup",
+                    call_id[:12],
+                )
+            # Record the exchange so the transcript/recording review shows WHY
+            # the call ended (the deterministic path skips _run_turn's append).
+            try:
+                from app.domain.models.conversation import Message as _Msg
+                session.conversation_history.append(
+                    _Msg(role=MessageRole.USER, content=full_transcript)
+                )
+                if end_line:
+                    session.conversation_history.append(
+                        _Msg(role=MessageRole.ASSISTANT, content=end_line)
+                    )
+                # F-11b fix: this deterministic path appends to history but
+                # returns BEFORE the main turn's finally-cleanup that clears the
+                # speculative snapshot. Left stale, a barge-in during the
+                # farewell would truncate this just-committed exchange back out
+                # of history. None = "committed, nothing to roll back."
+                session._speculative_history_len = None
+            except Exception:
+                pass
+            try:
+                session._end_call_requested = True
+            except Exception:
+                pass
+            # The close line goes through as the shutdown's FAREWELL: that path
+            # tracks playback and drains it before the hangup (self-review fix —
+            # pre-speaking it here and hanging up with farewell="" cut the line
+            # off, because synthesize only QUEUES audio to the media gateway).
+            try:
+                await self._p._shutdown_session_for_end_action(
+                    session, websocket, "wrong_number_disposition", end_line,
+                )
+            except Exception as _sd_exc:
+                logger.warning(
+                    "identity_disposition_shutdown_failed call=%s err=%s",
+                    call_id[:12], _sd_exc,
+                )
+            try:
+                session.current_user_input = ""
+            except AttributeError:
+                pass
+            return
+
+        if disposition == IdentityDisposition.AMBIGUOUS:
+            # Bare "wrong number", no business/person scope — ask ONCE which it
+            # is, deterministically (no LLM), then let the caller's answer route
+            # to WRONG_BUSINESS (end) or WRONG_PERSON (pivot) on the next turn.
+            logger.info(
+                "identity_disposition_clarify call=%s transcript=%r",
+                call_id[:12], full_transcript[:80],
+            )
+            try:
+                session._identity_clarify_asked = True
+            except Exception:
+                pass
+            # Enter the exchange into history so the NEXT turn's LLM sees the
+            # caller's "wrong number" AND our clarify question in context.
+            try:
+                from app.domain.models.conversation import Message as _Msg
+                session.conversation_history.append(
+                    _Msg(role=MessageRole.USER, content=full_transcript)
+                )
+                session.conversation_history.append(
+                    _Msg(role=MessageRole.ASSISTANT, content=CLARIFY_SCOPE_LINE)
+                )
+                # F-11b fix (matters most here — the call CONTINUES): this early
+                # return bypasses the finally-cleanup, so without resetting the
+                # snapshot a barge-in on the caller's clarify answer would
+                # truncate this Q&A back out of history. None = committed.
+                session._speculative_history_len = None
+            except Exception:
+                pass
+            try:
+                await self._p.synthesize_and_send_audio(
+                    session, CLARIFY_SCOPE_LINE, websocket,
+                )
+            except Exception:
+                pass
+            try:
+                session.current_user_input = ""
+            except AttributeError:
+                pass
+            return
+
         # Parent span for the complete LLM+TTS turn
         with voice_span(
             "turn",
@@ -560,19 +741,49 @@ class TurnEnder:
                 # with no extra farewell. Real capability replacing the
                 # role-played "[hangs up]" the audit found.
                 if getattr(session, "_end_call_requested", False):
-                    logger.info(
-                        "agent_end_call call_id=%s — model requested hangup",
-                        call_id[:12],
-                    )
-                    try:
-                        await self._p._shutdown_session_for_end_action(
-                            session, websocket, "agent_end_call", "",
+                    # Reverse enforcement gate (Case 1): a model-issued END_CALL
+                    # on a turn the deterministic classifier judged WRONG_PERSON
+                    # is the other half of the coin flip — the business is right
+                    # and we should be pivoting, not hanging up. Strip the flag
+                    # and keep the call alive instead of honoring it.
+                    #
+                    # Defect 6 exception: person-mismatch evidence AND an
+                    # explicit goodbye in the SAME utterance ("she's not here
+                    # — goodbye") means the caller themselves ended the
+                    # conversation; the model saying goodbye back and hanging
+                    # up is then correct, not a coin-flip. Only a genuine,
+                    # unambiguous sign-off exempts the strip — see
+                    # contains_explicit_goodbye's narrow phrase set. This never
+                    # changes classify()'s WRONG_PERSON return (person-mismatch
+                    # alone still never auto-hangs-up) and goodbye alone
+                    # (disposition NONE) never reaches this branch at all.
+                    if (
+                        getattr(session, "_turn_disposition", IdentityDisposition.NONE) == IdentityDisposition.WRONG_PERSON
+                        and not contains_explicit_goodbye(full_transcript)
+                    ):
+                        logger.info(
+                            "end_call_stripped_wrong_person call_id=%s — "
+                            "model asked to hang up but disposition=wrong_person; keeping call alive",
+                            call_id[:12],
                         )
-                    except Exception as _ec_exc:
-                        logger.warning(
-                            "agent_end_call_failed call_id=%s err=%s",
-                            call_id[:12], _ec_exc,
+                        try:
+                            session._end_call_requested = False
+                        except Exception:
+                            pass
+                    else:
+                        logger.info(
+                            "agent_end_call call_id=%s — model requested hangup",
+                            call_id[:12],
                         )
+                        try:
+                            await self._p._shutdown_session_for_end_action(
+                                session, websocket, "agent_end_call", "",
+                            )
+                        except Exception as _ec_exc:
+                            logger.warning(
+                                "agent_end_call_failed call_id=%s err=%s",
+                                call_id[:12], _ec_exc,
+                            )
 
             except Exception as e:
                 turn_span.record_exception(e)

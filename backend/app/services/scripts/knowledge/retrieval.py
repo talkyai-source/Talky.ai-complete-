@@ -114,7 +114,8 @@ async def retrieve_knowledge(
     campaign_id: str,
     query: str,
     k: int = 2,
-    bump_hits: bool = True,
+    bump_hits: bool = False,
+    acquire_timeout: Optional[float] = None,
 ) -> List[dict]:
     """Top-k knowledge nodes for `query` (a user transcript). Hybrid FTS + trgm.
 
@@ -144,36 +145,54 @@ async def retrieve_knowledge(
         )
         return []
     try:
-        async with acquire_with_tenant(pool, tenant_id) as conn:
+        # acquire_timeout (Case 3): bound the pool wait so a saturated pool
+        # fails fast into the caller's retrieve budget instead of queueing
+        # unbounded behind it. None preserves the previous (unbounded) behavior
+        # for non-voice callers that don't pass it.
+        async with acquire_with_tenant(pool, tenant_id, timeout=acquire_timeout) as conn:
             rows = await conn.fetch(
+                # `cand` bounds how many campaign nodes reach the expensive
+                # ts_rank/word_similarity ranking (Case 3 defensive cap). The set
+                # is already campaign-scoped (small), so the 200 cap is a
+                # backstop for a pathologically large knowledge base, not a
+                # behavior change for normal campaigns; it prefilters on the
+                # cheap match predicate and orders by priority/hit_count so the
+                # nodes most likely to win are the ones that survive the cap.
                 """
                 WITH tq AS (
                     SELECT websearch_to_tsquery('english', $2) AS q_and,
                            NULLIF(replace(
                                websearch_to_tsquery('english', $2)::text,
                                ' & ', ' | '), '')::tsquery AS q_or
+                ),
+                cand AS (
+                    SELECT n.id, n.heading, n.summary, n.voice_answer, n.content,
+                           n.search_tsv, n.search_text, n.priority, n.hit_count
+                    FROM campaign_knowledge_nodes n, tq
+                    WHERE n.campaign_id = $1
+                      AND n.enabled
+                      AND (
+                           n.search_tsv @@ tq.q_and
+                        OR (tq.q_or IS NOT NULL AND n.search_tsv @@ tq.q_or)
+                        OR word_similarity($2, n.search_text) >= $4
+                      )
+                    ORDER BY n.priority DESC, n.hit_count DESC
+                    LIMIT 200
                 )
-                SELECT n.id, n.heading, n.summary, n.voice_answer, n.content,
-                       ts_rank(n.search_tsv, tq.q_and) AS fts,
-                       word_similarity($2, n.search_text) AS sim
-                FROM campaign_knowledge_nodes n, tq
-                WHERE n.campaign_id = $1
-                  AND n.enabled
-                  AND (
-                       n.search_tsv @@ tq.q_and
-                    OR (tq.q_or IS NOT NULL AND n.search_tsv @@ tq.q_or)
-                    OR word_similarity($2, n.search_text) >= $4
-                  )
+                SELECT c.id, c.heading, c.summary, c.voice_answer, c.content,
+                       ts_rank(c.search_tsv, tq.q_and) AS fts,
+                       word_similarity($2, c.search_text) AS sim
+                FROM cand c, tq
                 ORDER BY
-                    CASE WHEN n.search_tsv @@ tq.q_and THEN 2
-                         WHEN tq.q_or IS NOT NULL AND n.search_tsv @@ tq.q_or THEN 1
+                    CASE WHEN c.search_tsv @@ tq.q_and THEN 2
+                         WHEN tq.q_or IS NOT NULL AND c.search_tsv @@ tq.q_or THEN 1
                          ELSE 0 END DESC,
                     GREATEST(
-                        ts_rank(n.search_tsv, COALESCE(tq.q_or, tq.q_and)),
-                        word_similarity($2, n.search_text)
+                        ts_rank(c.search_tsv, COALESCE(tq.q_or, tq.q_and)),
+                        word_similarity($2, c.search_text)
                     ) DESC,
-                    n.priority DESC,
-                    n.hit_count DESC
+                    c.priority DESC,
+                    c.hit_count DESC
                 LIMIT $3
                 """,
                 campaign_id, q, k, _WORD_SIM_FLOOR,

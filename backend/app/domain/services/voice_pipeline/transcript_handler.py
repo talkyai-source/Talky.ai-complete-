@@ -198,8 +198,12 @@ class TranscriptHandler:
             # they only ever arrived via eager events (no plain interim).
             if not session.llm_active and call_id not in self._p._pending_llm_tasks:
                 session.current_user_input = transcript.text
-                # Confidence feeds handle_turn_end's turn-0 garbled-mishear floor.
-                session._last_transcript_confidence = transcript.confidence
+                # Confidence feeds handle_turn_end's turn-0 garbled-mishear floor;
+                # store it ONLY from a final recognition so an interim's low value
+                # can't spuriously trip the gate (Case 2). Text is still stashed
+                # unconditionally so the eager-only turn keeps the caller's words.
+                if getattr(transcript, "is_final", True):
+                    session._last_transcript_confidence = transcript.confidence
             return
 
         # Real-time machine detection on EVERY transcript, interims included.
@@ -251,6 +255,13 @@ class TranscriptHandler:
             )
             self._p.latency_tracker.mark_stt_first_transcript(call_id)
             session.current_user_input = transcript.text
-            session._last_transcript_confidence = transcript.confidence
+            # Store confidence ONLY from a FINAL recognition (Case 2): the turn-0
+            # floor treats this value as the utterance's recognition confidence,
+            # but interim chunks carry provisional/low values that don't mean
+            # that. Writing an interim here let a mid-utterance dip drop a good
+            # first turn. Final-only makes the stored value match the gate's
+            # assumption. (On Flux confidence is always None regardless.)
+            if getattr(transcript, "is_final", True):
+                session._last_transcript_confidence = transcript.confidence
             session.update_activity()
 

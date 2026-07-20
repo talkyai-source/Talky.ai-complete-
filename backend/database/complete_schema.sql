@@ -432,8 +432,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_campaign_phone_unique ON leads(campa
 CREATE TABLE IF NOT EXISTS calls (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    campaign_id UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
-    lead_id UUID NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+    -- campaign_id and lead_id nullable (2026-07-17): manual/PBX-originated
+    -- calls that never went through the dialer have no campaign or lead row
+    -- to attach to (the recording stub path inserts them as NULL). ON DELETE
+    -- CASCADE is safe on a nullable FK — NULL rows are simply never referenced.
+    campaign_id UUID REFERENCES campaigns(id) ON DELETE CASCADE,
+    lead_id UUID REFERENCES leads(id) ON DELETE CASCADE,
     phone_number VARCHAR(20) NOT NULL,
     external_call_uuid VARCHAR(100),
     status VARCHAR(50) NOT NULL DEFAULT 'initiated',

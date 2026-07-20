@@ -65,6 +65,7 @@ from app.infrastructure.assistant.model_config import get_tenant_assistant_model
 from app.infrastructure.assistant.proposals import (
     clear_proposal,
     get_proposal,
+    pop_proposal,
     store_proposal,
 )
 
@@ -564,7 +565,9 @@ async def _run_voice_session(
                 pass
 
     async def apply_proposal(proposal_id: Optional[str], mode: Optional[str] = None) -> None:
-        proposal = get_proposal(proposal_id, tenant_id) if isinstance(proposal_id, str) else None
+        # Atomic consume (Case 4): pop so two concurrent applies of the same
+        # proposal can't both dispatch and double-create.
+        proposal = pop_proposal(proposal_id, tenant_id) if isinstance(proposal_id, str) else None
         if not proposal:
             await send_json({"type": "proposal_result", "proposal_id": proposal_id, "applied": False,
                              "error": "That proposal is no longer available — please ask again."})
@@ -589,7 +592,7 @@ async def _run_voice_session(
                 and not result.get("error")
             )
             err = result.get("error") if isinstance(result, dict) else "Apply failed"
-            clear_proposal(proposal_id)
+            # proposal already consumed by pop_proposal above.
             await send_json({
                 "type": "proposal_result",
                 "proposal_id": proposal_id,
@@ -606,7 +609,7 @@ async def _run_voice_session(
             await speak(spoken_note)
         except Exception as exc:
             logger.error("assistant_voice: apply_proposal failed: %s", exc, exc_info=True)
-            clear_proposal(proposal_id)
+            # proposal already consumed by pop_proposal above.
             await send_json({"type": "proposal_result", "proposal_id": proposal_id, "applied": False,
                              "error": "Something went wrong applying that."})
 

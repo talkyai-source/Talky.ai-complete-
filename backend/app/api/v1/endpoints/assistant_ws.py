@@ -23,6 +23,7 @@ from app.infrastructure.assistant.model_config import get_tenant_assistant_model
 from app.infrastructure.assistant.proposals import (
     store_proposal,
     get_proposal,
+    pop_proposal,
     clear_proposal,
 )
 
@@ -595,7 +596,11 @@ async def assistant_chat(
             
             elif data.get("type") == "apply_proposal":
                 proposal_id = data.get("proposal_id")
-                proposal = get_proposal(proposal_id, tenant_id) if isinstance(proposal_id, str) else None
+                # Atomic consume (Case 4): pop, so a concurrent second apply of
+                # the same proposal (two tabs / double-click) gets None below and
+                # cannot double-insert. On dispatch failure the proposal is gone —
+                # the user re-asks, same as a restart.
+                proposal = pop_proposal(proposal_id, tenant_id) if isinstance(proposal_id, str) else None
                 if not proposal:
                     await manager.send_json(connection_id, {
                         "type": "proposal_result",
@@ -626,7 +631,7 @@ async def assistant_chat(
                         and not result.get("error")
                     )
                     err = result.get("error") if isinstance(result, dict) else "Apply failed"
-                    clear_proposal(proposal_id)
+                    # proposal already consumed by pop_proposal above.
                     await manager.send_json(connection_id, {
                         "type": "proposal_result",
                         "proposal_id": proposal_id,
@@ -652,7 +657,7 @@ async def assistant_chat(
                     await persist_conversation()
                 except Exception as apply_err:
                     logger.error("apply_proposal failed: %s", apply_err, exc_info=True)
-                    clear_proposal(proposal_id)
+                    # proposal already consumed by pop_proposal above.
                     await manager.send_json(connection_id, {
                         "type": "proposal_result",
                         "proposal_id": proposal_id,

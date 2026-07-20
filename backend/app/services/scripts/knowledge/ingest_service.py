@@ -105,6 +105,20 @@ async def ingest_markdown(
             "knowledge_ingested campaign=%s source=%s nodes=%d tokens=%d mode=%s",
             str(campaign_id)[:12], str(source_id)[:12], len(nodes), total_tokens, mode,
         )
+        # Invalidate the retrieval cache (Case 3) so a live call in the TTL
+        # window doesn't keep serving pre-upload answers (or "no knowledge"
+        # for a query this new source now answers). This is the sole write
+        # path for ingest — any future caller of ingest_markdown gets
+        # invalidation for free without having to remember it. Fail-soft: a
+        # cache-clear failure must never fail an otherwise-successful upload.
+        try:
+            from app.services.scripts.knowledge import cache as _kb_cache
+            _kb_cache.invalidate_campaign(tenant_id, campaign_id)
+        except Exception as exc:
+            logger.debug(
+                "knowledge cache invalidate failed campaign=%s: %s",
+                str(campaign_id)[:12], exc,
+            )
         return {
             "source_id": str(source_id),
             "node_count": len(nodes),

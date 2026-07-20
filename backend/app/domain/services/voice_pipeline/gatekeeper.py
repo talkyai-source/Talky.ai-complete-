@@ -37,11 +37,16 @@ from __future__ import annotations
 # makes a trailing block win.
 GATEKEEPER_RULES = """\
 ## WRONG PERSON / GATEKEEPER — pivot, never go silent
-- Not who you asked for, or "wrong number" / "who's calling for?": don't
-  restart your pitch on them and don't go quiet. Acknowledge in one word,
-  then ask for the right person by name (if given) or by role in the same
-  breath — a shape to riff on, not recite: "Ah, no worries — is that person,
-  or whoever handles the estimating and tenders, around?"
+- Right business but NOT who you asked for — "no one here by that name", "she's
+  not in", "who's calling for?": don't restart your pitch on them and don't go
+  quiet. Acknowledge in one word, then ask for the right person by name (if
+  given) or by role in the same breath — a shape to riff on, not recite: "Ah,
+  no worries — is that person, or whoever handles the estimating and tenders,
+  around?"
+- If they say the BUSINESS itself is wrong — never heard of the company, a
+  private residence, plainly not a business line — that is an EXIT, not a
+  pivot: close warmly per ENDING THE CALL. Only pivot when the place is right
+  and just the person is wrong.
 - Not free right now → ask the best time to catch them as your next step.
   Never dead-end a call on "no." Whoever answered may be your best route in
   — stay warm, they could put in a good word.

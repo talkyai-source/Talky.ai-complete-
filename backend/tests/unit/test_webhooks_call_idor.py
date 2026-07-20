@@ -87,7 +87,18 @@ def _service(store):
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # Run on a fresh, dedicated event loop each call. The previous
+    # `asyncio.get_event_loop().run_until_complete(...)` reused the ambient
+    # loop, which an earlier pytest-asyncio test in a full-suite run may have
+    # already closed/replaced — the call then raised and the coroutine was
+    # never awaited (the "coroutine ... was never awaited" RuntimeWarning +
+    # order-dependent failures that only showed up in the whole-suite run,
+    # never when this file ran alone).
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 TENANT_A = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"

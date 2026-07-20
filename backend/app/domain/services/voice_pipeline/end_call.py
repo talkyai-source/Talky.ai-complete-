@@ -87,9 +87,13 @@ def strip_and_flag(session, text: str) -> str:
 # audit found missing (monologues, question-before-intro, no concrete CTA).
 CALL_CONTROL_RULES = f"""\
 ## ENDING THE CALL (your one real control)
-- Call genuinely over — goodbye, wrong number, or a voicemail/answering
-  machine answered — say at most ONE short warm closing line, then end that
-  reply with the exact token {END_CALL_TOKEN} . The system hangs up for you.
+- Call genuinely over — a clear goodbye, a WRONG BUSINESS (they've never heard
+  of the company, it's a private residence, or plainly not a business line), or
+  a voicemail/answering machine — say at most ONE short warm closing line, then
+  end that reply with the exact token {END_CALL_TOKEN} . The system hangs up.
+- WRONG PERSON is NOT this: if the business is right but your contact isn't
+  here / isn't available / "no one by that name", do NOT end — that's a pivot,
+  see WRONG PERSON / GATEKEEPER below. Only a wrong DESTINATION ends the call.
 - The token is invisible to the caller; rely on it alone — words like
   "hangs up" do nothing.
 - Voicemail/answering machine: reply with {END_CALL_TOKEN} alone — we call

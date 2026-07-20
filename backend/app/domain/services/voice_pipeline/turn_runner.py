@@ -38,6 +38,10 @@ from app.services.scripts.spoken_email_normalizer import (
     natural_phone_readback,
 )
 from app.domain.services.voice_pipeline.confirm_llm import llm_confirmation_verdict
+from app.domain.services.voice_pipeline.identity_disposition import (
+    IdentityDisposition,
+    contains_explicit_goodbye,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -325,14 +329,30 @@ class TurnRunner:
                 # Two declines = the persona legitimately closes (issue #16), so
                 # honor end-session rather than re-opening with the recovery line.
                 _declined = getattr(getattr(session, "captured_slots", None), "declined_count", 0)
-                if not should_honor_end_session(
+                # F-15 fix (2026-07-20): this JSON end-session path is the OTHER
+                # hangup gate, and it never consulted the deterministic
+                # disposition — so a model that chose the JSON format instead of
+                # the [[END_CALL]] sentinel bypassed turn_ender's wrong-person
+                # reverse gate entirely and could hang up on a valid prospect.
+                # Mirror that gate here: on a WRONG_PERSON turn (right business,
+                # wrong person → pivot) suppress the hangup unless the caller
+                # explicitly said goodbye. do_not_call is EXEMPT — a genuine
+                # opt-out always ends (and a DNC utterance classifies as DNC,
+                # not WRONG_PERSON, so this can never swallow an opt-out).
+                _wrong_person_block = (
+                    not ask_ai_end_action.get("do_not_call")
+                    and getattr(session, "_turn_disposition", IdentityDisposition.NONE)
+                    == IdentityDisposition.WRONG_PERSON
+                    and not contains_explicit_goodbye(full_transcript)
+                )
+                if _wrong_person_block or not should_honor_end_session(
                     ask_ai_end_action, full_transcript, user_turns, declined_count=_declined,
                 ):
                     logger.info(
                         "phantom_goodbye_suppressed call_id=%s reason=%s user_turns=%d "
-                        "transcript=%r — keeping call alive",
+                        "wrong_person_block=%s transcript=%r — keeping call alive",
                         call_id, ask_ai_end_action.get("reason"), user_turns,
-                        (full_transcript or "")[:60],
+                        _wrong_person_block, (full_transcript or "")[:60],
                     )
                     session.tts_active = True
                     await self._p.synthesize_and_send_audio(

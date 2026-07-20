@@ -176,7 +176,12 @@ def _run_retrieve(monkeypatch, *, bump_hits):
         "content": "C", "fts": 0.1, "sim": 0.2,
     }]
     conn = _FakeConn(rows)
-    monkeypatch.setattr(retr, "acquire_with_tenant", lambda pool, tenant: _FakeAcquire(conn))
+    # Accept the new acquire_timeout kwarg the voice path now passes through
+    # (retrieve_knowledge → acquire_with_tenant(..., timeout=...)).
+    monkeypatch.setattr(
+        retr, "acquire_with_tenant",
+        lambda pool, tenant, **kw: _FakeAcquire(conn),
+    )
     out = asyncio.run(retr.retrieve_knowledge(
         object(), "t1", "c1", "price", k=2, bump_hits=bump_hits,
     ))

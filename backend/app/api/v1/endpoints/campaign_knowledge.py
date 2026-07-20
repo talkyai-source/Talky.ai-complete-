@@ -196,6 +196,18 @@ async def update_node(
         )
     if not updated:
         raise HTTPException(status_code=404, detail="Node not found")
+
+    # Invalidate the retrieval cache (Case 3) so an operator's edit (e.g.
+    # disabling a node or correcting a voice_answer) is visible to the very
+    # next lookup instead of serving a stale hit for up to the TTL. Fail-soft:
+    # never let a cache-clear problem fail an otherwise-successful edit.
+    try:
+        from app.services.scripts.knowledge import cache as _kb_cache
+        _kb_cache.invalidate_campaign(tenant_id, campaign_id)
+    except Exception as exc:
+        logger.debug(
+            "knowledge cache invalidate failed campaign=%s: %s", campaign_id[:12], exc,
+        )
     return {"id": str(updated), "updated": list(fields.keys())}
 
 
@@ -275,4 +287,15 @@ async def delete_source(
         mode = choose_mode(int(remaining or 0), model)
         await conn.execute("UPDATE campaigns SET knowledge_mode = $2, updated_at = NOW() WHERE id = $1",
                            campaign_id, mode)
+
+    # Invalidate the retrieval cache (Case 3): a deleted source's nodes must
+    # stop being served immediately, not up to 45s later. Fail-soft: never
+    # let a cache-clear problem fail an otherwise-successful deletion.
+    try:
+        from app.services.scripts.knowledge import cache as _kb_cache
+        _kb_cache.invalidate_campaign(tenant_id, campaign_id)
+    except Exception as exc:
+        logger.debug(
+            "knowledge cache invalidate failed campaign=%s: %s", campaign_id[:12], exc,
+        )
     return {"deleted": str(deleted), "knowledge_mode": mode}

@@ -514,6 +514,63 @@ class RecordingService:
 
     # ── Private DB helpers ────────────────────────────────────────
 
+    async def _resolve_call_uuid(
+        self, call_id: str, tenant_id: str, conn: Any
+    ) -> Optional[UUID]:
+        """Resolve an incoming ``call_id`` to the authoritative ``calls.id``.
+
+        ``call_id`` is a proper UUID on the dialer/campaign path, but on
+        manual/PBX-originated calls it can be a PBX channel string (e.g.
+        ``"talky-out-da0f496d..."``) that was never a UUID to begin with.
+        Mirrors the resolution pattern already used at recording-persist
+        time (``app/domain/services/telephony/recording.py``): if the id
+        parses as a UUID it IS the calls.id; otherwise look it up via
+        ``calls.external_call_uuid`` (tenant-scoped, same as the stub row
+        insert that writes it there). Returns ``None`` — never raises —
+        when neither resolves, so the caller can degrade to a clean,
+        logged no-op instead of an aborted INSERT.
+        """
+        try:
+            return UUID(call_id)
+        except (ValueError, AttributeError, TypeError):
+            pass
+
+        try:
+            tenant_uuid = UUID(tenant_id)
+        except (ValueError, AttributeError, TypeError):
+            tenant_uuid = None
+
+        try:
+            row = await conn.fetchrow(
+                """
+                SELECT id FROM calls
+                WHERE external_call_uuid = $1
+                  AND ($2::uuid IS NULL OR tenant_id = $2)
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                call_id,
+                tenant_uuid,
+            )
+        except Exception as exc:
+            logger.warning(
+                "recording_call_id_resolution_failed call_id=%s err=%s",
+                call_id, exc,
+            )
+            return None
+
+        if row:
+            return row["id"]
+
+        logger.warning(
+            "recording_call_id_unresolved call_id=%s tenant=%s — "
+            "no matching calls row (channel id not a UUID and no "
+            "external_call_uuid match); recording will not have a "
+            "recordings_s3 DB row (WAV remains on disk/S3 only)",
+            call_id, tenant_id,
+        )
+        return None
+
     async def _insert_recording_record(
         self,
         call_id: str,
@@ -528,31 +585,70 @@ class RecordingService:
         s3_region: Optional[str] = None,
         status: str = "uploaded",
     ) -> Optional[UUID]:
-        """Insert a row into recordings_s3 and return the new UUID."""
+        """Insert a row into recordings_s3 and return the new UUID.
+
+        ``call_id`` may be a PBX channel id rather than a UUID on the
+        non-dialer path (see ``_resolve_call_uuid``); it is resolved to
+        the authoritative ``calls.id`` before the INSERT so the row is
+        never silently dropped by a ``UUID()`` parse failure.
+        """
         try:
             async with self._db.acquire() as conn:
-                row = await conn.fetchrow(
-                    """
-                    INSERT INTO recordings_s3 (
-                        call_id, tenant_id, campaign_id,
-                        s3_bucket, s3_key, s3_region,
-                        file_size_bytes, duration_seconds,
-                        status, upload_started_at, upload_finished_at
-                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-                    RETURNING id
-                    """,
-                    UUID(call_id),
-                    UUID(tenant_id),
-                    UUID(campaign_id) if campaign_id else None,
-                    s3_bucket if s3_bucket is not None else self._s3.bucket,
-                    s3_key,
-                    s3_region if s3_region is not None else self._s3.region,
-                    file_size_bytes,
-                    duration_seconds,
-                    status,
-                    upload_started,
-                    upload_finished,
-                )
+                try:
+                    tenant_uuid = UUID(tenant_id)
+                except (ValueError, AttributeError, TypeError):
+                    logger.warning(
+                        "Failed to insert recording_s3 record: invalid "
+                        "tenant_id=%s for call_id=%s", tenant_id, call_id,
+                    )
+                    return None
+
+                try:
+                    campaign_uuid = UUID(campaign_id) if campaign_id else None
+                except (ValueError, AttributeError, TypeError):
+                    campaign_uuid = None
+
+                # `calls` and `recordings_s3` both carry tenant-isolation RLS
+                # policies keyed on app.current_tenant_id, and a pooled
+                # connection's value is whatever the LAST request set — an
+                # inherited-context lottery. Pin it transaction-locally so the
+                # resolution SELECT and the INSERT below are deterministic
+                # under RLS (same pattern as the stub-row insert in
+                # telephony/recording.py). set_config(..., true) is
+                # txn-scoped: nothing leaks back to the pool.
+                async with conn.transaction():
+                    await conn.execute(
+                        "SELECT set_config('app.current_tenant_id', $1, true)",
+                        str(tenant_uuid),
+                    )
+                    resolved_call_id = await self._resolve_call_uuid(
+                        call_id, tenant_id, conn
+                    )
+                    if resolved_call_id is None:
+                        return None
+
+                    row = await conn.fetchrow(
+                        """
+                        INSERT INTO recordings_s3 (
+                            call_id, tenant_id, campaign_id,
+                            s3_bucket, s3_key, s3_region,
+                            file_size_bytes, duration_seconds,
+                            status, upload_started_at, upload_finished_at
+                        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                        RETURNING id
+                        """,
+                        resolved_call_id,
+                        tenant_uuid,
+                        campaign_uuid,
+                        s3_bucket if s3_bucket is not None else self._s3.bucket,
+                        s3_key,
+                        s3_region if s3_region is not None else self._s3.region,
+                        file_size_bytes,
+                        duration_seconds,
+                        status,
+                        upload_started,
+                        upload_finished,
+                    )
                 return row["id"] if row else None
         except Exception as exc:
             logger.error(f"Failed to insert recording_s3 record: {exc}")
