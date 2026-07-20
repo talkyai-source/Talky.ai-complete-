@@ -822,4 +822,26 @@ class TurnEnder:
                     # the messages it appended are valid and must not be rolled back.
                     session._speculative_history_len = None
                     session.increment_turn()
+                    # F-08: dispatch a turn that arrived (distinct from this
+                    # one) while this task was still running. Gated on
+                    # _owns_slot ONLY — a stale/superseded task must never
+                    # fire this (that's exactly what _owns_slot protects
+                    # against elsewhere in this block).
+                    _queued = getattr(session, "_queued_next_turn", None)
+                    if _queued is not None:
+                        session._queued_next_turn = None
+                        logger.info(
+                            "turn_queued_next_dispatch call=%s seq=%s",
+                            call_id[:12], _queued.get("seq"),
+                        )
+                        _next_task = asyncio.create_task(
+                            self._p.handle_turn_end(
+                                session, websocket, source="queued",
+                                user_text=_queued.get("text"),
+                            )
+                        )
+                        _next_task._turn_type = "final"
+                        _next_task._utterance_seq = _queued.get("seq")
+                        _next_task._source_text = _queued.get("text")
+                        self._p._pending_llm_tasks[call_id] = _next_task
 

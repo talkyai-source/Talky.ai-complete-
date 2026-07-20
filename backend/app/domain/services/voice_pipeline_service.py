@@ -569,6 +569,13 @@ class VoicePipelineService:
                 "barge_in_ignored_final_pre_tts call=%s — protecting in-flight answer",
                 call_id[:12],
             )
+            # F-08: defensively clear any event this (or the direct STT
+            # callback) already armed. Turn 1 hasn't reached TTS yet — a
+            # dangling armed event would make synthesize_and_send see it as
+            # "already barged in" the instant it starts and abort before a
+            # single word plays.
+            if call_id in self._barge_in_events:
+                self._barge_in_events[call_id].clear()
             return
 
         logger.info(
@@ -580,7 +587,13 @@ class VoicePipelineService:
                 "tts_active": session.tts_active,
             },
         )
-        if call_id in self._barge_in_events:
+        if call_id in self._barge_in_events and session.tts_active:
+            # F-08: only arm the event when there is actual audible playback
+            # to stop. Reaching here with tts_active False means the pending
+            # task (if any) is SPECULATIVE — it gets cancelled unconditionally
+            # below regardless of this event, so gating the event costs
+            # nothing while closing off the same dangling-armed-event hazard
+            # the pre-TTS guard above protects against.
             self._barge_in_events[call_id].set()
             # P1: stamp which turn-epoch this barge-in targets so the streamer
             # can ignore it if a newer turn has already superseded that one.

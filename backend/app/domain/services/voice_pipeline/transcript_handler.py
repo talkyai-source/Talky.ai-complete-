@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime
 from typing import Optional
 
@@ -173,19 +174,64 @@ class TranscriptHandler:
             # across two EndOfTurns, producing a totally off-topic answer.
             existing = self._p._pending_llm_tasks.get(call_id)
             if existing and not existing.done():
-                # A task is already in flight for this call. Two cases:
-                #  * speculative (started on EagerEndOfTurn) — Deepgram
-                #    guarantees this EndOfTurn's transcript matches that
-                #    eager turn, so the in-flight task IS the answer. PROMOTE
-                #    it to "final" (protects it from a later StartOfTurn
-                #    cancelling it) and let it finish — restarting would throw
-                #    away the eager-EOT latency head start.
-                #  * final — a duplicate EndOfTurn; the promotion is a no-op
-                #    and we simply skip the duplicate.
-                # Either way we must NOT drop the turn into silence.
-                existing._turn_type = "final"
-                logger.debug(
-                    "turn_end: existing task kept as final for %s", call_id[:12]
+                # A task is already in flight for this call. Determine whether
+                # THIS EndOfTurn is the same utterance that launched it (a
+                # genuine duplicate / eager-promotion case) or a genuinely
+                # DIFFERENT, later utterance that finished while turn 1 is
+                # still thinking (F-08).
+                #
+                # seq: bumped on every StartOfTurn that reaches the pipeline
+                # (_on_barge_in_direct). A new distinct utterance normally
+                # bumps it, so a seq mismatch is strong evidence of a new
+                # utterance.
+                #
+                # content fallback: Flux's own StartOfTurn gate can suppress
+                # the barge-in callback (so no seq bump) for an utterance that
+                # STARTS like a backchannel but grows into content —
+                # session.current_user_input still updates via Update chunks,
+                # so a text mismatch catches that case too. A true Flux
+                # EndOfTurn->TurnResumed->EndOfTurn split of ONE utterance has
+                # both seq AND text unchanged, so it still collapses as a
+                # duplicate — zero behavior change for that case.
+                _current_seq = self._p._utterance_seq.get(call_id, 0)
+                _existing_seq = getattr(existing, "_utterance_seq", _current_seq)
+                _existing_text = (getattr(existing, "_source_text", None) or "").strip()
+                _new_text = (session.current_user_input or "").strip()
+                _is_distinct = (_current_seq != _existing_seq) or (
+                    _new_text and _new_text != _existing_text
+                )
+                if not _is_distinct:
+                    # Same utterance: two cases —
+                    #  * speculative (started on EagerEndOfTurn) — Deepgram
+                    #    guarantees this EndOfTurn's transcript matches that
+                    #    eager turn, so the in-flight task IS the answer.
+                    #    PROMOTE it to "final" (protects it from a later
+                    #    StartOfTurn cancelling it) and let it finish —
+                    #    restarting would throw away the eager-EOT latency
+                    #    head start.
+                    #  * final — a duplicate EndOfTurn; the promotion is a
+                    #    no-op and we simply skip the duplicate.
+                    # Either way we must NOT drop the turn into silence.
+                    existing._turn_type = "final"
+                    logger.debug(
+                        "turn_end: existing task kept as final for %s", call_id[:12]
+                    )
+                    return
+                # F-08: a genuinely different utterance finished while turn 1
+                # is still running (LLM in flight / thinking). Don't drop it —
+                # queue it depth-1 so turn_ender dispatches it the instant
+                # turn 1 releases the turn slot. A 3rd distinct utterance
+                # simply overwrites the queued slot (coalesces onto the
+                # latest, matching how a live caller would expect their most
+                # recent words to be the ones answered).
+                session._queued_next_turn = {
+                    "text": session.current_user_input,
+                    "seq": _current_seq,
+                    "queued_monotonic": time.monotonic(),
+                }
+                logger.info(
+                    "turn_queued_behind_pending call=%s seq=%d",
+                    call_id[:12], _current_seq,
                 )
                 return
             session._speculative_history_len = len(session.conversation_history)
@@ -203,6 +249,12 @@ class TranscriptHandler:
             # protected — a bare StartOfTurn must never cancel it (only an
             # interruption of audio that is actually playing may).
             task._turn_type = "final"
+            # F-08: tag with the utterance identity that launched this task so
+            # a LATER EndOfTurn arriving while this one is still running can
+            # tell a genuine duplicate from a genuinely new utterance (see the
+            # branch above).
+            task._utterance_seq = self._p._utterance_seq.get(call_id, 0)
+            task._source_text = _user_text
             self._p._pending_llm_tasks[call_id] = task
             return
 

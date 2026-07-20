@@ -160,3 +160,302 @@ def test_stale_task_finally_does_not_clobber_a_newer_turn():
     # The stale turn's finally saw a different live owner → left the new state intact.
     assert session.llm_active is True, "stale task clobbered the newer turn's llm_active"
     assert svc._pending_llm_tasks.get(session.call_id) is newer_task
+
+
+# ── 4. F-08 — a distinct 2nd utterance while turn 1 is still "thinking" ─────
+#
+# Root cause (2026-07-20): _on_barge_in_direct armed the barge-in event
+# UNCONDITIONALLY, so a 2nd StartOfTurn while turn 1's LLM was still in
+# flight (tts_active=False, nothing audible yet) pre-armed the event turn 1's
+# own TTS would see the instant it tried to speak — turn 1 never spoke.
+# Separately, transcript_handler's "existing task still running" guard always
+# collapsed a 2nd EndOfTurn into a no-op promote-to-final, so turn 2's
+# content was simply lost. Net effect: BOTH turns silenced.
+#
+# Fix: (1) audio_ingest / handle_barge_in only arm the event when
+# tts_active is True; (2) transcript_handler distinguishes a genuine
+# duplicate from a distinct new utterance (utterance-seq, with a
+# current_user_input content fallback for the case Flux's own StartOfTurn
+# gate suppressed the seq bump) and QUEUES a distinct one depth-1 instead of
+# dropping it; (3) turn_ender dispatches the queued turn from its `finally`,
+# but ONLY when this task still owns the turn slot (_owns_slot) — never from
+# a stale/superseded task.
+
+from app.domain.models.conversation import TranscriptChunk
+from app.domain.services.voice_pipeline.audio_ingest import AudioIngest
+
+
+def _tagged_pending_task(seq, text, turn_type="final"):
+    """A never-finishing task tagged the way transcript_handler tags a
+    freshly-created turn task, for tests that drive the dedup/queue logic
+    directly without running a real turn to completion. Must be called from
+    inside a running event loop (e.g. within an `asyncio.run(scenario())`)."""
+    async def _never():
+        await asyncio.Event().wait()
+
+    t = asyncio.create_task(_never())
+    t._turn_type = turn_type
+    t._utterance_seq = seq
+    t._source_text = text
+    return t
+
+
+class _FluxLikeSTT:
+    """Minimal stand-in for the real STT provider's detect_turn_end: Flux
+    semantics — EndOfTurn is signalled by an empty, is_final chunk."""
+
+    def detect_turn_end(self, transcript) -> bool:
+        return bool(transcript.is_final) and not transcript.text
+
+
+class _TwoTurnLLM:
+    """Each call's stream blocks on its own release event before yielding —
+    call 1 simulates turn 1 still "thinking" (nothing sent to TTS yet,
+    tts_active stays False); call 2 gives the test the same deterministic
+    control over turn 2's completion, so the dispatched task can be observed
+    mid-flight instead of racing the event loop's own scheduling order."""
+
+    def __init__(self, release1: asyncio.Event, release2: asyncio.Event):
+        self._releases = [release1, release2]
+        self._texts = ["Turn one reply. ", "Turn two reply. "]
+        self._call_n = 0
+
+    async def _gen(self):
+        idx = self._call_n
+        self._call_n += 1
+        await self._releases[idx].wait()
+        yield self._texts[idx]
+
+    async def stream_chat_with_timeout(self, *a, **k):
+        async for c in self._gen():
+            yield c
+
+    async def stream_chat_with_tools(self, *a, **k):
+        async for c in self._gen():
+            yield c
+
+
+def test_distinct_second_utterance_while_thinking_is_queued_not_dropped():
+    """Full integration: turn 1 pending (slow LLM, pre-TTS) + a DISTINCT 2nd
+    utterance's EndOfTurn arrives — turn 1 must still speak, the 2nd turn
+    must be queued (not dropped), and both replies must land in history
+    once turn 1 releases the slot."""
+    release1 = asyncio.Event()
+    release2 = asyncio.Event()
+    svc = VoicePipelineService(
+        stt_provider=_FluxLikeSTT(),
+        llm_provider=_TwoTurnLLM(release1, release2),
+        tts_provider=AsyncMock(),
+        media_gateway=AsyncMock(),
+        mute_during_tts=False,
+    )
+    svc.latency_tracker = MagicMock()
+    svc.latency_tracker.get_metrics.return_value = None
+    svc.transcript_service = MagicMock()
+    svc.synthesize_and_send_audio = AsyncMock(return_value=False)  # never interrupted
+
+    session = _make_session()
+    call_id = session.call_id
+    svc._barge_in_events[call_id] = session.barge_in_event
+    # Prior turn so the turn-0 floor / instant-opener paths don't apply.
+    session.conversation_history.append(Message(role=MessageRole.USER, content="earlier"))
+    session.conversation_history.append(Message(role=MessageRole.ASSISTANT, content="hi"))
+
+    async def scenario():
+        # ── Turn 1: text chunk then Deepgram's always-emitted empty EOT marker.
+        svc._utterance_seq[call_id] = 1
+        await svc.handle_transcript(
+            session, TranscriptChunk(text="what are your hours", is_final=True),
+        )
+        await svc.handle_transcript(session, TranscriptChunk(text="", is_final=True))
+
+        task1 = svc._pending_llm_tasks.get(call_id)
+        assert task1 is not None and not task1.done()
+        await asyncio.sleep(0)  # let turn 1's task actually start and block on `release`
+
+        # (i) Still "thinking" — nothing has been sent to TTS, so the event
+        # must NOT have been armed by anything in this flow.
+        assert not session.barge_in_event.is_set()
+
+        # ── Turn 2: a DISTINCT utterance — new StartOfTurn bumps the seq.
+        svc._utterance_seq[call_id] = 2
+        await svc.handle_transcript(
+            session, TranscriptChunk(text="also can you text me the address", is_final=True),
+        )
+        await svc.handle_transcript(session, TranscriptChunk(text="", is_final=True))
+
+        # (ii) Queued, not dropped — and turn 1's task is untouched/still running.
+        queued = getattr(session, "_queued_next_turn", None)
+        assert queued is not None, "distinct 2nd utterance was dropped, not queued"
+        assert queued["text"] == "also can you text me the address"
+        assert queued["seq"] == 2
+        assert svc._pending_llm_tasks.get(call_id) is task1
+        assert not task1.done()
+
+        # Release turn 1 and let it finish. Turn 2's LLM call blocks on
+        # release2 (still unset), so turn 2 is dispatched but parked —
+        # giving us a deterministic window to observe it mid-flight instead
+        # of racing the event loop's own scheduling order.
+        release1.set()
+        for _ in range(1000):
+            if svc._pending_llm_tasks.get(call_id) is not task1:
+                break
+            await asyncio.sleep(0)
+        else:
+            raise AssertionError("turn 1 never completed / dispatched turn 2")
+
+        # (iii) turn_ender's finally dispatched the queued turn automatically.
+        task2 = svc._pending_llm_tasks.get(call_id)
+        assert task2 is not None and task2 is not task1
+        release2.set()
+        await asyncio.wait_for(task2, timeout=2.0)
+        assert getattr(session, "_queued_next_turn", None) is None
+
+        return session.conversation_history
+
+    history = asyncio.run(scenario())
+
+    # (iv) Both assistant replies landed in conversation_history.
+    assistant_texts = " ".join(
+        m.content for m in history if m.role == MessageRole.ASSISTANT
+    )
+    assert "Turn one reply." in assistant_texts, assistant_texts
+    assert "Turn two reply." in assistant_texts, assistant_texts
+
+
+def test_duplicate_same_seq_and_text_is_still_collapsed():
+    """Regression: a 2nd EndOfTurn carrying the SAME seq/text as the pending
+    task (e.g. Flux EndOfTurn->TurnResumed->EndOfTurn on ONE utterance) must
+    still be treated as a duplicate — promoted-to-final, no queuing."""
+    svc = _make_service()
+    svc.stt_provider.detect_turn_end = MagicMock(
+        side_effect=lambda t: t.is_final and not t.text
+    )
+    session = _make_session()
+    call_id = session.call_id
+    svc._utterance_seq[call_id] = 1
+    session.current_user_input = "same utterance text"
+
+    async def scenario():
+        task = _tagged_pending_task(seq=1, text="same utterance text")
+        svc._pending_llm_tasks[call_id] = task
+        await svc.handle_transcript(
+            session, TranscriptChunk(text="same utterance text", is_final=True),
+        )
+        await svc.handle_transcript(session, TranscriptChunk(text="", is_final=True))
+        result = (
+            getattr(session, "_queued_next_turn", None),
+            task._turn_type,
+            svc._pending_llm_tasks.get(call_id) is task,
+        )
+        task.cancel()
+        return result
+
+    queued, turn_type, kept_same_task = asyncio.run(scenario())
+
+    assert queued is None
+    assert turn_type == "final"
+    assert kept_same_task, "duplicate must not replace the pending task"
+
+
+def test_grown_utterance_with_suppressed_seq_bump_is_distinct_via_content():
+    """Grow-through-gate: Flux's own StartOfTurn gate suppressed the barge-in
+    callback for this utterance (no seq bump), but current_user_input grew
+    into text different from what launched the pending task — must still be
+    classified DISTINCT via the content fallback, not silently dropped."""
+    svc = _make_service()
+    svc.stt_provider.detect_turn_end = MagicMock(
+        side_effect=lambda t: t.is_final and not t.text
+    )
+    session = _make_session()
+    call_id = session.call_id
+    svc._utterance_seq[call_id] = 1  # NOT bumped for this utterance (gate suppressed it)
+
+    async def scenario():
+        task = _tagged_pending_task(seq=1, text="yeah")
+        svc._pending_llm_tasks[call_id] = task
+        await svc.handle_transcript(
+            session, TranscriptChunk(text="yeah, but what does it cost", is_final=True),
+        )
+        await svc.handle_transcript(session, TranscriptChunk(text="", is_final=True))
+        task.cancel()
+
+    asyncio.run(scenario())
+
+    queued = getattr(session, "_queued_next_turn", None)
+    assert queued is not None, "grown utterance (content differs, seq unchanged) must be distinct"
+    assert queued["text"] == "yeah, but what does it cost"
+    assert queued["seq"] == 1
+
+
+class _ImmediateBargeSTT:
+    """Fires the pipeline's on_barge_in callback exactly once, mirroring how
+    the real STT provider invokes it from within stream_transcribe, then
+    ends the stream (no transcripts)."""
+
+    async def stream_transcribe(self, audio_iter, call_id=None, on_barge_in=None, **kwargs):
+        if on_barge_in:
+            on_barge_in()
+        return
+        yield  # pragma: no cover - unreachable; keeps this an async generator
+
+
+def test_on_barge_in_direct_does_not_arm_event_while_thinking():
+    """Direct test of the audio_ingest closure: a StartOfTurn that reaches
+    _on_barge_in_direct while tts_active=False (agent thinking, nothing
+    audible) must bump the utterance seq but NOT arm the barge-in event."""
+    pipeline = MagicMock()
+    pipeline.media_gateway.get_audio_queue.return_value = asyncio.Queue(maxsize=10)
+    pipeline.stt_provider = _ImmediateBargeSTT()
+    pipeline._barge_in_events = {}
+    pipeline._barge_in_epoch = {}
+    pipeline._utterance_seq = {}
+    pipeline.latency_tracker = MagicMock()
+    pipeline.latency_tracker.get_metrics.return_value = None
+    pipeline.synthesize_and_send_audio = AsyncMock()
+
+    session = _make_session()
+    session.stt_active = True
+    session.tts_active = False
+    pipeline._barge_in_events[session.call_id] = session.barge_in_event
+
+    ingest = AudioIngest(pipeline)
+
+    async def scenario():
+        task = asyncio.ensure_future(ingest.process(session))
+        await asyncio.sleep(0.05)
+        session.stt_active = False
+        try:
+            await asyncio.wait_for(task, timeout=1.0)
+        except asyncio.TimeoutError:
+            task.cancel()
+
+    asyncio.run(scenario())
+
+    assert not session.barge_in_event.is_set(), (
+        "barge-in event armed while tts_active=False (thinking) — F-08 regression"
+    )
+    assert getattr(session, "_last_caller_activity_monotonic", None) is not None
+    assert pipeline._utterance_seq.get(session.call_id) == 1
+
+
+def test_handle_barge_in_does_not_arm_event_for_speculative_task_while_thinking():
+    """Same F-08 gate, exercised through VoicePipelineService.handle_barge_in
+    directly: a speculative (non-final) pending task with tts_active=False
+    must be cancelled as before, but the event must not be armed — there is
+    nothing audible to stop."""
+    svc = _make_service()
+    session = _make_session()
+    call_id = session.call_id
+    svc._barge_in_events[call_id] = session.barge_in_event
+    session.tts_active = False
+
+    async def scenario():
+        spec_task = _tagged_pending_task(seq=1, text="x", turn_type="speculative")
+        svc._pending_llm_tasks[call_id] = spec_task
+        await svc.handle_barge_in(session, AsyncMock())
+
+    asyncio.run(scenario())
+
+    assert not session.barge_in_event.is_set()
+    assert call_id not in svc._pending_llm_tasks
