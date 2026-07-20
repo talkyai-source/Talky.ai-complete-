@@ -30,6 +30,7 @@ class FakeConn:
         self.fetchval_calls: List[Tuple[str, Tuple[Any, ...]]] = []
         self.fetchrow_calls: List[Tuple[str, Tuple[Any, ...]]] = []
         self.execute_calls: List[Tuple[str, Tuple[Any, ...]]] = []
+        self.codec_calls: List[str] = []
         self.closed = False
         self._fetch_handlers: List[Tuple[str, Any]] = []
         self._fetchval_handlers: List[Tuple[str, Any]] = []
@@ -77,6 +78,11 @@ class FakeConn:
     async def execute(self, sql: str, *args: Any) -> Any:
         self.execute_calls.append((sql, args))
         return self._resolve(self._execute_handlers, sql, args, "UPDATE 1")
+
+    async def set_type_codec(self, typename: str, *args: Any, **kwargs: Any) -> None:
+        # Models asyncpg's per-connection codec registration so the adapter's
+        # jsonb/json codec setup on ad-hoc connections is exercised, not swallowed.
+        self.codec_calls.append(typename)
 
     async def close(self) -> None:
         self.closed = True
@@ -255,6 +261,12 @@ def test_insert_serializes_dict_payloads_for_jsonb_columns(connect_queue):
     _sql, args = conn.fetchrow_calls[0]
     assert isinstance(args[4], str)
     assert json.loads(args[4]) == {"session_type": "voice_demo"}
+
+    # Regression (custom_fields "expected str, got dict"): the ad-hoc
+    # asyncpg connection MUST register the jsonb/json codec. _coerce_bind_value
+    # passes dict/list values bound to a real jsonb column through un-serialized,
+    # trusting this codec to encode them; without it asyncpg rejects the dict.
+    assert "jsonb" in conn.codec_calls and "json" in conn.codec_calls
 
 
 def test_select_decodes_jsonb_columns_to_native_python_values(connect_queue):

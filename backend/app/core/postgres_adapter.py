@@ -222,6 +222,14 @@ class QueryBuilder:
         conn = None
         try:
             conn = await asyncpg.connect(_DATABASE_URL)
+            # Register the jsonb/json codec on this ad-hoc connection. The pool
+            # registers it via init=, but these direct connections otherwise
+            # wouldn't — and _coerce_bind_value passes dict/list values bound to
+            # jsonb columns through UN-serialized, trusting this codec to encode
+            # them. Without it, inserting e.g. a dict custom_fields raised
+            # "invalid input for query argument: expected str, got dict".
+            from app.core.db import _register_jsonb_codecs
+            await _register_jsonb_codecs(conn)
 
             # Set RLS context for the session
             from app.core.security.tenant_isolation import get_current_tenant_id, get_bypass_rls
@@ -820,7 +828,13 @@ class RpcBuilder:
         conn = None
         try:
             conn = await asyncpg.connect(_DATABASE_URL)
-            
+            # Register the jsonb/json codec on this ad-hoc connection (see the
+            # matching note in the other _execute_async) so dict/list values
+            # bound to jsonb columns are encoded — without it an insert/update
+            # with a dict (e.g. custom_fields) raised "expected str, got dict".
+            from app.core.db import _register_jsonb_codecs
+            await _register_jsonb_codecs(conn)
+
             # Set RLS context for the session
             from app.core.security.tenant_isolation import get_current_tenant_id, get_bypass_rls
             tenant_id = get_current_tenant_id()
