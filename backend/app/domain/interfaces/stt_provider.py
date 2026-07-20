@@ -23,7 +23,7 @@ class STTProvider(ABC):
         context: Optional[str] = None,
         call_id: Optional[str] = None,
         on_eager_end_of_turn: Optional[Callable[[str], None]] = None,
-        on_barge_in: Optional[Callable[[], None]] = None,
+        on_barge_in: Optional[Callable[[Optional[str]], None]] = None,
     ) -> AsyncIterator[TranscriptChunk]:
         """
         Stream audio and receive real-time transcriptions

@@ -18,9 +18,20 @@ only once per call, and any failure falls through to the normal LLM turn.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 
 logger = logging.getLogger(__name__)
+
+# F-10: bounded echo-immunity window. The instant-opener's own greeting
+# echoes back as a StartOfTurn a beat after playback starts (and playback
+# itself may still be running when it arrives) — that echo must not be
+# treated as a real interrupt. Scoped to actual playback (via
+# ``_instant_opener_in_flight``) PLUS this short trailing grace period so a
+# StartOfTurn that lands just after ``_send_outbound_greeting`` returns is
+# still recognized as the same echo instead of racing to be first.
+_INSTANT_OPENER_ECHO_GRACE_S = 0.7
 
 # Words a callee uses to answer the phone content-free. If every token of the
 # first utterance is from this set, the pre-synth opener is a perfect reply.
@@ -41,6 +52,27 @@ def is_bare_greeting(text: str) -> bool:
     return all((w in _GREETING_WORDS or not w) for w in words)
 
 
+def is_opener_echo(session, text) -> bool:
+    """True when a StartOfTurn/BargeInSignal should be treated as the echo of
+    the instant-opener's own greeting rather than a real interruption.
+
+    Two-part gate:
+      1. TIMING — only while the opener is actually playing
+         (``_instant_opener_in_flight``) or within the short trailing grace
+         window after it finishes (``_instant_opener_grace_until``). Outside
+         that window this is never an echo, whatever the text says.
+      2. CONTENT — reuses ``is_bare_greeting``, the same classifier that
+         decided to INVOKE the opener in the first place. A bare greeting
+         echoing back is exempt; "stop"/"wait"/any real content is NOT a
+         bare greeting and still cancels normally, so a genuine interrupt
+         during opener playback is never swallowed.
+    """
+    if not getattr(session, "_instant_opener_in_flight", False) and \
+       time.monotonic() >= getattr(session, "_instant_opener_grace_until", 0.0):
+        return False
+    return is_bare_greeting(text or "")
+
+
 async def try_instant_opener(session, transcript: str) -> bool:
     """Play the ringing-phase pre-synth greeting as the reply to the caller's
     first bare greeting. Returns True when it played (skip the LLM turn).
@@ -51,7 +83,6 @@ async def try_instant_opener(session, transcript: str) -> bool:
         vs = getattr(session, "_voice_session_ref", None)
         if vs is None or not getattr(vs, "_presynth_greeting_audio", None):
             return False
-        session._instant_opener_done = True
 
         # The caller's greeting belongs in history BEFORE the agent's opener
         # so the next LLM turn sees the true exchange order.
@@ -73,22 +104,36 @@ async def try_instant_opener(session, transcript: str) -> bool:
         )
         # The opener IS the answer to the caller's own "Hello?" — the trailing
         # audio/echo of that very hello fires a fresh StartOfTurn barge-in a
-        # beat after playback starts, and the greeting player (correctly, for
-        # normal turns) aborts on it. Result observed live 15:13: agent
-        # permanently silent. Make THIS one playback barge-in-immune by
-        # parking the event; a real interruption costs at most ~3s of opener
-        # audio, versus a dead call.
-        _evt = getattr(session, "barge_in_event", None)
+        # beat after playback starts. Result observed live 15:13: agent
+        # permanently silent. F-10: rather than parking the barge-in event
+        # (which never touched the real pipeline-dict event the STT path
+        # actually arms, and didn't survive task cancellation anyway), the
+        # echo is now recognized by CONTENT + this bounded in-flight/grace
+        # window (see is_opener_echo) at the two places a barge-in can land
+        # — _on_barge_in_direct and handle_barge_in. A real interruption
+        # ("stop"/real content) is never a bare greeting, so it still cancels
+        # this task normally via asyncio.CancelledError below.
+        _completed = False
+        session._instant_opener_in_flight = True
         try:
-            if _evt is not None:
-                _evt.clear()
-                session.barge_in_event = None
             await _send_outbound_greeting(vs)
+            _completed = True
+        except asyncio.CancelledError:
+            logger.warning(
+                "instant_opener_cancelled call_id=%s — real interrupt during "
+                "opener playback",
+                str(session.call_id)[:12],
+            )
+            raise
         finally:
-            if _evt is not None:
-                _evt.clear()
-                session.barge_in_event = _evt
+            session._instant_opener_in_flight = False
+            session._instant_opener_grace_until = (
+                time.monotonic() + _INSTANT_OPENER_ECHO_GRACE_S
+            )
+            session._instant_opener_done = _completed
         return True
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:  # noqa: BLE001 — fall through to the LLM turn
         logger.warning(
             "instant_opener_failed call_id=%s err=%s — falling back to LLM",

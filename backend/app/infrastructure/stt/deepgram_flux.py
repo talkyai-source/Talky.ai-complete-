@@ -793,7 +793,7 @@ class DeepgramFluxSTTProvider(STTProvider):
                             # consume the BargeInSignal from the transcript queue.
                             if on_barge_in:
                                 try:
-                                    on_barge_in()
+                                    on_barge_in(transcript_text)
                                 except Exception:
                                     pass
                             # Also queue the signal for handle_barge_in bookkeeping
@@ -804,7 +804,7 @@ class DeepgramFluxSTTProvider(STTProvider):
                             # finishes — causing stale audio to play post-barge-in.
                             # Solution: drop oldest non-critical Update chunks to
                             # make room, then put_nowait.
-                            barge_in = BargeInSignal()
+                            barge_in = BargeInSignal(text=transcript_text)
                             try:
                                 transcript_queue.put_nowait(barge_in)
                             except asyncio.QueueFull:

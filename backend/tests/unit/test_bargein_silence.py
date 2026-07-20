@@ -459,3 +459,90 @@ def test_handle_barge_in_does_not_arm_event_for_speculative_task_while_thinking(
 
     assert not session.barge_in_event.is_set()
     assert call_id not in svc._pending_llm_tasks
+
+
+# ── F-10 x F-08 interaction ─────────────────────────────────────────────────
+
+class _EchoSTT:
+    """Fires the pipeline's on_barge_in callback exactly once WITH the
+    recognized text (mirrors how deepgram_flux invokes it after F-10), then
+    ends the stream — no transcript chunks. Used to drive the real
+    _on_barge_in_direct closure for the opener-echo seq-bump ordering test."""
+
+    async def stream_transcribe(self, audio_iter, call_id=None, on_barge_in=None, **kwargs):
+        if on_barge_in:
+            on_barge_in("hello")
+        return
+        yield  # pragma: no cover - unreachable; keeps this an async generator
+
+
+def test_opener_echo_does_not_bump_seq_and_matching_eot_is_deduped():
+    """Regression for the F-10 x F-08 interaction: if an IGNORED opener echo
+    still bumped _utterance_seq, a matching text EndOfTurn ("hello") arriving
+    while the opener task is still running would look DISTINCT under F-08's
+    seq-mismatch check and get queued as a spurious extra LLM turn — the
+    agent answering its own opener echo. Moving the seq bump to AFTER the
+    is_opener_echo early-return (this fix) must keep the seq unchanged for
+    an ignored echo, so the matching EndOfTurn collapses as a duplicate
+    (existing task promoted to final, nothing queued) exactly like a real
+    Flux EndOfTurn->TurnResumed->EndOfTurn split of one utterance."""
+    svc = _make_service()
+    svc.stt_provider.detect_turn_end = MagicMock(
+        side_effect=lambda t: t.is_final and not t.text
+    )
+    session = _make_session()
+    call_id = session.call_id
+    session._instant_opener_in_flight = True
+    svc._utterance_seq[call_id] = 0
+
+    async def scenario():
+        # Opener task tagged the way try_instant_opener's caller (turn_ender)
+        # tags a fresh turn task: seq at launch time (0) + source text.
+        task = _tagged_pending_task(seq=0, text="hello")
+        svc._pending_llm_tasks[call_id] = task
+
+        # ── Phase 1: StartOfTurn echo through the REAL audio_ingest closure.
+        pipeline = MagicMock()
+        pipeline.media_gateway.get_audio_queue.return_value = asyncio.Queue(maxsize=10)
+        pipeline.stt_provider = _EchoSTT()
+        pipeline._barge_in_events = {call_id: session.barge_in_event}
+        pipeline._barge_in_epoch = {}
+        pipeline._utterance_seq = svc._utterance_seq  # shared dict — same counter
+        pipeline.latency_tracker = MagicMock()
+        pipeline.latency_tracker.get_metrics.return_value = None
+        pipeline.synthesize_and_send_audio = AsyncMock()
+
+        session.stt_active = True
+        ingest = AudioIngest(pipeline)
+        ingest_task = asyncio.ensure_future(ingest.process(session))
+        await asyncio.sleep(0.05)
+        session.stt_active = False
+        try:
+            await asyncio.wait_for(ingest_task, timeout=1.0)
+        except asyncio.TimeoutError:
+            ingest_task.cancel()
+
+        assert svc._utterance_seq.get(call_id, 0) == 0, (
+            "an ignored opener echo must NOT bump _utterance_seq"
+        )
+
+        # ── Phase 2: the matching "hello" EndOfTurn reaches transcript_handler
+        # while the opener task is still "in flight" — must dedupe, not queue.
+        await svc.handle_transcript(
+            session, TranscriptChunk(text="hello", is_final=True),
+        )
+        await svc.handle_transcript(session, TranscriptChunk(text="", is_final=True))
+
+        result = (
+            getattr(session, "_queued_next_turn", None),
+            task._turn_type,
+            svc._pending_llm_tasks.get(call_id) is task,
+        )
+        task.cancel()
+        return result
+
+    queued, turn_type, kept_same_task = asyncio.run(scenario())
+
+    assert queued is None, "opener echo's EndOfTurn was queued as a spurious extra turn"
+    assert turn_type == "final"
+    assert kept_same_task, "duplicate must not replace the pending opener task"

@@ -223,7 +223,31 @@ class AudioIngest:
             # Direct barge-in callback: sets the event immediately from the STT
             # background task, even while the pipeline loop is blocked in
             # handle_turn_end.  This is the only reliable way to stop TTS mid-stream.
-            def _on_barge_in_direct() -> None:
+            def _on_barge_in_direct(transcript_text: Optional[str] = None) -> None:
+                # F-10: the instant-opener's own greeting echoes back as a
+                # StartOfTurn a beat after playback starts. Distinguish that
+                # echo from a real interrupt by CONTENT (bare-greeting text)
+                # + a bounded in-flight/grace window, instead of the old
+                # (broken) event-parking approach — see instant_opener.py.
+                #
+                # MUST run before the F-09 seq bump below: if an ignored echo
+                # still advanced _utterance_seq, a matching text EndOfTurn
+                # ("hello") reaching transcript_handler while the opener task
+                # is still running would see current_seq != the opener task's
+                # _utterance_seq (F-08's distinctness check) and queue a
+                # spurious extra LLM turn — the agent answering its own
+                # opener echo. Bailing here before the bump keeps a real
+                # StartOfTurn's bump exactly as before (is_opener_echo
+                # returns False immediately outside the opener window).
+                from app.domain.services.voice_pipeline.instant_opener import (
+                    is_opener_echo,
+                )
+                if is_opener_echo(session, transcript_text):
+                    logger.info(
+                        "instant_opener_echo_ignored call=%s text=%r",
+                        call_id[:12], (transcript_text or "")[:24],
+                    )
+                    return
                 # F-09: bump the per-call utterance counter on every StartOfTurn
                 # so transcript_handler can tag a suppressed backchannel with
                 # the utterance it belongs to (see _utterance_seq docstring).

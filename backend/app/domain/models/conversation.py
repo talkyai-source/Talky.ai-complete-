@@ -47,9 +47,17 @@ class BargeInSignal(BaseModel):
     
     Used for natural conversational interruptions where the user wants to
     interject before the agent finishes speaking.
+
+    F-10: ``text`` optionally carries the recognized transcript for the
+    StartOfTurn that triggered this signal (Flux only — Nova's SpeechStarted
+    has no recognized text yet). Lets downstream handlers distinguish a real
+    interruption from the echo of the agent's own instant-opener pickup by
+    CONTENT, not just timing. Additive/optional — every existing
+    ``BargeInSignal()`` call stays valid.
     """
     timestamp: datetime = None
-    
+    text: Optional[str] = None
+
     class Config:
         arbitrary_types_allowed = True
     

@@ -546,8 +546,22 @@ class VoicePipelineService:
         self,
         session: CallSession,
         websocket: Optional[WebSocket] = None,
+        transcript_text: str = "",
     ) -> None:
         call_id = session.call_id
+
+        # F-10: echo of the instant-opener's own pickup greeting, not a real
+        # interrupt — bail out before arming anything or touching the
+        # pending turn task. See instant_opener.is_opener_echo.
+        from app.domain.services.voice_pipeline.instant_opener import (
+            is_opener_echo,
+        )
+        if is_opener_echo(session, transcript_text):
+            logger.info(
+                "instant_opener_echo_ignored call=%s text=%r",
+                call_id[:12], (transcript_text or "")[:24],
+            )
+            return
 
         # Protect an in-flight FINAL answer that has not started playing yet.
         # A StartOfTurn here means the caller began a NEW utterance before we

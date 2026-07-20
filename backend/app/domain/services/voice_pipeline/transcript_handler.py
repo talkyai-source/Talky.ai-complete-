@@ -41,7 +41,10 @@ class TranscriptHandler:
         call_id = session.call_id
 
         if isinstance(transcript, BargeInSignal):
-            await self._p.handle_barge_in(session, websocket)
+            await self._p.handle_barge_in(
+                session, websocket,
+                transcript_text=getattr(transcript, "text", "") or "",
+            )
             return
 
         if transcript.metadata and transcript.metadata.get("resumed"):
