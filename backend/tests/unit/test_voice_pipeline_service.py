@@ -822,3 +822,141 @@ async def test_disposition_early_returns_reset_speculative_snapshot():
     await service2.handle_turn_end(session2, AsyncMock())
     assert session2._turn_disposition == IdentityDisposition.AMBIGUOUS
     assert session2._speculative_history_len is None
+
+
+# --- F-09 (2026-07-20) — empty EOT marker after a suppressed backchannel ----
+#
+# Deepgram always emits TWO TranscriptChunks per EndOfTurn: the real-text
+# chunk, then an ALWAYS-emitted empty marker (text="", is_final=True). When
+# a text-bearing backchannel ("yeah") is suppressed by the tts_active guard
+# in transcript_handler.py, the function used to set NO state — so the very
+# next chunk (the empty marker) sailed past the (text-only) backchannel check,
+# hit detect_turn_end (True for an empty is_final chunk), and barged in on
+# the agent's TTS + started an empty turn. The fix correlates the suppression
+# with its own utterance via VoicePipelineService._utterance_seq.
+
+from app.domain.models.conversation import TranscriptChunk
+
+
+def _make_transcript_service_stub() -> MagicMock:
+    stub = MagicMock()
+    stub.bind_call_identity = MagicMock()
+    stub.accumulate_turn = MagicMock()
+    return stub
+
+
+def _make_service_for_transcript_handler() -> VoicePipelineService:
+    service = VoicePipelineService(
+        stt_provider=MagicMock(),
+        llm_provider=AsyncMock(),
+        tts_provider=AsyncMock(),
+        media_gateway=AsyncMock(),
+    )
+    # Real Flux semantics: EndOfTurn == an is_final chunk with no text.
+    service.stt_provider.detect_turn_end = MagicMock(
+        side_effect=lambda t: t.is_final and not t.text
+    )
+    service.latency_tracker = MagicMock()
+    service.latency_tracker.get_metrics = MagicMock(return_value=None)
+    service.transcript_service = _make_transcript_service_stub()
+    service.handle_barge_in = AsyncMock()
+    service.handle_turn_end = AsyncMock()
+    return service
+
+
+@pytest.mark.asyncio
+async def test_empty_eot_marker_after_suppressed_backchannel_is_swallowed():
+    # Pure "yeah": suppressed, then its empty EOT marker must NOT barge in or
+    # start a turn.
+    service = _make_service_for_transcript_handler()
+    session = _make_session()
+    session.tts_active = True
+    session.llm_active = False
+
+    # StartOfTurn bumps the utterance seq (mirrors _on_barge_in_direct).
+    service._utterance_seq[session.call_id] = 1
+
+    before_input = session.current_user_input
+    await service.handle_transcript(
+        session, TranscriptChunk(text="yeah", is_final=True), websocket=None
+    )
+    assert session.current_user_input == before_input  # unchanged — suppressed
+
+    await service.handle_transcript(
+        session, TranscriptChunk(text="", is_final=True), websocket=None
+    )
+
+    service.handle_barge_in.assert_not_called()
+    assert session.call_id not in service._pending_llm_tasks
+
+
+@pytest.mark.asyncio
+async def test_grown_backchannel_still_ends_turn_on_empty_marker():
+    # "yeah" (suppressed) -> "yeah, but what does it cost?" (real content,
+    # not a backchannel, still interim) -> empty marker. The grow-case clear
+    # must let the empty marker fire detect_turn_end so the turn actually
+    # runs with the full grown text — the strictly-worse alternative is the
+    # turn NEVER running at all.
+    service = _make_service_for_transcript_handler()
+    session = _make_session()
+    session.tts_active = True
+    session.llm_active = False
+    service._utterance_seq[session.call_id] = 1
+
+    await service.handle_transcript(
+        session, TranscriptChunk(text="yeah", is_final=True), websocket=None
+    )
+    # Grown, non-final interim update of the SAME utterance (seq unchanged —
+    # no new StartOfTurn fired).
+    await service.handle_transcript(
+        session,
+        TranscriptChunk(text="yeah, but what does it cost?", is_final=False),
+        websocket=None,
+    )
+    assert session.current_user_input == "yeah, but what does it cost?"
+
+    await service.handle_transcript(
+        session, TranscriptChunk(text="", is_final=True), websocket=None
+    )
+
+    service.handle_barge_in.assert_called_once()
+    assert session.call_id in service._pending_llm_tasks
+    task = service._pending_llm_tasks[session.call_id]
+    service.handle_turn_end.assert_called_once()
+    _, kwargs = service.handle_turn_end.call_args
+    assert kwargs.get("user_text") == "yeah, but what does it cost?"
+    task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_normal_nonbackchannel_endofturn_still_barges_in_during_tts():
+    # Regression: a real, non-backchannel utterance while the agent is
+    # talking — text-bearing final chunk followed by Deepgram's ALWAYS-emitted
+    # empty EOT marker — must still barge in and start a turn on the empty
+    # marker exactly as before this fix (no suppression mark was ever set).
+    service = _make_service_for_transcript_handler()
+    session = _make_session()
+    session.tts_active = True
+    session.llm_active = False
+    service._utterance_seq[session.call_id] = 1
+
+    await service.handle_transcript(
+        session,
+        TranscriptChunk(text="actually, what about refunds", is_final=True),
+        websocket=None,
+    )
+    # Real content, non-empty final chunk never trips detect_turn_end by
+    # itself (Flux semantics: EndOfTurn == an empty is_final chunk) — no
+    # barge-in/turn yet.
+    service.handle_barge_in.assert_not_called()
+    assert session.call_id not in service._pending_llm_tasks
+
+    await service.handle_transcript(
+        session, TranscriptChunk(text="", is_final=True), websocket=None
+    )
+
+    service.handle_barge_in.assert_called_once()
+    assert session.call_id in service._pending_llm_tasks
+    task = service._pending_llm_tasks[session.call_id]
+    service.handle_turn_end.assert_called_once()
+    task.cancel()

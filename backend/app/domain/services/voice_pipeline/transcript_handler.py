@@ -121,7 +121,35 @@ class TranscriptHandler:
                 "backchannel %r during agent speech — ignored (no interrupt, no reply)",
                 (transcript.text or "")[:24],
             )
+            # F-09: mark this utterance's seq as suppressed so the ALWAYS-emitted
+            # empty is_final marker that follows it (Deepgram sends one after
+            # every EndOfTurn) doesn't get read as a genuine EndOfTurn below and
+            # barge in on the agent's TTS for a mere "yeah".
+            session._suppressed_backchannel_seq = self._p._utterance_seq.get(call_id, 0)
             return
+
+        # Grow case: an earlier fragment of THIS SAME utterance (same seq) was
+        # suppressed above as a backchannel, but this chunk is no longer a
+        # backchannel — the utterance grew into real content (e.g. "yeah" ->
+        # "yeah, but what does it cost?"). Clear the mark so the empty EOT
+        # marker below is treated as a genuine end-of-turn, not swallowed —
+        # otherwise the grown utterance's only detect_turn_end=True chunk (the
+        # empty marker) would be swallowed and the turn would NEVER run.
+        # Gated on transcript.text (non-empty): the empty EOT marker itself
+        # must NOT trip this clear, or it would erase the mark right before
+        # the empty-marker suppression check below ever gets to see it.
+        if transcript.text and getattr(session, "_suppressed_backchannel_seq", None) == self._p._utterance_seq.get(call_id, 0):
+            session._suppressed_backchannel_seq = None
+
+        if not transcript.text:
+            _sup_seq = getattr(session, "_suppressed_backchannel_seq", None)
+            if _sup_seq is not None and _sup_seq == self._p._utterance_seq.get(call_id, 0):
+                session._suppressed_backchannel_seq = None  # one-shot consume
+                logger.debug(
+                    "empty_eot_marker_suppressed_for_backchannel call=%s seq=%s",
+                    call_id[:12], _sup_seq,
+                )
+                return
 
         if self._p.stt_provider.detect_turn_end(transcript):
             # Grow case: a turn that began as a backchannel (so the StartOfTurn

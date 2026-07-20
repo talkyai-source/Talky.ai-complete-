@@ -130,6 +130,13 @@ class VoicePipelineService:
         # from a previous interruption) so it can't silence a fresh reply.
         self._turn_epochs: dict[str, int] = {}
         self._barge_in_epoch: dict[str, int] = {}
+        # F-09: per-call monotonic utterance counter, bumped on every StartOfTurn
+        # that reaches the pipeline (_on_barge_in_direct). Lets transcript_handler
+        # correlate a suppressed text-bearing backchannel with ITS OWN empty
+        # is_final EOT marker (Deepgram always emits one after every EndOfTurn)
+        # instead of a global boolean, which would swallow a later, unrelated
+        # empty marker for a different utterance.
+        self._utterance_seq: dict[str, int] = {}
         self._tracer = get_tracer()
 
     @property
@@ -478,6 +485,7 @@ class VoicePipelineService:
                 self._barge_in_events.pop(call_id, None)
                 self._turn_epochs.pop(call_id, None)
                 self._barge_in_epoch.pop(call_id, None)
+                self._utterance_seq.pop(call_id, None)
                 session.stt_active = False
                 self.latency_tracker.cleanup_call(call_id)
                 logger.info("pipeline_end", extra={"call_id": call_id})

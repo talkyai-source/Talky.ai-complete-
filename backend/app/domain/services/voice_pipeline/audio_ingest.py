@@ -224,6 +224,10 @@ class AudioIngest:
             # background task, even while the pipeline loop is blocked in
             # handle_turn_end.  This is the only reliable way to stop TTS mid-stream.
             def _on_barge_in_direct() -> None:
+                # F-09: bump the per-call utterance counter on every StartOfTurn
+                # so transcript_handler can tag a suppressed backchannel with
+                # the utterance it belongs to (see _utterance_seq docstring).
+                self._p._utterance_seq[call_id] = self._p._utterance_seq.get(call_id, 0) + 1
                 event = self._p._barge_in_events.get(call_id)
                 if event:
                     # Stamp the moment of the barge-in signal so tts_playback can
