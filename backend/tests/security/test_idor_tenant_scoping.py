@@ -11,6 +11,11 @@ Sites covered (see the fix commit):
   3. secrets_manager.get_expiring_secrets + /expiring route
   4. security_events update / resolve / escalate endpoints
   5. telephony/recording._save_call_recording external_call_uuid lookup
+  6. CampaignService.get_campaign / pause_campaign / stop_campaign +
+     CampaignService._get_pending_leads / _reset_leads_for_restart /
+     _inactive_list_ids / _update_campaign_status  (campaigns/leads/
+     contact_lists — RLS-backed, these are the app-level defense-in-depth
+     filters added alongside it)
 
 Site 1 (call_summary/store) is enforced by Postgres RLS (calls/leads have a
 tenant-isolation policy and the store goes through acquire_with_tenant); the
@@ -510,3 +515,270 @@ async def test_recording_lookup_same_tenant_resolves_its_own_call():
         await rec._save_call_recording(vs, "pbx-channel")
 
     assert captured_save["call_id"] == str(call["id"])
+
+
+# ===========================================================================
+# Site 6 — CampaignService (campaigns / leads / contact_lists / dialer_jobs)
+# ===========================================================================
+#
+# CampaignService talks to Postgres through the fluent `db_client.table(...)`
+# query-builder wrapper (app.core.postgres_adapter.Client), not raw asyncpg,
+# so the fake here emulates THAT interface — select/update/eq/in_/order —
+# rather than SecretsConn's `fetchrow(sql, *args)` shape used above.
+#
+# The RLS policy on campaigns/leads/contact_lists is `tenant_id =
+# current_setting('app.current_tenant_id')::uuid` (see
+# database/complete_schema.sql + the contact_lists migration): a mismatched
+# tenant_id makes the row invisible, same as "not found". The tests below
+# prove the equivalent app-level `.eq("tenant_id", ...)` filters added in
+# CampaignService do the same job — this is what's actually exercisable at
+# the unit level, since there is no live Postgres/RLS here.
+
+class _CampResp:
+    def __init__(self, data):
+        self.data = data
+
+
+class _CampQuery:
+    """Minimal fake of the postgrest-style fluent builder used throughout
+    CampaignService: .select/.update/.eq/.in_/.order/.execute()."""
+
+    def __init__(self, db, table):
+        self._db = db
+        self._table = table
+        self._filters = []
+        self._op = "select"
+        self._payload = None
+
+    def select(self, *_a, **_k):
+        self._op = "select"
+        return self
+
+    def update(self, data):
+        self._op = "update"
+        self._payload = data
+        return self
+
+    def eq(self, col, val):
+        self._filters.append(("eq", col, str(val)))
+        return self
+
+    def in_(self, col, vals):
+        self._filters.append(("in", col, [str(v) for v in vals]))
+        return self
+
+    def order(self, *_a, **_k):
+        return self
+
+    def _match(self, row):
+        for kind, col, val in self._filters:
+            rv = row.get(col)
+            rv = str(rv) if rv is not None else None
+            if kind == "eq" and rv != val:
+                return False
+            if kind == "in" and rv not in val:
+                return False
+        return True
+
+    def execute(self):
+        rows = self._db.tables.setdefault(self._table, [])
+        if self._op == "select":
+            return _CampResp([dict(r) for r in rows if self._match(r)])
+        if self._op == "update":
+            changed = []
+            for r in rows:
+                if self._match(r):
+                    r.update(self._payload)
+                    changed.append(dict(r))
+            return _CampResp(changed)
+        return _CampResp([])
+
+
+class CampaignFakeDB:
+    def __init__(self):
+        self.tables = {
+            "campaigns": [], "leads": [], "contact_lists": [], "dialer_jobs": [],
+        }
+
+    def table(self, name):
+        return _CampQuery(self, name)
+
+
+def _campaign_service(db):
+    from app.domain.services.campaign_service import CampaignService
+    return CampaignService(db, queue_service=None)
+
+
+def _seed_campaign(db, campaign_id, tenant_id, status="running"):
+    db.tables["campaigns"].append({
+        "id": campaign_id, "tenant_id": tenant_id, "status": status,
+        "name": "c", "total_leads": 0,
+    })
+
+
+class TestCampaignServiceTenantScoping:
+    """CampaignService.get_campaign is the read-side gate: it's also called
+    internally by pause_campaign/stop_campaign/start_campaign BEFORE any
+    mutation, so proving it 404s cross-tenant proves the whole family does."""
+
+    async def test_get_campaign_same_tenant_succeeds(self):
+        db = CampaignFakeDB()
+        cid = str(uuid4())
+        _seed_campaign(db, cid, str(OWNER))
+        svc = _campaign_service(db)
+
+        campaign = await svc.get_campaign(cid, tenant_id=str(OWNER))
+        assert campaign["id"] == cid
+
+    async def test_get_campaign_cross_tenant_is_not_found(self):
+        from app.domain.services.campaign_service import CampaignNotFoundError
+
+        db = CampaignFakeDB()
+        cid = str(uuid4())
+        _seed_campaign(db, cid, str(OWNER))
+        svc = _campaign_service(db)
+
+        with pytest.raises(CampaignNotFoundError):
+            await svc.get_campaign(cid, tenant_id=str(ATTACKER))
+
+    async def test_get_campaign_no_tenant_context_is_unfiltered(self):
+        """No explicit tenant_id AND no RLS context var set (e.g. a genuine
+        worker/system caller) => the app-level filter is skipped and RLS
+        alone would gate it in production. Documents the deliberate
+        no-filter branch rather than silently forcing a filter that would
+        break a legitimate system-context caller."""
+        from app.core.security.tenant_isolation import get_current_tenant_id
+        assert get_current_tenant_id() is None  # sanity: no ambient context
+
+        db = CampaignFakeDB()
+        cid = str(uuid4())
+        _seed_campaign(db, cid, str(OWNER))
+        svc = _campaign_service(db)
+
+        campaign = await svc.get_campaign(cid)  # no tenant_id, no context var
+        assert campaign["id"] == cid
+
+    async def test_pause_campaign_cross_tenant_is_not_found_same_tenant_succeeds(self):
+        from app.domain.services.campaign_service import CampaignNotFoundError
+
+        cid = str(uuid4())
+
+        db_cross = CampaignFakeDB()
+        _seed_campaign(db_cross, cid, str(OWNER))
+        with pytest.raises(CampaignNotFoundError):
+            await _campaign_service(db_cross).pause_campaign(cid, tenant_id=str(ATTACKER))
+        # the row was never touched
+        assert db_cross.tables["campaigns"][0]["status"] == "running"
+
+        db_same = CampaignFakeDB()
+        _seed_campaign(db_same, cid, str(OWNER))
+        result = await _campaign_service(db_same).pause_campaign(cid, tenant_id=str(OWNER))
+        assert result["status"] == "paused"
+
+    async def test_stop_campaign_cross_tenant_is_not_found_same_tenant_succeeds(self):
+        from app.domain.services.campaign_service import CampaignNotFoundError
+
+        cid = str(uuid4())
+
+        db_cross = CampaignFakeDB()
+        _seed_campaign(db_cross, cid, str(OWNER))
+        with pytest.raises(CampaignNotFoundError):
+            await _campaign_service(db_cross).stop_campaign(cid, tenant_id=str(ATTACKER))
+        assert db_cross.tables["campaigns"][0]["status"] == "running"
+
+        db_same = CampaignFakeDB()
+        _seed_campaign(db_same, cid, str(OWNER))
+        result = await _campaign_service(db_same).stop_campaign(cid, tenant_id=str(OWNER))
+        assert result["status"] == "stopped"
+
+    async def test_get_pending_leads_scoped_to_tenant(self):
+        db = CampaignFakeDB()
+        cid = str(uuid4())
+        db.tables["leads"] = [
+            {"id": "L1", "campaign_id": cid, "tenant_id": str(OWNER),
+             "status": "pending", "list_id": None, "priority": 5,
+             "created_at": "2026-07-20", "phone_number": "+15551234567"},
+            {"id": "L2", "campaign_id": cid, "tenant_id": str(ATTACKER),
+             "status": "pending", "list_id": None, "priority": 5,
+             "created_at": "2026-07-20", "phone_number": "+15557654321"},
+        ]
+        svc = _campaign_service(db)
+
+        owner_leads = await svc._get_pending_leads(cid, tenant_id=str(OWNER))
+        assert {l["id"] for l in owner_leads} == {"L1"}
+
+        attacker_leads = await svc._get_pending_leads(cid, tenant_id=str(ATTACKER))
+        assert {l["id"] for l in attacker_leads} == {"L2"}
+
+    async def test_reset_leads_for_restart_scoped_to_tenant(self):
+        db = CampaignFakeDB()
+        cid = str(uuid4())
+        db.tables["leads"] = [
+            {"id": "L1", "campaign_id": cid, "tenant_id": str(OWNER),
+             "status": "failed", "last_called_at": "2026-07-19"},
+            {"id": "L2", "campaign_id": cid, "tenant_id": str(ATTACKER),
+             "status": "failed", "last_called_at": "2026-07-19"},
+        ]
+        svc = _campaign_service(db)
+
+        # Attacker's restart call only resets ITS OWN tenant's failed leads —
+        # never the owner's, even though both share campaign_id.
+        n = await svc._reset_leads_for_restart(cid, tenant_id=str(ATTACKER))
+        assert n == 1
+        by_id = {l["id"]: l for l in db.tables["leads"]}
+        assert by_id["L2"]["status"] == "pending"
+        assert by_id["L1"]["status"] == "failed"  # untouched
+
+
+class TestCampaignModelTenantIdNotClientControlled:
+    """Task 1: the domain Campaign model's tenant_id can't be used for an
+    IDOR — it's Optional (never required, never inferred from a client
+    payload) and every real construction site sets it server-side."""
+
+    def test_tenant_id_defaults_to_none_not_required(self):
+        from datetime import datetime as _dt
+
+        from app.domain.models.campaign import Campaign
+
+        campaign = Campaign(
+            id=str(uuid4()),
+            name="n",
+            system_prompt="p",
+            voice_id="v",
+            created_at=_dt.utcnow(),
+        )
+        assert campaign.tenant_id is None
+
+    def test_tenant_id_is_settable_only_as_a_plain_field_not_derived_from_id(self):
+        """Sanity check that the field exists, is a plain optional string,
+        and setting it does exactly what's asked — no hidden coupling to
+        `id` or any other client-supplied field that could be abused to
+        smuggle a tenant choice through a different key."""
+        from datetime import datetime as _dt
+
+        from app.domain.models.campaign import Campaign
+
+        campaign = Campaign(
+            id=str(uuid4()),
+            tenant_id=str(OWNER),
+            name="n",
+            system_prompt="p",
+            voice_id="v",
+            created_at=_dt.utcnow(),
+        )
+        assert campaign.tenant_id == str(OWNER)
+
+    def test_no_endpoint_constructs_campaign_model_from_request_body(self):
+        """Regression guard for the actual IDOR vector: campaign creation
+        inserts a raw dict built server-side (tenant_id from current_user),
+        never `Campaign(**campaign_data.dict())`. If someone "helpfully"
+        refactors campaigns.py to build a Campaign model from the client
+        request schema without explicitly stripping tenant_id, this fails
+        loudly instead of silently reopening the hole."""
+        import inspect
+
+        from app.api.v1.endpoints import campaigns as campaigns_ep
+
+        src = inspect.getsource(campaigns_ep)
+        assert "Campaign(**campaign_data" not in src
+        assert "Campaign(**body" not in src

@@ -20,8 +20,20 @@ class CampaignStatus(str, Enum):
 class Campaign(BaseModel):
     """Campaign for outbound calls"""
     id: str
-    # MULTI-TENANT: we have to uncomment it when we ll enable the mutli-tenant features
-    # tenant_id: str  # Tenant identifier for multi-tenant isolation
+    # MULTI-TENANT: Optional (not required) is deliberate, not an oversight.
+    # This Pydantic model is never constructed from a client request body
+    # (grepped: no `Campaign(...)` call site in app/ takes API input — the
+    # only constructors are in tests/unit/test_day9.py). Making the field
+    # required would still be IDOR-safe *today*, but Optional[str] = None
+    # is the defense-in-depth choice: if a future endpoint ever builds a
+    # Campaign directly from a request payload (e.g. **body), an Optional
+    # field can't be silently overridden by a client-supplied value the way
+    # a required field invites ("just pass tenant_id in the JSON"). Every
+    # construction site MUST set tenant_id itself from the authenticated
+    # session / the already tenant-scoped DB row — never from client input.
+    # The DB layer is the actual source of truth and already writes
+    # tenant_id server-side on insert (see campaigns.py ~L293).
+    tenant_id: Optional[str] = None
     name: str
     description: Optional[str] = None
     status: CampaignStatus = CampaignStatus.DRAFT

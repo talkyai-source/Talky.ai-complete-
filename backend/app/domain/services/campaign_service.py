@@ -58,17 +58,17 @@ class CampaignStateError(CampaignError):
 class CampaignService:
     """
     Domain service for campaign operations.
-    
+
     Encapsulates all campaign business logic:
     - Starting/stopping campaigns
     - Job creation and priority calculation
     - Queue management
-    
+
     Usage:
         service = CampaignService(db_client, queue_service)
         result = await service.start_campaign(campaign_id, tenant_id)
     """
-    
+
     def __init__(
         self,
         db_client: Client,
@@ -76,7 +76,7 @@ class CampaignService:
     ):
         """
         Initialize campaign service.
-        
+
         Args:
             db_client: PostgreSQL client for database operations
             queue_service: Optional pre-configured queue service
@@ -84,7 +84,42 @@ class CampaignService:
         self.db_client = db_client
         self._queue_service = queue_service
         self._owns_queue_service = queue_service is None
-    
+
+    # =========================================================================
+    # Tenant scoping helper (defense-in-depth alongside Postgres RLS)
+    # =========================================================================
+
+    @staticmethod
+    def _resolve_tenant_id(tenant_id: Optional[str]) -> Optional[str]:
+        """Resolve the tenant to scope a query by.
+
+        RLS (``app.current_tenant_id``, set per-query in
+        ``app.core.postgres_adapter`` from this same context var) is the
+        primary enforcement layer and already blocks cross-tenant rows at
+        the database. The explicit ``.eq("tenant_id", ...)`` filters this
+        helper enables are defense-in-depth on top of that — they also make
+        the scoping unit-testable without a real Postgres/RLS instance.
+
+        Prefers an explicitly-passed ``tenant_id`` (a caller that already
+        knows/validated it); otherwise falls back to the per-request RLS
+        context var so callers that don't thread tenant_id through (most of
+        this file, and every one of its callers today) still get the same
+        scoping RLS applies.
+
+        Returns None when no tenant context exists at all (e.g. a genuine
+        system/worker path with no authenticated request behind it) — in
+        that case callers must skip the app-level filter and rely on RLS
+        alone rather than force a filter that would silently match zero
+        rows and break the caller.
+        """
+        if tenant_id:
+            return str(tenant_id)
+        try:
+            from app.core.security.tenant_isolation import get_current_tenant_id
+            return get_current_tenant_id()
+        except Exception:
+            return None
+
     async def _get_queue_service(self):
         """Get or create the dialer queue service.
 
@@ -114,33 +149,47 @@ class CampaignService:
             redis_client=redis_client,
         )
         return self._queue_service
-    
+
     async def _cleanup_queue_service(self) -> None:
         """Close queue service if we own it."""
         if self._owns_queue_service and self._queue_service:
             await self._queue_service.close()
             self._queue_service = None
-    
+
     # =========================================================================
     # Campaign Retrieval
     # =========================================================================
-    
-    async def get_campaign(self, campaign_id: str) -> Dict[str, Any]:
+
+    async def get_campaign(
+        self,
+        campaign_id: str,
+        tenant_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Get campaign by ID.
-        
+
+        ``tenant_id`` (explicit param, else the per-request RLS context var)
+        is applied as an app-level filter alongside RLS — defense-in-depth
+        so a cross-tenant campaign_id resolves to CampaignNotFoundError
+        exactly like a missing row, never another tenant's data.
+
         Raises:
-            CampaignNotFoundError: If campaign doesn't exist
+            CampaignNotFoundError: If campaign doesn't exist (or belongs to
+                another tenant)
         """
-        response = self.db_client.table("campaigns").select("*").eq("id", campaign_id).execute()
+        scoped_tenant = self._resolve_tenant_id(tenant_id)
+        query = self.db_client.table("campaigns").select("*").eq("id", campaign_id)
+        if scoped_tenant:
+            query = query.eq("tenant_id", scoped_tenant)
+        response = query.execute()
         if not response.data:
             raise CampaignNotFoundError(campaign_id)
         return response.data[0]
-    
+
     # =========================================================================
     # Start Campaign
     # =========================================================================
-    
+
     async def start_campaign(
         self,
         campaign_id: str,
@@ -152,7 +201,7 @@ class CampaignService:
     ) -> StartCampaignResult:
         """
         Start a campaign - enqueue all pending leads as dialer jobs.
-        
+
         Process:
         1. Validates the campaign exists and is in a valid state
         2. Fetches all leads with status='pending' for this campaign
@@ -160,28 +209,37 @@ class CampaignService:
         4. Enqueues all jobs to Redis queue
         5. Stores job metadata in database
         6. Updates campaign status to 'running'
-        
+
         Priority Logic:
         - Base priority from lead.priority (default 5)
         - High-value leads (is_high_value=true): +2 priority
         - Tags 'urgent' or 'appointment': +1 priority
         - Priority >= 8 goes to priority queue (processed first)
-        
+
         Args:
             campaign_id: Campaign UUID
             tenant_id: Tenant ID (defaults to 'default-tenant')
             priority_override: Override priority for all jobs (1-10)
-            
+
         Returns:
             StartCampaignResult with job counts and queue stats
-            
+
         Raises:
             CampaignNotFoundError: If campaign doesn't exist
             CampaignStateError: If campaign is already running
         """
         try:
+            # 0. Preserve the tenant scope requested at entry (may be None,
+            # in which case get_campaign falls back to the RLS context var).
+            # Used below for defense-in-depth filters — kept distinct from
+            # the `tenant_id` local reassigned two lines down, which gets a
+            # non-empty "default-tenant" fallback for job creation and must
+            # never leak into a row filter (it wouldn't match a real DB row
+            # and would silently zero out an update).
+            scoping_tenant_id = tenant_id
+
             # 1. Validate campaign
-            campaign = await self.get_campaign(campaign_id)
+            campaign = await self.get_campaign(campaign_id, tenant_id=scoping_tenant_id)
 
             # ``allow_running`` lets "call this list" enqueue a list's pending
             # leads even while the campaign is already running — the active-job
@@ -193,30 +251,38 @@ class CampaignService:
             tenant_id = tenant_id or campaign.get("tenant_id") or "default-tenant"
 
             # 3. Get pending leads (optionally scoped to a single contact list)
-            leads = await self._get_pending_leads(campaign_id, list_id=list_id)
+            leads = await self._get_pending_leads(
+                campaign_id, list_id=list_id, tenant_id=scoping_tenant_id
+            )
 
             if not leads and list_id is None:
                 # No pending/calling leads — reset failed/skipped leads so
                 # a campaign restart actually retries them. Skipped for a
                 # single-list dial: we never want a "call this list" to revive
                 # other lists' failed leads.
-                reset_count = await self._reset_leads_for_restart(campaign_id)
+                reset_count = await self._reset_leads_for_restart(
+                    campaign_id, tenant_id=scoping_tenant_id
+                )
                 if reset_count > 0:
                     logger.info(
                         f"Campaign {campaign_id}: reset {reset_count} "
                         f"failed/skipped leads to pending for restart"
                     )
-                    leads = await self._get_pending_leads(campaign_id)
+                    leads = await self._get_pending_leads(
+                        campaign_id, tenant_id=scoping_tenant_id
+                    )
 
             if not leads:
-                await self._update_campaign_status(campaign_id, "running")
+                await self._update_campaign_status(
+                    campaign_id, "running", tenant_id=scoping_tenant_id
+                )
                 return StartCampaignResult(
                     success=True,
                     message=f"Campaign {campaign_id} started (no pending leads)",
                     jobs_enqueued=0,
                     campaign_id=campaign_id
                 )
-            
+
             # 4. Update campaign status to 'running' BEFORE enqueuing to Redis.
             # The dialer worker dequeues jobs and immediately validates campaign
             # status against the DB.  If status is updated after the Redis push,
@@ -229,10 +295,13 @@ class CampaignService:
                 await self._update_campaign_status(
                     campaign_id,
                     status="running",
-                    total_leads=len(leads)
+                    total_leads=len(leads),
+                    tenant_id=scoping_tenant_id,
                 )
             else:
-                await self._update_campaign_status(campaign_id, status="running")
+                await self._update_campaign_status(
+                    campaign_id, status="running", tenant_id=scoping_tenant_id
+                )
 
             # 5. Get queue service
             queue_service = await self._get_queue_service()
@@ -287,13 +356,20 @@ class CampaignService:
             try:
                 lead_ids_all = [str(l["id"]) for l in leads]
                 if lead_ids_all:
-                    res = (
+                    _dj_query = (
                         self.db_client.table("dialer_jobs")
                         .select("lead_id")
                         .in_("lead_id", lead_ids_all)
                         .in_("status", list(ACTIVE_STATUSES))
-                        .execute()
                     )
+                    # Defense-in-depth: `leads` is already tenant-scoped above
+                    # so lead_ids_all can't contain another tenant's leads,
+                    # but filter dialer_jobs by tenant too rather than trust
+                    # that invariant transitively.
+                    _dj_tenant = self._resolve_tenant_id(scoping_tenant_id)
+                    if _dj_tenant:
+                        _dj_query = _dj_query.eq("tenant_id", _dj_tenant)
+                    res = _dj_query.execute()
                     active_lead_ids = {str(r["lead_id"]) for r in (getattr(res, "data", None) or [])}
             except Exception as exc:
                 logger.warning("active-lead dedup pre-check failed: %s", exc)
@@ -326,15 +402,15 @@ class CampaignService:
 
             # 7. Store jobs in database (batch insert)
             await self._store_jobs_batch(jobs_data)
-            
+
             # 8. Get queue stats
             stats = await queue_service.get_queue_stats()
-            
+
             # Cleanup if we own the queue service
             await self._cleanup_queue_service()
-            
+
             logger.info(f"Campaign {campaign_id} started with {jobs_created} jobs")
-            
+
             return StartCampaignResult(
                 success=True,
                 message=f"Campaign {campaign_id} started",
@@ -342,18 +418,22 @@ class CampaignService:
                 campaign_id=campaign_id,
                 queue_stats=stats
             )
-            
+
         except (CampaignNotFoundError, CampaignStateError):
             raise
         except Exception as e:
             logger.error(f"Error starting campaign {campaign_id}: {e}")
             raise CampaignError(f"Failed to start campaign: {str(e)}")
-    
+
     # =========================================================================
     # Pause Campaign
     # =========================================================================
-    
-    async def pause_campaign(self, campaign_id: str) -> Dict[str, Any]:
+
+    async def pause_campaign(
+        self,
+        campaign_id: str,
+        tenant_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Pause a campaign.
 
         Sets status='paused' (so the dialer stops dequeuing new jobs — it
@@ -362,13 +442,28 @@ class CampaignService:
         where it left off; only the live calls are dropped. Without the hangup
         sweep, "Pause" looked like a no-op for 30-60s while ringing/connected
         calls kept running.
-        """
-        # Validate exists
-        await self.get_campaign(campaign_id)
 
-        response = self.db_client.table("campaigns").update({
+        ``tenant_id`` is applied to the UPDATE as defense-in-depth alongside
+        RLS (see ``_resolve_tenant_id``); it's the same value ``get_campaign``
+        just validated the row against, so a successful get_campaign here
+        guarantees the filtered UPDATE below matches that same row.
+        """
+        # Validate exists (and belongs to this tenant)
+        await self.get_campaign(campaign_id, tenant_id=tenant_id)
+
+        scoped_tenant = self._resolve_tenant_id(tenant_id)
+        query = self.db_client.table("campaigns").update({
             "status": "paused"
-        }).eq("id", campaign_id).execute()
+        }).eq("id", campaign_id)
+        if scoped_tenant:
+            query = query.eq("tenant_id", scoped_tenant)
+        response = query.execute()
+        if not response.data:
+            # get_campaign just confirmed the row exists for this tenant, so
+            # an empty result here means the row changed between the two
+            # queries (or a mocked/misbehaving client in tests) — surface it
+            # as not-found rather than raising IndexError below.
+            raise CampaignNotFoundError(campaign_id)
 
         # Hang up live calls now — best-effort, never roll back the status update.
         hung_up = 0
@@ -382,32 +477,42 @@ class CampaignService:
 
         logger.info(f"Campaign {campaign_id} paused (hung_up={hung_up})")
         return response.data[0]
-    
+
     # =========================================================================
     # Stop Campaign
     # =========================================================================
-    
+
     async def stop_campaign(
         self,
         campaign_id: str,
-        clear_queue: bool = False
+        clear_queue: bool = False,
+        tenant_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Stop a campaign completely.
-        
+
         Args:
             campaign_id: Campaign UUID
             clear_queue: If True, mark pending jobs as skipped
+            tenant_id: Applied to the UPDATE as defense-in-depth alongside
+                RLS (see ``_resolve_tenant_id``); same value get_campaign
+                just validated the row against.
         """
-        # Validate exists
-        await self.get_campaign(campaign_id)
-        
+        # Validate exists (and belongs to this tenant)
+        await self.get_campaign(campaign_id, tenant_id=tenant_id)
+
+        scoped_tenant = self._resolve_tenant_id(tenant_id)
         # Update campaign status
-        response = self.db_client.table("campaigns").update({
+        query = self.db_client.table("campaigns").update({
             "status": "stopped",
             "completed_at": datetime.utcnow().isoformat()
-        }).eq("id", campaign_id).execute()
-        
+        }).eq("id", campaign_id)
+        if scoped_tenant:
+            query = query.eq("tenant_id", scoped_tenant)
+        response = query.execute()
+        if not response.data:
+            raise CampaignNotFoundError(campaign_id)
+
         # Stop = stop now. Cancel EVERY active job for this campaign so nothing
         # lingers in the pipeline. The previous logic only cleared 'pending'/
         # 'retry_scheduled', and only when clear_queue was set — which left
@@ -450,12 +555,12 @@ class CampaignService:
             hung_up,
         )
         return response.data[0]
-    
+
     # =========================================================================
     # Private Helpers
     # =========================================================================
-    
-    def _inactive_list_ids(self, campaign_id: str) -> set:
+
+    def _inactive_list_ids(self, campaign_id: str, tenant_id: Optional[str] = None) -> set:
         """Return the set of contact_list ids that are toggled OFF for this
         campaign.
 
@@ -465,15 +570,22 @@ class CampaignService:
         return an empty set so the dialer keeps calling rather than silently
         going dark — an over-inclusive dial is far less harmful than a
         campaign that stops dead.
+
+        ``tenant_id`` filter mirrors the ``contact_lists_tenant_isolation``
+        RLS policy exactly (strict equality, no NULL bypass) — defense in
+        depth, not a behavior change versus RLS alone.
         """
         try:
-            resp = (
+            query = (
                 self.db_client.table("contact_lists")
                 .select("id, is_active")
                 .eq("campaign_id", campaign_id)
                 .eq("is_active", False)
-                .execute()
             )
+            scoped_tenant = self._resolve_tenant_id(tenant_id)
+            if scoped_tenant:
+                query = query.eq("tenant_id", scoped_tenant)
+            resp = query.execute()
             return {str(r["id"]) for r in (getattr(resp, "data", None) or [])}
         except Exception as exc:  # noqa: BLE001 — never let this stop dialing
             logger.warning(
@@ -487,6 +599,7 @@ class CampaignService:
         self,
         campaign_id: str,
         list_id: Optional[str] = None,
+        tenant_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Get all pending leads for a campaign, ordered by priority.
         Also includes leads stuck at 'calling' from a previous crashed run.
@@ -495,10 +608,16 @@ class CampaignService:
         the list on/off toggle). Leads with list_id NULL or an active list are
         kept. When ``list_id`` is provided the result is additionally scoped to
         that single list ("call this list").
+
+        ``tenant_id`` is applied as an app-level filter alongside RLS
+        (defense-in-depth).
         """
+        scoped_tenant = self._resolve_tenant_id(tenant_id)
         query = self.db_client.table("leads").select("*")\
             .eq("campaign_id", campaign_id)\
             .in_("status", ["pending", "calling"])
+        if scoped_tenant:
+            query = query.eq("tenant_id", scoped_tenant)
         if list_id is not None:
             query = query.eq("list_id", list_id)
         response = query.order("priority", desc=True)\
@@ -509,7 +628,7 @@ class CampaignService:
         # Exclude leads whose list is toggled off. Skipped entirely when a
         # single list was requested (that list is being explicitly dialed).
         if list_id is None:
-            inactive = self._inactive_list_ids(campaign_id)
+            inactive = self._inactive_list_ids(campaign_id, tenant_id=tenant_id)
             if inactive:
                 leads = [
                     l for l in leads
@@ -517,16 +636,25 @@ class CampaignService:
                 ]
         return leads
 
-    async def _reset_leads_for_restart(self, campaign_id: str) -> int:
-        """Reset failed/skipped/calling leads to pending so a campaign restart retries them."""
-        response = self.db_client.table("leads").update({
+    async def _reset_leads_for_restart(
+        self, campaign_id: str, tenant_id: Optional[str] = None
+    ) -> int:
+        """Reset failed/skipped/calling leads to pending so a campaign restart retries them.
+
+        ``tenant_id`` is applied to the UPDATE as defense-in-depth alongside
+        RLS (see ``_resolve_tenant_id``).
+        """
+        scoped_tenant = self._resolve_tenant_id(tenant_id)
+        query = self.db_client.table("leads").update({
             "status": "pending",
             "last_called_at": None,
         }).eq("campaign_id", campaign_id)\
-          .in_("status", ["failed", "skipped", "calling"])\
-          .execute()
+          .in_("status", ["failed", "skipped", "calling"])
+        if scoped_tenant:
+            query = query.eq("tenant_id", scoped_tenant)
+        response = query.execute()
         return len(response.data) if response.data else 0
-    
+
     def _calculate_priority(
         self,
         lead: Dict[str, Any],
@@ -534,7 +662,7 @@ class CampaignService:
     ) -> int:
         """
         Calculate job priority based on lead attributes.
-        
+
         Priority Logic:
         - Base priority from lead.priority (default 5)
         - High-value leads: +2 priority
@@ -543,20 +671,20 @@ class CampaignService:
         """
         if priority_override is not None:
             return min(max(priority_override, 1), 10)
-        
+
         base_priority = lead.get("priority", 5)
-        
+
         # High-value boost
         if lead.get("is_high_value"):
             base_priority += 2
-        
+
         # Urgent tag boost
         lead_tags = lead.get("tags", []) or []
         if any(tag in lead_tags for tag in ["urgent", "appointment", "reminder"]):
             base_priority += 1
-        
+
         return min(base_priority, 10)
-    
+
     def _create_job_for_lead(
         self,
         campaign_id: str,
@@ -570,7 +698,7 @@ class CampaignService:
     ) -> tuple:
         """
         Create a DialerJob and database record for a lead.
-        
+
         Returns:
             Tuple of (DialerJob, dict for database insert)
         """
@@ -641,35 +769,48 @@ class CampaignService:
             "scheduled_at": now.isoformat(),
             "created_at": now.isoformat()
         }
-        
+
         return job, job_record
-    
+
     async def _store_jobs_batch(self, jobs_data: List[Dict[str, Any]]) -> None:
         """Store jobs in database as batch insert."""
         if not jobs_data:
             return
-        
+
         try:
             self.db_client.table("dialer_jobs").insert(jobs_data).execute()
         except Exception as e:
             # Log but don't fail - jobs are already in Redis queue
             logger.warning(f"Failed to store jobs in database: {e}")
-    
+
     async def _update_campaign_status(
         self,
         campaign_id: str,
         status: str,
-        total_leads: Optional[int] = None
+        total_leads: Optional[int] = None,
+        tenant_id: Optional[str] = None,
     ) -> None:
-        """Update campaign status and metadata."""
+        """Update campaign status and metadata.
+
+        ``tenant_id`` is applied to the UPDATE as defense-in-depth alongside
+        RLS (see ``_resolve_tenant_id``). Callers within start_campaign pass
+        the ORIGINAL entry-point tenant scope (``scoping_tenant_id``), never
+        the "default-tenant" literal fallback used for job creation — that
+        fallback string would not match a real row's tenant_id and would
+        silently zero out this update.
+        """
         update_data = {
             "status": status,
             "started_at": datetime.utcnow().isoformat()
         }
         if total_leads is not None:
             update_data["total_leads"] = total_leads
-        
-        self.db_client.table("campaigns").update(update_data).eq("id", campaign_id).execute()
+
+        scoped_tenant = self._resolve_tenant_id(tenant_id)
+        query = self.db_client.table("campaigns").update(update_data).eq("id", campaign_id)
+        if scoped_tenant:
+            query = query.eq("tenant_id", scoped_tenant)
+        query.execute()
 
 
 # =========================================================================
@@ -679,7 +820,7 @@ class CampaignService:
 def get_campaign_service(db_client: Client) -> CampaignService:
     """
     Factory function for FastAPI dependency injection.
-    
+
     Usage:
         @router.post("/campaigns/{id}/start")
         async def start(

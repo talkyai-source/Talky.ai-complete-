@@ -27,7 +27,11 @@ import pytest
 
 from app.domain.models.dialer_job import CallOutcome
 from app.domain.services.call_service import CallService
-from app.core.security.tenant_isolation import set_bypass_rls, set_current_tenant_id
+from app.core.security.tenant_isolation import (
+    clear_tenant_context,
+    set_bypass_rls,
+    set_current_tenant_id,
+)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -176,7 +180,13 @@ def _rls_bypass_context():
     set_bypass_rls(True)
     set_current_tenant_id("00000000-0000-0000-0000-000000000000")
     yield
-    set_bypass_rls(False)
+    # Full reset, not just bypass_rls: the previous version left
+    # `_tenant_context` set to the nil UUID for the rest of the pytest
+    # session (contextvars aren't per-test in this pytest-asyncio setup),
+    # which leaked into any later test/code that reads
+    # get_current_tenant_id() as an ambient "am I in a tenant request"
+    # signal — e.g. CampaignService's defense-in-depth tenant filters.
+    clear_tenant_context()
 
 
 # ──────────────────────────────────────────────────────────────────
