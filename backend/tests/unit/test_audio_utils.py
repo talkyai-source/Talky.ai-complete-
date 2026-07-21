@@ -91,6 +91,74 @@ class TestG711MuLaw:
         assert max_error < 4000  # Within acceptable range for 8-bit encoding
 
 
+class TestG711MuLawLUTExactness:
+    """The vectorised LUT codecs must be BYTE-IDENTICAL to the scalar
+    reference across every possible input — not approximate."""
+
+    def test_encode_lut_matches_scalar_for_all_65536_inputs(self):
+        from app.utils.audio_utils import pcm_to_ulaw, _linear_to_ulaw
+
+        # Every int16 value, in ascending uint16 bit-pattern order so the
+        # bytes line up 1:1 with pcm_to_ulaw's output.
+        all_samples = np.arange(0, 65536, dtype=np.uint16).view(np.int16)
+        pcm_bytes = all_samples.tobytes()
+
+        vectorised = pcm_to_ulaw(pcm_bytes)
+        scalar = bytes(_linear_to_ulaw(int(s)) for s in all_samples)
+
+        assert vectorised == scalar
+        assert len(vectorised) == 65536
+
+    def test_decode_lut_matches_scalar_for_all_256_inputs(self):
+        from app.utils.audio_utils import ulaw_to_pcm, _ulaw_to_linear
+
+        ulaw_bytes = bytes(range(256))
+
+        vectorised = ulaw_to_pcm(ulaw_bytes)
+        scalar = np.array(
+            [_ulaw_to_linear(b) for b in range(256)], dtype=np.int16
+        ).tobytes()
+
+        assert vectorised == scalar
+        assert len(vectorised) == 512  # 256 samples * 2 bytes
+
+    def test_encode_handles_int16_min_max_corners(self):
+        # -32768 exercises the -sample overflow / clip-to-ULAW_CLIP quirk.
+        from app.utils.audio_utils import pcm_to_ulaw, _linear_to_ulaw
+
+        for val in (-32768, -1, 0, 1, 32767):
+            pcm = np.array([val], dtype=np.int16).tobytes()
+            assert pcm_to_ulaw(pcm) == bytes([_linear_to_ulaw(val)])
+
+    def test_encode_empty_input_returns_empty(self):
+        from app.utils.audio_utils import pcm_to_ulaw
+
+        assert pcm_to_ulaw(b"") == b""
+
+    def test_decode_empty_input_returns_empty(self):
+        from app.utils.audio_utils import ulaw_to_pcm
+
+        assert ulaw_to_pcm(b"") == b""
+
+    def test_encode_odd_length_raises_like_original(self):
+        # np.frombuffer(int16) rejects a buffer whose size isn't a multiple of
+        # 2 — the original per-sample implementation behaved identically.
+        from app.utils.audio_utils import pcm_to_ulaw
+
+        with pytest.raises(ValueError):
+            pcm_to_ulaw(b"\x01\x02\x03")
+
+    def test_ulaw_roundtrip_is_stable(self):
+        # decode∘encode∘decode == decode (mu-law encode is idempotent on
+        # values it already produced).
+        from app.utils.audio_utils import pcm_to_ulaw, ulaw_to_pcm
+
+        all_ulaw = bytes(range(256))
+        pcm = ulaw_to_pcm(all_ulaw)
+        re_encoded = pcm_to_ulaw(pcm)
+        assert ulaw_to_pcm(re_encoded) == pcm
+
+
 class TestG711ALaw:
     """Tests for G.711 A-law codec."""
     

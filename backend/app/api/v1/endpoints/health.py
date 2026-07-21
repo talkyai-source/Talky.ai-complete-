@@ -111,6 +111,78 @@ async def deep_readiness_probe(response: Response) -> Dict[str, Any]:
     return result
 
 
+# Background-worker liveness registry: worker-name → the Redis key that worker
+# refreshes on each heartbeat tick. Adding voice/reminder/cleanup workers later
+# is one line each once they write their own heartbeat key (see
+# DialerWorker.HEARTBEAT_REDIS_KEY). A worker is "healthy" when its heartbeat is
+# fresher than _WORKER_STALE_AFTER_S.
+_WORKER_HEARTBEAT_KEYS: Dict[str, str] = {
+    "dialer": "dialer:heartbeat_ts",
+}
+_WORKER_STALE_AFTER_S = 180
+
+
+@router.get("/healthz/workers")
+async def workers_health_probe(response: Response) -> Dict[str, Any]:
+    """
+    Background-worker liveness probe (unauthenticated, like the other healthz
+    probes) — the single monitorable signal any uptime checker can watch, no
+    Prometheus/redis-exporter required.
+
+    Reads each registered worker's Redis heartbeat timestamp and reports
+    per-worker ``{name, last_beat_epoch, age_seconds, healthy}`` where healthy
+    means the heartbeat is younger than _WORKER_STALE_AFTER_S. Overall HTTP 200
+    only when EVERY known worker is healthy; 503 if any is stale or missing
+    (worker dead, hung, or Redis unreachable) so an alert fires.
+
+    Each Redis read is bounded so a wedged Redis can't hang the probe — a
+    timeout/error is treated as "no heartbeat" → that worker is unhealthy.
+    """
+    import time as _time
+    from app.core.container import get_container
+
+    container = get_container()
+    redis_client = (
+        getattr(container, "redis", None) if container.is_initialized else None
+    )
+
+    now = _time.time()
+    workers: list[Dict[str, Any]] = []
+    all_healthy = True
+
+    for name, key in _WORKER_HEARTBEAT_KEYS.items():
+        last_beat: Any = None
+        if redis_client is not None:
+            try:
+                raw = await asyncio.wait_for(
+                    redis_client.get(key), timeout=_DEEP_PING_TIMEOUT_S
+                )
+                if raw is not None:
+                    if isinstance(raw, (bytes, bytearray)):
+                        raw = raw.decode("utf-8", "ignore")
+                    last_beat = float(raw)
+            except Exception:
+                last_beat = None
+
+        age = (now - last_beat) if last_beat is not None else None
+        healthy = age is not None and age < _WORKER_STALE_AFTER_S
+        if not healthy:
+            all_healthy = False
+        workers.append(
+            {
+                "name": name,
+                "last_beat_epoch": last_beat,
+                "age_seconds": age,
+                "healthy": healthy,
+            }
+        )
+
+    result: Dict[str, Any] = {"healthy": all_healthy, "workers": workers}
+    if not all_healthy:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    return result
+
+
 @router.get("/health", status_code=status.HTTP_200_OK)
 async def health_check() -> Dict[str, Any]:
     """

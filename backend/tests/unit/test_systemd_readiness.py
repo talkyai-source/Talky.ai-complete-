@@ -170,7 +170,13 @@ class TestSystemdServiceFiles:
             assert "[Unit]" in content, f"{filename} missing [Unit]"
             assert "[Service]" in content, f"{filename} missing [Service]"
             assert "[Install]" in content, f"{filename} missing [Install]"
-            assert "Restart=on-failure" in content, f"{filename} missing Restart"
+            # Every worker must auto-restart. The dialer uses the stronger
+            # Restart=always (paired with Type=notify + WatchdogSec so a hung
+            # loop is also restarted); others use Restart=on-failure. Accept
+            # either valid auto-restart policy.
+            assert (
+                "Restart=on-failure" in content or "Restart=always" in content
+            ), f"{filename} missing an auto-restart policy"
             assert "EnvironmentFile=" in content, f"{filename} missing EnvironmentFile"
     
     def test_install_script_is_executable(self):

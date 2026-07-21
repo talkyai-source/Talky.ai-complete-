@@ -9,6 +9,8 @@ import asyncio
 import logging
 import os
 import signal
+import sys
+import time
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -121,12 +123,35 @@ class DialerWorker:
         3. Handle errors gracefully
         """
         await self.initialize()
-        
+
         self.running = True
         consecutive_errors = 0
-        
+
         logger.info("Dialer Worker started - listening for jobs")
-        
+
+        # Liveness layer: a concurrent heartbeat task that (a) writes a Redis
+        # heartbeat timestamp the health API can watch, (b) sends the systemd
+        # READY=1 handshake once and pets the WATCHDOG=1 timer every tick. It
+        # runs on THIS event loop, so a wedged loop stops petting the watchdog
+        # and systemd restarts the process. Started before the main loop so
+        # READY=1 is reachable on the normal startup path (initialize() already
+        # succeeded above).
+        heartbeat_task = asyncio.create_task(self._heartbeat())
+
+        try:
+            await self._run_loop(consecutive_errors)
+        finally:
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        await self.shutdown()
+
+    async def _run_loop(self, consecutive_errors: int) -> None:
+        """The main dequeue/process loop, extracted so ``run`` can own the
+        heartbeat task lifecycle in a try/finally."""
         while self.running:
             try:
                 # 1. Check for due scheduled jobs (every 10s)
@@ -171,13 +196,18 @@ class DialerWorker:
                 logger.error(f"Worker error ({consecutive_errors}): {e}", exc_info=True)
                 
                 if consecutive_errors >= self.MAX_CONSECUTIVE_ERRORS:
-                    logger.critical("Too many consecutive errors, stopping worker")
-                    break
-                
+                    # Fatal: exit with a non-zero code so systemd (Restart=always)
+                    # sees a failure and restarts the process cleanly, instead of
+                    # silently break-ing out of the loop and lingering as a live
+                    # but idle unit that no monitor can distinguish from healthy.
+                    logger.critical(
+                        "Too many consecutive errors (%d) — exiting for systemd restart",
+                        consecutive_errors,
+                    )
+                    sys.exit(1)
+
                 await asyncio.sleep(min(5 * consecutive_errors, 60))
-        
-        await self.shutdown()
-    
+
     async def process_job(self, job: DialerJob) -> None:
         """
         Process a single dialer job.
@@ -1394,18 +1424,57 @@ class DialerWorker:
             }
         }
 
+    # Redis key the health API (/api/v1/healthz/workers) watches to tell a
+    # live worker from a dead/hung one. TTL is set > 2x the heartbeat interval
+    # so a single slow tick never makes a healthy worker look stale, but a
+    # dead/hung worker's key expires and the probe flips to 503.
+    HEARTBEAT_INTERVAL = 60
+    HEARTBEAT_TTL = 180
+    HEARTBEAT_REDIS_KEY = "dialer:heartbeat_ts"
+
     async def _heartbeat(self) -> None:
-        """Log heartbeat periodically for systemd liveness monitoring."""
-        # Using simple config access to avoid dependency issues during migration
-        # from app.core.voice_config import get_voice_config
-        # interval = get_voice_config().worker_heartbeat_interval
-        interval = 60
+        """Liveness heartbeat loop — the single place this worker proves it is
+        alive to both Redis (for the health API) and systemd (watchdog).
+
+        Layers:
+          1. Redis: ``SETEX dialer:heartbeat_ts <ttl> <epoch>`` each tick so
+             ``/api/v1/healthz/workers`` can report age/health. Wrapped in
+             try/except — Redis being down must never kill the heartbeat loop
+             (and thus stop petting the systemd watchdog and trigger a restart
+             for a Redis outage that the worker itself survives).
+          2. systemd: ``READY=1`` once at entry (satisfies ``Type=notify`` so
+             startup completes) then ``WATCHDOG=1`` every tick. Because this
+             coroutine shares the worker's event loop, a wedged loop stops
+             petting the watchdog and systemd (``WatchdogSec=``) restarts it.
+             No-op when ``$NOTIFY_SOCKET`` is unset (dev/local).
+        """
+        from app.core.sd_notify import SystemdNotifier
+
+        notifier = SystemdNotifier()
+        # READY=1 once, at loop entry, on the normal startup path.
+        notifier.notify_ready()
+
         while self.running:
             logger.info(
                 f"heartbeat: jobs_processed={self._jobs_processed}, "
                 f"jobs_failed={self._jobs_failed}"
             )
-            await asyncio.sleep(interval)
+
+            # Layer 1 — Redis heartbeat for the health API. Best-effort.
+            try:
+                if self._redis is not None:
+                    await self._redis.setex(
+                        self.HEARTBEAT_REDIS_KEY,
+                        self.HEARTBEAT_TTL,
+                        str(time.time()),
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("heartbeat: redis write failed: %s", exc)
+
+            # Layer 2 — pet the systemd watchdog from the live loop.
+            notifier.notify_watchdog()
+
+            await asyncio.sleep(self.HEARTBEAT_INTERVAL)
 
 
 async def main():
