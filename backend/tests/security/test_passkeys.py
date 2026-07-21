@@ -21,7 +21,7 @@ from app.core.security.passkeys import (
     AUTHENTICATOR_SELECTION_PLATFORM,
     AuthenticationOptions,
     AuthenticationResult,
-    PUBKEY_CRED_PARAMS,
+    SUPPORTED_PUB_KEY_ALGS,
     RP_ID,
     RP_NAME,
     RP_ORIGIN,
@@ -57,8 +57,13 @@ class TestPasskeyConfig:
         assert WEBAUTHN_CHALLENGE_TTL_MINUTES == 5
 
     def test_supported_algorithms(self):
-        """Must support ES256 (-7), Ed25519 (-8), RS256 (-257)."""
-        alg_ids = [p["alg"] for p in PUBKEY_CRED_PARAMS]
+        """Must support ES256 (-7), Ed25519 (-8), RS256 (-257).
+
+        py_webauthn 2.x exposes these as COSEAlgorithmIdentifier enum members
+        (SUPPORTED_PUB_KEY_ALGS) — the pre-2.0 PUBKEY_CRED_PARAMS dict shape
+        no longer exists in the module.
+        """
+        alg_ids = [int(a) for a in SUPPORTED_PUB_KEY_ALGS]
         assert -7 in alg_ids  # ES256
         assert -8 in alg_ids  # Ed25519
         assert -257 in alg_ids  # RS256

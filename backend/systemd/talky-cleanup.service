@@ -1,0 +1,16 @@
+[Unit]
+Description=Talky.ai Data-Retention Cleanup (call_events/stream_events/call_legs)
+After=network.target
+# One-shot, triggered by talky-cleanup.timer. Do NOT add Restart= here —
+# a failed run surfaces via exit code in journald and retries next night.
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/talky/backend
+EnvironmentFile=/opt/talky/backend/.env
+# DRY-RUN is the default (CLEANUP_DRY_RUN=true). Only flip to false after
+# the retention windows have been signed off — see cleanup_worker.py.
+ExecStart=/opt/talky/backend/venv/bin/python -m app.workers.cleanup_worker
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=talky-cleanup
