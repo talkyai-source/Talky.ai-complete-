@@ -10,6 +10,7 @@ import logging
 import os
 import signal
 import json
+import time
 from datetime import datetime
 from typing import Optional
 
@@ -156,20 +157,28 @@ class VoicePipelineWorker:
         Subscribes to Redis pub/sub and handles call events.
         """
         await self.initialize()
-        
+
         self.running = True
-        
+
         # Subscribe to call events channel
         pubsub = self._redis.pubsub()
         await pubsub.subscribe(self.CALL_CHANNEL)
-        
+
         logger.info(f"Voice Pipeline Worker started - listening on {self.CALL_CHANNEL}")
-        
+
+        # Liveness layer — mirrors DialerWorker.run(): a concurrent heartbeat
+        # task that (a) writes a Redis heartbeat timestamp the health API
+        # watches, and (b) sends the systemd READY=1 handshake once and pets
+        # WATCHDOG=1 every tick. Runs on THIS event loop, so a wedged loop
+        # (e.g. pubsub.listen() stuck, or a pipeline task deadlocking the
+        # loop) stops petting the watchdog and systemd restarts the process.
+        heartbeat_task = asyncio.create_task(self._heartbeat())
+
         try:
             async for message in pubsub.listen():
                 if not self.running:
                     break
-                
+
                 if message["type"] == "message":
                     try:
                         event = json.loads(message["data"])
@@ -178,10 +187,15 @@ class VoicePipelineWorker:
                         logger.error(f"Invalid JSON in message: {e}")
                     except Exception as e:
                         logger.error(f"Error handling event: {e}", exc_info=True)
-                        
+
         except asyncio.CancelledError:
             logger.info("Worker received cancellation signal")
         finally:
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except (asyncio.CancelledError, Exception):
+                pass
             try:
                 await pubsub.unsubscribe(self.CALL_CHANNEL)
             except Exception:
@@ -341,8 +355,33 @@ class VoicePipelineWorker:
             "active_call_ids": list(self._active_pipelines.keys())
         }
 
+    # Redis key the health API (/api/v1/healthz/workers) watches to tell a
+    # live worker from a dead/hung one. TTL is set > 2x the heartbeat interval
+    # so a single slow tick never makes a healthy worker look stale, but a
+    # dead/hung worker's key expires and the probe flips to 503. Mirrors
+    # DialerWorker.HEARTBEAT_REDIS_KEY / HEARTBEAT_TTL.
+    HEARTBEAT_TTL = 180
+    HEARTBEAT_REDIS_KEY = "voice:heartbeat_ts"
+
     async def _heartbeat(self) -> None:
-        """Log heartbeat periodically for systemd liveness monitoring."""
+        """Liveness heartbeat loop — the single place this worker proves it is
+        alive to both Redis (for the health API) and systemd (watchdog).
+
+        Layers:
+          1. Redis: ``SETEX voice:heartbeat_ts <ttl> <epoch>`` each tick so
+             ``/api/v1/healthz/workers`` can report age/health. Wrapped in
+             try/except — Redis being down must never kill the heartbeat loop
+             (and thus stop petting the systemd watchdog and trigger a restart
+             for a Redis outage that the worker itself survives).
+          2. systemd: ``READY=1`` once at entry (satisfies ``Type=notify``)
+             then ``WATCHDOG=1`` every tick. No-op when ``$NOTIFY_SOCKET`` is
+             unset (dev/local).
+        """
+        from app.core.sd_notify import SystemdNotifier
+
+        notifier = SystemdNotifier()
+        notifier.notify_ready()
+
         interval = self._voice_config.worker_heartbeat_interval
         while self.running:
             logger.info(
@@ -350,6 +389,21 @@ class VoicePipelineWorker:
                 f"calls_handled={self._calls_handled}, "
                 f"calls_failed={self._calls_failed}"
             )
+
+            # Layer 1 — Redis heartbeat for the health API. Best-effort.
+            try:
+                if self._redis is not None:
+                    await self._redis.setex(
+                        self.HEARTBEAT_REDIS_KEY,
+                        self.HEARTBEAT_TTL,
+                        str(time.time()),
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("heartbeat: redis write failed: %s", exc)
+
+            # Layer 2 — pet the systemd watchdog from the live loop.
+            notifier.notify_watchdog()
+
             await asyncio.sleep(interval)
 
 

@@ -118,6 +118,8 @@ async def deep_readiness_probe(response: Response) -> Dict[str, Any]:
 # fresher than _WORKER_STALE_AFTER_S.
 _WORKER_HEARTBEAT_KEYS: Dict[str, str] = {
     "dialer": "dialer:heartbeat_ts",
+    "voice": "voice:heartbeat_ts",
+    "reminder": "reminder:heartbeat_ts",
 }
 _WORKER_STALE_AFTER_S = 180
 

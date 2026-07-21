@@ -133,7 +133,11 @@ class DialerQueueService:
             await self._redis.ping()
             self._initialized = True
             await self._migrate_processing_key()
-            logger.info(f"DialerQueueService connected to Redis: {redis_url}")
+            from app.core.log_redact import redact_redis_url
+            logger.info(
+                "DialerQueueService connected to Redis: %s",
+                redact_redis_url(redis_url),
+            )
         except Exception as e:
             logger.error(f"Failed to connect to Redis: {e}")
             raise

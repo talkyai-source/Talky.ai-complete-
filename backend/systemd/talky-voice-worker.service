@@ -1,14 +1,29 @@
 [Unit]
 Description=Talky.ai Voice Pipeline Worker
 After=network.target talky-api.service
+# Crash-loop guard: cap restarts at 5 per 300s so a persistently broken deploy
+# stops (enters failed state) instead of thrashing forever. These are [Unit]
+# directives in modern systemd (>=230); placing them under [Service] is ignored.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
-Type=exec
+# Type=notify: systemd waits for the worker's READY=1 (sent from the heartbeat
+# loop at startup) before considering the unit started. WatchdogSec=180 arms
+# the watchdog — the worker pets it with WATCHDOG=1 every ~60s from the same
+# event loop that runs the pub/sub listen loop, so a HUNG (not just dead)
+# worker whose loop stops petting is force-restarted. NotifyAccess=main
+# restricts the notify socket to the main process.
+Type=notify
+NotifyAccess=main
+WatchdogSec=180
 WorkingDirectory=/opt/talky/backend
 EnvironmentFile=/opt/talky/backend/.env
 ExecStart=/opt/talky/backend/venv/bin/python -m app.workers.voice_worker
-Restart=on-failure
-RestartSec=5
+# Restart=always so a watchdog kill or a clean exit both bring the worker back
+# (crash-loop capped via [Unit] StartLimit* above).
+Restart=always
+RestartSec=3
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=talky-voice

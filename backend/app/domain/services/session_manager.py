@@ -88,7 +88,11 @@ class SessionManager:
             # Start periodic sync task
             self._sync_task = asyncio.create_task(self._periodic_sync())
             
-            logger.info(f"SessionManager initialized with Redis: {redis_url}")
+            from app.core.log_redact import redact_redis_url
+            logger.info(
+                "SessionManager initialized with Redis: %s",
+                redact_redis_url(redis_url),
+            )
         except Exception as e:
             logger.error(f"Failed to connect to Redis: {e}")
             

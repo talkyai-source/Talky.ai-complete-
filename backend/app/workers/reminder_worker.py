@@ -11,7 +11,9 @@ import asyncio
 import logging
 import os
 import signal
+import sys
 import json
+import time
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
@@ -22,6 +24,7 @@ load_dotenv()
 
 try:
     import asyncpg
+    import redis.asyncio as redis
 except ImportError as e:
     raise ImportError(f"Required dependency not installed: {e}")
 
@@ -62,30 +65,47 @@ class ReminderWorker:
     def __init__(self):
         self.running = False
         self._db_pool: Optional[asyncpg.Pool] = None
+        self._redis: Optional["redis.Redis"] = None
         self._sms_service = None
         self._email_service = None
-        
+
         # Stats
         self._reminders_sent = 0
         self._reminders_failed = 0
         self._emails_sent = 0
-    
+
     async def initialize(self) -> None:
         """Initialize connections and services."""
         logger.info("Initializing Reminder Worker...")
-        
+
         # Initialize PostgreSQL pool
         self._db_pool = await init_db_pool()
-        
+
+        # Redis connection for the liveness heartbeat (health API + systemd
+        # watchdog). This worker has no other Redis usage — it's wired here
+        # purely for liveness, mirroring DialerWorker.initialize(). A failed
+        # connection must never block reminder processing (DB-only worker),
+        # so it's best-effort: the heartbeat's Redis write simply no-ops
+        # (self._redis stays None) if this fails.
+        try:
+            redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+            self._redis = await redis.from_url(redis_url, decode_responses=True)
+            await self._redis.ping()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Reminder Worker could not connect to Redis for heartbeat: %s", exc
+            )
+            self._redis = None
+
         # Initialize services
         # Note: We need updated services that accept db_pool instead of db_client client
         # For now, we will pass db_pool and assume services are compatible or will be updated
         from app.services.sms_service import get_sms_service
         from app.services.email_service import get_email_service
-        
+
         self._sms_service = get_sms_service(self._db_pool)
         self._email_service = get_email_service(self._db_pool)
-        
+
         logger.info("Reminder Worker initialized successfully")
     
     async def run(self) -> None:
@@ -98,37 +118,59 @@ class ReminderWorker:
         3. Handle errors and schedule retries
         """
         await self.initialize()
-        
+
         self.running = True
         consecutive_errors = 0
-        
+
         logger.info("Reminder Worker started - scanning for due reminders")
-        
-        while self.running:
-            try:
-                # Process due reminders
-                processed = await self._process_due_reminders()
-                
-                if processed > 0:
-                    logger.info(f"Processed {processed} reminders")
-                    consecutive_errors = 0
-                
-                # Wait before next scan
-                await asyncio.sleep(self.POLL_INTERVAL)
-                
-            except asyncio.CancelledError:
-                logger.info("Worker received cancellation signal")
-                break
-            except Exception as e:
-                consecutive_errors += 1
-                logger.error(f"Worker error ({consecutive_errors}): {e}", exc_info=True)
-                
-                if consecutive_errors >= self.MAX_CONSECUTIVE_ERRORS:
-                    logger.critical("Too many consecutive errors, stopping worker")
+
+        # Liveness layer: a concurrent heartbeat task that (a) writes a Redis
+        # heartbeat timestamp the health API can watch, (b) sends the systemd
+        # READY=1 handshake once and pets the WATCHDOG=1 timer every tick.
+        # Mirrors DialerWorker.run() — started before the main loop so
+        # READY=1 is reachable on the normal startup path.
+        heartbeat_task = asyncio.create_task(self._heartbeat())
+
+        try:
+            while self.running:
+                try:
+                    # Process due reminders
+                    processed = await self._process_due_reminders()
+
+                    if processed > 0:
+                        logger.info(f"Processed {processed} reminders")
+                        consecutive_errors = 0
+
+                    # Wait before next scan
+                    await asyncio.sleep(self.POLL_INTERVAL)
+
+                except asyncio.CancelledError:
+                    logger.info("Worker received cancellation signal")
                     break
-                
-                await asyncio.sleep(min(5 * consecutive_errors, 60))
-        
+                except Exception as e:
+                    consecutive_errors += 1
+                    logger.error(f"Worker error ({consecutive_errors}): {e}", exc_info=True)
+
+                    if consecutive_errors >= self.MAX_CONSECUTIVE_ERRORS:
+                        # Fatal: exit with a non-zero code so systemd
+                        # (Restart=always) sees a failure and restarts the
+                        # process cleanly, instead of silently break-ing out
+                        # of the loop and lingering as a live but idle unit
+                        # that no monitor can distinguish from healthy.
+                        logger.critical(
+                            "Too many consecutive errors (%d) — exiting for "
+                            "systemd restart", consecutive_errors,
+                        )
+                        sys.exit(1)
+
+                    await asyncio.sleep(min(5 * consecutive_errors, 60))
+        finally:
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except (asyncio.CancelledError, Exception):
+                pass
+
         await self.shutdown()
     
     async def _process_due_reminders(self) -> int:
@@ -411,10 +453,16 @@ class ReminderWorker:
         """Graceful shutdown."""
         logger.info("Shutting down Reminder Worker...")
         self.running = False
-        
+
+        if self._redis:
+            try:
+                await self._redis.aclose()
+            except Exception:
+                pass
+
         if self._db_pool:
             await close_db_pool()
-        
+
         # Log final stats
         logger.info(
             f"Reminder Worker shutdown complete. "
@@ -432,16 +480,59 @@ class ReminderWorker:
             "reminders_failed": self._reminders_failed
         }
 
+    # Redis key the health API (/api/v1/healthz/workers) watches to tell a
+    # live worker from a dead/hung one. TTL is set > 2x the heartbeat interval
+    # so a single slow tick never makes a healthy worker look stale, but a
+    # dead/hung worker's key expires and the probe flips to 503. Mirrors
+    # DialerWorker.HEARTBEAT_REDIS_KEY / HEARTBEAT_TTL.
+    HEARTBEAT_INTERVAL = 60
+    HEARTBEAT_TTL = 180
+    HEARTBEAT_REDIS_KEY = "reminder:heartbeat_ts"
+
     async def _heartbeat(self) -> None:
-        """Log heartbeat periodically for systemd liveness monitoring."""
-        interval = 60
+        """Liveness heartbeat loop — the single place this worker proves it is
+        alive to both Redis (for the health API) and systemd (watchdog).
+
+        Layers:
+          1. Redis: ``SETEX reminder:heartbeat_ts <ttl> <epoch>`` each tick so
+             ``/api/v1/healthz/workers`` can report age/health. Wrapped in
+             try/except — Redis being down must never kill the heartbeat loop
+             (and thus stop petting the systemd watchdog and trigger a restart
+             for a Redis outage that the worker itself survives). This worker
+             is DB-only otherwise, so ``self._redis`` may be None if the
+             best-effort connect in ``initialize()`` failed — the write is
+             simply skipped.
+          2. systemd: ``READY=1`` once at entry (satisfies ``Type=notify``)
+             then ``WATCHDOG=1`` every tick. No-op when ``$NOTIFY_SOCKET`` is
+             unset (dev/local).
+        """
+        from app.core.sd_notify import SystemdNotifier
+
+        notifier = SystemdNotifier()
+        notifier.notify_ready()
+
         while self.running:
             logger.info(
                 f"heartbeat: reminders_sent={self._reminders_sent}, "
                 f"emails_sent={self._emails_sent}, "
                 f"reminders_failed={self._reminders_failed}"
             )
-            await asyncio.sleep(interval)
+
+            # Layer 1 — Redis heartbeat for the health API. Best-effort.
+            try:
+                if self._redis is not None:
+                    await self._redis.setex(
+                        self.HEARTBEAT_REDIS_KEY,
+                        self.HEARTBEAT_TTL,
+                        str(time.time()),
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("heartbeat: redis write failed: %s", exc)
+
+            # Layer 2 — pet the systemd watchdog from the live loop.
+            notifier.notify_watchdog()
+
+            await asyncio.sleep(self.HEARTBEAT_INTERVAL)
 
 
 async def main():

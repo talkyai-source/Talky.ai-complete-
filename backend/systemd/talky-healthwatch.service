@@ -1,0 +1,14 @@
+[Unit]
+Description=Talky.ai Worker Health Watch (heartbeat probe)
+After=network.target talky-api.service
+# One-shot, triggered by talky-healthwatch.timer. Do NOT add Restart= here —
+# a failed run surfaces via exit code + a "HEALTHWATCH CRITICAL" journald
+# line (see deploy/healthwatch.sh) and simply retries on the next timer tick.
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/talky/backend
+ExecStart=/bin/bash /opt/talky/backend/deploy/healthwatch.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=talky-healthwatch
