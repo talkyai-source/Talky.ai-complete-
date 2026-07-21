@@ -71,6 +71,28 @@ async def _send_outbound_greeting(voice_session) -> None:
         return
     session.llm_active = True
 
+    # F-10 extended to the agent-first greeting path. The outbound greeting we
+    # are about to play echoes back off the callee's pickup ("Hello?") as a
+    # StartOfTurn a beat after audio starts — prod 2026-07-20 showed this
+    # truncating the greeting ~1s in (elapsed_ms≈1107/906, interrupted=True).
+    # Arm the SAME content-aware echo-immunity window the instant-opener path
+    # uses (session._instant_opener_in_flight during playback + a bounded
+    # trailing grace after). Both barge-in arming sites already consult
+    # is_opener_echo as their FIRST check (audio_ingest._on_barge_in_direct and
+    # voice_pipeline_service.handle_barge_in), so setting these flags makes the
+    # echo be recognized by CONTENT (is_bare_greeting) and ignored, with ZERO
+    # change to those functions. A real interrupt ("stop"/"wait"/any non-bare
+    # content) is not a bare greeting, so is_opener_echo returns False, the gate
+    # falls through, and the barge-in still fires immediately — no time-only
+    # suppression. NB: we deliberately do NOT touch _instant_opener_done here —
+    # that once-per-call marker belongs to the caller-first try_instant_opener
+    # path and must stay independent so reuse of the shared echo-window flags
+    # cannot misfire its guard.
+    from app.domain.services.voice_pipeline.instant_opener import (
+        _INSTANT_OPENER_ECHO_GRACE_S,
+    )
+    session._instant_opener_in_flight = True
+
     try:
         # Clear any barge_in_event that fired when the callee answered ("Hello?")
         # so the greeting is not immediately suppressed before a single chunk plays.
@@ -250,6 +272,14 @@ async def _send_outbound_greeting(voice_session) -> None:
         logger.warning(f"Outbound greeting failed for {call_id[:12]}: {exc}")
     finally:
         session.llm_active = False
+        # Close the echo-immunity window: clear the in-flight flag and open the
+        # bounded trailing grace so a StartOfTurn that lands just after playback
+        # returns is still recognized as the same greeting echo (mirrors
+        # instant_opener.try_instant_opener's finally exactly).
+        session._instant_opener_in_flight = False
+        session._instant_opener_grace_until = (
+            _time.monotonic() + _INSTANT_OPENER_ECHO_GRACE_S
+        )
 
 
 async def prepare_pre_originate_greeting(
