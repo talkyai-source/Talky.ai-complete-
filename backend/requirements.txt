@@ -59,6 +59,13 @@ google-cloud-texttospeech>=2.16.0
 vonage>=3.0.0
 phonenumbers>=8.13.0
 
+# --- Billing (Stripe) ---
+# Pinned <15.0.0: v15 dropped dict-inheritance from StripeObject, breaking
+# `event.get("id")` in billing_service.py.  v12–v14 are fully compatible
+# with the existing webhook + checkout code.  When upgrading past v15,
+# audit all .get() calls on Stripe objects (one known: billing_service L346).
+stripe>=12.0.0,<15.0.0
+
 # --- Authentication & Security ---
 PyJWT>=2.8.0
 email-validator>=2.0.0
