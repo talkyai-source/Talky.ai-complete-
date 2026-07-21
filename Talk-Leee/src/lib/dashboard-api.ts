@@ -353,6 +353,13 @@ class DashboardApi {
         });
     }
 
+    async deleteCampaign(id: string): Promise<{ message: string }> {
+        return this.client.request({
+            path: `/campaigns/${id}`,
+            method: "DELETE",
+        });
+    }
+
     async getCampaignStats(id: string): Promise<{
         campaign_id: string;
         campaign_status: string;

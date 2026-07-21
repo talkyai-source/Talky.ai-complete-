@@ -151,6 +151,9 @@ async def list_campaigns(
         from app.utils.tenant_filter import apply_tenant_filter
         query = db_client.table("campaigns").select("*")
         query = apply_tenant_filter(query, current_user.tenant_id)
+        # Hide soft-deleted campaigns (see delete_campaign) so a deleted
+        # campaign doesn't reappear in the list on refresh.
+        query = query.neq("status", "deleted")
         query = query.order("created_at", desc=True)
         response = query.execute()
         return {"campaigns": response.data}
@@ -744,6 +747,78 @@ async def stop_campaign(
     except Exception as e:
         logger.error(f"Error stopping campaign {campaign_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to stop campaign")
+
+
+@router.delete("/{campaign_id}", dependencies=[Depends(require_permission(Permission.CAMPAIGNS_DELETE))])
+async def delete_campaign(
+    campaign_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """Soft-delete a campaign.
+
+    Marks status='deleted' (``list_campaigns`` filters these out) rather
+    than hard-deleting, so the campaign's calls/leads history and any FK
+    references are preserved — mirroring how contacts are soft-deleted.
+    A running campaign is stopped and its pending dialer jobs cleared
+    first so the dialer can't keep placing calls for a deleted campaign.
+
+    ``get_current_user`` is required so the per-request RLS tenant context
+    is set; without it the lookup/update matches no rows and the caller
+    gets a spurious 404 (same rationale as start/stop/pause).
+
+    NOTE: before this endpoint existed the frontend 'Delete' button called
+    the STOP endpoint and only hid the row from its local cache, so the
+    campaign reappeared on refresh. This is the real delete.
+    """
+    try:
+        # Confirm it exists for THIS tenant (RLS-scoped) before mutating.
+        existing = db_client.table("campaigns").select("id, status").eq(
+            "id", campaign_id
+        ).neq("status", "deleted").execute()
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+
+        # Best-effort stop + clear queue so a running campaign stops dialing.
+        # Already-stopped/draft campaigns raise or no-op here — that's fine.
+        try:
+            service = _get_campaign_service(db_client)
+            await service.stop_campaign(campaign_id, clear_queue=True)
+        except CampaignNotFoundError:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+        except Exception as stop_err:
+            logger.info(
+                f"delete_campaign: stop step skipped for {campaign_id}: {stop_err}"
+            )
+
+        updated = db_client.table("campaigns").update(
+            {"status": "deleted"}
+        ).eq("id", campaign_id).execute()
+        if getattr(updated, "error", None):
+            logger.error(
+                f"Error soft-deleting campaign {campaign_id}: {updated.error}"
+            )
+            raise HTTPException(status_code=500, detail="Failed to delete campaign")
+
+        if current_user.tenant_id:
+            async with db_client.pool.acquire() as conn:
+                await emit_event(
+                    conn,
+                    tenant_id=current_user.tenant_id,
+                    category="user_action",
+                    title="Campaign deleted",
+                    description="Operator deleted the campaign.",
+                    related_campaign_id=str(campaign_id),
+                    actor_user_id=current_user.id,
+                )
+
+        logger.info(f"Campaign {campaign_id} soft-deleted by {current_user.id}")
+        return {"message": f"Campaign {campaign_id} deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting campaign {campaign_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete campaign")
 
 
 @router.get("/{campaign_id}/jobs")

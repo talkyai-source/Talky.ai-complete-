@@ -45,11 +45,20 @@ export default function CampaignsPage() {
         },
     });
 
-    const stop = useMutation({
-        mutationFn: (id: string) => dashboardApi.stopCampaign(id),
+    const removeCampaign = useMutation({
+        // Real delete (soft-delete on the backend). Previously this called
+        // stopCampaign and only filtered the row from the local cache, so the
+        // campaign reappeared on refresh — the "delete doesn't work" bug.
+        mutationFn: (id: string) => dashboardApi.deleteCampaign(id),
         onSuccess: (_res, id) => {
             qc.setQueryData<Campaign[]>(queryKeys.campaigns(), (prev) => (prev ?? []).filter((c) => c.id !== id));
             notificationsStore.create({ type: "success", title: "Campaign deleted", message: "Campaign removed." });
+        },
+        onError: (err) => {
+            // Refetch so the row that failed to delete stays visible/accurate.
+            void qc.invalidateQueries({ queryKey: queryKeys.campaigns() });
+            const message = err instanceof Error ? err.message : "Could not delete the campaign.";
+            notificationsStore.create({ type: "error", title: "Can't delete campaign", message });
         },
     });
 
@@ -68,7 +77,7 @@ export default function CampaignsPage() {
     }
 
     async function handleDelete(id: string) {
-        await stop.mutateAsync(id);
+        await removeCampaign.mutateAsync(id);
     }
 
     async function handleDuplicate(id: string) {
