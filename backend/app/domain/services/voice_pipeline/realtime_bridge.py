@@ -35,13 +35,29 @@ Discipline
   are both already bounded; we add none.
 * Fail-soft: any error logs and ends the bridge cleanly. A realtime failure
   must end the CALL, never crash the worker.
+
+Mid-call connection loss (Fix 14)
+---------------------------------
+The realtime session runs ONE websocket per call with no reconnect. If that
+socket drops WHILE the call is still up, both pumps end and ``run()`` returns —
+which today leaves the call in dead air until the ~300 s inactivity watchdog
+notices. To avoid that, ``run()`` distinguishes an *unexpected mid-call socket
+death* (``realtime_session.closed()`` became true while nobody asked us to
+stop and the call is still active) from a *normal* call end (a caller hangup
+cancels the pipeline task → ``CancelledError``; a clean ``stop()`` sets the
+stop event). Only the former arms the ``on_connection_lost`` callback, which
+the lifecycle layer wires to rebuild the cascaded pipeline on the SAME media
+gateway. The callback fires EXACTLY ONCE, is wrapped so its own error can never
+crash the bridge, and the bridge then ends WITHOUT triggering the normal
+'call over' teardown — the callback owner decides what happens next.
 """
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +93,7 @@ class RealtimeBridge:
         barge_in_event: Optional[asyncio.Event] = None,
         transcript_service: Optional[Any] = None,
         talklee_call_id: Optional[str] = None,
+        on_connection_lost: Optional[Callable[[], Awaitable[None]]] = None,
     ) -> None:
         self._call_id = call_id
         self._rt = realtime_session
@@ -117,6 +134,20 @@ class RealtimeBridge:
         # caller). Defaults True — outbound telephony is agent-first.
         self._greet_on_start = greet_on_start
 
+        # Fix 14 — mid-call connection-loss fallback hook. When the realtime
+        # socket dies while the call is still up, run() invokes this exactly
+        # once so the lifecycle layer can rebuild the cascaded pipeline on the
+        # SAME media gateway. May be sync or async; a None hook (or the env
+        # kill-switch not wiring one) preserves today's behaviour. Set either
+        # via the constructor or set_on_connection_lost() after construction
+        # (the lifecycle layer, which knows the PBX call_id, wires it there).
+        self._on_connection_lost: Optional[Callable[[], Any]] = on_connection_lost
+        # Armed in run() when an unexpected socket death is detected; consumed
+        # in run()'s finally. Separate from _connection_lost_fired so the
+        # callback can never be invoked more than once.
+        self._connection_lost = False
+        self._connection_lost_fired = False
+
         self._stop = asyncio.Event()
         self._caller_task: Optional[asyncio.Task] = None
         self._model_task: Optional[asyncio.Task] = None
@@ -127,6 +158,16 @@ class RealtimeBridge:
         self._tool_tasks: "set[asyncio.Task]" = set()
 
     # ── Lifecycle ────────────────────────────────────────────────────────
+    def set_on_connection_lost(
+        self, cb: Optional[Callable[[], Any]]
+    ) -> None:
+        """Wire (or clear) the mid-call connection-loss callback after
+        construction. The lifecycle layer uses this because it — not the
+        orchestrator that builds the bridge — knows the PBX call_id the
+        recovery handler needs, and gates the wiring on
+        REALTIME_FALLBACK_ENABLED (a None callback = today's behaviour)."""
+        self._on_connection_lost = cb
+
     async def run(self) -> None:
         """Run until the call ends or the realtime session closes. Fail-soft:
         never raises out — a realtime error ends this bridge (and the call)
@@ -180,14 +221,54 @@ class RealtimeBridge:
                 if exc:
                     logger.warning("realtime_bridge task err call=%s: %s",
                                    self._call_id, exc)
+            # Fix 14 — decide, BEFORE stop() runs (stop() sets self._stop),
+            # whether the pumps ended because the realtime SOCKET died while
+            # the call is still up (→ arm the fallback) versus a normal end.
+            # A normal caller-hangup cancels this task → CancelledError, which
+            # skips this line entirely; a clean stop() sets self._stop; a
+            # voicemail/model-error break leaves the socket OPEN. Only a truly
+            # closed socket, unrequested, on a still-active call, arms it.
+            if (
+                self._rt.closed()
+                and not self._stop.is_set()
+                and self._session_active()
+            ):
+                logger.warning(
+                    "realtime_bridge connection_lost call=%s — realtime socket "
+                    "died mid-call; arming cascaded fallback", self._call_id,
+                )
+                self._connection_lost = True
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 — never crash the call worker
             logger.error("realtime_bridge run error call=%s: %s",
                          self._call_id, exc)
         finally:
+            # Fully tear down the bridge (cancel pumps, close the socket)
+            # BEFORE handing off, so the cascaded pipeline the callback starts
+            # is the SOLE consumer of the gateway's caller-audio queue.
             await self.stop()
+            if self._connection_lost:
+                await self._invoke_on_connection_lost()
             logger.info("realtime_bridge end call=%s", self._call_id)
+
+    async def _invoke_on_connection_lost(self) -> None:
+        """Invoke the connection-loss callback exactly once, wrapped so a
+        callback error can never crash the bridge. Supports a sync or async
+        callback."""
+        cb = self._on_connection_lost
+        if cb is None or self._connection_lost_fired:
+            return
+        self._connection_lost_fired = True
+        try:
+            result = cb()
+            if inspect.isawaitable(result):
+                await result
+        except Exception as exc:  # noqa: BLE001 — callback error must not crash
+            logger.error(
+                "realtime_bridge on_connection_lost callback err call=%s: %s",
+                self._call_id, exc,
+            )
 
     async def stop(self) -> None:
         """Idempotent teardown: stop pumps, cancel any in-flight tool task,

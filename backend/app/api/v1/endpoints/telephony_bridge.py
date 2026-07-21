@@ -61,6 +61,13 @@ from app.domain.services.telephony.prewarm import (  # noqa: E402
 from app.domain.services.telephony.failure_reasons import (  # noqa: E402
     humanize_failure,
 )
+from app.domain.services.telephony.config import (  # noqa: E402
+    _MAX_TELEPHONY_SESSIONS,
+    _RINGING_MAX_AGE_S,
+)
+from app.domain.services.telephony.adapter_registry import (  # noqa: E402
+    register_adapter_getter,
+)
 from app.domain.services.event_emitter import emit_event_via_pool  # noqa: E402
 from app.core.security.internal_auth import (  # noqa: E402
     CallerContext,
@@ -83,13 +90,20 @@ def _apply_caller_first_inbound_prompt(voice_session) -> None:
 # ---------------------------------------------------------------------------
 _adapter: Optional[CallControlAdapter] = None
 
+# Hand the domain layer a live view of ``_adapter`` (see adapter_registry.py
+# for why this indirection exists instead of the domain layer importing this
+# module directly). The lambda closes over the module global by name, so it
+# keeps working after ``_adapter`` is reassigned below / in app/main.py.
+register_adapter_getter(lambda: _adapter)
+
 # Active voice sessions keyed by PBX call_id (channel_id / call UUID)
 _telephony_sessions: dict[str, object] = {}  # VoiceSession objects
 
-# Max concurrent telephony sessions; override with MAX_TELEPHONY_SESSIONS env var.
-# Each session holds 1 Deepgram WS + 1 Groq connection + audio buffers (~60KB–57MB).
-# Groq free-tier llama-3.1-8b-instant hits 30K TPM at ~28-40 concurrent calls.
-_MAX_TELEPHONY_SESSIONS = int(os.getenv("MAX_TELEPHONY_SESSIONS", "50"))
+# _MAX_TELEPHONY_SESSIONS is now defined in
+# app.domain.services.telephony.config (imported above) — the domain layer
+# (lifecycle.py's watchdog/capacity checks) needs it and must not import
+# this API module to get it. Kept as a module-level name here too since
+# call sites in this file reference it unqualified.
 
 # Watchdog task handle — started when the adapter connects, cancelled on stop.
 _watchdog_task: Optional[asyncio.Task] = None
@@ -123,10 +137,8 @@ _ringing_warmups: dict[str, tuple[object, Optional[asyncio.Task]]] = {}
 # the open Deepgram + TTS WebSockets leak per unanswered call.
 _ringing_warmup_created_at: dict[str, float] = {}
 
-# Maximum age (seconds) for an entry in _ringing_warmups / _ringing_events
-# before the watchdog drops it. Outbound calls almost always connect or fail
-# within ~60s; 180s is a conservative safety net for genuinely-slow carriers.
-_RINGING_MAX_AGE_S: int = 180
+# _RINGING_MAX_AGE_S is now defined in app.domain.services.telephony.config
+# (imported above) for the same reason as _MAX_TELEPHONY_SESSIONS.
 
 
 # Coordination events for ringing-phase warmup.  When _on_ringing starts, it

@@ -22,6 +22,25 @@ from app.domain.services.voice_orchestrator import Direction
 logger = logging.getLogger(__name__)
 
 
+# Max concurrent telephony sessions; override with MAX_TELEPHONY_SESSIONS env var.
+# Each session holds 1 Deepgram WS + 1 Groq connection + audio buffers (~60KB–57MB).
+# Groq free-tier llama-3.1-8b-instant hits 30K TPM at ~28-40 concurrent calls.
+#
+# Canonical home for this constant (moved from telephony_bridge.py so the
+# domain layer — lifecycle.py's watchdog/capacity checks — doesn't have to
+# reach into the API layer to read it; telephony_bridge.py now imports it
+# from here instead of defining it locally).
+_MAX_TELEPHONY_SESSIONS = int(os.getenv("MAX_TELEPHONY_SESSIONS", "50"))
+
+# Maximum age (seconds) for an entry in _ringing_warmups / _ringing_events
+# before the watchdog drops it. Outbound calls almost always connect or fail
+# within ~60s; 180s is a conservative safety net for genuinely-slow carriers.
+#
+# Canonical home for this constant — see _MAX_TELEPHONY_SESSIONS above for
+# why it lives here rather than on telephony_bridge.py.
+_RINGING_MAX_AGE_S: int = 180
+
+
 def _outbound_first_speaker() -> str:
     """
     Who speaks first on an outbound (campaign) call after the callee answers.

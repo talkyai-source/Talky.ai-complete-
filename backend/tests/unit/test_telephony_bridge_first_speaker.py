@@ -147,25 +147,31 @@ class TestOutboundFirstSpeaker:
         from app.domain.services.telephony import lifecycle
 
         call_id = "reserved-call"
-        fake_bridge = SimpleNamespace(
-            _adapter=SimpleNamespace(name="asterisk"),
-            _ringing_warmups={},
-            _ringing_events={call_id: asyncio.Event()},
-            _telephony_sessions={},
-            _MAX_TELEPHONY_SESSIONS=10,
+        fake_adapter = SimpleNamespace(name="asterisk")
+        # Model the "reserved" condition directly on the state backend
+        # (get_ringing_event returning non-None means a caller-first
+        # prewarm already reserved this call_id) rather than relying on
+        # the real process-global telephony_bridge dicts, which other
+        # tests in the suite also mutate.
+        fake_state = SimpleNamespace(
+            has_ringing_warmup=lambda _cid: False,
+            get_ringing_event=lambda _cid: object(),
+            get_voice_session=lambda _cid: None,
         )
 
-        monkeypatch.setattr(lifecycle, "_bridge", lambda: fake_bridge)
+        monkeypatch.setattr(lifecycle, "get_adapter", lambda: fake_adapter)
+        monkeypatch.setattr(lifecycle, "_state", lambda: fake_state)
+        monkeypatch.setattr(lifecycle, "_MAX_TELEPHONY_SESSIONS", 10)
         monkeypatch.setattr(
             lifecycle,
             "_get_orchestrator",
             lambda: (_ for _ in ()).throw(AssertionError("must not warm up")),
         )
 
+        # Must return early (idempotent/reserved) without ever reaching
+        # the orchestrator warmup path — the AssertionError-raising lambda
+        # above would propagate out of this call if it were.
         await lifecycle._on_ringing(call_id)
-
-        assert fake_bridge._ringing_warmups == {}
-        assert call_id in fake_bridge._ringing_events
 
     @pytest.mark.asyncio
     async def test_asterisk_trunk_aliases_oldest_originated_channel(self):

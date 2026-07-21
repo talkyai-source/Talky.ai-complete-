@@ -142,10 +142,9 @@ class TestForceEndAndHangup:
             call_order.append(f"on_call_ended:{call_id}")
 
         adapter = _RecordingAdapter()
-        fake_bridge = SimpleNamespace(_adapter=adapter)
 
         monkeypatch.setattr(lifecycle, "_on_call_ended", fake_on_call_ended)
-        monkeypatch.setattr(lifecycle, "_bridge", lambda: fake_bridge)
+        monkeypatch.setattr(lifecycle, "get_adapter", lambda: adapter)
 
         await lifecycle._force_end_and_hangup("call-123")
 
@@ -160,10 +159,9 @@ class TestForceEndAndHangup:
             return None
 
         adapter = _RecordingAdapter(raise_on_hangup=True)
-        fake_bridge = SimpleNamespace(_adapter=adapter)
 
         monkeypatch.setattr(lifecycle, "_on_call_ended", fake_on_call_ended)
-        monkeypatch.setattr(lifecycle, "_bridge", lambda: fake_bridge)
+        monkeypatch.setattr(lifecycle, "get_adapter", lambda: adapter)
 
         # Must not raise.
         await lifecycle._force_end_and_hangup("call-456")
@@ -174,10 +172,8 @@ class TestForceEndAndHangup:
         async def fake_on_call_ended(call_id: str) -> None:
             return None
 
-        fake_bridge = SimpleNamespace(_adapter=None)
-
         monkeypatch.setattr(lifecycle, "_on_call_ended", fake_on_call_ended)
-        monkeypatch.setattr(lifecycle, "_bridge", lambda: fake_bridge)
+        monkeypatch.setattr(lifecycle, "get_adapter", lambda: None)
 
         # Must not raise even though there's nothing to hang up.
         await lifecycle._force_end_and_hangup("call-789")

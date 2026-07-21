@@ -11,8 +11,17 @@ callbacks during ``start_telephony``.
 the early-audio buffer, the gateway-session map) live on
 ``telephony_bridge.py``, not here. ``app/main.py`` writes the adapter
 directly via ``_tb._adapter = ...`` at startup, so the bridge has to
-remain the canonical owner of those names. Functions in this module
-read and mutate that state through the ``_bridge()`` helper below.
+remain the canonical owner of those names.
+
+Per-call state (voice sessions, ringing warmups, gateway-session map,
+etc.) is reached through ``_state()`` / ``get_state_backend()`` below.
+The live PBX adapter — not per-call state, a single live ARI/ESL
+connection object — is reached through
+``app.domain.services.telephony.adapter_registry.get_adapter()``:
+``telephony_bridge.py`` registers a getter closure over its own
+``_adapter`` global at import time, so this module never has to import
+the API layer to read it (that used to be done via a lazy-imported
+``_bridge()`` helper — an API→domain dependency pointing the wrong way).
 """
 from __future__ import annotations
 
@@ -26,7 +35,10 @@ from typing import Optional
 from app.domain.services.telephony.config import (
     _build_telephony_session_config,
     _build_outbound_greeting,
+    _MAX_TELEPHONY_SESSIONS,
+    _RINGING_MAX_AGE_S,
 )
+from app.domain.services.telephony.adapter_registry import get_adapter
 from app.domain.services.telephony.modes import resolve_first_speaker
 from app.domain.services.telephony.modes.agent_first import _send_outbound_greeting
 from app.domain.services.telephony.recording import _save_call_recording
@@ -40,26 +52,13 @@ from app.domain.services.telephony.outcome_resolver import resolve_call_outcome
 logger = logging.getLogger(__name__)
 
 
-def _bridge():
-    """Lazy import of the bridge module to access shared state.
-
-    The bridge owns the telephony module state singletons; lifecycle
-    functions reach them through this indirection so the bridge module
-    stays the single point of write (``app/main.py`` assigns
-    ``_tb._adapter = ...`` at startup, which would not work through a
-    ``__getattr__`` shim).
-    """
-    from app.api.v1.endpoints import telephony_bridge
-    return telephony_bridge
-
-
 def _state():
     """The telephony state backend (Phase 1, item 1 of the architecture
     roadmap). All per-call state reads/writes go through this so the
     Redis-backed backend can mirror them for restart recovery. Lazy
-    import keeps the module-load graph acyclic — same rationale as
-    ``_bridge()`` above. ``_adapter`` is NOT state-backend-managed (it's
-    a live ARI/ESL connection); it stays accessed via ``_bridge()``.
+    import keeps the module-load graph acyclic. ``_adapter`` is NOT
+    state-backend-managed (it's a live ARI/ESL connection); it's reached
+    via ``adapter_registry.get_adapter()`` instead (see module docstring).
     """
     from app.domain.services.telephony.state_backend import get_state_backend
     return get_state_backend()
@@ -106,6 +105,82 @@ def _track_task(coro) -> "asyncio.Task":
 
     task.add_done_callback(_done)
     return task
+
+
+def _realtime_fallback_enabled() -> bool:
+    """Fix 14 config gate. When a realtime speech-to-speech socket drops
+    mid-call, fall back to the cascaded pipeline instead of dying into dead
+    air. Default ON; set REALTIME_FALLBACK_ENABLED=false to keep today's
+    behaviour (the bridge ends and the inactivity watchdog eventually reaps
+    the call). Read per-call so an operator can flip it without a restart."""
+    return os.getenv("REALTIME_FALLBACK_ENABLED", "true").strip().lower() not in (
+        "false", "0", "no", "off",
+    )
+
+
+async def _on_realtime_connection_lost(call_id: str, voice_session) -> None:
+    """Fix 14 recovery: the realtime session's websocket dropped mid-call.
+    Rebuild the cascaded pipeline on the SAME live media gateway and swap it in
+    so the caller keeps talking to the agent instead of hitting dead air.
+
+    Invoked (at most once per call) by RealtimeBridge.run() via its
+    on_connection_lost hook. Guards:
+      * config gate REALTIME_FALLBACK_ENABLED (also checked at wire time);
+      * once-per-call (``_realtime_fallback_attempted`` on the session);
+      * the call/session must still be live (present in the state backend).
+    If the cascaded rebuild itself fails we log and force-end the call — the
+    same terminal outcome as today, never worse.
+
+    Double-teardown safety: the swap replaces ``voice_session.pipeline_task``
+    with the new cascaded task BEFORE the dying realtime task's done-callback
+    fires. ``_pipeline_done_cb`` ignores a superseded task (and the realtime
+    task completes without an exception anyway), so it never force-ends the
+    call out from under the fallback.
+    """
+    if not _realtime_fallback_enabled():
+        return
+    if voice_session is None:
+        return
+    if getattr(voice_session, "_realtime_fallback_attempted", False):
+        logger.debug(
+            "realtime_fallback_skip call=%s — already attempted once", call_id[:12],
+        )
+        return
+    voice_session._realtime_fallback_attempted = True
+
+    # Only recover a call that's still alive. A hangup that raced the socket
+    # drop already removed the session (and is tearing down) — nothing to do.
+    if _state().get_voice_session(call_id) is None:
+        logger.info(
+            "realtime_fallback_skip call=%s — session already gone", call_id[:12],
+        )
+        return
+
+    try:
+        new_task = await _get_orchestrator().start_cascaded_fallback(voice_session)
+    except Exception as exc:  # noqa: BLE001 — defensive; builder already fail-soft
+        logger.error(
+            "realtime_fallback_build_raised call=%s: %s — ending call",
+            call_id[:12], exc,
+        )
+        new_task = None
+
+    if new_task is None:
+        logger.error(
+            "realtime_fallback_failed call=%s — cascaded rebuild produced no "
+            "pipeline; ending call (same as today)", call_id[:12],
+        )
+        _track_task(_force_end_and_hangup(call_id))
+        return
+
+    # Swap the live task reference, then attach the done-callback so a later
+    # crash of the cascaded pipeline still tears the call down.
+    voice_session.pipeline_task = new_task
+    new_task.add_done_callback(lambda t: _pipeline_done_cb(t, call_id))
+    logger.warning(
+        "realtime_fallback_active call=%s — cascaded pipeline swapped in after "
+        "realtime socket drop", call_id[:12],
+    )
 
 
 def _pop_ringing_warmup(call_id: str):
@@ -288,7 +363,7 @@ async def _force_end_and_hangup(call_id: str) -> None:
     the channel actually was still up.
     """
     await _on_call_ended(call_id)
-    adapter = _bridge()._adapter
+    adapter = get_adapter()
     if adapter is not None:
         try:
             await adapter.hangup(call_id)
@@ -368,7 +443,7 @@ async def _session_watchdog() -> None:
             # on the Asterisk adapter; a None channel list (ARI unreachable) is a
             # safe no-op.
             try:
-                _adapter = _bridge()._adapter
+                _adapter = get_adapter()
                 if _adapter is not None and getattr(_adapter, "name", None) == "asterisk":
                     _live_ids = await _adapter.list_active_channel_ids()
                     _zombies = _detect_zombie_sessions(
@@ -416,7 +491,7 @@ async def _session_watchdog() -> None:
             # ----- Orphaned ringing-warmup sweep (bug #3 / #7) -----
             stale_ringing = [
                 cid for cid, created_at in _sb.iter_ringing_started_at_items()
-                if (now - created_at) > _bridge()._RINGING_MAX_AGE_S
+                if (now - created_at) > _RINGING_MAX_AGE_S
             ]
             for cid in stale_ringing:
                 ringing = _pop_ringing_warmup(cid)
@@ -424,7 +499,7 @@ async def _session_watchdog() -> None:
                 logger.warning(
                     "telephony_watchdog: orphaned ringing_warmup %s "
                     "(age >%ds) — releasing STT/TTS sockets",
-                    cid[:12], _bridge()._RINGING_MAX_AGE_S,
+                    cid[:12], _RINGING_MAX_AGE_S,
                     extra={"call_id": cid, "alert": "ringing_warmup_orphan"},
                 )
                 if ringing is not None:
@@ -589,7 +664,7 @@ async def recover_orphaned_calls() -> int:
     )
     container = _gc()
     db_pool = getattr(container, "db_pool", None) if container.is_initialized else None
-    adapter = _bridge()._adapter
+    adapter = get_adapter()
 
     recovered = 0
     for entry in orphans:
@@ -645,6 +720,22 @@ def _pipeline_done_cb(task: asyncio.Task, call_id: str) -> None:
     the channel up.
     """
     if task.cancelled():
+        return
+    # Fix 14 — a SUPERSEDED pipeline task must never tear the call down. When
+    # the realtime→cascaded fallback swaps in a new pipeline_task, the dying
+    # realtime task's done-callback still fires; if it's no longer the
+    # session's current task, the fallback has taken over — do nothing. (The
+    # realtime task also completes without an exception, so the exc branch
+    # below would be skipped anyway; this is the explicit, documented guard.)
+    try:
+        _vs = _state().get_voice_session(call_id)
+    except Exception:
+        _vs = None
+    if _vs is not None and getattr(_vs, "pipeline_task", None) not in (None, task):
+        logger.debug(
+            "pipeline_done_cb: superseded task for %s (fallback took over) — "
+            "no teardown", call_id[:12],
+        )
         return
     exc = task.exception()
     if exc:
@@ -706,7 +797,8 @@ async def _on_ringing(call_id: str) -> None:
     detects the missing entry and falls back to the normal answer-phase
     warmup path so the call still works (just with the old ~2 s penalty).
     """
-    if _bridge()._adapter is None or getattr(_bridge()._adapter, "name", "") != "asterisk":
+    _ringing_adapter = get_adapter()
+    if _ringing_adapter is None or getattr(_ringing_adapter, "name", "") != "asterisk":
         return
     _sb = _state()
     if (
@@ -739,7 +831,7 @@ async def _on_ringing(call_id: str) -> None:
             "call_status.ringing_emit_raised call=%s err=%s", call_id[:12], _ring_exc,
         )
 
-    if _sb.voice_session_count() + _sb.ringing_warmup_count() >= _bridge()._MAX_TELEPHONY_SESSIONS:
+    if _sb.voice_session_count() + _sb.ringing_warmup_count() >= _MAX_TELEPHONY_SESSIONS:
         logger.warning(
             "ringing_warmup_skipped_at_capacity call_id=%s", call_id[:12],
         )
@@ -896,9 +988,10 @@ async def _reject_overcap_call(call_id: str) -> None:
             await _get_orchestrator().end_session(ringing_session)
         except Exception:
             pass
-    if _bridge()._adapter:
+    _reject_adapter = get_adapter()
+    if _reject_adapter:
         try:
-            await _bridge()._adapter.hangup(call_id)
+            await _reject_adapter.hangup(call_id)
         except Exception:
             pass
 
@@ -926,7 +1019,7 @@ async def _fetch_campaign_row(db_pool, tenant_id: str, campaign_id: str):
 def _inbound_caller_number(call_id: str) -> Optional[str]:
     """Best-effort caller ANI captured from the inbound StasisStart event."""
     try:
-        adapter = _bridge()._adapter
+        adapter = get_adapter()
         get_meta = getattr(adapter, "get_inbound_call_meta", None)
         meta = get_meta(call_id) if callable(get_meta) else None
         if meta:
@@ -945,7 +1038,7 @@ async def _resolve_inbound_route_for_call(call_id: str):
     ``route.rejected`` means the caller must hang up (conflict / strict).
     """
     try:
-        adapter = _bridge()._adapter
+        adapter = get_adapter()
         if not adapter or getattr(adapter, "name", "") != "asterisk":
             return None, None
         get_meta = getattr(adapter, "get_inbound_call_meta", None)
@@ -1003,7 +1096,7 @@ async def _on_new_call(call_id: str) -> None:
     # exceeds its MAX_TELEPHONY_SESSIONS memory budget). The global cap
     # below is the new cluster-wide check (T1.2).
     _pod_session_count = _state().voice_session_count()
-    if _pod_session_count >= _bridge()._MAX_TELEPHONY_SESSIONS:
+    if _pod_session_count >= _MAX_TELEPHONY_SESSIONS:
         logger.error(
             "telephony_at_pod_capacity sessions=%d call_id=%s — rejecting",
             _pod_session_count, call_id[:12],
@@ -1047,7 +1140,7 @@ async def _on_new_call(call_id: str) -> None:
         # Select the correct media gateway based on the active PBX adapter:
         #   - Asterisk path: TelephonyMediaGateway (HTTP callbacks, no WebSocket)
         #   - FreeSWITCH path: BrowserMediaGateway (mod_audio_fork WebSocket)
-        is_asterisk = bool(_bridge()._adapter and _bridge()._adapter.name == "asterisk")
+        is_asterisk = bool(get_adapter() and get_adapter().name == "asterisk")
         gateway_type = "telephony" if is_asterisk else "browser"
 
         # ── Fast path: consume the session pre-warmed in _on_ringing ─────
@@ -1241,13 +1334,13 @@ async def _on_new_call(call_id: str) -> None:
         # gateway first lets input_queue buffer the audio; the pipeline
         # drains it as soon as it starts.
         if is_asterisk:
-            gateway_session_id = getattr(_bridge()._adapter, "_gateway_sessions", {}).get(call_id)
+            gateway_session_id = getattr(get_adapter(), "_gateway_sessions", {}).get(call_id)
             if gateway_session_id:
                 _sb.set_call_id_for_gateway_session(gateway_session_id, call_id)
 
             await voice_session.media_gateway.on_call_started(
                 voice_session.call_id,
-                {"adapter": _bridge()._adapter, "pbx_call_id": call_id},
+                {"adapter": get_adapter(), "pbx_call_id": call_id},
             )
 
             # ── Caller-first 2-second greeting timer (parallel with setup) ──
@@ -1377,6 +1470,23 @@ async def _on_new_call(call_id: str) -> None:
             # registered above, so any caller audio that arrived during warmup
             # is waiting in input_queue.
             if getattr(voice_session, "realtime_bridge", None) is not None:
+                # Fix 14 — wire the mid-call connection-loss fallback BEFORE the
+                # bridge starts. Gated on REALTIME_FALLBACK_ENABLED: when off we
+                # wire nothing, so a socket drop keeps today's behaviour. The
+                # closure captures THIS call's PBX call_id + session (the bridge
+                # only knows its internal uuid), which the recovery handler needs
+                # to look the session up in the state backend.
+                if _realtime_fallback_enabled():
+                    _rt_bridge = voice_session.realtime_bridge
+                    _rt_session = voice_session
+                    _rt_call_id = call_id
+                    _set_hook = getattr(_rt_bridge, "set_on_connection_lost", None)
+                    if callable(_set_hook):
+                        _set_hook(
+                            lambda: _on_realtime_connection_lost(
+                                _rt_call_id, _rt_session
+                            )
+                        )
                 voice_session.pipeline_task = asyncio.create_task(
                     voice_session.realtime_bridge.run()
                 )
@@ -1439,8 +1549,8 @@ async def _on_new_call(call_id: str) -> None:
         # For Asterisk this is a no-op (audio_callback_url handles it via C++ gateway).
         # For FreeSWITCH this triggers mod_audio_fork which connects the WebSocket,
         # which then triggers _on_ws_session_start to complete the FS pipeline setup.
-        if _bridge()._adapter:
-            await _bridge()._adapter.start_audio_stream(call_id)
+        if get_adapter():
+            await get_adapter().start_audio_stream(call_id)
 
         _total_init_ms = (asyncio.get_event_loop().time() - _new_call_t0) * 1000.0
         logger.info(
@@ -1461,9 +1571,9 @@ async def _on_new_call(call_id: str) -> None:
                 await _get_orchestrator().end_session(orphan)
             except Exception:
                 pass
-        if _bridge()._adapter:
+        if get_adapter():
             try:
-                await _bridge()._adapter.hangup(call_id)
+                await get_adapter().hangup(call_id)
             except Exception:
                 pass
 
@@ -1678,7 +1788,7 @@ async def _on_call_ended(call_id: str) -> None:
                     # +24h. Only fill it if the pipeline didn't already set one.
                     if not getattr(voice_session, "_hangup_reason", None):
                         try:
-                            _adapter = _bridge()._adapter
+                            _adapter = get_adapter()
                             _cause = _adapter.get_hangup_cause(call_id) if _adapter else None
                             if _cause:
                                 voice_session._hangup_reason = _cause
@@ -1794,7 +1904,7 @@ async def _on_call_ended(call_id: str) -> None:
             if _c4.is_initialized:
                 _cause = None
                 try:
-                    _adp = _bridge()._adapter
+                    _adp = get_adapter()
                     _cause = _adp.get_hangup_cause(call_id) if _adp else None
                 except Exception:
                     _cause = None

@@ -200,7 +200,7 @@ class TestWsSessionRaceReleasesLease:
         fake_adapter = SimpleNamespace(
             hangup=lambda cid: bare_hangup_calls.append(cid)
         )
-        monkeypatch.setattr(lifecycle, "_bridge", lambda: SimpleNamespace(_adapter=fake_adapter))
+        monkeypatch.setattr(lifecycle, "get_adapter", lambda: fake_adapter)
         monkeypatch.setattr(lifecycle, "_force_end_and_hangup", fake_force_end_and_hangup)
 
         await lifecycle._on_ws_session_start(call_id)
@@ -244,7 +244,7 @@ class TestWsSessionRaceReleasesLease:
             ),
         )
         monkeypatch.setattr(lifecycle, "_pop_ringing_warmup", lambda _cid: None)
-        monkeypatch.setattr(lifecycle, "_bridge", lambda: SimpleNamespace(_adapter=None))
+        monkeypatch.setattr(lifecycle, "get_adapter", lambda: None)
 
         await lifecycle._force_end_and_hangup(call_id)
 

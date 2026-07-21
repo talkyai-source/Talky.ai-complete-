@@ -567,6 +567,100 @@ class VoiceOrchestrator:
             raise
 
     # ------------------------------------------------------------------
+    # 1b. Mid-call realtime → cascaded fallback (Fix 14)
+    # ------------------------------------------------------------------
+
+    async def start_cascaded_fallback(
+        self, session: VoiceSession
+    ) -> Optional[asyncio.Task]:
+        """Rebuild the CASCADED pipeline on a live realtime session whose
+        speech-to-speech socket dropped mid-call, and start it.
+
+        Reuses the session's EXISTING media gateway (it is wired to the live
+        RTP/gateway session — a fresh gateway from the factory would not be),
+        creates fresh STT/LLM/TTS providers from the session's own config, and
+        returns the started pipeline task. Returns None on any failure so the
+        caller can fall through to normal teardown (the call ends — never worse
+        than today's dead-air-until-watchdog).
+
+        Sample-rate note: the realtime gateway runs at a single 8 kHz internal
+        rate (see _create_media_gateway). We align the cascaded pipeline's
+        stt/tts rates to the gateway's ACTUAL internal rate so the
+        gateway→STT ingest and TTS→gateway egress resample chains stay
+        self-consistent — a 16 kHz assumption on an 8 kHz gateway is exactly
+        the half-speed 'ghost audio' the connect-time fallback guards against.
+        """
+        config = getattr(session, "config", None)
+        gateway = getattr(session, "media_gateway", None)
+        call_session = getattr(session, "call_session", None)
+        if config is None or gateway is None or call_session is None:
+            logger.error(
+                "cascaded fallback missing config/gateway/call_session "
+                "call_id=%s — cannot rebuild", getattr(session, "call_id", "?"),
+            )
+            return None
+        try:
+            # Force cascaded mode so any provider/rate logic keyed off
+            # pipeline_mode builds the cascaded shape.
+            try:
+                config.pipeline_mode = "cascaded"
+            except Exception:  # noqa: BLE001 — config may be frozen; best-effort
+                pass
+
+            gw_rate = int(
+                getattr(gateway, "_sample_rate", None) or config.stt_sample_rate
+            )
+
+            stt_provider, llm_provider, tts_provider = await asyncio.gather(
+                self._create_stt_provider(config),
+                self._create_llm_provider(config),
+                self._create_tts_provider(config),
+            )
+
+            pipeline = VoicePipelineService(
+                stt_provider=stt_provider,
+                llm_provider=llm_provider,
+                tts_provider=tts_provider,
+                media_gateway=gateway,
+                stt_sample_rate=gw_rate,
+                tts_sample_rate=gw_rate,
+            )
+
+            # The realtime bridge told the gateway its output was already
+            # real-time-paced (batch=1). Clear that hint so cascaded TTS gets
+            # its normal opportunistic batching. Best-effort.
+            try:
+                set_rt = getattr(gateway, "set_realtime_output", None)
+                if set_rt:
+                    set_rt(session.call_id, False)
+            except Exception:  # noqa: BLE001
+                pass
+
+            # Swap the cascaded providers + pipeline onto the live session so
+            # end_session tears them down normally on hangup.
+            session.stt_provider = stt_provider
+            session.llm_provider = llm_provider
+            session.tts_provider = tts_provider
+            session.pipeline = pipeline
+
+            # The gateway session was already registered at answer time; the
+            # telephony start_pipeline path takes websocket=None and reuses it.
+            task = asyncio.create_task(
+                pipeline.start_pipeline(call_session, None)
+            )
+            logger.warning(
+                "cascaded fallback pipeline started call_id=%s rate=%d",
+                session.call_id[:8], gw_rate,
+            )
+            return task
+        except Exception as exc:  # noqa: BLE001 — never raise into the callback
+            logger.error(
+                "cascaded fallback build failed call_id=%s: %s",
+                getattr(session, "call_id", "?"), exc,
+            )
+            return None
+
+    # ------------------------------------------------------------------
     # 2. Start pipeline
     # ------------------------------------------------------------------
 
