@@ -12,6 +12,7 @@ Called from `app.main.lifespan` before the service container starts.
 """
 from __future__ import annotations
 
+import importlib.util
 import logging
 import os
 from dataclasses import dataclass
@@ -208,6 +209,38 @@ def _check_required_secrets() -> list[GateViolation]:
                     "STRIPE_SECRET_KEY is not set — billing would silently fall "
                     "back to mock mode. Set the key, or set "
                     "STRIPE_BILLING_DISABLED=1 to acknowledge running without billing."
+                ),
+            )
+        )
+    elif stripe_key and not stripe_key.startswith("sk_live_"):
+        # A set-but-non-live key (test/restricted-test 'sk_test_...' or a
+        # malformed value) means the operator believes billing is live when
+        # it is actually charging against Stripe's test ledger — or not at
+        # all. This does not change billing behavior, only refuses prod boot.
+        violations.append(
+            GateViolation(
+                rule="STRIPE_LIVE_KEY",
+                detail=(
+                    f"STRIPE_SECRET_KEY is set but is not a live key "
+                    f"({stripe_key[:8]}…) — production billing would run "
+                    "against Stripe's test mode. Use an 'sk_live_' key."
+                ),
+            )
+        )
+
+    if stripe_key and importlib.util.find_spec("stripe") is None:
+        # A key is configured but the SDK that would actually call Stripe
+        # isn't installed — billing_service falls back to mock mode
+        # silently in that case, so the operator believes billing is live
+        # (key is set) while every charge is actually simulated.
+        violations.append(
+            GateViolation(
+                rule="STRIPE_SDK_MISSING",
+                detail=(
+                    "STRIPE_SECRET_KEY is set but the 'stripe' package is not "
+                    "installed — billing would silently run in mock mode "
+                    "despite the operator believing it is live. Install the "
+                    "stripe SDK or unset STRIPE_SECRET_KEY."
                 ),
             )
         )

@@ -500,7 +500,57 @@ class CallGuard:
         tenant_id: str,
         **kwargs
     ) -> CheckResult:
-        """Check if tenant has valid subscription/billing status."""
+        """Check if tenant has valid subscription/billing status.
+
+        Cached in Redis for 60s (guard:subscription:{tenant_id}) — subscription
+        status changes infrequently (billing webhook / admin action) and this
+        check runs on every call attempt. Both ALLOW and DENY outcomes are
+        cached; the exact reason/details are cached too so a cache hit returns
+        a result indistinguishable from a fresh DB read. Any Redis error
+        (get or set) falls through to the DB check — we never fail open to
+        "allowed" on a cache failure, only fail open to the source of truth.
+        """
+        cache_key = f"guard:subscription:{tenant_id}"
+
+        if self._redis:
+            try:
+                cached = await self._redis.get(cache_key)
+                if cached:
+                    data = json.loads(cached)
+                    return CheckResult(
+                        check=GuardCheck.SUBSCRIPTION_VALID,
+                        passed=data["passed"],
+                        reason=data.get("reason"),
+                        details=data.get("details") or {},
+                    )
+            except Exception as e:
+                logger.debug(f"subscription cache read failed, falling through to DB: {e}")
+
+        result = await self._check_subscription_uncached(tenant_id)
+
+        if self._redis:
+            try:
+                await self._redis.setex(
+                    cache_key,
+                    60,
+                    json.dumps({
+                        "passed": result.passed,
+                        "reason": result.reason,
+                        "details": result.details,
+                    }),
+                )
+            except Exception as e:
+                logger.debug(f"subscription cache write failed: {e}")
+
+        return result
+
+    async def _check_subscription_uncached(
+        self,
+        tenant_id: str,
+    ) -> CheckResult:
+        """Uncached subscription/billing status check — see _check_subscription
+        for the caching wrapper. Kept as a separate method so the DB read path
+        stays identical to before caching was added."""
         try:
             async with self._db_pool.acquire() as conn:
                 row = await conn.fetchrow(
