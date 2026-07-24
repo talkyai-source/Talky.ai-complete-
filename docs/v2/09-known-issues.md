@@ -14,6 +14,36 @@ remembered.* It becomes the DOC-09 deliverable in Sprint 2; until then it accumu
 
 ## Open — action required
 
+### 🔴 F-23 · Row-level security is defined but **not enforced**
+- **What:** the production runtime role is `rolsuper = true`, `rolbypassrls = true`. Postgres skips
+  RLS entirely for such a role. **All 64 defined policies are inert.**
+- **Evidence:** `SELECT current_user, rolsuper, rolbypassrls FROM pg_roles WHERE rolname=current_user`
+  → `{'role': 'talkyai', 'rolsuper': True, 'rolbypassrls': True, 'rolcreaterole': True}`.
+  `calls`/`campaigns`/`leads` have `relrowsecurity=true` and `relforcerowsecurity=false`;
+  `tenants` and `tenant_ai_configs` have RLS not enabled at all (**F-30**).
+- **Impact:** tenant isolation rests **entirely** on application-layer `WHERE tenant_id = …` filters.
+  That layer is real and was hardened deliberately — but it is the only one, not the second one.
+  Separately, the application connects to Postgres as a **superuser with CREATEROLE**, which is a
+  least-privilege failure on its own and compounds F-10 (all OS services run as root).
+- **Corroboration:** `core/db.py` already notes `readonly=True` is "a no-op against today's superuser
+  pool". The knowledge existed in-code and never became a finding.
+- **Full analysis:** `docs/v2/rls-set-audit.md`.
+
+### 🟠 F-24 · 42 RLS session-variable sites are unsafe under connection pooling
+- 3 bare `SET app.…` (dialer worker, event emitter, billing service), **36** via
+  `apply_tenant_rls_context()` which passes `set_config(…, false)` — session scope — and 3
+  `SET LOCAL` issued with no open transaction.
+- **The dangerous interaction with F-23:** these are inert *only while the role stays
+  over-privileged*. The moment someone does the obviously-correct thing and de-privileges the role so
+  the 64 policies start working, **all 42 arm simultaneously** — a security improvement that silently
+  creates 42 cross-tenant leak paths. **Fix the 42 before touching the role.**
+
+### 🟠 F-25 · Three sites are already incorrect today, independent of pooling
+- `telephony_bridge._verify_call_ownership`, `telephony_bridge.hangup_calls_for_campaign` and
+  `provider_cost_ledger._flush_once` issue `SET LOCAL` outside any transaction, so the bypass is
+  discarded before the query that needs it runs. They work only by inheriting session state leaked by
+  a Category A/B caller. **One of them is a security check.**
+
 ### 🔴 F-14 · Production Postgres password in a public repository
 - **What:** `tmp_query{,2,3,4}.sh` at repo root each contain `export PGPASSWORD=…` for
   `psql -U talkyai -d talkyai`. Introduced by `0ffa7fa6` (2026-07-23). The repository

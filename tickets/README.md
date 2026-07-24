@@ -30,14 +30,14 @@ sickness, an incident, a fix that turns out to be twice the size. A 30-day plan 
 
 | Day | Date | Sprint | Tickets | Status |
 |---|---|---|---|---|
-| 01 | Thu 2026-07-23 | 1 | TKT-001 ground truth 🟡 · TKT-002 baseline freeze 🟡 | 🟡 |
-| 02 | Fri 2026-07-24 | 1 | TKT-003 deploy-path reconciliation 🟡 · TKT-004 live validation call ⬜ | 🟡 |
-| 03 | Sat 2026-07-25 | — | **BUFFER — consumed** catching up Days 01–02 | 🟡 |
+| 01 | Thu 2026-07-23 | 1 | TKT-001 ground truth 🟢 · TKT-002 baseline freeze 🟢 | 🟢 |
+| 02 | Fri 2026-07-24 | 1 | TKT-003 deploy-path reconciliation 🟡 · TKT-004 live validation call 🟡 | 🟡 |
+| 03 | Sat 2026-07-25 | — | **BUFFER — consumed:** Days 01–02 caught up + **TKT-009 pulled forward** | 🟡 |
 | 04 | Sun 2026-07-26 | — | **BUFFER** | ⬜ |
 | 05 | Mon 2026-07-27 | 1 | TKT-005 STT connection lifecycle (build) | ⬜ |
 | 06 | Tue 2026-07-28 | 1 | TKT-006 STT lifecycle ship · TKT-007 Flux concurrency guard | ⬜ |
-| 07 | Wed 2026-07-29 | 1 | TKT-008 Nova parity + email truncation · TKT-009 RLS `SET LOCAL` audit | ⬜ |
-| 08 | Thu 2026-07-30 | 1 | TKT-010 PgBouncer · TKT-011 Twilio/Vonage session registry | ⬜ |
+| 07 | Wed 2026-07-29 | 1 | TKT-008 Nova parity + email truncation ⬜ · ~~TKT-009 RLS audit~~ **done early, 🟡** | 🟡 |
+| 08 | Thu 2026-07-30 | 1 | ~~TKT-010 PgBouncer~~ **⬛ DEFERRED — TKT-009 verdict** · TKT-011 Twilio/Vonage session registry | 🟡 |
 | 09 | Fri 2026-07-31 | 1 | TKT-012 Stripe live mode · TKT-013 debt sweep | ⬜ |
 | 10 | Sat 2026-08-01 | — | **BUFFER** | ⬜ |
 | 11 | Sun 2026-08-02 | — | **BUFFER** | ⬜ |
