@@ -164,23 +164,49 @@ def test_make_call_user_own_tenant_passes_gate(monkeypatch):
 from app.core.security.internal_auth import CallerContext  # noqa: E402
 
 
+class _FakeTxn:
+    """Minimal stand-in for asyncpg's transaction context manager."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    async def __aenter__(self):
+        self._conn.in_transaction = True
+        return None
+
+    async def __aexit__(self, *a):
+        self._conn.in_transaction = False
+        return False
+
+
 class _FakeConn:
     def __init__(self, row):
         self._row = row
+        # Records whether each statement ran inside an explicit transaction, so
+        # tests can prove `SET LOCAL` is transaction-scoped rather than merely
+        # present. SET LOCAL outside a transaction is silently discarded before
+        # the next statement — see docs/v2/rls-set-audit.md (F-25).
+        self.in_transaction = False
+        self.statements: list[tuple[str, bool]] = []
 
-    async def execute(self, *a, **k):
+    def transaction(self):
+        return _FakeTxn(self)
+
+    async def execute(self, sql, *a, **k):
+        self.statements.append((str(sql), self.in_transaction))
         return None
 
     async def fetchrow(self, *a, **k):
+        self.statements.append(("<fetchrow>", self.in_transaction))
         return self._row
 
 
 class _FakeAcquire:
-    def __init__(self, row):
-        self._row = row
+    def __init__(self, conn):
+        self._conn = conn
 
     async def __aenter__(self):
-        return _FakeConn(self._row)
+        return self._conn
 
     async def __aexit__(self, *a):
         return False
@@ -188,10 +214,12 @@ class _FakeAcquire:
 
 class _FakePool:
     def __init__(self, row):
-        self._row = row
+        # One connection instance for the life of the pool, so a test can inspect
+        # what was executed on it and in what scope.
+        self.conn = _FakeConn(row)
 
     def acquire(self):
-        return _FakeAcquire(self._row)
+        return _FakeAcquire(self.conn)
 
 
 class _FakeContainer:

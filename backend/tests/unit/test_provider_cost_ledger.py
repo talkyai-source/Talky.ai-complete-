@@ -90,10 +90,29 @@ async def test_flush_once_writes_via_copy_records():
     class _FakeConn:
         def __init__(self):
             self.calls = []
+            # `SET LOCAL` only survives to the next statement inside an explicit
+            # transaction; outside one it is discarded and the COPY would run
+            # without the RLS bypass. Recorded so the test proves the scoping.
+            self.in_transaction = False
+
+        def transaction(self):
+            conn = self
+
+            class _Txn:
+                async def __aenter__(_s):
+                    conn.in_transaction = True
+                    return None
+
+                async def __aexit__(_s, *a):
+                    conn.in_transaction = False
+                    return False
+
+            return _Txn()
+
         async def execute(self, *a, **kw):
-            self.calls.append(("execute", a, kw))
+            self.calls.append(("execute", a, kw, self.in_transaction))
         async def copy_records_to_table(self, *a, **kw):
-            self.calls.append(("copy", a, kw))
+            self.calls.append(("copy", a, kw, self.in_transaction))
 
     fake = _FakeConn()
 
@@ -112,3 +131,11 @@ async def test_flush_once_writes_via_copy_records():
     # Both the RLS bypass and the COPY ran.
     assert any(c[0] == "execute" and "bypass_rls" in c[1][0] for c in fake.calls)
     assert any(c[0] == "copy" for c in fake.calls)
+
+    # ...and both ran INSIDE an explicit transaction. Without it the SET LOCAL is
+    # discarded before the COPY, so the bypass silently does nothing — the defect
+    # fixed under TKT-009 / F-25. See docs/v2/rls-set-audit.md.
+    bypass = next(c for c in fake.calls if c[0] == "execute" and "bypass_rls" in c[1][0])
+    copy = next(c for c in fake.calls if c[0] == "copy")
+    assert bypass[3] is True, "SET LOCAL app.bypass_rls must run inside a transaction"
+    assert copy[3] is True, "COPY must run inside the same transaction as the bypass"

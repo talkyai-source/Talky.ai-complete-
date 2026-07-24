@@ -29,20 +29,31 @@ remembered.* It becomes the DOC-09 deliverable in Sprint 2; until then it accumu
   pool". The knowledge existed in-code and never became a finding.
 - **Full analysis:** `docs/v2/rls-set-audit.md`.
 
-### 🟠 F-24 · 42 RLS session-variable sites are unsafe under connection pooling
-- 3 bare `SET app.…` (dialer worker, event emitter, billing service), **36** via
-  `apply_tenant_rls_context()` which passes `set_config(…, false)` — session scope — and 3
-  `SET LOCAL` issued with no open transaction.
-- **The dangerous interaction with F-23:** these are inert *only while the role stays
-  over-privileged*. The moment someone does the obviously-correct thing and de-privileges the role so
-  the 64 policies start working, **all 42 arm simultaneously** — a security improvement that silently
-  creates 42 cross-tenant leak paths. **Fix the 42 before touching the role.**
+### 🟡 F-24 · 39 session-scoped RLS sites — **latent** (revised down from High)
+- 3 bare `SET app.…` (dialer worker, event emitter, billing service) and **36** via
+  `apply_tenant_rls_context()`, which passes `set_config(…, false)` — `false` is the `is_local` flag.
+- **Correction to the first write-up.** These do **not** leak between requests today. asyncpg's pool
+  issues `RESET ALL` on release (verified in the deployed `asyncpg 0.29.0`: `pool.py:209` →
+  `Connection.reset()` → `RESET ALL;`). The first draft asserted a live cross-tenant leak; that was an
+  assumed pooling behaviour rather than a verified one, and it is withdrawn.
+- **Still a hard blocker for TKT-010.** Under PgBouncer transaction pooling a bare `SET` is its own
+  implicit transaction, lands on some server connection, and is released — the *next* statement may be
+  routed elsewhere. So the GUC both fails to apply where intended **and** pollutes a connection other
+  tenants will use.
+- **Still ordered before the F-23 role fix.** De-privileging the role arms all 39 at once.
+- **Today's safety comes from a library implementation detail, not from this codebase.** Now pinned by
+  `backend/tests/unit/test_rls_set_local_invariant.py`, which allowlists exactly these 4 files and
+  fails if a fifth appears — or if an allowlisted file is fixed and the entry is left behind.
 
-### 🟠 F-25 · Three sites are already incorrect today, independent of pooling
+### ✅ F-25 · Three sites broken regardless of pooling — **FIXED 2026-07-24**
 - `telephony_bridge._verify_call_ownership`, `telephony_bridge.hangup_calls_for_campaign` and
-  `provider_cost_ledger._flush_once` issue `SET LOCAL` outside any transaction, so the bypass is
-  discarded before the query that needs it runs. They work only by inheriting session state leaked by
-  a Category A/B caller. **One of them is a security check.**
+  `provider_cost_ledger._flush_once` issued `SET LOCAL` with **no open transaction**, so the bypass
+  was discarded before the query it was meant for.
+- **Impact had RLS ever been enforced:** an ownership check that fails open or closed unpredictably,
+  a campaign Stop that silently sweeps nothing, and a cost ledger that drops rows. Masked entirely by
+  F-23 today — which is the only reason nobody noticed.
+- **Fixed:** each wrapped in `async with conn.transaction():`, with a comment explaining why the
+  wrapper is load-bearing so it does not get "tidied away" later.
 
 ### 🔴 F-14 · Production Postgres password in a public repository
 - **What:** `tmp_query{,2,3,4}.sh` at repo root each contain `export PGPASSWORD=…` for
@@ -61,9 +72,14 @@ remembered.* It becomes the DOC-09 deliverable in Sprint 2; until then it accumu
   **Treat the credential as compromised regardless of network reachability.**
 - **Not checked:** GitHub secret-scanning alerts returned 404 (feature not enabled or not accessible),
   so we do not know whether GitHub itself flagged this. Worth enabling either way.
-- **Remediation order:** rotate the `talkyai` password → decide repo visibility → delete the files and
-  add a `.gitleaksignore` recording the rotation.
-- **Owner:** repository owner. **Status:** open, **awaiting owner decision since 2026-07-23**.
+- **Done 2026-07-24:** the four `tmp_query*.sh` files are deleted from the working tree (nothing in
+  the codebase referenced them — only these documents did), and `.gitleaksignore` now carries the
+  four fingerprints with a header stating in terms that an entry means *"real leak, credential
+  rotated"* and **not** *"false positive"*, plus an instruction to delete the block and let CI stay
+  red if rotation has not happened.
+- **⚠️ STILL OUTSTANDING:** **rotate the `talkyai` password**, and decide the repository's visibility.
+  The credential remains in public history; deletion changed nothing about that.
+- **Owner:** repository owner. **Status:** files removed, **rotation and visibility decision open**.
 - ⚠️ **Tension worth naming:** this is rated "Critical / act now" and has sat untouched for two days.
   That is a legitimate owner-decision blocker, not negligence — but a Critical with no owner ping and
   no date is how a Critical quietly becomes a Medium. Escalate if unresolved at the next check-in.
@@ -114,10 +130,16 @@ remembered.* It becomes the DOC-09 deliverable in Sprint 2; until then it accumu
 - **Contrast, and it makes the omission harder to excuse:** the ARI password in the *same script* is
   generated at runtime with `openssl rand -hex 24` and written to `/opt/talky/secrets/`. The correct
   pattern was understood and applied fifteen lines away.
-- **Remediation:** rotate with the carrier **first** — ahead of F-14, on exposure duration and remote
-  usability — then move both values to the environment and re-provision. Ask the carrier for recent
-  call-detail records to confirm no unauthorised origination has already occurred.
-- **Owner:** repository owner + carrier account holder. **Status:** open.
+- **Code fixed 2026-07-24:** both literals removed. `setup-asterisk.sh` now requires them from the
+  environment via `${TRUNK_USER:?…}` / `${TRUNK_PASS:?…}`, which **fails closed** — the script aborts
+  rather than provisioning a broken trunk. A banner above the block records the exposure window and
+  states that rotation is still mandatory.
+- **⚠️ STILL OUTSTANDING, and only the owner can do it:**
+  1. **Rotate with the carrier.** Removing the literals from the working tree does **not** remove them
+     from git history, and the history is public. Until rotation, the exposure is unchanged.
+  2. **Request recent CDRs** to confirm no unauthorised origination has already occurred. Two months
+     is long enough that "probably fine" is not an answer.
+- **Owner:** repository owner + carrier account holder. **Status:** code fixed, **rotation open**.
 
 ### 🟠 F-12 · Monitoring is not merely unscraped — it could not work as configured
 - Three non-unified config sets (root + `backend/deploy/prometheus/`, `infra/`,

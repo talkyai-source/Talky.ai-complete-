@@ -900,10 +900,16 @@ async def _verify_call_ownership(ctx: CallerContext, call_id: str) -> None:
         raise HTTPException(status_code=503, detail="Call ownership check unavailable")
     try:
         async with container.db_pool.acquire() as conn:
-            await conn.execute("SET LOCAL app.bypass_rls = 'on'")
-            row = await conn.fetchrow(
-                "SELECT tenant_id FROM calls WHERE external_call_uuid = $1", call_id
-            )
+            # The transaction is load-bearing, not decoration: SET LOCAL outside
+            # an explicit transaction applies only to the implicit single-statement
+            # transaction it runs in, and is discarded before the fetchrow below.
+            # Without this wrapper the bypass never reaches the query — and this is
+            # an ownership check, so it must not depend on inherited session state.
+            async with conn.transaction():
+                await conn.execute("SET LOCAL app.bypass_rls = 'on'")
+                row = await conn.fetchrow(
+                    "SELECT tenant_id FROM calls WHERE external_call_uuid = $1", call_id
+                )
     except Exception as exc:  # noqa: BLE001
         logger.error("call ownership lookup failed call_id=%s err=%s", call_id, exc)
         raise HTTPException(status_code=503, detail="Call ownership check failed")
@@ -970,12 +976,16 @@ async def hangup_calls_for_campaign(campaign_id: str) -> int:
     )
     try:
         async with pool.acquire() as conn:
-            await conn.execute("SET LOCAL app.bypass_rls = 'on'")
-            rows = await conn.fetch(
-                "SELECT external_call_uuid FROM calls "
-                "WHERE campaign_id = $1::uuid AND status = ANY($2::text[])",
-                campaign_id, list(active),
-            )
+            # SET LOCAL needs an explicit transaction to reach the next statement.
+            # Without it the bypass is discarded before the fetch, and Stop would
+            # silently sweep nothing once RLS is actually enforced.
+            async with conn.transaction():
+                await conn.execute("SET LOCAL app.bypass_rls = 'on'")
+                rows = await conn.fetch(
+                    "SELECT external_call_uuid FROM calls "
+                    "WHERE campaign_id = $1::uuid AND status = ANY($2::text[])",
+                    campaign_id, list(active),
+                )
     except Exception as exc:
         logger.error("hangup_calls_for_campaign db lookup failed: %s", exc)
         return 0

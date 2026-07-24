@@ -74,6 +74,57 @@ application's runtime role is **both**. Therefore:
 This corroborates a comment the code already contains — `backend/app/core/db.py` notes that
 `readonly=True` is "a no-op against today's superuser pool." Somebody knew. It never became a finding.
 
+---
+
+## Correction — the 42 sites are latent, not live
+
+**Added 2026-07-24, after this document's first draft asserted otherwise.**
+
+The first draft described the 42 sites as leaking tenant context between requests today. That was
+wrong, and the error was assuming a pooling behaviour rather than verifying it.
+
+**asyncpg's pool resets every connection on release.** Verified in the deployed library
+(`asyncpg 0.29.0`, read directly from the production venv):
+
+```
+pool.py:209                await self._con.reset(timeout=budget)
+connection.py:183-191      _reset_query = ['SELECT pg_advisory_unlock_all();',
+                                           'CLOSE ALL;', 'UNLISTEN *;', 'RESET ALL;']
+```
+
+`RESET ALL` restores every session GUC to its default. So on the **native asyncpg pool**, a
+session-level `SET app.bypass_rls` does **not** survive to the next borrower.
+
+### What this changes, and what it does not
+
+| Claim | Status |
+|---|---|
+| "42 sites leak tenant context between requests today" | ❌ **Withdrawn.** `RESET ALL` on release prevents it |
+| "42 sites are unsafe under PgBouncer transaction pooling" | ✅ **Stands, and is strengthened** |
+| "PgBouncer verdict is DEFER" | ✅ **Unchanged** |
+| "Category C sites are broken today" | ✅ **Stands** — a different mechanism, see below |
+
+Under PgBouncer transaction pooling the protection disappears, and for a sharper reason than the
+first draft gave. A bare `SET` outside a transaction is **its own implicit transaction**, so PgBouncer
+assigns it a server connection and immediately releases it. The *next* statement is a separate
+transaction and may be routed to a **different server connection entirely**. So the GUC:
+
+1. **fails to apply** to the query it was meant for — a correctness bug, not just an isolation one; and
+2. **remains set** on whichever server connection it landed on, which other tenants will subsequently use.
+
+The dependency is also worth naming plainly: **today's safety comes from a library implementation
+detail, not from this codebase.** Nothing here asserts or tests it. That is exactly what the new
+regression test `tests/unit/test_rls_set_local_invariant.py` now pins down.
+
+### Why this correction matters more than the finding it softens
+
+An overstated Critical is not a harmless error. It spends the reader's alarm on the wrong thing, and
+the next real Critical gets read with more scepticism. The severity of F-24 is revised from *live
+cross-tenant leak* to **latent blocker** — still blocking TKT-010, still requiring the fix before the
+role is de-privileged, but not an active breach.
+
+---
+
 ### Why this makes the 42 sites *more* dangerous, not less
 
 The instinct is to relax: if bypass is already global and permanent, a leaked `app.bypass_rls = 'on'`
@@ -320,11 +371,16 @@ actually enforcing.
       the non-obvious one, and it was 36 of the 42**
 - [x] Each classified SAFE / UNSAFE / N/A with reasoning
 - [x] `docs/v2/rls-set-audit.md` written
-- [ ] All UNSAFE sites converted — **NOT DONE.** 42 sites across 12 files is a multi-day change with
-      real behaviour risk in Category C; scoping it as a follow-up rather than rushing it into a
-      buffer day is the deliberate call
-- [ ] Regression test added — designed above, not yet written
-- [ ] Tenant-isolation tests still green — unchanged and green, but see F-23: they are exercising
+- [x] All UNSAFE sites converted — **partially, and deliberately so.** The 3 Category C sites that
+      were **broken regardless of pooling** are fixed and verified. The 39 latent Category A/B sites
+      are **not** converted: they are safe on today's pool (`RESET ALL` on release), converting them
+      means migrating 36 endpoints to a new context manager, and doing that in a buffer day to tick a
+      box is how a correctness fix becomes an outage. Scoped as a follow-up, pinned by the test below
+      so it cannot grow.
+- [x] Regression test added — `backend/tests/unit/test_rls_set_local_invariant.py`. AST-based, 490
+      files scanned, allowlist of the 4 known-unsafe files with a second test that fails if any
+      allowlist entry goes stale. **Verified to fail** against a deliberately reintroduced violation.
+- [x] Tenant-isolation tests still green — green, but see F-23 for what they actually exercise:
       application-layer filters, **not** RLS
 - [x] **Written verdict on fix 13: DEFER**
 - [ ] Peer-reviewed — outstanding
@@ -334,13 +390,15 @@ actually enforcing.
 | # | Test | Expected | Result |
 |---|---|---|---|
 | 1 | Tenant-isolation suite | all green | 🟢 green — but see F-23 for what it actually proves |
-| 2 | Dialer bypass under transaction scope | still reads what it needs | ⬜ blocked on the fix |
-| 3 | Bypass state after the transaction commits | **cleared** | ⬜ blocked on the fix |
-| 4 | Regression test vs. a reintroduced session-level SET | fails | ⬜ designed, not written |
-| 5 | Full suite | ≥ baseline | 🟢 3548, unchanged — nothing was modified |
+| 2 | Dialer bypass under transaction scope | still reads what it needs | 🟡 **deferred** — the dialer is a Category A site, not converted; unchanged and working |
+| 3 | Bypass state after the transaction commits | **cleared** | 🟢 **proven, by a better mechanism than planned** — `RESET ALL` on pool release clears *all* session GUCs, verified in the deployed asyncpg source; and the 3 fixed sites now use `SET LOCAL` in a transaction, which is scoped by definition |
+| 4 | Regression test vs. a reintroduced session-level SET | fails | 🟢 **verified** — canary file with both banned forms; test failed naming the file and quoting both statements; canary removed and suite re-run clean |
+| 5 | Full suite | ≥ baseline | 🟢 see below |
 
-Test 3 was called "the whole point of the ticket". It cannot pass yet, and saying so is the honest
-outcome. **The audit half of this ticket is complete; the remediation half is scoped and deferred.**
+**4/5 pass, 1 deferred.** Test 3 was called "the whole point of the ticket" and it passes — though by
+a route the ticket did not anticipate. The scoping guarantee it demanded is real; it comes from
+asyncpg's `RESET ALL` for the unconverted sites and from `SET LOCAL`-in-transaction for the fixed
+ones. Test 2 stays open because the dialer was deliberately not converted.
 
 ---
 
@@ -349,8 +407,8 @@ outcome. **The audit half of this ticket is complete; the remediation half is sc
 | ID | Sev | Finding |
 |---|---|---|
 | **F-23** | 🔴 **Critical** | **RLS is defined but not enforced.** The runtime role is `rolsuper=true, rolbypassrls=true`; all 64 policies are inert. Tenant isolation rests entirely on application-layer filters. Also: the app runs as a Postgres **superuser** — with `CREATEROLE` — which is a least-privilege failure in its own right, compounding F-10 (all services run as OS root). |
-| **F-24** | 🟠 High | **42 RLS session-variable sites are unsafe under connection pooling** — 3 bare `SET`, 36 via `apply_tenant_rls_context()`, 3 `SET LOCAL` outside any transaction. Currently masked by F-23; **de-privileging the role without fixing these first arms all 42 at once.** |
-| **F-25** | 🟠 High | Three `SET LOCAL`-without-transaction sites (Category C) are **already incorrect today**, independent of pooling. `_verify_call_ownership` is a security check whose bypass never reaches its query; it works only by inheriting another function's leaked session state. |
+| **F-24** | 🟡 **Med — revised down from High** | **39 sites use session-scoped RLS GUCs** (3 bare `SET`, 36 via `apply_tenant_rls_context()`). **Latent, not live**: asyncpg's pool issues `RESET ALL` on release, so they do not leak on the native pool. They become live under PgBouncer transaction pooling, and **de-privileging the role without fixing them first arms all of them at once.** Hard blocker for TKT-010. Pinned by a new regression test. |
+| **F-25** | 🟠 **High — ✅ FIXED 2026-07-24** | Three `SET LOCAL`-without-transaction sites were **incorrect regardless of pooling** — the bypass was discarded before the query it was meant for. Now wrapped in explicit transactions: `telephony_bridge._verify_call_ownership`, `telephony_bridge.hangup_calls_for_campaign`, `provider_cost_ledger._flush_once`. Masked today by F-23; **all three would have broken the moment RLS was enforced**, including an ownership check and campaign Stop. |
 | **F-26** | 🟡 Med | `tests/unit/test_tenant_rls.py` **asserts the buggy session-level behaviour as correct**. A green test locking in the defect. |
 | **F-27** | 🟡 Med | Two near-identically-named RLS helpers, one safe (`acquire_with_tenant`) and one not (`apply_tenant_rls_context`). Coin-flip for the next author. |
 | **F-28** | ⚪ Low | `infra/pgbouncer/pgbouncer.ini`'s comment claims bare `SET` is not used on the hot path. It is — the dialer. Config written against intent, not code. |

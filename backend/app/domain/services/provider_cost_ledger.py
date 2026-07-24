@@ -123,18 +123,23 @@ async def _flush_once(pool: Any) -> int:
         async with pool.acquire() as conn:
             # RLS bypass — the recorder is platform-internal and may
             # write rows for any tenant.
-            await conn.execute("SET LOCAL app.bypass_rls = 'true'")
-            await conn.copy_records_to_table(
-                "tenant_provider_cost_events",
-                records=rows,
-                columns=[
-                    "tenant_id", "call_id",
-                    "provider", "provider_role", "api_key_fp",
-                    "unit", "quantity", "unit_price_usd", "cost_usd",
-                    "model", "voice_id",
-                    "latency_ms", "status",
-                ],
-            )
+            #
+            # SET LOCAL requires an explicit transaction to survive to the next
+            # statement; outside one it is discarded as soon as it auto-commits,
+            # so the COPY below would run without the bypass.
+            async with conn.transaction():
+                await conn.execute("SET LOCAL app.bypass_rls = 'true'")
+                await conn.copy_records_to_table(
+                    "tenant_provider_cost_events",
+                    records=rows,
+                    columns=[
+                        "tenant_id", "call_id",
+                        "provider", "provider_role", "api_key_fp",
+                        "unit", "quantity", "unit_price_usd", "cost_usd",
+                        "model", "voice_id",
+                        "latency_ms", "status",
+                    ],
+                )
         logger.debug("cost_ledger_flushed rows=%d", len(rows))
         return len(rows)
     except Exception as exc:
