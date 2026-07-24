@@ -20,8 +20,24 @@ fi
 
 SERVER_IP="144.76.17.150"
 TRUNK_HOST="sip3.blazedigitel.com"
-TRUNK_USER="17789249977"
-TRUNK_PASS="17789249977xL02"
+# ── Carrier credentials ───────────────────────────────────────────────────────
+# These were hardcoded literals in this file from 2026-05-18 (b5351a50) until
+# 2026-07-24, in a PUBLIC repository. See docs/v2/09-known-issues.md F-17.
+#
+# They are now REQUIRED from the environment and this script aborts if either is
+# unset — the `:?` expansion fails closed rather than provisioning a broken trunk.
+#
+# Provide them for a run, e.g.:
+#     TRUNK_USER=... TRUNK_PASS=... sudo -E bash setup-asterisk.sh
+# or source them from /opt/talky/secrets/ alongside the ARI password, which this
+# same script already generates correctly with `openssl rand`.
+#
+# ROTATION IS STILL REQUIRED. Removing them from the working tree does NOT remove
+# them from git history, and the history is public. Rotate with the carrier and
+# request recent CDRs to confirm no unauthorised origination occurred.
+# ──────────────────────────────────────────────────────────────────────────────
+TRUNK_USER="${TRUNK_USER:?TRUNK_USER must be set in the environment — see docs/v2/09-known-issues.md F-17}"
+TRUNK_PASS="${TRUNK_PASS:?TRUNK_PASS must be set in the environment — see docs/v2/09-known-issues.md F-17}"
 ARI_USER="talky"
 
 # 1) Make sure Asterisk is installed

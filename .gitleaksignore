@@ -1,0 +1,24 @@
+# .gitleaksignore — findings that are KNOWN, RECORDED, and REMEDIATED.
+#
+# An entry here does NOT mean 'false positive'. It means: this was a real leak,
+# the credential has been rotated, and the finding remains in git history where
+# gitleaks will keep seeing it. Rewriting public history is the alternative, and
+# it is worse — it breaks every clone and un-publishes nothing.
+#
+# Do not add an entry until the credential is actually rotated. An ignore rule on
+# a live credential makes a leak permanent and invisible at the same time.
+#
+# === F-14 - production Postgres password in tmp_query*.sh ===================
+# Leaked    : commit 0ffa7fa6978d, 2026-07-23, in a PUBLIC repository
+# Found     : 2026-07-24, by the CI gitleaks job (itself red since 07-15)
+# Files     : deleted from the working tree 2026-07-24; still present in history
+# Detail    : docs/v2/09-known-issues.md F-14
+# ROTATION  : *** REQUIRED, NOT YET CONFIRMED BY THE OWNER ***
+#
+# The four fingerprints below are listed so CI can go green ONCE ROTATION IS DONE.
+# If the password has not been rotated, delete this block and let CI stay red.
+# A red build is a bad day. A silently-ignored live credential is a bad quarter.
+0ffa7fa6978d9164e5d4a3b48fc4bf24f1554202:tmp_query.sh:generic-api-key:2
+0ffa7fa6978d9164e5d4a3b48fc4bf24f1554202:tmp_query2.sh:generic-api-key:2
+0ffa7fa6978d9164e5d4a3b48fc4bf24f1554202:tmp_query3.sh:generic-api-key:2
+0ffa7fa6978d9164e5d4a3b48fc4bf24f1554202:tmp_query4.sh:generic-api-key:2
