@@ -32,6 +32,7 @@ from typing import AsyncIterator, Callable, Optional
 from app.domain.interfaces.stt_provider import STTProvider
 from app.domain.models.conversation import AudioChunk, TranscriptChunk
 from app.infrastructure.providers.provider_concurrency import get_provider_guard
+from app.infrastructure.stt.transcript_compose import compose_turn_text
 
 logger = logging.getLogger(__name__)
 
@@ -95,9 +96,15 @@ class DeepgramNovaSTTProvider(STTProvider):
         grace: list[int] = [0]          # consecutive idle ticks after the audio stream ends
 
         def turn_text() -> str:
-            """Best full-turn text: finalized segments, else the last interim."""
-            base = " ".join(finals).strip()
-            return base or last_interim[0].strip()
+            """
+            Best full-turn text: finalized segments PLUS any pending interim tail.
+
+            This used to be `finals or last_interim` — either/or. When a turn ended
+            with a fragment still interim (the classic "…dot com" at the end of an
+            email address), the finalized part won and the fragment was dropped,
+            silently turning john@example.com into john@example. See TKT-008.
+            """
+            return compose_turn_text(finals, last_interim[0])
 
         async with self._guard.acquire():
             connect_kwargs = dict(
@@ -221,7 +228,9 @@ class DeepgramNovaSTTProvider(STTProvider):
                             else:
                                 # Interim — running full turn (finalized segments + this interim).
                                 last_interim[0] = text
-                                running = (" ".join(finals) + " " + text).strip()
+                                # Same overlap-aware composition as turn_text, so a
+                                # running update never doubles a repeated fragment.
+                                running = compose_turn_text(finals, text)
                                 if running:
                                     yield TranscriptChunk(text=running, is_final=False, confidence=conf)
                     finally:
