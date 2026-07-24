@@ -1,12 +1,40 @@
 name: Deploy — Build, Push & Deploy
 
+# ═══════════════════════════════════════════════════════════════════════════
+# DORMANT — this workflow does not describe how production is deployed today.
+#
+# Production (144.76.17.150) is a git checkout at /opt/talky whose Python
+# services run under systemd, with Postgres and Redis as compose-managed
+# containers. It is deployed by `deploy_to_server.sh` — git pull --ff-only
+# plus systemctl restart. That is the authoritative path. See
+# docs/v2/00-ground-truth.md § Deployment.
+#
+# This file describes a different system: a GHCR image applied with
+# `docker compose up -d`. It has never deployed anything. Every run in its
+# history completed in 6-18 seconds with all real jobs skipped, because its
+# automatic trigger required a green CI run and CI has been red since
+# 2026-07-15.
+#
+# The automatic `workflow_run` trigger was REMOVED on 2026-07-24 (TKT-003).
+# Reason: red CI was the only thing preventing this untested path from
+# firing at production the moment CI went green. That is an accident waiting
+# for a fix to arrive, not a safety mechanism.
+#
+# It is deliberately NOT deleted. It is a working, reviewed starting point
+# for a future containerised deploy, complete with rollback and recovery
+# logic. To use it, dispatch it manually and choose the environment.
+#
+# Before re-arming any automatic trigger, three things must be true:
+#   1. CI is green and has been for a meaningful period.
+#   2. DEPLOY_HOST / DEPLOY_PATH are confirmed to point where you think.
+#   3. Someone has decided whether production should be containerised at all,
+#      given the datastores already are and the application is not.
+# ═══════════════════════════════════════════════════════════════════════════
 on:
-  # Automatic deploys are downstream of the blocking CI workflow. A direct
-  # push can no longer build or deploy while its CI run is red.
-  workflow_run:
-    workflows: ["CI — Lint, Test, Build, Scan"]
-    types: [completed]
-    branches: [main]
+  # workflow_run:  ← intentionally disabled, see the header above.
+  #   workflows: ["CI — Lint, Test, Build, Scan"]
+  #   types: [completed]
+  #   branches: [main]
   workflow_dispatch:
     inputs:
       environment:
@@ -101,6 +129,10 @@ jobs:
               ' > /dev/null
           }
 
+          # UNREACHABLE as of 2026-07-24 — the workflow_run trigger is disabled,
+          # so EVENT_NAME can only ever be "workflow_dispatch". See file header.
+          # Retained deliberately: this is the logic to restore if the automatic
+          # trigger is ever re-armed, and it has already been reviewed once.
           if [ "${EVENT_NAME}" = "workflow_run" ]; then
             # A failed/cancelled CI run deliberately produces no deploy job.
             if [ "${RUN_CONCLUSION}" = "success" ]; then

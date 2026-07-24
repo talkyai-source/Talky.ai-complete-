@@ -1,0 +1,63 @@
+# Talky.ai C++ Voice Media Gateway
+#
+# RECOVERED INTO VERSION CONTROL 2026-07-24 (TKT-001, finding F-1).
+#
+# This unit had been running in production since 2026-05-12 from
+# /etc/systemd/system/talky-voice-gateway.service with NO copy anywhere in
+# this repository. Every other running unit had one. If the box had been
+# rebuilt, or the file lost, the gateway would not have come back and no
+# definition of it existed to restore from.
+#
+# The content below is a verbatim capture of the live production unit, taken
+# with `systemctl cat talky-voice-gateway`. It is recorded as-is rather than
+# as it "should" be, so that repo and reality match exactly. Two properties
+# differ from the Python services and are deliberately preserved here rather
+# than silently corrected:
+#
+#   * Type=exec / Restart=on-failure with no watchdog, where the three
+#     workers use Type=notify / Restart=always / WatchdogSec=180. The
+#     gateway has no sd_notify support, so Type=notify would fail to start.
+#   * User=admins — the gateway is the only service that does NOT run as
+#     root. That is the correct posture; the others are the anomaly (F-10).
+#   * No StartLimitIntervalSec / StartLimitBurst, where the three workers set
+#     300 / 5. This unit falls back to systemd's default crash-loop guard
+#     (5 starts in 10s). Accurate to production, not an omission here.
+#
+# Changing any of them is a separate, deliberate decision. Do not "fix" them
+# here without changing the running unit in the same step, or this file stops
+# being a true record of production.
+#
+# FRESH BOX — the scenario this file exists for. `restart` is not enough; a
+# unit that is not enabled does not survive a reboot:
+#   cp backend/systemd/talky-voice-gateway.service /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now talky-voice-gateway
+#   curl localhost:18080/stats                # verify it came up
+#
+# UPDATING an already-enabled unit (the routine case):
+#   cp backend/systemd/talky-voice-gateway.service /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl restart talky-voice-gateway     # only at 0 active_sessions
+#   curl localhost:18080/stats                # verify it came back
+#
+# The binary itself is built manually (g++/cmake) and committed to
+# services/voice-gateway-cpp/build/. No CI or deploy path builds it.
+
+[Unit]
+Description=Talky.ai Voice Media Gateway (C++)
+After=network.target
+
+[Service]
+User=admins
+Group=admins
+Type=exec
+WorkingDirectory=/opt/talky/services/voice-gateway-cpp
+ExecStart=/opt/talky/services/voice-gateway-cpp/build/voice_gateway --host 127.0.0.1 --port 18080
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=talky-voice-gateway
+
+[Install]
+WantedBy=multi-user.target

@@ -30,9 +30,9 @@ sickness, an incident, a fix that turns out to be twice the size. A 30-day plan 
 
 | Day | Date | Sprint | Tickets | Status |
 |---|---|---|---|---|
-| 01 | Thu 2026-07-23 | 1 | TKT-001 ground truth · TKT-002 baseline freeze | ⬜ |
-| 02 | Fri 2026-07-24 | 1 | TKT-003 deploy-path reconciliation · TKT-004 live validation call | ⬜ |
-| 03 | Sat 2026-07-25 | — | **BUFFER** | ⬜ |
+| 01 | Thu 2026-07-23 | 1 | TKT-001 ground truth 🟡 · TKT-002 baseline freeze 🟡 | 🟡 |
+| 02 | Fri 2026-07-24 | 1 | TKT-003 deploy-path reconciliation 🟡 · TKT-004 live validation call ⬜ | 🟡 |
+| 03 | Sat 2026-07-25 | — | **BUFFER — consumed** catching up Days 01–02 | 🟡 |
 | 04 | Sun 2026-07-26 | — | **BUFFER** | ⬜ |
 | 05 | Mon 2026-07-27 | 1 | TKT-005 STT connection lifecycle (build) | ⬜ |
 | 06 | Tue 2026-07-28 | 1 | TKT-006 STT lifecycle ship · TKT-007 Flux concurrency guard | ⬜ |
@@ -63,8 +63,38 @@ sickness, an incident, a fix that turns out to be twice the size. A 30-day plan 
 
 Status legend: ⬜ not started · 🟡 in progress · 🟢 done & verified · 🔴 blocked · ⬛ dropped (with reason)
 
+### 🔴 Two things found on Day 03 that outrank the rest of this board
+
+1. **Production Postgres password committed to a public repository** (`tmp_query*.sh`, `0ffa7fa6`,
+   2026-07-23). Handled as an incident, not a ticket. Rotation and repo-visibility are decisions for
+   the owner. See `docs/v2/00-ground-truth.md` **F-14**.
+2. **CI has failed on every push to `main` for 25 consecutive runs since 2026-07-15** — the backend
+   suite has not run in CI for over a week. See **F-13**.
+
+**Sequencing consequence:** red CI is the only thing currently stopping `.github/workflows/deploy.yml`
+from auto-deploying on a green build. **TKT-003's gating must land before the CI fix**, or fixing CI
+switches the dormant deploy path on by accident. This reverses the order the original plan implied.
+
 **A ticket is only marked 🟢 when every checklist box is ticked and every test case passes.**
 99% is ⬜. This is the standing rule on this project and it applies here without exception.
+
+### Amendment 1 — what "peer-reviewed" means here (2026-07-24)
+
+Every ticket carries a "peer-reviewed by a second team member" checklist item, and there is no second
+engineer in this loop. As originally written, **no ticket on this board could ever reach 🟢** — which
+would have quietly voided the standard rather than upheld it.
+
+Resolved as follows, and the distinction is recorded on every ticket rather than blurred:
+
+- **Agent-adversarial review** — a fresh agent that did not perform the work reviews the deliverable
+  against its evidence, instructed to find defects rather than approve. This is the default and it is
+  *weaker than* human review: it catches unsupported claims, internal contradictions and
+  ticked-but-unsatisfied checkboxes, and it does not catch bad judgement.
+- **Human review** — required before REV-42 sign-off, and required outright for anything that changes
+  production behaviour or accepts a risk.
+
+A ticket reviewed only by an agent is marked 🟢 with `(agent-reviewed)` against the checklist item.
+That is a real standard, honestly labelled — not a human signature claimed by a machine.
 
 ---
 

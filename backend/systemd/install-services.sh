@@ -23,14 +23,26 @@ echo "  Reloading systemd daemon..."
 systemctl daemon-reload
 
 # 3. Enable all services
+#
+# Every unit symlinked in step 1 must be enabled here, or it is present on disk
+# but dead after a reboot — which is indistinguishable from "still missing" to
+# anyone who runs this installer and moves on.
 echo "  Enabling services..."
 systemctl enable talky-api.service
 systemctl enable talky-voice-worker.service
 systemctl enable talky-dialer-worker.service
 systemctl enable talky-reminder-worker.service
+systemctl enable talky-voice-gateway.service   # C++ media gateway; see the unit's header
 systemctl enable talky-cleanup.timer   # activates talky-cleanup.service nightly
 systemctl enable talky-healthwatch.timer   # activates talky-healthwatch.service every 2 min
 systemctl enable talky.target
+
+# NOTE (F-4): talky-trunk-status.{service,timer} live in backend/deploy/systemd/,
+# a second systemd directory this installer does not read. Until the two
+# directories are consolidated, install those two units by hand:
+#   ln -sf "$SCRIPT_DIR/../deploy/systemd/talky-trunk-status.service" "$SYSTEMD_DIR/"
+#   ln -sf "$SCRIPT_DIR/../deploy/systemd/talky-trunk-status.timer"   "$SYSTEMD_DIR/"
+#   systemctl daemon-reload && systemctl enable --now talky-trunk-status.timer
 
 echo ""
 echo "=== Installation complete ==="
