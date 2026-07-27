@@ -356,7 +356,8 @@ export default function WebhooksPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5" aria-hidden /> Signature Verification</CardTitle>
               <CardDescription>
-                Every webhook delivery includes an <code className="rounded bg-muted px-1 py-0.5 text-xs font-mono">X-TalkLee-Signature</code> header.
+                Every webhook delivery includes an <code className="rounded bg-muted px-1 py-0.5 text-xs font-mono">X-Webhook-Signature</code> header,
+                alongside <code className="rounded bg-muted px-1 py-0.5 text-xs font-mono">X-Webhook-Timestamp</code> and <code className="rounded bg-muted px-1 py-0.5 text-xs font-mono">X-Webhook-Version</code>.
                 Verify the HMAC-SHA256 signature against the endpoint signing secret to ensure authenticity.
               </CardDescription>
             </CardHeader>
