@@ -82,7 +82,7 @@ export default function ApiKeysPage() {
       createdAt: new Date().toISOString(),
       status: "active",
       scopes: [...newScopes],
-      createdBy: "admin@talkly.ai",
+      createdBy: "admin@talk-lee.ai",
       rateLimit: parseInt(newRateLimit, 10) || undefined,
       expiresAt: newExpiration ? new Date(newExpiration).toISOString() : undefined,
     };

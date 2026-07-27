@@ -4,9 +4,9 @@ import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
 
 export const metadata: Metadata = {
-  title: "Transform Software & Tech Support with Talkly AI",
+  title: "Transform Software & Tech Support with Talk-Lee AI",
   description:
-    "In today’s fast-paced software and technology world, delivering fast, reliable, and personalized support is crucial. Talkly AI helps software companies automate support, optimize onboarding, and enhance customer interactions with intelligent AI solutions.",
+    "In today’s fast-paced software and technology world, delivering fast, reliable, and personalized support is crucial. Talk-Lee AI helps software companies automate support, optimize onboarding, and enhance customer interactions with intelligent AI solutions.",
 };
 
 export default function SoftwareTechSupportIndustryPage() {
@@ -21,7 +21,7 @@ export default function SoftwareTechSupportIndustryPage() {
   const sections = [
     {
       title: "AI for Software Companies",
-      intro: "Talkly AI empowers software companies to:",
+      intro: "Talk-Lee AI empowers software companies to:",
       bullets: [
         "Automate repetitive support tasks",
         "Resolve user queries quickly and accurately",
@@ -31,7 +31,7 @@ export default function SoftwareTechSupportIndustryPage() {
     {
       title: "AI SaaS Customer Support",
       intro:
-        "SaaS platforms often handle hundreds of support requests daily. With AI SaaS customer support, Talkly AI helps you:",
+        "SaaS platforms often handle hundreds of support requests daily. With AI SaaS customer support, Talk-Lee AI helps you:",
       bullets: ["Answer repetitive queries instantly", "Reduce customer wait times", "Free your support staff for complex issues"],
     },
     {
@@ -62,17 +62,17 @@ export default function SoftwareTechSupportIndustryPage() {
       <div className="mx-auto w-full max-w-6xl px-4 md:px-6 lg:px-8 py-16 md:py-20">
         <header className="text-center">
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-primary dark:text-foreground">
-            Transform Software &amp; Tech Support with Talkly AI
+            Transform Software &amp; Tech Support with Talk-Lee AI
           </h1>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            In today’s fast-paced software and technology world, delivering fast, reliable, and personalized support is crucial. Talkly AI helps
+            In today’s fast-paced software and technology world, delivering fast, reliable, and personalized support is crucial. Talk-Lee AI helps
             software companies automate support, optimize onboarding, and enhance customer interactions with intelligent AI solutions.
           </p>
           <div className="mt-10 flex justify-center">
             <div className="group w-full max-w-4xl overflow-hidden rounded-3xl border border-border/70 shadow-sm transition-[transform,box-shadow,filter] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md hover:brightness-[1.02]">
               <Image
                 src="/images/industries/software-tech-support/12.jpg"
-                alt="Talkly AI dashboard for software and tech support automation"
+                alt="Talk-Lee AI dashboard for software and tech support automation"
                 width={1344}
                 height={768}
                 quality={100}

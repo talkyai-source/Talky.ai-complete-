@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import Image from "next/image";
 
 export const metadata: Metadata = {
-  title: "Talkly AI for Travel Industry",
+  title: "Talk-Lee AI for Travel Industry",
   description: "Intelligent Communication Built for Modern Travel & Hospitality",
 };
 
@@ -79,18 +79,18 @@ export default function TravelIndustryIndustryPage() {
       <div className="mx-auto w-full max-w-6xl px-4 md:px-6 lg:px-8 py-16 md:py-20">
         <header className="text-center">
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-primary dark:text-foreground">
-            Talkly AI for Travel Industry
+            Talk-Lee AI for Travel Industry
           </h1>
           <h2 className="mt-6 text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
             Intelligent Communication Built for Modern Travel &amp; Hospitality
           </h2>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
             The travel and hospitality industry operates on speed, accuracy, and guest satisfaction. Delays, missed inquiries, or poor
-            communication directly impact bookings and brand trust. Talkly AI for travel industry enables businesses to manage guest conversations
+            communication directly impact bookings and brand trust. Talk-Lee AI for travel industry enables businesses to manage guest conversations
             efficiently while maintaining service quality at scale.
           </p>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Talkly AI helps travel and hospitality teams automate calls, streamline bookings, and support guests across every stage of the journey.
+            Talk-Lee AI helps travel and hospitality teams automate calls, streamline bookings, and support guests across every stage of the journey.
           </p>
           <div className="mt-10 flex justify-center">
             <div className="group w-full max-w-5xl overflow-hidden rounded-3xl border border-border/70 shadow-sm transition-[transform,box-shadow,filter] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md hover:brightness-[1.02]">
@@ -110,10 +110,10 @@ export default function TravelIndustryIndustryPage() {
 
         <section className="mt-14">
           <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            How Talkly AI Supports the Travel Industry
+            How Talk-Lee AI Supports the Travel Industry
           </h2>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talkly AI delivers purpose-built automation designed specifically for travel and hospitality operations.
+            Talk-Lee AI delivers purpose-built automation designed specifically for travel and hospitality operations.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
             {supportBlocksTop.map((item) => (
@@ -185,10 +185,10 @@ export default function TravelIndustryIndustryPage() {
 
         <section className="mt-14">
           <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Why Talkly AI for Travel Industry
+            Why Talk-Lee AI for Travel Industry
           </h2>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talkly AI is designed specifically for communication-heavy industries where response time and accuracy matter.
+            Talk-Lee AI is designed specifically for communication-heavy industries where response time and accuracy matter.
           </p>
           <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
             <li>• Built for real-world travel and hospitality workflows</li>
@@ -198,12 +198,12 @@ export default function TravelIndustryIndustryPage() {
             <li>• Real-time insights into call activity and guest engagement</li>
           </ul>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talkly AI enables travel businesses to operate efficiently while delivering a consistent guest experience.
+            Talk-Lee AI enables travel businesses to operate efficiently while delivering a consistent guest experience.
           </p>
         </section>
 
         <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Get Started with Talkly AI</h2>
+          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Get Started with Talk-Lee AI</h2>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
             Improve booking efficiency, reduce call congestion, and deliver reliable guest communication.
           </p>

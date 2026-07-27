@@ -2,7 +2,7 @@
 FRONTEND CODEBASE - MOCK & DUMMY DATA INVENTORY
 ================================================================================
 Generated: 2026-04-14
-Project: Talk-Leee Frontend
+Project: Talk-Lee Frontend
 
 This document contains a complete reference of all mock/dummy data, hardcoded
 API responses, and placeholder content found in the frontend codebase.

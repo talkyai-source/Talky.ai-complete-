@@ -41,8 +41,8 @@ export default function RealEstateIndustryPage() {
           <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Capture Every Lead Instantly</h2>
           <h3 className="mt-6 text-xl md:text-2xl font-semibold text-primary dark:text-foreground">Respond to Prospects in Real-Time</h3>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            In real estate, every minute counts. Talkly AI ensures that no lead goes unanswered by automatically managing incoming inquiries,
-            calls, and follow-ups. Whether a prospect wants pricing details, availability, or to schedule a viewing, Talkly AI responds instantly,
+            In real estate, every minute counts. Talk-Lee AI ensures that no lead goes unanswered by automatically managing incoming inquiries,
+            calls, and follow-ups. Whether a prospect wants pricing details, availability, or to schedule a viewing, Talk-Lee AI responds instantly,
             so your team can focus on closing deals.
           </p>
           <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
@@ -129,7 +129,7 @@ export default function RealEstateIndustryPage() {
             Advanced Tools to Save Time and Boost Efficiency
           </h3>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talky AI is more than just a call management system. It’s a full suite of tools designed for AI for real estate teams:
+            Talk-Lee AI is more than just a call management system. It’s a full suite of tools designed for AI for real estate teams:
           </p>
           <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
             <ul className="space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
@@ -150,7 +150,7 @@ export default function RealEstateIndustryPage() {
             Build Trust and Satisfaction with Every Interaction
           </h3>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Client expectations are higher than ever. With Talkly AI, you can provide fast, professional, and personalized service at every
+            Client expectations are higher than ever. With Talk-Lee AI, you can provide fast, professional, and personalized service at every
             touchpoint. By automating routine tasks, your team can focus on meaningful client interactions, building trust, and strengthening
             long-term relationships.
           </p>

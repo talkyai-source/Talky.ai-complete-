@@ -69,10 +69,10 @@ export function formatRecoveryCodes(codes: string[]): string {
 
 export function downloadRecoveryCodes(
     codes: string[],
-    filename: string = "talky-mfa-recovery-codes.txt",
+    filename: string = "talk-lee-mfa-recovery-codes.txt",
 ): void {
     const content =
-        `Talky.ai — MFA Recovery Codes\n` +
+        `Talk-Lee — MFA Recovery Codes\n` +
         `Generated: ${new Date().toISOString()}\n\n` +
         formatRecoveryCodes(codes) +
         `\n\nStore these codes in a safe place. Each code can only be used once.\n` +

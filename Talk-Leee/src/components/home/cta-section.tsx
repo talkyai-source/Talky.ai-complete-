@@ -26,7 +26,7 @@ export function CTASection() {
           </h2>
           
           <p className="text-lg md:text-xl text-gray-700 dark:text-muted-foreground mb-10 max-w-2xl mx-auto">
-            Start automating with Talkly AI today — scale conversations, boost efficiency, and stay compliant.
+            Start automating with Talk-Lee AI today — scale conversations, boost efficiency, and stay compliant.
           </p>
 
           <Link href="/auth/register">

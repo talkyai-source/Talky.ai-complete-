@@ -50,37 +50,37 @@ function SectionPlaceholder({ minHeightClassName }: { minHeightClassName: string
 function FAQSection() {
   const items = [
     {
-      question: "What is Talkly AI?",
+      question: "What is Talk-Lee AI?",
       answer:
-        "Talkly AI is a fully featured platform that automates phone calls with intelligent voice agents, helping teams scale conversations without queues or delays.",
+        "Talk-Lee AI is a fully featured platform that automates phone calls with intelligent voice agents, helping teams scale conversations without queues or delays.",
     },
     {
-      question: "Do I need technical expertise to use Talkly AI?",
+      question: "Do I need technical expertise to use Talk-Lee AI?",
       answer: "No. Our guided AI builder makes it simple to design call flows and prompts without coding.",
     },
     {
-      question: "Can Talkly AI integrate with my existing phone system or CRM?",
-      answer: "Yes. Talkly AI connects seamlessly with phone systems, CRMs like HubSpot, and lead forms.",
+      question: "Can Talk-Lee AI integrate with my existing phone system or CRM?",
+      answer: "Yes. Talk-Lee AI connects seamlessly with phone systems, CRMs like HubSpot, and lead forms.",
     },
     {
-      question: "How does Talkly AI learn my company information?",
+      question: "How does Talk-Lee AI learn my company information?",
       answer: "You can upload PDFs, images, or crawl entire websites to instantly train your agent with the right knowledge.",
     },
     {
       question: "Can calls be transferred to human agents?",
-      answer: "Absolutely. Talkly AI can forward calls to live agents whenever needed or requested by customers.",
+      answer: "Absolutely. Talk-Lee AI can forward calls to live agents whenever needed or requested by customers.",
     },
     {
-      question: "Is Talkly AI secure and compliant?",
+      question: "Is Talk-Lee AI secure and compliant?",
       answer: "Yes. We provide built‑in consent handling, encryption, GDPR/TCPA tooling, and enterprise‑grade compliance features.",
     },
     {
-      question: "Can I resell Talkly AI under my own brand?",
+      question: "Can I resell Talk-Lee AI under my own brand?",
       answer: "Yes. Our white‑label program lets you offer AI voice solutions as your own. Limited spots available.",
     },
     {
       question: "Do you provide phone numbers for campaigns?",
-      answer: "Talkly AI issues dedicated numbers for your outbound and inbound campaigns.",
+      answer: "Talk-Lee AI issues dedicated numbers for your outbound and inbound campaigns.",
     },
   ];
 
@@ -88,7 +88,7 @@ function FAQSection() {
     <section id="faq" className="bg-cyan-100 dark:bg-background py-20 px-4 md:px-6 lg:px-8 overflow-hidden">
       <div className="max-w-5xl mx-auto">
         <h2 className="text-center text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-          Frequently Asked Questions - Talkly AI
+          Frequently Asked Questions - Talk-Lee AI
         </h2>
         <div className="mt-10 space-y-3">
           {items.map((item) => (

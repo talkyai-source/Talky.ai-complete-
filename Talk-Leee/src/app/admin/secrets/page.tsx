@@ -89,7 +89,7 @@ export default function SecretsPage() {
       isExpired: false,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      updatedBy: "admin@talkly.ai",
+      updatedBy: "admin@talk-lee.ai",
       description: addForm.description || undefined,
     };
     setSecrets((prev) => [newSecret, ...prev]);

@@ -3,7 +3,7 @@ export default function Head() {
     <>
       <meta
         name="description"
-        content="Scale conversations instantly with Talkly AI. Smart voice agents deliver support, scheduling, and compliance worldwide."
+        content="Scale conversations instantly with Talk-Lee AI. Smart voice agents deliver support, scheduling, and compliance worldwide."
       />
     </>
   );

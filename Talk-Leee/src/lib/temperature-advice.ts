@@ -1,7 +1,7 @@
 /**
  * Temperature guidance for the AI Options slider.
  *
- * Single source of truth, data-backed: bands come from Talky's own 2026-06
+ * Single source of truth, data-backed: bands come from Talk-Lee's own 2026-06
  * temperature sweep across the live model menu (email/number read-back accuracy,
  * price-hallucination, and naturalness) plus 2026 voice-agent best practice.
  *

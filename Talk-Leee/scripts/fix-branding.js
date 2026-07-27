@@ -1,13 +1,17 @@
 const fs = require('fs');
 const path = require('path');
 
-const FORBIDDEN_TERM = 'VoiceFluid';
-const REPLACEMENT_TERM = 'Talk-Lee';
-const SEARCH_DIR = 'src';
+const {
+  FORBIDDEN_TERMS,
+  REPLACEMENT_TERM,
+  SEARCH_DIR,
+  FILE_PATTERN,
+  toGlobalRegExp,
+} = require('./branding-terms');
 
 function fixFiles(dir) {
   let count = 0;
-  
+
   if (!fs.existsSync(dir)) {
     return 0;
   }
@@ -21,12 +25,22 @@ function fixFiles(dir) {
     if (stat.isDirectory()) {
       count += fixFiles(filePath);
     } else {
-      if (file.match(/\.(tsx|ts|js|jsx|css|md|json)$/)) {
-        let content = fs.readFileSync(filePath, 'utf8');
-        if (content.includes(FORBIDDEN_TERM)) {
-          console.log(`🔧 Fixing branding in: ${filePath}`);
-          const regex = new RegExp(FORBIDDEN_TERM, 'g');
-          content = content.replace(regex, REPLACEMENT_TERM);
+      if (file.match(FILE_PATTERN)) {
+        const original = fs.readFileSync(filePath, 'utf8');
+        let content = original;
+        const applied = [];
+
+        // Sequential, most-specific-first (see branding-terms.js) so that
+        // "Talky.ai" is rewritten whole rather than left as "Talk-Lee.ai".
+        for (const term of FORBIDDEN_TERMS) {
+          if (!content.includes(term)) continue;
+          const occurrences = content.split(term).length - 1;
+          content = content.replace(toGlobalRegExp(term), REPLACEMENT_TERM);
+          applied.push(`${term}×${occurrences}`);
+        }
+
+        if (content !== original) {
+          console.log(`🔧 Fixing branding in: ${filePath} (${applied.join(', ')})`);
           fs.writeFileSync(filePath, content, 'utf8');
           count++;
         }
@@ -36,7 +50,7 @@ function fixFiles(dir) {
   return count;
 }
 
-console.log(`🔍 Automatically replacing "${FORBIDDEN_TERM}" with "${REPLACEMENT_TERM}"...`);
+console.log(`🔍 Replacing ${FORBIDDEN_TERMS.map((t) => `"${t}"`).join(', ')} with "${REPLACEMENT_TERM}"...`);
 const fixedCount = fixFiles(SEARCH_DIR);
 if (fixedCount > 0) {
   console.log(`✅ Fixed branding in ${fixedCount} files.`);

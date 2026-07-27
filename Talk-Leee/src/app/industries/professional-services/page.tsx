@@ -23,12 +23,12 @@ export default function ProfessionalServicesIndustryPage() {
     {
       title: "AI Client Support Automation",
       description:
-        "Talkly AI provides reliable AI client support automation to handle routine inquiries and follow-ups automatically. Clients receive immediate responses while your team focuses on higher-value work.",
+        "Talk-Lee AI provides reliable AI client support automation to handle routine inquiries and follow-ups automatically. Clients receive immediate responses while your team focuses on higher-value work.",
     },
     {
       title: "Smarter Client Communication",
       description:
-        "Clients expect fast responses. Manual call handling causes delays and missed inquiries. Talkly AI automates client communication so your firm stays responsive without added workload.",
+        "Clients expect fast responses. Manual call handling causes delays and missed inquiries. Talk-Lee AI automates client communication so your firm stays responsive without added workload.",
     },
     {
       title: "AI Call Automation for Consultants",
@@ -68,8 +68,8 @@ export default function ProfessionalServicesIndustryPage() {
             Smarter communication for modern firms
           </h2>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Talkly AI delivers intelligent AI for professional services, helping firms manage client communication with speed, accuracy, and
-            professionalism. From consulting and advisory firms to legal and business service providers, Talkly AI ensures every client interaction
+            Talk-Lee AI delivers intelligent AI for professional services, helping firms manage client communication with speed, accuracy, and
+            professionalism. From consulting and advisory firms to legal and business service providers, Talk-Lee AI ensures every client interaction
             is handled seamlessly.
           </p>
         </header>
@@ -89,7 +89,7 @@ export default function ProfessionalServicesIndustryPage() {
 
         <section className="mt-14">
           <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Professional Services Solutions Powered by Talkly AI
+            Professional Services Solutions Powered by Talk-Lee AI
           </h2>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
             Automation tools designed to support every client interaction
@@ -120,7 +120,7 @@ export default function ProfessionalServicesIndustryPage() {
         </section>
 
         <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Why Firms Choose Talkly AI</h2>
+          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Why Firms Choose Talk-Lee AI</h2>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
             Designed for growth and efficiency
           </p>
@@ -139,7 +139,7 @@ export default function ProfessionalServicesIndustryPage() {
           </h2>
           <p className="mt-6 text-lg md:text-xl font-semibold text-primary dark:text-foreground">Respond faster. Work smarter.</p>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            With AI for professional services, Talkly AI helps firms deliver professional, consistent, and responsive client communication.
+            With AI for professional services, Talk-Lee AI helps firms deliver professional, consistent, and responsive client communication.
           </p>
           <div className="mt-8 flex justify-center">
             <Button

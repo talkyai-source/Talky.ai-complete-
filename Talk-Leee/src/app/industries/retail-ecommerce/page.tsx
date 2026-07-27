@@ -24,12 +24,12 @@ export default function RetailEcommerceIndustryPage() {
     {
       title: "AI Order Inquiry Automation",
       description:
-        "Customers frequently call to check order status, delivery timelines, or returns. Talky AI automates these conversations using AI order inquiry automation, providing accurate updates without human intervention.",
+        "Customers frequently call to check order status, delivery timelines, or returns. Talk-Lee AI automates these conversations using AI order inquiry automation, providing accurate updates without human intervention.",
     },
     {
       title: "AI Product Inquiry Handling",
       description:
-        "From pricing to availability and features, Talky AI manages AI product inquiry handling with speed and accuracy, helping customers make faster buying decisions.",
+        "From pricing to availability and features, Talk-Lee AI manages AI product inquiry handling with speed and accuracy, helping customers make faster buying decisions.",
     },
     {
       title: "AI Voice Agents for Retail",
@@ -40,7 +40,7 @@ export default function RetailEcommerceIndustryPage() {
     {
       title: "AI Inbound Retail Calls Management",
       description:
-        "Talky AI efficiently handles AI inbound retail calls, reducing missed calls and improving first-call resolution during busy hours.",
+        "Talk-Lee AI efficiently handles AI inbound retail calls, reducing missed calls and improving first-call resolution during busy hours.",
       strongTitle: true,
     },
   ] as const;
@@ -59,7 +59,7 @@ export default function RetailEcommerceIndustryPage() {
     {
       title: "E-Commerce Integrations",
       description:
-        "Connect Talky AI to your favorite e-commerce platforms to get a 360-degree view of customer activity. Sync orders, product details, and customer history to provide faster, more accurate responses.",
+        "Connect Talk-Lee AI to your favorite e-commerce platforms to get a 360-degree view of customer activity. Sync orders, product details, and customer history to provide faster, more accurate responses.",
       strongTitle: true,
     },
     {
@@ -82,7 +82,7 @@ export default function RetailEcommerceIndustryPage() {
             Smarter Conversations. Faster Sales. Better Customer Experience.
           </h2>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Retail and e-commerce customers expect instant answers whether they are calling about an order, a product, or availability. Talky AI
+            Retail and e-commerce customers expect instant answers whether they are calling about an order, a product, or availability. Talk-Lee AI
             delivers intelligent automation through AI for retail &amp; e-commerce, helping retail brands handle high call volumes, reduce wait
             times, and improve customer engagement across every channel.
           </p>
@@ -107,11 +107,11 @@ export default function RetailEcommerceIndustryPage() {
 
         <section className="mt-14">
           <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Why Talky AI for Retail &amp; E-commerce Businesses?
+            Why Talk-Lee AI for Retail &amp; E-commerce Businesses?
           </h2>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talky AI is built to manage real retail challenges— from peak shopping seasons to daily order inquiries— so no customer call goes
-            unanswered. Using AI retail customer support, Talky AI helps businesses respond faster, stay available 24/7, and maintain a consistent
+            Talk-Lee AI is built to manage real retail challenges— from peak shopping seasons to daily order inquiries— so no customer call goes
+            unanswered. Using AI retail customer support, Talk-Lee AI helps businesses respond faster, stay available 24/7, and maintain a consistent
             brand voice across all interactions.
           </p>
         </section>
@@ -155,7 +155,7 @@ export default function RetailEcommerceIndustryPage() {
             AI Retail Call Center That Scales With You
           </h2>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Whether you manage a small online store or a large retail chain, Talky AI functions as a modern AI retail call center that scales
+            Whether you manage a small online store or a large retail chain, Talk-Lee AI functions as a modern AI retail call center that scales
             effortlessly during sales, promotions, and seasonal spikes.
           </p>
         </section>
@@ -165,7 +165,7 @@ export default function RetailEcommerceIndustryPage() {
             Features That Connect You With Shoppers
           </h2>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Deliver seamless shopping experiences and personalized support with <strong>Talky AI</strong>.
+            Deliver seamless shopping experiences and personalized support with <strong>Talk-Lee AI</strong>.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
             {featuresThatConnect.map((item) => (
@@ -211,14 +211,14 @@ export default function RetailEcommerceIndustryPage() {
             Conversational Analytics for Retail &amp; E-commerce
           </h2>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talky AI’s conversational analytics reduce pre- and post-call admin, freeing your team to focus on high-value tasks. Gain insights into
+            Talk-Lee AI’s conversational analytics reduce pre- and post-call admin, freeing your team to focus on high-value tasks. Gain insights into
             call trends, customer behavior, and team performance.
           </p>
         </section>
 
         <section className="mt-14">
           <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Why Retailers Choose Talky AI
+            Why Retailers Choose Talk-Lee AI
           </h2>
           <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
             <li>• AI retail customer support that scales with demand</li>

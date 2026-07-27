@@ -469,7 +469,7 @@ export function SipTrunksList() {
                             <ServerCog className="h-5 w-5" aria-hidden /> Local PBX / SIP Trunks
                         </CardTitle>
                         <CardDescription>
-                            Point Talky at your own Asterisk / FreeSWITCH / Kamailio trunk. Set a caller ID and tune
+                            Point Talk-Lee at your own Asterisk / FreeSWITCH / Kamailio trunk. Set a caller ID and tune
                             DTMF, registration, proxy and SRTP under <strong>Advanced options</strong>. Run{" "}
                             <strong>Test</strong> to verify reachability — activation is blocked until at least one
                             successful test.

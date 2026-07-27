@@ -1,9 +1,9 @@
 ## System Architecture
-- The Talk-lee platform is composed of four primary layers that work together to deliver real-time voice sessions while exposing configuration, operations, and observability through the dashboard:
+- The Talk-Lee platform is composed of four primary layers that work together to deliver real-time voice sessions while exposing configuration, operations, and observability through the dashboard:
   - Frontend (Next.js Dashboard): the web UI that users and operators interact with to configure AI options, manage connectors, view sessions/records, and trigger workflows
   - Backend API Layer: the authoritative system-of-record for users, tenants, configuration, and operational workflows; exposes REST endpoints consumed by the dashboard
   - Session + Voice Pipeline: real-time session orchestration and audio processing that manages active calls and voice interaction flows
-  - Telephony Infrastructure: SIP routing and call handling systems that connect Talk-lee to carriers and BYO SIP providers
+  - Telephony Infrastructure: SIP routing and call handling systems that connect Talk-Lee to carriers and BYO SIP providers
 
 ### Architecture Flow
 ```text
@@ -247,7 +247,7 @@ Screenshot:
 | Recordings | Prototype |
 
 ## White-Label Compatibility
-- The Talk-lee frontend supports multi-tenant white-label deployments where multiple tenant organizations share the same codebase while keeping data and feature access isolated.
+- The Talk-Lee frontend supports multi-tenant white-label deployments where multiple tenant organizations share the same codebase while keeping data and feature access isolated.
 
 ### Key Capabilities
 - Tenant-scoped data: all feature data is expected to be tenant-isolated by the backend and surfaced in the dashboard per authenticated tenant context.

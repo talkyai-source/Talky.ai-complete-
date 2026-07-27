@@ -6,9 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Video } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "Talkly AI | AI Recruitment & Candidate Screening",
+  title: "Talk-Lee AI | AI Recruitment & Candidate Screening",
   description:
-    "Streamline hiring with Talkly AI. Automate candidate screening, interview scheduling, and recruitment workflows for faster and smarter hiring.",
+    "Streamline hiring with Talk-Lee AI. Automate candidate screening, interview scheduling, and recruitment workflows for faster and smarter hiring.",
 };
 
 export default function RecruitmentIndustryPage() {
@@ -24,7 +24,7 @@ export default function RecruitmentIndustryPage() {
     {
       title: "Smart Candidate Screening",
       description:
-        "Quickly evaluate resumes and applications using AI candidate screening. Talkly AI identifies top talent and flags ideal candidates, reducing manual effort and human error.",
+        "Quickly evaluate resumes and applications using AI candidate screening. Talk-Lee AI identifies top talent and flags ideal candidates, reducing manual effort and human error.",
     },
     {
       title: "Automated Interview Scheduling",
@@ -47,14 +47,14 @@ export default function RecruitmentIndustryPage() {
     {
       title: "AI Hiring Automation for Repetitive Tasks",
       description:
-        "Focus on strategic decision-making while Talkly AI handles routine tasks like candidate communication, assessment reminders, and pre-screening questions.",
+        "Focus on strategic decision-making while Talk-Lee AI handles routine tasks like candidate communication, assessment reminders, and pre-screening questions.",
     },
   ] as const;
 
   const howItWorks = [
     {
       title: "Seamless ATS Integration",
-      description: "Connect Talkly AI with your existing systems for a unified workflow.",
+      description: "Connect Talk-Lee AI with your existing systems for a unified workflow.",
     },
     {
       title: "Enhanced Productivity",
@@ -78,15 +78,15 @@ export default function RecruitmentIndustryPage() {
       <div className="mx-auto w-full max-w-6xl px-4 md:px-6 lg:px-8 py-16 md:py-20">
         <header className="text-center">
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-primary dark:text-foreground">
-            AI Recruitment Solutions with Talkly AI
+            AI Recruitment Solutions with Talk-Lee AI
           </h1>
           <p className="mt-4 text-base sm:text-lg md:text-xl text-gray-700 dark:text-muted-foreground font-semibold">
             Streamline Hiring, Screen Candidates, and Schedule Interviews Seamlessly
           </p>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Hiring top talent shouldn’t be slow, tedious, or inconsistent. Talkly AI delivers AI recruitment solutions that streamline candidate
+            Hiring top talent shouldn’t be slow, tedious, or inconsistent. Talk-Lee AI delivers AI recruitment solutions that streamline candidate
             screening, automate interview scheduling, and optimize your recruitment workflow. Whether you are a growing recruitment team or an
-            enterprise talent acquisition department, Talkly AI helps you hire smarter, faster, and more efficiently.
+            enterprise talent acquisition department, Talk-Lee AI helps you hire smarter, faster, and more efficiently.
           </p>
           <div className="mt-10 flex justify-center">
             <Button
@@ -104,14 +104,14 @@ export default function RecruitmentIndustryPage() {
 
         <section className="mt-14">
           <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Why Modern Recruiters Choose Talkly AI
+            Why Modern Recruiters Choose Talk-Lee AI
           </h2>
           <p className="mt-6 text-xl md:text-2xl font-semibold text-primary dark:text-foreground">
             Say goodbye to manual hiring bottlenecks
           </p>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
             Recruiters face constant challenges: High volumes of applications, missed candidate follow-ups, and time-consuming administrative work.
-            Talkly AI solves these problems with intelligent automation:
+            Talk-Lee AI solves these problems with intelligent automation:
           </p>
           <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
             <li>• AI hiring automation to manage repetitive tasks</li>
@@ -121,7 +121,7 @@ export default function RecruitmentIndustryPage() {
             <li>• AI virtual recruiter to answer candidate queries 24/7</li>
           </ul>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            With Talkly AI, every candidate receives a timely, professional experience while your team stays focused on strategic hiring.
+            With Talk-Lee AI, every candidate receives a timely, professional experience while your team stays focused on strategic hiring.
           </p>
         </section>
 
@@ -148,7 +148,7 @@ export default function RecruitmentIndustryPage() {
         </section>
 
         <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">The Benefits of Using Talkly AI</h2>
+          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">The Benefits of Using Talk-Lee AI</h2>
           <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
             <li>
               • <strong className="text-primary dark:text-foreground">Faster Hiring:</strong> Reduce time-to-hire with intelligent automation
@@ -174,7 +174,7 @@ export default function RecruitmentIndustryPage() {
 
         <section className="mt-14">
           <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            How Talkly AI Works for Your Recruitment Team
+            How Talk-Lee AI Works for Your Recruitment Team
           </h2>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
             {howItWorks.map((item) => (
@@ -192,7 +192,7 @@ export default function RecruitmentIndustryPage() {
           <div className="text-center">
             <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Transform Your Hiring Today</h2>
             <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-              With Talkly AI’s AI recruitment solutions, recruiters can:
+              With Talk-Lee AI’s AI recruitment solutions, recruiters can:
             </p>
           </div>
 
@@ -205,7 +205,7 @@ export default function RecruitmentIndustryPage() {
           </ul>
 
           <p className="mt-10 text-center text-base sm:text-lg md:text-xl font-semibold text-primary dark:text-foreground">
-            Book a demo today and experience the future of recruitment with Talkly AI.
+            Book a demo today and experience the future of recruitment with Talk-Lee AI.
           </p>
         </section>
       </div>

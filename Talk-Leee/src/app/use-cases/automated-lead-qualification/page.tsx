@@ -6,9 +6,9 @@ import { Button } from "@/components/ui/button";
 import { BadgeCheck, Building2, ClipboardList, Clock, Headphones, HeartPulse, Home, Landmark, ShieldCheck, ShoppingCart, Sparkles, UserCheck } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "Talkly AI | 24/7 Automated Lead Qualification",
+  title: "Talk-Lee AI | 24/7 Automated Lead Qualification",
   description:
-    "Never miss a lead. Automate engagement, scoring, and follow-ups with Talkly AI to increase quality conversions and sales productivity.",
+    "Never miss a lead. Automate engagement, scoring, and follow-ups with Talk-Lee AI to increase quality conversions and sales productivity.",
 };
 
 export default function AutomatedLeadQualificationUseCasePage() {
@@ -16,25 +16,25 @@ export default function AutomatedLeadQualificationUseCasePage() {
     {
       title: "Instant AI Engagement",
       description:
-        "As soon as a lead enters your system, Talkly AI initiates contact through Voice AI customer service or automated conversations; no waiting, no manual follow-ups.",
+        "As soon as a lead enters your system, Talk-Lee AI initiates contact through Voice AI customer service or automated conversations; no waiting, no manual follow-ups.",
       icon: Sparkles,
     },
     {
       title: "Intelligent Data Capture",
       description:
-        "Using AI customer service solutions, Talkly AI asks structured qualification questions and captures intent, urgency, and key buyer signals during the conversation.",
+        "Using AI customer service solutions, Talk-Lee AI asks structured qualification questions and captures intent, urgency, and key buyer signals during the conversation.",
       icon: ClipboardList,
     },
     {
       title: "Automated Lead Scoring",
       description:
-        "Talkly AI evaluates responses in real time and applies AI customer support automation to score leads based on your predefined criteria and ideal customer profile.",
+        "Talk-Lee AI evaluates responses in real time and applies AI customer support automation to score leads based on your predefined criteria and ideal customer profile.",
       icon: BadgeCheck,
     },
     {
       title: "Smart Routing or Scheduling",
       description:
-        "High-quality leads are automatically routed to sales teams, while Talkly AI can schedule callbacks, demos, or appointments without human intervention.",
+        "High-quality leads are automatically routed to sales teams, while Talk-Lee AI can schedule callbacks, demos, or appointments without human intervention.",
       icon: UserCheck,
     },
   ] as const;
@@ -61,7 +61,7 @@ export default function AutomatedLeadQualificationUseCasePage() {
     {
       title: "Personalized Conversations at Scale",
       description:
-        "Talkly AI adapts conversations in real time, delivering tailored responses that improve engagement and trust.",
+        "Talk-Lee AI adapts conversations in real time, delivering tailored responses that improve engagement and trust.",
       icon: Sparkles,
     },
     {
@@ -114,10 +114,10 @@ export default function AutomatedLeadQualificationUseCasePage() {
       <div className="mx-auto w-full max-w-6xl px-4 md:px-6 lg:px-8 py-16 md:py-20">
         <header className="text-center">
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-primary dark:text-foreground">
-            Automated Lead Qualification with Talkly AI
+            Automated Lead Qualification with Talk-Lee AI
           </h1>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Talkly AI helps businesses qualify leads instantly using AI-powered voice and conversational automation. Our AI agents engage, assess,
+            Talk-Lee AI helps businesses qualify leads instantly using AI-powered voice and conversational automation. Our AI agents engage, assess,
             and route leads in real time, ensuring your sales teams only focus on high-intent prospects.
           </p>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
@@ -127,10 +127,10 @@ export default function AutomatedLeadQualificationUseCasePage() {
 
         <section className="mt-14">
           <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            How Talkly AI Automates Lead Qualification
+            How Talk-Lee AI Automates Lead Qualification
           </h2>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talkly AI works seamlessly within your existing customer engagement workflows, delivering fast and accurate lead qualification at scale.
+            Talk-Lee AI works seamlessly within your existing customer engagement workflows, delivering fast and accurate lead qualification at scale.
           </p>
 
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -162,7 +162,7 @@ export default function AutomatedLeadQualificationUseCasePage() {
 
         <section className="mt-14">
           <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Why Businesses Choose Talkly AI for Lead Qualification
+            Why Businesses Choose Talk-Lee AI for Lead Qualification
           </h2>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
             {reasons.map((item) => (
@@ -193,10 +193,10 @@ export default function AutomatedLeadQualificationUseCasePage() {
 
         <section className="mt-14">
           <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Industries That Benefit from Talkly AI Lead Qualification
+            Industries That Benefit from Talk-Lee AI Lead Qualification
           </h2>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talkly AI supports lead qualification across high-volume, high-intent industries:
+            Talk-Lee AI supports lead qualification across high-volume, high-intent industries:
           </p>
 
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -231,7 +231,7 @@ export default function AutomatedLeadQualificationUseCasePage() {
             Seamless Integration with Your Existing Systems
           </h2>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talkly AI integrates easily with CRMs, contact center platforms, and customer databases. Our AI customer service automation fits into your
+            Talk-Lee AI integrates easily with CRMs, contact center platforms, and customer databases. Our AI customer service automation fits into your
             current stack without disrupting operations.
           </p>
         </section>
@@ -249,7 +249,7 @@ export default function AutomatedLeadQualificationUseCasePage() {
 
         <section className="mt-14">
           <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Key Benefits of Talkly AI Lead Qualification
+            Key Benefits of Talk-Lee AI Lead Qualification
           </h2>
           <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-3">
             {[
@@ -283,7 +283,7 @@ export default function AutomatedLeadQualificationUseCasePage() {
             Overcoming Common Lead Qualification Challenges
           </h2>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talkly AI helps businesses address:
+            Talk-Lee AI helps businesses address:
           </p>
           <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
             <li>• Slow response times</li>
@@ -299,7 +299,7 @@ export default function AutomatedLeadQualificationUseCasePage() {
             Start qualifying better leads automatically.
           </h2>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-3xl mx-auto">
-            Book a demo with Talkly AI today and see how AI-powered lead qualification can improve conversions while reducing costs.
+            Book a demo with Talk-Lee AI today and see how AI-powered lead qualification can improve conversions while reducing costs.
           </p>
           <div className="mt-7 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
             <Button asChild size="lg" className="rounded-full px-8 bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400">

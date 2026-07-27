@@ -85,7 +85,7 @@ export default function AbuseDetectionPage() {
       value: blockForm.value,
       reason: blockForm.reason,
       blockedAt: new Date().toISOString(),
-      blockedBy: "admin@talkly.ai",
+      blockedBy: "admin@talk-lee.ai",
       expiresAt: blockForm.expiresAt || undefined,
       status: "active",
     };

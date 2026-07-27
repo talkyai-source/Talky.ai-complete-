@@ -5,9 +5,9 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeftRight, CalendarDays, MessageSquareText, Plug2 } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "Talky AI Voice Agent | Smarter Calls, Faster Growth",
+  title: "Talk-Lee AI Voice Agent | Smarter Calls, Faster Growth",
   description:
-    "Transform every call into a conversion with Talky AI Voice Agent. Human-like dialogue, instant responses, and seamless CRM integration.",
+    "Transform every call into a conversion with Talk-Lee AI Voice Agent. Human-like dialogue, instant responses, and seamless CRM integration.",
 };
 
 export default function AIVoiceAgentPage() {
@@ -25,7 +25,7 @@ export default function AIVoiceAgentPage() {
       <div className="mx-auto w-full max-w-6xl px-4 md:px-6 lg:px-8 py-16 md:py-20">
         <header className="text-center">
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-primary dark:text-foreground">
-            Talky AI Voice Agent
+            Talk-Lee AI Voice Agent
           </h1>
           <p className="mt-4 text-base sm:text-lg md:text-xl text-gray-700 dark:text-muted-foreground">
             Smarter Conversations. Faster Growth. Limitless Scale.
@@ -33,9 +33,9 @@ export default function AIVoiceAgentPage() {
         </header>
 
         <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Why Talky’s AI Voice Agent?</h2>
+          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Why Talk-Lee’s AI Voice Agent?</h2>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Your customers don’t want to wait. Your team doesn’t want to drown in repetitive calls. Talky’s AI Voice Agent is the
+            Your customers don’t want to wait. Your team doesn’t want to drown in repetitive calls. Talk-Lee’s AI Voice Agent is the
             intelligent call automation solution that transforms every inbound conversation into an opportunity without adding headcount.
           </p>
           <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
@@ -50,7 +50,7 @@ export default function AIVoiceAgentPage() {
 
         <section className="mt-14">
           <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Core Capabilities of Talky AI Voice Agent
+            Core Capabilities of Talk-Lee AI Voice Agent
           </h2>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className={accentCardClassName} style={accentCardStyle}>
@@ -81,7 +81,7 @@ export default function AIVoiceAgentPage() {
                 <div className="min-w-0">
                   <h3 className="text-xl md:text-2xl font-semibold text-primary dark:text-foreground">Conversations That Feel Human</h3>
                   <p className="mt-3 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-                    Talky’s AI understands tone, intent, and interruptions delivering natural, fluid exchanges that keep customers engaged.
+                    Talk-Lee’s AI understands tone, intent, and interruptions delivering natural, fluid exchanges that keep customers engaged.
                   </p>
                 </div>
               </div>
@@ -95,7 +95,7 @@ export default function AIVoiceAgentPage() {
                 <div className="min-w-0">
                   <h3 className="text-xl md:text-2xl font-semibold text-primary dark:text-foreground">Smart Handoffs</h3>
                   <p className="mt-3 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-                    When a call needs a human touch, Talky transfers it instantly—complete with context, notes, and structured insights.
+                    When a call needs a human touch, Talk-Lee transfers it instantly—complete with context, notes, and structured insights.
                   </p>
                 </div>
               </div>
@@ -196,9 +196,9 @@ export default function AIVoiceAgentPage() {
         </section>
 
         <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">The Talky Advantage</h2>
+          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">The Talk-Lee Advantage</h2>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Unlike generic call bots, Talky’s AI Voice Agent is built for growth‑driven businesses. It’s not just automation. It’s a
+            Unlike generic call bots, Talk-Lee’s AI Voice Agent is built for growth‑driven businesses. It’s not just automation. It’s a
             customer experience engine that:
           </p>
           <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
@@ -216,7 +216,7 @@ export default function AIVoiceAgentPage() {
           >
             <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Ready to scale smarter?</h2>
             <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-              Talky’s AI Voice Agent is the future of customer communication. Start today and watch your calls turn into
+              Talk-Lee’s AI Voice Agent is the future of customer communication. Start today and watch your calls turn into
               conversions.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">

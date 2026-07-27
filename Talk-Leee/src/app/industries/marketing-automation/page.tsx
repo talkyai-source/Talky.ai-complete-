@@ -9,7 +9,7 @@ import { Video } from "lucide-react";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Supercharge Marketing with Talkly AI",
+  title: "Supercharge Marketing with Talk-Lee AI",
   description: "Turn Leads into Customers with Smarter AI Marketing Automation",
 };
 
@@ -26,7 +26,7 @@ export default function MarketingAutomationIndustryPage() {
     {
       title: "Open API and 100+ Integrations",
       description:
-        "Connect Talkly AI with your CRM, email, campaign platforms, and productivity tools for seamless operations.",
+        "Connect Talk-Lee AI with your CRM, email, campaign platforms, and productivity tools for seamless operations.",
     },
     {
       title: "Mobile and Desktop Apps",
@@ -45,13 +45,13 @@ export default function MarketingAutomationIndustryPage() {
       <div className="mx-auto w-full max-w-6xl px-4 md:px-6 lg:px-8 py-16 md:py-20">
         <header className="text-center">
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-primary dark:text-foreground">
-            Supercharge Marketing with Talkly AI
+            Supercharge Marketing with Talk-Lee AI
           </h1>
           <p className="mt-4 text-base sm:text-lg md:text-xl text-gray-700 dark:text-muted-foreground font-semibold">
             Turn Leads into Customers with Smarter AI Marketing Automation
           </p>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Marketing today moves fast; your prospects expect quick, personalized responses, and your team can’t afford bottlenecks. Talkly AI
+            Marketing today moves fast; your prospects expect quick, personalized responses, and your team can’t afford bottlenecks. Talk-Lee AI
             marketing automation helps agencies and enterprises capture leads, engage clients, and manage campaigns without manual effort.
           </p>
           <p className="mt-8 text-base sm:text-lg md:text-xl text-gray-700 dark:text-muted-foreground font-semibold">
@@ -79,7 +79,7 @@ export default function MarketingAutomationIndustryPage() {
             Your clients shouldn’t wait || neither should your marketing team.
           </p>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            With AI voice agents for marketing, Talkly AI answers calls instantly, handles inquiries, and delivers a professional, human-like
+            With AI voice agents for marketing, Talk-Lee AI answers calls instantly, handles inquiries, and delivers a professional, human-like
             experience. No more missed opportunities, delayed follow-ups, or frustrated prospects.
           </p>
           <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
@@ -95,7 +95,7 @@ export default function MarketingAutomationIndustryPage() {
             Focus on the leads that matter most.
           </h3>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talkly AI leads generation for marketing screens, qualifies, and prioritizes prospects automatically. Save hours of manual outreach and
+            Talk-Lee AI leads generation for marketing screens, qualifies, and prioritizes prospects automatically. Save hours of manual outreach and
             ensure your team is always talking to high-potential leads.
           </p>
           <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
@@ -143,7 +143,7 @@ export default function MarketingAutomationIndustryPage() {
           <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Streamline Your Marketing Operations</h2>
           <p className="mt-6 text-lg md:text-xl font-semibold text-primary dark:text-foreground">No more chaos. Just smooth workflows.</p>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            With AI marketing workflow automation, Talkly AI organizes campaigns, tasks, and follow-ups automatically. Reduce human error, keep your
+            With AI marketing workflow automation, Talk-Lee AI organizes campaigns, tasks, and follow-ups automatically. Reduce human error, keep your
             team aligned, and run campaigns faster than ever.
           </p>
           <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
@@ -155,7 +155,7 @@ export default function MarketingAutomationIndustryPage() {
 
         <section className="mt-14">
           <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Why Talkly AI Works for Marketing Teams
+            Why Talk-Lee AI Works for Marketing Teams
           </h2>
           <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
             <li>
@@ -220,7 +220,7 @@ export default function MarketingAutomationIndustryPage() {
           <div className="text-center">
             <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Ready to Transform Your Marketing?</h2>
             <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-              Give your marketing team the power of AI. With Talkly AI, automate campaigns, engage clients, and generate leads; all while saving
+              Give your marketing team the power of AI. With Talk-Lee AI, automate campaigns, engage clients, and generate leads; all while saving
               time and increasing ROI.
             </p>
           </div>

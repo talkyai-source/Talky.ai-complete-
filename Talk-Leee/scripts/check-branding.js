@@ -1,13 +1,18 @@
 const fs = require('fs');
 const path = require('path');
 
-const FORBIDDEN_TERM = 'VoiceFluid';
-const REPLACEMENT_TERM = 'Talk-Lee';
-const SEARCH_DIR = 'src';
+const {
+  FORBIDDEN_TERMS,
+  CHECK_ONLY_TERMS,
+  REPLACEMENT_TERM,
+  SEARCH_DIR,
+  FILE_PATTERN,
+  isAllowlistedLine,
+} = require('./branding-terms');
 
 function searchFiles(dir) {
   let found = false;
-  
+
   if (!fs.existsSync(dir)) {
     return false;
   }
@@ -21,17 +26,27 @@ function searchFiles(dir) {
     if (stat.isDirectory()) {
       if (searchFiles(filePath)) found = true;
     } else {
-      if (file.match(/\.(tsx|ts|js|jsx|css|md|json)$/)) {
+      if (file.match(FILE_PATTERN)) {
         const content = fs.readFileSync(filePath, 'utf8');
-        if (content.includes(FORBIDDEN_TERM)) {
+        const lines = content.split('\n');
+        const violations = [];
+
+        lines.forEach((line, index) => {
+          const hits = FORBIDDEN_TERMS.filter((term) => line.includes(term));
+          // Lowercase forms live in domains/emails — flag, never auto-rewrite,
+          // and ignore the auth-cookie identifiers that legitimately match.
+          const softHits = CHECK_ONLY_TERMS.filter(
+            (term) => line.includes(term) && !isAllowlistedLine(line, term),
+          );
+          const all = [...hits, ...softHits];
+          if (all.length > 0) {
+            violations.push(`   Line ${index + 1} [${all.join(', ')}]: ${line.trim()}`);
+          }
+        });
+
+        if (violations.length > 0) {
           console.error(`❌ Branding violation found in: ${filePath}`);
-          // Find line number
-          const lines = content.split('\n');
-          lines.forEach((line, index) => {
-            if (line.includes(FORBIDDEN_TERM)) {
-               console.error(`   Line ${index + 1}: ${line.trim()}`);
-            }
-          });
+          violations.forEach((v) => console.error(v));
           found = true;
         }
       }
@@ -40,10 +55,10 @@ function searchFiles(dir) {
   return found;
 }
 
-console.log(`🔍 Checking for forbidden branding terms ("${FORBIDDEN_TERM}")...`);
+console.log(`🔍 Checking for forbidden branding terms (${FORBIDDEN_TERMS.map((t) => `"${t}"`).join(', ')})...`);
 if (searchFiles(SEARCH_DIR)) {
   console.error(`\nFAILED: Forbidden branding terms found.`);
-  console.error(`Please replace "${FORBIDDEN_TERM}" with "${REPLACEMENT_TERM}".`);
+  console.error(`The product is spelled "${REPLACEMENT_TERM}". Run \`npm run fix-branding\` to correct them.`);
   process.exit(1);
 } else {
   console.log('✅ Branding check passed.');

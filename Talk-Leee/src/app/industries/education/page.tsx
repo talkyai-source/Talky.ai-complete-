@@ -5,9 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Video } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "Talky AI | AI That Transforms Education",
+  title: "Talk-Lee AI | AI That Transforms Education",
   description:
-    "Boost engagement and streamline school operations with Talky AI. Automate calls, admissions, and student support effortlessly!",
+    "Boost engagement and streamline school operations with Talk-Lee AI. Automate calls, admissions, and student support effortlessly!",
 };
 
 export default function EducationIndustryPage() {
@@ -43,7 +43,7 @@ export default function EducationIndustryPage() {
             Smarter AI for Education Institutions
           </h1>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Deliver faster, smarter, and more personalized support to students, parents, and staff with Talky AI, the intelligent platform
+            Deliver faster, smarter, and more personalized support to students, parents, and staff with Talk-Lee AI, the intelligent platform
             designed specifically for AI for education. From admissions to daily operations, our AI automates key workflows, improving efficiency
             and student satisfaction.
           </p>
@@ -70,7 +70,7 @@ export default function EducationIndustryPage() {
         <section className="mt-14">
           <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">AI Virtual Assistant for Schools</h2>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talky AI serves as a smart AI virtual assistant for schools, capable of:
+            Talk-Lee AI serves as a smart AI virtual assistant for schools, capable of:
           </p>
           <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
             <li>• Handling routine queries</li>
@@ -141,9 +141,9 @@ export default function EducationIndustryPage() {
         </section>
 
         <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Why Choose Talky AI?</h2>
+          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Why Choose Talk-Lee AI?</h2>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Institutions using Talky AI see measurable results:
+            Institutions using Talk-Lee AI see measurable results:
           </p>
           <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
             <li>• Faster student response times</li>
@@ -154,9 +154,9 @@ export default function EducationIndustryPage() {
         </section>
 
         <section className="mt-14 rounded-3xl border border-border/70 bg-background/70 dark:bg-white/5 backdrop-blur-sm p-8 md:p-12 text-center">
-          <h3 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Get Started with Talky AI Today</h3>
+          <h3 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Get Started with Talk-Lee AI Today</h3>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Transform your school with intelligent AI solutions. Automate admissions, support, appointments, and engagement with Talky AI; the
+            Transform your school with intelligent AI solutions. Automate admissions, support, appointments, and engagement with Talk-Lee AI; the
             complete platform for AI for education.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">

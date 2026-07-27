@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "Talkly AI for Financial Services",
+  title: "Talk-Lee AI for Financial Services",
   description: "Transform Your Financial Operations with Intelligent AI",
 };
 
@@ -72,13 +72,13 @@ export default function FinancialServicesIndustryPage() {
       <div className="mx-auto w-full max-w-6xl px-4 md:px-6 lg:px-8 py-16 md:py-20">
         <header className="text-center">
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-primary dark:text-foreground">
-            Talkly AI for Financial Services
+            Talk-Lee AI for Financial Services
           </h1>
           <p className="mt-4 text-base sm:text-lg md:text-xl text-gray-700 dark:text-muted-foreground font-semibold">
             Transform Your Financial Operations with Intelligent AI
           </p>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            In today’s fast-paced financial world, delivering fast, accurate, and secure customer service is more critical than ever. Talkly AI
+            In today’s fast-paced financial world, delivering fast, accurate, and secure customer service is more critical than ever. Talk-Lee AI
             brings advanced automation to your banking, insurance, fintech, and lending operations, helping teams provide seamless support,
             streamline workflows, and enhance client engagement.
           </p>
@@ -89,7 +89,7 @@ export default function FinancialServicesIndustryPage() {
               className="rounded-xl px-8 bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400"
             >
               <Link href="/#contact" className="inline-flex items-center gap-2">
-                Get started with Talkly AI Today
+                Get started with Talk-Lee AI Today
                 <ArrowRight className="h-5 w-5" aria-hidden />
               </Link>
             </Button>
@@ -110,13 +110,13 @@ export default function FinancialServicesIndustryPage() {
             <li>• Ensuring compliance while personalizing service</li>
           </ul>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talkly AI addresses these challenges head-on with AI-powered automation tailored for financial teams.
+            Talk-Lee AI addresses these challenges head-on with AI-powered automation tailored for financial teams.
           </p>
         </section>
 
         <section className="mt-14">
           <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            How Talkly AI Works for Financial Services
+            How Talk-Lee AI Works for Financial Services
           </h2>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
             AI solutions designed to meet the unique needs of financial institutions:
@@ -188,7 +188,7 @@ export default function FinancialServicesIndustryPage() {
         </section>
 
         <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Why Talkly AI Stands Out</h2>
+          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Why Talk-Lee AI Stands Out</h2>
           <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
             <li>• Human-like AI conversations designed for financial compliance</li>
             <li>• Secure, encrypted platform to protect sensitive client data</li>
@@ -196,7 +196,7 @@ export default function FinancialServicesIndustryPage() {
             <li>• Real-time analytics and reporting for better operational decision-making</li>
           </ul>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talkly AI combines efficiency, security, and personalization, making it the ultimate AI solution for financial services.
+            Talk-Lee AI combines efficiency, security, and personalization, making it the ultimate AI solution for financial services.
           </p>
         </section>
 

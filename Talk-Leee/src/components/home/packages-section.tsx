@@ -274,7 +274,7 @@ export function PackagesSection() {
           <div className="mt-10 max-w-5xl mx-auto text-center">
             <div className="text-xl font-semibold text-primary dark:text-foreground">Personalize Every Conversation</div>
             <div className="mt-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground leading-relaxed">
-              Use Talkly’s AI voice agents to deliver human‑like customer engagement.
+              Use Talk-Lee’s AI voice agents to deliver human‑like customer engagement.
             </div>
           </div>
 

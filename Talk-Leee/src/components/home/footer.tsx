@@ -68,8 +68,9 @@ export function Footer() {
 
         {/* Bottom Section */}
         <div className="flex flex-col md:flex-row items-center justify-between gap-6 text-sm">
-          <div className="text-gray-700 dark:text-muted-foreground">
-            © {currentYear} Talk-Lee. All rights reserved.
+          <div className="text-gray-700 dark:text-muted-foreground text-center md:text-left">
+            <p>© {currentYear} Talk-Lee. All rights reserved.</p>
+            <p className="mt-1">Powered by Aresync</p>
           </div>
 
           <div className="flex items-center gap-6">

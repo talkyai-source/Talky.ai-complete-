@@ -4,7 +4,7 @@ import { Footer } from "@/components/home/footer";
 import Image from "next/image";
 
 export const metadata: Metadata = {
-  title: "Talkly AI | AI Virtual Receptionist for Healthcare",
+  title: "Talk-Lee AI | AI Virtual Receptionist for Healthcare",
   description:
     "Reduce staff workload and improve patient engagement. AI automates scheduling, reminders, and support with secure, compliant workflows.",
 };
@@ -23,7 +23,7 @@ export default function HealthcareIndustryPage() {
       title: "Overdue Dental Appointment - 96% Patient Satisfaction",
       lines: [
         "A patient missed a cleaning appointment two months ago.",
-        "Talkly AI Agent Goal:",
+        "Talk-Lee AI Agent Goal:",
         "Re-engage patients efficiently",
         "Offer available time slots",
         "Schedule the appointment live using AI virtual receptionist healthcare capabilities",
@@ -33,7 +33,7 @@ export default function HealthcareIndustryPage() {
       title: "Surgery Confirmation - 96% Patient Satisfaction",
       lines: [
         "Patients scheduled for surgery receive automated confirmation calls.",
-        "Talkly AI Agent Goal:",
+        "Talk-Lee AI Agent Goal:",
         "Confirm appointment details",
         "Provide pre-surgery instructions",
         "Reduce no-shows through AI healthcare voice assistant interactions",
@@ -43,7 +43,7 @@ export default function HealthcareIndustryPage() {
       title: "Elder Care Inquiry - 66% Transfer Rate",
       lines: [
         "A family member calls to arrange elder care for their parent.",
-        "Talkly AI Agent Goal:",
+        "Talk-Lee AI Agent Goal:",
         "Ask qualifying questions",
         "Capture care requirements",
         "Transfer the call to the right advisor instantly using AI hospital call management",
@@ -78,12 +78,12 @@ export default function HealthcareIndustryPage() {
             Automate Patient Calls. Improve Outcomes. Stay Compliant.
           </p>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Talkly AI offers the most advanced AI voice agents for healthcare, designed to streamline patient communication while keeping full
+            Talk-Lee AI offers the most advanced AI voice agents for healthcare, designed to streamline patient communication while keeping full
             control and compliance. From scheduling and reminders to patient support, these intelligent voice agents operate 24/7, handling calls
             at scale without compromising privacy.
           </p>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Whether you manage clinics, dental practices, elder care facilities, or multi-location hospitals, Talkly AI helps reduce staff workload,
+            Whether you manage clinics, dental practices, elder care facilities, or multi-location hospitals, Talk-Lee AI helps reduce staff workload,
             increase appointments, and enhance patient satisfaction.
           </p>
           <div className="mt-10 flex justify-center">
@@ -139,7 +139,7 @@ export default function HealthcareIndustryPage() {
             Measurable Results for Healthcare Teams
           </h2>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Healthcare providers using Talkly AI’s AI voice agents for healthcare see:
+            Healthcare providers using Talk-Lee AI’s AI voice agents for healthcare see:
           </p>
           <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
             <li>• 97% call containment rate</li>
@@ -154,11 +154,11 @@ export default function HealthcareIndustryPage() {
 
         <section className="mt-14">
           <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Why Healthcare Organizations Choose Talkly AI
+            Why Healthcare Organizations Choose Talk-Lee AI
           </h2>
           <h3 className="mt-6 text-xl md:text-2xl font-semibold text-primary dark:text-foreground">Own Your AI. Protect Patient Data.</h3>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talkly AI is built for organizations that cannot afford shared infrastructure or rented AI models.
+            Talk-Lee AI is built for organizations that cannot afford shared infrastructure or rented AI models.
           </p>
           <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
             <li>• Dedicated servers and GPUs</li>
@@ -203,7 +203,7 @@ export default function HealthcareIndustryPage() {
 
             <div className="space-y-4">
               <h3 className="text-xl md:text-2xl font-semibold text-primary dark:text-foreground">
-                How Talkly AI Works for Healthcare
+                How Talk-Lee AI Works for Healthcare
               </h3>
               <ul className="space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
                 <li>• Deploy a single AI agent or scale across multiple locations</li>
@@ -225,7 +225,7 @@ export default function HealthcareIndustryPage() {
             <div className="space-y-4">
               <h3 className="text-xl md:text-2xl font-semibold text-primary dark:text-foreground">Security &amp; Compliance</h3>
               <p className="text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-                Talkly AI is built for regulated healthcare environments:
+                Talk-Lee AI is built for regulated healthcare environments:
               </p>
               <ul className="space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
                 <li>• Encrypted calls and secure data storage</li>
@@ -253,9 +253,9 @@ export default function HealthcareIndustryPage() {
         </section>
 
         <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Why Choose Talkly AI?</h2>
+          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Why Choose Talk-Lee AI?</h2>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            With AI voice agents for healthcare, Talkly AI enables organizations to:
+            With AI voice agents for healthcare, Talk-Lee AI enables organizations to:
           </p>
           <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
             <li>• Streamline patient communication with AI hospital call management</li>
@@ -272,7 +272,7 @@ export default function HealthcareIndustryPage() {
             Ready to Transform Patient Communication?
           </h2>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Scale patient conversations instantly with Talkly AI. Automate core healthcare calls, reduce operational workload, and deliver better
+            Scale patient conversations instantly with Talk-Lee AI. Automate core healthcare calls, reduce operational workload, and deliver better
             patient experiences; securely and efficiently.
           </p>
         </section>

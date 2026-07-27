@@ -1,8 +1,8 @@
-Talk-lee Billing Layer Plan
+Talk-Lee Billing Layer Plan
 Production-grade implementation blueprint aligned to Session Layer, Voice Pipeline, White-label hierarchy, and Payment Provider synchronization
 
 1. Purpose
-This document defines the complete Billing Layer for Talk-lee. The billing layer decides what plan was purchased, what was actually used, what exceeded the plan, and what must be charged. For Talk-lee, billing truth must come from backend usage events and session closure, not from the frontend.
+This document defines the complete Billing Layer for Talk-Lee. The billing layer decides what plan was purchased, what was actually used, what exceeded the plan, and what must be charged. For Talk-Lee, billing truth must come from backend usage events and session closure, not from the frontend.
 2. System Position
  
 The billing layer consumes call/session events from the session layer and combines them with plan limits and payment-provider state. It must remain authoritative, transparent, and replay-safe.
@@ -22,7 +22,7 @@ Partner Aggregation	Usage grouped under white-label partner	Needed for reseller 
 Tenant Breakdown	Usage grouped per customer/sub-tenant	Transparency and reporting
 4. Coverage Priorities
  
-5. Billing Model for Talk-lee
+5. Billing Model for Talk-Lee
 Recommended billable dimensions:
 •	Base subscription fee
 •	Included minutes per billing cycle
@@ -72,7 +72,7 @@ Recommended provider: Stripe (or another hosted processor) for subscriptions, in
 •	Verify webhook signatures.
 •	Process webhooks idempotently.
 •	Store invoice IDs and payment status references.
-•	Map provider subscription state to Talk-lee billing state.
+•	Map provider subscription state to Talk-Lee billing state.
 10. Billing States
 Recommended states:
 •	active

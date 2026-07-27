@@ -1172,7 +1172,7 @@ export function CampaignPerformanceTable({
                                                             </div>
                                                             <div className="flex items-center justify-between">
                                                                 <div className="text-sm text-muted-foreground">Agent</div>
-                                                                <div className="text-xs font-semibold text-muted-foreground">Talky AI</div>
+                                                                <div className="text-xs font-semibold text-muted-foreground">Talk-Lee AI</div>
                                                             </div>
                                                         </div>
                                                     </div>
