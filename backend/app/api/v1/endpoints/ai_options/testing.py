@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.api.v1.dependencies import get_current_user
 
 from app.domain.models.ai_config import (
+    CEREBRAS_MODELS,
     GEMINI_MODELS,
     LLMTestRequest,
     LLMTestResponse,
@@ -64,26 +65,40 @@ async def test_llm(request: LLMTestRequest, current_user=Depends(get_current_use
     Returns:
         LLMTestResponse with response text and latency metrics
     """
-    gemini_model_ids = {m.id for m in GEMINI_MODELS}
-    is_gemini = request.model in gemini_model_ids
+    # Route the model id to its owning provider. Table-driven so adding a
+    # provider means one row here, not another branch — the previous two-way
+    # if/else silently sent anything unrecognised to Groq, which turned a
+    # typo'd model name into a confusing Groq 404 instead of a clear error.
+    _PROVIDER_BY_MODEL_ID: list[tuple[str, set[str], str]] = [
+        ("gemini", {m.id for m in GEMINI_MODELS}, "GEMINI_API_KEY"),
+        ("cerebras", {m.id for m in CEREBRAS_MODELS}, "CEREBRAS_API_KEY"),
+    ]
 
-    if is_gemini:
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Gemini API key not configured. Set GEMINI_API_KEY in .env."
-            )
-    else:
-        api_key = os.getenv("GROQ_API_KEY")
-        if not api_key:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Groq API key not configured"
-            )
+    provider_name = "groq"
+    env_var = "GROQ_API_KEY"
+    for candidate, model_ids, candidate_env in _PROVIDER_BY_MODEL_ID:
+        if request.model in model_ids:
+            provider_name, env_var = candidate, candidate_env
+            break
+
+    api_key = os.getenv(env_var)
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                f"{provider_name.capitalize()} API key not configured. "
+                f"Set {env_var} in .env."
+            ),
+        )
 
     try:
-        llm = GeminiLLMProvider() if is_gemini else GroqLLMProvider()
+        if provider_name == "gemini":
+            llm = GeminiLLMProvider()
+        elif provider_name == "cerebras":
+            from app.infrastructure.llm.cerebras import CerebrasLLMProvider
+            llm = CerebrasLLMProvider()
+        else:
+            llm = GroqLLMProvider()
         await llm.initialize({
             "api_key": api_key,
             "model": request.model,

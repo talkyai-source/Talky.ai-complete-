@@ -1116,6 +1116,7 @@ class VoiceOrchestrator:
     _LLM_API_KEY_ENV = {
         "groq": "GROQ_API_KEY",
         "gemini": "GEMINI_API_KEY",
+        "cerebras": "CEREBRAS_API_KEY",
     }
 
     # Default secondary model per provider for LLM_FAILOVER_ENABLED. Same-vendor

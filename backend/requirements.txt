@@ -47,6 +47,10 @@ deepgram-sdk==5.3.0
 
 # --- AI Providers: LLM ---
 groq==0.37.0
+# Cerebras Inference (wafer-scale, OpenAI-compatible). Optional at runtime:
+# llm/factory.py registers the provider inside a try/ImportError guard, so a
+# host without this installed simply won't offer Cerebras.
+cerebras-cloud-sdk==1.91.0
 # Google Gemini / Gemma — modern unified SDK. NOT the deprecated
 # `google-generativeai` package. Used by GeminiLLMProvider.
 google-genai==2.0.1

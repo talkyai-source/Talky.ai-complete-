@@ -1,15 +1,35 @@
-"""Per-tenant assistant model selection (Groq). Default + allowed-list + read helper."""
+"""Per-tenant assistant model selection. Default + allowed-list + read helper.
+
+Groq and Cerebras are both offered. Cerebras models appear only when
+CEREBRAS_API_KEY is configured — listing a model whose key is missing would
+let a user select something that then fails at request time.
+"""
 from __future__ import annotations
+import os
 from typing import Any
-from app.domain.models.ai_config import GROQ_MODELS
+from app.domain.models.ai_config import CEREBRAS_MODELS, GROQ_MODELS
 
 DEFAULT_ASSISTANT_MODEL = "llama-3.3-70b-versatile"
-ALLOWED_ASSISTANT_MODEL_IDS = {m.id for m in GROQ_MODELS}
+
+# Validation accepts Cerebras ids unconditionally, even when the key is unset.
+# Otherwise a tenant who had selected a Cerebras model would silently fall back
+# to the default the moment the key was rotated out — a confusing, invisible
+# downgrade. get_assistant_client raises a clear error instead.
+ALLOWED_ASSISTANT_MODEL_IDS = {m.id for m in GROQ_MODELS} | {
+    m.id for m in CEREBRAS_MODELS
+}
 
 
 def available_models() -> list[dict]:
-    """The selectable models for the dashboard assistant (id + display name)."""
-    return [{"id": m.id, "name": m.name} for m in GROQ_MODELS]
+    """The selectable models for the dashboard assistant (id + display name).
+
+    Cerebras entries are gated on the key being present, matching how the
+    AI-Options provider list gates Gemini and Cerebras.
+    """
+    models = [{"id": m.id, "name": m.name} for m in GROQ_MODELS]
+    if os.getenv("CEREBRAS_API_KEY"):
+        models.extend({"id": m.id, "name": m.name} for m in CEREBRAS_MODELS)
+    return models
 
 
 def normalize_model(model: str | None) -> str:

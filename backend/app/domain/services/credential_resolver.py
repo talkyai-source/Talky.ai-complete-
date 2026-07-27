@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 _ENV_VAR_BY_PROVIDER: dict[str, str] = {
     "groq": "GROQ_API_KEY",
     "gemini": "GEMINI_API_KEY",
+    "cerebras": "CEREBRAS_API_KEY",
     "deepgram": "DEEPGRAM_API_KEY",
     "cartesia": "CARTESIA_API_KEY",
     "elevenlabs": "ELEVENLABS_API_KEY",

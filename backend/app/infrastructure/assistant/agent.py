@@ -15,7 +15,7 @@ from langgraph.prebuilt import ToolNode
 # LangChain message classes for proper LangGraph compatibility
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from groq import AsyncGroq
+from app.infrastructure.assistant.llm_client import get_assistant_client
 
 import asyncpg  # migrated from db_client
 
@@ -135,7 +135,10 @@ async def agent_node(state: AgentState) -> Dict[str, Any]:
     """
     import os
     
-    groq_client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
+    # Resolve the model first — it selects the vendor. `adapt` rewrites the
+    # request for that vendor (token-limit param name, reasoning controls).
+    resolved_model = normalize_model(state.get("model"))
+    llm_client, adapt_args = get_assistant_client(resolved_model)
     
     # Build messages for Groq
     system_message = {
@@ -229,14 +232,14 @@ async def agent_node(state: AgentState) -> Dict[str, Any]:
     tools = GROQ_TOOL_SCHEMAS
     
     try:
-        response = await groq_client.chat.completions.create(
-            model=normalize_model(state.get("model")),
+        response = await llm_client.chat.completions.create(**adapt_args(dict(
+            model=resolved_model,
             messages=messages,
             tools=tools,
             tool_choice="auto",
             temperature=0.7,
-            max_tokens=2000
-        )
+            max_tokens=2000,
+        )))
         
         message = response.choices[0].message
         

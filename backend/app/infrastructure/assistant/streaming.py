@@ -31,7 +31,9 @@ from datetime import datetime
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from fastapi.encoders import jsonable_encoder
-from groq import APIError, AsyncGroq
+from groq import APIError
+
+from app.infrastructure.assistant.llm_client import get_assistant_client
 
 from app.infrastructure.assistant.agent import SYSTEM_PROMPT
 from app.infrastructure.assistant.tools.dispatch import dispatch_tool
@@ -335,10 +337,13 @@ async def stream_assistant_reply(
     model: Optional[str],
 ) -> AsyncIterator[Dict[str, Any]]:
     """Run the streaming ReAct loop and yield token/tool_start/final events."""
-    groq = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
     system_prompt = SYSTEM_PROMPT.format(current_time=datetime.utcnow().isoformat())
     convo = _build_convo(system_prompt, chat_messages)
     resolved_model = normalize_model(model)
+    # Client is chosen FROM the resolved model — it decides the vendor, so it
+    # must be resolved first. `adapt` rewrites completion args for that vendor
+    # (token-limit param name, reasoning controls).
+    llm, adapt = get_assistant_client(resolved_model)
     forced_email_args = _forced_read_emails_args(chat_messages)
     turn_tools = GROQ_TOOL_SCHEMAS
 
@@ -430,7 +435,7 @@ async def stream_assistant_reply(
                 if turn_tools:
                     completion_args["tools"] = turn_tools
                     completion_args["tool_choice"] = "auto"
-                stream = await groq.chat.completions.create(**completion_args)
+                stream = await llm.chat.completions.create(**adapt(completion_args))
 
                 async for chunk in stream:
                     if not chunk.choices:

@@ -44,3 +44,9 @@ try:
 except ImportError:
     pass  # google-genai not installed; Gemini provider unavailable
 
+try:
+    from app.infrastructure.llm.cerebras import CerebrasLLMProvider
+    LLMFactory.register("cerebras", CerebrasLLMProvider)
+except ImportError:
+    pass  # cerebras-cloud-sdk not installed; Cerebras provider unavailable
+

@@ -32,6 +32,16 @@ def _tc(index, id=None, name=None, arguments=None):
     )
 
 
+
+def _identity_adapt(args):
+    """Stand-in for the Groq args adapter, which is a no-op.
+
+    streaming.get_assistant_client returns (client, adapt); these tests drive
+    the Groq path, whose adapter passes completion args through unchanged.
+    """
+    return args
+
+
 class _FakeCompletions:
     """Returns a pre-baked async stream per create() call (one per turn)."""
 
@@ -80,7 +90,7 @@ _BASE = dict(
 class TestStreaming:
     async def test_text_turn_streams_tokens_then_final(self):
         turns = [[_chunk(content="Hel"), _chunk(content="lo"), _chunk(content="!")]]
-        with patch.object(streaming, "AsyncGroq", return_value=_fake_groq(turns)):
+        with patch.object(streaming, "get_assistant_client", return_value=(_fake_groq(turns), _identity_adapt)):
             events = await _collect(**_BASE)
 
         tokens = [e["delta"] for e in events if e["type"] == "token"]
@@ -100,7 +110,7 @@ class TestStreaming:
         turn2 = [_chunk(content="You have "), _chunk(content="2 campaigns.")]
         dispatch = AsyncMock(return_value={"campaigns": ["a", "b"]})
 
-        with patch.object(streaming, "AsyncGroq", return_value=_fake_groq([turn1, turn2])), \
+        with patch.object(streaming, "get_assistant_client", return_value=(_fake_groq([turn1, turn2]), _identity_adapt)), \
              patch.object(streaming, "dispatch_tool", dispatch):
             events = await _collect(**_BASE)
 
@@ -123,7 +133,7 @@ class TestStreaming:
                 completions=SimpleNamespace(create=AsyncMock(side_effect=RuntimeError("groq down")))
             )
         )
-        with patch.object(streaming, "AsyncGroq", return_value=boom):
+        with patch.object(streaming, "get_assistant_client", return_value=(boom, _identity_adapt)):
             events = await _collect(**_BASE)
 
         assert events and events[-1]["type"] == "error"
@@ -147,7 +157,7 @@ class TestStreaming:
             ],
         }
 
-        with patch.object(streaming, "AsyncGroq", return_value=groq), \
+        with patch.object(streaming, "get_assistant_client", return_value=(groq, _identity_adapt)), \
              patch.object(streaming, "dispatch_tool", dispatch):
             events = await _collect(**kwargs)
 
@@ -187,7 +197,7 @@ class TestStreaming:
             "chat_messages": [{"role": "user", "content": "read my last 5 emails"}],
         }
 
-        with patch.object(streaming, "AsyncGroq", return_value=groq), \
+        with patch.object(streaming, "get_assistant_client", return_value=(groq, _identity_adapt)), \
              patch.object(streaming, "dispatch_tool", dispatch):
             events = await _collect(**kwargs)
 
@@ -212,7 +222,7 @@ class TestStreaming:
             "chat_messages": [{"role": "user", "content": "read my last 5 emails"}],
         }
 
-        with patch.object(streaming, "AsyncGroq", return_value=groq), \
+        with patch.object(streaming, "get_assistant_client", return_value=(groq, _identity_adapt)), \
              patch.object(streaming, "dispatch_tool", dispatch):
             events = await _collect(**kwargs)
 
@@ -239,7 +249,7 @@ class TestStreaming:
             "chat_messages": [{"role": "user", "content": "read my last 5 emails"}],
         }
 
-        with patch.object(streaming, "AsyncGroq", return_value=groq), \
+        with patch.object(streaming, "get_assistant_client", return_value=(groq, _identity_adapt)), \
              patch.object(streaming, "dispatch_tool", dispatch):
             events = await _collect(**kwargs)
 

@@ -21,6 +21,7 @@ from app.domain.models.ai_config import (
     DEEPGRAM_MODELS,
     DEEPGRAM_TTS_MODELS,
     ELEVENLABS_TTS_MODELS,
+    CEREBRAS_MODELS,
     GEMINI_MODELS,
     GOOGLE_TTS_MODELS,
     GROQ_MODELS,
@@ -75,6 +76,9 @@ async def list_providers():
     if os.getenv("GEMINI_API_KEY"):
         llm_providers.append("gemini")
         llm_models.extend(model.model_dump() for model in GEMINI_MODELS)
+    if os.getenv("CEREBRAS_API_KEY"):
+        llm_providers.append("cerebras")
+        llm_models.extend(model.model_dump() for model in CEREBRAS_MODELS)
 
     return ProviderListResponse(
         llm={

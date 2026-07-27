@@ -18,6 +18,7 @@ from app.domain.models.ai_config import (
     AIProviderConfig,
     CARTESIA_MODELS,
     DEEPGRAM_TTS_MODELS,
+    CEREBRAS_MODELS,
     GEMINI_MODELS,
     GOOGLE_TTS_MODELS,
     GROQ_MODELS,
@@ -169,6 +170,7 @@ async def save_config(
     _llm_models_by_provider: dict[str, list[str]] = {
         "groq": [m.id for m in GROQ_MODELS],
         "gemini": [m.id for m in GEMINI_MODELS],
+        "cerebras": [m.id for m in CEREBRAS_MODELS],
     }
 
     if config.llm_provider not in _llm_models_by_provider:

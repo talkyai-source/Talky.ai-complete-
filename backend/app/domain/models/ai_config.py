@@ -13,6 +13,7 @@ class LLMProvider(str, Enum):
     """Available LLM providers"""
     GROQ = "groq"
     GEMINI = "gemini"
+    CEREBRAS = "cerebras"
 
 
 class STTProvider(str, Enum):
@@ -79,6 +80,38 @@ class GeminiModel(str, Enum):
     # matching GEMINI_MODELS entry to offer them; no other code change needed.
     # GEMMA_4_31B = "gemma-4-31b-it"
     # GEMMA_4_26B_A4B = "gemma-4-26b-a4b-it"
+
+
+class CerebrasModel(str, Enum):
+    """Models served by Cerebras Inference (wafer-scale, OpenAI-compatible API).
+
+    Reasoning control differs PER MODEL and the difference matters for voice —
+    see CEREBRAS_REASONING_NONE_SUPPORTED below. Source:
+    https://inference-docs.cerebras.ai/api-reference/chat-completions
+    """
+    # reasoning_effort: "none" (default) | low | medium | high  → fully off-able
+    GEMMA_4_31B = "gemma-4-31b"
+    # reasoning_effort: "none" disables reasoning entirely  → fully off-able
+    ZAI_GLM_4_7 = "zai-glm-4.7"
+    # reasoning_effort: low | medium (default) | high — "none" is NOT accepted,
+    # so thinking cannot be switched off, only minimised to "low".
+    GPT_OSS_120B = "gpt-oss-120b"
+
+
+# Models whose reasoning can be switched OFF outright via reasoning_effort="none".
+# Anything not listed here gets the lowest effort the model does accept, so the
+# provider never sends a value the API will reject.
+CEREBRAS_REASONING_NONE_SUPPORTED = {
+    CerebrasModel.GEMMA_4_31B.value,
+    CerebrasModel.ZAI_GLM_4_7.value,
+}
+
+# Lowest reasoning_effort each model actually accepts. Used when "none" is
+# unsupported so we still minimise thinking rather than silently leaving the
+# model on its default.
+CEREBRAS_MIN_REASONING_EFFORT = {
+    CerebrasModel.GPT_OSS_120B.value: "low",
+}
 
 
 class DeepgramModel(str, Enum):
@@ -403,6 +436,97 @@ GEMINI_MODELS = [
         context_window=1_048_576,
         is_preview=False,
         provider="gemini",
+    ),
+]
+
+
+# =============================================================================
+# CEREBRAS MODELS (Cerebras Inference — wafer-scale, OpenAI-compatible API)
+# =============================================================================
+# Added 2026-07-28. Why this provider exists in the menu at all: Groq's
+# free-tier cap is 8K TPM per ORGANISATION, and a single assistant turn is
+# ~8.7K tokens, so on Groq that request can never fit. Cerebras pay-as-you-go
+# is 500K–1M TPM per model — 60–125x the headroom.
+#
+# Rate limits (Developer / pay-as-you-go, per official docs):
+#   gpt-oss-120b   1M TPM   1K RPM
+#   zai-glm-4.7    500K TPM 500 RPM
+#   gemma-4-31b    500K TPM 300 RPM
+#
+# context_window is deliberately left None: the published rate-limit page does
+# not state per-model context windows, and guessing one would be worse than
+# showing nothing. Fill in only from a verified source.
+#
+# THINKING: reasoning support is NOT uniform, and the difference is the whole
+# reason CEREBRAS_REASONING_NONE_SUPPORTED exists. VERIFIED against the live API
+# 2026-07-28 — gpt-oss-120b returns a hard error for "none":
+#     "Unsupported reasoning effort: none. Supported values are 'low',
+#      'medium', and 'high'."  (type=invalid_request_error)
+# so the provider floors that model at "low". Confirmed effective via
+# usage.completion_tokens_details.reasoning_tokens:
+#     gemma-4-31b  + none -> 0   (thinking genuinely off)
+#     zai-glm-4.7  + none -> 0   (thinking genuinely off)
+#     gpt-oss-120b + low  -> 16  (cannot reach 0 by design)
+# See cerebras.py::_reasoning_effort.
+#
+# NOTE ON ERROR SHAPE: Cerebras returns errors FLAT — {"message","type","code"} —
+# not OpenAI's nested {"error":{...}}. Any hand-rolled probe that checks for an
+# "error" key will read a rejection as a success. The SDK raises properly, so
+# this only bites ad-hoc curl checks.
+#
+# MEASURED 2026-07-28, prod host, 5 samples, voice-shaped request (~9.5 KB
+# system prompt, 60-token reply). Full round-trip medians:
+#     zai-glm-4.7    192 ms   (179-234 — tight, the most consistent of the three)
+#     gpt-oss-120b   269 ms   (181-1077 — wide tail)
+#     gemma-4-31b    402 ms   (176-1067 — wide tail)
+# For comparison on the same harness: gemini-2.5-flash 186 ms, and Groq
+# llama-3.1-8b-instant ~90 ms TTFT.
+
+CEREBRAS_MODELS = [
+    ModelInfo(
+        id=CerebrasModel.GEMMA_4_31B.value,
+        name="Gemma 4 31B (Cerebras)",
+        description=(
+            "Google's Gemma 4 31B on wafer-scale hardware. Reasoning defaults "
+            "to OFF and we pin reasoning_effort='none' explicitly, so no "
+            "thinking tokens are spent before the first word — the behaviour "
+            "voice needs. 500K TPM / 300 RPM on pay-as-you-go."
+        ),
+        speed="402 ms median (measured) — high variance",
+        price="See console.cerebras.ai billing",
+        is_preview=False,
+        provider="cerebras",
+    ),
+    ModelInfo(
+        id=CerebrasModel.ZAI_GLM_4_7.value,
+        name="GLM 4.7 (Cerebras)",
+        description=(
+            "Z.ai GLM 4.7. Reasoning can be switched off outright "
+            "(reasoning_effort='none'), and we also set clear_thinking so "
+            "earlier turns' thinking is not replayed into the prompt — which "
+            "would otherwise grow every turn. 500K TPM / 500 RPM."
+        ),
+        speed="192 ms median (measured) — most consistent",
+        price="~$2.25 in / $2.75 out per 1M tokens",
+        is_preview=False,
+        provider="cerebras",
+    ),
+    ModelInfo(
+        id=CerebrasModel.GPT_OSS_120B.value,
+        name="GPT-OSS 120B (Cerebras)",
+        description=(
+            "Cerebras' flagship: highest limits (1M TPM / 1K RPM) and cheapest "
+            "(~$0.35 in / $0.75 out per 1M). ⚠ Thinking CANNOT be disabled on "
+            "this model — 'none' is rejected, so we floor it at 'low'. Also "
+            "note this codebase already found the gpt-oss family misbehaves on "
+            "conversational voice (see groq.py _is_gpt_oss_model); it is a "
+            "strong agentic/tool-calling model, so prefer it for the assistant "
+            "rather than for live calls."
+        ),
+        speed="269 ms median (measured)",
+        price="~$0.35 in / $0.75 out per 1M tokens",
+        is_preview=False,
+        provider="cerebras",
     ),
 ]
 
