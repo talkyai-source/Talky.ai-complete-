@@ -18,7 +18,18 @@
 # The four fingerprints below are listed so CI can go green ONCE ROTATION IS DONE.
 # If the password has not been rotated, delete this block and let CI stay red.
 # A red build is a bad day. A silently-ignored live credential is a bad quarter.
-0ffa7fa6978d9164e5d4a3b48fc4bf24f1554202:tmp_query.sh:generic-api-key:2
-0ffa7fa6978d9164e5d4a3b48fc4bf24f1554202:tmp_query2.sh:generic-api-key:2
-0ffa7fa6978d9164e5d4a3b48fc4bf24f1554202:tmp_query3.sh:generic-api-key:2
-0ffa7fa6978d9164e5d4a3b48fc4bf24f1554202:tmp_query4.sh:generic-api-key:2
+# 0ffa7fa6978d9164e5d4a3b48fc4bf24f1554202:tmp_query.sh:generic-api-key:2
+# 0ffa7fa6978d9164e5d4a3b48fc4bf24f1554202:tmp_query2.sh:generic-api-key:2
+# 0ffa7fa6978d9164e5d4a3b48fc4bf24f1554202:tmp_query3.sh:generic-api-key:2
+# 0ffa7fa6978d9164e5d4a3b48fc4bf24f1554202:tmp_query4.sh:generic-api-key:2
+
+# ^^^ The four fingerprints above are COMMENTED OUT DELIBERATELY.
+#
+# Uncommenting them makes the CI gitleaks job green, which unblocks the
+# Backend / Frontend / SQL-Schema / Docker jobs behind it. Do that ONLY once
+# the talkyai Postgres password has actually been rotated.
+#
+# Until then the red build IS the control. It is the only automated signal
+# that a live credential is sitting in public history, and suppressing it
+# while the credential is still live would be the worst of both worlds:
+# the leak persists and the alarm is off.

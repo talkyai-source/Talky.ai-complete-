@@ -855,11 +855,34 @@ class DialerWorker:
         result, surfacing as 'campaign is missing') or throw an
         invalid-UUID error when the GUC is unset.
 
-        Setting bypass_rls = on (without LOCAL, no transaction needed)
-        keeps the value alive for the connection's lifetime, including
-        after it's returned to the pool and reused. The nil-UUID sentinel
-        on app.current_tenant_id ensures the policy's UUID cast doesn't
-        throw even if some path evaluates the left side of the OR.
+        The nil-UUID sentinel on app.current_tenant_id ensures the policy's
+        UUID cast doesn't throw even if some path evaluates the left side
+        of the OR.
+
+        ⚠️ CORRECTION (TKT-009, F-24). This docstring previously claimed that
+        setting bypass_rls without LOCAL "keeps the value alive for the
+        connection's lifetime, including after it's returned to the pool and
+        reused." **That is false, and it was the stated rationale for the
+        pattern below.**
+
+        asyncpg's pool issues `RESET ALL` on release (pool.py -> Connection.reset),
+        so the GUC does NOT survive back into the pool. The bypass works here only
+        because it is re-issued on every acquire — not because it persists.
+
+        Two consequences worth keeping in mind before editing this:
+
+          * The value not persisting is what makes this SAFE today. Do not
+            "restore" persistence.
+          * Under PgBouncer transaction pooling this breaks differently: a bare
+            SET is its own implicit transaction, so it lands on one server
+            connection while the next statement may be routed to another. The
+            bypass would fail to apply AND pollute a connection other tenants use.
+
+        The correct form is `acquire_with_tenant(pool, None)` in
+        app/core/db_utils.py, which does exactly what this method intends,
+        transaction-scoped. Converting it is deliberately deferred — see
+        docs/v2/rls-set-audit.md. Until then this file is allowlisted in
+        tests/unit/test_rls_set_local_invariant.py.
         """
         pool = self._db_pool
         async with pool.acquire() as conn:

@@ -73,10 +73,16 @@ remembered.* It becomes the DOC-09 deliverable in Sprint 2; until then it accumu
 - **Not checked:** GitHub secret-scanning alerts returned 404 (feature not enabled or not accessible),
   so we do not know whether GitHub itself flagged this. Worth enabling either way.
 - **Done 2026-07-24:** the four `tmp_query*.sh` files are deleted from the working tree (nothing in
-  the codebase referenced them — only these documents did), and `.gitleaksignore` now carries the
-  four fingerprints with a header stating in terms that an entry means *"real leak, credential
-  rotated"* and **not** *"false positive"*, plus an instruction to delete the block and let CI stay
-  red if rotation has not happened.
+  the codebase referenced them — only these documents did), and `.gitleaksignore` documents the four
+  fingerprints.
+- **The fingerprints are COMMENTED OUT, deliberately.** They were briefly written active, which would
+  have turned the CI gitleaks job green — and with it the Backend/Frontend/SQL/Docker jobs behind it —
+  while the password is **not confirmed rotated**. That directly contradicted the file's own header.
+  Caught in review and reverted. **The red build is the control**: it is the only automated signal
+  that a live credential sits in public history, and switching it off while the credential is live
+  would leave the leak in place and the alarm off. Uncomment only after rotation.
+- Commit date note: `0ffa7fa6` is `2026-07-23T19:42Z` UTC, `2026-07-24T00:42+05:00` local. Both dates
+  appear across these documents; they are the same moment.
 - **⚠️ STILL OUTSTANDING:** **rotate the `talkyai` password**, and decide the repository's visibility.
   The credential remains in public history; deletion changed nothing about that.
 - **Owner:** repository owner. **Status:** files removed, **rotation and visibility decision open**.
@@ -134,12 +140,19 @@ remembered.* It becomes the DOC-09 deliverable in Sprint 2; until then it accumu
   environment via `${TRUNK_USER:?…}` / `${TRUNK_PASS:?…}`, which **fails closed** — the script aborts
   rather than provisioning a broken trunk. A banner above the block records the exposure window and
   states that rotation is still mandatory.
+- **⚠️ The code fix is INCOMPLETE — the same trunk identifier appears elsewhere in the repo.**
+  `setup-asterisk.sh` was the file the ticket named, so it was the only file fixed. A review found the
+  trunk username/DID digits also present at **`backend/app/infrastructure/telephony/pjsip_config_generator.py:127`**
+  (load-bearing explanatory comment, not a placeholder) and **`backend/app/core/errors.py:26`**.
+  Lower severity than the password half of the pair, but "code fixed" overstated it. Replace both with
+  a placeholder, or accept them explicitly once the credential is rotated.
 - **⚠️ STILL OUTSTANDING, and only the owner can do it:**
   1. **Rotate with the carrier.** Removing the literals from the working tree does **not** remove them
      from git history, and the history is public. Until rotation, the exposure is unchanged.
   2. **Request recent CDRs** to confirm no unauthorised origination has already occurred. Two months
      is long enough that "probably fine" is not an answer.
-- **Owner:** repository owner + carrier account holder. **Status:** code fixed, **rotation open**.
+- **Owner:** repository owner + carrier account holder. **Status:** partially fixed in code,
+  **rotation open, two further occurrences open**.
 
 ### 🟠 F-12 · Monitoring is not merely unscraped — it could not work as configured
 - Three non-unified config sets (root + `backend/deploy/prometheus/`, `infra/`,

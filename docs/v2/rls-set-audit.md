@@ -88,9 +88,26 @@ wrong, and the error was assuming a pooling behaviour rather than verifying it.
 
 ```
 pool.py:209                await self._con.reset(timeout=budget)
-connection.py:183-191      _reset_query = ['SELECT pg_advisory_unlock_all();',
-                                           'CLOSE ALL;', 'UNLISTEN *;', 'RESET ALL;']
+connection.py:1481-1500    async def reset(...)        -> executes the reset query
+connection.py:1661-1680    def _get_reset_query(...)   -> appends, conditionally:
+                             'SELECT pg_advisory_unlock_all();', 'CLOSE ALL;',
+                             'UNLISTEN *;', 'RESET ALL;'
 ```
+
+> **Citation corrected.** An earlier revision of this document cited
+> `connection.py:183-191` for the reset query. Those line numbers were wrong — they came from a
+> `sed`-filtered excerpt piped through `grep -n`, which renumbers from 1, so they were offsets into
+> the excerpt rather than into the file. `connection.py:183-191` is actually an unrelated docstring.
+> The conclusion was right and the `pool.py:209` citation was exact, but a fabricated-looking line
+> reference in the very section arguing "verify, don't assume" is exactly the failure it warns
+> against. Independently re-verified against the pinned `asyncpg==0.29.0` wheel.
+
+Further verification, beyond what the first correction claimed: **every release path that skips the
+reset destroys the physical connection instead of returning it** — `max_queries` exceeded, generation
+expired, or `reset()` itself failing all lead to `terminate()`. And `PoolAcquireContext.__aexit__`
+releases unconditionally, including when the body raised. So there is no path by which a connection
+carrying stale GUCs is handed to another borrower. `RESET ALL` does clear custom GUCs such as
+`app.bypass_rls` — they are ordinary runtime parameters.
 
 `RESET ALL` restores every session GUC to its default. So on the **native asyncpg pool**, a
 session-level `SET app.bypass_rls` does **not** survive to the next borrower.

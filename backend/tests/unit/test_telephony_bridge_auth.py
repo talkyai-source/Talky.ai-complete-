@@ -229,9 +229,17 @@ class _FakeContainer:
 
 
 def _patch_container(monkeypatch, row):
+    """Patch get_container to return ONE stable container, and hand back its pool.
+
+    Stable rather than freshly-constructed per call so a test can inspect what was
+    executed on the connection afterwards — and closer to reality, since the real
+    container is a singleton.
+    """
     import app.core.container as cmod
 
-    monkeypatch.setattr(cmod, "get_container", lambda: _FakeContainer(row))
+    container = _FakeContainer(row)
+    monkeypatch.setattr(cmod, "get_container", lambda: container)
+    return container.db_pool
 
 
 def _verify(ctx, call_id):
@@ -269,3 +277,25 @@ def test_ownership_unknown_call_is_403(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         _verify(CallerContext(is_internal=False, tenant_id="tenant-A"), "call-x")
     assert exc.value.status_code == 403
+
+
+def test_ownership_lookup_runs_the_bypass_inside_a_transaction(monkeypatch):
+    """
+    TKT-009 / F-25. `SET LOCAL` outside an explicit transaction is discarded before
+    the next statement, so the RLS bypass would never reach the ownership SELECT —
+    leaving a security check dependent on session state leaked by some other caller.
+
+    The fake records the transaction state of every statement; without this test
+    that recording is dead infrastructure and reverting the fix would go unnoticed.
+    """
+    pool = _patch_container(monkeypatch, {"tenant_id": "tenant-A"})
+    _verify(CallerContext(is_internal=False, tenant_id="tenant-A"), "call-x")
+
+    stmts = pool.conn.statements
+    bypass = next((s for s in stmts if "bypass_rls" in s[0]), None)
+    lookup = next((s for s in stmts if s[0] == "<fetchrow>"), None)
+
+    assert bypass is not None, f"no RLS bypass was issued; statements={stmts}"
+    assert lookup is not None, f"no ownership lookup was issued; statements={stmts}"
+    assert bypass[1] is True, "SET LOCAL app.bypass_rls must run inside a transaction"
+    assert lookup[1] is True, "the ownership SELECT must run in the same transaction"
