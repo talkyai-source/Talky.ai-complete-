@@ -30,7 +30,7 @@ import os
 from typing import AsyncIterator, Callable, Optional
 
 from app.domain.interfaces.stt_provider import STTProvider
-from app.domain.models.conversation import AudioChunk, TranscriptChunk
+from app.domain.models.conversation import AudioChunk, BargeInSignal, TranscriptChunk
 from app.infrastructure.providers.provider_concurrency import get_provider_guard
 from app.infrastructure.stt.transcript_compose import compose_turn_text
 
@@ -190,11 +190,35 @@ class DeepgramNovaSTTProvider(STTProvider):
 
                             if kind == "speech_started":
                                 # Acoustic barge-in: user started speaking.
+                                #
+                                # Two things must happen, and Nova used to do only
+                                # the first (TKT-008 parity audit, divergence #8):
+                                #
+                                #  1. the direct callback, which stops TTS playback
+                                #     immediately; and
+                                #  2. a BargeInSignal on the transcript stream, which
+                                #     is what TranscriptHandler routes to
+                                #     handle_barge_in() — the path that cancels the
+                                #     in-flight LLM task, rolls back speculative
+                                #     conversation history, and annotates the last
+                                #     assistant turn "[interrupted by caller]".
+                                #
+                                # Emitting only (1) meant that under Nova the agent
+                                # went quiet but kept generating, and the history
+                                # kept text the caller never heard. Flux emits both;
+                                # downstream turn logic must not have to know which
+                                # provider produced the chunk.
+                                #
+                                # text="" is correct here, not a placeholder: Nova's
+                                # SpeechStarted is a pure VAD event with no transcript
+                                # yet. BargeInSignal documents this exact case, and
+                                # TranscriptHandler already reads it defensively.
                                 if on_barge_in is not None:
                                     try:
                                         on_barge_in()
                                     except Exception as exc:  # noqa: BLE001
                                         logger.debug("nova on_barge_in error: %s", exc)
+                                yield BargeInSignal(text="")
                                 continue
 
                             if kind == "utterance_end":
