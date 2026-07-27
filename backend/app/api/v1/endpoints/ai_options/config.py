@@ -273,6 +273,10 @@ async def save_config(
     SLOW_MODELS: set[str] = set()
     PREVIEW_MODELS = {
         "qwen/qwen3.6-27b",
+        # Superseded by the GA "gemini-3.1-flash-lite"; still selectable so
+        # already-saved tenants can write their config. Warn on it so nobody
+        # newly adopts a preview id that Google can retire.
+        "gemini-3.1-flash-lite-preview",
     }
 
     latency_warnings: list[str] = []

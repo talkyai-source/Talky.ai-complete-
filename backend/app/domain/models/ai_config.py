@@ -47,19 +47,36 @@ class GroqModel(str, Enum):
 
 
 class GeminiModel(str, Enum):
-    """Available Gemini / Gemma models served via the Google AI Studio API."""
+    """Available Gemini / Gemma models served via the Google AI Studio API.
+
+    Menu refreshed 2026-07-28 against a live ListModels call on the production
+    GEMINI_API_KEY, so every id below is confirmed to exist and to support
+    generateContent — not copied from docs.
+    """
     GEMINI_2_5_FLASH = "gemini-2.5-flash"
     # Released March 2026 (developer preview). ~2.5× faster TTFT and ~64%
-    # higher output throughput than 2.5 Flash — the right default for
-    # latency-critical voice paths like the Ask AI popup.
-    GEMINI_3_1_FLASH_LITE = "gemini-3.1-flash-lite-preview"
-    # gemini-3.5-flash removed from the menu 2026-06-25: it NATO-spells emails
-    # (S for Sierra…) 3/3 even after the read-back guardrail fix — a model-level
-    # quirk that prompt rules don't beat, voice-unsafe for core-field capture.
+    # higher output throughput than 2.5 Flash.
+    # KEPT even though `gemini-3.1-flash-lite` is now GA: a tenant still has
+    # this exact id stored in tenant_ai_configs, and config.py rejects any
+    # llm_model outside this menu — dropping it would lock that tenant out of
+    # saving their AI Options. Remove only after migrating that row.
+    GEMINI_3_1_FLASH_LITE_PREVIEW = "gemini-3.1-flash-lite-preview"
+    # Same model, now generally available. Prefer this id for new configs.
+    GEMINI_3_1_FLASH_LITE = "gemini-3.1-flash-lite"
+    # GA. Google: "fastest, most cost-effective 3.5 model for high-throughput
+    # execution" — the lowest-latency Gemini currently offered.
+    GEMINI_3_5_FLASH_LITE = "gemini-3.5-flash-lite"
+    # GA, newest Flash. Google: balances speed with intelligence, fewer output
+    # tokens and fewer tool calls than 3.5 Flash, at a lower price.
+    GEMINI_3_6_FLASH = "gemini-3.6-flash"
+    # gemini-3.5-flash itself stays OFF the menu (removed 2026-06-25): it
+    # NATO-spells emails (S for Sierra…) 3/3 even after the read-back guardrail
+    # fix — a model-level quirk prompt rules don't beat, voice-unsafe for
+    # core-field capture. See the warning on the 3.5 Flash-Lite entry below.
     # The provider still handles any gemini-3.x name if one is passed.
-    # Reserved for Gemma 4 — uncomment and add a matching GEMINI_MODELS entry
-    # once Google AI Studio exposes them. No other code change needed; the
-    # GeminiLLMProvider already handles arbitrary model names.
+    # Gemma 4 is now live on AI Studio (verified 2026-07-28: gemma-4-31b-it and
+    # gemma-4-26b-a4b-it both returned by ListModels). Uncomment plus add a
+    # matching GEMINI_MODELS entry to offer them; no other code change needed.
     # GEMMA_4_31B = "gemma-4-31b-it"
     # GEMMA_4_26B_A4B = "gemma-4-26b-a4b-it"
 
@@ -280,34 +297,109 @@ GROQ_MODELS = [
 # =============================================================================
 # GEMINI MODELS (Google AI Studio)
 # =============================================================================
-# Gemini 2.5 Flash ships now. Slots for Gemma 4 (31B dense, 26B A4B MoE) stay
-# commented out in GeminiModel above — uncomment and add an entry here when
-# Google AI Studio exposes those endpoints.
+# Ordered FASTEST-FIRST by measurement, not by version number.
+# Gemma 4 (31B dense, 26B A4B MoE) is available on AI Studio but not offered
+# here yet; see the commented enum members above.
+#
+# ── MEASURED 2026-07-28, from the prod host, 5 samples per model ────────────
+# Request shaped like a real voice turn: ~9.5 KB system prompt (~2.4k tokens),
+# 60-token reply, thinkingLevel=minimal. Figures are full round-trip medians.
+#
+#   gemini-2.5-flash        186 ms   ← fastest by ~3×
+#   gemini-3.5-flash-lite   552 ms
+#   gemini-3.1-flash-lite   570 ms
+#   gemini-3.6-flash        980 ms   ← newest, and the slowest of the four
+#
+# This INVERTS both Google's marketing ("3.5 Flash-Lite is the fastest 3.5
+# model") and the claim previously written here ("3.1 Flash-Lite is ~2.5×
+# faster TTFT than 2.5 Flash" — measured false, it is ~3× slower). The likely
+# cause is documented in gemini.py::_is_gemini_3: the 3.x family cannot fully
+# disable thinking (thinking_level floors at "minimal"), while 2.5 honours
+# thinking_budget=0 and genuinely turns it off. Newer ≠ faster here.
+#
+# CAVEATS — re-measure before treating as settled:
+#  - Round-trip to completion, NOT streaming TTFT. Thinking precedes the first
+#    token, so the ranking should hold for TTFT, but that is inference.
+#  - Single region, single hour, n=5. Google may shift capacity.
+#  - Still slower than the Groq default: llama-3.1-8b-instant runs ~90 ms TTFT.
+#    None of these entries is "faster than Groq".
 
 GEMINI_MODELS = [
     ModelInfo(
-        id=GeminiModel.GEMINI_3_1_FLASH_LITE.value,
-        name="Gemini 3.1 Flash-Lite (preview)",
+        id=GeminiModel.GEMINI_2_5_FLASH.value,
+        name="Gemini 2.5 Flash — fastest",
         description=(
-            "Fastest Gemini for real-time voice. ~2.5× faster time-to-first-token "
-            "and ~64% higher throughput than 2.5 Flash. Released March 2026, "
-            "still in developer preview — best choice for latency-critical paths."
+            "FASTEST Gemini on this stack: 186 ms median round-trip on a "
+            "voice-shaped request, ~3× quicker than every 3.x model measured "
+            "2026-07-28. It is the oldest of the four and still the quickest, "
+            "because 2.5 honours thinking_budget=0 and genuinely disables "
+            "thinking, while the 3.x family floors at thinking_level=minimal. "
+            "GA, ~1M-token context, 65K max output, free-tier grounding."
         ),
-        speed="~380 tokens/s",
+        speed="186 ms median (measured)",
+        price="$0.30 input / $2.50 output per 1M tokens",
+        context_window=1_048_576,
+        is_preview=False,
+        provider="gemini",
+    ),
+    ModelInfo(
+        id=GeminiModel.GEMINI_3_5_FLASH_LITE.value,
+        name="Gemini 3.5 Flash-Lite",
+        description=(
+            "Google's stated fastest/cheapest 3.5 model, GA. Measured here at "
+            "552 ms median — quickest of the 3.x family but ~3× slower than "
+            "2.5 Flash. ⚠ NOT cleared for live voice: its sibling "
+            "gemini-3.5-flash NATO-spells email addresses (S for Sierra…) and "
+            "that quirk has not been retested on Flash-Lite. Run the email "
+            "read-back check before putting it on calls."
+        ),
+        speed="552 ms median (measured)",
+        price="Lowest of the 3.5 family",
+        context_window=1_048_576,
+        is_preview=False,
+        provider="gemini",
+    ),
+    ModelInfo(
+        id=GeminiModel.GEMINI_3_1_FLASH_LITE.value,
+        name="Gemini 3.1 Flash-Lite",
+        description=(
+            "Now generally available (was preview). Measured at 570 ms median. "
+            "The Gemini this stack has the most production evidence for — it "
+            "is what ran the 2026-07-24 session. Prefer this id over the "
+            "legacy '-preview' one below."
+        ),
+        speed="570 ms median (measured)",
+        price="Lower than 2.5 Flash",
+        context_window=1_048_576,
+        is_preview=False,
+        provider="gemini",
+    ),
+    ModelInfo(
+        id=GeminiModel.GEMINI_3_1_FLASH_LITE_PREVIEW.value,
+        name="Gemini 3.1 Flash-Lite (preview — legacy id)",
+        description=(
+            "Superseded by the GA 'gemini-3.1-flash-lite' above; same model. "
+            "Kept only so tenants already saved on this id can still write "
+            "their AI Options config. Prefer the GA id for anything new."
+        ),
+        speed="570 ms median (measured)",
         price="Lower than 2.5 Flash",
         context_window=1_048_576,
         is_preview=True,
         provider="gemini",
     ),
     ModelInfo(
-        id=GeminiModel.GEMINI_2_5_FLASH.value,
-        name="Gemini 2.5 Flash",
+        id=GeminiModel.GEMINI_3_6_FLASH.value,
+        name="Gemini 3.6 Flash — newest",
         description=(
-            "Google's stable Flash model. ~1M-token context, 65K max output. "
-            "Slower than 3.1 Flash-Lite but GA and supports free-tier grounding."
+            "Newest Flash, GA, and the SLOWEST of the four here: 980 ms "
+            "median, ~5× Gemini 2.5 Flash. Emits fewer output tokens and "
+            "fewer tool calls than 3.5 Flash at a lower price, and is the "
+            "strongest Gemini for agentic and multimodal work. Choose it when "
+            "answer quality outweighs latency — not for real-time voice."
         ),
-        speed="~250 tokens/s",
-        price="$0.30 input / $2.50 output per 1M tokens",
+        speed="980 ms median (measured)",
+        price="Below 3.5 Flash",
         context_window=1_048_576,
         is_preview=False,
         provider="gemini",
