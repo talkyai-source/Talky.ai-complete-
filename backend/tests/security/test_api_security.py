@@ -37,8 +37,31 @@ class TestDefaultLimits:
 
     def test_ip_limit_defaults(self):
         config = DEFAULT_LIMITS[RateLimitTier.IP]
-        assert config.requests == 100
+        # Raised from 100 on 2026-07-28: a single dashboard user measured
+        # 76-225 req/min in production (it polls /calls/live every ~2s), so the
+        # old cap rejected a THIRD of one user's traffic and the frontend
+        # rendered it as "service down".
+        assert config.requests == 600
         assert config.window == 60
+        # Short block by design — the sliding window already throttles. The
+        # previous 300s block turned a one-request overshoot into a five-minute
+        # blackout for everyone sharing that IP.
+        assert config.block_duration == 60
+
+    def test_ip_limits_are_env_tunable(self, monkeypatch):
+        """Operators must be able to retune this without a code deploy — the
+        previous hardcoded value caused a user-visible outage.
+
+        Calls the builder directly rather than reloading the module: a reload
+        would rebuild the limiter singleton and break TestSingleton.
+        """
+        from app.core.security.api_security import build_ip_limit_config
+
+        monkeypatch.setenv("RATE_LIMIT_IP_REQUESTS", "1234")
+        monkeypatch.setenv("RATE_LIMIT_IP_BLOCK_SECONDS", "7")
+        cfg = build_ip_limit_config()
+        assert cfg.requests == 1234
+        assert cfg.block_duration == 7
 
     def test_user_limit_defaults(self):
         config = DEFAULT_LIMITS[RateLimitTier.USER]
@@ -96,7 +119,7 @@ class TestAPIRateLimiter:
     async def test_allow_under_limit(self, mock_redis):
         """Requests under the limit should be allowed."""
         mock_redis.exists.return_value = 0  # Not blocked
-        mock_redis.zcard.return_value = 5  # 5 requests (under 100 limit)
+        mock_redis.zcard.return_value = 5  # well under the IP limit
         limiter = APIRateLimiter(redis_client=mock_redis)
         action, meta = await limiter.check_rate_limit(
             RateLimitTier.IP, "192.168.1.1"
@@ -108,7 +131,9 @@ class TestAPIRateLimiter:
     async def test_block_when_over_limit(self, mock_redis):
         """Requests over the limit should be blocked."""
         mock_redis.exists.return_value = 0
-        mock_redis.zcard.return_value = 100  # At limit
+        # Derived from config, not hardcoded: this assertion is about
+        # "at the limit", not about any particular number.
+        mock_redis.zcard.return_value = DEFAULT_LIMITS[RateLimitTier.IP].requests
         limiter = APIRateLimiter(redis_client=mock_redis)
         action, meta = await limiter.check_rate_limit(
             RateLimitTier.IP, "192.168.1.1"
@@ -120,7 +145,9 @@ class TestAPIRateLimiter:
     async def test_throttle_near_limit(self, mock_redis):
         """Requests within 10% of limit should be throttled."""
         mock_redis.exists.return_value = 0
-        mock_redis.zcard.return_value = 91  # 91% of 100
+        mock_redis.zcard.return_value = int(
+            DEFAULT_LIMITS[RateLimitTier.IP].requests * 0.91
+        )  # 91% of the limit
         limiter = APIRateLimiter(redis_client=mock_redis)
         action, meta = await limiter.check_rate_limit(
             RateLimitTier.IP, "192.168.1.1"

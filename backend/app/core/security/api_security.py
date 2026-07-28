@@ -13,6 +13,7 @@ Implements tiered rate limiting:
 
 import hashlib
 import logging
+import os
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -47,13 +48,42 @@ class RateLimitConfig:
 
 
 # Default configurations
-DEFAULT_LIMITS: Dict[RateLimitTier, RateLimitConfig] = {
-    RateLimitTier.IP: RateLimitConfig(
+#
+# IP TIER SIZING (corrected 2026-07-28 — this tier was taking the dashboard
+# down). The old value was 100 req/min with a 300 s block, but a single
+# logged-in dashboard user measured 76-225 req/min in production: the UI polls
+# /calls/live every ~2 s, /calls/issues every ~3 s, plus /events and the usual
+# page traffic. One user with a couple of tabs open therefore exceeded the cap
+# on their own, and 963 of that IP's 2,863 requests (a THIRD) were rejected.
+#
+# The 300 s block made it far worse than a throttle: exceeding the window by
+# one request blacked the IP out for five minutes, which the frontend renders
+# as "service down". It also punished everyone behind the same office NAT.
+#
+# This tier's job is to stop unauthenticated abuse before auth runs — it is a
+# floor, not the real quota (authenticated traffic is additionally governed by
+# the USER and TENANT tiers below). 600/min = 10 req/s sustained: comfortable
+# for a real UI, still orders of magnitude below a scraper or credential-stuffer.
+# Both values are env-tunable so this can be adjusted without a code deploy.
+def build_ip_limit_config() -> RateLimitConfig:
+    """IP-tier config, read from env at call time.
+
+    A function rather than an inline literal so it can be tested by
+    monkeypatching env — reloading the module instead would rebuild the
+    module-level limiter singleton and break unrelated tests.
+    """
+    return RateLimitConfig(
         tier=RateLimitTier.IP,
-        requests=100,      # 100 requests
-        window=60,         # per minute
-        block_duration=300  # 5 min block
-    ),
+        requests=int(os.getenv("RATE_LIMIT_IP_REQUESTS", "600")),
+        window=int(os.getenv("RATE_LIMIT_IP_WINDOW_SECONDS", "60")),
+        # Short by design: the sliding window already throttles. A long block
+        # converts a transient burst into an outage.
+        block_duration=int(os.getenv("RATE_LIMIT_IP_BLOCK_SECONDS", "60")),
+    )
+
+
+DEFAULT_LIMITS: Dict[RateLimitTier, RateLimitConfig] = {
+    RateLimitTier.IP: build_ip_limit_config(),
     RateLimitTier.USER: RateLimitConfig(
         tier=RateLimitTier.USER,
         requests=1000,     # 1000 requests

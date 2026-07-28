@@ -143,7 +143,15 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
             _is_internal = _valid_internal_token(request)
         except Exception:
             _is_internal = False
-        if request.method == "OPTIONS" or _is_loopback or _is_internal:
+        # Liveness/readiness probes are never rate-limited. Throttling a health
+        # endpoint is self-defeating: the 429 makes monitoring (and any load
+        # balancer) mark a perfectly healthy service as DOWN, turning a traffic
+        # spike into a reported outage. Observed 2026-07-28 — /api/v1/health was
+        # 429'd 51 times in two hours while the service was fine.
+        _path = request.url.path
+        _is_health = _path.endswith("/health") or _path.endswith("/ready")
+
+        if request.method == "OPTIONS" or _is_loopback or _is_internal or _is_health:
             return await call_next(request)
 
         try:
