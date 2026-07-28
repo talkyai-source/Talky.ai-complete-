@@ -23,6 +23,8 @@ from app.core.security.recovery import (
 from app.core.security.sessions import create_session, hash_session_token
 from app.core.security.totp import decrypt_totp_secret, verify_totp_code
 
+from app.api.v1.endpoints.auth._shared import issue_cookie_auth
+
 from ._shared import GENERIC_MFA_ERROR, _get_client_ip, _get_user_agent, _set_session_cookie
 from .challenge import (
     MFA_VERIFY_MAX_ATTEMPTS,
@@ -266,6 +268,35 @@ async def verify_mfa_challenge(
     )
 
     _set_session_cookie(response, raw_session_token)
+
+    # Issue the httpOnly access/refresh cookie pair, exactly as the non-MFA
+    # login path does (auth/login.py). Its own docstring says it is "called by
+    # every successful authentication path" — but this path did not call it,
+    # so MFA users received ONLY the legacy talky_sid session cookie plus a
+    # body JWT, and never got talky_at.
+    #
+    # That broke every surface that authenticates by cookie rather than by
+    # Authorization header — most visibly WebSockets, because a browser cannot
+    # attach headers to a WS upgrade. Symptom (observed 2026-07-28): the
+    # campaign "Test agent" connected and then logged
+    # "campaign_test_ws: no auth frame within 5s" for MFA users on every
+    # attempt, while non-MFA users on the same build worked. It was 100%
+    # reproducible and scoped exactly to accounts with mfa_enabled.
+    #
+    # A fresh connection is acquired because the one used above is scoped to
+    # the transaction block that created the session and is already released.
+    async with db_client.pool.acquire() as cookie_conn:
+        await issue_cookie_auth(
+            response,
+            cookie_conn,
+            user_id=user_id,
+            email=user_row["email"],
+            role=user_row["role"],
+            tenant_id=tenant_id,
+            session_id=session_id,
+            ip=ip,
+            user_agent=ua,
+        )
 
     logger.info("MFA challenge verified — full session issued for user=%s", user_id)
 
