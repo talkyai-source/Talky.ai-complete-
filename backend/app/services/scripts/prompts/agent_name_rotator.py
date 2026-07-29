@@ -84,6 +84,113 @@ def _inferred_gender(name: str) -> Optional[str]:
         return None
 
 
+def _positively_conflicts(
+    name: str, gmap: Mapping[str, str], voice_gender: str
+) -> bool:
+    """True only when this name has a KNOWN gender that differs from the voice.
+
+    An explicit operator tag wins over inference. A name we cannot place
+    ("Alex", "Sam", "Jordan", anything not in the built-in lists) returns
+    False — unknown is not a conflict, and treating it as one would let a
+    perfectly usable unisex name be thrown away.
+    """
+    tag = str(gmap.get(str(name).strip().lower(), "")).strip().lower()
+    gender = tag if tag in ("male", "female") else _inferred_gender(name)
+    return gender in ("male", "female") and gender != voice_gender
+
+
+def pool_wholly_conflicts(
+    pool: Sequence[str],
+    genders: Optional[Mapping[str, str]],
+    voice_gender: Optional[str],
+) -> bool:
+    """True when EVERY configured name conflicts with the voice BY INFERENCE.
+
+    This is the narrow case where the operator's pool cannot be satisfied at
+    all: a male voice whose only names are female, or vice versa. If even one
+    name matches — or is merely unknown ("Sam", "Jordan") — this is False and
+    ``pick_agent_name_for_voice`` can do its job within the pool.
+
+    AN EXPLICIT GENDER TAG ANYWHERE IN THE POOL DISABLES THIS ENTIRELY.
+    Tagging is a deliberate act: the operator opened the gender control and
+    made a choice, so a tagged name that disagrees with the voice is an
+    intentional casting decision, not the accident this exists to correct.
+    The failure being fixed is specifically the UNTAGGED one — campaign forms
+    never sent tags, so ``agent_name_genders`` is null on real campaigns (it
+    was null on 50847cc9, which is how a male London voice ended up saying
+    "this is Sarah"). Honouring tags also keeps the operator's escape hatch
+    total: tag the name and we never touch it, whichever way you tag it.
+    """
+    vg = (voice_gender or "").strip().lower()
+    if vg not in ("male", "female"):
+        return False
+    names = [n for n in (pool or []) if n and str(n).strip()]
+    if not names:
+        return False
+    gmap = {
+        str(k).strip().lower(): str(v)
+        for k, v in (genders or {}).items()
+    }
+    # Any deliberate tag on any pool name → hands off the whole pool.
+    for name in names:
+        tag = str(gmap.get(str(name).strip().lower(), "")).strip().lower()
+        if tag in ("male", "female"):
+            return False
+    return all(_positively_conflicts(n, gmap, vg) for n in names)
+
+
+def name_is_referenced_in(text: Optional[str], pool: Sequence[str]) -> bool:
+    """True if any configured name appears in the operator's own script text.
+
+    This is the guard against re-creating the 2026-07-09 regression: a campaign
+    whose ROLE/GOAL text says "You are James" must keep using James, because
+    substituting a built-in name would produce a prompt that contradicts
+    itself — the agent introducing itself as one name while its instructions
+    assert another. Matching is on the FIRST TOKEN, case-insensitive, which is
+    what a script actually writes ("You are Sarah", not "You are Sarah jones").
+    """
+    if not text:
+        return False
+    haystack = str(text).lower()
+    for name in pool or []:
+        parts = str(name or "").strip().split()
+        if not parts:
+            continue
+        first = parts[0].strip().lower()
+        # Bounded check so "Sam" does not match "same" / "sample".
+        if len(first) < 2:
+            continue
+        import re as _re
+
+        if _re.search(rf"\b{_re.escape(first)}\b", haystack):
+            return True
+    return False
+
+
+def substitute_name_for_voice(
+    voice_gender: Optional[str], *, seed: Optional[str] = None
+) -> Optional[str]:
+    """A built-in name matching the voice, for use when the pool cannot be.
+
+    Deterministic when ``seed`` is given — pass a stable per-call/per-campaign
+    value so a retried call does not introduce itself with a different name
+    than the attempt before it.
+    """
+    vg = (voice_gender or "").strip().lower()
+    if vg not in ("male", "female"):
+        return None
+    try:
+        from app.domain.services.global_ai_config import FEMALE_NAMES, MALE_NAMES
+
+        options = list(MALE_NAMES if vg == "male" else FEMALE_NAMES)
+    except Exception:  # pragma: no cover - defensive
+        return None
+    if not options:
+        return None
+    chooser = random.Random(seed) if seed is not None else random
+    return chooser.choice(sorted(options))
+
+
 def pick_agent_name(pool: Sequence[str], *, seed: Optional[str] = None) -> str:
     """Return one agent name from the pool.
 

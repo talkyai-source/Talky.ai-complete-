@@ -152,6 +152,73 @@ def _warn_on_agent_name_voice_mismatch(
         pass
 
 
+def resolve_name_against_voice(
+    chosen: Optional[str],
+    pool,
+    genders: Optional[dict],
+    voice_gender: Optional[str],
+    *,
+    script_text: Optional[str] = None,
+    seed: Optional[str] = None,
+) -> tuple[Optional[str], Optional[str]]:
+    """Final say on the agent name once the voice is known.
+
+    Returns ``(name, substituted_from)``. ``substituted_from`` is None in the
+    normal case and carries the discarded name when a substitution happened.
+
+    THE POOL STILL WINS in every case except one: the voice gender is KNOWN and
+    EVERY configured name positively conflicts with it. That is the "male voice
+    introducing itself as Sarah" failure, and it is unfixable inside the pool —
+    there is no name in it that can be spoken by this voice without sounding
+    wrong to the callee, so preferring the pool preserves nothing.
+
+    Two guards keep this from re-creating the regression that made the pool
+    authoritative in the first place (2026-07-09: the agent said "Emily" while
+    the campaign's own instructions said "You are James" — a self-contradicting
+    prompt):
+
+      * a name that is merely UNKNOWN (unisex — "Alex", "Sam") is not a
+        conflict, so a pool containing one is always satisfiable and is never
+        overridden; and
+      * if any configured name appears in the operator's own ROLE/GOAL text, we
+        do NOT substitute — their script names the agent, so changing it would
+        produce exactly that contradiction. We warn instead and leave it alone.
+
+    Escape hatch for a deliberate cross-gender name: tag it explicitly in
+    ``agent_name_genders`` with the voice's gender. An explicit tag is taken as
+    the operator's considered choice, so it no longer counts as a conflict and
+    nothing is substituted.
+    """
+    if not pool or not chosen:
+        return chosen, None
+    try:
+        from app.services.scripts.prompts.agent_name_rotator import (
+            name_is_referenced_in,
+            pool_wholly_conflicts,
+            substitute_name_for_voice,
+        )
+
+        if not pool_wholly_conflicts(pool, genders, voice_gender):
+            return chosen, None
+        if name_is_referenced_in(script_text, pool):
+            logger.warning(
+                "agent_name_conflict_kept campaign_script_names_the_agent — "
+                "every configured name conflicts with the %s voice, but the "
+                "campaign's own instructions reference one of them, so it is "
+                "KEPT to avoid a self-contradicting prompt. Fix the campaign: "
+                "change the voice, or the names, or tag the name's gender.",
+                voice_gender,
+            )
+            return chosen, None
+        replacement = substitute_name_for_voice(voice_gender, seed=seed)
+        if not replacement or replacement == chosen:
+            return chosen, None
+        return replacement, chosen
+    except Exception as exc:  # pragma: no cover - never break a live call
+        logger.debug("resolve_name_against_voice failed: %s", exc)
+        return chosen, None
+
+
 def _fallback_agent_name(voice_gender: Optional[str]) -> str:
     """Built-in agent name for a campaign with no configured name pool.
 
@@ -793,20 +860,43 @@ def build_telephony_session_config(
     # campaign "Test agent" WS, and campaigns with no durable job name).
     _voice_gender = _resolve_voice_gender_safe(tts_voice_id)
 
+    # Seed the substitution on the campaign so a retry, or a second call on the
+    # same campaign, does not introduce itself with a different name than the
+    # attempt before it.
+    _name_seed = _campaign_id(campaign) or None
+    _script_text = script_config.get("additional_instructions")
+
     if agent_name_override:
         agent_name = agent_name_override
         # The dialer picked this name when the job was created and it is
-        # durable across retries, so we do NOT re-roll it here. But if it
-        # disagrees with the voice, say so loudly — this is the "male voice
-        # says 'this is Sarah'" failure, and it is otherwise silent.
-        _warn_on_agent_name_voice_mismatch(
-            agent_name, _agent_name_genders, _voice_gender,
-            campaign_id=_campaign_id(campaign), voice_id=tts_voice_id,
+        # durable across retries, so we do NOT re-roll it here — unless it is
+        # unusable with this voice, which the durable choice cannot know about
+        # (the voice can be changed on the campaign after the job was created,
+        # which is exactly what happened on campaign 50847cc9).
+        agent_name, _substituted_from = resolve_name_against_voice(
+            agent_name, agent_names_pool, _agent_name_genders, _voice_gender,
+            script_text=_script_text, seed=_name_seed,
         )
+        if _substituted_from:
+            logger.warning(
+                "agent_name_substituted campaign=%s %r -> %r — every configured "
+                "name is %s and the voice %s is %s, so the durable job name was "
+                "overridden for this call",
+                _campaign_id(campaign), _substituted_from, agent_name,
+                "female" if _voice_gender == "male" else "male",
+                tts_voice_id, _voice_gender,
+            )
+        else:
+            # Still mismatched but deliberately kept (see resolve_name_against_
+            # voice) — say so loudly; it is otherwise silent.
+            _warn_on_agent_name_voice_mismatch(
+                agent_name, _agent_name_genders, _voice_gender,
+                campaign_id=_campaign_id(campaign), voice_id=tts_voice_id,
+            )
     elif agent_names_pool:
         try:
-            # THE POOL ALWAYS WINS: gender only orders the preference inside
-            # the operator's configured names, it never invents a new one.
+            # The pool orders the preference; gender never invents a name while
+            # the pool still contains a usable one.
             agent_name = pick_agent_name_for_voice(
                 agent_names_pool, _agent_name_genders, _voice_gender,
             )
@@ -817,10 +907,22 @@ def build_telephony_session_config(
             )
             agent_name = _fallback_agent_name(_voice_gender)
         else:
-            _warn_on_agent_name_voice_mismatch(
-                agent_name, _agent_name_genders, _voice_gender,
-                campaign_id=_campaign_id(campaign), voice_id=tts_voice_id,
+            agent_name, _substituted_from = resolve_name_against_voice(
+                agent_name, agent_names_pool, _agent_name_genders, _voice_gender,
+                script_text=_script_text, seed=_name_seed,
             )
+            if _substituted_from:
+                logger.warning(
+                    "agent_name_substituted campaign=%s %r -> %r — no configured "
+                    "name is usable with the %s voice %s",
+                    _campaign_id(campaign), _substituted_from, agent_name,
+                    _voice_gender, tts_voice_id,
+                )
+            else:
+                _warn_on_agent_name_voice_mismatch(
+                    agent_name, _agent_name_genders, _voice_gender,
+                    campaign_id=_campaign_id(campaign), voice_id=tts_voice_id,
+                )
     else:
         agent_name = _fallback_agent_name(_voice_gender)
 

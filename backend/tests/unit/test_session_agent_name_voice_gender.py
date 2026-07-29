@@ -140,3 +140,129 @@ def test_unknown_voice_gender_is_never_flagged():
 def test_explicit_tag_beats_inference():
     # Operator says "Sarah" is male in their market → trust them, no warning.
     assert agent_name_voice_mismatch("Sarah", {"Sarah": "male"}, "male") is None
+
+
+# ---------------------------------------------------------------------------
+# When the pool CANNOT satisfy the voice at all
+# ---------------------------------------------------------------------------
+# Reported after a live call on campaign 50847cc9 (2026-07-29): the campaign's
+# only name was "Sarah jones" and the effective voice was Petros (male,
+# british), so every call opened with a male London voice saying "this is
+# Sarah". Warning-only was not enough — the operator wants the name taken
+# "accordingly".
+#
+# The narrow rule: substitute a matching built-in name ONLY when the voice
+# gender is known AND every configured name positively conflicts. That is the
+# one case the pool cannot be satisfied, so preferring it preserves nothing.
+#
+# Both guards below exist to protect the 2026-07-09 decision that made the pool
+# authoritative (the agent said "Emily" while the campaign script said "You are
+# James" — a self-contradicting prompt).
+
+import pytest
+
+from app.domain.services.telephony_session_config import resolve_name_against_voice
+from app.services.scripts.prompts.agent_name_rotator import (
+    name_is_referenced_in,
+    pool_wholly_conflicts,
+    substitute_name_for_voice,
+)
+
+
+@pytest.mark.parametrize(
+    "pool,genders,voice_gender,expected",
+    [
+        (["Sarah jones"], None, "male", True),      # the reported case
+        (["Sarah", "Emily"], None, "male", True),   # every name conflicts
+        (["Sarah", "James"], None, "male", False),  # one name fits
+        (["Sarah", "Alex"], None, "male", False),   # unknown != conflict
+        (["Sarah"], {"Sarah": "male"}, "male", False),  # explicit tag wins
+        (["Sarah"], {"Sarah": "female"}, "male", False),  # tagged AGAINST the
+        # voice is still hands-off: tagging is a deliberate casting choice.
+        (["Sarah"], None, None, False),             # unknown voice -> never
+        ([], None, "male", False),                  # empty pool
+    ],
+)
+def test_pool_wholly_conflicts(pool, genders, voice_gender, expected):
+    assert pool_wholly_conflicts(pool, genders, voice_gender) is expected
+
+
+def test_unisex_name_is_never_treated_as_a_conflict():
+    """"Alex"/"Sam" are usable with either voice. Treating unknown as a
+    conflict would discard a perfectly good configured name."""
+    for name in ("Sam", "Jordan", "Riley", "Casey", "Taylor"):
+        assert pool_wholly_conflicts([name], None, "male") is False
+        assert pool_wholly_conflicts([name], None, "female") is False
+
+
+def test_substitution_happens_and_is_deterministic():
+    """A retry must not introduce itself with a different name than the
+    attempt before it."""
+    first = resolve_name_against_voice(
+        "Sarah jones", ["Sarah jones"], None, "male", seed="campaign-1"
+    )
+    assert first[1] == "Sarah jones", "should report what it replaced"
+    assert first[0] != "Sarah jones"
+    for _ in range(5):
+        assert resolve_name_against_voice(
+            "Sarah jones", ["Sarah jones"], None, "male", seed="campaign-1"
+        ) == first
+
+
+def test_substituted_name_matches_the_voice():
+    name, replaced = resolve_name_against_voice(
+        "Sarah jones", ["Sarah jones"], None, "male", seed="c"
+    )
+    assert replaced and name in _MALE_AGENT_NAMES + list(
+        __import__(
+            "app.domain.services.global_ai_config", fromlist=["MALE_NAMES"]
+        ).MALE_NAMES
+    )
+
+
+def test_operator_script_naming_the_agent_blocks_substitution():
+    """THE regression guard. If the campaign's own ROLE/GOAL text names the
+    agent, substituting would contradict it — keep the name, warn instead."""
+    name, replaced = resolve_name_against_voice(
+        "Sarah jones", ["Sarah jones"], None, "male",
+        script_text="You are Sarah, a friendly estimator for All-state.",
+        seed="c",
+    )
+    assert (name, replaced) == ("Sarah jones", None)
+
+
+def test_script_match_is_word_bounded():
+    """"Sam" must not be considered referenced by the word "same"."""
+    assert name_is_referenced_in("we do the same thing every time", ["Sam"]) is False
+    assert name_is_referenced_in("You are Sam, an estimator", ["Sam"]) is True
+    assert name_is_referenced_in(None, ["Sam"]) is False
+
+
+@pytest.mark.parametrize(
+    "chosen,pool,genders,voice_gender,script",
+    [
+        ("James", ["Sarah", "James"], None, "male", None),   # pool satisfiable
+        ("Sarah", ["Sarah"], {"Sarah": "male"}, "male", None),  # tagged
+        ("Sarah", ["Sarah"], None, None, None),              # voice unknown
+        ("Sarah", ["Sarah"], None, "female", None),          # already matches
+    ],
+)
+def test_no_substitution_when_not_wholly_conflicting(
+    chosen, pool, genders, voice_gender, script
+):
+    assert resolve_name_against_voice(
+        chosen, pool, genders, voice_gender, script_text=script, seed="c"
+    ) == (chosen, None)
+
+
+def test_substitute_name_for_voice_refuses_unknown_gender():
+    assert substitute_name_for_voice(None) is None
+    assert substitute_name_for_voice("neutral") is None
+    assert substitute_name_for_voice("male", seed="s") is not None
+
+
+def test_resolver_never_raises_on_garbage():
+    """It runs on every live call — a bad pool must degrade, never throw."""
+    for pool in (None, [], [""], [None], ["Sarah", None]):
+        name, _ = resolve_name_against_voice("Sarah", pool, None, "male", seed="c")
+        assert isinstance(name, str)
