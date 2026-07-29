@@ -12,6 +12,13 @@ and what most campaigns pick). On answer:
 Barge-in: if the callee speaks during playback, only the spoken portion of the
 greeting is persisted to ``conversation_history`` so the LLM does not echo the
 unspoken tail on the next turn.
+
+Recording disclosure (2026-07-28): when the tenant's recording policy requires
+an announcement, the notice is spoken as the FIRST audio on the call — before
+the greeting, and therefore before the callee has said anything that could be
+retained. What actually happened is reported to the disclosure ledger in
+``recording_policy_service``; ``RecordingService.save_and_link`` refuses to
+retain audio for a call whose required notice was not delivered.
 """
 from __future__ import annotations
 
@@ -43,6 +50,178 @@ def _has_real_opener_content(text) -> bool:
     if not stripped:
         return False
     return stripped.lower() not in _BARE_FILLER_OPENERS
+
+
+def _disclosure_call_ids(voice_session) -> list:
+    """Every id this call is known by, for the disclosure ledger.
+
+    ``voice_session.call_id`` is the voice-session UUID; ``_dialer_call_id``
+    is ``calls.id``, stamped by ``bind_telephony_call`` at answer time (which
+    runs before the greeting task is spawned). The recording teardown path
+    saves under whichever of the two it managed to resolve, so both are
+    registered.
+
+    ``call_session.provider_call_id`` is deliberately NOT used: on the
+    telephony path it is the literal ``"{session_type}-session"``, identical
+    across concurrent calls, so keying on it would let one call's disclosure
+    satisfy another call's consent check.
+    """
+    session = getattr(voice_session, "call_session", None)
+    candidates = [
+        getattr(voice_session, "call_id", None),
+        getattr(voice_session, "_dialer_call_id", None),
+        getattr(session, "call_id", None) if session is not None else None,
+    ]
+    seen, ids = set(), []
+    for value in candidates:
+        if not value:
+            continue
+        text = str(value)
+        if text not in seen:
+            seen.add(text)
+            ids.append(text)
+    return ids
+
+
+def _disclosure_tenant_id(voice_session):
+    """Authoritative tenant for the recording policy lookup.
+
+    Same priority order as the recording teardown path's
+    ``_session_tenant_uuid`` (telephony/recording.py), so the policy that
+    gates the upload is the policy we announced under.
+    """
+    config = getattr(voice_session, "config", None)
+    session = getattr(voice_session, "call_session", None)
+    for value in (
+        getattr(voice_session, "_dialer_tenant_id", None),
+        getattr(config, "tenant_id", None) if config is not None else None,
+        getattr(session, "tenant_id", None) if session is not None else None,
+    ):
+        if value:
+            return str(value)
+    return None
+
+
+async def _speak_recording_disclosure(voice_session) -> None:
+    """Speak the recording notice, if the tenant's policy requires one.
+
+    Must run BEFORE any greeting audio: a disclosure delivered after the
+    callee has already spoken is worthless — their words were captured
+    before they were told. Being the first audio on the call also means
+    the notice itself sits at the head of the stored WAV, so the
+    recording carries its own proof of consent.
+
+    Always records an outcome in the disclosure ledger, and NEVER raises:
+    a failure here must not drop the call, it must drop the RECORDING.
+    The call itself is perfectly lawful without a recording; the
+    recording is not lawful without the notice. Every failure path
+    therefore lands on DISCLOSURE_FAILED, which
+    ``RecordingService.save_and_link`` treats as "do not retain".
+    """
+    from app.domain.models.conversation import Message, MessageRole
+    from app.domain.services.recording_policy_service import (
+        DISCLOSURE_FAILED,
+        DISCLOSURE_NOT_REQUIRED,
+        DISCLOSURE_SPOKEN,
+        RecordingPolicyService,
+        record_disclosure_state,
+        spoken_disclosure_text,
+    )
+
+    call_ids = _disclosure_call_ids(voice_session)
+    call_id = voice_session.call_id
+    session = voice_session.call_session
+
+    try:
+        from app.core.container import get_container
+
+        container = get_container()
+        db_pool = (
+            getattr(container, "db_pool", None)
+            if getattr(container, "is_initialized", False)
+            else None
+        )
+        if db_pool is None:
+            # No pool = no way to know what this tenant's policy is. We
+            # cannot prove an announcement was unnecessary, so we must
+            # assume it was required and was not given.
+            record_disclosure_state(DISCLOSURE_FAILED, *call_ids)
+            logger.error(
+                "recording_disclosure_unavailable call_id=%s — no DB pool to "
+                "resolve the recording policy; recording will be suppressed",
+                call_id[:12],
+            )
+            return
+
+        tenant_id = _disclosure_tenant_id(voice_session)
+        if not tenant_id:
+            record_disclosure_state(DISCLOSURE_FAILED, *call_ids)
+            logger.error(
+                "recording_disclosure_no_tenant call_id=%s — cannot resolve "
+                "the recording policy; recording will be suppressed",
+                call_id[:12],
+            )
+            return
+
+        # destination_country_code is deliberately left None. It is the
+        # ONLY input that can turn the announcement off for a two-party
+        # tenant, and we cannot derive it safely from the dialled number:
+        # the policy's two-party list is written in US STATE terms
+        # ("US-CA"), which no E.164 prefix resolves to. Guessing "US"
+        # against a "US-CA" list returns "no announcement needed" and
+        # would record a Californian in silence. Passing None means
+        # "unknown" -> announce, and it matches what save_and_link passes
+        # when it re-runs the same decision, so the two ends never
+        # disagree about whether a notice was owed.
+        decision = await RecordingPolicyService(db_pool).decide(
+            tenant_id=tenant_id,
+        )
+        text = spoken_disclosure_text(decision)
+        if not text:
+            record_disclosure_state(DISCLOSURE_NOT_REQUIRED, *call_ids)
+            logger.info(
+                "recording_disclosure_not_required call_id=%s reason=%s",
+                call_id[:12], getattr(decision, "reason", "-"),
+            )
+            return
+
+        logger.info(
+            "recording_disclosure_speaking call_id=%s reason=%s text=%r",
+            call_id[:12], getattr(decision, "reason", "-"), text[:80],
+        )
+        interrupted = await voice_session.pipeline.synthesize_and_send_audio(
+            session, text, websocket=None
+        )
+        if interrupted:
+            # The callee talked over the notice, so we cannot claim they
+            # heard it. (The echo-immunity window armed by the caller
+            # already absorbs the "Hello?" that answering produces, so
+            # this is a genuine interruption, not pickup noise.)
+            record_disclosure_state(DISCLOSURE_FAILED, *call_ids)
+            logger.warning(
+                "recording_disclosure_interrupted call_id=%s — notice was cut "
+                "short; recording will be suppressed",
+                call_id[:12],
+            )
+            return
+
+        record_disclosure_state(DISCLOSURE_SPOKEN, *call_ids)
+        # Put it in history so the LLM knows the notice was already given
+        # and does not repeat it (or contradict it) on the first turn.
+        try:
+            session.conversation_history.append(
+                Message(role=MessageRole.ASSISTANT, content=text)
+            )
+        except Exception:
+            pass
+        logger.info("recording_disclosure_spoken call_id=%s", call_id[:12])
+    except Exception as exc:
+        record_disclosure_state(DISCLOSURE_FAILED, *call_ids)
+        logger.error(
+            "recording_disclosure_failed call_id=%s err=%s — recording will "
+            "be suppressed for this call",
+            call_id[:12], exc, exc_info=True,
+        )
 
 
 async def _send_outbound_greeting(voice_session) -> None:
@@ -97,6 +276,16 @@ async def _send_outbound_greeting(voice_session) -> None:
         # Clear any barge_in_event that fired when the callee answered ("Hello?")
         # so the greeting is not immediately suppressed before a single chunk plays.
         voice_session.pipeline.clear_barge_in_event(session)
+
+        # ── Recording disclosure — FIRST audio on the call ──────────────
+        # Ordering is the whole point: this runs before the pre-synth fast
+        # path and before the slow-path TTS, so the notice reaches the
+        # callee before the opener invites them to say anything. It sits
+        # inside the echo-immunity window armed above, so the "Hello?"
+        # that answering produces cannot cut it short. A failure here only
+        # suppresses the recording (see _speak_recording_disclosure) — the
+        # greeting below still plays and the call continues normally.
+        await _speak_recording_disclosure(voice_session)
 
         # ── Fast path: pre-synthesized greeting from ringing phase ──────
         presynth_chunks = getattr(voice_session, "_presynth_greeting_audio", None)

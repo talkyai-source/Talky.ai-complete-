@@ -293,12 +293,17 @@ class RecordingService:
         Never raises — storage failures should not break call flow.
 
         T0.4 — Consults `tenant_recording_policy` and returns None when
-        recording is disabled or consent was not collected. The caller
-        (voice pipeline) is responsible for playing the announcement
-        BEFORE the call starts — this gate only blocks the upload when
-        the policy says recording is off. If no policy row exists for
-        the tenant, the safe default is "record with two-party consent"
-        — recording proceeds.
+        recording is disabled. If no policy row exists for the tenant,
+        the safe default is two-party consent (announcement required).
+
+        2026-07-28 — the announcement is now ENFORCED, not just computed.
+        The greeting path (telephony/modes/agent_first.py) speaks the
+        notice as the first audio on the call and reports the outcome to
+        the disclosure ledger in `recording_policy_service`; this method
+        refuses to retain audio for a call whose required notice was not
+        delivered. Previously `announcement_required` was advisory, no
+        caller ever played it, and two-party-consent tenants were
+        recorded without the callee ever being told.
         """
         if not buffer or buffer.total_bytes == 0:
             logger.warning(f"No audio to save for call {call_id}")
@@ -308,6 +313,7 @@ class RecordingService:
         try:
             from app.domain.services.recording_policy_service import (
                 RecordingPolicyService,
+                consent_satisfied,
             )
             policy = RecordingPolicyService(self._db)
             decision = await policy.decide(
@@ -317,6 +323,25 @@ class RecordingService:
             if not decision.should_record:
                 logger.info(
                     "recording_skipped_by_policy call=%s tenant=%s reason=%s",
+                    call_id, tenant_id, decision.reason,
+                )
+                return None
+
+            # The policy demanded a spoken notice. Retain the audio only
+            # if that notice actually reached the callee on this call.
+            # Fails CLOSED — an unknown call counts as "not disclosed".
+            # Keeping audio captured without the required notice is
+            # unlawful in the UK/EU and in two-party-consent US states;
+            # dropping it costs the tenant a QA artefact. A tenant that
+            # is genuinely in a one-party jurisdiction should set
+            # `default_consent_mode = 'one_party'` on its
+            # `tenant_recording_policy` row — that is the lawful way to
+            # record without announcing, and it makes this gate a no-op.
+            if not consent_satisfied(decision, call_id):
+                logger.error(
+                    "recording_suppressed_no_disclosure call=%s tenant=%s "
+                    "reason=%s — policy requires a spoken recording notice "
+                    "and none was delivered on this call; audio discarded",
                     call_id, tenant_id, decision.reason,
                 )
                 return None
@@ -401,6 +426,30 @@ class RecordingService:
 
         Returns the recording UUID string on success, None on failure.
         """
+        # This method is also called DIRECTLY by the telephony teardown
+        # fallback (telephony/recording.py), which bypasses save_and_link
+        # and therefore bypasses the policy gate. Honour a disclosure
+        # failure we positively know about, so that bypass cannot write a
+        # recording the greeting path already determined must not be kept.
+        # Only a POSITIVE failure blocks here: an unknown call falls
+        # through unchanged, because this method has no policy decision of
+        # its own and must not turn "no information" into a silent
+        # behaviour change for callers that never consulted the policy.
+        try:
+            from app.domain.services.recording_policy_service import (
+                disclosure_known_failed,
+            )
+            if disclosure_known_failed(call_id):
+                logger.error(
+                    "recording_suppressed_no_disclosure call=%s tenant=%s "
+                    "— required recording notice was not delivered; "
+                    "local save skipped",
+                    call_id, tenant_id,
+                )
+                return None
+        except Exception as exc:
+            logger.debug("disclosure ledger check failed for %s: %s", call_id, exc)
+
         recordings_dir = os.getenv("LOCAL_RECORDINGS_DIR", "./recordings")
         abs_dir = os.path.abspath(recordings_dir)
         filepath = os.path.join(abs_dir, f"{call_id}.wav")
