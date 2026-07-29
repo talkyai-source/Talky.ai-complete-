@@ -44,6 +44,38 @@ _RULES: list[tuple[str, IssueAdvice]] = [
         "The campaign isn't running, so queued calls are skipped. Press Start to begin dialing.",
         "warning", "campaign",
     )),
+    ("campaign_not_runnable", IssueAdvice(
+        "Campaign is not running",
+        "The campaign isn't running, so queued calls are skipped. Press Start to begin dialing.",
+        "warning", "campaign",
+    )),
+    # TESTING MODE must be recognised BEFORE the schedule rules below — its
+    # raw code mentions the schedule, but it is the opposite of a block: the
+    # calling window was deliberately bypassed and the operator has to see it.
+    ("testing_mode_schedule_bypassed", IssueAdvice(
+        "TESTING MODE: schedule bypassed",
+        "Calls are going out even though the current time is outside the configured calling hours, because the testing override is switched on. This is for testing only — turn it off before real calling, since calling-hour rules exist for legal/compliance reasons.",
+        "warning", "schedule",
+    )),
+    # Day-of-week gate. The raw dialer code is `calling_not_allowed_on_Tue`
+    # (from CallingRules.is_within_time_window) — it contains neither
+    # "time_window" nor "day", so before this rule existed it fell through to
+    # the generic fallback card and the user was told nothing useful.
+    ("calling_not_allowed_on", IssueAdvice(
+        "Outside calling days",
+        "Today isn't one of this campaign's allowed calling days. It will dial automatically on the next allowed day, or add today to the calling days in the campaign's calling rules.",
+        "warning", "schedule",
+    )),
+    ("schedule_day_not_allowed", IssueAdvice(
+        "Outside calling days",
+        "Today isn't one of this campaign's allowed calling days. It will dial automatically on the next allowed day, or add today to the calling days in the campaign's calling rules.",
+        "warning", "schedule",
+    )),
+    ("schedule_outside_window", IssueAdvice(
+        "Outside calling hours",
+        "The current time is outside this campaign's allowed calling window. It will dial automatically when the window opens, or widen the window in the campaign's calling rules.",
+        "warning", "schedule",
+    )),
     ("outside_time_window", IssueAdvice(
         "Outside calling hours",
         "The current time is outside this campaign's allowed calling window. It will dial automatically when the window opens, or widen the window in the campaign's calling rules.",

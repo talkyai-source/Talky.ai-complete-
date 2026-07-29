@@ -225,6 +225,10 @@ class DialerWorker:
         # next one.
         self._last_bridge_http_status = None
         self._last_bridge_body = None
+        # Set only when the opt-in TESTING schedule override let this job past
+        # the calling-window gate; read by `_create_call_record` so the call
+        # is stamped as placed-under-override and stays auditable afterwards.
+        self._schedule_override = None
 
         try:
             campaign_status = await self._get_campaign_status(job.campaign_id)
@@ -236,6 +240,7 @@ class DialerWorker:
                     job.campaign_id,
                     campaign_status or "missing",
                 )
+                await self._publish_block(job, reason)
                 await self.queue_service.mark_skipped(job.job_id, reason="campaign_stopped")
                 await self._update_job_status(job.job_id, JobStatus.SKIPPED, error=reason)
                 return
@@ -248,6 +253,7 @@ class DialerWorker:
                     "Skipping job %s — tenant %s is out of plan minutes",
                     job.job_id, job.tenant_id,
                 )
+                await self._publish_block(job, "out_of_minutes")
                 await self._emit_out_of_minutes_event(job)
                 await self.queue_service.mark_skipped(job.job_id, reason="out_of_minutes")
                 await self._update_job_status(job.job_id, JobStatus.SKIPPED, error="out_of_minutes")
@@ -300,11 +306,69 @@ class DialerWorker:
                 enforce_window=not ignore_schedule,
             )
             
+            # 3b. TESTING OVERRIDE — explicit, opt-in, OFF by default.
+            #
+            # ⚠️ COMPLIANCE: calling-hour/day rules exist for legal reasons
+            # (UK Ofcom permitted hours, TCPA-style local-time windows). The
+            # gate above still RUNS and still produced its normal structured
+            # reason; nothing here widens the default schedule for anyone.
+            # This only lets an operator who deliberately switched the
+            # override on dial anyway — loudly (WARNING per call), visibly
+            # (surfaced on the campaign's reason channel as "TESTING MODE:
+            # schedule bypassed"), and auditably (stamped on the call record
+            # below). Reversible by unsetting the switch. See
+            # app/domain/services/dialer/testing_override.py.
+            self._schedule_override = None
+            if not can_call:
+                from app.domain.services.dialer.block_reasons import (
+                    SCHEDULE_BLOCK_CODES, classify, describe_schedule,
+                    testing_override_notice,
+                )
+                from app.domain.services.dialer.testing_override import (
+                    log_override_used, schedule_override_source,
+                )
+
+                blocked = classify(reason, rules=rules)
+                override_source = (
+                    schedule_override_source(campaign_cfg)
+                    if blocked.code in SCHEDULE_BLOCK_CODES else None
+                )
+                if override_source:
+                    log_override_used(
+                        source=override_source,
+                        campaign_id=job.campaign_id,
+                        tenant_id=job.tenant_id,
+                        phone_number=job.phone_number,
+                        blocked_reason=reason,
+                        schedule=describe_schedule(rules),
+                    )
+                    self._schedule_override = {
+                        "source": override_source,
+                        "blocked_reason": reason,
+                        "schedule": describe_schedule(rules),
+                    }
+                    # Surface the override through the SAME channel that shows
+                    # blocking reasons so it can never be invisible.
+                    await self._publish_reason(
+                        job,
+                        testing_override_notice(
+                            rules, source=override_source, raw_reason=reason,
+                        ),
+                    )
+                    can_call = True
+
             if not can_call:
                 logger.info(f"Cannot call now: {reason}")
 
-                # Calculate delay until next window or retry
-                if "time_window" in reason or "day" in reason.lower():
+                # Calculate delay until next window or retry.
+                # Matched on the STRUCTURED code, not substrings: the raw
+                # day-gate reason is "calling_not_allowed_on_Tue", which
+                # contains neither "time_window" nor "day", so the old
+                # substring test missed it and fell through to the generic
+                # 300s retry — a campaign blocked on a non-calling day
+                # re-woke every 5 minutes for days instead of sleeping until
+                # the window actually opened.
+                if blocked.code in SCHEDULE_BLOCK_CODES:
                     delay = self.rules_engine.get_delay_until_next_window(rules)
                     logger.info(
                         f"Outside calling window (tz={rules.timezone}, "
@@ -324,6 +388,7 @@ class DialerWorker:
                     # Re-enqueue directly into the tenant queue for immediate pickup
                     job.attempt_number += 1
                     await self.queue_service.enqueue_job(job)
+                    await self._publish_reason(job, blocked)
                     await self._update_job_status(job.job_id, JobStatus.SKIPPED, reason=reason)
                     return
                 elif "daily_lead_cap" in reason:
@@ -344,6 +409,11 @@ class DialerWorker:
                 else:
                     delay = 300  # 5 minutes for other reasons (concurrent limit, etc.)
 
+                # Re-classify with the delay we actually chose so the reason
+                # carries a truthful next_eligible_at for the gates whose next
+                # eligible moment is only known here.
+                blocked = classify(reason, rules=rules, retry_after_seconds=delay)
+                await self._publish_reason(job, blocked)
                 await self.queue_service.schedule_retry(job, delay_seconds=delay)
                 await self._update_job_status(job.job_id, JobStatus.SKIPPED, reason=reason)
                 return
@@ -368,6 +438,7 @@ class DialerWorker:
                     "Campaign %s went %s during job %s validation — skipping originate",
                     job.campaign_id, campaign_status or "missing", job.job_id,
                 )
+                await self._publish_block(job, "campaign_stopped_before_originate")
                 await self.queue_service.mark_skipped(job.job_id, reason="campaign_stopped")
                 await self._update_job_status(
                     job.job_id, JobStatus.SKIPPED, error="campaign_stopped_before_originate",
@@ -393,6 +464,9 @@ class DialerWorker:
                         "deferring job %s", job.campaign_id, inflight, batch_size,
                         job.job_id,
                     )
+                    await self._publish_block(
+                        job, "batch_capacity", rules=rules, retry_after_seconds=5,
+                    )
                     await self.queue_service.schedule_retry(job, delay_seconds=5)
                     await self._update_job_status(
                         job.job_id, JobStatus.RETRY_SCHEDULED, reason="batch_capacity",
@@ -416,6 +490,9 @@ class DialerWorker:
                         "job %s by %ds", job.campaign_id, since_last, call_gap,
                         job.job_id, wait,
                     )
+                    await self._publish_block(
+                        job, "call_gap", rules=rules, retry_after_seconds=wait,
+                    )
                     await self.queue_service.schedule_retry(job, delay_seconds=wait)
                     await self._update_job_status(
                         job.job_id, JobStatus.RETRY_SCHEDULED, reason="call_gap",
@@ -436,6 +513,9 @@ class DialerWorker:
                 logger.debug(
                     "tenant_gap: tenant %s dialed recently — deferring job %s by %ds",
                     job.tenant_id, job.job_id, _tenant_wait,
+                )
+                await self._publish_block(
+                    job, "tenant_gap", rules=rules, retry_after_seconds=_tenant_wait,
                 )
                 await self.queue_service.schedule_retry(job, delay_seconds=_tenant_wait)
                 await self._update_job_status(
@@ -471,15 +551,22 @@ class DialerWorker:
 
                 if guard_decision == "block":
                     # Block the call - mark job as blocked, don't retry
+                    await self._publish_block(job, "call_guard_blocked", rules=rules)
                     await self._update_job_status(job.job_id, JobStatus.BLOCKED, reason="call_guard_blocked")
                     return
                 elif guard_decision == "throttle":
                     # Throttle - reschedule with delay
+                    await self._publish_block(
+                        job, "call_guard_throttled", rules=rules, retry_after_seconds=60,
+                    )
                     await self.queue_service.schedule_retry(job, delay_seconds=60)
                     await self._update_job_status(job.job_id, JobStatus.SKIPPED, reason="call_guard_throttled")
                     return
                 elif guard_decision == "queue":
                     # Queue - reschedule to retry later
+                    await self._publish_block(
+                        job, "call_guard_queued", rules=rules, retry_after_seconds=30,
+                    )
                     await self.queue_service.schedule_retry(job, delay_seconds=30)
                     await self._update_job_status(job.job_id, JobStatus.SKIPPED, reason="call_guard_queued")
                     return
@@ -497,6 +584,10 @@ class DialerWorker:
                     # Nothing dialed — give the tenant slot back so the other
                     # campaign isn't paced against a failed attempt.
                     await release_tenant_dial_slot(self._redis, job.tenant_id)
+                    await self._publish_block(
+                        job, "voice_pipeline_unavailable", rules=rules,
+                        retry_after_seconds=60,
+                    )
                     await self._update_lead_status(job.lead_id, "pending")
                     await self.queue_service.schedule_retry(job, delay_seconds=60)
                     await self._update_job_status(
@@ -565,6 +656,20 @@ class DialerWorker:
                     # so the FIRST call of a run never waits out the gap; the gap
                     # only spaces the calls that follow.
                     await self._mark_campaign_dialed(job.campaign_id)
+                    # A call went out ⇒ the campaign is no longer blocked, so
+                    # drop the stored reason rather than let the UI keep
+                    # showing a stale blocker. EXCEPTION: when the testing
+                    # override is what let this call through, the "TESTING
+                    # MODE: schedule bypassed" notice must STAY visible for
+                    # exactly as long as calls are going out under it.
+                    if not self._schedule_override:
+                        try:
+                            from app.domain.services.dialer.block_state import (
+                                clear_block_reason,
+                            )
+                            await clear_block_reason(self._redis, job.campaign_id)
+                        except Exception as exc:  # noqa: BLE001
+                            logger.debug("block_state clear failed: %s", exc)
                     logger.info(
                         "Call initiated: internal_call_id=%s provider_call_id=%s job=%s",
                         internal_call_id,
@@ -681,6 +786,56 @@ class DialerWorker:
     # Reset on every job to avoid leaking state across attempts.
     _last_bridge_http_status: Optional[int] = None
     _last_bridge_body: Optional[str] = None
+
+    # Populated per-job when the explicit TESTING schedule override permitted a
+    # dial the calling-window gate would otherwise have blocked. None on every
+    # normal call — the override is OFF by default (see
+    # app/domain/services/dialer/testing_override.py).
+    _schedule_override: Optional[Dict[str, Any]] = None
+
+    # ---------------------------------------------------------------- reasons
+    async def _publish_reason(self, job: DialerJob, reason) -> None:
+        """Publish an already-built :class:`BlockReason` on the campaign's live
+        reason channel (Redis current-state + one ``stream_events`` row on
+        CHANGE — never one per poll). See dialer/block_state.py.
+
+        Strictly fire-and-forget: this is observability, and a Redis or DB
+        hiccup must never alter whether a call is placed.
+        """
+        try:
+            from app.domain.services.dialer.block_state import publish_block_reason
+            await publish_block_reason(
+                self._redis,
+                self._db_pool,
+                tenant_id=job.tenant_id,
+                campaign_id=job.campaign_id,
+                reason=reason,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "block_reason publish failed job=%s err=%s", job.job_id, exc,
+            )
+
+    async def _publish_block(
+        self,
+        job: DialerJob,
+        raw_reason: str,
+        *,
+        rules: Optional[CallingRules] = None,
+        retry_after_seconds: Optional[int] = None,
+    ) -> None:
+        """Classify a raw pre-dial gate reason and publish it. Convenience
+        wrapper around ``classify`` + ``_publish_reason`` for the gates that
+        don't already hold a structured reason."""
+        try:
+            from app.domain.services.dialer.block_reasons import classify
+            reason = classify(
+                raw_reason, rules=rules, retry_after_seconds=retry_after_seconds,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("block_reason classify failed raw=%s err=%s", raw_reason, exc)
+            return
+        await self._publish_reason(job, reason)
 
     async def _make_call(self, job: DialerJob, rules: CallingRules) -> Optional[str]:
         """
@@ -1185,6 +1340,27 @@ class DialerWorker:
         talklee_call_id = generate_talklee_call_id()
         internal_call_id = str(uuid.uuid4())
 
+        # AUDIT: when the explicit TESTING override let this call past the
+        # calling-window gate, stamp that fact on the call itself so it is
+        # provable afterwards which calls went out outside the configured
+        # hours, under which switch, and what would otherwise have blocked
+        # them. Uses existing JSONB columns (call_legs.metadata,
+        # call_events.event_data) — no schema change.
+        override_audit: dict = {}
+        if self._schedule_override:
+            try:
+                from app.domain.services.dialer.testing_override import (
+                    override_audit_payload,
+                )
+                override_audit = override_audit_payload(
+                    source=self._schedule_override.get("source", "unknown"),
+                    blocked_reason=self._schedule_override.get("blocked_reason"),
+                    schedule=self._schedule_override.get("schedule"),
+                )
+            except Exception as exc:  # noqa: BLE001 — never fail a live call
+                logger.warning("schedule_override audit payload failed: %s", exc)
+                override_audit = {"schedule_override": True}
+
         try:
             async with self._acquire_db() as conn:
                 await conn.execute(
@@ -1238,6 +1414,7 @@ class DialerWorker:
                         "job_id": job.job_id,
                         "campaign_id": job.campaign_id,
                         "provider_call_id": provider_call_id,
+                        **override_audit,
                     }),
                 )
 
@@ -1257,9 +1434,29 @@ class DialerWorker:
                         "leg_type": "pstn_outbound",
                         "provider": getattr(self, "_last_provider_name", "sip"),
                         "provider_call_id": provider_call_id,
+                        **override_audit,
                     }),
                     "initiated",
                 )
+
+                if override_audit:
+                    # A dedicated, greppable audit event — one row per call
+                    # placed under the testing override. `event_type` is
+                    # varchar(30); "schedule_override" is 17 chars.
+                    await conn.execute(
+                        """
+                        INSERT INTO call_events (
+                            call_id, talklee_call_id, leg_id, event_type, source,
+                            event_data, created_at
+                        ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+                        """,
+                        internal_call_id,
+                        talklee_call_id,
+                        leg_id,
+                        "schedule_override",
+                        "dialer_worker",
+                        json.dumps(override_audit),
+                    )
 
                 return internal_call_id, talklee_call_id, leg_id
 

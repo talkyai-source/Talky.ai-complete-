@@ -79,6 +79,15 @@ class CallIssueItem(BaseModel):
     stage: str
     attempts: int = 0
     updated_at: Optional[str] = None
+    # Structured block reason (additive — see
+    # app/domain/services/dialer/block_reasons.py). `reason_code` above stays
+    # the RAW dialer string for backwards compatibility; `block_code` is the
+    # stable machine value a UI should switch on, `block_message` the human
+    # sentence that says what to do, and `next_eligible_at` the ISO timestamp
+    # of the next moment this call can go out (when computable).
+    block_code: Optional[str] = None
+    block_message: Optional[str] = None
+    next_eligible_at: Optional[str] = None
 
 
 class CallIssuesResponse(BaseModel):
@@ -320,7 +329,8 @@ async def list_call_issues(
                dj.id, dj.phone_number, dj.campaign_id, dj.lead_id, dj.status,
                dj.last_outcome, dj.last_error, dj.failure_category,
                dj.failure_reason, dj.attempt_number, dj.updated_at,
-               camp.name AS campaign_name, camp.status AS campaign_status
+               camp.name AS campaign_name, camp.status AS campaign_status,
+               camp.calling_config AS calling_config
         FROM   dialer_jobs dj
         LEFT   JOIN campaigns camp ON camp.id = dj.campaign_id
         WHERE  dj.tenant_id = $1
@@ -361,6 +371,41 @@ async def list_call_issues(
     except Exception:
         minutes_ok = True  # fail open — never hide a real issue on a lookup glitch
 
+    # Effective calling rules per campaign, so a schedule issue can quote the
+    # user's OWN window ("Mon & Fri, 14:00-17:00 Europe/London") and compute
+    # the next eligible time. One tenant-rules lookup for the whole request;
+    # the per-campaign overlay comes from the calling_config already selected
+    # above. Best-effort — a lookup problem just yields a generic message.
+    from app.domain.models.calling_rules import CallingRules
+    from app.domain.services.dialer.block_reasons import classify
+    from app.domain.services.dialer.campaign_schedule import effective_rules
+
+    tenant_rules = CallingRules.default()
+    try:
+        async with db_client.pool.acquire() as conn:
+            raw_rules = await conn.fetchval(
+                "SELECT calling_rules FROM tenants WHERE id = $1::uuid",
+                current_user.tenant_id,
+            )
+        if raw_rules:
+            if isinstance(raw_rules, str):
+                import json as _json
+                raw_rules = _json.loads(raw_rules)
+            if isinstance(raw_rules, dict):
+                tenant_rules = CallingRules.from_dict(raw_rules)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("list_call_issues: tenant calling_rules lookup failed: %s", exc)
+
+    def _rules_for(row) -> CallingRules:
+        cfg = row["calling_config"] if "calling_config" in row.keys() else None
+        if isinstance(cfg, str):
+            try:
+                import json as _json
+                cfg = _json.loads(cfg)
+            except Exception:  # noqa: BLE001
+                cfg = None
+        return effective_rules(tenant_rules, cfg if isinstance(cfg, dict) else None)
+
     items: List[CallIssueItem] = []
     for r in rows:
         reason = r["failure_reason"] or r["last_error"] or r["status"]
@@ -372,6 +417,11 @@ async def list_call_issues(
             continue
         category = r["failure_category"]
         adv = advise(reason, category=category)
+        try:
+            blocked = classify(reason, rules=_rules_for(r))
+        except Exception as exc:  # noqa: BLE001 — enrichment must never 500
+            logger.debug("list_call_issues: classify failed reason=%r: %s", reason, exc)
+            blocked = None
         items.append(CallIssueItem(
             job_id=str(r["id"]),
             phone_number=r["phone_number"] or "",
@@ -386,6 +436,12 @@ async def list_call_issues(
             stage=adv.stage,
             attempts=r["attempt_number"] or 0,
             updated_at=r["updated_at"].isoformat() if r["updated_at"] else None,
+            block_code=blocked.code.value if blocked else None,
+            block_message=blocked.message if blocked else None,
+            next_eligible_at=(
+                blocked.next_eligible_at.isoformat()
+                if blocked and blocked.next_eligible_at else None
+            ),
         ))
 
     # Newest first across all numbers (DISTINCT ON forced phone_number order).

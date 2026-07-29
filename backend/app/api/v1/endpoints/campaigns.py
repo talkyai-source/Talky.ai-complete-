@@ -886,6 +886,74 @@ async def get_minutes_status(
     return status.as_dict()
 
 
+def _campaign_activity(
+    campaign_status: Optional[str],
+    blocking_reason: Optional[dict],
+    job_status_counts: Optional[dict] = None,
+) -> dict:
+    """What is this campaign actually DOING right now, and why?
+
+    Fixes the "campaign placed zero calls and reported itself completed"
+    failure. A campaign held by its calling window has DEFERRED its work —
+    describing that as ``completed`` tells the user the job is done when in
+    fact nothing was dialled.
+
+    Why a separate field instead of a new ``campaigns.status`` value
+    ---------------------------------------------------------------
+    ``campaigns.status`` is a bare ``varchar(50)`` with no CHECK constraint,
+    so a new value like ``waiting`` would insert fine — but it is read in
+    several places that switch on the exact string and silently fall through
+    on an unknown one:
+
+      * ``dialer_worker._get_active_tenant_ids`` and
+        ``_get_campaign_status`` gate every dial on
+        ``status IN ('running','active')`` — a campaign flipped to
+        ``waiting`` would STOP being dialled at all, turning a temporary
+        schedule pause into a permanent one. That alone rules the new-status
+        option out.
+      * ``campaign_service.start_campaign`` rejects a restart based on
+        ``status == "running"``.
+      * The dashboard and campaign pages colour-code on the literal strings
+        ``running`` / ``paused`` / ``completed`` / ``stopped`` and render
+        anything else raw.
+
+    So: keep ``status`` truthful and untouched (it stays ``running`` — the
+    campaign IS running, it is simply between windows) and expose the richer
+    truth additively here. Blast radius: one new key in this endpoint's JSON.
+    Nothing reads it yet, nothing breaks if it is ignored, and no existing
+    consumer of ``status`` changes behaviour.
+    """
+    counts = job_status_counts or {}
+    active = sum(
+        int(counts.get(k, 0) or 0)
+        for k in ("pending", "queued", "retry_scheduled", "processing", "calling")
+    )
+    code = (blocking_reason or {}).get("code")
+    state = "idle"
+    if campaign_status in ("running", "active"):
+        state = "dialing" if not code else "blocked"
+        if code in ("schedule_day_not_allowed", "schedule_outside_window"):
+            # THE important case: waiting, not finished.
+            state = "waiting_for_calling_window"
+        elif code == "testing_mode_schedule_bypassed":
+            state = "dialing_testing_override"
+    elif campaign_status == "paused":
+        state = "paused"
+    elif campaign_status in ("stopped", "cancelled", "completed"):
+        state = campaign_status
+
+    return {
+        "state": state,
+        # True whenever work remains but is deferred rather than done — the
+        # single flag a caller needs in order NOT to say "completed".
+        "work_remaining": bool(active),
+        "waiting_on_schedule": state == "waiting_for_calling_window",
+        "schedule_override_active": code == "testing_mode_schedule_bypassed",
+        "reason_code": code,
+        "next_eligible_at": (blocking_reason or {}).get("next_eligible_at"),
+    }
+
+
 @router.get("/{campaign_id}/stats")
 async def get_campaign_stats(
     campaign_id: str,
@@ -961,6 +1029,32 @@ async def get_campaign_stats(
             .neq("status", "deleted").execute().count or 0
         )
 
+        # Why isn't this campaign dialling right now? The dialer publishes its
+        # current structured block reason per campaign (Redis, written by
+        # app/domain/services/dialer/block_state.py); this endpoint is already
+        # polled every ~7s by the campaign page, so reading it here surfaces
+        # the reason LIVE without inventing a new transport. Best-effort: a
+        # Redis problem degrades to "no reason known", never a 500.
+        blocking_reason = None
+        try:
+            from app.core.container import get_container
+            from app.domain.services.dialer.block_state import read_block_reason
+
+            container = get_container()
+            blocking_reason = await read_block_reason(
+                getattr(container, "redis", None), campaign_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("campaign %s blocking-reason read failed: %s", campaign_id, exc)
+
+        # A campaign that placed no calls because it is WAITING for its
+        # calling window has DEFERRED its work, not finished it. `activity`
+        # is the honest answer for any surface that would otherwise infer
+        # "completed" from "nothing left in flight" — see the note on
+        # `_campaign_activity` for why this is a separate field rather than a
+        # new `campaigns.status` value.
+        activity = _campaign_activity(campaign.get("status"), blocking_reason, status_counts)
+
         return {
             "campaign_id": campaign_id,
             "campaign_status": campaign.get("status"),
@@ -968,7 +1062,9 @@ async def get_campaign_stats(
             "qualified_leads": qualified_leads,
             "job_status_counts": status_counts,
             "call_outcome_counts": outcome_counts,
-            "goals_achieved": goals_achieved
+            "goals_achieved": goals_achieved,
+            "blocking_reason": blocking_reason,
+            "activity": activity,
         }
     except HTTPException:
         raise
