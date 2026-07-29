@@ -324,3 +324,69 @@ def test_voice_pipeline_import_installs_the_redactor():
 
     importlib.reload(importlib.import_module("app.domain.services.voice_pipeline.transcript_handler"))
     assert getattr(logging.Logger.makeRecord, "_pii_redacting", False) is True
+
+
+# ---------------------------------------------------------------------------
+# Precision: hash / hex debug fields must NOT be eaten
+# ---------------------------------------------------------------------------
+# Observed on the first live call after the redactor shipped (2026-07-29):
+#
+#     TTS_FMT_DEBUG ... first_bytes=2048 head=fcfffdff03000000       <- survived
+#     TTS_FMT_DEBUG ... first_bytes=2048 head=[redacted digits=16 ..00]
+#
+# The same debug field redacted or not depending on whether that call's audio
+# header happened to contain a hex letter. All-digit hex is indistinguishable
+# from a 16-digit card to a pattern matcher, so `longrun` ate it — destroying
+# the field that says whether the gateway got the audio format it expects.
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "TTS_FMT_DEBUG call=3e3201ed gateway_fmt=s16le first_bytes=2048 head=0000000000000000",
+        "TTS_FMT_DEBUG call=3e3201ed gateway_fmt=s16le first_bytes=2048 head=fcfffdff03000000",
+        "sha=1234567890123456 verified",
+        "digest: 99999999999999",
+        "signature=00000000000000000000 ok",
+    ],
+)
+def test_hash_and_hex_debug_fields_survive(line):
+    """A digit run directly after a hash/hex field name is a debug value."""
+    assert log_redact.scrub_text(line) == line
+
+
+@pytest.mark.parametrize(
+    "line,must_not_contain",
+    [
+        ("card 4111 1111 1111 1111 taken", "4111 1111 1111 1111"),
+        ("my number is 447754566590 ok", "447754566590"),
+        ("call me on +44 7754 566590", "7754 566590"),
+        # The exemption is anchored on the WHOLE field name: a field that merely
+        # STARTS with an exempt name must still be scrubbed.
+        ("headcount=12345678901 leads", "12345678901"),
+        # ...and an exempt name appearing as prose, not as a field, must not
+        # license the digits that follow it.
+        ("the head of sales is on 447754566590", "447754566590"),
+    ],
+)
+def test_real_identifiers_are_still_masked(line, must_not_contain):
+    """The precision fix must not have opened a hole."""
+    out = log_redact.scrub_text(line)
+    assert must_not_contain not in out
+    assert log_redact.REDACTED_PREFIX in out
+
+
+def test_exemption_can_only_cost_debuggability_not_privacy():
+    """Documents the direction of the risk, which is why enumerating names here
+    is acceptable while enumerating SENSITIVE_FIELD_NAMES would not be.
+
+    Every exempt name must be a hash/hex/opaque-blob field. If one is ever
+    added that names real content, this asserts loudly: the exempt set and the
+    sensitive set must stay disjoint, or a sensitive field would be silently
+    exempted from redaction.
+    """
+    overlap = log_redact._NON_PII_VALUE_FIELDS & log_redact.SENSITIVE_FIELD_NAMES
+    assert not overlap, (
+        f"field name(s) are both PII-exempt and sensitive: {sorted(overlap)} — "
+        "an exempt name wins, so this would silently stop redacting caller speech"
+    )

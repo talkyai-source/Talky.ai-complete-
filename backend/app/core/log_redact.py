@@ -211,6 +211,49 @@ _CONV_SPEC_RE = re.compile(
 )
 _NAME_BEFORE_RE = re.compile(r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*[=:]\s*['\"]?$")
 
+# Field names whose value is a hash / hex blob / opaque identifier — never a
+# phone number, card or account number. A digit run sitting immediately after
+# one of these is left alone.
+#
+# WHY (observed on the first live call after this shipped, 2026-07-29):
+#
+#     TTS_FMT_DEBUG ... first_bytes=2048 head=fcfffdff03000000   <- survived
+#     TTS_FMT_DEBUG ... first_bytes=2048 head=[redacted digits=16 ..00]
+#
+# The same debug field was redacted or not depending on whether that call's
+# audio header happened to contain a hex letter. All-digit hex ("0000000000000000")
+# is indistinguishable from a 16-digit card to a pattern matcher, so the
+# `longrun` rule ate it — destroying the one field that tells us whether the
+# gateway is being handed the audio format it expects.
+#
+# NOTE THE DIRECTION OF THE RISK, which is the opposite of
+# SENSITIVE_FIELD_NAMES above and is why enumerating names is acceptable here:
+# forgetting a name in THAT set leaks PII; forgetting one in THIS set merely
+# over-redacts a debug field. This list can only ever cost debuggability, never
+# privacy — so it stays deliberately short, and a name belongs here only if its
+# value is structurally incapable of being a real-world identifier.
+_NON_PII_VALUE_FIELDS = frozenset({
+    "checksum",
+    "crc",
+    "digest",
+    "etag",
+    "fingerprint",
+    "hash",
+    "head",
+    "hex",
+    "md5",
+    "sha",
+    "sha1",
+    "sha256",
+    "sig",
+    "signature",
+    "tail",
+})
+
+_NON_PII_CONTEXT_RE = re.compile(
+    r"(?i)\b(?P<name>" + "|".join(sorted(_NON_PII_VALUE_FIELDS)) + r")\s*[=:]\s*['\"]?$"
+)
+
 #: Values that cannot carry speech — never rewritten, even in a sensitive slot.
 _NON_TEXT_TYPES = (bool, int, float, complex, type(None))
 
@@ -271,6 +314,19 @@ def _mask_match(match: "re.Match[str]") -> str:
         # STT heard the right provider without learning who the caller is.
         return f"***@{domain}"
     raw = match.group(0)
+
+    # Precision guard: a bare digit run directly after a hash/hex field name is
+    # a debug value, not an identifier. Restricted to the two rules that can
+    # actually collide with hex — `grouped` and `longrun`. `email` is handled
+    # above and `intl` requires a leading "+", neither of which appears in a
+    # hex dump, and `ssn` is a 3-2-4 shape that hex never takes. See
+    # _NON_PII_VALUE_FIELDS for why a miss here is harmless.
+    if match.lastgroup in ("grouped", "longrun") or (
+        match.group("grouped") is not None or match.group("longrun") is not None
+    ):
+        if _NON_PII_CONTEXT_RE.search(match.string, 0, match.start()):
+            return raw
+
     digits = [c for c in raw if c.isdigit()]
     # Last two digits kept: enough to correlate "same number repeated" across
     # turns, far short of anything usable.
