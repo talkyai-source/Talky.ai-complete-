@@ -76,6 +76,7 @@ from app.core.security.passkeys import (
     AuthenticationResult,
     VerifiedCredential,
 )
+from app.api.v1.endpoints.auth._shared import issue_cookie_auth
 from app.core.security.sessions import (
     SESSION_COOKIE_NAME,
     create_session,
@@ -624,6 +625,37 @@ async def login_complete(
 
     # Set session cookie
     _set_session_cookie(response, raw_session_token)
+
+    # Issue the httpOnly access + refresh cookie pair, same as the password and
+    # MFA login paths. Passkey login previously set ONLY the legacy talky_sid
+    # cookie and returned the JWT in the response body, which produced a
+    # half-authenticated session with two distinct failures:
+    #
+    #   1. No talky_at -> every cookie-authenticated surface breaks. Both
+    #      assistant_ws.py and campaign_test_ws.py read ONLY talky_at (or a
+    #      first-frame bearer); neither falls back to talky_sid. A browser
+    #      cannot set an Authorization header on a WS upgrade, so passkey
+    #      users silently lost the Test agent and assistant sockets — the
+    #      identical failure MFA users hit ("no auth frame within 5s").
+    #
+    #   2. No talky_rt -> POST /auth/refresh (auth/refresh.py) unconditionally
+    #      401s, so the session cannot renew silently and dies when the body
+    #      JWT expires, forcing a hard re-login.
+    #
+    # A fresh connection is acquired because the one above is scoped to the
+    # transaction that created the session and is already released.
+    async with db_client.pool.acquire() as cookie_conn:
+        await issue_cookie_auth(
+            response,
+            cookie_conn,
+            user_id=user_id,
+            email=user_row["email"],
+            role=user_row["role"],
+            tenant_id=tenant_id,
+            session_id=session_id,
+            ip=ip,
+            user_agent=ua,
+        )
 
     # Use the already-injected db_client instead of trying to import a
     # non-existent resolve_db_client helper (the original

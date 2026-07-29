@@ -27,12 +27,44 @@ import pytest
 
 _ENDPOINTS = Path(__file__).resolve().parents[2] / "app" / "api" / "v1" / "endpoints"
 
-# Paths that mint a login session and must therefore also issue cookies.
-_SESSION_MINTING_FILES = [
-    _ENDPOINTS / "auth" / "login.py",
-    _ENDPOINTS / "auth" / "signup.py",
-    _ENDPOINTS / "mfa" / "verify.py",
-]
+
+def _discover_session_minting_files() -> list[Path]:
+    """Every endpoint module that calls create_session().
+
+    DISCOVERED, never enumerated. The first version of this test listed three
+    files by hand and consequently missed `passkeys.py`, which had the exact
+    defect the test exists to catch — repeating the mistake that caused the
+    original bug, where a cross-cutting auth change was scoped to the `auth/`
+    directory and skipped the MFA path living in `mfa/`.
+
+    An auth path added in a fourth location tomorrow is covered automatically.
+
+    Detection is by IMPORT, not by substring. `emergency_access.py` calls
+    `emergency_access.create_session(...)` — a method on a different service
+    that mints a break-glass bearer token returned in the body, with no browser
+    session or cookie involved. A substring match flags it wrongly. Requiring
+    the symbol to be imported from the auth session module identifies the real
+    login sessions precisely, so no allowlist is needed.
+    """
+    found: list[Path] = []
+    for path in sorted(_ENDPOINTS.rglob("*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue
+        imports_auth_create_session = any(
+            isinstance(node, ast.ImportFrom)
+            and node.module is not None
+            and "security.sessions" in node.module
+            and any(alias.name == "create_session" for alias in node.names)
+            for node in ast.walk(tree)
+        )
+        if imports_auth_create_session:
+            found.append(path)
+    return found
+
+
+_SESSION_MINTING_FILES = _discover_session_minting_files()
 
 
 def _called_function_names(path: Path) -> set[str]:

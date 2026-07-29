@@ -10,10 +10,10 @@ Step 1: POST /auth/forgot-password   {email}
 Step 2: POST /auth/reset-password    {email, code, new_password}
         -> Verify the code from Redis (hashed compare), validate the new
            password's strength, update user_profiles.password_hash, and
-           revoke ALL existing sessions (OWASP guidance on password
-           reset). Returns 200 on success, 400 otherwise (generic error
-           so attackers can't tell whether email-existed-but-code-wrong
-           vs email-didn't-exist).
+           revoke ALL existing sessions AND ALL refresh tokens (OWASP
+           guidance on password reset). Returns 200 on success, 400
+           otherwise (generic error so attackers can't tell whether
+           email-existed-but-code-wrong vs email-didn't-exist).
 
 The whole flow deliberately mirrors signup_start / signup_complete so
 the frontend pattern (email -> code email -> code+new-password) stays
@@ -27,6 +27,7 @@ import logging
 import secrets
 from typing import Optional
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, Field
 
@@ -37,6 +38,7 @@ from app.core.security.password import (
     hash_password,
     validate_password_strength,
 )
+from app.core.security.refresh_tokens import revoke_all_user_refresh_tokens
 from app.core.security.sessions import revoke_all_user_sessions
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services.email_service import get_email_service
@@ -113,6 +115,86 @@ def _reset_redis_key(email: str) -> str:
 
 def _hash_reset_code(code: str) -> str:
     return hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+
+# --- refresh-token revocation reason ---------------------------------------
+# The accurate audit reason for this path is "password_reset", and that is
+# what this code attempts FIRST — see _revoke_refresh_tokens_for_reset below.
+#
+# History: `refresh_tokens.revoked_reason` carries a CHECK constraint,
+# `refresh_tokens_revoked_reason_check`, created inline with the table by
+# Alembic/versions/0002_add_refresh_tokens.py:36-38 and reproduced at
+# database/schema/baseline_2026-06-02.sql:1187. It originally permitted only:
+#
+#     ('rotated', 'reuse_detected', 'logout', 'admin', 'expired')
+#
+# so "password_reset" was rejected outright, and the CheckViolationError —
+# raised INSIDE the reset transaction — would have rolled back the new
+# password hash and locked the user out of the very flow they use to recover
+# a compromised account. Hence the SAVEPOINT + permitted-value fallback:
+# revocation itself is never skipped, only the audit label degrades.
+#
+# database/migrations/20260729_widen_refresh_tokens_revoked_reason.sql widens
+# the constraint to admit "password_reset" (along with "password_change",
+# "mfa_disabled" and "expired_with_subsequent_use", which were hard 500s on
+# their own paths — auth/password.py:134, mfa/status.py:135 and
+# refresh_tokens.py:149 respectively, none of which had this guard).
+#
+# The SAVEPOINT is KEPT ON PURPOSE, not left behind by accident:
+#
+#   * Once the migration is applied, attempt #1 simply succeeds and the
+#     accurate "password_reset" label is what gets written. The fallback
+#     never fires. There is nothing to "clean up" for correctness — the only
+#     cost is one extra round trip on a flow that runs a handful of times a
+#     day.
+#   * Keeping it makes this module safe to deploy in EITHER order relative to
+#     the migration. The migration in this repo is applied by hand via psql
+#     (there is no auto-runner), so "migration first" is a human step with no
+#     enforcement. Removing the guard would convert a missed/late migration
+#     from a degraded audit label into a failed password reset — the single
+#     worst endpoint in the app to make order-dependent, because it is the
+#     one users reach when they are already locked out.
+#   * It is also the rollback path: if the migration is ever reverted (see
+#     that file's ROLLBACK section), this endpoint keeps working.
+#
+# The invariant that the constraint must cover every reason the code writes
+# is now pinned by tests/security/test_refresh_revocation_reasons.py.
+_RESET_REVOKE_REASON = "password_reset"
+_RESET_REVOKE_REASON_FALLBACK = "logout"
+
+
+async def _revoke_refresh_tokens_for_reset(conn, user_id: str) -> int:
+    """Revoke every refresh token for *user_id*, constraint-safely.
+
+    Must be called inside the caller's transaction so the revocation
+    commits atomically with the new password hash.
+    """
+    try:
+        # Nested conn.transaction() == SAVEPOINT: a CHECK violation rolls
+        # back to here, leaving the outer transaction usable.
+        async with conn.transaction():
+            return await revoke_all_user_refresh_tokens(
+                conn,
+                user_id,
+                reason=_RESET_REVOKE_REASON,
+            )
+    except asyncpg.exceptions.CheckViolationError:
+        logger.warning(
+            "reset_password: refresh_tokens.revoked_reason rejected %r — "
+            "database/migrations/20260729_widen_refresh_tokens_revoked_reason"
+            ".sql has NOT been applied to this database. Retrying with %r; "
+            "revocation still applies, only the audit label degrades. Apply "
+            "the migration — auth/password.py and mfa/status.py have no such "
+            "fallback and are returning 500s right now.",
+            _RESET_REVOKE_REASON,
+            _RESET_REVOKE_REASON_FALLBACK,
+        )
+
+    return await revoke_all_user_refresh_tokens(
+        conn,
+        user_id,
+        reason=_RESET_REVOKE_REASON_FALLBACK,
+    )
 
 
 def _get_redis_or_503():
@@ -324,12 +406,33 @@ async def reset_password(
                 user_id,
             )
             # OWASP: invalidate all sessions on password reset.
-            await revoke_all_user_sessions(
+            sessions_revoked = await revoke_all_user_sessions(
                 conn,
                 user_id,
                 reason="password_reset",
                 exclude_token_hash=None,
             )
+
+            # --- ALSO revoke every refresh token for the user -----------------
+            # Mirrors change_password (auth/password.py) and MFA-disable
+            # (mfa/status.py), both of which revoke sessions AND refresh
+            # tokens. Without this, a stolen `talky_rt` cookie issued
+            # before the reset would silently keep minting fresh 15-min
+            # access JWTs for up to REFRESH_TOKEN_LIFETIME_DAYS (7) —
+            # straight through the very flow the victim used to secure
+            # their account. `security_sessions` and `refresh_tokens` are
+            # independent stores: revoking one does nothing to the other,
+            # and POST /auth/refresh consults only the latter.
+            #
+            # Unlike change_password there is no current session/family to
+            # preserve — password reset is the account-RECOVERY path, so
+            # EVERY device must re-authenticate, including the caller.
+            refresh_revoked = await _revoke_refresh_tokens_for_reset(conn, user_id)
+
+    logger.info(
+        "password_reset_completed user=%s sessions_revoked=%s refresh_tokens_revoked=%s",
+        user_id, sessions_revoked, refresh_revoked,
+    )
 
     await redis.delete(_reset_redis_key(email))
 

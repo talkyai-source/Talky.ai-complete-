@@ -78,11 +78,19 @@ class SessionListResponse(BaseModel):
 
 
 class SessionRevokeResponse(BaseModel):
-    """Response for revoking a specific session."""
+    """Response for revoking a specific session.
+
+    `revoked` refers to the `security_sessions` row ONLY. It does not
+    mean the device lost access — see the DELETE handler's docstring for
+    why the device's refresh token cannot be revoked with the current
+    schema. `refresh_token_revoked` is reported explicitly so callers
+    cannot mistake a session revoke for a full sign-out.
+    """
 
     detail: str
     session_id: str
     revoked: bool
+    refresh_token_revoked: bool = False
 
 
 class SessionVerificationRequest(BaseModel):
@@ -201,6 +209,44 @@ async def revoke_specific_session(
     - Cannot revoke current session (use /auth/logout instead)
 
     Returns 404 if session not found or doesn't belong to user.
+
+    !! KNOWN LIMITATION — this does NOT fully log the device out. !!
+
+    This endpoint revokes the target row in `security_sessions` and
+    nothing else. It cannot revoke that device's refresh token, because
+    the two stores have no column linking them:
+
+      - `refresh_tokens` (Alembic 0002_add_refresh_tokens.py;
+        database/schema/baseline_2026-06-02.sql:1172-1188) holds
+        id / family_id / user_id / tenant_id / token_hash / parent_id /
+        ip / user_agent — no session_id, no security_sessions FK.
+      - `security_sessions` (baseline:1272-1305) holds no family_id and
+        no refresh-token reference either.
+
+    The only overlapping columns are (user_id, ip, user_agent), which is
+    a heuristic and NOT an identity — two browsers on one machine share
+    both, and a roaming phone changes ip. Guessing a family from them
+    would revoke the WRONG device, so we deliberately do not try.
+
+    Consequence, stated plainly: the revoked device keeps full access.
+    `get_current_user` does not consult `security_sessions` on the
+    `talky_at` cookie path (app/api/v1/dependencies.py:206-224), and
+    POST /auth/refresh consults only `refresh_tokens`
+    (app/api/v1/endpoints/auth/refresh.py) — so the device can rotate
+    `talky_rt` indefinitely on a rolling 7-day window. What this call
+    genuinely invalidates is the legacy `talky_sid` server-side session.
+
+    Fixing this needs a schema change, not code here: add
+    `session_id UUID REFERENCES security_sessions(id) ON DELETE SET NULL`
+    to `refresh_tokens`, stamp it in `issue_initial_refresh_token`
+    (the caller, `auth/_shared.py:issue_cookie_auth`, already HAS the
+    session_id and currently discards the family_id), carry it onto
+    successors in `rotate_refresh_token`, then revoke by session_id here.
+    Until then this response must not claim more than it does.
+
+    Do NOT "fix" this by calling revoke_all_user_refresh_tokens() — that
+    would sign the user out of EVERY device when they asked to sign out
+    of one, which is a worse bug than this one.
     """
     # Prevent revoking current session through this endpoint
     async with db_client.pool.acquire() as conn:
@@ -217,7 +263,11 @@ async def revoke_specific_session(
                     detail="Cannot revoke current session. Use /auth/logout instead.",
                 )
 
-        # Revoke the session
+        # Revoke the session row only. See the docstring: there is no
+        # column correlating this session to a refresh-token family, so
+        # the device's `talky_rt` survives and can still mint access
+        # JWTs. Revoking ALL families here would be wrong — the user
+        # asked to sign out ONE device.
         revoked = await revoke_session_by_id(
             conn,
             session_id=session_id,
@@ -232,15 +282,22 @@ async def revoke_specific_session(
         )
 
     logger.info(
-        "User revoked specific session: user=%s session=%s",
+        "User revoked specific session: user=%s session=%s "
+        "(refresh token NOT revoked — no session/family correlation in schema)",
         current_user.id,
         session_id,
     )
 
     return SessionRevokeResponse(
-        detail="Session revoked successfully.",
+        detail=(
+            "Session revoked. Note: this device's refresh token could not "
+            "be revoked, so it may retain access until the token expires. "
+            "To fully sign out everywhere, use /auth/logout-all or change "
+            "your password."
+        ),
         session_id=session_id,
         revoked=True,
+        refresh_token_revoked=False,
     )
 
 
