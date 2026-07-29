@@ -77,25 +77,26 @@ def test_success_outcomes_terminal():
 
 # ── terminal-no-retry outcomes ────────────────────────────────────
 def test_terminal_no_retry_outcomes():
-    # INVALID/dead numbers and hard declines stay terminal. UNAVAILABLE
-    # (phone off) is NO LONGER terminal — it retries +24h (see below).
+    # INVALID/dead numbers and hard declines stay terminal. UNAVAILABLE is
+    # terminal too (2026-07-28): call_service marks the lead 'dnc' on it,
+    # so scheduling retries as well was a compliance contradiction — see
+    # tests/unit/test_unavailable_disposition.py.
     for oc in (
         CallOutcome.GOAL_NOT_ACHIEVED,
         CallOutcome.SPAM,
         CallOutcome.INVALID,
         CallOutcome.DISCONNECTED,
+        CallOutcome.UNAVAILABLE,
     ):
         d = decide(oc, 1)
         assert d.should_retry is False
         assert d.is_success is False
 
 
-def test_unavailable_retries_next_day():
-    # Phone off / temporarily unreachable — may be reachable later, so retry
-    # a full day later (never same-day), then stop.
-    assert decide(CallOutcome.UNAVAILABLE, 1).should_retry is True
-    assert decide(CallOutcome.UNAVAILABLE, 1).delay_seconds == 24 * 3600
-    assert decide(CallOutcome.UNAVAILABLE, 3).should_retry is False
+def test_unavailable_never_redialled():
+    # Operator-marked unreachable → do-not-call. One dial, then stop.
+    assert decide(CallOutcome.UNAVAILABLE, 1).should_retry is False
+    assert decide(CallOutcome.UNAVAILABLE, 1).delay_seconds == 0
 
 
 # ── monotonic non-increasing? no — schedules grow; assert ordering ─

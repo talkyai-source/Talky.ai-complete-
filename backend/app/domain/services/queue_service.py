@@ -288,14 +288,56 @@ class DialerQueueService:
         await self._mark_processing(job.job_id, payload)
         return job
     
+    async def get_live_attempt_number(self, job_id: str) -> Optional[int]:
+        """Live attempt count for a job that is currently in flight.
+
+        ``dialer_jobs.attempt_number`` in Postgres is only advanced by the
+        post-answer finalizer (``CallService._handle_job_completion*``); the
+        PRE-answer path (``dialer_worker``'s originate-failure handler →
+        ``schedule_retry``) bumps only the Redis copy. The durable inflight
+        payload written by ``_pop_and_track`` is therefore the most accurate
+        "which attempt is this?" counter available while a call is live, and
+        it is the one this class increments below.
+
+        Returns ``None`` when there is no inflight copy — the job was never
+        dequeued through this service, it was already untracked, or
+        ``reap_stale_processing`` aged it out (a call longer than the reaper
+        window). Callers MUST fall back to the persisted
+        ``dialer_jobs.attempt_number`` in that case; this is a best-effort
+        read that never raises.
+        """
+        try:
+            if self._redis is None:
+                return None
+            payload = await self._redis.hget(self.INFLIGHT_HASH, job_id)
+            if not payload:
+                return None
+            value = json.loads(payload).get("attempt_number")
+            if isinstance(value, bool) or not isinstance(value, int):
+                return None
+            return max(1, value)
+        except Exception as exc:  # noqa: BLE001 — advisory read, never fatal
+            logger.debug("get_live_attempt_number failed job=%s err=%s", job_id, exc)
+            return None
+
     async def schedule_retry(self, job: DialerJob, delay_seconds: int = 7200) -> bool:
         """
         Schedule a job for retry after a delay.
-        
+
+        ATTEMPT ACCOUNTING: this method OWNS the increment. ``job`` must
+        arrive carrying the attempt number that JUST COMPLETED (or just
+        failed to originate) — never a pre-incremented one — and it is
+        bumped exactly once here, so the job that comes back off the
+        scheduled set is stamped with the attempt it is about to make.
+        ``dialer_worker`` already passes the live job unmodified;
+        ``CallService._schedule_retry`` used to pre-increment as well,
+        which double-counted and made the retry job claim an attempt it had
+        never made.
+
         Args:
             job: Job to retry
             delay_seconds: Delay before retry (default: 2 hours)
-            
+
         Returns:
             True if scheduled successfully
         """

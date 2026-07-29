@@ -23,23 +23,43 @@ whether to retry, after how long, and why. Pure logic — no DB, no
 Redis, no logging — so it is trivially unit-testable and the caller
 (``call_service``) owns the side effects.
 
-Cadence (confirmed product policy, 2026-06-12):
+Cadence (confirmed product policy; no-answer/voicemail moved to
+next-day-only 2026-07-07):
 
     DISPOSITION   RETRY SCHEDULE              CAP
     ───────────   ──────────────────────────  ───
     Busy          5m → 15m → 45m              4
-    No-answer     2h → next-day (~20h)        3
-    Voicemail     4h (once)                   2
-    Rejected      no retry — stop             1
+    No-answer     24h → 24h                   3
+    Voicemail     24h (once)                  2
+    Unavailable   no retry — DNC              1
+    Rejected      no retry — DNC              1
     Failed        30s → 2m                    3
     Timeout       30s → 2m                    3
     Answered      done — never redial         —
     Goal achieved done — never redial         —
 
+This module also owns ``DNC_OUTCOMES`` — the outcomes that put the lead
+on do-not-call. ``call_service`` imports that set instead of keeping its
+own copy, because the two lists MUST NOT disagree (see the compliance
+note below), and ``_assert_disjoint()`` re-checks the invariant on every
+import so a future edit cannot reintroduce the contradiction silently.
+
 CAP is the maximum *total* dial attempts for the lead (initial + all
 retries). The schedule for a retryable outcome therefore has
 ``CAP - 1`` entries; when the just-completed ``attempt_number`` reaches
 ``CAP`` (or the schedule is exhausted) we stop.
+
+COMPLIANCE NOTE (2026-07-28): this module is pure and was always
+correct, but the cap is only real if the caller passes a *growing*
+``attempt_number``. It did not: ``dialer_jobs.attempt_number`` was
+written once at job creation and never updated, so every post-answer
+call arrived here claiming attempt 1, no cap (all >= 2) could fire, and
+busy leads were redialled every 5 minutes forever — repeated-call
+harassment under TCPA/Ofcom. The counter is now advanced by
+``CallService`` (see ``_effective_attempt_number``). ``decide`` itself
+now also refuses to retry when handed an unusable attempt number rather
+than raising, so a bad caller degrades to "stop calling", never to
+"call forever".
 
 "Next-day" is expressed as a concrete ~20h delay rather than a sentinel:
 combined with the dialer's calling-window gate (``RulesEngine.can_make_
@@ -80,9 +100,8 @@ _RETRY_SCHEDULES: dict[CallOutcome, list[int]] = {
     # Voicemail: we reached an answering machine (we hang up immediately,
     # never leave a message). Retry a full day later, not the same day.
     CallOutcome.VOICEMAIL: [_DAY],
-    # Unavailable / phone switched off: not reachable right now but may be
-    # on later. Treat like no-answer — retry a full day later, not same day.
-    CallOutcome.UNAVAILABLE: [_DAY, _DAY],
+    # NOTE: UNAVAILABLE is deliberately absent — it is a DNC outcome, see
+    # _TERMINAL_NO_RETRY / DNC_OUTCOMES below.
     # Failed / timeout: transient pipeline or network trouble, not a
     # signal about the prospect. Fast geometric backoff. Cap is 3 total
     # attempts (2 retries) — the originate-side retry_policy keeps its
@@ -98,7 +117,6 @@ _ATTEMPT_CAPS: dict[CallOutcome, int] = {
     CallOutcome.BUSY: 4,
     CallOutcome.NO_ANSWER: 3,
     CallOutcome.VOICEMAIL: 2,
-    CallOutcome.UNAVAILABLE: 3,
     CallOutcome.FAILED: 3,
     CallOutcome.TIMEOUT: 3,
 }
@@ -112,8 +130,19 @@ _SUCCESS_OUTCOMES: frozenset[CallOutcome] = frozenset(
 # REJECTED: they actively declined. GOAL_NOT_ACHIEVED: a real
 # conversation that didn't convert — redialing is a human decision, not
 # an automatic one. SPAM/INVALID/DISCONNECTED: dead input — the number is
-# not active, so redialing it is pointless. (UNAVAILABLE / phone-off is
-# NOT here: it may be reachable later, so it retries +24h — see schedules.)
+# not active, so redialing it is pointless.
+#
+# UNAVAILABLE (compliance fix 2026-07-28): this used to sit in the retry
+# schedule at [24h, 24h] / cap 3 while ``call_service`` simultaneously
+# listed it as non-retryable and set the lead to ``dnc``. Both were true
+# at once: we flagged the lead do-not-call and then dialled it twice
+# more — a TCPA/Ofcom breach. Nothing in the telephony path ever emits
+# it (``telephony/outcome_resolver.py`` and ``call_status.py`` map every
+# Q.850 / SIP cause to BUSY / NO_ANSWER / REJECTED / FAILED, never to
+# UNAVAILABLE); its ONLY producer is the operator-driven
+# ``CallService.mark_as_spam(reason="unavailable")`` suppression
+# endpoint. A human saying "stop calling this number" is unambiguously
+# DNC, so UNAVAILABLE is terminal here and the two tables now agree.
 _TERMINAL_NO_RETRY: frozenset[CallOutcome] = frozenset(
     {
         CallOutcome.REJECTED,
@@ -121,8 +150,50 @@ _TERMINAL_NO_RETRY: frozenset[CallOutcome] = frozenset(
         CallOutcome.SPAM,
         CallOutcome.INVALID,
         CallOutcome.DISCONNECTED,
+        CallOutcome.UNAVAILABLE,
     }
 )
+
+# ── Public, cross-module contract ────────────────────────────────────
+#
+# RETRYABLE_OUTCOMES: outcomes this module will ever schedule again.
+# DNC_OUTCOMES:       outcomes that mark the LEAD do-not-call and count
+#                     as "could not reach" (calls_failed).
+#
+# ``call_service.NON_RETRYABLE_OUTCOMES`` is built from DNC_OUTCOMES —
+# it does not maintain a second list. GOAL_NOT_ACHIEVED is terminal but
+# deliberately NOT DNC: a real conversation that didn't convert is a
+# human follow-up decision, not a suppression.
+RETRYABLE_OUTCOMES: frozenset[CallOutcome] = frozenset(_RETRY_SCHEDULES)
+DNC_OUTCOMES: frozenset[CallOutcome] = _TERMINAL_NO_RETRY - {
+    CallOutcome.GOAL_NOT_ACHIEVED
+}
+
+
+def _assert_disjoint() -> None:
+    """Fail loudly at import if an outcome is both DNC and retryable.
+
+    This is the invariant whose absence let UNAVAILABLE be marked
+    do-not-call and redialled twice at the same time. Enforced at import
+    (not just in tests) so the contradiction cannot reach production
+    even if someone edits one table without the other.
+    """
+    overlap = (DNC_OUTCOMES | _SUCCESS_OUTCOMES) & RETRYABLE_OUTCOMES
+    if overlap:
+        raise RuntimeError(
+            "disposition_policy: outcome(s) are both non-retryable/DNC and "
+            f"in the retry schedule: {sorted(o.value for o in overlap)}. "
+            "A lead cannot be marked do-not-call and redialled."
+        )
+    missing_cap = RETRYABLE_OUTCOMES - frozenset(_ATTEMPT_CAPS)
+    if missing_cap:
+        raise RuntimeError(
+            "disposition_policy: retryable outcome(s) without an attempt "
+            f"cap: {sorted(o.value for o in missing_cap)}"
+        )
+
+
+_assert_disjoint()
 
 
 @dataclass(frozen=True)
@@ -166,7 +237,18 @@ def decide(outcome: CallOutcome, attempt_number: int) -> DispositionDecision:
     first dial). The next-retry delay is read from the schedule at index
     ``attempt_number - 1``; when that index is out of range, or the
     per-disposition attempt cap is reached, we stop.
+
+    An ``attempt_number`` that is missing or not a usable integer is
+    treated as "unknown" and fails CLOSED (no retry): the one thing this
+    function must never do is authorise an unbounded redial because the
+    caller lost count.
     """
+    try:
+        if isinstance(attempt_number, bool):
+            raise TypeError("bool is not an attempt number")
+        attempt_number = int(attempt_number)
+    except (TypeError, ValueError):
+        attempt_number = 0  # unknown → falls through to the no-retry branch
     # Positive terminal — done, never redial.
     if outcome in _SUCCESS_OUTCOMES:
         return DispositionDecision(

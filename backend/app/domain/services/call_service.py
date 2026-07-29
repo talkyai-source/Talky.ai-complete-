@@ -22,6 +22,7 @@ from app.domain.models.dialer_job import DialerJob, JobStatus, CallOutcome
 from app.domain.services.queue_service import DialerQueueService
 from app.domain.repositories.call_repository import CallRepository
 from app.domain.repositories.lead_repository import LeadRepository
+from app.workers.disposition_policy import DNC_OUTCOMES
 
 logger = logging.getLogger(__name__)
 
@@ -43,16 +44,23 @@ class WebhookTargetMismatch(Exception):
 # that brain took over — keeping them here would invite the same
 # "treats every outcome identically" drift they used to cause.
 
-# Outcomes that should NOT retry (still used for lead DNC marking,
+# Outcomes that should NOT retry (used for lead DNC marking,
 # campaign-counter routing, and the terminal job status).
-NON_RETRYABLE_OUTCOMES = {
-    CallOutcome.SPAM,
-    CallOutcome.INVALID,
-    CallOutcome.UNAVAILABLE,
-    CallOutcome.DISCONNECTED,
-    CallOutcome.REJECTED,
-    CallOutcome.GOAL_ACHIEVED,
-}
+#
+# DERIVED, NOT DUPLICATED (compliance fix 2026-07-28): this used to be a
+# hand-maintained literal set, and it drifted — it listed UNAVAILABLE
+# (→ lead status 'dnc', counted in calls_failed) while
+# ``disposition_policy`` simultaneously scheduled UNAVAILABLE for two
+# more dials at +24h. We marked a lead do-not-call and then called it
+# twice: a TCPA/Ofcom breach. The retry brain is now the single source
+# of truth for both halves, and it raises at import if any outcome is
+# ever both DNC and retryable again.
+#
+# GOAL_ACHIEVED is added here (and not in disposition_policy's DNC set)
+# because it is non-retryable for a different reason — success, not
+# suppression. The counter/routing code below strips it back out before
+# deciding calls_failed vs calls_completed.
+NON_RETRYABLE_OUTCOMES = frozenset(DNC_OUTCOMES) | {CallOutcome.GOAL_ACHIEVED}
 
 
 class CallService:
@@ -151,17 +159,20 @@ class CallService:
                         call_uuid, outcome, outcome_value, duration
                     )
 
-                # Handle dialer job completion (always done app-side for retry logic)
+                # Handle dialer job completion (always done app-side for retry
+                # logic). Must run BEFORE the counters: a lead that is going
+                # to be redialled has not been completed or failed yet.
+                lead_is_terminal = True
                 if job_id:
-                    await self._handle_job_completion(
+                    lead_is_terminal = await self._handle_job_completion(
                         job_id=job_id,
                         outcome=outcome,
                         campaign_id=campaign_id or "",
                         lead_id=rpc_result.get("lead_id", "") if rpc_result else ""
                     )
 
-                # Update campaign counters
-                if campaign_id:
+                # Update campaign counters — once per LEAD, not per attempt.
+                if campaign_id and lead_is_terminal:
                     self._update_campaign_counters(campaign_id, outcome)
 
             logger.info(f"Call {call_uuid} status updated: {outcome}")
@@ -379,19 +390,24 @@ class CallService:
                 if lead_id:
                     await self._update_lead_status_pooled(conn, lead_id, outcome)
 
-                # ---- Step 2: campaign counters ------------------------------
-                if campaign_id:
-                    await self._update_campaign_counters_pooled(conn, campaign_id, outcome)
-
-                # ---- Step 3: dialer job completion + retry decision --------
+                # ---- Step 2: dialer job completion + retry decision --------
+                # Runs BEFORE the campaign counters (it used to run after) so
+                # the counters can be gated on the retry decision — see
+                # `_update_campaign_counters_pooled`. A lead that is going to
+                # be redialled has not been "completed" or "failed" yet.
+                lead_is_terminal = True
                 if job_id:
-                    retry_args = await self._handle_job_completion_pooled(
+                    lead_is_terminal, retry_args = await self._handle_job_completion_pooled(
                         conn,
                         job_id=job_id,
                         outcome=outcome,
                         campaign_id=campaign_id or "",
                         lead_id=lead_id or "",
                     )
+
+                # ---- Step 3: campaign counters ------------------------------
+                if campaign_id and lead_is_terminal:
+                    await self._update_campaign_counters_pooled(conn, campaign_id, outcome)
         except (asyncio.TimeoutError, DatabasePoolTimeoutError) as exc:
             logger.error(
                 "handle_call_status: DB pool acquire timed out for call=%s "
@@ -466,7 +482,15 @@ class CallService:
         self, conn: asyncpg.Connection, campaign_id: str, outcome: CallOutcome,
     ) -> None:
         """Pooled equivalent of `_update_campaign_counters` — same routing
-        rules (see that method's docstring for the counter table)."""
+        rules (see that method's docstring for the counter table).
+
+        ONE BUMP PER LEAD, not per attempt: the caller only invokes this
+        once the lead has reached a terminal state (no retry scheduled), so
+        `calls_completed + calls_failed` counts leads finished and can no
+        longer exceed `total_leads`. Previously this ran on every attempt,
+        before the retry decision, so a single busy lead redialled four
+        times bumped `calls_completed` four times.
+        """
         non_reachable = NON_RETRYABLE_OUTCOMES - {CallOutcome.GOAL_ACHIEVED}
         counter = "calls_failed" if outcome in non_reachable else "calls_completed"
         # `counter` is one of two hard-coded literals above — never
@@ -487,22 +511,34 @@ class CallService:
         outcome: CallOutcome,
         campaign_id: str,
         lead_id: str,
-    ) -> Optional[tuple]:
+    ) -> tuple[bool, Optional[tuple]]:
         """Pooled equivalent of `_handle_job_completion`.
 
-        Returns the positional-argument tuple for `_schedule_retry` when a
-        retry is due, else None. The caller is responsible for invoking
-        `_schedule_retry` AFTER the transaction commits — that call talks to
-        Redis and must not run while holding a pooled DB connection.
+        Returns ``(lead_is_terminal, retry_args)``.
+
+        * ``lead_is_terminal`` — True when this teardown really finalised the
+          lead (no further attempt is coming). The caller uses it to decide
+          whether to bump the campaign counters: a lead awaiting a retry, or
+          a duplicate teardown whose idempotency guard tripped, must not
+          count.
+        * ``retry_args`` — the positional-argument tuple for
+          `_schedule_retry` when a retry is due, else None. The caller must
+          invoke `_schedule_retry` AFTER the transaction commits — that call
+          talks to Redis and must not run while holding a pooled DB
+          connection.
         """
         job_data = await conn.fetchrow(
             "SELECT * FROM dialer_jobs WHERE id = $1", job_id,
         )
         if job_data is None:
             logger.warning(f"Dialer job not found: {job_id}")
-            return None
+            # Nothing to retry — the lead is as finished as we can tell, so
+            # let the caller count it rather than stalling campaign progress.
+            return True, None
 
-        attempt_number = job_data["attempt_number"] or 1
+        attempt_number = await self._effective_attempt_number(
+            job_id, job_data["attempt_number"],
+        )
         tenant_id = job_data["tenant_id"] or "default-tenant"
 
         from app.workers.disposition_policy import decide as decide_disposition
@@ -532,10 +568,26 @@ class CallService:
         # this far, `updated_job_id` comes back None and we must NOT
         # re-schedule a second retry for the same job.
         if decision.should_retry:
+            # ATTEMPT ACCOUNTING (compliance-critical): advance the persisted
+            # counter in the SAME guarded UPDATE that books the retry. Nothing
+            # else in the codebase ever wrote this column, so it sat at 1
+            # forever and `disposition_policy`'s `attempt_number >= cap` test
+            # (every cap is >= 2) could never fire — a busy lead was redialled
+            # every 5 minutes indefinitely. The increment rides the existing
+            # `status = 'processing'` guard, so it is atomic and cannot be
+            # applied twice by a duplicate teardown. Expressed as SQL rather
+            # than a Python value so it stays a pure, race-free increment.
+            #
+            # This column therefore counts CONNECTED (post-answer) attempts.
+            # Attempts that died before connecting are counted only in the
+            # Redis job, which `_effective_attempt_number` folds in with a
+            # max() — so the live signal can only ever make the cap fire
+            # SOONER, never later. Both paths are independently bounded.
             updated_job_id = await conn.fetchval(
                 """
                 UPDATE dialer_jobs
                 SET status = $2, last_outcome = $3, failure_reason = $4,
+                    attempt_number = GREATEST(COALESCE(attempt_number, 1), 1) + 1,
                     updated_at = NOW()
                 WHERE id = $1 AND status = 'processing'
                 RETURNING id
@@ -560,7 +612,8 @@ class CallService:
                 "'processing') — skipping duplicate finalize/retry-schedule",
                 job_id,
             )
-            return None
+            # Someone else already finalised (and already counted) this job.
+            return False, None
 
         logger.info(
             "job_completion job=%s final=%s %s",
@@ -568,7 +621,7 @@ class CallService:
         )
 
         if not decision.should_retry:
-            return None
+            return True, None
 
         logger.info(
             f"Scheduling retry for job {job_id} (attempt {attempt_number + 1}) "
@@ -577,10 +630,68 @@ class CallService:
         # `_schedule_retry` reads job_data as a dict (job_data.get(...)); the
         # asyncpg Record supports mapping-style access, but pass a plain
         # dict for exact parity with the legacy path's `job_response.data[0]`.
-        return (
+        return False, (
             job_id, dict(job_data), outcome, campaign_id, lead_id,
             str(tenant_id), attempt_number, decision.delay_seconds,
         )
+
+    async def _effective_attempt_number(
+        self, job_id: str, db_attempt_number: Optional[int],
+    ) -> int:
+        """How many dial attempts this lead has had, counting the one that
+        just finished. This is the number the retry cap is enforced against.
+
+        Two counters exist and neither is complete on its own:
+
+        * ``dialer_jobs.attempt_number`` (Postgres) — durable, but only
+          advanced by the post-answer finalizer, so it counts CONNECTED
+          attempts. Before 2026-07-28 nothing advanced it at all, which is
+          why the cap never fired.
+        * the Redis ``DialerJob`` inflight payload — advanced by
+          ``DialerQueueService.schedule_retry`` on BOTH the pre-answer
+          (originate failed) and post-answer paths, so it is the true total
+          while the call is live; but it is untracked when the job leaves
+          flight and aged out by ``reap_stale_processing`` after ~15 min, so
+          it is not durable.
+
+        Taking the MAX is the compliance-safe combination: the live counter
+        can only pull the cap forward (fewer calls), and the durable column
+        guarantees a bound even when Redis has nothing to say. The lookup is
+        advisory — any failure, timeout or missing service degrades silently
+        to the DB value rather than risking the teardown.
+        """
+        db_value = 1
+        try:
+            if db_attempt_number is not None:
+                db_value = max(1, int(db_attempt_number))
+        except (TypeError, ValueError):
+            db_value = 1
+
+        getter = getattr(self._queue_service, "get_live_attempt_number", None)
+        if getter is None:
+            return db_value
+
+        try:
+            # Bounded: this is the one Redis read that happens while the
+            # pooled DB connection is held (the retry ENQUEUE is still
+            # deferred until after the commit). A stalled Redis must not
+            # extend the transaction, so cap the wait and fall back.
+            live = await asyncio.wait_for(getter(job_id), timeout=0.5)
+        except Exception as exc:  # noqa: BLE001 — advisory, never fatal
+            logger.debug(
+                "live attempt lookup failed job=%s err=%s — using DB value %s",
+                job_id, exc, db_value,
+            )
+            return db_value
+
+        if isinstance(live, bool) or not isinstance(live, int) or live < 1:
+            return db_value
+        if live > db_value:
+            logger.info(
+                "attempt count job=%s: live=%s > persisted=%s — enforcing the "
+                "cap against the live count", job_id, live, db_value,
+            )
+        return max(db_value, live)
 
     async def _update_lead_status(self, lead_id: str, outcome: CallOutcome) -> None:
         """Update lead status and call tracking fields based on call outcome."""
@@ -661,9 +772,13 @@ class CallService:
         outcome: CallOutcome,
         campaign_id: str,
         lead_id: str
-    ) -> None:
+    ) -> bool:
         """
         Handle dialer job completion — decide retry or finalize.
+
+        Returns ``lead_is_terminal``: True when no further attempt is coming,
+        so the caller may bump the campaign counters. False when a retry was
+        scheduled (the lead isn't finished) or when finalisation failed.
 
         Retry policy is owned by ``disposition_policy.decide`` (the single
         source of truth for post-answer outcomes). It replaced the old
@@ -672,11 +787,13 @@ class CallService:
         no-answer and voicemail identically. Each disposition now has its
         own cadence and attempt cap:
 
-            Busy      5m → 15m → 45m   (cap 4)
-            No-answer 2h → next-day    (cap 3)
-            Voicemail 4h once          (cap 2)
-            Rejected  no retry — stop
-            Failed    30s → 2m → 10m   (cap 3)
+            Busy      5m → 15m → 45m   (cap 4 total attempts)
+            No-answer 24h → 24h        (cap 3)
+            Voicemail 24h once         (cap 2)
+            Unavail.  no retry — DNC
+            Rejected  no retry — DNC
+            Failed    30s → 2m         (cap 3)
+            Timeout   30s → 2m         (cap 3)
         """
         try:
             # Get job details
@@ -684,10 +801,15 @@ class CallService:
 
             if not job_response.data:
                 logger.warning(f"Dialer job not found: {job_id}")
-                return
+                return True
 
             job_data = job_response.data[0]
-            attempt_number = job_data.get("attempt_number", 1)
+            # Live-or-persisted attempt count — see
+            # `_effective_attempt_number`. Reading the raw column alone is
+            # what let the cap sit at a frozen 1 forever.
+            attempt_number = await self._effective_attempt_number(
+                job_id, job_data.get("attempt_number"),
+            )
             tenant_id = job_data.get("tenant_id", "default-tenant")
 
             # Disposition-based decision — see module docstring for the
@@ -719,6 +841,12 @@ class CallService:
 
             if not decision.should_retry:
                 job_update["completed_at"] = datetime.utcnow().isoformat()
+            else:
+                # Persist the advanced attempt count so the NEXT teardown
+                # sees a higher number and the cap can actually be reached.
+                # (Legacy non-pooled path — no `RETURNING`, so this is a
+                # plain write of the value we already resolved.)
+                job_update["attempt_number"] = attempt_number + 1
 
             self._db_client.table("dialer_jobs").update(job_update).eq("id", job_id).execute()
 
@@ -735,8 +863,12 @@ class CallService:
                 decision.log_message,
             )
 
+            return not decision.should_retry
+
         except Exception as e:
             logger.error(f"Error handling job completion for {job_id}: {e}", exc_info=True)
+            # Unknown state — do NOT count the lead as finished.
+            return False
     
     async def _schedule_retry(
         self,
@@ -757,6 +889,13 @@ class CallService:
         priority queue; combined with the delayed re-enqueue (which
         RPUSHes to the back of the tenant FIFO when due), fresh leads
         always drain before recycled ones.
+
+        ``attempt_number`` is the attempt that JUST COMPLETED and is passed
+        through unchanged: ``DialerQueueService.schedule_retry`` owns the
+        single increment. This used to build the job with
+        ``attempt_number + 1`` and then let the queue bump it again, so a
+        retry job was stamped two attempts ahead of reality — burning a
+        retry the lead had never been given.
         """
         logger.info(
             f"Scheduling retry for job {job_id} (attempt {attempt_number + 1}) "
@@ -776,7 +915,8 @@ class CallService:
             phone_number=job_data.get("phone_number", ""),
             priority=retry_priority,
             status=JobStatus.RETRY_SCHEDULED,
-            attempt_number=attempt_number + 1,
+            # NOT +1 — `schedule_retry` increments this exactly once.
+            attempt_number=attempt_number,
             last_outcome=outcome
         )
 
