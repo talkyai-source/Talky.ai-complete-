@@ -273,6 +273,100 @@ class CerebrasLLMProvider(LLMProvider):
         logger.error("Cerebras LLM streaming failed after retries: %s", last_err)
         raise RuntimeError(f"Cerebras LLM streaming failed: {last_err}")
 
+    async def stream_chat_with_timeout(
+        self,
+        messages: List[Message],
+        timeout_seconds: float = DEFAULT_LLM_TIMEOUT,
+        **kwargs,
+    ) -> AsyncIterator[str]:
+        """Stream with a hard wall-clock deadline and inter-token stall detection.
+
+        THIS METHOD IS NOT OPTIONAL. The voice pipeline calls
+        ``stream_chat_with_timeout`` — never ``stream_chat`` — on every turn
+        (turn_streamer.py, llm_response.py, confirm_llm.py). It is absent from
+        the ``LLMProvider`` ABC, so a provider that omits it type-checks and
+        imports fine and then raises ``AttributeError`` on the first turn of
+        every call. That is exactly what happened when Cerebras shipped without
+        it: AI Options' "Test" button worked (it calls ``stream_chat``
+        directly) while the campaign Test agent and real calls produced no
+        reply at all.
+
+        Logic mirrors ``GeminiLLMProvider.stream_chat_with_timeout``, which is
+        provider-agnostic — it wraps ``stream_chat`` in per-token asyncio
+        timeouts and adds nothing vendor-specific.
+
+        The exception type matters: the pipeline catches
+        ``app.infrastructure.llm.groq.LLMTimeoutError`` specifically, so we
+        raise that one rather than defining another class it would not catch.
+
+        Raises:
+            LLMTimeoutError: no token arrived before the TTFT deadline.
+        """
+        from app.infrastructure.llm.groq import LLMTimeoutError
+
+        _INTERTOKEN_TIMEOUT = 2.0
+
+        t_start = asyncio.get_event_loop().time()
+        tokens_received = 0
+        gen = self.stream_chat(messages, **kwargs)
+        try:
+            while True:
+                remaining = timeout_seconds - (
+                    asyncio.get_event_loop().time() - t_start
+                )
+                if remaining <= 0:
+                    if tokens_received > 0:
+                        logger.warning(
+                            "Cerebras wall-clock expired mid-stream "
+                            "(limit=%.1fs, tokens=%d) — treating as stream end",
+                            timeout_seconds, tokens_received,
+                        )
+                        break
+                    logger.error(
+                        "Cerebras deadline exceeded before first token "
+                        "(limit=%.1fs)", timeout_seconds,
+                    )
+                    raise LLMTimeoutError(
+                        f"LLM response timed out after {timeout_seconds}s"
+                    )
+                token_timeout = (
+                    remaining if tokens_received == 0
+                    else min(remaining, _INTERTOKEN_TIMEOUT)
+                )
+                try:
+                    token = await asyncio.wait_for(
+                        gen.__anext__(), timeout=token_timeout
+                    )
+                    tokens_received += 1
+                    yield token
+                except StopAsyncIteration:
+                    break
+                except asyncio.TimeoutError:
+                    elapsed = asyncio.get_event_loop().time() - t_start
+                    if tokens_received > 0:
+                        logger.warning(
+                            "Cerebras inter-token stall after %.2fs (tokens=%d) "
+                            "— treating as stream end", elapsed, tokens_received,
+                        )
+                        break
+                    logger.error(
+                        "Cerebras timeout waiting for first token after %.2fs "
+                        "(limit=%.1fs)", elapsed, timeout_seconds,
+                    )
+                    raise LLMTimeoutError(
+                        f"LLM response timed out after {timeout_seconds}s"
+                    )
+        finally:
+            # Close the underlying stream so the HTTP connection is released
+            # even when the caller stops iterating early (barge-in does this
+            # on almost every turn).
+            aclose = getattr(gen, "aclose", None)
+            if aclose is not None:
+                try:
+                    await aclose()
+                except Exception:  # noqa: BLE001
+                    pass
+
     async def cleanup(self) -> None:
         """Release the client reference."""
         self._client = None

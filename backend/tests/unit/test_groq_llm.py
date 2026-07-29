@@ -393,6 +393,12 @@ async def test_debug_log_does_not_leak_message_content_by_default(caplog, monkey
     full_log_text = "\n".join(r.message for r in caplog.records)
 
     # Content must be absent everywhere in the debug output...
+    # NOTE: the first assertion below is the only one the PII redactor could
+    # ever satisfy on its own (it would render the address `***@example.com`).
+    # The other three are redaction-proof — the redactor leaves "Acme Roofing",
+    # "AC-99182-XJ" (5-digit run, no pattern matches) untouched — so this test
+    # keeps proving the gate stays SHUT whether or not another module has
+    # installed the redactor first.
     assert "jane.doe.private@example.com" not in full_log_text
     assert "078-05-1120" not in full_log_text
     assert "AC-99182-XJ" not in full_log_text
@@ -404,10 +410,57 @@ async def test_debug_log_does_not_leak_message_content_by_default(caplog, monkey
         assert "content='" not in line  # old truncated-preview format is gone
 
 
+@pytest.fixture()
+def pii_redaction_installed():
+    """Install the process-wide PII redactor exactly the way production does.
+
+    Production wires this up in ``app_bootstrap.configure_logging()`` (and the
+    voice-pipeline modules install it at import time), so every log record is
+    rewritten *as it is created* — ``logging.Logger.makeRecord`` is wrapped.
+    Unit tests never call ``configure_logging()``, so a test that wants to
+    assert PRODUCTION log behaviour must install it itself, and must do so
+    BEFORE the code under test emits its records: installing at assertion time
+    is too late, the records already exist unredacted.
+
+    ``install_pii_log_redaction()`` is documented idempotent, and the source
+    bears that out — it short-circuits on the ``_pii_redacting`` marker it
+    stamps on its own wrapper and returns False without re-wrapping (see
+    ``tests/security/test_log_pii_redaction.py::
+    test_install_is_idempotent_and_reversible``). We use that return value for
+    cleanup: uninstall ONLY if this fixture is what installed it. In a
+    full-suite run another module (e.g.
+    ``app.domain.services.voice_pipeline.transcript_handler``) has already
+    installed it at import time and must keep it, so no global logging state
+    leaks either way.
+    """
+    from app.core import log_redact
+
+    installed_here = log_redact.install_pii_log_redaction()
+    previous_enabled = log_redact._enabled
+    log_redact.set_pii_redaction_enabled(True)  # ignore any LOG_REDACT_PII=0
+    try:
+        yield
+    finally:
+        log_redact.set_pii_redaction_enabled(previous_enabled)
+        if installed_here:
+            log_redact.uninstall_pii_log_redaction()
+
+
 @pytest.mark.asyncio
-async def test_debug_log_includes_content_when_explicitly_opted_in(caplog, monkeypatch):
+async def test_debug_log_includes_content_when_explicitly_opted_in(
+    caplog, monkeypatch, pii_redaction_installed
+):
     """LOG_MESSAGE_CONTENT opt-in still gives the old truncated-content
-    preview for local debugging — proves the gate actually gates both ways."""
+    preview for local debugging — proves the gate actually gates both ways.
+
+    The gate opening is NOT a licence to leak. Production always has the
+    process-wide PII redactor installed, so what actually reaches a handler is
+    the message content with the caller's email masked. This test asserts that
+    production shape: the content IS logged (non-PII words from both the
+    caller message and the tenant system prompt appear, in the truncated
+    ``content='...'`` preview format) while the PII inside it is redacted to
+    ``***@example.com``.
+    """
     import app.infrastructure.llm.groq as groq_module
 
     monkeypatch.setattr(groq_module, "_LOG_MESSAGE_CONTENT", True)
@@ -427,4 +480,19 @@ async def test_debug_log_includes_content_when_explicitly_opted_in(caplog, monke
         pass
 
     full_log_text = "\n".join(r.message for r in caplog.records)
-    assert "jane.doe.private@example.com" in full_log_text
+
+    # 1. The gate OPENED — content really is being logged now, in the old
+    #    truncated-preview format. Contrast with the default-off test above,
+    #    where none of this appears at all. These substrings are not PII and
+    #    are untouched by the redactor, so they are what proves the gate.
+    message_lines = [r.message for r in caplog.records if r.message.startswith("Message ")]
+    assert message_lines, "expected per-message debug log lines"
+    assert "content='" in full_log_text, "opt-in must restore the content preview"
+    assert "Yeah my email is" in full_log_text  # from the caller message
+    assert "Acme Roofing" in full_log_text  # from the tenant system prompt
+
+    # 2. ...but the PII inside that content is still redacted, because the
+    #    redactor is installed the way production installs it. The opt-in
+    #    widens what is logged; it must never surface a raw caller email.
+    assert "jane.doe.private@example.com" not in full_log_text
+    assert "***@example.com" in full_log_text

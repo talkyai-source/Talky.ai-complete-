@@ -201,3 +201,62 @@ def test_assistant_allows_cerebras_ids_even_without_key(monkeypatch):
     offered = {e["id"] for e in mc.available_models()}
     assert {m.id for m in CEREBRAS_MODELS} <= offered
     importlib.reload(mc)
+
+
+# ── voice-pipeline interface contract ────────────────────────────────────
+# The bug these guard: the voice pipeline calls stream_chat_with_timeout, NOT
+# stream_chat, on every turn (turn_streamer.py / llm_response.py /
+# confirm_llm.py). That method is absent from the LLMProvider ABC, so Cerebras
+# shipped without it, imported cleanly, passed every unit test, and then raised
+# AttributeError on the first turn of every call — the campaign Test agent and
+# real calls produced no reply while AI Options' "Test" button (which calls
+# stream_chat directly) worked fine.
+
+
+def test_provider_implements_methods_the_voice_pipeline_calls():
+    """Any provider selectable in AI Options must satisfy the pipeline's real
+    call surface, not just the ABC's."""
+    from app.infrastructure.llm.groq import GroqLLMProvider
+
+    for method in ("stream_chat", "stream_chat_with_timeout"):
+        assert hasattr(GroqLLMProvider, method)  # reference contract
+        assert hasattr(CerebrasLLMProvider, method), (
+            f"CerebrasLLMProvider is missing {method}() — the voice pipeline "
+            f"calls it on every turn, so the agent would never reply."
+        )
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_with_timeout_yields_tokens(monkeypatch):
+    """Happy path: it must pass tokens straight through from stream_chat."""
+    provider = CerebrasLLMProvider()
+
+    async def _fake_stream(messages, **kwargs):
+        for tok in ("Hi", " there", "!"):
+            yield tok
+
+    monkeypatch.setattr(provider, "stream_chat", _fake_stream)
+    msgs = [Message(role=MessageRole.USER, content="hello")]
+    out = [t async for t in provider.stream_chat_with_timeout(msgs)]
+    assert "".join(out) == "Hi there!"
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_with_timeout_raises_the_error_the_pipeline_catches():
+    """It must raise groq.LLMTimeoutError — that is the exact class
+    turn_streamer/llm_response catch. Any other class escapes their handler."""
+    import asyncio as _asyncio
+
+    from app.infrastructure.llm.groq import LLMTimeoutError
+
+    provider = CerebrasLLMProvider()
+
+    async def _never_yields(messages, **kwargs):
+        await _asyncio.sleep(5)
+        yield "too late"
+
+    provider.stream_chat = _never_yields  # type: ignore[method-assign]
+    msgs = [Message(role=MessageRole.USER, content="hello")]
+    with pytest.raises(LLMTimeoutError):
+        async for _ in provider.stream_chat_with_timeout(msgs, timeout_seconds=0.05):
+            pass
