@@ -69,6 +69,12 @@ _WIRE_RATE = 8000  # OpenAI Realtime audio/pcmu is μ-law @ 8 kHz
 # (and its latency). Env-overridable.
 _REALTIME_NODE_CHARS = int(os.getenv("KNOWLEDGE_REALTIME_NODE_CHARS", "2000"))
 
+# Bounded "no facts" tool result — returned for no hits, a blocked (tenantless)
+# lookup, a retrieve timeout, and when every node was dropped by the injection
+# scan. Always closing the tool round-trip with a short, truthful string is what
+# keeps the caller off an open-ended hold and leaves the model nothing to invent.
+_NO_KB_INFO = "I don't have specific information on that."
+
 
 class RealtimeBridge:
     """Drives one realtime call: gateway <-> OpenAIRealtimeSession.
@@ -483,7 +489,24 @@ class RealtimeBridge:
     async def _lookup_knowledge(self, query: str) -> str:
         """Top-k campaign-knowledge nodes rendered for the voice model. Returns
         a short plain-text answer, or a graceful 'no info' string. Reuses
-        retrieve_knowledge — the cascaded per-turn retrieval."""
+        retrieve_knowledge — the cascaded per-turn retrieval.
+
+        SECURITY: what this returns lands in a ``function_call_output`` item,
+        which the realtime model reads as authoritative fact — the highest-trust
+        channel in the call. The text itself is tenant/3rd-party data, so it gets
+        the SAME defenses the cascaded inject path applies
+        (``turn_streamer._knowledge_block_for_turn``): per-node
+        ``scan_for_injection`` drops a poisoned node, and ``fence_untrusted`` +
+        ``DATA_ONLY_NOTE`` delimit what survives. The note is carried INLINE here
+        (unlike the cascaded tool path, which puts it in its system addendum)
+        because this bridge does not author the realtime session instructions —
+        see app/services/scripts/realtime_instructions.py — so the result must be
+        self-framing.
+
+        BOUNDED: retrieval is capped by the shared per-turn budget. Without it a
+        saturated pool left the caller on an open-ended "let me check" hold with
+        no reply ever arriving.
+        """
         if not query or not self._knowledge_pool or not self._campaign_id:
             return "No company information is available for that."
         # SECURITY — fail closed (issue #5): a missing/empty tenant must NEVER
@@ -498,32 +521,72 @@ class RealtimeBridge:
                 "realtime_bridge KB lookup BLOCKED — no tenant on session call=%s "
                 "(refusing RLS-bypass cross-tenant read)", self._call_id,
             )
-            return "I don't have specific information on that."
+            return _NO_KB_INFO
+        from app.domain.services.voice_pipeline.kb_budget import (
+            _KNOWLEDGE_RETRIEVE_TIMEOUT_S,
+        )
+        from app.domain.services.voice_pipeline.knowledge_tool import (
+            _kb_entry_is_injection,
+            fence_kb_result,
+        )
+
         try:
             from app.services.scripts.knowledge.retrieval import (
                 render_node_answer,
                 retrieve_knowledge,
             )
-            nodes = await retrieve_knowledge(
-                self._knowledge_pool,
-                tenant_id=tenant_id,
-                campaign_id=self._campaign_id,
-                query=query,
-                k=2,
-                bump_hits=False,
+            nodes = await asyncio.wait_for(
+                retrieve_knowledge(
+                    self._knowledge_pool,
+                    tenant_id=tenant_id,
+                    campaign_id=self._campaign_id,
+                    query=query,
+                    k=2,
+                    bump_hits=False,
+                ),
+                # The SHARED per-turn budget (kb_budget), the same one the inject
+                # path and the cascaded tool path use — not a new number. On
+                # expiry wait_for cancels the retrieval, which unwinds the pool
+                # acquire too, so a saturated pool can't hold the turn open.
+                timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
             )
+        except asyncio.TimeoutError:
+            # Match the other two paths: on timeout the turn proceeds WITHOUT
+            # facts. Returning the no-info sentinel (rather than nothing) keeps
+            # the tool round-trip closed so the model speaks instead of leaving
+            # the caller on an open hold, and gives it nothing to invent from.
+            logger.warning(
+                "realtime_bridge KB lookup TIMEOUT >%.0fms call=%s — answering "
+                "without facts", _KNOWLEDGE_RETRIEVE_TIMEOUT_S * 1000, self._call_id,
+            )
+            return _NO_KB_INFO
         except Exception as exc:  # noqa: BLE001
             logger.debug("realtime_bridge knowledge lookup err: %s", exc)
             return "I couldn't look that up right now."
         if not nodes:
-            return "I don't have specific information on that."
+            return _NO_KB_INFO
         parts = []
+        dropped_injection = 0
         for n in nodes:
             # Source-first (issue #1): the FACT comes from the node's own
             # content (retrieval can match a fact anywhere in the node), not the
             # enricher's top-of-node voice_answer summary.
             body = render_node_answer(n, max_chars=_REALTIME_NODE_CHARS)
             head = (n.get("heading") or "").strip()
-            if body:
-                parts.append(f"{head}: {body}" if head else body)
-        return "  ".join(parts) if parts else "I don't have specific information on that."
+            if not body:
+                continue
+            # Content-integrity layer: a node shaped like an instruction to the
+            # model is a poisoned KB entry — drop it, never hand it back as an
+            # authoritative tool result.
+            if _kb_entry_is_injection(head, body):
+                dropped_injection += 1
+                continue
+            parts.append(f"{head}: {body}" if head else body)
+        if dropped_injection:
+            logger.warning(
+                "realtime_bridge call=%s dropped %d knowledge node(s) flagged as "
+                "injection", self._call_id, dropped_injection,
+            )
+        if not parts:
+            return _NO_KB_INFO
+        return fence_kb_result("  ".join(parts), with_note=True)
