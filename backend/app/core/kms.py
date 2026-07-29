@@ -24,6 +24,10 @@ Environment variables:
   KMS_REGION            = us-east-1 (AWS only)
   SECRETS_MASTER_KEY    = hex-encoded 32-byte key (local backend only)
                           Generate: python3 -c "import secrets; print(secrets.token_hex(32))"
+                          MANDATORY in production — enforced both by
+                          app/core/prod_gate.py at boot and by
+                          LocalKMSBackend.__init__ below. Changing or losing
+                          it orphans every secret already in the database.
 """
 from __future__ import annotations
 
@@ -166,8 +170,15 @@ class LocalKMSBackend(KMSBackend):
       - High-security requirements (key material lives in an env var)
 
     The master key MUST be set in SECRETS_MASTER_KEY (64-char hex).
-    If not set, a random key is generated at startup — this means all
-    previously encrypted DEKs become permanently unreadable after restart.
+
+    If it is not set:
+      - ENVIRONMENT=production → construction RAISES. The boot gate
+        (app/core/prod_gate.py) normally catches this first; this check
+        exists for worker processes that never run the gate. Refusing to
+        start is strictly better than re-keying live data.
+      - anywhere else → a random ephemeral key is generated and a loud
+        warning is logged. Fine for dev, where there is nothing durable
+        to lose.
     """
 
     def __init__(self, master_key: Optional[bytes] = None) -> None:
@@ -187,11 +198,28 @@ class LocalKMSBackend(KMSBackend):
                     # Try base64 in case the user base64-encoded it
                     self._kek = base64.b64decode(env_key)
             else:
+                environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+                if environment == "production":
+                    # Fail closed. Booting here would encrypt new secrets
+                    # under a throwaway key and orphan every secret already
+                    # in the database — silently, and only discovered later.
+                    raise RuntimeError(
+                        "SECRETS_MASTER_KEY is not set and ENVIRONMENT=production. "
+                        "Refusing to start with an ephemeral key: any secrets "
+                        "already encrypted in the database would become "
+                        "permanently unreadable, and new ones would be lost on "
+                        "the next restart. Set SECRETS_MASTER_KEY (64-char hex) "
+                        "to the SAME value this deployment has always used."
+                    )
                 self._kek = secrets.token_bytes(32)
                 logger.warning(
-                    "SECRETS_MASTER_KEY not set — generated ephemeral key. "
-                    "All secrets will be UNREADABLE after restart. "
-                    "Set SECRETS_MASTER_KEY in your .env file."
+                    "SECRETS_MASTER_KEY not set — generated an EPHEMERAL key "
+                    "(environment=%s). Any previously encrypted secrets will be "
+                    "UNREADABLE, and anything encrypted now will be unreadable "
+                    "after this process restarts — the ciphertext survives, the "
+                    "key does not. Acceptable in development only. Set "
+                    "SECRETS_MASTER_KEY in your .env file to make it durable.",
+                    environment,
                 )
 
         if len(self._kek) not in (16, 24, 32):

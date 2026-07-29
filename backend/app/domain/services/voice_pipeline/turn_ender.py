@@ -15,6 +15,7 @@ from typing import Any, Optional
 from fastapi import WebSocket
 
 from app.core.container import get_container
+from app.core.log_redact import install_pii_log_redaction
 from app.core.telemetry import pipeline_span, voice_span
 from app.domain.models.conversation import MessageRole
 from app.domain.models.session import CallSession, CallState
@@ -37,6 +38,13 @@ from app.domain.services.voice_pipeline.turn_helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+# This module logs the caller's utterance on almost every branch (turn-0
+# rejection, backchannel, self-echo, turn_end, slow-turn WARNING — the last of
+# which Sentry turns into a breadcrumb that leaves the box). Install the
+# process-wide log redactor at import: idempotent, never raises, and it covers
+# future log statements added here without anyone having to remember.
+install_pii_log_redaction()
 
 # Sentinel distinguishing "not yet resolved" from a resolved-but-None cache
 # value on the session (a non-campaign call legitimately resolves to None).

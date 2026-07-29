@@ -44,6 +44,9 @@ def _prod_env_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FREESWITCH_ESL_PASSWORD", _STRONG_PBX_PW)
     # Required secrets
     monkeypatch.setenv("JWT_SECRET", _STRONG_JWT)
+    # Required in production since the KMS fail-open fix: without it the gate
+    # correctly refuses to boot, so this happy-path baseline must supply it.
+    monkeypatch.setenv("SECRETS_MASTER_KEY", "a" * 64)
     monkeypatch.setenv("TELEPHONY_METRICS_TOKEN", "tok_" + "a" * 32)
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_" + "a" * 32)
 

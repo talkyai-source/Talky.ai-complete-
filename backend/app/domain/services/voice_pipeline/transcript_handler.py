@@ -19,11 +19,20 @@ from typing import Optional
 
 from fastapi import WebSocket
 
+from app.core.log_redact import install_pii_log_redaction
 from app.domain.models.conversation import BargeInSignal
 from app.domain.models.session import CallSession
 from app.domain.services.voice_pipeline.backchannel import is_backchannel
 
 logger = logging.getLogger(__name__)
+
+# Caller speech is PII (callers say health and financial details out loud) and
+# log content has no retention limit anywhere in this stack. Install the
+# process-wide log redactor as soon as any voice-pipeline module is imported —
+# idempotent, never raises, and independent of which entrypoint configured
+# logging (API bootstrap, voice worker, dialer worker, a script or a test).
+# See app/core/log_redact.py for the mechanism and LOG_REDACT_PII to disable.
+install_pii_log_redaction()
 
 
 class TranscriptHandler:
@@ -122,7 +131,9 @@ class TranscriptHandler:
         # it's the caller's turn is a real answer and falls through normally.
         if getattr(session, "tts_active", False) and is_backchannel(transcript.text):
             logger.info(
-                "backchannel %r during agent speech — ignored (no interrupt, no reply)",
+                # `transcript=` names the placeholder so the log redactor can
+                # tell this argument is caller speech (see log_redact).
+                "backchannel transcript=%r during agent speech — ignored (no interrupt, no reply)",
                 (transcript.text or "")[:24],
             )
             # F-09: mark this utterance's seq as suppressed so the ALWAYS-emitted

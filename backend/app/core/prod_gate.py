@@ -162,7 +162,8 @@ def _check_pbx_default_credentials() -> list[GateViolation]:
 def _check_required_secrets() -> list[GateViolation]:
     """T0.3 — secrets that MUST be set in production. JWT controls auth;
     TELEPHONY_METRICS_TOKEN gates the /metrics endpoint; STRIPE_SECRET_KEY
-    stops billing from silently falling back to mock mode.
+    stops billing from silently falling back to mock mode;
+    SECRETS_MASTER_KEY is the KEK every stored secret is encrypted under.
     """
     violations: list[GateViolation] = []
 
@@ -190,6 +191,31 @@ def _check_required_secrets() -> list[GateViolation]:
                 detail=(
                     "TELEPHONY_METRICS_TOKEN is not set — /metrics endpoint would "
                     "be unauthenticated or exposed to scrapers"
+                ),
+            )
+        )
+
+    # SECRETS_MASTER_KEY is the key-encryption key (KEK) that wraps every DEK
+    # in the secrets table — tenant credentials, provider keys, connector
+    # tokens. When it is unset the local KMS backend mints a RANDOM EPHEMERAL
+    # key at startup (app/core/kms.py) and secrets_manager silently falls back
+    # to JWT_SECRET/SECRET_KEY. Either way the next restart — or a JWT_SECRET
+    # rotation — re-keys the service while the ciphertext in the database stays
+    # under the old key: unrecoverable, and it looks like a clean deploy.
+    # Required regardless of KMS_PROVIDER, because SecretsManager derives its
+    # master KEK from this variable even when KMS_PROVIDER=aws.
+    if not (os.getenv("SECRETS_MASTER_KEY", "") or "").strip():
+        violations.append(
+            GateViolation(
+                rule="missing_secret",
+                detail=(
+                    "SECRETS_MASTER_KEY is not set — the service would encrypt "
+                    "secrets under an ephemeral/derived key, and every secret "
+                    "already stored in the database becomes permanently "
+                    "unreadable on the next restart or JWT_SECRET rotation. "
+                    "Generate with: python -c \"import secrets; "
+                    "print(secrets.token_hex(32))\" — but see the deploy notes "
+                    "first if this service has ever booted without it."
                 ),
             )
         )

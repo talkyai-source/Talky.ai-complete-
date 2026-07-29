@@ -24,6 +24,22 @@ from app.core.tenant_middleware import TenantMiddleware
 
 def configure_logging() -> None:
     """Configure application and noisy third-party loggers."""
+    # Install PII redaction BEFORE any handler exists. It wraps
+    # Logger.makeRecord, so it applies to every logger in the process --
+    # journald, Sentry breadcrumbs, and any handler added later.
+    #
+    # This is the canonical install point. Installing it from the voice
+    # pipeline modules instead left a real hole: groq.py logs full message
+    # content (caller email, SSN) on a path that does not import them, so
+    # that PII was reaching logs unredacted. Every process that configures
+    # logging now gets redaction, including the dialer/cleanup/reminder
+    # workers, which log lead phone numbers.
+    try:
+        from app.core.log_redact import install_pii_log_redaction
+        install_pii_log_redaction()
+    except Exception:  # noqa: BLE001 - logging must never fail to configure
+        pass
+
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
     logging.basicConfig(
         level=getattr(logging, log_level, logging.INFO),
