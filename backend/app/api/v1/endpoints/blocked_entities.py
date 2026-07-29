@@ -9,8 +9,18 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.postgres_adapter import Client
-from app.api.v1.dependencies import get_db_client, require_admin, CurrentUser
+from app.api.v1.dependencies import get_db_client, require_admin_tenant, CurrentUser
 
+# TENANT-SCOPED router over `dnc_entries`. A customer managing their own
+# do-not-call/blocked list is a core self-service (and compliance) feature, so
+# this stays at admin level and is filtered to the caller's tenant.
+#
+# Note on GLOBAL entries: dnc_entries.tenant_id is NULLABLE, where NULL means a
+# platform-wide entry. Those are deliberately NOT returned or deletable here —
+# they are managed by the platform operator (see /admin/dnc in call_limits.py,
+# now platform_admin-only). Scoping strictly to `tenant_id = caller` means a
+# tenant can never delete a global suppression, which would be a compliance
+# breach, and the query builder has no OR support to safely widen the read.
 router = APIRouter(prefix="/admin", tags=["Admin Blocked Entities"])
 logger = logging.getLogger(__name__)
 
@@ -31,12 +41,18 @@ class CreateBlockedEntityRequest(BaseModel):
 
 @router.get("/blocked-entities", response_model=List[BlockedEntity])
 async def list_blocked_entities(
-    current_user: CurrentUser = Depends(require_admin),
+    current_user: CurrentUser = Depends(require_admin_tenant),
     db_client: Client = Depends(get_db_client),
 ):
-    """List blocked entities (proxied through DNC entries)."""
+    """List the caller tenant's own blocked entities (via DNC entries)."""
     try:
-        result = db_client.table("dnc_entries").select("*").limit(200).execute()
+        result = (
+            db_client.table("dnc_entries")
+            .select("*")
+            .eq("tenant_id", current_user.tenant_id)
+            .limit(200)
+            .execute()
+        )
         data = result.data or []
         return [
             BlockedEntity(
@@ -56,10 +72,10 @@ async def list_blocked_entities(
 @router.post("/blocked-entities", response_model=BlockedEntity)
 async def block_entity(
     request: CreateBlockedEntityRequest,
-    current_user: CurrentUser = Depends(require_admin),
+    current_user: CurrentUser = Depends(require_admin_tenant),
     db_client: Client = Depends(get_db_client),
 ):
-    """Block a new entity."""
+    """Block a new entity for the caller's tenant."""
     try:
         import uuid
         payload = {
@@ -92,12 +108,20 @@ async def block_entity(
 @router.delete("/blocked-entities/{entity_id}")
 async def unblock_entity(
     entity_id: str,
-    current_user: CurrentUser = Depends(require_admin),
+    current_user: CurrentUser = Depends(require_admin_tenant),
     db_client: Client = Depends(get_db_client),
 ):
-    """Unblock an entity."""
+    """Unblock an entity belonging to the caller's tenant."""
     try:
-        result = db_client.table("dnc_entries").delete().eq("id", entity_id).execute()
+        # Tenant-scoped delete: another tenant's (or a global, tenant_id NULL)
+        # entry matches zero rows and returns 404 instead of being removed.
+        result = (
+            db_client.table("dnc_entries")
+            .delete()
+            .eq("id", entity_id)
+            .eq("tenant_id", current_user.tenant_id)
+            .execute()
+        )
         if result.error or not result.data:
             raise HTTPException(status_code=404, detail="Blocked entity not found")
         return {"success": True}

@@ -21,17 +21,29 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from app.api.v1.dependencies import require_admin
+from app.api.v1.dependencies import require_platform_admin
 
-# Router-level auth: every /admin/abuse/* route was previously reachable with NO
-# authentication (only Depends(get_db_pool)) — anyone could read cross-tenant
-# abuse data and edit detection rules. Gate the whole router at admin level.
-# (Cross-tenant scoping to platform_admin is a deliberate follow-up; this closes
-# the fully-unauthenticated hole.)
+# PLATFORM-WIDE router — platform_admin only. This completes the follow-up the
+# previous fix flagged: router-level auth closed the fully-unauthenticated hole,
+# but `require_admin` still admitted any tenant_admin, and NONE of the routes
+# below scope to the caller's tenant. Specifically:
+#
+#   * /events, /statistics, /alerts take `tenant_id` as a CLIENT-SUPPLIED query
+#     param and default to scanning EVERY tenant (they JOIN tenants to render
+#     other customers' names), so a tenant filter here would be attacker-chosen,
+#     not caller-derived — the param is an operator convenience, not authz.
+#   * /events/{id} and /events/{id}/resolve key on an id alone, so a
+#     tenant_admin could read and resolve another customer's fraud events.
+#   * /rules CRUD operates on `abuse_detection_rules` where tenant_id IS NULL
+#     means a GLOBAL rule — a tenant_admin could disable or delete the
+#     platform's fraud detection for every customer at once.
+#
+# This is an operator console (fraud review across the estate), not a customer
+# feature, so the correct fix is to raise the bar rather than bolt on a filter.
 router = APIRouter(
     prefix="/admin/abuse",
     tags=["Abuse Monitoring (Day 7)"],
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_platform_admin)],
 )
 
 

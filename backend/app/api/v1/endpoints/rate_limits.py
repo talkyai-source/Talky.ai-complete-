@@ -9,8 +9,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.postgres_adapter import Client
-from app.api.v1.dependencies import get_db_client, require_admin, CurrentUser
+from app.api.v1.dependencies import get_db_client, require_admin_tenant, CurrentUser
 
+# TENANT-SCOPED router. `tenant_telephony_threshold_policies.tenant_id` is NOT
+# NULL and every row belongs to exactly one customer, so a tenant_admin
+# managing their OWN telephony thresholds is a legitimate customer feature —
+# this stays at admin level rather than platform_admin. The isolation comes
+# from filtering every query by the caller's tenant (RLS is BYPASSRLS in prod,
+# so this app-level filter is the only defence).
 router = APIRouter(prefix="/admin", tags=["Admin Rate Limits"])
 logger = logging.getLogger(__name__)
 
@@ -39,12 +45,17 @@ class UpdateRateLimitRequest(BaseModel):
 
 @router.get("/rate-limits", response_model=List[RateLimitRule])
 async def list_rate_limits(
-    current_user: CurrentUser = Depends(require_admin),
+    current_user: CurrentUser = Depends(require_admin_tenant),
     db_client: Client = Depends(get_db_client),
 ):
-    """List rate limit rules."""
+    """List rate limit rules for the caller's own tenant."""
     try:
-        result = db_client.table("tenant_telephony_threshold_policies").select("*").execute()
+        result = (
+            db_client.table("tenant_telephony_threshold_policies")
+            .select("*")
+            .eq("tenant_id", current_user.tenant_id)
+            .execute()
+        )
         data = result.data or []
         return [
             RateLimitRule(
@@ -68,10 +79,10 @@ async def list_rate_limits(
 @router.post("/rate-limits", response_model=RateLimitRule)
 async def create_rate_limit(
     request: CreateRateLimitRequest,
-    current_user: CurrentUser = Depends(require_admin),
+    current_user: CurrentUser = Depends(require_admin_tenant),
     db_client: Client = Depends(get_db_client),
 ):
-    """Create a rate limit rule."""
+    """Create a rate limit rule owned by the caller's tenant."""
     try:
         import uuid
         payload = {
@@ -108,14 +119,16 @@ async def create_rate_limit(
 async def update_rate_limit(
     rule_id: str,
     request: UpdateRateLimitRequest,
-    current_user: CurrentUser = Depends(require_admin),
+    current_user: CurrentUser = Depends(require_admin_tenant),
     db_client: Client = Depends(get_db_client),
 ):
-    """Update rate limit rule status."""
+    """Update rate limit rule status (only within the caller's tenant)."""
     try:
+        # tenant_id is part of the WHERE clause, so another tenant's rule_id
+        # matches zero rows and surfaces as 404 — never a cross-tenant write.
         result = db_client.table("tenant_telephony_threshold_policies").update({
             "active": request.active,
-        }).eq("id", rule_id).execute()
+        }).eq("id", rule_id).eq("tenant_id", current_user.tenant_id).execute()
         if result.error or not result.data:
             raise HTTPException(status_code=404, detail="Rate limit rule not found")
         row = result.data[0]

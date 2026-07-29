@@ -22,13 +22,30 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, validator
 from app.api.v1.dependencies import (
     get_db_client,
-    require_admin,
+    require_platform_admin,
     CurrentUser,
     get_audit_logger,
 )
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.core.postgres_adapter import Client
 
+# PLATFORM-WIDE router — platform_admin only. Every route here is an operator
+# function over another party's configuration, and a tenant filter would be
+# wrong (not merely insufficient) because the target is named in the path:
+#
+#   * /tenants/{tenant_id}/call-limits — the tenant is an arbitrary PATH param.
+#     Beyond the cross-tenant read, letting a tenant_admin PUT their own limits
+#     is self-serve quota escalation: the body sets monthly_minutes_allocated
+#     and monthly_spend_cap, i.e. a customer could lift their own billing caps.
+#   * /partners/{partner_id}/limits — revenue_share_percent and billing
+#     min/max. Commercial terms; never customer-writable.
+#   * /dnc {POST,GET,DELETE} — the operator DNC surface: tenant_id is a query
+#     param where NULL means a GLOBAL suppression, and the DELETE keyed on
+#     entry_id alone could remove ANY tenant's (or a global) DNC record, which
+#     is a compliance breach. Customers are NOT losing a feature here: the
+#     tenant-scoped equivalent lives at /api/v1/dnc (endpoints/dnc.py), which
+#     derives the tenant from the caller via _require_tenant().
+#   * /call-limits/status — aggregate counts across all tenants.
 router = APIRouter(prefix="/admin", tags=["Call Limits Admin (Day 7)"])
 
 logger = __import__("logging").getLogger(__name__)
@@ -110,7 +127,7 @@ class DncEntryResponse(BaseModel):
 )
 async def get_tenant_call_limits(
     tenant_id: UUID,
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
 ):
     """Get call limits for a tenant. Requires admin privileges."""
@@ -150,7 +167,7 @@ async def get_tenant_call_limits(
 async def update_tenant_call_limits(
     tenant_id: UUID,
     limits: TenantCallLimitsSchema,
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
@@ -265,7 +282,7 @@ async def update_tenant_call_limits(
 )
 async def get_partner_limits(
     partner_id: UUID,
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
 ):
     """Get aggregate limits for a partner. Requires admin privileges."""
@@ -311,7 +328,7 @@ async def get_partner_limits(
 async def update_partner_limits(
     partner_id: UUID,
     limits: PartnerLimitsSchema,
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
@@ -386,7 +403,7 @@ async def update_partner_limits(
 async def add_dnc_entry(
     entry: DncEntrySchema,
     tenant_id: Optional[UUID] = Query(None, description="Tenant ID (null for global)"),
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
@@ -453,7 +470,7 @@ async def list_dnc_entries(
     tenant_id: Optional[UUID] = Query(None),
     phone_number: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
 ):
     """List DNC entries. Requires admin privileges."""
@@ -500,7 +517,7 @@ async def list_dnc_entries(
 )
 async def remove_dnc_entry(
     entry_id: UUID,
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
@@ -526,7 +543,7 @@ async def remove_dnc_entry(
     description="Get overview of call limits and usage across all tenants.",
 )
 async def get_call_limits_status(
-    admin_user: CurrentUser = Depends(require_admin),
+    admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
 ):
     """Get call limits system status. Requires admin privileges."""

@@ -9,8 +9,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.postgres_adapter import Client
-from app.api.v1.dependencies import get_db_client, require_admin, CurrentUser
+from app.api.v1.dependencies import get_db_client, require_admin_tenant, CurrentUser
 
+# TENANT-SCOPED router. `webhook_endpoints` / `webhook_deliveries` rows carry a
+# tenant_id and a customer configuring their own webhook endpoints is a normal
+# self-service feature, so this stays at admin level. Every query filters by the
+# caller's tenant: webhook URLs frequently embed secrets/tokens, and delivery
+# history contains customer payloads, so an unfiltered read leaked both.
 router = APIRouter(prefix="/admin", tags=["Admin Webhooks"])
 logger = logging.getLogger(__name__)
 
@@ -39,12 +44,17 @@ class CreateWebhookRequest(BaseModel):
 
 @router.get("/webhooks", response_model=List[WebhookEndpoint])
 async def list_webhooks(
-    current_user: CurrentUser = Depends(require_admin),
+    current_user: CurrentUser = Depends(require_admin_tenant),
     db_client: Client = Depends(get_db_client),
 ):
-    """List configured webhook endpoints."""
+    """List webhook endpoints configured by the caller's own tenant."""
     try:
-        result = db_client.table("webhook_endpoints").select("*").execute()
+        result = (
+            db_client.table("webhook_endpoints")
+            .select("*")
+            .eq("tenant_id", current_user.tenant_id)
+            .execute()
+        )
         data = result.data or []
         return [
             WebhookEndpoint(
@@ -64,10 +74,10 @@ async def list_webhooks(
 @router.post("/webhooks", response_model=WebhookEndpoint)
 async def create_webhook(
     request: CreateWebhookRequest,
-    current_user: CurrentUser = Depends(require_admin),
+    current_user: CurrentUser = Depends(require_admin_tenant),
     db_client: Client = Depends(get_db_client),
 ):
-    """Create a new webhook endpoint."""
+    """Create a new webhook endpoint owned by the caller's tenant."""
     try:
         import uuid
         payload = {
@@ -99,12 +109,19 @@ async def create_webhook(
 @router.delete("/webhooks/{webhook_id}")
 async def delete_webhook(
     webhook_id: str,
-    current_user: CurrentUser = Depends(require_admin),
+    current_user: CurrentUser = Depends(require_admin_tenant),
     db_client: Client = Depends(get_db_client),
 ):
-    """Delete a webhook endpoint."""
+    """Delete a webhook endpoint belonging to the caller's tenant."""
     try:
-        result = db_client.table("webhook_endpoints").delete().eq("id", webhook_id).execute()
+        # Cross-tenant webhook_id matches zero rows -> 404, never a foreign delete.
+        result = (
+            db_client.table("webhook_endpoints")
+            .delete()
+            .eq("id", webhook_id)
+            .eq("tenant_id", current_user.tenant_id)
+            .execute()
+        )
         if result.error or not result.data:
             raise HTTPException(status_code=404, detail="Webhook not found")
         return {"success": True}
@@ -118,12 +135,18 @@ async def delete_webhook(
 @router.post("/webhooks/{webhook_id}/test")
 async def test_webhook(
     webhook_id: str,
-    current_user: CurrentUser = Depends(require_admin),
+    current_user: CurrentUser = Depends(require_admin_tenant),
     db_client: Client = Depends(get_db_client),
 ):
-    """Test a webhook endpoint."""
+    """Test a webhook endpoint belonging to the caller's tenant."""
     try:
-        result = db_client.table("webhook_endpoints").select("*").eq("id", webhook_id).execute()
+        result = (
+            db_client.table("webhook_endpoints")
+            .select("*")
+            .eq("id", webhook_id)
+            .eq("tenant_id", current_user.tenant_id)
+            .execute()
+        )
         if result.error or not result.data:
             raise HTTPException(status_code=404, detail="Webhook not found")
         return {"success": True, "delivery_id": webhook_id}
@@ -137,12 +160,19 @@ async def test_webhook(
 @router.get("/webhooks/deliveries", response_model=List[WebhookDelivery])
 async def list_webhook_deliveries(
     webhook_id: Optional[str] = None,
-    current_user: CurrentUser = Depends(require_admin),
+    current_user: CurrentUser = Depends(require_admin_tenant),
     db_client: Client = Depends(get_db_client),
 ):
-    """List webhook delivery history."""
+    """List webhook delivery history for the caller's own tenant."""
     try:
-        query = db_client.table("webhook_deliveries").select("*")
+        # The tenant filter is applied FIRST and unconditionally, so a
+        # caller-supplied webhook_id can only ever narrow within their own
+        # tenant — it cannot be used to pivot to another tenant's deliveries.
+        query = (
+            db_client.table("webhook_deliveries")
+            .select("*")
+            .eq("tenant_id", current_user.tenant_id)
+        )
         if webhook_id:
             query = query.eq("webhook_id", webhook_id)
         result = query.execute()

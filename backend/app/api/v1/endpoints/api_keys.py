@@ -9,8 +9,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.postgres_adapter import Client
-from app.api.v1.dependencies import get_db_client, require_admin, CurrentUser
+from app.api.v1.dependencies import get_db_client, require_admin_tenant, CurrentUser
 
+# TENANT-SCOPED router. `tenant_ai_credentials.tenant_id` is NOT NULL — these
+# are the customer's own bring-your-own AI provider credentials, so managing
+# them is a legitimate tenant_admin feature and must NOT be raised to
+# platform_admin. It is also the highest-impact leak of the set: an unfiltered
+# list returned every other customer's credential rows, and an unfiltered
+# revoke let one customer disable another customer's live credentials.
 router = APIRouter(prefix="/admin", tags=["Admin API Keys"])
 logger = logging.getLogger(__name__)
 
@@ -32,12 +38,17 @@ class CreateApiKeyRequest(BaseModel):
 
 @router.get("/api-keys", response_model=List[ApiKeyResponse])
 async def list_api_keys(
-    current_user: CurrentUser = Depends(require_admin),
+    current_user: CurrentUser = Depends(require_admin_tenant),
     db_client: Client = Depends(get_db_client),
 ):
-    """List API keys (proxied through tenant_ai_credentials)."""
+    """List the caller tenant's own API keys (via tenant_ai_credentials)."""
     try:
-        result = db_client.table("tenant_ai_credentials").select("*").execute()
+        result = (
+            db_client.table("tenant_ai_credentials")
+            .select("*")
+            .eq("tenant_id", current_user.tenant_id)
+            .execute()
+        )
         data = result.data or []
         return [
             ApiKeyResponse(
@@ -58,10 +69,10 @@ async def list_api_keys(
 @router.post("/api-keys", response_model=ApiKeyResponse)
 async def create_api_key(
     request: CreateApiKeyRequest,
-    current_user: CurrentUser = Depends(require_admin),
+    current_user: CurrentUser = Depends(require_admin_tenant),
     db_client: Client = Depends(get_db_client),
 ):
-    """Create a new API key record."""
+    """Create a new API key record owned by the caller's tenant."""
     try:
         import uuid
         payload = {
@@ -93,15 +104,17 @@ async def create_api_key(
 @router.post("/api-keys/{key_id}/revoke")
 async def revoke_api_key(
     key_id: str,
-    current_user: CurrentUser = Depends(require_admin),
+    current_user: CurrentUser = Depends(require_admin_tenant),
     db_client: Client = Depends(get_db_client),
 ):
-    """Revoke an API key."""
+    """Revoke an API key belonging to the caller's tenant."""
     try:
+        # Without the tenant predicate this was a cross-tenant denial-of-service:
+        # any admin could revoke any other customer's provider credentials.
         result = db_client.table("tenant_ai_credentials").update({
             "revoked_at": datetime.utcnow().isoformat(),
             "status": "revoked"
-        }).eq("id", key_id).execute()
+        }).eq("id", key_id).eq("tenant_id", current_user.tenant_id).execute()
         if result.error or not result.data:
             raise HTTPException(status_code=404, detail="API key not found")
         return {"success": True}

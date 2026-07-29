@@ -9,8 +9,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.core.postgres_adapter import Client
-from app.api.v1.dependencies import get_db_client, require_admin, CurrentUser
+from app.api.v1.dependencies import get_db_client, require_admin_tenant, CurrentUser
 
+# TENANT-SCOPED router. `call_guard_decisions.tenant_id` is NOT NULL and each
+# row records a guard decision about one tenant's own call — including the
+# dialled phone number — so reviewing them is a legitimate tenant_admin
+# feature, but an unfiltered read exposed other customers' call metadata.
 router = APIRouter(prefix="/admin", tags=["Admin Call Guards"])
 logger = logging.getLogger(__name__)
 
@@ -29,12 +33,18 @@ class ToggleCallGuardRequest(BaseModel):
 
 @router.get("/call-guards", response_model=List[CallGuardRule])
 async def list_call_guards(
-    current_user: CurrentUser = Depends(require_admin),
+    current_user: CurrentUser = Depends(require_admin_tenant),
     db_client: Client = Depends(get_db_client),
 ):
-    """List call guard rules."""
+    """List call guard rules for the caller's own tenant."""
     try:
-        result = db_client.table("call_guard_decisions").select("*").limit(100).execute()
+        result = (
+            db_client.table("call_guard_decisions")
+            .select("*")
+            .eq("tenant_id", current_user.tenant_id)
+            .limit(100)
+            .execute()
+        )
         data = result.data or []
         return [
             CallGuardRule(
@@ -55,14 +65,16 @@ async def list_call_guards(
 async def toggle_call_guard(
     rule_id: str,
     request: ToggleCallGuardRequest,
-    current_user: CurrentUser = Depends(require_admin),
+    current_user: CurrentUser = Depends(require_admin_tenant),
     db_client: Client = Depends(get_db_client),
 ):
-    """Toggle a call guard rule."""
+    """Toggle a call guard rule within the caller's tenant."""
     try:
+        # Tenant-scoped update: another tenant's rule_id matches zero rows (404)
+        # rather than letting one customer disable another's fraud guard.
         result = db_client.table("call_guard_decisions").update({
             "enabled": request.enabled,
-        }).eq("id", rule_id).execute()
+        }).eq("id", rule_id).eq("tenant_id", current_user.tenant_id).execute()
         if result.error or not result.data:
             raise HTTPException(status_code=404, detail="Call guard rule not found")
         row = result.data[0]

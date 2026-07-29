@@ -402,13 +402,49 @@ from app.core.security.rbac import (
     get_user_tenants,
     normalize_role,
 )
-from app.core.security.tenant_isolation import (
-    TenantContext,
-    require_tenant_access,
-    get_tenant_context_dependency,
-    get_current_tenant_id,
-    validate_tenant_access,
-)
+# Tenant-isolation helpers are re-exported LAZILY (PEP 562 module __getattr__),
+# not imported here.
+#
+# WHY: `app.core.security.tenant_isolation` imports `CurrentUser` and
+# `get_current_user` from THIS module at its own import time, so the two form a
+# cycle. An eager import here only worked when `dependencies` happened to be
+# imported first — then tenant_isolation's import of it re-entered a module that
+# had already defined both names. Import `tenant_isolation` first (as
+# `call_service` -> `tenant_isolation` does, which is what any test module
+# importing call_service before the app package triggers) and the cycle fails
+# the other way round:
+#
+#     ImportError: cannot import name 'TenantContext' from partially
+#     initialized module 'app.core.security.tenant_isolation'
+#
+# — because this line runs while tenant_isolation has only executed as far as
+# its own import statement. Two test modules could not be collected standalone
+# for exactly this reason; they passed only under a full-suite collection where
+# conftest imported the app first, which made the ordering accidental rather
+# than guaranteed.
+#
+# Nothing in this module needs these names at import time — they are used inside
+# one function body (see `validate_tenant_access` below) and listed in
+# `__all__` for callers that do `from app.api.v1.dependencies import
+# TenantContext`. Resolving them on first attribute access keeps that public
+# surface identical while removing the ordering dependency entirely.
+_TENANT_ISOLATION_REEXPORTS = frozenset({
+    "TenantContext",
+    "require_tenant_access",
+    "get_tenant_context_dependency",
+    "get_current_tenant_id",
+    "validate_tenant_access",
+})
+
+
+def __getattr__(name: str):  # PEP 562
+    if name in _TENANT_ISOLATION_REEXPORTS:
+        from app.core.security import tenant_isolation
+
+        value = getattr(tenant_isolation, name)
+        globals()[name] = value  # cache — subsequent lookups skip __getattr__
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 async def require_admin(
@@ -429,6 +465,34 @@ async def require_admin(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",
+        )
+    return current_user
+
+
+async def require_admin_tenant(
+    current_user: CurrentUser = Depends(require_admin),
+) -> CurrentUser:
+    """Admin gate for TENANT-SCOPED admin routes.
+
+    Role policy is identical to ``require_admin`` (tenant_admin and above) —
+    this is deliberately NOT a privilege change, so customer-facing admin
+    features keep working. What it adds is the guarantee that the caller
+    carries a ``tenant_id``, which lets the route filter every query by
+    ``current_user.tenant_id``.
+
+    Why the guard matters: a principal whose profile has a NULL tenant_id
+    would otherwise produce ``WHERE tenant_id = NULL`` (or, worse, an
+    unfiltered query if a caller skipped the filter) — a fail-OPEN that
+    reintroduces the cross-tenant read this dependency exists to close.
+    Failing closed with 403 keeps the isolation invariant total.
+
+    Use for routes over tenant-owned tables. Genuinely platform-wide tables
+    must use ``require_platform_admin`` instead.
+    """
+    if not current_user.tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tenant context required for this operation",
         )
     return current_user
 
@@ -479,7 +543,13 @@ async def require_tenant_member(
         set_bypass_rls(True)
         return current_user
 
-    # Validate tenant membership
+    # Validate tenant membership. Imported here, not at module scope: the
+    # module-level re-export is lazy to break the dependencies <-> tenant
+    # isolation import cycle, and a module __getattr__ does NOT service a bare
+    # global lookup from inside this module (only `module.attr` access from
+    # outside), so the name must be resolved explicitly.
+    from app.core.security.tenant_isolation import validate_tenant_access
+
     async with get_db_client().pool.acquire() as conn:
         has_access = await validate_tenant_access(conn, current_user.id, tenant_id)
 
@@ -534,6 +604,7 @@ __all__ = [
     "get_current_user",
     "get_optional_user",
     "require_admin",
+    "require_admin_tenant",
     "require_platform_admin",
     "require_tenant_member",
     "load_user_permissions",
