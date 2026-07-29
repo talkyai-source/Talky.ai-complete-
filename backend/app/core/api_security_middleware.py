@@ -50,6 +50,130 @@ SUSPICIOUS_UAS = [
     "dirbuster",
 ]
 
+# ---------------------------------------------------------------------------
+# Monitoring-probe exemption
+# ---------------------------------------------------------------------------
+# WHY THIS EXISTS (incident, 2026-07-28)
+# The IP tier was 100 req/min with a 300s block. /api/v1/health was 429'd 51
+# times in two hours while the service was perfectly healthy. A throttled
+# health endpoint is worse than no health endpoint: the 429 makes the uptime
+# monitor and the load balancer mark the pod DOWN, so the limiter *manufactures*
+# the outage it is reporting. The limits were retuned (600/min, 60s block) and
+# probes were exempted outright.
+#
+# WHY THE FIRST FIX WAS NOT ENOUGH
+# The original rule was `path.endswith("/health") or path.endswith("/ready")`.
+# Against the routes that actually exist that exempted only /api/v1/health and
+# /api/v1/healthz/ready, and silently missed /api/v1/healthz/live,
+# /api/v1/healthz/deep, /api/v1/healthz/workers and /api/v1/health/detailed —
+# all of them unauthenticated probes meant to be polled by monitoring. A suffix
+# test is exactly the wrong shape here: it can only ever cover the literal leaf
+# names someone remembered to list, so every new health sub-route re-opens the
+# same hole.
+#
+# THE RULE
+# Match on the FIRST path segment after an optional /api/v{N} version prefix.
+# A path is a monitoring probe iff it is rooted at a probe namespace
+# (/healthz/..., /health/...). Everything under such a root is covered
+# automatically, so adding GET /healthz/whatever tomorrow needs no change here.
+#
+# WHY THIS DOES NOT OVER-EXEMPT
+# Anchoring at the root segment (rather than a substring or suffix test) is what
+# keeps application routes limited. Concretely, these all keep their rate
+# limiting:
+#   /api/v1/calls/live                  — tenant call listing (a suffix rule on
+#                                         "/live" would have exempted it, and it
+#                                         is the single most-polled DB read in
+#                                         the product)
+#   /api/v1/admin/calls/live
+#   /api/v1/admin/health/{detailed,workers,queues,database,incidents,alerts}
+#                                       — admin-authenticated dashboard reads
+#                                         that run real DB queries and fan out
+#                                         to provider health checks. They are
+#                                         rooted at "admin", not at a probe
+#                                         namespace, so they stay limited: they
+#                                         are not what a load balancer polls,
+#                                         and they are expensive.
+#   /api/v1/admin/system-health         — a substring match on "health" would
+#                                         have exempted this. The root-segment
+#                                         rule does not.
+#   /api/v1/campaigns/minutes/status, /api/v1/connectors/status,
+#   /api/v1/auth/mfa/status, /api/v1/telephony/sip/quotas/status, …
+#                                       — "status" is a normal application verb
+#                                         in this codebase (~10 routes), which
+#                                         is why it is deliberately NOT a probe
+#                                         namespace.
+#
+# WHY "live"/"status"/"metrics" ARE NOT ROOTS
+#   live    — /api/v1/calls/live proves the word is application vocabulary here.
+#             "livez" is unambiguous, "live" is not, so only the former is a
+#             root. A bare top-level /live probe does not exist today.
+#   status  — see above.
+#   metrics — the Prometheus scrape endpoint (GET /metrics, app/api/operational.py)
+#             is token-gated in constant time and fails CLOSED when
+#             TELEPHONY_METRICS_TOKEN is unset, so it must never be widened by
+#             namespace. It is already skipped by _is_exempt_path() as an exact
+#             path, and an unauthenticated flood is rejected at the header check
+#             before any DB work. /api/v1/telephony/sip/runtime/metrics/activation
+#             is an authenticated admin report, not a scrape target, and stays
+#             limited. A real scrape at 15s intervals is 4 req/min — three orders
+#             of magnitude under the 600/min IP tier — so metrics endpoints have
+#             no operational need for an exemption in the first place.
+#
+# COST OF THE EXEMPTION
+# Exempting a path removes abuse protection from it, so the exempt set is kept
+# to handlers that are cheap and bounded. /healthz/live, /health and
+# /health/detailed are pure in-memory. /healthz/ready reads a process-local
+# snapshot. /healthz/deep and /healthz/workers touch Postgres/Redis, but only
+# with SELECT 1 and a GET, each capped at 500ms (see health.py
+# _DEEP_PING_TIMEOUT_S) so neither can be turned into a slow-query amplifier.
+# The exemption is additionally restricted to safe methods below: every probe
+# is a GET, so a POST flood aimed at a health path stays rate limited even
+# though it would only ever earn a 405.
+_API_VERSION_PREFIX_RE = re.compile(r"^/api/v\d+(?=/|$)")
+
+# First path segment (after the optional version prefix) that marks a genuine
+# liveness/readiness/monitoring namespace. Add a name here ONLY if the whole
+# subtree under it is a cheap, unauthenticated probe.
+MONITORING_ROOT_SEGMENTS = frozenset(
+    {
+        "health",      # /api/v1/health, /api/v1/health/detailed
+        "healthz",     # /api/v1/healthz/{ready,live,deep,workers}
+        "healthcheck",
+        "ready",
+        "readyz",
+        "livez",
+        "ping",
+    }
+)
+
+# Methods a monitoring probe may use. Anything else stays rate limited.
+MONITORING_METHODS = frozenset({"GET", "HEAD"})
+
+
+def is_monitoring_path(path: str) -> bool:
+    """True if `path` is rooted at a monitoring/probe namespace.
+
+    Matches the first path segment after an optional ``/api/v{N}`` prefix, so
+    the whole subtree of a probe namespace is covered (present and future) while
+    application routes that merely *contain* a probe-ish word are not.
+
+        /api/v1/healthz/workers   -> True
+        /api/v1/health/detailed   -> True
+        /health                   -> True
+        /api/v1/calls/live        -> False
+        /api/v1/admin/health/workers -> False
+        /api/v1/admin/system-health  -> False
+    """
+    stripped = path.rstrip("/") or "/"
+    stripped = _API_VERSION_PREFIX_RE.sub("", stripped, count=1)
+    if not stripped.startswith("/"):
+        # Path was exactly "/api/v1" (or similar) — not a probe.
+        return False
+    segments = stripped.split("/")
+    root = segments[1].lower() if len(segments) > 1 else ""
+    return root in MONITORING_ROOT_SEGMENTS
+
 
 class APISecurityMiddleware(BaseHTTPMiddleware):
     """
@@ -148,8 +272,16 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
         # balancer) mark a perfectly healthy service as DOWN, turning a traffic
         # spike into a reported outage. Observed 2026-07-28 — /api/v1/health was
         # 429'd 51 times in two hours while the service was fine.
+        #
+        # The rule is root-segment based, not suffix based — see the long note
+        # on is_monitoring_path() above for the enumerated exempt set and why
+        # application routes (/calls/live, /admin/health/*, */status) are NOT
+        # in it. Suffix matching is what left /healthz/{live,deep,workers} and
+        # /health/detailed still throttleable after the first fix.
         _path = request.url.path
-        _is_health = _path.endswith("/health") or _path.endswith("/ready")
+        _is_health = (
+            request.method in MONITORING_METHODS and is_monitoring_path(_path)
+        )
 
         if request.method == "OPTIONS" or _is_loopback or _is_internal or _is_health:
             return await call_next(request)
