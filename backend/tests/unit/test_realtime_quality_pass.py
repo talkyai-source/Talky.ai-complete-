@@ -93,7 +93,7 @@ async def test_lookup_knowledge_fails_closed_on_missing_tenant(monkeypatch):
     string instead."""
     called = {"n": 0}
 
-    async def _fake_retrieve(pool, *, tenant_id, campaign_id, query, k, bump_hits=True):
+    async def _fake_retrieve(pool, *, tenant_id, campaign_id, query, k, bump_hits=True, **_kw):
         called["n"] += 1
         return [{"heading": "Hours", "content": "9 to 5"}]
 

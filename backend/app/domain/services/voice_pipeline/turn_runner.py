@@ -196,6 +196,26 @@ def _agent_read_back_phone(history, phone) -> bool:
     return False
 
 
+def _unwrap_verdict(result, field: str) -> str:
+    """Fail-closed unwrap of one branch of a gathered confirmation verdict.
+
+    ``llm_confirmation_verdict`` already swallows provider errors and timeouts and
+    returns 'unclear', so an Exception surfacing here means something outside its
+    own guard went wrong — treat it the same way, leaving the value PENDING rather
+    than guessing. CancelledError is NOT a failure: it is a barge-in cancelling the
+    turn, so re-raise it and let ``run()`` unwind exactly as it did when the two
+    calls were sequential.
+    """
+    if isinstance(result, asyncio.CancelledError):
+        raise result
+    if isinstance(result, BaseException):
+        logger.debug(
+            "%s_confirm verdict failed, failing closed to unclear: %s", field, result
+        )
+        return "unclear"
+    return result
+
+
 class TurnRunner:
     """Runs one user turn: append history → stream LLM+TTS → commit/rollback."""
 
@@ -256,43 +276,75 @@ class TurnRunner:
                 _pending_email = _seeded
 
         _readback_issued = _agent_read_back_email(session.conversation_history, _pending_email)
-        _confirm_verdict = None
-        if (
-            _pending_email
-            and not getattr(_pending, "email_confirmed", False)
-            and _readback_issued
-            and not _is_email_correction(full_transcript, _pending_email)
-        ):
-            _confirm_verdict = _classify_core_confirmation(full_transcript)
-            _via_llm = False
-            if _confirm_verdict == "unclear":
-                _via_llm = True
-                _confirm_verdict = await llm_confirmation_verdict(
-                    self._p.llm_provider, full_transcript, _pending_email
-                )
-            logger.info(
-                "email_confirm call=%s via_llm=%s verdict=%s",
-                call_id[:8], _via_llm, _confirm_verdict,
-            )
-
         # Phone / callback number — SAME gate as email, resolved independently.
         _pending_phone = getattr(_pending, "phone", None)
         _phone_readback_issued = _agent_read_back_phone(
             session.conversation_history, _pending_phone
         )
-        _phone_verdict = None
-        if (
+
+        _email_gate_open = bool(
+            _pending_email
+            and not getattr(_pending, "email_confirmed", False)
+            and _readback_issued
+            and not _is_email_correction(full_transcript, _pending_email)
+        )
+        _phone_gate_open = bool(
             _pending_phone
             and not getattr(_pending, "phone_confirmed", False)
             and _phone_readback_issued
             and not _is_phone_correction(full_transcript, _pending_phone)
-        ):
-            _phone_verdict = _classify_core_confirmation(full_transcript)
-            if _phone_verdict == "unclear":
-                _phone_verdict = await llm_confirmation_verdict(
+        )
+
+        # Fast deterministic pass first — pure, zero-latency, and identical for
+        # both fields, so running it for BOTH gates up front changes nothing
+        # except that the ambiguous tail is now known before any await.
+        _confirm_verdict = (
+            _classify_core_confirmation(full_transcript) if _email_gate_open else None
+        )
+        _phone_verdict = (
+            _classify_core_confirmation(full_transcript) if _phone_gate_open else None
+        )
+        _email_via_llm = _confirm_verdict == "unclear"
+        _phone_via_llm = _phone_verdict == "unclear"
+
+        if _email_via_llm and _phone_via_llm:
+            # LATENCY: these two bounded LLM calls used to run SEQUENTIALLY, so a
+            # turn that was ambiguous on BOTH fields stacked two 1.5s timeouts —
+            # up to 3s of dead air before the caller's real answer started
+            # streaming. The fields are independent (neither verdict feeds the
+            # other; both are applied together below), so resolve them
+            # CONCURRENTLY: worst case is now one timeout, not two. Each call
+            # keeps its own timeout and return_exceptions means one failing can
+            # never abort or discard the other.
+            _results = await asyncio.gather(
+                llm_confirmation_verdict(
+                    self._p.llm_provider, full_transcript, _pending_email
+                ),
+                llm_confirmation_verdict(
                     self._p.llm_provider, full_transcript, _pending_phone,
                     subject="phone number",
-                )
+                ),
+                return_exceptions=True,
+            )
+            _confirm_verdict = _unwrap_verdict(_results[0], "email")
+            _phone_verdict = _unwrap_verdict(_results[1], "phone")
+        elif _email_via_llm:
+            # Single-field case: awaited directly — no gather/task overhead.
+            _confirm_verdict = await llm_confirmation_verdict(
+                self._p.llm_provider, full_transcript, _pending_email
+            )
+        elif _phone_via_llm:
+            _phone_verdict = await llm_confirmation_verdict(
+                self._p.llm_provider, full_transcript, _pending_phone,
+                subject="phone number",
+            )
+
+        if _email_gate_open:
+            logger.info(
+                "email_confirm call=%s via_llm=%s verdict=%s",
+                call_id[:8], _email_via_llm, _confirm_verdict,
+            )
+        if _phone_gate_open:
             logger.info("phone_confirm call=%s verdict=%s", call_id[:8], _phone_verdict)
 
         session.captured_slots = update_state_from_user_turn(

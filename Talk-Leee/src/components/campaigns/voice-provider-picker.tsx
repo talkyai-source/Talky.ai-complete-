@@ -32,10 +32,18 @@ export type VoiceProviderPickerProps = {
     onProviderChange?: (provider: string) => void;
     /** Preselect this provider (e.g. the campaign's saved provider on edit). */
     initialProvider?: string | null;
+    /**
+     * Reports the SELECTED voice's gender ("male"|"female"|undefined) so the
+     * parent can warn when the agent names don't match it. Fires on the user's
+     * pick AND once the catalog loads for an already-saved voice (the edit
+     * case), so the parent never has to look the voice up itself.
+     */
+    onVoiceGenderChange?: (gender?: string) => void;
 };
 
 export function VoiceProviderPicker({
     personaType, voiceId, onVoiceChange, onProviderChange, initialProvider,
+    onVoiceGenderChange,
 }: VoiceProviderPickerProps) {
     const [voices, setVoices] = useState<VoiceInfo[]>([]);
     const [provider, setProvider] = useState<string>("");
@@ -68,6 +76,17 @@ export function VoiceProviderPicker({
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    // Keep the parent's notion of "what gender is the selected voice" in sync.
+    // Depends on `voices` too so it resolves once the catalog arrives for a
+    // voice that was already saved on the campaign.
+    const emitGender = useRef(onVoiceGenderChange);
+    emitGender.current = onVoiceGenderChange;
+    useEffect(() => {
+        const g = voices.find((v) => v.id === voiceId)?.gender;
+        const norm = (g || "").trim().toLowerCase();
+        emitGender.current?.(norm === "male" || norm === "female" ? norm : undefined);
+    }, [voices, voiceId]);
 
     const providerOptions = useMemo(
         () => Array.from(new Set(voices.map((v) => v.provider))).filter(Boolean).sort(),

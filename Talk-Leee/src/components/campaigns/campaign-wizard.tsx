@@ -48,6 +48,7 @@ export function CampaignWizard() {
     const [personaType, setPersonaType] = useState<PersonaType>("lead_gen");
     const [agentNamesRaw, setAgentNamesRaw] = useState("");
     const [agentGenders, setAgentGenders] = useState<Record<string, string>>({});
+    const [voiceGender, setVoiceGender] = useState<string | undefined>(undefined);
     const [voiceId, setVoiceId] = useState("");
     const [voiceName, setVoiceName] = useState("");
     const [provider, setProvider] = useState("");
@@ -204,7 +205,7 @@ export function CampaignWizard() {
                                 1–3 names, comma-separated. The agent introduces itself with one (rotated per call).
                                 {agentNames.length > 0 && <span className="ml-1 text-emerald-600 dark:text-emerald-400">{agentNames.length} name{agentNames.length > 1 ? "s" : ""}.</span>}
                             </p>
-                            <AgentNameGender names={agentNames} value={agentGenders} onChange={setAgentGenders} />
+                            <AgentNameGender names={agentNames} value={agentGenders} onChange={setAgentGenders} voiceGender={voiceGender} />
                         </div>
 
                         <div>
@@ -221,6 +222,7 @@ export function CampaignWizard() {
                             voiceId={voiceId}
                             onVoiceChange={(id, nm) => { setVoiceId(id); setVoiceName(nm ?? ""); }}
                             onProviderChange={setProvider}
+                            onVoiceGenderChange={setVoiceGender}
                         />
 
                         <div className="rounded-lg border border-border bg-background/50 p-4">

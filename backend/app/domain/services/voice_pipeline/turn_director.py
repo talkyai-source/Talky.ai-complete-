@@ -29,7 +29,18 @@ from __future__ import annotations
 
 # Opening ladder — caller-first call, caller has not spoken yet. Kept short
 # and low-key; this is a "hello, are you on the line" check, not a check-in.
-OPENING_PHRASES = ["Hello?", "Hi, can you hear me okay?"]
+#
+# EXACTLY ONE rung may be a greeting, and it must be the first. These nudges
+# fire BEFORE the agent's real opener ("Hi, it's James from Allstate — I'm
+# calling because..."), which the persona delivers once the caller finally
+# speaks. The old rung 2 was "Hi, can you hear me okay?", so a silent pickup
+# heard "Hello?" → "Hi, can you hear me okay?" → "Hi, it's James from..." —
+# three greetings in a row (the "multiple hi and hello" report). Rung 2 keeps
+# the SOTA escalation (a warmer, longer follow-up) but drops the redundant
+# "Hi," so only one greeting precedes the real opener. Do not collapse this to
+# a single rung either: choose_silence_phrase clamps, so nudge 2 would then
+# repeat "Hello?" verbatim — two hellos, which is the same bug.
+OPENING_PHRASES = ["Hello?", "Can you hear me okay?"]
 
 # Mid-conversation ladder — caller has spoken before and has now gone quiet.
 # Neutral first ("Still there?" — Vapi's prescribed phrasing), then one warm,

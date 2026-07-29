@@ -31,6 +31,7 @@ import {
     parseKvList,
     parseList,
 } from "@/lib/campaign-personas";
+import { conflictingNames, pruneGenders } from "@/components/campaigns/agent-name-gender";
 import { aiOptionsApi, AIProviderConfig, VoiceInfo } from "@/lib/ai-options-api";
 import { captureException } from "@/lib/monitoring";
 import { ChevronDown, Loader2, Play, RefreshCw, Square, Volume2, Check } from "lucide-react";
@@ -118,6 +119,11 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
     const [personaType, setPersonaType] = useState<PersonaType>(seed.persona_type);
     const [companyName, setCompanyName] = useState<string>(seed.company_name);
     const [agentNamesRaw, setAgentNamesRaw] = useState<string>(seed.agent_names.join(", "));
+    // This form has no gender-toggle UI (that lives in the wizard / basics
+    // editor), but PUT /campaigns/{id} replaces the whole script_config — so
+    // without carrying the saved tags through, editing a campaign here silently
+    // WIPED its agent_name_genders and calls fell back to gender inference.
+    const [agentGenders] = useState<Record<string, string>>(seed.agent_name_genders ?? {});
     const [slotValues, setSlotValues] = useState<Record<string, string>>({ ...seed.slots });
 
     // Prompt preview (T4-B4) — backend renders the assembled system
@@ -371,6 +377,12 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
             persona_type: personaType,
             company_name: companyName.trim(),
             agent_names: agentNames,
+            agent_name_genders: (() => {
+                // Preserve only tags for names that still exist; omit entirely
+                // when empty so we never send `{}` over a saved map.
+                const kept = pruneGenders(agentGenders, agentNames);
+                return Object.keys(kept).length > 0 ? kept : undefined;
+            })(),
             campaign_slots: buildCampaignSlots(),
         };
 
@@ -942,15 +954,28 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
                                 const selected = voices.find((v) => v.id === formData.voice_id);
                                 const gender = (selected?.gender || "").trim().toLowerCase();
                                 if (gender !== "male" && gender !== "female") return null;
+                                // Name the actual offenders when we can recognise
+                                // them; unisex/unknown names are never flagged.
+                                const bad = conflictingNames(
+                                    parseAgentNames(agentNamesRaw), agentGenders, gender,
+                                );
                                 return (
                                     <div
                                         role="note"
                                         className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
                                     >
                                         <span className="font-semibold">Attention: </span>
-                                        Please add the names according to the voice — you picked a{" "}
-                                        <span className="font-semibold">{gender}</span> voice, so input{" "}
-                                        <span className="font-semibold">{gender}</span> names only.
+                                        You picked a <span className="font-semibold">{gender}</span> voice,
+                                        so use <span className="font-semibold">{gender}</span> names.
+                                        {bad.length > 0 && (
+                                            <>
+                                                {" "}
+                                                <span className="font-semibold">{bad.join(", ")}</span>{" "}
+                                                {bad.length > 1 ? "look" : "looks"} like a mismatch — the
+                                                agent would introduce itself with a name that doesn&apos;t
+                                                match the voice. You can still save if that&apos;s intended.
+                                            </>
+                                        )}
                                     </div>
                                 );
                             })()}

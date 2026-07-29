@@ -341,9 +341,24 @@ class CampaignService:
             voice_gender = None
             try:
                 from app.domain.services.global_ai_config import resolve_voice_gender
-                voice_gender = resolve_voice_gender(
+                _campaign_voice = (
                     campaign.get("voice_id") if isinstance(campaign, dict) else None
                 )
+                voice_gender = resolve_voice_gender(_campaign_voice)
+                # A campaign with no voice_id of its own SPEAKS WITH THE TENANT'S
+                # voice, so resolve that one instead — otherwise voice_gender
+                # stays None and the name is picked gender-blind, which is how a
+                # male voice ended up introducing itself as "Sarah".
+                if not _campaign_voice:
+                    from app.domain.services.tenant_ai_config_resolver import (
+                        get_tenant_ai_config_resolver,
+                    )
+                    _tenant_cfg = await get_tenant_ai_config_resolver().for_tenant_async(
+                        str(tenant_id) if tenant_id else None
+                    )
+                    voice_gender = resolve_voice_gender(
+                        getattr(_tenant_cfg, "tts_voice_id", None)
+                    )
             except Exception as exc:
                 logger.debug("voice gender resolve failed campaign=%s err=%s", campaign_id, exc)
 

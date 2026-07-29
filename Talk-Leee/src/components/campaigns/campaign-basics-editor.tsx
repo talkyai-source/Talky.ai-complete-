@@ -46,6 +46,7 @@ export function CampaignBasicsEditor({
     const [agentNamesRaw, setAgentNamesRaw] = useState(initial.agentNames.join(", "));
     const [agentGenders, setAgentGenders] = useState<Record<string, string>>(initial.agentNameGenders ?? {});
     const [voiceId, setVoiceId] = useState(initial.voiceId);
+    const [voiceGender, setVoiceGender] = useState<string | undefined>(undefined);
     const [provider, setProvider] = useState(initial.ttsProvider ?? "");
     const [goal, setGoal] = useState(initial.goal);
     const [schedule, setSchedule] = useState<CampaignCallingSchedule>(initial.callingSchedule ?? {});
@@ -129,7 +130,7 @@ export function CampaignBasicsEditor({
                         1–3 names, comma-separated.
                         {agentNames.length > 0 && <span className="ml-1 text-emerald-600 dark:text-emerald-400">{agentNames.length} name{agentNames.length > 1 ? "s" : ""}.</span>}
                     </p>
-                    <AgentNameGender names={agentNames} value={agentGenders} onChange={setAgentGenders} />
+                    <AgentNameGender names={agentNames} value={agentGenders} onChange={setAgentGenders} voiceGender={voiceGender} />
                 </div>
 
                 <div>
@@ -146,6 +147,7 @@ export function CampaignBasicsEditor({
                     initialProvider={provider}
                     onVoiceChange={(id) => setVoiceId(id)}
                     onProviderChange={setProvider}
+                    onVoiceGenderChange={setVoiceGender}
                 />
 
                 <div className="rounded-lg border border-border bg-background/50 p-4">

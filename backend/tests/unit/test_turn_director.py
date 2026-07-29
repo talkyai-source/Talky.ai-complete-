@@ -19,7 +19,10 @@ def test_opening_first_nudge_is_hello():
 
 
 def test_opening_second_nudge_escalates():
-    assert choose_silence_phrase(is_opening=True, nudge_index=1) == "Hi, can you hear me okay?"
+    # Escalates, but WITHOUT a second greeting — these rungs fire before the
+    # agent's real opener, so "Hi, can you hear me okay?" here made the callee
+    # hear three greetings in a row. See tests/unit/test_greeting_duplication.py.
+    assert choose_silence_phrase(is_opening=True, nudge_index=1) == "Can you hear me okay?"
 
 
 def test_opening_index_clamps_to_last_rung():
