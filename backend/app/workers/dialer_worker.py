@@ -1053,15 +1053,22 @@ class DialerWorker:
           * stuck CALL rows (non-terminal past the max call lifetime) → closed
             as ended, so they leave the live-calls panel AND free their
             batch-dispatch slot (a stale 'dialing' row must never wedge the
-            batch gate). Logic lives in dialer.stuck_job_reaper."""
+            batch gate);
+          * ORPHANED retry_scheduled jobs (past any legitimate retry delay) →
+            marked failed, freeing the lead's active-job slot. Without this a
+            job whose Redis schedule entry was lost holds that slot forever and
+            the lead can never be dialled again — found in production wedged
+            for 21 days. Logic lives in dialer.stuck_job_reaper."""
         try:
             from app.domain.services.dialer.stuck_job_reaper import (
+                reap_orphaned_scheduled_jobs,
                 reap_stuck_jobs,
                 reap_stuck_calls,
             )
             async with self._acquire_db() as conn:
                 await reap_stuck_jobs(conn)
                 await reap_stuck_calls(conn)
+                await reap_orphaned_scheduled_jobs(conn)
         except Exception as exc:
             logger.warning("reaper tick failed: %s", exc)
         # Self-heal the Redis in-flight ZSET: age out members whose call ended

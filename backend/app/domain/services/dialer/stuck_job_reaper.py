@@ -49,6 +49,85 @@ _INFLIGHT_CALL_STATUSES = (
 # the next tick.
 _LIVE_CALL_STATUSES = ("dialing", "ringing", "answered", "in_call")
 
+# ---------------------------------------------------------------------------
+# Orphaned retry_scheduled jobs
+# ---------------------------------------------------------------------------
+# `retry_scheduled` is NOT in IN_FLIGHT_STATUSES, so `reap_stuck_jobs` above
+# never touches it — correctly, because a legitimately scheduled retry is
+# supposed to sit there, and after the 2026-07-28 cadence change it can sit
+# there for a full DAY (no-answer and voicemail both retry at +24h).
+#
+# But `retry_scheduled` IS in the partial unique index
+# `uq_dialer_jobs_one_active_per_lead`:
+#
+#   WHERE status IN ('pending','queued','retry_scheduled','processing','calling')
+#
+# so a job wedged in that status holds the lead's only active-job slot. If the
+# Redis scheduled entry is lost — reaped, flushed, or dropped when a campaign
+# was stopped — the job can never fire AND can never be cleared, and the lead
+# becomes permanently un-callable. Silently: nothing logs it, no counter moves,
+# and the campaign simply never dials that lead again.
+#
+# Found in production 2026-07-29: one job on a stopped campaign had been
+# wedged for TWENTY-ONE DAYS with no Redis entry backing it.
+#
+# The threshold must exceed the longest legitimate retry delay or this would
+# reap live work. The longest schedule is 24h (no-answer, voicemail), so the
+# default is 48h — double the longest wait, and still 10x faster than "never".
+SCHEDULED_STUCK_TIMEOUT_S = int(
+    os.getenv("DIALER_SCHEDULED_STUCK_TIMEOUT_S", str(48 * 60 * 60))
+)
+ORPHANED_SCHEDULED_REASON = "orphaned_retry_schedule"
+
+
+async def reap_orphaned_scheduled_jobs(
+    conn,
+    *,
+    timeout_seconds: int = SCHEDULED_STUCK_TIMEOUT_S,
+) -> int:
+    """Fail `retry_scheduled` jobs that are far past any legitimate retry delay.
+
+    These are jobs whose Redis scheduled entry is gone, so they will never be
+    picked up again while still occupying the lead's active-job slot. Clearing
+    them frees the lead to be enqueued by a future campaign start.
+
+    Deliberately conservative — it keys ONLY off age, not off the presence of a
+    Redis entry. Checking Redis would be a cross-store read whose failure mode
+    is far worse than waiting: a transient Redis error would look like "no
+    entry" and reap a perfectly healthy scheduled retry. Age alone cannot
+    produce that mistake, because ``timeout_seconds`` is set beyond the longest
+    delay the scheduler can legitimately produce.
+
+    Returns:
+        Number of jobs reaped.
+    """
+    rows = await conn.fetch(
+        """
+        UPDATE dialer_jobs
+           SET status           = 'failed',
+               failure_category = COALESCE(failure_category, 'internal'),
+               failure_reason   = $1,
+               last_error       = $1,
+               updated_at       = now()
+         WHERE status = 'retry_scheduled'
+           AND updated_at < now() - make_interval(secs => $2::int)
+        RETURNING id, lead_id
+        """,
+        ORPHANED_SCHEDULED_REASON,
+        int(timeout_seconds),
+    )
+    reaped = len(rows)
+    if reaped:
+        logger.warning(
+            "reaper: cleared %d orphaned retry_scheduled job(s) older than %ss "
+            "— each was holding its lead's active-job slot, making that lead "
+            "permanently un-callable. lead_ids=%s",
+            reaped,
+            timeout_seconds,
+            [str(r["lead_id"]) for r in rows][:20],
+        )
+    return reaped
+
 
 async def reap_stuck_jobs(
     conn,
