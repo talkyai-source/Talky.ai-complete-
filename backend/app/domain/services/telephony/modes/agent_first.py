@@ -32,6 +32,19 @@ from app.domain.services.telephony.config import (
 
 logger = logging.getLogger(__name__)
 
+# Recording-disclosure delivery attempts. The notice lands in the two seconds
+# after pickup — precisely when people say "Hello?" / "Who's this?" — so a
+# single attempt loses the recording on a large share of calls (measured: 3 of
+# the first 7 production calls, 43%). Two attempts, with a settle gap between,
+# recovers the common case where the callee simply spoke first.
+#
+# Kept small on purpose: this audio plays before the greeting, so each extra
+# attempt delays the actual conversation. Two is enough for "they said hello
+# over it"; a callee who talks through both is genuinely not listening, and
+# the fail-closed path (no recording) is then the correct outcome.
+_DISCLOSURE_MAX_ATTEMPTS = 2
+_DISCLOSURE_RETRY_SETTLE_S = 1.2
+
 # 2026-07-08: opener-content guard. Prod surfaced 2 calls where the spoken
 # opener was a bare "Hello?" — the pre-synth greeting text was empty/
 # whitespace or degraded to a filler word, so the callee heard what sounded
@@ -189,19 +202,54 @@ async def _speak_recording_disclosure(voice_session) -> None:
             "recording_disclosure_speaking call_id=%s reason=%s text=%r",
             call_id[:12], getattr(decision, "reason", "-"), text[:80],
         )
-        interrupted = await voice_session.pipeline.synthesize_and_send_audio(
-            session, text, websocket=None
-        )
-        if interrupted:
-            # The callee talked over the notice, so we cannot claim they
-            # heard it. (The echo-immunity window armed by the caller
-            # already absorbs the "Hello?" that answering produces, so
-            # this is a genuine interruption, not pickup noise.)
+        # RE-DELIVER rather than give up (2026-07-31). Measured on the first
+        # 7 production calls after this shipped: 4 spoken, 3 INTERRUPTED — 43%
+        # of calls lost their recording entirely. That is the predictable
+        # outcome of putting a ~4-second sentence in the one moment where
+        # people always speak: the two seconds after they pick up.
+        #
+        # Abandoning the recording for the whole call because the callee said
+        # "Hi, who's this?" over the notice is the wrong trade. The lawful
+        # requirement is that they were TOLD, not that they were silent the
+        # first time we tried — so say it again once they stop talking.
+        #
+        # Bounded at _DISCLOSURE_MAX_ATTEMPTS and still FAILS CLOSED: if every
+        # attempt is talked over, the state stays DISCLOSURE_FAILED and
+        # save_and_link discards the audio exactly as before. This can only
+        # ever turn a suppressed recording into a delivered notice; it can
+        # never retain audio for a call where the notice was not completed.
+        spoken_ok = False
+        for _attempt in range(1, _DISCLOSURE_MAX_ATTEMPTS + 1):
+            interrupted = await voice_session.pipeline.synthesize_and_send_audio(
+                session, text, websocket=None
+            )
+            if not interrupted:
+                spoken_ok = True
+                break
+
+            if _attempt >= _DISCLOSURE_MAX_ATTEMPTS:
+                break
+
+            # Let the callee finish before trying again — retrying instantly
+            # would talk over the very speech that interrupted us and would be
+            # interrupted again, burning the attempt for nothing.
+            logger.info(
+                "recording_disclosure_interrupted_retrying call_id=%s attempt=%d/%d",
+                call_id[:12], _attempt, _DISCLOSURE_MAX_ATTEMPTS,
+            )
+            await asyncio.sleep(_DISCLOSURE_RETRY_SETTLE_S)
+            try:
+                voice_session.pipeline.clear_barge_in_event(session)
+            except Exception:  # noqa: BLE001 — best effort, never fatal
+                pass
+
+        if not spoken_ok:
+            # Every attempt was talked over, so we cannot claim they heard it.
             record_disclosure_state(DISCLOSURE_FAILED, *call_ids)
             logger.warning(
-                "recording_disclosure_interrupted call_id=%s — notice was cut "
-                "short; recording will be suppressed",
-                call_id[:12],
+                "recording_disclosure_interrupted call_id=%s — notice cut short "
+                "on all %d attempt(s); recording will be suppressed",
+                call_id[:12], _DISCLOSURE_MAX_ATTEMPTS,
             )
             return
 

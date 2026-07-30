@@ -32,6 +32,7 @@ from typing import Any, Callable, Coroutine, Dict, List, Optional
 import aiohttp
 
 from app.domain.interfaces.call_control_adapter import CallControlAdapter
+from app.domain.services.telephony.config import AUDIO_CALLBACK_BATCH_FRAMES
 
 logger = logging.getLogger(__name__)
 
@@ -1080,7 +1081,11 @@ class AsteriskAdapter(CallControlAdapter):
                     # 2 frames = 40ms = Deepgram Flux's optimal chunk size. Was 4 (80ms) when
                     # we re-batched downstream; now we hand off frames at Flux's native rate so
                     # there's no re-chunking jitter and per-call resamples drop by 50%.
-                    "audio_callback_batch_frames": 2,
+                    # Sourced from telephony.config so the gap detector, which
+                    # derives its threshold from the same constant, cannot drift
+                    # out of step with it again (it did: this went 4 -> 2 while
+                    # the detector kept assuming 80ms).
+                    "audio_callback_batch_frames": AUDIO_CALLBACK_BATCH_FRAMES,
                     # VG-01 sequence-ordered STT tap (see _stt_reorder_config).
                     **self._stt_reorder_config(),
                     "audio_callback_url": (
@@ -1278,7 +1283,11 @@ class AsteriskAdapter(CallControlAdapter):
                     # 2 frames = 40ms = Deepgram Flux's optimal chunk size. Was 4 (80ms) when
                     # we re-batched downstream; now we hand off frames at Flux's native rate so
                     # there's no re-chunking jitter and per-call resamples drop by 50%.
-                    "audio_callback_batch_frames": 2,
+                    # Sourced from telephony.config so the gap detector, which
+                    # derives its threshold from the same constant, cannot drift
+                    # out of step with it again (it did: this went 4 -> 2 while
+                    # the detector kept assuming 80ms).
+                    "audio_callback_batch_frames": AUDIO_CALLBACK_BATCH_FRAMES,
                     # VG-01 sequence-ordered STT tap (see _stt_reorder_config).
                     **self._stt_reorder_config(),
                     # Tell the gateway to POST audio chunks to our backend callback

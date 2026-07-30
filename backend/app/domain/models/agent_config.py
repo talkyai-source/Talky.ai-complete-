@@ -99,6 +99,15 @@ class AgentConfig(BaseModel):
     )
     agent_name: str = Field(..., description="Agent's name")
     company_name: str = Field(..., description="Company name")
+    call_reason: Optional[str] = Field(
+        default=None,
+        description=(
+            "Why this campaign is calling, in the operator's own words "
+            "(campaign_slots['call_reason']). Used by the SPOKEN opener so "
+            "the callee hears the reason in the first breath. Optional: when "
+            "absent the opener falls back to the generic permission-ask."
+        ),
+    )
 
     # Behavior
     rules: ConversationRule = Field(

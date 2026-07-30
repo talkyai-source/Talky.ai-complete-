@@ -42,8 +42,20 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.domain.interfaces.media_gateway import MediaGateway
+from app.domain.services.telephony.config import AUDIO_CALLBACK_INTERVAL_MS
 
 logger = logging.getLogger(__name__)
+
+# Warn when an inbound audio batch arrives this late. Derived from the real
+# configured cadence rather than a fixed number, so halving the batch size
+# again cannot silently halve the detector's sensitivity (which is exactly
+# what happened when 4 frames/80ms became 2 frames/40ms and this stayed at a
+# hardcoded 150ms).
+#
+# 3x the expected interval = three consecutive batches missed. Deliberately
+# not tighter: at a 40ms cadence a 2x threshold would fire on ordinary
+# scheduler jitter and drown the real stalls.
+_AUDIO_GAP_WARN_MS = max(120, AUDIO_CALLBACK_INTERVAL_MS * 3)
 
 
 @dataclass
@@ -327,14 +339,35 @@ class TelephonyMediaGateway(MediaGateway):
         now = loop.time()
         gap_ms = (now - session.last_audio_received_at) * 1000
         session.last_audio_received_at = now
-        # Expected batch interval is 80ms (4 frames × 20ms). Flag anything >150ms.
-        if session.chunks_received > 0 and gap_ms > 150:
+        # The expected inter-arrival is derived from the batch size the adapter
+        # actually configures, NOT hardcoded — the two had drifted (the batch
+        # was halved to 40ms while this still assumed 80ms), which silently made
+        # the detector half as sensitive as intended. See
+        # telephony.config.AUDIO_CALLBACK_INTERVAL_MS.
+        if session.chunks_received > 0 and gap_ms > _AUDIO_GAP_WARN_MS:
             session.audio_gap_count += 1
+            # The cause is NOT asserted. A gap here means audio did not ARRIVE
+            # on time; that is equally consistent with the gateway dropping a
+            # callback, this process being blocked so the callback timed out at
+            # the 200ms fire-and-forget deadline, or genuine upstream RTP loss.
+            # The gateway's own counters cannot settle it after the fact either
+            # — /stats sums only LIVE sessions, so a finished call's loss
+            # figures are gone. Naming one suspect in the message sent an
+            # earlier investigation down the wrong path, so state the fact and
+            # the expected cadence, and let the reader judge.
             logger.warning(
-                "telephony_audio_gap call_id=%s gap_ms=%.0f total_gaps=%d — "
-                "C++ gateway may have dropped a callback (200ms fire-and-forget timeout)",
-                call_id, gap_ms, session.audio_gap_count,
-                extra={"call_id": call_id, "gap_ms": round(gap_ms), "audio_gap_count": session.audio_gap_count},
+                "telephony_audio_gap call_id=%s gap_ms=%.0f expected_ms=%d "
+                "(%.1fx) total_gaps=%d — inbound audio batch arrived late; "
+                "cause may be gateway callback drop, event-loop stall, or RTP loss",
+                call_id, gap_ms, AUDIO_CALLBACK_INTERVAL_MS,
+                gap_ms / AUDIO_CALLBACK_INTERVAL_MS if AUDIO_CALLBACK_INTERVAL_MS else 0.0,
+                session.audio_gap_count,
+                extra={
+                    "call_id": call_id,
+                    "gap_ms": round(gap_ms),
+                    "expected_ms": AUDIO_CALLBACK_INTERVAL_MS,
+                    "audio_gap_count": session.audio_gap_count,
+                },
             )
 
         # Decode PCMU 8kHz -> linear16 8kHz, then upsample to internal rate.

@@ -32,6 +32,29 @@ logger = logging.getLogger(__name__)
 # from here instead of defining it locally).
 _MAX_TELEPHONY_SESSIONS = int(os.getenv("MAX_TELEPHONY_SESSIONS", "50"))
 
+# How many 20ms RTP frames the C++ gateway batches into one audio callback.
+#
+# CANONICAL HOME — both the producer and the consumer of that cadence must
+# agree, and they had silently drifted apart (2026-07-31):
+#
+#   asterisk_adapter.py sent audio_callback_batch_frames=2 (40ms), having been
+#   lowered from 4 (80ms) to match Deepgram Flux's native chunk size;
+#   telephony_media_gateway.py still documented "Expected batch interval is
+#   80ms (4 frames x 20ms)" and calibrated its gap detector against it.
+#
+# The detector therefore flagged >150ms, which is 3.75x the real 40ms cadence
+# instead of the ~1.9x it was tuned for — so a genuine stall of two or three
+# missed batches went unreported, while the gaps that DID fire were far more
+# severe than the log made them look.
+#
+# Deriving both ends from these constants is what keeps the next change to the
+# batch size from re-introducing the same drift.
+RTP_FRAME_MS = 20
+AUDIO_CALLBACK_BATCH_FRAMES = int(
+    os.getenv("TELEPHONY_AUDIO_CALLBACK_BATCH_FRAMES", "2")
+)
+AUDIO_CALLBACK_INTERVAL_MS = RTP_FRAME_MS * AUDIO_CALLBACK_BATCH_FRAMES
+
 # Maximum age (seconds) for an entry in _ringing_warmups / _ringing_events
 # before the watchdog drops it. Outbound calls almost always connect or fail
 # within ~60s; 180s is a conservative safety net for genuinely-slow carriers.

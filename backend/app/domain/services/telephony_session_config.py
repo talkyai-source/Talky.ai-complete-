@@ -999,6 +999,14 @@ def build_telephony_session_config(
         agent_name=agent_name,
         company_name=company_name,
         business_type=business_type,
+        # Carried so the SPOKEN opener can state why we're calling. The prompt
+        # has always told the model to "lead with the REASON straight after
+        # your name", but the model never gets the chance on an agent-first
+        # call: the pre-synthesised greeting speaks first and flips
+        # _has_introduced, so the reason-first opener the persona describes was
+        # never delivered. Sourced from campaign_slots exactly like
+        # business_type/tone above.
+        call_reason=_call_reason_for(script_config),
         goal=AgentGoal.INFORMATION_GATHERING,
         tone=tone,
         rules=ConversationRule(
@@ -1233,6 +1241,29 @@ _PERSONA_DEFAULTS: dict[str, tuple[str, str]] = {
         "warm, efficient, professional — makes callers feel in good hands",
     ),
 }
+
+
+#: Longest call_reason we will SPEAK in the opener. The reason is free text an
+#: operator types into the campaign form, and some write a paragraph. Past this
+#: the opener stops being a pattern-interrupt and becomes a monologue the callee
+#: talks over — so beyond the cap we fall back to the short generic opener and
+#: let the model deliver the reason conversationally on turn 1 instead.
+_MAX_SPOKEN_CALL_REASON_CHARS = 120
+
+
+def _call_reason_for(script_config: Optional[dict]) -> Optional[str]:
+    """The campaign's reason-for-calling, if it is short enough to speak.
+
+    Returns None when absent, blank, or too long — every caller must treat
+    None as "use the generic opener", never as an error.
+    """
+    slots = (script_config or {}).get("campaign_slots") or {}
+    raw = slots.get("call_reason") or slots.get("goal") or ""
+    reason = " ".join(str(raw).split()).strip()
+    if not reason or len(reason) > _MAX_SPOKEN_CALL_REASON_CHARS:
+        return None
+    # Trailing punctuation is re-added by the template.
+    return reason.rstrip(" .!?,;:")
 
 
 def _agent_config_defaults_for(
