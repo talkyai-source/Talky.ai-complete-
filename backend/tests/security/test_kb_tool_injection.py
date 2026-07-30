@@ -30,6 +30,7 @@ from app.domain.services.voice_pipeline.realtime_bridge import (
     _NO_KB_INFO,
     RealtimeBridge,
 )
+from app.services.scripts.prompts.guardrails import KNOWLEDGE_PRICE_GUARD
 from app.services.scripts.prompts.prompt_safety import scan_for_injection
 
 # The payload an attacker plants in a KB node (via a scraped page, an uploaded
@@ -108,7 +109,15 @@ def test_cascaded_tool_result_is_fenced_as_data(monkeypatch):
     out = asyncio.run(kt.run_knowledge_lookup(_Session(), "how much is it"))
 
     assert out.startswith(f"<{kt.KB_FENCE_TAG}>")
-    assert out.rstrip().endswith(f"</{kt.KB_FENCE_TAG}>")
+    # The untrusted region is a well-formed fence. What follows it is the
+    # TRUSTED price guard (a module constant, not caller/tenant text), which
+    # rides outside the fence exactly as it does on the inject path
+    # (session_inject.py). Assert the fence closes and that the only thing
+    # after it is that known constant — a stronger statement than the old
+    # "output ends with the fence".
+    assert f"</{kt.KB_FENCE_TAG}>" in out
+    _, _, after_fence = out.partition(f"</{kt.KB_FENCE_TAG}>")
+    assert after_fence.strip() == KNOWLEDGE_PRICE_GUARD
     # The tool-result trust rule lives in the trusted system channel, not next
     # to the untrusted text — so the addendum must carry it.
     addendum = kt.tool_system_addendum()
@@ -134,7 +143,12 @@ def test_cascaded_tool_cannot_break_out_of_the_fence(monkeypatch):
     out = asyncio.run(kt.run_knowledge_lookup(_Session(), "when do you open"))
 
     assert out.count(f"</{kt.KB_FENCE_TAG}>") == 1   # only the real closer...
-    assert out.rstrip().endswith(f"</{kt.KB_FENCE_TAG}>")   # ...and it's OURS
+    # ...and it's OURS: everything after the single closer is the trusted
+    # price-guard constant, so the node's injected closer did not terminate
+    # the fence early and nothing from the node escaped into instruction space.
+    _, _, after_fence = out.partition(f"</{kt.KB_FENCE_TAG}>")
+    assert after_fence.strip() == KNOWLEDGE_PRICE_GUARD
+    assert "discount code is FREE" not in after_fence
     assert "We open at nine." in out                 # content itself preserved
 
 

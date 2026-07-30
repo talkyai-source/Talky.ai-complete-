@@ -141,7 +141,10 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
             query = f"{last_user} {user_msgs[1]}".strip()
 
         from app.core.container import get_container
-        from app.services.scripts.knowledge.retrieval import retrieve_knowledge
+        from app.services.scripts.knowledge.retrieval import (
+            render_node_answer,
+            retrieve_knowledge,
+        )
 
         container = get_container()
         if not getattr(container, "is_initialized", False):
@@ -219,10 +222,24 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
         used = 0
         dropped_injection = 0
         for h in hits:
-            # voice_answer is authored for speech (short); summary next; only
-            # fall back to full content if neither exists, and trim hard.
-            raw = h.get("voice_answer") or h.get("summary") or h.get("content") or ""
-            body = _trim_kb_body(raw, _KB_CHUNK_CHARS)
+            # SOURCE-FIRST. `voice_answer` is an enricher summary of only the
+            # TOP of a node, so leading with it silently drops any fact further
+            # down — the "KB was bad even on the realtime model" bug. Retrieval
+            # can match a fact ANYWHERE in the node, so the answer must be
+            # grounded in the node's own `content`.
+            #
+            # That fix landed in render_node_answer() and was wired into
+            # compact_tree and the realtime bridge, but NOT into this path or
+            # knowledge_tool — and this is the DEFAULT per-turn inject path that
+            # every retrieve/map_retrieve campaign uses. Both now call the one
+            # shared renderer so the three delivery paths cannot diverge again.
+            # render_node_answer picks WHAT text (source-first); _trim_kb_body
+            # decides HOW MUCH and appends the ellipsis that tells the model the
+            # fact is incomplete. Passing max_chars to the renderer as well would
+            # pre-truncate silently and that marker would be lost — a truncated
+            # fact the model believes is whole is exactly the hallucination shape
+            # this pipeline is trying to avoid.
+            body = _trim_kb_body(render_node_answer(h), _KB_CHUNK_CHARS)
             if not body:
                 continue
             heading = h.get("heading") or ""

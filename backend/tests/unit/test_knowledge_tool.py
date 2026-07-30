@@ -107,7 +107,15 @@ def test_lookup_budget_and_format(monkeypatch):
     )
 
     out = asyncio.run(kt.run_knowledge_lookup(_Session(), "what is the price"))
-    assert len(out) <= kt._KB_TOTAL_CHARS + 200   # budgeted, not a 100k dump
+    # Budgeted, not a 100k dump. The allowance is stated in terms of the two
+    # KNOWN fixed additions rather than a magic number, so the next constant
+    # added to the result is a deliberate decision instead of slack that
+    # quietly ran out: the <company_knowledge> fence, and the trusted
+    # KNOWLEDGE_PRICE_GUARD that rides outside it.
+    from app.services.scripts.prompts.guardrails import KNOWLEDGE_PRICE_GUARD
+
+    fixed_overhead = len(KNOWLEDGE_PRICE_GUARD) + 2 * len(kt.KB_FENCE_TAG) + 32
+    assert len(out) <= kt._KB_TOTAL_CHARS + fixed_overhead
     assert "Node 0" in out
     assert "…" in out                              # huge bodies were trimmed
 

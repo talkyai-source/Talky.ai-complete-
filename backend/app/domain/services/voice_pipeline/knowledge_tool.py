@@ -184,7 +184,10 @@ async def run_knowledge_lookup(session: CallSession, query: str) -> str:
         return NO_KB_FACTS
     try:
         from app.core.container import get_container
-        from app.services.scripts.knowledge.retrieval import retrieve_knowledge
+        from app.services.scripts.knowledge.retrieval import (
+            render_node_answer,
+            retrieve_knowledge,
+        )
 
         container = get_container()
         if not getattr(container, "is_initialized", False):
@@ -227,7 +230,15 @@ async def run_knowledge_lookup(session: CallSession, query: str) -> str:
         used = 0
         dropped_injection = 0
         for h in hits:
-            raw = h.get("voice_answer") or h.get("summary") or h.get("content") or ""
+            # SOURCE-FIRST — see render_node_answer(). Leading with the
+            # enricher's `voice_answer` summarises only the TOP of a node and
+            # silently drops any fact below it, while retrieval can match a
+            # fact anywhere in the node. This path had kept the old precedence
+            # after the fix was applied to compact_tree and the realtime bridge.
+            # No max_chars here on purpose — _trim_kb_body below owns the budget
+            # AND appends the truncation ellipsis. Pre-truncating in the renderer
+            # loses that marker, leaving the model with a silently-cut fact.
+            raw = render_node_answer(h)
             body = _trim_kb_body(raw, _KB_CHUNK_CHARS)
             if not body:
                 continue
@@ -251,7 +262,25 @@ async def run_knowledge_lookup(session: CallSession, query: str) -> str:
             return NO_KB_FACTS
         # Delimit what survived. The framing sentence lives in the system
         # addendum (trusted channel), so the result carries the fence only.
-        return fence_kb_result("\n".join(lines), with_note=False)
+        #
+        # KNOWLEDGE_PRICE_GUARD rides WITH the facts, adjacent to them — the
+        # inject path does the same (turn_streamer / session_inject). Its
+        # placement is empirically load-bearing, not decorative: in the
+        # 2026-07-02 offline A/B, llama-3.3-70b invented a price on 11 of 12
+        # probes without this line seated next to the knowledge block and 0 of
+        # 12 with it.
+        #
+        # It was missing from THIS path entirely, which is the worst place to
+        # omit it: tool mode is enabled for the groq provider family, so the
+        # exact model the guard was proven necessary for is the one answering
+        # here. A caller asking for a price not covered by the returned snippet
+        # would otherwise be quoted an invented number.
+        from app.services.scripts.prompts.guardrails import KNOWLEDGE_PRICE_GUARD
+
+        return (
+            f"{fence_kb_result(chr(10).join(lines), with_note=False)}\n"
+            f"{KNOWLEDGE_PRICE_GUARD}"
+        )
     except Exception as exc:
         logger.warning("KB_TOOL call=%s error: %s",
                        getattr(session, "call_id", "?")[:8], exc)
