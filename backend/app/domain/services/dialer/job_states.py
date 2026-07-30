@@ -39,6 +39,53 @@ TERMINAL_STATUSES: tuple[str, ...] = (
     "failed",
     "skipped",
     "cancelled",
+    # Terminal too, and previously missing from this "single source of truth":
+    # blocked      : a pre-dial guard refused the call outright (call guard)
+    # non_retryable: the disposition policy decided never to dial again
+    # Both are written in production (dialer_worker / call_service) and neither
+    # is active, so is_terminal() returned False for two genuinely terminal
+    # states. Harmless today only because nothing calls is_terminal() on them.
+    "blocked",
+    "non_retryable",
+)
+
+# ---------------------------------------------------------------------------
+# calls.status — a DIFFERENT vocabulary from dialer_jobs.status
+# ---------------------------------------------------------------------------
+# A call is LIVE while it occupies a line. Used for "active calls" counting and
+# live-call views.
+#
+# WHY THIS LIVES HERE (2026-07-31): three copies of this list had drifted, and
+# the admin copy was simply wrong:
+#
+#   tenant  app/api/v1/endpoints/calls.py      queued dialing ringing answered
+#                                              in_call initiated          (correct)
+#   admin   admin/calls.py, admin/base.py,     in_progress ringing queued
+#           admin/health/queues.py             initiated                  (WRONG)
+#
+# `in_progress` is written by NOTHING in this codebase, and the admin list omits
+# `dialing`, `answered` and `in_call` — the three statuses a call spends nearly
+# all of its live time in. So every admin "active calls" figure counted only
+# calls that were ringing or queued, and read near-zero while real conversations
+# were in progress.
+LIVE_CALL_STATUSES: tuple[str, ...] = (
+    "queued",
+    "dialing",
+    "ringing",
+    "answered",
+    "in_call",
+    "initiated",
+)
+
+# The subset that proves a conversation is genuinely under way. Deliberately
+# EXCLUDES "initiated": that means a call row exists but the provider never
+# confirmed a channel, which is precisely the hung-origination case the stuck
+# reaper must still be allowed to reap. Do not merge this with the list above.
+CONVERSATION_LIVE_CALL_STATUSES: tuple[str, ...] = (
+    "dialing",
+    "ringing",
+    "answered",
+    "in_call",
 )
 
 

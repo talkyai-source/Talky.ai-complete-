@@ -9,6 +9,7 @@ from app.api.v1.dependencies import CurrentUser, get_db_client, require_admin
 from app.core.postgres_adapter import Client
 
 from .schemas import QueueStatus, QueuesResponse
+from app.domain.services.dialer.job_states import LIVE_CALL_STATUSES
 
 router = APIRouter()
 
@@ -36,7 +37,7 @@ async def get_queues_status(
 
             processing_calls = db_client.table("calls").select(
                 "id", count="exact"
-            ).in_("status", ["initiated", "ringing", "in_progress"]).execute()
+            ).in_("status", list(LIVE_CALL_STATUSES)).execute()
 
             failed_calls = db_client.table("calls").select(
                 "id", count="exact"

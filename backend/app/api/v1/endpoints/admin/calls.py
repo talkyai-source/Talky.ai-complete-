@@ -10,6 +10,7 @@ from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, require_platform_admin, CurrentUser
 from ._serialization import AdminResponseModel
+from app.domain.services.dialer.job_states import LIVE_CALL_STATUSES
 
 router = APIRouter()
 
@@ -98,12 +99,15 @@ async def get_live_calls(
     """
     Get list of currently active calls.
     
-    Returns calls with status: in_progress, ringing, queued, initiated.
+    Returns calls in any LIVE status (job_states.LIVE_CALL_STATUSES:
+    queued, dialing, ringing, answered, in_call, initiated).
     Includes tenant name and campaign name for context.
     """
     try:
         # Query active calls
-        active_statuses = ['in_progress', 'ringing', 'queued', 'initiated']
+        # Shared vocabulary — the local literal was missing dialing/
+        # answered/in_call and contained 'in_progress', which nothing writes.
+        active_statuses = list(LIVE_CALL_STATUSES)
         calls_response = db_client.table("calls").select(
             "id, tenant_id, phone_number, status, started_at, campaign_id"
         ).in_("status", active_statuses).order("started_at", desc=True).execute()
@@ -398,7 +402,9 @@ async def terminate_call(
             raise HTTPException(status_code=404, detail="Call not found")
         
         current_status = call_response.data.get("status", "")
-        active_statuses = ['in_progress', 'ringing', 'queued', 'initiated']
+        # Shared vocabulary — the local literal was missing dialing/
+        # answered/in_call and contained 'in_progress', which nothing writes.
+        active_statuses = list(LIVE_CALL_STATUSES)
         
         if current_status not in active_statuses:
             raise HTTPException(

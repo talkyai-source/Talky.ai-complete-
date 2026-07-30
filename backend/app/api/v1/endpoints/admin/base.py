@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, require_admin, CurrentUser
+from app.domain.services.dialer.job_states import LIVE_CALL_STATUSES
 
 router = APIRouter()
 
@@ -71,7 +72,7 @@ async def get_dashboard_stats(
         # Get active calls count
         calls_response = db_client.table("calls").select(
             "id", count="exact"
-        ).in_("status", ["in_progress", "ringing", "queued"]).execute()
+        ).in_("status", list(LIVE_CALL_STATUSES)).execute()
         active_calls = calls_response.count or 0
         
         # Get calls in last 24 hours for error rate

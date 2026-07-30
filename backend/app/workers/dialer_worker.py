@@ -560,7 +560,22 @@ class DialerWorker:
                         job, "call_guard_throttled", rules=rules, retry_after_seconds=60,
                     )
                     await self.queue_service.schedule_retry(job, delay_seconds=60)
-                    await self._update_job_status(job.job_id, JobStatus.SKIPPED, reason="call_guard_throttled")
+                    # RETRY_SCHEDULED, not SKIPPED. `schedule_retry` just put a
+                    # LIVE copy of this job in Redis's scheduled set — it is
+                    # coming back in 60s. SKIPPED is a TERMINAL status and is
+                    # therefore outside the partial unique index
+                    # uq_dialer_jobs_one_active_per_lead, so for that whole
+                    # window the lead looks like it has no active job: a
+                    # campaign restart or a "call this list" re-entry creates a
+                    # SECOND job, and both eventually dial the same person
+                    # minutes apart. Every sibling gate here (batch capacity,
+                    # call gap, tenant gap, voice pipeline) already writes
+                    # RETRY_SCHEDULED; these two call-guard branches were the
+                    # odd ones out.
+                    await self._update_job_status(
+                        job.job_id, JobStatus.RETRY_SCHEDULED,
+                        reason="call_guard_throttled",
+                    )
                     return
                 elif guard_decision == "queue":
                     # Queue - reschedule to retry later
@@ -568,7 +583,14 @@ class DialerWorker:
                         job, "call_guard_queued", rules=rules, retry_after_seconds=30,
                     )
                     await self.queue_service.schedule_retry(job, delay_seconds=30)
-                    await self._update_job_status(job.job_id, JobStatus.SKIPPED, reason="call_guard_queued")
+                    # See the throttle branch above — SKIPPED here would drop
+                    # the lead out of the active-job dedup index while a live
+                    # retry is still pending in Redis, allowing a duplicate
+                    # job (and so a duplicate call) for the same person.
+                    await self._update_job_status(
+                        job.job_id, JobStatus.RETRY_SCHEDULED,
+                        reason="call_guard_queued",
+                    )
                     return
 
             try:
