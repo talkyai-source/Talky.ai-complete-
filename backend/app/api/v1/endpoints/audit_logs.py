@@ -284,7 +284,17 @@ async def get_event_stats(
     db_pool=Depends(get_db_pool),
 ):
     """Get event type distribution statistics"""
-    scoped_tenant_id = tenant_id or current_user.get("tenant_id")
+    # CROSS-TENANT FIX (2026-07-31) — the client-supplied `tenant_id` used to
+    # win over the caller's own (`tenant_id or current_user...`), leaking another
+    # tenant's audit-event distribution to any holder of `audit:read`. The param
+    # may now only narrow to the caller's own tenant. GET /logs in this same file
+    # already does exactly this; the stats routes were missed.
+    user_tenant_id = current_user.get("tenant_id")
+    if tenant_id and user_tenant_id and str(tenant_id) != str(user_tenant_id):
+        raise HTTPException(
+            status_code=403, detail="Cannot access other tenant audit logs"
+        )
+    scoped_tenant_id = user_tenant_id or tenant_id
     since = datetime.utcnow() - timedelta(days=days)
     async with db_pool.acquire() as conn:
         rows = await conn.fetch(
@@ -311,24 +321,60 @@ async def get_failed_login_stats(
     current_user: dict = Depends(require_permissions(["audit:read", "security:monitor"])),
     db_pool=Depends(get_db_pool),
 ):
-    """Get failed login analysis"""
+    """Failed-login analysis, scoped to the caller's own tenant.
+
+    TWO bugs fixed here (2026-07-31):
+
+    1. The query filtered on ``attempted_at``, a column that does not exist —
+       ``login_attempts`` is (id, email, user_id, ip_address, user_agent,
+       success, failure_reason, created_at), verified against the live
+       database. Every call to this endpoint raised an UndefinedColumn error
+       and returned 500. It has never worked.
+
+    2. It had NO tenant predicate whatsoever, so had it worked it would have
+       reported failed-login counts and unique attacking IPs across EVERY
+       tenant on the platform to any holder of ``audit:read`` +
+       ``security:monitor``. RLS is BYPASSRLS in production, so nothing else
+       would have caught it.
+
+    ``login_attempts`` has no ``tenant_id`` column, so the tenant is derived by
+    joining ``user_profiles`` on ``user_id``.
+
+    KNOWN AND DELIBERATE LIMITATION: attempts against an address that matches
+    no account carry ``user_id IS NULL`` and therefore belong to no tenant.
+    They are EXCLUDED rather than shown to everyone — attributing them would
+    mean showing every tenant the same platform-wide attack data, which is the
+    leak this fix exists to close. ``unattributed_excluded`` is returned so the
+    number is visibly absent rather than silently missing.
+    """
     since = datetime.utcnow() - timedelta(days=days)
+    user_tenant_id = current_user.get("tenant_id")
     async with db_pool.acquire() as conn:
         summary = await conn.fetchrow(
             """
-            SELECT COUNT(*) FILTER (WHERE success = FALSE) AS total_failed,
-                   COUNT(DISTINCT ip_address) FILTER (WHERE success = FALSE) AS unique_ips,
-                   COUNT(*) FILTER (WHERE failure_reason = 'account_locked') AS blocked_attempts
-            FROM login_attempts
-            WHERE attempted_at >= $1
+            SELECT COUNT(*) FILTER (WHERE la.success = FALSE) AS total_failed,
+                   COUNT(DISTINCT la.ip_address)
+                       FILTER (WHERE la.success = FALSE) AS unique_ips,
+                   COUNT(*) FILTER (
+                       WHERE la.failure_reason = 'account_locked'
+                   ) AS blocked_attempts
+            FROM login_attempts la
+            JOIN user_profiles up ON up.id = la.user_id
+            WHERE la.created_at >= $1
+              AND ($2::uuid IS NULL OR up.tenant_id = $2::uuid)
             """,
             since,
+            user_tenant_id,
         )
     return {
         "period_days": days,
         "total_failed": int(summary["total_failed"] or 0),
         "unique_ips": int(summary["unique_ips"] or 0),
         "blocked_attempts": int(summary["blocked_attempts"] or 0),
+        # Attempts against unknown email addresses cannot be attributed to a
+        # tenant and are excluded — surfaced explicitly so the omission is
+        # visible rather than looking like "no attacks".
+        "unattributed_excluded": True,
         "top_countries": [],
     }
 

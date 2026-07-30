@@ -113,7 +113,23 @@ async def list_security_events(
         conditions.append(f"severity = ${param_idx}")
         params.append(severity)
         param_idx += 1
-    scoped_tenant_id = tenant_id or current_user.get("tenant_id")
+    # CROSS-TENANT FIX (2026-07-31). This was:
+    #     scoped_tenant_id = tenant_id or current_user.get("tenant_id")
+    # — the CLIENT-SUPPLIED `tenant_id` query param won over the caller's own
+    # tenant, so any authenticated holder of `security:read` could read another
+    # tenant's security events (evidence blobs, IPs, investigation notes) just
+    # by passing ?tenant_id=<victim>. RLS runs BYPASSRLS in production, so this
+    # predicate is the only isolation there is.
+    #
+    # The param is kept as an operator convenience but is now VALIDATED, never
+    # trusted: it may only ever narrow to the caller's own tenant. Same
+    # validate-then-403 shape already used by GET /events/{id} in this file.
+    user_tenant_id = current_user.get("tenant_id")
+    if tenant_id and user_tenant_id and str(tenant_id) != str(user_tenant_id):
+        raise HTTPException(
+            status_code=403, detail="Cannot access other tenant events"
+        )
+    scoped_tenant_id = user_tenant_id or tenant_id
     if scoped_tenant_id:
         conditions.append(f"tenant_id = ${param_idx}")
         params.append(scoped_tenant_id)
@@ -173,7 +189,21 @@ async def create_security_event(
     db_pool=Depends(get_db_pool),
 ):
     """Create a new security event (typically called by automated systems)"""
-    scoped_tenant_id = data.tenant_id or current_user.get("tenant_id")
+    # Same cross-tenant defect as the list route, on the WRITE side: the
+    # body-supplied tenant_id used to win, so a caller with `security:write`
+    # could insert events attributed to ANY tenant — poisoning another
+    # customer's security console, or burying a real event under noise.
+    # The field may only narrow to the caller's own tenant.
+    _user_tenant_id = current_user.get("tenant_id")
+    if (
+        data.tenant_id
+        and _user_tenant_id
+        and str(data.tenant_id) != str(_user_tenant_id)
+    ):
+        raise HTTPException(
+            status_code=403, detail="Cannot access other tenant events"
+        )
+    scoped_tenant_id = _user_tenant_id or data.tenant_id
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
             """
