@@ -70,3 +70,46 @@ def strip_self_echo(user_text: str, agent_text: str, *, min_run: int = 5) -> str
     if len([t for t in (_norm(x) for x in kept) if t]) < 2:
         return ""
     return " ".join(kept).strip()
+
+
+def strip_self_echo_multi(
+    user_text: str, agent_texts, *, min_run: int = 5
+) -> str:
+    """Strip echoes of SEVERAL recent agent utterances from one caller turn.
+
+    WHY THIS EXISTS (regression, 2026-07-31)
+    ----------------------------------------
+    The single-utterance form silently assumed exactly ONE agent utterance
+    precedes each caller turn. That held until the spoken recording disclosure
+    was added: the agent now says the notice AND then the greeting before the
+    callee has said anything, so by the caller's first turn the disclosure is
+    two messages back and invisible to a guard that only looks at the most
+    recent one.
+
+    The observed result, from a production transcript:
+
+        User: This call may be recorded.        <- the agent's own notice
+        Assistant: happy to continue. ...       <- agent answers itself
+        User: Happy to continue. ...            <- and that echoes too
+
+    The caller never spoke; the call was derailed from turn 0.
+
+    ``agent_texts`` should be every agent utterance since the caller last
+    spoke — that is exactly the set of audio still capable of echoing into
+    this turn, and it is self-limiting (normally 1, two on the opening turn,
+    three when a silence nudge intervened). Bounding it that way rather than
+    by a fixed count is what keeps a caller who legitimately repeats the
+    agent's wording from a minute ago being stripped.
+
+    Applied most-recent-first, feeding each result forward, so a turn that
+    echoes two separate utterances is fully cleaned. Returns "" when nothing
+    real survives.
+    """
+    text = user_text or ""
+    for agent_text in agent_texts or ():
+        if not text.strip():
+            return ""
+        if not agent_text:
+            continue
+        text = strip_self_echo(text, agent_text, min_run=min_run)
+    return text

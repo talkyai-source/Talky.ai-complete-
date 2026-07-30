@@ -20,7 +20,7 @@ from app.core.telemetry import pipeline_span, voice_span
 from app.domain.models.conversation import MessageRole
 from app.domain.models.session import CallSession, CallState
 from app.domain.services.voice_pipeline.backchannel import is_backchannel as _is_backchannel
-from app.services.scripts.echo_guard import strip_self_echo
+from app.services.scripts.echo_guard import strip_self_echo, strip_self_echo_multi
 from app.domain.services.voice_pipeline.identity_disposition import (
     CLARIFY_SCOPE_LINE,
     IdentityDisposition,
@@ -379,12 +379,31 @@ class TurnEnder:
         # If nothing real remains, skip the turn — answering our own echo derails
         # the call (observed in production). Short backchannels never match the
         # 5+ word run, so they pass through untouched.
-        _agent_last = next(
-            (m.content for m in reversed(session.conversation_history)
-             if m.role == MessageRole.ASSISTANT),
-            "",
-        )
-        _deechoed = strip_self_echo(full_transcript, _agent_last)
+        # EVERY agent utterance since the caller last spoke — not just the most
+        # recent one. That set is exactly the audio still capable of echoing
+        # into this turn, and it is self-limiting: normally one, TWO on the
+        # opening turn (the recording disclosure is now spoken before the
+        # greeting), three when a silence nudge intervened.
+        #
+        # Looking at only the last message was a latent assumption that exactly
+        # one agent utterance precedes each caller turn. The spoken recording
+        # disclosure broke it — the notice ends up two messages back, so it was
+        # never compared, and production transcripts show it being accepted as
+        # caller speech and answered:
+        #
+        #     User: This call may be recorded.        <- the agent's own notice
+        #     Assistant: happy to continue. ...       <- agent answers itself
+        #
+        # Bounding by "since the caller last spoke" rather than a fixed count is
+        # what stops a caller who legitimately echoes the agent's wording from a
+        # minute ago being stripped.
+        _agent_since_user: list[str] = []
+        for _m in reversed(session.conversation_history):
+            if _m.role == MessageRole.USER:
+                break
+            if _m.role == MessageRole.ASSISTANT and _m.content:
+                _agent_since_user.append(_m.content)
+        _deechoed = strip_self_echo_multi(full_transcript, _agent_since_user)
         if _deechoed != full_transcript:
             if not _deechoed.strip():
                 logger.info(
