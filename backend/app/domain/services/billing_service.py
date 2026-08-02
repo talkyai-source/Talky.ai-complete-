@@ -662,28 +662,58 @@ class BillingService:
         }
     
     async def get_usage_summary(
-        self, 
+        self,
         tenant_id: str,
         usage_type: str = "minutes"
     ) -> Dict[str, Any]:
-        """Get usage summary for the current billing period"""
-        # Get current subscription period
-        subscription = await self.get_subscription(tenant_id)
-        
-        # Get total usage
-        usage = self.db_client.table("usage_records").select(
-            "quantity"
-        ).eq("tenant_id", tenant_id).eq("usage_type", usage_type).execute()
-        
-        total_usage = sum(record["quantity"] for record in usage.data) if usage.data else 0
-        
-        # Get tenant allocation
+        """Get usage summary for the current billing period.
+
+        `GET /billing/usage` used to report zero for every tenant, always.
+        It summed `usage_records`, whose only writer is `record_usage()` —
+        a method with no callers anywhere in the codebase — so the table is
+        empty. It then compared that against `tenants.minutes_used`, a column
+        that is likewise zero for every tenant in production.
+
+        Minutes now come from the same live computation as the quota gate,
+        the dashboard and the auth/profile paths, so a tenant cannot be
+        blocked for exhausting an allowance that this endpoint says they have
+        not touched. Non-minute usage types keep the `usage_records` path;
+        it is unwired rather than wrong, and metered add-ons will populate it.
+        """
+        # Get tenant allocation (`minutes_used` deliberately not selected —
+        # it is never written; see `tenant_minutes`).
         tenant = self.db_client.table("tenants").select(
-            "minutes_allocated, minutes_used"
+            "minutes_allocated"
         ).eq("id", tenant_id).single().execute()
-        
-        allocated = tenant.data.get("minutes_allocated", 0) if tenant.data else 0
-        
+
+        allocated = (tenant.data.get("minutes_allocated", 0) if tenant.data else 0) or 0
+
+        if usage_type == "minutes":
+            from app.core.db import get_pool
+            from app.services.scripts.tenant_minutes import (
+                compute_tenant_minutes_used,
+            )
+            try:
+                total_usage = await compute_tenant_minutes_used(
+                    get_pool(), tenant_id
+                )
+            except Exception as exc:  # noqa: BLE001
+                # Matches the fail-soft contract of every other minutes
+                # reader: a metering hiccup must not 500 the billing page.
+                logger.warning(
+                    "usage summary: live minutes lookup failed for tenant %s: %s",
+                    str(tenant_id)[:8], exc,
+                )
+                total_usage = 0
+        else:
+            usage = self.db_client.table("usage_records").select(
+                "quantity"
+            ).eq("tenant_id", tenant_id).eq("usage_type", usage_type).execute()
+            total_usage = (
+                sum(record["quantity"] for record in usage.data)
+                if usage.data else 0
+            )
+
         return {
             "usage_type": usage_type,
             "total_used": total_usage,

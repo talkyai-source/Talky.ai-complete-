@@ -151,13 +151,24 @@ async def test_compute_minutes_floors_seconds_to_minutes():
     out = await compute_tenant_minutes_used(pool, str(uuid4()))
     assert out == 5
     # The aggregation runs inside a transaction that first issues a
-    # `SET LOCAL app.bypass_rls` execute(), so the SUM lands on the
-    # fetchval call — locate it by kind rather than a fixed index.
+    # `SET LOCAL app.bypass_rls` execute(), so the SUM lands on a fetchval —
+    # locate it by kind rather than a fixed index.
+    #
+    # Since 2026-08-03 this delegates to `minutes_quota.compute_minutes_status`,
+    # which fetches the tenant's allocation BEFORE the SUM. So the SUM is no
+    # longer fetchval[0]; search the queries instead of indexing, or this
+    # asserts against the allocation lookup.
     fetchval_queries = [q for kind, q, _ in conn.calls if kind == "fetchval"]
     assert fetchval_queries, "expected a fetchval SUM aggregation"
-    query = fetchval_queries[0]
-    assert "SUM(duration_seconds)" in query
-    assert "calls" in query
+    sums = [q for q in fetchval_queries if "SUM(duration_seconds)" in q]
+    assert sums, f"no SUM aggregation among {fetchval_queries}"
+    assert "calls" in sums[0]
+    # No disposition filter: billable time is every second recorded, matching
+    # the quota gate. See test_billing_minutes_agree_with_gate.
+    assert "status" not in sums[0]
+    assert any("minutes_allocated" in q for q in fetchval_queries), (
+        "delegation should also read the tenant's allocation"
+    )
 
 
 @pytest.mark.asyncio

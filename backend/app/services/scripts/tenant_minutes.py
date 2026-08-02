@@ -1,20 +1,47 @@
-"""Live tenant-minutes computation.
+"""Live tenant-minutes computation for the auth / profile / billing paths.
 
-The `tenants.minutes_used` column is no longer the source of truth — it
-was historically left at zero (no call-end hook ever wrote to it) which
-made every login response, profile read, and billing summary report a
-caller's minutes_remaining as the full plan allocation regardless of
-how many calls had completed.
+The `tenants.minutes_used` column is not the source of truth — it is zero
+for every tenant in production because no call-end hook ever writes it.
+Reading it made every login response, profile read and billing summary
+report `minutes_remaining` as the full plan allocation regardless of usage.
 
-The dashboard endpoint already computed minutes the right way: sum
-`duration_seconds` from the `calls` table for the current billing
-month. This module hoists that logic out so the auth / profile /
-billing paths can share the exact same number — preventing the bug
-where the dashboard says "120 minutes used" while /auth/me says "0".
+WHY THIS MODULE NO LONGER CARRIES ITS OWN SQL (2026-08-03)
+----------------------------------------------------------
+It used to run its own `SUM(duration_seconds)` with the predicate
 
-Returns minutes (int, floored), not seconds. Errors are swallowed and
-treated as "0 used" so a transient DB issue can't lock a tenant out
-of placing calls. The dashboard's behaviour is preserved verbatim.
+    status IN ('answered', 'completed', 'in_progress')
+
+and its docstring claimed that was "the same predicate the dashboard summary
+endpoint uses". That stopped being true: the dashboard moved to keying on
+`outcome` and dropped the status filter entirely, because the filter "missed
+every 'ended' call, so minutes were a small fraction of reality" (see the
+comment in `dashboard.py`). This module was never updated, so the two drifted
+back into exactly the disagreement it was created to prevent.
+
+Only two values have ever been written to `calls.status`: `completed` and
+`ended`. `answered` and `in_progress` have never existed in the table. So of
+the three values in the predicate, two matched nothing and the third excluded
+`ended` — the majority of recorded call time.
+
+The gate that actually *blocks* calls
+(`minutes_quota.compute_minutes_status`) has no such filter. Comparing the two
+against production data showed the billing figure landing anywhere from a
+small fraction of the gate's number down to zero for a tenant whose calls all
+finished as `ended`. A tenant could therefore be blocked for exhausting their
+plan while every screen they can see said they had most of it left.
+
+No status filter is needed, and adding one back is a regression: an
+unconnected call has no duration, so `duration_seconds` already filters
+itself. Checked against the full production history, every non-connected
+outcome sums to zero seconds apart from a negligible handful of `no_answer`
+rows that round away entirely.
+
+This module is now a thin adapter over `minutes_quota.compute_minutes_status`
+so there is exactly ONE definition of "minutes used" in the codebase, shared
+by the quota gate, the dashboard, auth, profile and billing.
+
+Returns minutes (int, floored), not seconds. Errors are swallowed and treated
+as "0 used" so a transient DB issue can't lock a tenant out of placing calls.
 """
 from __future__ import annotations
 
@@ -29,8 +56,11 @@ logger = logging.getLogger(__name__)
 def _start_of_current_month_utc() -> datetime:
     """First instant of the current calendar month in UTC.
 
-    Mirrors the dashboard endpoint exactly so the two paths agree on
-    when a billing window starts."""
+    Kept for callers that need the boundary itself. It agrees with the
+    `date_trunc('month', now())` used by `compute_minutes_status`: the
+    production database runs `TimeZone = UTC` and `calls.created_at` is
+    `timestamptz`, so the two resolve to the same instant.
+    """
     now = datetime.now(timezone.utc)
     return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
@@ -39,12 +69,11 @@ async def compute_tenant_minutes_used(
     db_pool,
     tenant_id: Optional[str],
 ) -> int:
-    """Live monthly minutes used for `tenant_id`, computed from the
-    `calls` table.
+    """Live monthly minutes used for `tenant_id`, from the `calls` table.
 
-    Sums `duration_seconds` across rows in the current billing month
-    whose status is one of ('answered', 'completed', 'in_progress')
-    — same predicate the dashboard summary endpoint uses.
+    Delegates to `minutes_quota.compute_minutes_status` — the same
+    computation the dialer's quota gate enforces against — so a tenant can
+    never be blocked by a number their invoice does not show.
 
     Args:
         db_pool: asyncpg pool. None → returns 0.
@@ -60,24 +89,16 @@ async def compute_tenant_minutes_used(
     except (ValueError, TypeError):
         return 0
 
+    from app.domain.services.minutes_quota import compute_minutes_status
+
     try:
         async with db_pool.acquire() as conn:
             async with conn.transaction():
-                # Bypass RLS — the WHERE clause already scopes to tenant_id,
-                # and this is a platform-internal aggregation.
+                # The WHERE clause already scopes to tenant_id, and this is a
+                # platform-internal aggregation. Preserved from the previous
+                # implementation so behaviour under RLS is unchanged.
                 await conn.execute("SET LOCAL app.bypass_rls = 'true'")
-                total_seconds = await conn.fetchval(
-                    """
-                    SELECT COALESCE(SUM(duration_seconds), 0)
-                    FROM calls
-                    WHERE tenant_id = $1
-                      AND status = ANY($2::text[])
-                      AND created_at >= $3
-                    """,
-                    tenant_uuid,
-                    ["answered", "completed", "in_progress"],
-                    _start_of_current_month_utc(),
-                )
+                status = await compute_minutes_status(conn, tenant_uuid)
     except Exception as exc:
         logger.warning(
             "compute_tenant_minutes_used failed tenant=%s err=%s",
@@ -85,9 +106,7 @@ async def compute_tenant_minutes_used(
         )
         return 0
 
-    if not total_seconds:
-        return 0
-    return int(int(total_seconds) // 60)
+    return int(status.used_minutes)
 
 
 async def compute_tenant_minutes_remaining(

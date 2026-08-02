@@ -13,19 +13,20 @@ from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
 from app.utils.tenant_filter import apply_tenant_filter
+from app.domain.services.call_outcomes import (
+    ANSWERED_OUTCOMES,
+    FAILED_OUTCOMES,
+    GOAL_OUTCOMES,
+)
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 # A call "connected" (answered) vs "failed" is decided by outcome, not status.
-_ANSWERED_OUTCOMES = {
-    "answered", "customer_hung_up", "agent_hung_up",
-    "goal_achieved", "goal_not_achieved",
-}
-_FAILED_OUTCOMES = {
-    "no_answer", "busy", "rejected", "unreachable",
-    "network_failure", "failed", "cancelled", "voicemail",
-}
-_GOAL_OUTCOMES = {"goal_achieved"}
+# Canonical definitions live in `call_outcomes`; these aliases are kept so the
+# module-local names (and the tests that import them) keep working.
+_ANSWERED_OUTCOMES = ANSWERED_OUTCOMES
+_FAILED_OUTCOMES = FAILED_OUTCOMES
+_GOAL_OUTCOMES = GOAL_OUTCOMES
 
 _VALID_GROUP_BY = {"hour", "day", "week", "month"}
 

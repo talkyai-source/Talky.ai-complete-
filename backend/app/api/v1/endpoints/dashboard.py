@@ -121,14 +121,10 @@ async def get_dashboard_summary(
         #    'ended' call, so minutes + answered were a small fraction of reality
         #    and failed was always 0. Minutes bill monthly (reset at the 1st UTC).
         month_start_iso = _start_of_current_month_utc()
-        _ANSWERED_OUTCOMES = {
-            "answered", "customer_hung_up", "agent_hung_up",
-            "goal_achieved", "goal_not_achieved",
-        }
-        _FAILED_OUTCOMES = {
-            "no_answer", "busy", "rejected", "unreachable",
-            "network_failure", "failed", "cancelled", "voicemail",
-        }
+        from app.domain.services.call_outcomes import (
+            ANSWERED_OUTCOMES as _ANSWERED_OUTCOMES,
+            FAILED_OUTCOMES as _FAILED_OUTCOMES,
+        )
         month_q = db_client.table("calls").select("outcome,duration_seconds")
         month_q = apply_tenant_filter(month_q, current_user.tenant_id)
         month_q = month_q.gte("created_at", month_start_iso)

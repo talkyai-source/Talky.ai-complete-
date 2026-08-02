@@ -15,6 +15,10 @@ from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
 from app.core.security.rbac import require_permission, Permission
 from app.domain.services.billing_service import BillingService
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
+from app.domain.services.call_outcomes import (
+    ANSWERED_OUTCOME_LIST,
+    FAILED_OUTCOME_LIST,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -420,10 +424,17 @@ async def get_daily_usage(
     """
     Daily minutes-used breakdown for the last `days` days (default 30).
 
-    Aggregates `duration_seconds` from the `calls` table grouped by day,
-    same call-status predicate as compute_tenant_minutes_used. Days with
-    no calls return 0 so the response is a continuous time series ready
-    for a sparkline.
+    Aggregates `duration_seconds` from the `calls` table grouped by day.
+    Days with no calls return 0 so the response is a continuous time series
+    ready for a sparkline.
+
+    Minutes are summed with NO disposition filter, matching the dashboard and
+    `minutes_quota.compute_minutes_status` (the gate that actually blocks
+    calls). Connected/failed counts key on `outcome`, never `status` — see
+    `call_outcomes`. The previous version filtered
+    `status IN ('answered','completed','in_progress')`, which dropped every
+    `ended` call, and then derived `failed` from `status NOT IN (...)` — a
+    count the outer WHERE made structurally impossible to be anything but 0.
     """
     days = max(1, min(int(days), 90))
     try:
@@ -444,16 +455,16 @@ async def get_daily_usage(
                     SELECT date_trunc('day', created_at)::date AS day,
                            COALESCE(SUM(duration_seconds), 0) AS total_seconds,
                            COUNT(*) AS total_calls,
-                           COUNT(*) FILTER (WHERE status IN ('answered','completed')) AS successful,
-                           COUNT(*) FILTER (WHERE status NOT IN ('answered','completed','in_progress')) AS failed
+                           COUNT(*) FILTER (WHERE outcome = ANY($2::text[])) AS successful,
+                           COUNT(*) FILTER (WHERE outcome = ANY($3::text[])) AS failed
                     FROM calls
                     WHERE tenant_id = $1
-                      AND status = ANY($2::text[])
-                      AND created_at >= $3
+                      AND created_at >= $4
                     GROUP BY day
                     """,
                     tenant_uuid,
-                    ["answered", "completed", "in_progress"],
+                    ANSWERED_OUTCOME_LIST,
+                    FAILED_OUTCOME_LIST,
                     start,
                 )
     except Exception as e:
