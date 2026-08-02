@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 END_SESSION_ACTION = "end_session"
 LEGACY_ASK_AI_END_SESSION_ACTION = "end_ask_ai_session"
@@ -103,6 +106,59 @@ def build_end_session_tool_instructions(*, action_name: str = END_SESSION_ACTION
     )
 
 
+def _normalise_action_name(value: object) -> Optional[str]:
+    """Match an action name the model got slightly wrong.
+
+    Observed in production: ``endsession`` for ``end_session`` and
+    ``conversationcomplete`` for ``conversation_complete`` — the model simply
+    dropped the underscores. An exact-match check rejected the envelope, so it
+    was spoken aloud instead of ending the call. Compare on letters only.
+    """
+    if not isinstance(value, str):
+        return None
+    squashed = "".join(ch for ch in value.lower() if ch.isalnum())
+    for known in (END_SESSION_ACTION, LEGACY_ASK_AI_END_SESSION_ACTION):
+        if squashed == "".join(ch for ch in known.lower() if ch.isalnum()):
+            return known
+    return None
+
+
+def _repair_action_json(candidate: str) -> Optional[dict]:
+    """Best-effort recovery of a nearly-valid action envelope.
+
+    Only ever used AFTER strict json.loads has failed, and only to decide
+    whether this text is an internal action (which must be swallowed) rather
+    than speech (which is spoken). Getting it wrong in the conservative
+    direction just means we return None and behave exactly as before.
+
+    Handles the failure actually seen on a live call — a key whose closing
+    quote is missing (``"farewell:"`` instead of ``"farewell":"``) — plus
+    trailing commas and single-quoted keys, which are the other two ways these
+    small models mangle JSON. Deliberately NOT a general JSON fixer: anything
+    it cannot repair confidently returns None.
+    """
+    import re as _re
+
+    text = candidate
+    # `"key:"value"`  ->  `"key":"value"`   (missing closing quote on the key)
+    text = _re.sub(r'"([A-Za-z_][A-Za-z0-9_]*):"', r'"\1":"', text)
+    # `'key':`        ->  `"key":`
+    text = _re.sub(r"'([A-Za-z_][A-Za-z0-9_]*)'\s*:", r'"\1":', text)
+    # trailing comma before a closing brace
+    text = _re.sub(r",\s*}", "}", text)
+    try:
+        repaired = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(repaired, dict):
+        return None
+    logger.warning(
+        "end_session_action: model emitted malformed JSON; repaired rather "
+        "than speaking it aloud. raw=%r", candidate[:160],
+    )
+    return repaired
+
+
 def parse_end_session_action(text: str) -> Optional[dict[str, object]]:
     """Parse the provider-agnostic structured action envelope emitted by the LLM."""
     raw = (text or "").strip()
@@ -114,12 +170,30 @@ def parse_end_session_action(text: str) -> Optional[dict[str, object]]:
     if start < 0 or end <= start:
         return None
 
+    candidate = raw[start:end + 1]
     try:
-        payload = json.loads(raw[start:end + 1])
+        payload = json.loads(candidate)
     except json.JSONDecodeError:
-        return None
+        # TOLERANT REPAIR (2026-08-03). A parse failure here is not harmless:
+        # the envelope stops being recognised as an action, falls through as
+        # ordinary reply text, and TTS READS IT ALOUD. That happened in
+        # production (2026-07-08) — a caller heard:
+        #
+        #   {"action":"endsession","reason":"conversationcomplete",
+        #    "farewell:"Message left, I'll try again another time. Cheers."}
+        #
+        # Note `farewell:"` — a missing quote. One dropped character turned a
+        # clean hangup into machine noise played down the line.
+        #
+        # Constrained decoding would prevent this at the token level, but Groq
+        # only supports strict mode on gpt-oss-20b/120b, and this codebase
+        # deliberately does not run gpt-oss for conversational voice. So the
+        # repair has to live here, where it works for every provider.
+        payload = _repair_action_json(candidate)
+        if payload is None:
+            return None
 
-    action = payload.get("action") or payload.get("name")
+    action = _normalise_action_name(payload.get("action") or payload.get("name"))
     if action not in {END_SESSION_ACTION, LEGACY_ASK_AI_END_SESSION_ACTION}:
         return None
 

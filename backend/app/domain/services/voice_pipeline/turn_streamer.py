@@ -69,6 +69,26 @@ _MAX_HISTORY_PAIRS = int(os.getenv("VOICE_MAX_HISTORY_PAIRS", "20"))
 _END_SESSION_TOOL_INSTRUCTIONS = build_end_session_tool_instructions()
 
 
+# Matches the START of an internal action envelope inside a longer buffer:
+# an opening brace followed, within a short window, by an "action" key. Kept
+# tight so an ordinary spoken brace ("the price is {x}") never trips it.
+_ACTION_ENVELOPE_RE = re.compile(
+    r"""\{\s*["']?\s*action\s*["']?\s*:""", re.IGNORECASE
+)
+
+
+def _find_action_envelope_start(buf: str) -> int:
+    """Index of an action envelope inside `buf`, or -1.
+
+    Used to split a turn where the model emitted prose AND the JSON envelope
+    together — the prose is spoken, the envelope is swallowed and parsed. The
+    envelope reaching TTS is not cosmetic: a caller heard one read aloud in
+    production on 2026-07-08.
+    """
+    m = _ACTION_ENVELOPE_RE.search(buf or "")
+    return m.start() if m else -1
+
+
 def _readback_protected_values(session) -> tuple[str, ...]:
     """Pending/captured core values + their spoken read-back forms, so the output
     leak-scrubber never deletes a sentence that reads one back to the caller
@@ -647,12 +667,20 @@ class TurnStreamer:
                 # aloud when the caller says goodbye. Accumulate it instead; it's
                 # parsed after the stream and only the farewell is spoken. Detect
                 # by the first non-whitespace char being '{'.
-                if (
-                    self._p._supports_llm_end_session_action(session)
-                    and buf.lstrip()[:1] == "{"
-                ):
-                    suppressed_for_action = True
-                    continue
+                if self._p._supports_llm_end_session_action(session):
+                    _lead = buf.lstrip()
+                    if _lead[:1] == "{":
+                        suppressed_for_action = True
+                        continue
+                    # The contract says "no spoken text outside JSON", but small
+                    # models routinely emit a sentence and THEN the envelope.
+                    # Checking only the first character missed that entirely, so
+                    # the envelope streamed to TTS and was read aloud. Speak the
+                    # prose, swallow everything from the brace on.
+                    _brace = _find_action_envelope_start(buf)
+                    if _brace > 0:
+                        buf = buf[:_brace]
+                        suppressed_for_action = True
 
                 # Flush each complete sentence (or, for long buffers, the first
                 # clause) to TTS as tokens arrive.
