@@ -291,7 +291,15 @@ def _schedule_reason(
 
     retry = None
     if nxt is not None:
-        retry = max(0, int((nxt - datetime.now(timezone.utc)).total_seconds()))
+        # Derive from the SAME clock `nxt` was computed against. This used
+        # datetime.now(timezone.utc) unconditionally while `nxt` came from the
+        # injected `now`, so the two fields could describe different instants —
+        # a reason card could say "Next window: Friday 14:00" and simultaneously
+        # report a retry delay measured from a different moment. In production
+        # `now` is normally None and they agreed by luck; anywhere it is passed
+        # (tests, replay, backfill) they silently diverged.
+        _ref = now or datetime.now(timezone.utc)
+        retry = max(0, int((nxt - _ref).total_seconds()))
 
     return BlockReason(
         code=code,

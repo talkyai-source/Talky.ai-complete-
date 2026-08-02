@@ -329,6 +329,17 @@ class TestCallingRules:
 
 
 class TestSchedulingRules:
+    """Scheduling-rule behaviour.
+
+    Every rule set here opens BOTH the hours (00:00-23:59) and the days
+    (all seven). The calling window is not what these tests exercise —
+    cooldown, concurrency and the authoritative-count override are. They
+    originally opened only the hours and inherited the Mon-Fri default for
+    days, so `can_make_call` short-circuited on
+    `calling_not_allowed_on_Sat/Sun` before reaching the assertion and the
+    whole class failed every weekend. A suite that is red two days in seven
+    trains people to ignore it, which is how a real regression slips past.
+    """
     """Tests for scheduling rule engine"""
     
     @pytest.mark.asyncio
@@ -340,6 +351,7 @@ class TestSchedulingRules:
         rules = CallingRules(
             time_window_start="00:00",
             time_window_end="23:59",
+            allowed_days=[0, 1, 2, 3, 4, 5, 6],  # weekend-safe: see class docstring
             max_concurrent_calls=10,
             timezone="UTC"
         )
@@ -362,6 +374,7 @@ class TestSchedulingRules:
         rules = CallingRules(
             time_window_start="00:00",
             time_window_end="23:59",
+            allowed_days=[0, 1, 2, 3, 4, 5, 6],  # weekend-safe: see class docstring
             max_concurrent_calls=1,  # Only 1 concurrent call
             timezone="UTC"
         )
@@ -387,6 +400,7 @@ class TestSchedulingRules:
         engine = SchedulingRuleEngine()
         rules = CallingRules(
             time_window_start="00:00", time_window_end="23:59",
+ allowed_days=[0, 1, 2, 3, 4, 5, 6],  # weekend-safe: see class docstring
             max_concurrent_calls=10, timezone="UTC",
         )
         can_call, reason = await engine.can_make_call(
@@ -406,6 +420,7 @@ class TestSchedulingRules:
         engine = SchedulingRuleEngine()
         rules = CallingRules(
             time_window_start="00:00", time_window_end="23:59",
+ allowed_days=[0, 1, 2, 3, 4, 5, 6],  # weekend-safe: see class docstring
             max_concurrent_calls=10, timezone="UTC",
         )
         for _ in range(10):  # simulate the leak: in-memory wedged at the cap
@@ -423,6 +438,7 @@ class TestSchedulingRules:
         engine = SchedulingRuleEngine()
         rules = CallingRules(
             time_window_start="00:00", time_window_end="23:59",
+ allowed_days=[0, 1, 2, 3, 4, 5, 6],  # weekend-safe: see class docstring
             max_concurrent_calls=1, timezone="UTC",
         )
         engine.register_call_start("t", "c")  # in-memory = 1 = cap
@@ -442,6 +458,7 @@ class TestSchedulingRules:
         rules = CallingRules(
             time_window_start="00:00",
             time_window_end="23:59",
+            allowed_days=[0, 1, 2, 3, 4, 5, 6],  # weekend-safe: see class docstring
             min_hours_between_calls=2,
             timezone="UTC"
         )
