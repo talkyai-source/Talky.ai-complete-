@@ -12,6 +12,12 @@ import logging
 import os
 from copy import deepcopy
 
+from app.infrastructure.llm.structured_output import (
+    response_format_for,
+    strict_mode_active,
+    summariser_model,
+)
+
 from groq import AsyncGroq
 
 logger = logging.getLogger(__name__)
@@ -74,6 +80,14 @@ EMPTY_SUMMARY: dict = {
 
 _SCHEMA_KEYS = set(EMPTY_SUMMARY.keys())
 
+# JSON-Schema property types, derived from EMPTY_SUMMARY so the two cannot
+# drift: a list default means an array of strings, anything else a string.
+_SUMMARY_SCHEMA_PROPERTIES = {
+    key: ({"type": "array", "items": {"type": "string"}}
+          if isinstance(default, list) else {"type": "string"})
+    for key, default in EMPTY_SUMMARY.items()
+}
+
 # Keys whose values must be lists (coerce scalars → single-element list)
 _LIST_KEYS = {"key_points", "objections", "commitments", "action_items", "follow_up_tips", "notable_quotes"}
 
@@ -130,16 +144,27 @@ async def summarize_transcript(transcript_text: str) -> dict:
     try:
         client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
 
+        # Strongest response_format this model can honour. On a strict-capable
+        # model (gpt-oss) the decoder is constrained at the TOKEN level, so the
+        # reply cannot be invalid JSON or miss a key; on every other model this
+        # is the json_object form that was here before. The call site does not
+        # branch — see infrastructure/llm/structured_output.py for why.
+        _model = summariser_model()
+        _response_format = response_format_for(
+            _model, properties=_SUMMARY_SCHEMA_PROPERTIES, name="call_summary"
+        )
+        _strict = strict_mode_active(_model)
+
         async def _call(user_content: str) -> str:
             resp = await client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model=_model,
                 messages=[
                     {"role": "system", "content": _SYSTEM_PROMPT},
                     {"role": "user", "content": user_content},
                 ],
                 temperature=0.3,
                 max_tokens=1500,
-                response_format={"type": "json_object"},
+                response_format=_response_format,
             )
             return resp.choices[0].message.content or ""
 
@@ -148,6 +173,19 @@ async def summarize_transcript(transcript_text: str) -> dict:
         try:
             parsed = json.loads(raw_content)
         except json.JSONDecodeError:
+            if _strict:
+                # Unreachable by construction: constrained decoding cannot emit
+                # invalid JSON. If it ever fires, the assumption is wrong and a
+                # silent retry would hide that — so say so and take the
+                # fallback rather than pretending the guarantee held.
+                logger.error(
+                    "call_summarizer: STRICT schema model %s returned invalid "
+                    "JSON — the constrained-decoding guarantee did not hold",
+                    _model,
+                )
+                result = deepcopy(EMPTY_SUMMARY)
+                result["headline"] = SUMMARY_UNAVAILABLE_HEADLINE
+                return result
             logger.warning(
                 "call_summarizer: first JSON parse failed — retrying with explicit instruction"
             )
