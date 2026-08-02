@@ -1724,12 +1724,54 @@ async def _on_call_ended(call_id: str) -> None:
         # produce log storms or zombie work for the rest of their
         # natural lifetime. Pattern follows Pipecat's session-cleanup
         # contract: hangup is authoritative, all per-session work cancels.
+        #
+        # QUIESCE BEFORE READING (2026-08-03). Everything below this point
+        # reads per-call state and persists it: the transcript, the resolved
+        # outcome, and the opt-out/DNC purge. Each of those awaits a DB round
+        # trip, and every await yields the event loop.
+        #
+        # The in-flight TURN task is a SIBLING task (spawned from
+        # transcript_handler), not a child of pipeline_task — so it kept
+        # running through all of that. It could append the agent's final line
+        # to conversation_history AFTER the transcript had been persisted, and,
+        # far worse, set `_caller_opted_out` AFTER the outcome had already been
+        # resolved and the purge decision made.
+        #
+        # Concretely: a caller says "take me off your list" and hangs up
+        # mid-reply. The turn task sets the opt-out flag a few milliseconds
+        # after teardown already read it as False, the DNC purge never runs,
+        # and that person gets called again. That is a regulatory exposure, not
+        # an untidy log.
+        #
+        # Cancelling here — before any awaited teardown work — makes the
+        # session quiescent so what we read is what actually happened.
+        # `end_session()` cancels the same things again later; both are
+        # idempotent, so the duplicate is a cheap no-op.
+        _pipeline = getattr(voice_session, "pipeline", None)
+        if _pipeline is not None:
+            try:
+                await _pipeline.cancel_active_turn(call_id)
+            except Exception as exc:  # noqa: BLE001 — teardown must not fail
+                logger.debug("teardown cancel_active_turn failed: %s", exc)
+
         for _attr in (
             "_greeting_task",
         ):
             _t = getattr(voice_session, _attr, None)
             if _t is not None and not _t.done():
+                # Bounded await, not fire-and-forget. A bare .cancel() returns
+                # immediately and the task keeps running until it next hits an
+                # await — during which it can still append to history or push
+                # audio at a torn-down channel. This mirrors
+                # VoicePipelineService._cancel_turn_task, which documents why
+                # an unawaited cancel is unsafe; the greeting cancel was the
+                # one path that skipped that pattern.
                 _t.cancel()
+                if _pipeline is not None:
+                    try:
+                        await _pipeline._cancel_turn_task(_t, call_id, _attr)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("teardown greeting cancel failed: %s", exc)
 
         # --- Persist transcript + terminal metrics to dialer's calls row ---
         # Two writes that have to happen before teardown:

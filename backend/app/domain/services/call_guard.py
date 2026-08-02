@@ -932,7 +932,40 @@ class CallGuard:
                 reason="no_minutes_quota",
             )
 
+        # LIVE usage, not the stored column (2026-08-03).
+        #
+        # `tenant_call_limits.monthly_minutes_used` is written by exactly ONE
+        # thing in this codebase: the admin PUT /admin/tenants/{id}/call-limits
+        # endpoint. NOTHING increments it when a call actually happens. So this
+        # check was comparing an estimate against a number frozen at whatever
+        # an operator last typed in — usually 0.
+        #
+        # That matters because POST /sip/telephony/call is reachable by any
+        # logged-in user, not just the dialer, and this guard was its only
+        # quota gate. The docstring above claimed it "closes the direct-
+        # origination revenue leak"; it did not, because the counter never
+        # moved. Unmetered calls, indefinitely.
+        #
+        # `compute_minutes_status` is the same live computation the dialer's
+        # own gate uses — summed from the `calls` table — so the two paths now
+        # agree instead of enforcing against different realities.
         used = tenant_limits.monthly_minutes_used or 0
+        try:
+            from app.domain.services.minutes_quota import compute_minutes_status
+
+            async with self._db_pool.acquire() as conn:
+                _status = await compute_minutes_status(conn, str(tenant_id))
+            if _status.used_minutes is not None:
+                used = int(_status.used_minutes)
+        except Exception as exc:  # noqa: BLE001
+            # Fails OPEN to the stored value, matching this method's stated
+            # contract that a metering hiccup never strands legitimate calls.
+            logger.warning(
+                "call_guard: live minutes lookup failed for tenant=%s (%s) — "
+                "falling back to the stored counter, which may be stale",
+                str(tenant_id)[:8], exc,
+            )
+
         # Round this call's minutes UP (carriers bill per started minute).
         est_minutes = -(-(estimated_duration_seconds or 60) // 60)  # ceil division
 
