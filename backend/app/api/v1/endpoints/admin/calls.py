@@ -11,6 +11,7 @@ from app.core.postgres_adapter import Client
 from app.api.v1.dependencies import get_db_client, require_platform_admin, CurrentUser
 from ._serialization import AdminResponseModel
 from app.domain.services.dialer.job_states import LIVE_CALL_STATUSES
+from app.domain.services.call_status import CallOutcome, CallState
 
 router = APIRouter()
 
@@ -412,12 +413,31 @@ async def terminate_call(
                 detail=f"Call is not active. Current status: {current_status}"
             )
         
-        # Update call status
+        # Update call status.
+        #
+        # Was `status='terminated'` + `outcome='terminated_by_admin'`. Neither
+        # value exists in the shared vocabulary: `terminated` is not a
+        # `CallState`, so the row became invisible to the live panel, the
+        # reapers and every dashboard filter; `terminated_by_admin` is not a
+        # `CallOutcome` and is in neither ANSWERED_OUTCOMES nor
+        # FAILED_OUTCOMES, so the call counted as neither connected nor
+        # failed and `successful + failed` silently stopped equalling the
+        # calls that finished.
+        #
+        # An admin force-terminating a call is the same event as an operator
+        # hanging one up, so it records the same way: ENDED, with the outcome
+        # following whether the call had actually been answered. The admin
+        # attribution is preserved in the audit log, which is where it
+        # belongs — not in a field the analytics pipeline has to classify.
         now = datetime.utcnow().isoformat() + "Z"
+        was_answered = current_status in ("answered", "in_call")
         update_response = db_client.table("calls").update({
-            "status": "terminated",
+            "status": "ended",
             "ended_at": now,
-            "outcome": "terminated_by_admin",
+            "outcome": (
+                CallOutcome.AGENT_HUNG_UP.value if was_answered
+                else CallOutcome.CANCELLED.value
+            ),
             "updated_at": now
         }).eq("id", call_id).execute()
         
@@ -428,7 +448,7 @@ async def terminate_call(
             "detail": "Call terminated successfully",
             "call_id": call_id,
             "previous_status": current_status,
-            "new_status": "terminated"
+            "new_status": CallState.ENDED.value
         }
     
     except HTTPException:

@@ -148,6 +148,29 @@ async def hangup_live_call(
     ended so the panel reflects it immediately (this also clears phantom stuck
     rows whose channel is already gone). Never overwrites an outcome the ARI
     callback already recorded.
+
+    THE OUTCOME IS NOT A CONSTANT (fixed 2026-08-03)
+    ------------------------------------------------
+    This used to write `outcome = COALESCE(outcome, 'agent_hung_up')`
+    unconditionally. But the docstring above says what this endpoint is mostly
+    used for: clearing phantom stuck rows whose channel is already gone —
+    calls that were NEVER ANSWERED. `agent_hung_up` means "the AI agent ended
+    a call it was having", and it lives in `call_outcomes.ANSWERED_OUTCOMES`,
+    so every phantom an operator cleared was counted as a successful
+    conversation on the dashboard, in analytics, and in campaign performance.
+
+    In production this was the single largest outcome bucket — more rows than
+    every genuinely answered call combined, every one of them with no
+    `answered_at`, no transcript and no recording, inflating the reported
+    connect rate to well over twice the truth. The effect is self-reinforcing:
+    the more stuck calls the system produces, the better its numbers look.
+
+    Now the outcome follows the evidence — `agent_hung_up` only when the call
+    really had been answered, `cancelled` (CallOutcome.CANCELLED: "we hung up
+    before answer") otherwise, which classifies as failed.
+
+    It also sets `duration_seconds`, which it never did. An operator ending a
+    genuinely live conversation recorded zero billable time for it.
     """
     if not current_user.tenant_id:
         raise HTTPException(status_code=403, detail="No tenant context")
@@ -173,10 +196,31 @@ async def hangup_live_call(
 
         async with db_client.pool.acquire() as conn:
             await conn.execute(
-                "UPDATE calls SET status = 'ended', "
-                "ended_at = COALESCE(ended_at, NOW()), "
-                "outcome = COALESCE(outcome, 'agent_hung_up') "
-                "WHERE id = $1 AND tenant_id = $2",
+                """
+                UPDATE calls
+                   SET status   = 'ended',
+                       ended_at = COALESCE(ended_at, NOW()),
+                       outcome  = COALESCE(
+                           outcome,
+                           CASE WHEN answered_at IS NOT NULL
+                                      OR status IN ('answered', 'in_call')
+                                THEN 'agent_hung_up'
+                                ELSE 'cancelled'
+                           END
+                       ),
+                       duration_seconds = COALESCE(
+                           duration_seconds,
+                           CASE WHEN answered_at IS NOT NULL
+                                THEN GREATEST(
+                                    0,
+                                    EXTRACT(EPOCH FROM (NOW() - answered_at))::int
+                                )
+                                ELSE 0
+                           END
+                       ),
+                       updated_at = NOW()
+                 WHERE id = $1 AND tenant_id = $2
+                """,
                 call_id, current_user.tenant_id,
             )
         return {"status": "ok", "call_id": call_id}

@@ -24,67 +24,12 @@ could see said most of it was left.
 """
 from __future__ import annotations
 
-import ast
-import io
-import tokenize
-from pathlib import Path
-
 import pytest
 
-_BACKEND = Path(__file__).resolve().parents[2]
-
-
-def _read(rel: str) -> str:
-    return (_BACKEND / rel).read_text(encoding="utf-8")
-
-
-def _code_only(src: str) -> str:
-    """Source with docstrings and `#` comments blanked out.
-
-    A source-scanning test that reads prose will re-detect whatever bug it
-    documents: the first version of this file failed on four counts, every
-    one of them matching the comment explaining the fix rather than any
-    code. Docstrings are located via `ast` (NOT by stripping triple-quoted
-    strings — the SQL in these modules is triple-quoted and must survive).
-    """
-    lines = src.splitlines()
-    blank: set[int] = set()
-    for node in ast.walk(ast.parse(src)):
-        if not isinstance(
-            node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-        ):
-            continue
-        body = getattr(node, "body", None)
-        if not body:
-            continue
-        head = body[0]
-        if (
-            isinstance(head, ast.Expr)
-            and isinstance(head.value, ast.Constant)
-            and isinstance(head.value.value, str)
-        ):
-            for ln in range(head.lineno, (head.end_lineno or head.lineno) + 1):
-                blank.add(ln)
-
-    cuts: dict[int, int] = {}
-    for tok in tokenize.generate_tokens(io.StringIO(src).readline):
-        if tok.type == tokenize.COMMENT:
-            row, col = tok.start
-            cuts[row] = min(cuts.get(row, col), col)
-
-    out = []
-    for i, line in enumerate(lines, 1):
-        if i in blank:
-            out.append("")
-        elif i in cuts:
-            out.append(line[: cuts[i]])
-        else:
-            out.append(line)
-    return "\n".join(out)
-
-
-def _code(rel: str) -> str:
-    return _code_only(_read(rel))
+from tests.unit._source_scan import BACKEND as _BACKEND
+from tests.unit._source_scan import code as _code
+from tests.unit._source_scan import code_only as _code_only
+from tests.unit._source_scan import read as _read
 
 
 # --------------------------------------------------------------------------

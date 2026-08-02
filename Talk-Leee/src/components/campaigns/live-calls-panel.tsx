@@ -232,11 +232,16 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
             await api.hangupCall(callId);
             // Optimistic: mark ended locally so the row leaves "in flight"
             // instantly; the next poll reconciles with the server.
+            //
+            // Deliberately does NOT guess the outcome. It used to fill in
+            // "agent_hung_up", which claims the AI agent ended a conversation
+            // it was having — untrue for the phantom stuck rows this button
+            // mostly clears. The server decides from whether the call was
+            // actually answered; showing nothing for one poll is honest,
+            // showing the wrong label is not.
             setItems((prev) =>
                 prev.map((it) =>
-                    it.id === callId
-                        ? { ...it, status: "ended", outcome: it.outcome ?? "agent_hung_up" }
-                        : it,
+                    it.id === callId ? { ...it, status: "ended" } : it,
                 ),
             );
         } catch (err) {
