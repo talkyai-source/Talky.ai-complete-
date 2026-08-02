@@ -470,15 +470,81 @@ def build_telephony_inbound_greeting(agent_name: str, company_name: str) -> str:
 # below picks it up. Adding a direction to an existing persona: same.
 # Missing combinations fall through to the generic builders, so a
 # half-configured persona still produces a grammatical greeting.
+# Reason-first openers, used ONLY when the campaign supplies a short
+# `call_reason` (campaign_slots). Activation is by DATA, not a flag: a campaign
+# without a usable reason keeps exactly the templates below, unchanged.
+#
+# WHY THESE EXIST
+# ---------------
+# The persona prompt has always instructed the model to "give your name, your
+# company, and the honest reason you called ... Lead with the REASON straight
+# after your name (stating the reason early has the biggest lift), then hand
+# them an easy way to say no rather than asking permission to proceed ... and
+# never open with 'is this a bad time?'".
+#
+# The model never got the chance to follow it. On an agent-first call the
+# PRE-SYNTHESISED greeting speaks first and flips `_has_introduced`, so what the
+# callee actually heard was a reason-free permission-to-PROCEED ask ("Got a
+# quick second?") — the precise pattern the prompt says lands worse — and the
+# reason then arrived several turns later, or never.
+#
+# STRUCTURE IS EVIDENCE-BASED, not taste (Gong, 300M+ calls / 90,380-call study):
+#
+#   "Did I catch you at a bad time?"          2.15%  <- WORST performer
+#   "How's your day going?"                   7.6%
+#   context -> own the cold call -> permission  11.18%
+#   context-first ("heard our name?")         11.24%  <- best
+#   stating the reason for calling            2.1x lift
+#
+# Prospects decide in 8-12 SECONDS, so the opener's job is to earn the next
+# thirty seconds, not to pitch. Two consequences for the wording below:
+#
+#  * NO "bad time" / "tell me to get lost" out. An earlier draft of these
+#    templates used exactly that, which is the 2.15% line dressed in friendlier
+#    words. The persona prompt's advice to prefer "permission-to-decline" is
+#    only right in its 11.18% form — context FIRST, then owning the cold call,
+#    then asking — not as a bad-time question.
+#  * SHORT. ~20 words, roughly six seconds, so the callee can speak inside the
+#    window in which they are actually deciding. A 25-word opener talks straight
+#    through it.
+#
+# "I'll be straight with you, this is a cold call" is the "own the cold call"
+# move from the 11.18% structure. It also sits well with the hard rule that this
+# agent must never pretend to be something it is not.
+#
+# `{call_reason}` is operator text — already whitespace-normalised and
+# length-capped by `_call_reason_for` before it reaches here.
+_PERSONA_GREETINGS_WITH_REASON: dict[str, list[str]] = {
+    "lead_gen": [
+        "Hi, it's {agent_name} at {company_name}. Straight up — cold call, "
+        "about {call_reason}. Thirty seconds?",
+        "Hi, {agent_name} here from {company_name}. Being honest, this is a "
+        "cold call — it's about {call_reason}. Worth thirty seconds?",
+        "Hi, it's {agent_name} from {company_name}. I'll be upfront — cold "
+        "call, about {call_reason}. Can I explain quickly?",
+    ],
+    "customer_support": [
+        "Hi, it's {agent_name} at {company_name} — I'm ringing about "
+        "{call_reason}. Have you got a minute?",
+        "Hi, {agent_name} here from {company_name}. Quick one about "
+        "{call_reason} — is now OK?",
+    ],
+}
+
 _PERSONA_GREETINGS: dict[str, dict[str, list[str]]] = {
     "lead_gen": {
+        # No campaign reason configured. Still the 11.18% shape minus the
+        # reason: identity, own the cold call, then a question that earns the
+        # next thirty seconds. The originals ("Got a quick second?", "Do you
+        # have a minute to talk?") were permission-to-PROCEED asks — the
+        # pattern the measured data puts at the bottom.
         "outbound": [
-            "Hey, this is {agent_name} from {company_name}. "
-            "Got a quick second?",
-            "Hi, {agent_name} here from {company_name}. "
-            "Do you have a minute to talk?",
-            "Hi! This is {agent_name} calling from {company_name}. "
-            "Quick question — got a moment?",
+            "Hi, it's {agent_name} at {company_name}. I'll be straight with "
+            "you — this is a cold call. Can I have thirty seconds?",
+            "Hi, {agent_name} here from {company_name}. Being honest, this is "
+            "a cold call. Worth thirty seconds of your time?",
+            "Hi, it's {agent_name} from {company_name}. I'll be upfront — cold "
+            "call. Can I take thirty seconds to explain?",
         ],
         "inbound": [
             "Hi, this is {agent_name} from {company_name} -- "
@@ -488,13 +554,16 @@ _PERSONA_GREETINGS: dict[str, dict[str, list[str]]] = {
         ],
     },
     "customer_support": {
+        # NOT cold calls — these follow an existing enquiry, so claiming
+        # "this is a cold call" would be false. Context-first is already the
+        # right shape here; only the bad-time question is removed.
         "outbound": [
-            "Hi, this is {agent_name} from {company_name} support. "
-            "Got a quick moment?",
-            "Hey, {agent_name} here from {company_name}. "
-            "Calling about your recent inquiry — got a sec?",
-            "Hi! This is {agent_name} from {company_name}. "
-            "Quick follow-up — is now a good time?",
+            "Hi, it's {agent_name} from {company_name} support — following up "
+            "on your enquiry. Have you got a minute?",
+            "Hi, {agent_name} here from {company_name}, about your recent "
+            "enquiry. Can I run through it quickly?",
+            "Hi, it's {agent_name} at {company_name} — quick follow-up on your "
+            "enquiry. Have you got a moment?",
         ],
         "inbound": [
             "Thanks for calling {company_name} -- this is {agent_name}, "
@@ -504,13 +573,14 @@ _PERSONA_GREETINGS: dict[str, dict[str, list[str]]] = {
         ],
     },
     "receptionist": {
+        # Also a follow-up, not a cold call — same treatment as support.
         "outbound": [
-            "Hi, this is {agent_name} from {company_name}. "
-            "Quick follow-up — got a moment?",
-            "Hey, {agent_name} calling from {company_name}. "
-            "Do you have a quick second?",
-            "Hi! {agent_name} from {company_name} here. "
-            "Just following up — got a minute?",
+            "Hi, it's {agent_name} from {company_name} — just following up. "
+            "Have you got a minute?",
+            "Hi, {agent_name} calling from {company_name} about your enquiry. "
+            "Can I go through it quickly?",
+            "Hi, it's {agent_name} at {company_name}, following up. Have you "
+            "got a moment?",
         ],
         "inbound": [
             "Thank you for calling {company_name}. This is {agent_name} -- "
@@ -528,6 +598,7 @@ def build_persona_greeting(
     agent_name: str,
     company_name: str,
     direction: str = "outbound",
+    call_reason: Optional[str] = None,
 ) -> str:
     """Pick a per-persona × direction TTS opener at random.
 
@@ -554,6 +625,22 @@ def build_persona_greeting(
     import random as _random
 
     direction_key = (direction or "outbound").strip().lower()
+
+    # Reason-first opener when the campaign gave us a usable reason. Outbound
+    # only — on an inbound call the caller already knows why they rang.
+    reason = (call_reason or "").strip()
+    if (
+        reason
+        and direction_key == "outbound"
+        and persona_type in _PERSONA_GREETINGS_WITH_REASON
+    ):
+        template = _random.choice(_PERSONA_GREETINGS_WITH_REASON[persona_type])
+        return template.format(
+            agent_name=agent_name,
+            company_name=company_name,
+            call_reason=reason,
+        )
+
     if persona_type and persona_type in _PERSONA_GREETINGS:
         per_persona = _PERSONA_GREETINGS[persona_type]
         variants = per_persona.get(direction_key)
@@ -1248,7 +1335,15 @@ _PERSONA_DEFAULTS: dict[str, tuple[str, str]] = {
 #: the opener stops being a pattern-interrupt and becomes a monologue the callee
 #: talks over — so beyond the cap we fall back to the short generic opener and
 #: let the model deliver the reason conversationally on turn 1 instead.
-_MAX_SPOKEN_CALL_REASON_CHARS = 120
+# Measured against the 8-12 SECOND window in which a prospect decides. The
+# template itself is ~16 words; at ~2.8 words/second an opener stays inside
+# that window only if the reason adds roughly 6 words or fewer. A 120-char cap
+# produced 26-29 word openers (~9-10s) that talked straight through the
+# decision the opener exists to influence.
+#
+# Past the cap we fall back to the short generic opener and let the model
+# deliver the reason conversationally on turn 1 — better than a monologue.
+_MAX_SPOKEN_CALL_REASON_CHARS = 60
 
 
 def _call_reason_for(script_config: Optional[dict]) -> Optional[str]:

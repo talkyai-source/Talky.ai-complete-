@@ -171,11 +171,21 @@ def _build_call_greeting(session, *, first_speaker: str) -> str:
         config = getattr(session, "config", None)
         persona_type = getattr(config, "persona_type", None) if config else None
 
+    # The campaign's reason-for-calling, when it supplied a short one. Carried
+    # on AgentConfig alongside agent_name/company_name so the SPOKEN opener can
+    # state it in the first breath — which is what the persona prompt has always
+    # instructed, and which the pre-synthesised greeting used to make impossible
+    # (it speaks first and flips _has_introduced, so the model's reason-first
+    # opener never ran). None => the generic opener, exactly as before.
+    agent_config = getattr(session, "agent_config", None)
+    call_reason = getattr(agent_config, "call_reason", None) if agent_config else None
+
     return build_persona_greeting(
         persona_type=persona_type,
         agent_name=agent_name,
         company_name=company,
         direction="outbound",
+        call_reason=call_reason,
     )
 
 
