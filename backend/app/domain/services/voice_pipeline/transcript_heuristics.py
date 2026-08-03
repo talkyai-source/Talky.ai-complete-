@@ -78,6 +78,18 @@ _VOICEMAIL_PHRASES = (
     "leave me a message",
     "leave us a message",
     "the voicemail of",
+    # Corporate auto-attendant / PBX voicemail (2026-08-04 production miss).
+    # Two outbound calls answered with EXACTLY this and nothing else — it was
+    # the only final transcript on either call — yet AMD returned False, so the
+    # agent played its recording notice and opener to a machine. The notice was
+    # cut short by the machine's own speech, which suppressed the recording,
+    # and both calls burned ~11s. A live person answering their own phone never
+    # refers to themselves in the third person by extension number.
+    "the person at extension",
+    "person at extension",
+    "the party at extension",
+    "at the sound of the tone",
+    "at the sound of the beep",
 )
 
 

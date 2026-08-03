@@ -65,3 +65,9 @@ Thumbs.db
 # Google service account keys - NEVER commit
 *service_account*.json
 gen-lang-client-*.json
+
+# Local-only env variants (TestSprite stack, scratch configs). The bare
+# `.env` above is read by pytest as well as the app, so local overrides live
+# in `.env.<name>` files passed explicitly via `uvicorn --env-file`.
+.env.*
+!.env.example

@@ -35,6 +35,41 @@ class TestIsVoicemailGreeting:
         ):
             assert is_voicemail_greeting(text) is False, text
 
+    def test_corporate_auto_attendant_matches(self):
+        """Production miss, 2026-08-04.
+
+        Two outbound calls were answered by a PBX auto-attendant whose ONLY
+        final transcript was "The person at extension". AMD returned False, so
+        the agent played its recording notice and opener to a machine; the
+        machine's own speech barged in at elapsed_ms=2, which cut the notice
+        short and therefore suppressed the recording. Both calls burned ~11s
+        and produced zero assistant turns.
+
+        A live person answering their own phone does not refer to themselves
+        in the third person by extension number.
+        """
+        for text in (
+            "The person at extension",
+            "The person at extension 204 is not available.",
+            "The party at extension 7 is unavailable.",
+            "Please leave your message at the sound of the tone.",
+            "Record your name at the sound of the beep.",
+        ):
+            assert is_voicemail_greeting(text) is True, text
+
+    def test_extension_wording_a_human_might_use_does_not_match(self):
+        """Precision guard for the phrase added above. The phrase list is
+        deliberately anchored on "person/party at extension" rather than the
+        bare word "extension", because a real person can and does talk about
+        their own extension in the first person."""
+        for text in (
+            "I'm not at my extension right now, call me back.",
+            "Let me transfer you to extension 12.",
+            "My extension is 400 if you need me.",
+            "Sorry, wrong extension.",
+        ):
+            assert is_voicemail_greeting(text) is False, text
+
     def test_empty_and_none_safe(self):
         assert is_voicemail_greeting("") is False
         assert is_voicemail_greeting(None) is False  # type: ignore[arg-type]

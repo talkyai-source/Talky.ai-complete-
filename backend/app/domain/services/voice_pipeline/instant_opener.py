@@ -35,10 +35,26 @@ _INSTANT_OPENER_ECHO_GRACE_S = 0.7
 
 # Words a callee uses to answer the phone content-free. If every token of the
 # first utterance is from this set, the pre-synth opener is a perfect reply.
+#
+# `who`, `it`, `this` and `that` were removed 2026-08-04. With them present,
+# `is_bare_greeting("who is this?")` returned True — the exact utterance this
+# module's own docstring names as one that "deserves the LLM's specific
+# answer". That had two consequences:
+#
+#   1. `try_instant_opener` answered "who is this?" with a canned greeting
+#      instead of identifying the caller, which is the one thing a suspicious
+#      callee actually asked for.
+#   2. `is_opener_echo` classified a GENUINE "who is this" / "who is it" /
+#      "yes this is" arriving during opener playback as the agent's own echo,
+#      so `_on_barge_in_direct` returned before `event.set()` and the agent
+#      talked straight over them.
+#
+# `there` is deliberately kept so "hi there" still matches, and `is` is kept
+# so "good morning, is speaking" style pickups do — neither can form a
+# question on its own once the interrogative `who` is gone.
 _GREETING_WORDS = frozenset({
     "hello", "hi", "hey", "yeah", "yes", "hiya", "morning", "afternoon",
-    "evening", "good", "speaking", "yep", "yo", "allo", "who", "is", "it",
-    "this", "there", "that",
+    "evening", "good", "speaking", "yep", "yo", "allo", "is", "there",
 })
 
 

@@ -18,7 +18,43 @@ from app.domain.services.voice_pipeline_service import VoicePipelineService
 
 def test_bare_greetings_match():
     for t in ("Hello?", "Hi", "hello hello", "Yeah?", "Good morning", "Hiya",
-              "Hello, who is this", "Yes speaking"):
+              "Hi there", "Yes speaking"):
+        assert is_bare_greeting(t), t
+
+
+@pytest.mark.parametrize(
+    "utterance",
+    ["who is this", "who is this?", "Hello, who is this", "who is it",
+     "yes this is"],
+)
+def test_identity_questions_are_not_bare_greetings(utterance):
+    """A caller ASKING WHO IS CALLING is not a content-free pickup.
+
+    `Hello, who is this` was previously asserted to MATCH, which contradicted
+    this module's own docstring: "a real opening question like 'who is this?'
+    deserves the LLM's specific answer". `_GREETING_WORDS` contained `who`,
+    `is`, `it`, `this` and `that`, so the one example the docstring names as
+    must-not-match was the one it matched.
+
+    It broke both callers of this predicate:
+
+      * `try_instant_opener` replied to "who is this?" with a canned greeting
+        instead of answering the question a suspicious callee actually asked.
+      * `is_opener_echo` treated a GENUINE "who is this" arriving during
+        opener playback as the agent's own echo, so `_on_barge_in_direct`
+        returned before `event.set()` and the agent kept talking over them.
+
+    Verified 2026-08-04 against the live classifier.
+    """
+    assert not is_bare_greeting(utterance)
+
+
+def test_plain_greetings_still_match_after_the_narrowing():
+    """The fix removed `who`/`it`/`this`/`that` but deliberately KEPT `there`
+    and `is`, so ordinary pickups are unaffected. Without `there`, "hi there"
+    would have regressed to a full LLM turn."""
+    for t in ("hi there", "hello there", "good evening", "yep", "allo",
+              "yes", "yeah", "speaking"):
         assert is_bare_greeting(t), t
 
 
