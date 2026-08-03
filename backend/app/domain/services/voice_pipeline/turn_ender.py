@@ -315,10 +315,20 @@ class TurnEnder:
                 pass
             return
         elif _is_backchannel(full_transcript):
+            # This branch is reached when the transcript IS a backchannel but one
+            # of the two exemptions applies. Log WHICH one: the message used to
+            # say "first user utterance" unconditionally, so a mid-call "Yes"
+            # answering "Are you the homeowner?" was reported as a turn-0 event.
+            # The behaviour was right; the reason was wrong, which is exactly
+            # what misleads an incident review.
+            _reason = (
+                "turn_0_first_utterance" if not _has_prior_user_turn
+                else "answers_agent_question"
+            )
             logger.info(
-                "backchannel_allowed_turn0 transcript=%r call=%s — "
-                "first user utterance, never suppressed",
-                full_transcript, call_id[:12],
+                "backchannel_allowed reason=%s transcript=%r call=%s "
+                "agent_last_was_question=%s",
+                _reason, full_transcript, call_id[:12], _agent_asked_question,
             )
 
         # Clear any barge-in event that was set by the user's own StartOfTurn that
