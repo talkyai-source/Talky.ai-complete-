@@ -65,6 +65,31 @@ class TenantPhoneNumberService:
         # unverified. `acquire_with_tenant()` sets the GUC for the scope of
         # this query — see app/core/db_utils.py.
         from app.core.db_utils import acquire_with_tenant
+
+        # NORMALISE BEFORE COMPARING (2026-08-06).
+        #
+        # The query is an exact string match, and registration
+        # (`tenant_phone_numbers._e164_format`) enforces a leading '+', so the
+        # stored side is always true E.164. The CALLER side was not normalised,
+        # and production shipped `DEFAULT_CALLER_ID=17789249977` — the same
+        # number WITHOUT the '+'. `'17789249977' = '+17789249977'` is false, so
+        # every campaign that fell back to that default was told its caller ID
+        # was unverified and the dial was refused with `caller_id_not_verified`.
+        #
+        # That is a one-character difference between "the dialer works" and
+        # "this tenant can never place a call". It accounted for the entire
+        # blocked state of newly-signed-up tenants, whose campaigns carry no
+        # explicit `calling_config.caller_id` and therefore always take the
+        # default path (`dialer_worker.py:878`).
+        #
+        # Normalising here rather than at the one call site fixes every caller
+        # at once and is strictly narrowing: a non-phone value like the
+        # Asterisk extension "1001" normalises to something that still matches
+        # no row, so it stays unverified exactly as before.
+        from app.domain.services.dnc_service import normalize_e164
+
+        lookup_e164 = normalize_e164(e164) or e164
+
         try:
             async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
                 row = await conn.fetchrow(
@@ -75,7 +100,7 @@ class TenantPhoneNumberService:
                     LIMIT 1
                     """,
                     tenant_id,
-                    e164,
+                    lookup_e164,
                 )
         except ValueError:
             # acquire_with_tenant raises ValueError for non-UUID tenant ids.
@@ -83,7 +108,7 @@ class TenantPhoneNumberService:
         except Exception as exc:
             logger.error(
                 "tenant_phone_number_lookup_failed tenant=%s e164=%s err=%s",
-                tenant_id, e164, exc,
+                tenant_id, lookup_e164, exc,
             )
             return False
 
