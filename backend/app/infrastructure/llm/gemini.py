@@ -41,9 +41,31 @@ _LLM_RETRY_BASE_DELAY = 0.3  # 300ms — fast first retry for voice latency budg
 # length is non-deterministic; env-tunable for operators.
 _THINKING_RESERVE_TOKENS = int(os.getenv("GEMINI_THINKING_RESERVE_TOKENS", "1024"))
 
+# Imported for the base class below, aliased so the name `LLMTimeoutError`
+# still refers to Gemini's own subclass throughout this module.
+from app.infrastructure.llm.groq import (  # noqa: E402
+    LLMTimeoutError as _GroqLLMTimeoutError,
+)
 
-class LLMTimeoutError(Exception):
-    """Raised when LLM response times out (parallels groq.LLMTimeoutError)."""
+
+class LLMTimeoutError(_GroqLLMTimeoutError):
+    """Raised when a Gemini response times out.
+
+    SUBCLASSES ``groq.LLMTimeoutError`` deliberately (2026-08-06). It used to
+    be an independent ``Exception``, and the exception TYPE is load-bearing
+    here: the voice pipeline catches ``app.infrastructure.llm.groq.
+    LLMTimeoutError`` *specifically* — at ``turn_streamer.py:739``,
+    ``llm_response.py:114`` and in ``resilient_llm`` — so a Gemini timeout
+    raised as an unrelated class sailed past every one of those handlers and
+    landed in ``turn_ender``'s generic ``except Exception``, which plays the
+    hard apology line ("I'm sorry, I'm having trouble right now") instead of
+    the graceful degradation those handlers implement.
+
+    ``cerebras.py`` already documents this trap and sidesteps it by importing
+    Groq's class outright. Gemini keeps its own NAME (so any existing
+    ``except gemini.LLMTimeoutError`` still works) but is now a subclass, which
+    makes the fix purely additive.
+    """
     pass
 
 
@@ -587,27 +609,48 @@ class GeminiLLMProvider(LLMProvider):
         **kwargs,
     ) -> AsyncIterator[str]:
         """
-        Stream with a hard wall-clock deadline and inter-token stall detection.
+        Stream with a hard deadline on provider wait time + stall detection.
 
         Mirrors GroqLLMProvider.stream_chat_with_timeout so the voice pipeline
         can call either provider through the same interface. Logic is
         provider-agnostic — wraps `stream_chat` in per-token asyncio timeouts.
+
+        ``timeout_seconds`` budgets ONLY the time spent *awaiting Gemini*, not
+        wall-clock from stream start. This matters because the voice pipeline
+        is a pull consumer: ``turn_streamer`` awaits ``synthesize_and_send_audio``
+        — which paces playback in REAL TIME — between token pulls. A wall-clock
+        budget therefore charged the caller's own audio playback against the
+        LLM's allowance, so a healthy multi-sentence reply hit "remaining <= 0"
+        partway through and took the ``break`` below: the reply was truncated
+        mid-thought, logged only as "treating as stream end", with no error and
+        no fallback line. The caller simply heard the agent stop talking.
+
+        Telephony sessions allow up to 5 sentences per turn
+        (``telephony_session_config``), each paced at real-time speech rate, so
+        several seconds of playback per turn were being deducted from a 10s
+        budget. Groq already accounted for this correctly; Gemini and Cerebras
+        did not. Fixed 2026-08-06.
 
         Raises:
             LLMTimeoutError: no token arrived before the TTFT deadline.
         """
         _INTERTOKEN_TIMEOUT = 2.0
 
-        t_start = asyncio.get_event_loop().time()
+        # Time spent INSIDE the awaits that fetch the next token from Gemini.
+        # The gap between yielding a token and being asked for the next one
+        # (consumer-side TTS/playback) is NOT added here, so downstream pacing
+        # can never consume the LLM budget.
+        gemini_wait_accumulated = 0.0
+        t_first_token_start = asyncio.get_event_loop().time()
         tokens_received = 0
         gen = self.stream_chat(messages, **kwargs)
         try:
             while True:
-                remaining = timeout_seconds - (asyncio.get_event_loop().time() - t_start)
+                remaining = timeout_seconds - gemini_wait_accumulated
                 if remaining <= 0:
                     if tokens_received > 0:
                         logger.warning(
-                            "Gemini wall-clock expired mid-stream "
+                            "Gemini-wait budget expired mid-stream "
                             "(limit=%.1fs, tokens=%d) — treating as stream end",
                             timeout_seconds, tokens_received,
                         )
@@ -623,35 +666,46 @@ class GeminiLLMProvider(LLMProvider):
                     remaining if tokens_received == 0
                     else min(remaining, _INTERTOKEN_TIMEOUT)
                 )
+                _wait_t0 = asyncio.get_event_loop().time()
                 try:
                     token = await asyncio.wait_for(gen.__anext__(), timeout=token_timeout)
-                    if tokens_received == 0:
-                        ttft_ms = (asyncio.get_event_loop().time() - t_start) * 1000
-                        if ttft_ms > 800:
-                            logger.warning(
-                                "High Gemini TTFT: %.0fms — may indicate cold start "
-                                "or rate limiting.", ttft_ms,
-                            )
-                    tokens_received += 1
-                    yield token
                 except StopAsyncIteration:
                     break
                 except asyncio.TimeoutError:
-                    elapsed = asyncio.get_event_loop().time() - t_start
+                    # Only the Gemini wait counts — a full `token_timeout` elapsed.
+                    gemini_wait_accumulated += (
+                        asyncio.get_event_loop().time() - _wait_t0
+                    )
                     if tokens_received > 0:
                         logger.warning(
-                            "Gemini inter-token stall after %.2fs (tokens=%d) — "
-                            "treating as stream end",
-                            elapsed, tokens_received,
+                            "Gemini inter-token stall (gemini_wait=%.2fs, tokens=%d) "
+                            "— treating as stream end",
+                            gemini_wait_accumulated, tokens_received,
                         )
                         break
                     logger.error(
-                        "Gemini timeout waiting for first token after %.2fs (limit=%.1fs)",
-                        elapsed, timeout_seconds,
+                        "Gemini timeout waiting for first token after %.2fs "
+                        "(limit=%.1fs)",
+                        gemini_wait_accumulated, timeout_seconds,
                     )
                     raise LLMTimeoutError(
                         f"LLM response timed out after {timeout_seconds}s"
                     )
+                # Success: charge ONLY the just-measured Gemini-wait span, then
+                # yield. Whatever time the consumer spends before pulling again
+                # lands OUTSIDE this measured span.
+                gemini_wait_accumulated += asyncio.get_event_loop().time() - _wait_t0
+                if tokens_received == 0:
+                    ttft_ms = (
+                        asyncio.get_event_loop().time() - t_first_token_start
+                    ) * 1000
+                    if ttft_ms > 800:
+                        logger.warning(
+                            "High Gemini TTFT: %.0fms — may indicate cold start "
+                            "or rate limiting.", ttft_ms,
+                        )
+                tokens_received += 1
+                yield token
         finally:
             # Ensure the underlying stream generator is closed so the HTTP
             # connection is released even if the caller stops iterating early.

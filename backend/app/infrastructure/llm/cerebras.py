@@ -306,18 +306,22 @@ class CerebrasLLMProvider(LLMProvider):
 
         _INTERTOKEN_TIMEOUT = 2.0
 
-        t_start = asyncio.get_event_loop().time()
+        # Budgets ONLY time spent awaiting Cerebras — never consumer-side TTS
+        # playback. See GeminiLLMProvider.stream_chat_with_timeout for the full
+        # explanation: the voice pipeline pulls tokens between real-time-paced
+        # audio sends, so a wall-clock budget charged the caller's own playback
+        # against the LLM allowance and truncated healthy multi-sentence replies
+        # mid-thought with no error and no fallback line. Fixed 2026-08-06.
+        cerebras_wait_accumulated = 0.0
         tokens_received = 0
         gen = self.stream_chat(messages, **kwargs)
         try:
             while True:
-                remaining = timeout_seconds - (
-                    asyncio.get_event_loop().time() - t_start
-                )
+                remaining = timeout_seconds - cerebras_wait_accumulated
                 if remaining <= 0:
                     if tokens_received > 0:
                         logger.warning(
-                            "Cerebras wall-clock expired mid-stream "
+                            "Cerebras-wait budget expired mid-stream "
                             "(limit=%.1fs, tokens=%d) — treating as stream end",
                             timeout_seconds, tokens_received,
                         )
@@ -333,16 +337,24 @@ class CerebrasLLMProvider(LLMProvider):
                     remaining if tokens_received == 0
                     else min(remaining, _INTERTOKEN_TIMEOUT)
                 )
+                _wait_t0 = asyncio.get_event_loop().time()
                 try:
                     token = await asyncio.wait_for(
                         gen.__anext__(), timeout=token_timeout
+                    )
+                    # Charge ONLY the measured Cerebras-wait span, then yield.
+                    cerebras_wait_accumulated += (
+                        asyncio.get_event_loop().time() - _wait_t0
                     )
                     tokens_received += 1
                     yield token
                 except StopAsyncIteration:
                     break
                 except asyncio.TimeoutError:
-                    elapsed = asyncio.get_event_loop().time() - t_start
+                    cerebras_wait_accumulated += (
+                        asyncio.get_event_loop().time() - _wait_t0
+                    )
+                    elapsed = cerebras_wait_accumulated
                     if tokens_received > 0:
                         logger.warning(
                             "Cerebras inter-token stall after %.2fs (tokens=%d) "
