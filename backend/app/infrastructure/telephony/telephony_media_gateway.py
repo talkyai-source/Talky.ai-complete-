@@ -632,7 +632,51 @@ class TelephonyMediaGateway(MediaGateway):
         # enqueue_tts_ulaw accepts any multiple of 160 bytes.
         PACKET_SIZE = 160
         PACKET_DURATION_S = PACKET_SIZE / self._WIRE_SAMPLE_RATE   # 0.020 s at 8 kHz
-        TARGET_AHEAD_S = 0.200                                     # keep <= 200 ms ahead
+        # How much audio the C++ gateway may hold ahead of real time.
+        #
+        # Raised 200ms -> 300ms (2026-08-07). This is the ONE knob that closes
+        # the audible gap between sentences, and it does so without the unsafe
+        # part of the alternative.
+        #
+        # THE GAP: tts_playback awaits send_audio (this function) per chunk
+        # INSIDE its `async for` over the TTS generator, so the generator is
+        # suspended at `yield` while we pace. At a sentence boundary the next
+        # sentence's synthesis therefore cannot start until the previous one
+        # has drained to within TARGET_AHEAD_S. Cartesia's generation latency
+        # is ~250ms, so a 200ms lead left ~50ms uncovered at every boundary —
+        # the agent stops dead, pauses, resumes. 300ms covers the ~250ms and
+        # leaves margin.
+        #
+        # WHY NOT PREFETCH THE NEXT SENTENCE INSTEAD: because the generator is
+        # suspended for the whole audible duration, CartesiaTTSProvider's
+        # per-call lock is held that long too. A concurrent synthesis on the
+        # same call blocks on it and, after _WS_LOCK_ACQUIRE_TIMEOUT_S = 2.0,
+        # force-swaps the lock and sends {"cancel": true} for the in-flight
+        # context — truncating the sentence the caller is CURRENTLY HEARING for
+        # any sentence longer than ~2s of speech. There is a passing test
+        # demonstrating exactly that (test_turn_streamer_tts_overlap.py).
+        # Deepgram's lock is provider-WIDE, so a prefetch would head-of-line
+        # block other calls. Real overlap needs a tts_playback begin/drain split
+        # plus a per-socket demultiplexer in the Cartesia provider — a much
+        # larger change for the same ~50ms.
+        #
+        # WHY THIS DOESN'T COST BARGE-IN RESPONSIVENESS (the reason the old
+        # comment gave for keeping it at 200ms):
+        #   * DETECTION is unaffected — the pacing wait below is
+        #     `wait_for(barge_in_event.wait(), timeout=overshoot)`, which
+        #     returns within microseconds of StartOfTurn rather than after the
+        #     window. A longer window is simply a longer thing to interrupt.
+        #   * THE STOP is unaffected — clear_output_buffer flushes BOTH the
+        #     local packetisation buffer AND the C++ gateway's internal queue,
+        #     so buffered-but-unplayed audio is DROPPED, not drained. Residual
+        #     audio is bounded by what is already on the wire, not by this.
+        # Env-tunable so it can be rolled back without a deploy.
+        try:
+            TARGET_AHEAD_S = float(
+                os.getenv("TELEPHONY_TTS_TARGET_AHEAD_S", "0.300")
+            )
+        except ValueError:
+            TARGET_AHEAD_S = 0.300
         try:
             MAX_BATCH_PACKETS = max(
                 1, int(os.getenv("TELEPHONY_TTS_BATCH_PACKETS", "2"))
