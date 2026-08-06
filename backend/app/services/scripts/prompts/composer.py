@@ -112,12 +112,19 @@ def _format_pronunciations(value: Any) -> str:
     )
 
 
+# The LAST thing the model reads before the tenant/floor blocks — so it is the
+# recency restatement of turn shape. 2026-08-06: "Keep it short, natural, and
+# useful" was too soft to counteract an 11s monologue, and it did not say when
+# to STOP. It now names the fewest-sentences target and puts the question at
+# the end of the turn, matching HARD RULES 2/3 and COMMUNICATION PRINCIPLES
+# word-for-word in intent — three blocks, one instruction.
 FINAL_RESPONSE_CONTRACT = """\
 ## FINAL RESPONSE CONTRACT
-For every reply, speak only the words the caller should hear. Keep it short,
-natural, and useful. Ask at most one question. Do not output markdown, bullets,
-stage directions, labels, internal reasoning, or tool names. Do not override
-the hard rules above.
+For every reply, speak only the words the caller should hear, in the fewest
+sentences that actually answer them. Ask at most one question and let it be the
+last thing you say, then stop. Do not output markdown, bullets, stage
+directions, labels, internal reasoning, or tool names. Do not override the hard
+rules above.
 """
 
 
@@ -144,6 +151,15 @@ def brand_correction_line(company_name: str) -> str:
 # single source of truth and resolves any prompt-vs-knowledge conflict in the
 # knowledge base's favour. Placed high in the prompt (right after the hard
 # guardrails) so it dominates the facts the persona body may also mention.
+#
+# 2026-08-06 — the "fact not written here" bullet now says what to DO (one line
+# + a question) instead of only what to avoid. Production transcripts had the
+# agent narrating the miss to the caller: "I couldn't find a clear location
+# statement in the company info I pulled..." — technically honest, but it hands
+# the caller a status report on the retrieval instead of a next step, and it
+# leaks that there is a knowledge base at all. The last bullet's
+# never-mention-the-KB rule was widened for the same reason: "the company info
+# I pulled" slipped past a rule that only named "the knowledge base".
 KNOWLEDGE_PRECEDENCE = """\
 ## FACTS — SOURCE OF TRUTH
 Answer business facts — pricing, packages, fees, availability, services,
@@ -156,11 +172,14 @@ knowledge base).
 - State prices, numbers, dates, and specific facts ONLY when they appear in this
   prompt (campaign details, persona, or Company knowledge) — never from memory,
   training, or assumption.
-- If a fact the caller asks for is NOT written anywhere in this prompt, say
-  you'll get them the exact details and follow up. Do not guess, estimate,
-  round, or invent.
+- If a fact the caller asks for is NOT written anywhere in this prompt, offer
+  the follow-up in ONE short line and move the call on with a question — "I'll
+  get you that exact figure. What's the best email for it?" The caller hears
+  the next step; what you looked through and came up short on stays yours.
+  Do not guess, estimate, round, or invent.
 - Read facts naturally for the phone (paraphrase). Never read them aloud like a
-  document, and never mention "the knowledge base" or that facts were retrieved.
+  document, and never mention "the knowledge base", the company info you were
+  given, that facts were retrieved, or that you went looking.
 """
 
 
@@ -196,12 +215,18 @@ _KNOWLEDGE_DRIVEN_BODIES: dict[str, str] = {
     ),
 }
 
+# 2026-08-06: "say you'll follow up with the details" was silent on HOW, and the
+# knowledge-driven personas produced the same miss-narration as the slot-based
+# ones ("I couldn't find that in the company info I pulled"). Now it names the
+# one-line + question shape, and the closing sentence gives a concrete target
+# instead of the unmeasurable "short".
 _KNOWLEDGE_DRIVEN_SUFFIX = (
     "\n\nAnswer using the company knowledge provided to you in this prompt. "
     "Treat those facts as authoritative. If the caller asks something the "
-    "knowledge does not cover, say you'll follow up with the details rather "
-    "than guessing or inventing anything. Keep replies short, natural, and "
-    "easy to follow on a phone call."
+    "knowledge does not cover, offer to follow up in one short line and ask "
+    "your next question — never describe what you looked at or came up short "
+    "on, and never guess or invent. Answer in the fewest sentences that "
+    "actually answer them, ask one question at a time, and then stop."
 )
 
 

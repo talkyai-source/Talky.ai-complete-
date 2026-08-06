@@ -463,8 +463,10 @@ def build_telephony_inbound_greeting(agent_name: str, company_name: str) -> str:
 # first audio after pickup. Each entry is a LIST of str.format templates
 # taking ``{agent_name}`` and ``{company_name}``. The dispatcher picks
 # one randomly per call so consecutive calls don't sound identical.
-# Keep variants SHORT (~1.5-2.5 seconds spoken) — the LLM drives every
-# turn after this one and a long static opener wastes early air time.
+# Keep variants SHORT — <= 12 words / ~4.0 seconds spoken, per the LENGTH
+# BUDGET derivation below. The LLM drives every turn after this one and a long
+# static opener does not just waste early air time, it spends the callee's
+# entire decision window (2026-08-05 hang-up, below).
 #
 # Adding a new persona: drop a key into this dict and the dispatcher
 # below picks it up. Adding a direction to an existing persona: same.
@@ -504,9 +506,40 @@ def build_telephony_inbound_greeting(agent_name: str, company_name: str) -> str:
 #    words. The persona prompt's advice to prefer "permission-to-decline" is
 #    only right in its 11.18% form — context FIRST, then owning the cold call,
 #    then asking — not as a bad-time question.
-#  * SHORT. ~20 words, roughly six seconds, so the callee can speak inside the
-#    window in which they are actually deciding. A 25-word opener talks straight
-#    through it.
+#  * SHORT — and "short" was measured wrong until 2026-08-05 (see below).
+#
+# LENGTH BUDGET (2026-08-05, from a real call that hung up)
+# ---------------------------------------------------------
+# Outbound call answered 20:21:35:
+#
+#   20:21:35 -> 20:21:39   recording notice        4.0s
+#   20:21:39 -> 20:21:47   greeting, 192 chunks    7.7s   interrupted=False
+#   20:21:47               callee hung up
+#
+# The callee heard 11.7s of unbroken agent monologue and hung up the instant it
+# stopped. `interrupted=False` is the damning part: they never tried to cut in.
+# They waited it out and quit.
+#
+# The 20-word opener above was itself the bug. The 8-12s decision window does
+# not start when the AGENT finishes — it starts at "hello". The 4.0s legal
+# recording notice is non-negotiable and eats a third of the window before a
+# single greeting word is spoken, so the greeting's real budget is what is LEFT:
+#
+#   decision window (worst case)        8.0s
+#   - recording notice                 -4.0s
+#   = greeting budget                   4.0s
+#   x 2.8 words/second (measured: 20 words -> 7.7s incl. TTS pauses ~= 2.6-2.8)
+#   = 11.2 words  ->  TARGET <= 12 WORDS  (punctuation-only tokens don't count)
+#
+# The old "~20 words, roughly six seconds" note above was doing the arithmetic
+# against the whole window and ignoring the notice, so every opener overran by
+# ~2x. The STRUCTURE (identity -> own the cold call -> earn the next thirty
+# seconds) is unchanged and still evidence-backed; only the word count moved.
+#
+# Ending on the ask is deliberate and is NOT the banned pattern: "Got a quick
+# second?" scores badly because it is permission-to-PROCEED with no context in
+# front of it. The same ask AFTER identity + owning the cold call is the 11.18%
+# structure's third beat. What was removed is the words between the beats.
 #
 # "I'll be straight with you, this is a cold call" is the "own the cold call"
 # move from the 11.18% structure. It also sits well with the hard rule that this
@@ -514,20 +547,34 @@ def build_telephony_inbound_greeting(agent_name: str, company_name: str) -> str:
 #
 # `{call_reason}` is operator text — already whitespace-normalised and
 # length-capped by `_call_reason_for` before it reaches here.
+#
+# WORD BUDGET WITH A REASON IN THE LINE
+# -------------------------------------
+# Every template below spends exactly 8 words on the fixed part (with a
+# one-word agent name and a one-word company name), leaving 4 of the 12 for
+# `{call_reason}`. That split is deliberate: the reason carries a 2.1x lift and
+# the connective tissue around it carries none, so the words removed came out of
+# the padding ("I'll be upfront", "it's about", "Being honest, this is a"), not
+# out of the reason. `_MAX_SPOKEN_CALL_REASON_CHARS` / `_..._WORDS` enforce the
+# 4-word half of the split at the door — see their definitions for the sums.
 _PERSONA_GREETINGS_WITH_REASON: dict[str, list[str]] = {
     "lead_gen": [
-        "Hi, it's {agent_name} at {company_name}. Straight up — cold call, "
-        "about {call_reason}. Thirty seconds?",
-        "Hi, {agent_name} here from {company_name}. Being honest, this is a "
-        "cold call — it's about {call_reason}. Worth thirty seconds?",
-        "Hi, it's {agent_name} from {company_name}. I'll be upfront — cold "
-        "call, about {call_reason}. Can I explain quickly?",
+        # 8 fixed words + reason. e.g. "Sarah at Allstate — cold call about
+        # cutting your energy bill. Thirty seconds?" = 12 words / ~4.3s.
+        "{agent_name} at {company_name} — cold call about {call_reason}. "
+        "Thirty seconds?",
+        "Hi, {agent_name} from {company_name}. Cold call — {call_reason}. "
+        "Thirty seconds?",
+        "{agent_name}, {company_name} — honestly, a cold call: {call_reason}. "
+        "Thirty seconds?",
     ],
     "customer_support": [
-        "Hi, it's {agent_name} at {company_name} — I'm ringing about "
-        "{call_reason}. Have you got a minute?",
-        "Hi, {agent_name} here from {company_name}. Quick one about "
-        "{call_reason} — is now OK?",
+        # NOT a cold call (see _PERSONA_GREETINGS below) — the reason IS the
+        # context here, so it does the disarming that "cold call" does for
+        # lead_gen. Same 8 fixed words + 4 for the reason.
+        "Hi, {agent_name} at {company_name} about {call_reason}. Is now OK?",
+        "Hi, {agent_name} at {company_name} — quick one about {call_reason}. "
+        "OK?",
     ],
 }
 
@@ -538,13 +585,22 @@ _PERSONA_GREETINGS: dict[str, dict[str, list[str]]] = {
         # next thirty seconds. The originals ("Got a quick second?", "Do you
         # have a minute to talk?") were permission-to-PROCEED asks — the
         # pattern the measured data puts at the bottom.
+        #
+        # THIS IS THE VARIANT SET FROM THE 2026-08-05 HANG-UP. The campaign had
+        # an empty campaign_slots, so no call_reason, so the reason-first path
+        # above never fired and the callee got 7.7s of this. Every line below is
+        # the same three beats as before at <= 10 words / <= 3.6s, which leaves
+        # ~4s of the 8s decision window for the callee to actually respond in.
         "outbound": [
-            "Hi, it's {agent_name} at {company_name}. I'll be straight with "
-            "you — this is a cold call. Can I have thirty seconds?",
-            "Hi, {agent_name} here from {company_name}. Being honest, this is "
-            "a cold call. Worth thirty seconds of your time?",
-            "Hi, it's {agent_name} from {company_name}. I'll be upfront — cold "
-            "call. Can I take thirty seconds to explain?",
+            # 9 words / ~3.2s
+            "Hi, it's {agent_name} at {company_name}. Cold call — thirty "
+            "seconds?",
+            # 10 words / ~3.6s
+            "Hi, {agent_name} from {company_name}. Honest cold call — worth "
+            "thirty seconds?",
+            # 10 words / ~3.6s
+            "{agent_name} here at {company_name}. Straight up, cold call — "
+            "thirty seconds?",
         ],
         "inbound": [
             "Hi, this is {agent_name} from {company_name} -- "
@@ -557,13 +613,23 @@ _PERSONA_GREETINGS: dict[str, dict[str, list[str]]] = {
         # NOT cold calls — these follow an existing enquiry, so claiming
         # "this is a cold call" would be false. Context-first is already the
         # right shape here; only the bad-time question is removed.
+        #
+        # These ran 15-17 words (~5.5-6.0s) and had the same overrun as
+        # lead_gen: "on your enquiry" already IS the context, so "Have you got
+        # a minute?" was paying four words for a beat the enquiry reference had
+        # earned. Now <= 11 words / <= 3.9s.
         "outbound": [
-            "Hi, it's {agent_name} from {company_name} support — following up "
-            "on your enquiry. Have you got a minute?",
-            "Hi, {agent_name} here from {company_name}, about your recent "
-            "enquiry. Can I run through it quickly?",
+            # 11 words / ~3.9s
             "Hi, it's {agent_name} at {company_name} — quick follow-up on your "
-            "enquiry. Have you got a moment?",
+            "enquiry. OK?",
+            # 11 words / ~3.9s
+            "Hi, {agent_name} from {company_name} support. About your enquiry "
+            "— is now OK?",
+            # 12 words / ~4.3s — the longest kept, because "can I run through
+            # it" is the one ask that tells them this is a two-minute call and
+            # not a pitch.
+            "{agent_name} at {company_name} — following up your enquiry. Can I "
+            "run through it?",
         ],
         "inbound": [
             "Thanks for calling {company_name} -- this is {agent_name}, "
@@ -573,14 +639,18 @@ _PERSONA_GREETINGS: dict[str, dict[str, list[str]]] = {
         ],
     },
     "receptionist": {
-        # Also a follow-up, not a cold call — same treatment as support.
+        # Also a follow-up, not a cold call — same treatment as support, same
+        # <= 12 word / <= 4.0s budget.
         "outbound": [
+            # 11 words / ~3.9s
             "Hi, it's {agent_name} from {company_name} — just following up. "
-            "Have you got a minute?",
+            "OK to talk?",
+            # 11 words / ~3.9s
             "Hi, {agent_name} calling from {company_name} about your enquiry. "
-            "Can I go through it quickly?",
-            "Hi, it's {agent_name} at {company_name}, following up. Have you "
-            "got a moment?",
+            "Is now OK?",
+            # 9 words / ~3.2s
+            "{agent_name} here from {company_name} — quick follow-up. Is now "
+            "OK?",
         ],
         "inbound": [
             "Thank you for calling {company_name}. This is {agent_name} -- "
@@ -1108,10 +1178,30 @@ def build_telephony_session_config(
         flow=ConversationFlow(max_objection_attempts=2),
         # Per-turn ceiling (not a target). 2 forced every reply terse — no room
         # for consultative discovery, mood-matching, or natural expressiveness.
-        # 5 lets the agent open up when it earns it; the persona prompt keeps it
-        # SHORT by default and only fuller when warranted, so this is headroom,
-        # not a mandate to monologue.
-        response_max_sentences=5,
+        # 5 was set as "headroom, not a mandate to monologue" and trusted the
+        # persona prompt to stay short by default.
+        #
+        # The 2026-08-05 hang-up says that trust is misplaced: given room, this
+        # agent uses all of it. The callee sat through 11.7s of unbroken speech
+        # (4.0s notice + 7.7s greeting) with interrupted=False and hung up the
+        # moment it stopped — they did not fight for the turn, they left. On a
+        # phone call the ceiling IS the behaviour, so it has to be set to what
+        # is acceptable, not to what is tolerable.
+        #
+        #   5 sentences x ~12 words x (1 / 2.8 words/s)  ~= 21s per turn
+        #   3 sentences x ~12 words x (1 / 2.8 words/s)  ~= 13s per turn
+        #
+        # 3 is the smallest value that still fits the shapes this agent
+        # legitimately needs and 2 clips:
+        #   * acknowledge -> answer -> question (the consultative turn)
+        #   * read-back -> confirm question, which llm_response.py already
+        #     raises to 3 on its own when an email is captured-but-unconfirmed —
+        #     at a default of 5 that bump was invisible, at 3 the default and
+        #     the read-back budget finally agree.
+        # Not 2: that is the ask_ai value and it truncates the trailing
+        # confirmation question, which is how a mis-heard email ships silently.
+        # Pricing answers on a custom prompt still bump to 4 in llm_response.py.
+        response_max_sentences=3,
     )
 
     # Audio sample-rate strategy:
@@ -1335,15 +1425,37 @@ _PERSONA_DEFAULTS: dict[str, tuple[str, str]] = {
 #: the opener stops being a pattern-interrupt and becomes a monologue the callee
 #: talks over — so beyond the cap we fall back to the short generic opener and
 #: let the model deliver the reason conversationally on turn 1 instead.
-# Measured against the 8-12 SECOND window in which a prospect decides. The
-# template itself is ~16 words; at ~2.8 words/second an opener stays inside
-# that window only if the reason adds roughly 6 words or fewer. A 120-char cap
-# produced 26-29 word openers (~9-10s) that talked straight through the
-# decision the opener exists to influence.
+# ARITHMETIC (re-derived 2026-08-05 after a callee hung up on a 7.7s greeting):
 #
-# Past the cap we fall back to the short generic opener and let the model
+#   decision window (worst case)                       8.0s
+#   - legal recording notice, spoken BEFORE us        -4.0s
+#   = greeting budget                                  4.0s
+#   x 2.8 words/second (measured on the 20-word opener that overran)
+#   = 11.2 words  ->  whole opener <= 12 words
+#   - fixed part of every _PERSONA_GREETINGS_WITH_REASON template
+#     (8 words, with a one-word agent name and company name)
+#   = 4 words for the reason
+#   x ~6.2 chars/word (English mean ~5.2 + one space)
+#   = 24.8 chars  ->  CAP 30
+#
+# Rounded UP to 30 rather than down to 25: the WORD cap below is what bounds
+# speaking time, so the char cap only needs to catch pathological input. At 25
+# a legitimate four-word reason made of long words ("improving your energy
+# bills", 27 chars) would be rejected and lose the 2.1x lift for no reason.
+#
+# 60 was the previous cap and it was derived against the FULL 8-12s window with
+# no allowance for the recording notice, so a reason at the cap produced a
+# ~16-word opener (~5.7s) on top of the notice: 9.7s of talking before the
+# callee could get a word in, which is the whole decision window.
+#
+# The char cap alone does not bound SPEAKING time — "we can cut your bill now"
+# is 24 chars but six words — so the word cap below is the real guard and the
+# char cap backstops one absurdly long token. Both must pass.
+#
+# Past either cap we fall back to the short generic opener and let the model
 # deliver the reason conversationally on turn 1 — better than a monologue.
-_MAX_SPOKEN_CALL_REASON_CHARS = 60
+_MAX_SPOKEN_CALL_REASON_CHARS = 30
+_MAX_SPOKEN_CALL_REASON_WORDS = 4
 
 
 def _call_reason_for(script_config: Optional[dict]) -> Optional[str]:
@@ -1356,6 +1468,11 @@ def _call_reason_for(script_config: Optional[dict]) -> Optional[str]:
     raw = slots.get("call_reason") or slots.get("goal") or ""
     reason = " ".join(str(raw).split()).strip()
     if not reason or len(reason) > _MAX_SPOKEN_CALL_REASON_CHARS:
+        return None
+    # Words, not just characters: the budget is in SECONDS and speaking time
+    # tracks word count. A short-but-wordy reason ("we can cut your bill now",
+    # 24 chars / 6 words) passes the char cap and still overruns.
+    if len(reason.split()) > _MAX_SPOKEN_CALL_REASON_WORDS:
         return None
     # Trailing punctuation is re-added by the template.
     return reason.rstrip(" .!?,;:")

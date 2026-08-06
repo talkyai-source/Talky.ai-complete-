@@ -148,7 +148,13 @@ class TestPerPersonaDirectionalOpeners:
             direction="inbound",
         ))
         assert "Alex from Acme" in flat
-        assert "calling because" in flat.lower()
+        # Assert the REASON is spoken in the opener, not one connective phrase.
+        # The 2026-08-06 brevity rewrite shortened the shape to the measured
+        # own-the-cold-call form ("Alex at Acme — cold call, about <reason>.
+        # Thirty seconds?"), which drops the words "calling because" while
+        # keeping — and in fact fronting — the reason itself. Pinning the
+        # connective made a shape change look like a behaviour regression.
+        assert LEAD_GEN_SLOTS["call_reason"] in flat
         # The opener must explicitly tell the agent not to play receptionist.
         assert "do not play receptionist" in flat.lower()
 
