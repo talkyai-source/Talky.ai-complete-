@@ -47,6 +47,44 @@ _HARD_INTERRUPTS = frozenset({
 })
 
 
+# Pure disfluency / hesitation noise. NOT speech that takes the floor and NOT
+# a listener cue — a caller clearing their throat or stalling mid-thought.
+#
+# This set is the CONTENT-based replacement for the old word-COUNT barge-in
+# guard (see deepgram_flux._min_interrupt_words). That guard rejected any
+# StartOfTurn under N words, which was written as though it saw a whole
+# utterance. It does not: Flux's StartOfTurn transcript is a PARTIAL, normally
+# just the first word out of the caller's mouth. Over 14 days of production it
+# deferred 173 of 415 barge-in attempts (29%), and the deferred text was
+# overwhelmingly real speech mid-launch — 'Listen', "Let's", 'Speaking',
+# 'Excuse', 'Please.', "What's", 'Bye', 'Hi.'. Counting words on a partial
+# measures how fast the caller talks, not whether they mean it.
+#
+# What that guard was really trying to reject is THIS: noise. So reject this,
+# by name, and let every real first word through.
+_DISFLUENCIES = frozenset({
+    "uh", "um", "umm", "uhh", "er", "err", "erm", "ah", "ahh", "eh", "hm",
+    "hmm", "mm", "mmm", "huh", "oh",
+})
+
+
+def is_disfluency(text: str) -> bool:
+    """True if ``text`` is nothing but hesitation noise ("uh", "um", "erm").
+
+    Used to gate an immediate barge-in on a PARTIAL StartOfTurn transcript,
+    where a word count says nothing useful (see ``_DISFLUENCIES``). Empty →
+    False, so an empty transcript is handled by the normal path rather than
+    silently swallowed here.
+    """
+    if not text:
+        return False
+    cleaned = _NON_WORD.sub(" ", text.strip().lower())
+    cleaned = " ".join(cleaned.split())
+    if not cleaned:
+        return False
+    return all(w in _DISFLUENCIES for w in cleaned.split())
+
+
 def is_hard_interrupt(text: str) -> bool:
     """True if ``text`` is a short utterance that must barge in regardless of
     the min-words guard (e.g. "stop", "wait", "no"). Empty → False."""

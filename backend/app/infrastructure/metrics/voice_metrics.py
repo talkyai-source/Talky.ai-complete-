@@ -361,6 +361,42 @@ def record_interruption(itype: str, *, false_interrupt: bool) -> None:
     ).inc()
 
 
+_interrupt_outcome = _counter(
+    "voice_interrupt_outcome_total",
+    "Playback-interrupt attempts by outcome (ok=the C++ gateway confirmed it "
+    "stopped; failed=the agent may still be audible to the caller)",
+    ("outcome",),
+)
+_interrupt_dropped_frames = _histogram_buckets(
+    "voice_interrupt_dropped_frames",
+    "PCMU frames the C++ gateway discarded per interrupt (20ms each) — how "
+    "much already-queued agent audio a barge-in actually binned",
+    (),
+    (0, 1, 5, 10, 25, 50, 100, 200, 400),
+)
+
+
+def record_interrupt_outcome(
+    *, ok: bool, dropped_frames: int = 0, attempts: int = 0,
+) -> None:
+    """Meter one playback interrupt.
+
+    ``ok`` is the GATEWAY's verdict, not Python's local state — a False here
+    means the caller is probably still hearing the agent, which is the single
+    worst failure mode of the voice path and previously had no metric at all.
+    ``attempts`` > 1 means the first POST failed and the retry was used, which
+    is an early warning even when the outcome is ok.
+    """
+    outcome = "ok" if ok else "failed"
+    if ok and attempts > 1:
+        outcome = "ok_after_retry"
+    _interrupt_outcome.labels(outcome=outcome).inc()
+    try:
+        _interrupt_dropped_frames.observe(max(0, int(dropped_frames)))
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def record_llm_failover(outcome: str) -> None:
     """Count an LLM first-token failover event. ``outcome`` ∈
     {primary_missed, primary_circuit_open, secondary_missed}; anything else

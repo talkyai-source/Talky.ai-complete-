@@ -672,25 +672,22 @@ class VoicePipelineService:
                     last_msg.content.rstrip() + " [interrupted by caller]"
                 )
 
-        session.current_ai_response = ""
-        session.current_user_input = ""  # Reset so stale transcript never reaches LLM
-        session.tts_active = False
-        session.state = CallState.LISTENING
-        # Immediately tell the media gateway (and downstream C++ gateway) to
-        # discard any buffered TTS audio so the caller stops hearing the AI.
-        try:
-            await self.media_gateway.clear_output_buffer(call_id)
-        except Exception as _exc:
-            logger.debug("clear_output_buffer on barge-in failed: %s", _exc)
-        # Tell the TTS provider to cancel any server-side buffered audio.
-        # For Deepgram this sends a Clear message that stops further audio
-        # chunks from being generated — critical for fast barge-in (<200ms).
-        clear_tts = getattr(self.tts_provider, "clear_queue", None)
-        if clear_tts:
-            try:
-                await clear_tts()
-            except Exception as _exc:
-                logger.debug("tts clear_queue on barge-in failed: %s", _exc)
+        # ONE centralized, idempotent stop (2026-08-08). State change, buffer
+        # clears, the C++ interrupt and the utterance-id rotation used to be
+        # four independent best-effort steps here, each swallowing its own
+        # failure, with no assembled verdict — so "did the agent actually stop?"
+        # could not be answered from Python and the cancellation chain could not
+        # be traced. interrupt_playback does all of it under one interrupt_id,
+        # logs every step, meters the outcome, and returns the gateway's
+        # acknowledgement (frames/ms discarded). See voice_pipeline.interrupt.
+        from app.domain.services.voice_pipeline.interrupt import interrupt_playback
+
+        await interrupt_playback(
+            session,
+            media_gateway=self.media_gateway,
+            reason="barge_in",
+            tts_provider=self.tts_provider,
+        )
         if websocket:
             try:
                 await websocket.send_json({

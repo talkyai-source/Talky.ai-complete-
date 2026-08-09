@@ -839,7 +839,7 @@ class TelephonyMediaGateway(MediaGateway):
         if session:
             session.realtime_output = enabled
 
-    async def clear_output_buffer(self, call_id: str) -> None:
+    async def clear_output_buffer(self, call_id: str) -> Dict[str, Any]:
         """
         Drop buffered telephony output immediately after barge-in.
 
@@ -848,10 +848,26 @@ class TelephonyMediaGateway(MediaGateway):
            being sent to the C++ gateway.
         2. The C++ gateway's internal audio queue — stops audio the gateway has
            already buffered from continuing to play at the caller's ear.
+
+        Returns an acknowledgement (2026-08-08) so a caller can prove the agent
+        actually stopped rather than assuming it:
+
+            {"ok": bool, "local_bytes_discarded": int, "pending_bytes": int,
+             "gateway": {...adapter.interrupt_tts result...} | None}
+
+        ``ok`` is the GATEWAY's verdict, not ours — clearing our own buffer says
+        nothing about audio the C++ side has already queued to the caller's ear.
         """
+        result: Dict[str, Any] = {
+            "ok": False, "local_bytes_discarded": 0, "pending_bytes": 0,
+            "gateway": None,
+        }
         session = self._sessions.get(call_id)
         if not session or not session.is_active:
-            return
+            # Nothing buffered because there is no session — vacuously stopped.
+            result["ok"] = True
+            result["reason"] = "no_active_session"
+            return result
 
         # Send a single silent PCMU packet (160 bytes × 0x7F) before discarding
         # the buffer.  µ-law 0x7F encodes to zero PCM amplitude, so this gives the
@@ -866,6 +882,7 @@ class TelephonyMediaGateway(MediaGateway):
             except Exception:
                 pass
 
+        result["local_bytes_discarded"] = len(session.tts_buffer)
         session.tts_buffer = b""
         # Reset real-time pacing cursor so the next utterance gets a fresh burst window.
         session._tts_send_deadline = None
@@ -884,6 +901,7 @@ class TelephonyMediaGateway(MediaGateway):
         # the two writes happens last — in real execution order — wins, with
         # no interleaving possible mid-assignment on a single-threaded event
         # loop.
+        result["pending_bytes"] = len(session._tts_pending_bytes)
         session._tts_pending_bytes = b""
         # Tell the C++ gateway to discard its buffered TTS queue immediately.
         # Without this, audio already sent to the gateway continues to play
@@ -891,9 +909,29 @@ class TelephonyMediaGateway(MediaGateway):
         # for 0.5–2s after barge-in has fired.
         if hasattr(session.adapter, "interrupt_tts"):
             try:
-                await session.adapter.interrupt_tts(session.pbx_call_id)
+                ack = await session.adapter.interrupt_tts(session.pbx_call_id)
+                if isinstance(ack, dict):
+                    result["gateway"] = ack
+                    result["ok"] = bool(ack.get("ok"))
+                else:
+                    # Adapter predates the acknowledgement contract (Twilio/
+                    # Vonage bridges). It did not raise, so treat as stopped,
+                    # but say so explicitly rather than inventing counts.
+                    result["ok"] = True
+                    result["gateway"] = {"ok": True, "error": "no_ack_contract"}
             except Exception as exc:
-                logger.debug("clear_output_buffer: interrupt_tts failed: %s", exc)
+                # NOT debug. A failure here means the agent may still be audible
+                # to the caller — the single loudest symptom this whole path
+                # exists to prevent.
+                logger.error(
+                    "clear_output_buffer: interrupt_tts raised for %s — agent "
+                    "may still be speaking: %s", call_id[:12], exc,
+                )
+                result["gateway"] = {"ok": False, "error": str(exc)}
+        else:
+            result["ok"] = True
+            result["gateway"] = {"ok": True, "error": "adapter_has_no_interrupt"}
+        return result
 
     # ------------------------------------------------------------------
     # Recording buffer (required by MediaGateway interface)

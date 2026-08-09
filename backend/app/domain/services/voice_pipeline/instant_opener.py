@@ -33,6 +33,20 @@ logger = logging.getLogger(__name__)
 # still recognized as the same echo instead of racing to be first.
 _INSTANT_OPENER_ECHO_GRACE_S = 0.7
 
+# How long after playback STARTS a bare greeting can still be the acoustic echo
+# of the caller's own pickup. Real echo is near-immediate — it is the same audio
+# arriving late, not a new decision. Past this, a "Hello?" is a person who has
+# been listening to the agent and is trying to get a word in. This bound is what
+# stops a long agent-first greeting (recording disclosure + opener, several
+# seconds) from being one giant window in which the caller cannot interrupt.
+_ECHO_ONSET_WINDOW_S = 1.5
+
+# Both barge-in arming sites call is_opener_echo for the SAME event (this is
+# why the production journal shows exactly two `instant_opener_echo_ignored`
+# lines per occurrence). Two calls this close are one utterance being
+# double-checked, NOT the caller repeating themselves.
+_ECHO_SAME_EVENT_DEBOUNCE_S = 0.4
+
 # Words a callee uses to answer the phone content-free. If every token of the
 # first utterance is from this set, the pre-synth opener is a perfect reply.
 #
@@ -68,25 +82,112 @@ def is_bare_greeting(text: str) -> bool:
     return all((w in _GREETING_WORDS or not w) for w in words)
 
 
+def _normalise_tokens(text: str) -> frozenset:
+    """Lowercased, punctuation-free token set — for opener-similarity only."""
+    return frozenset(
+        w for w in (t.strip(".,!?'’\"-") for t in (text or "").lower().split()) if w
+    )
+
+
+def _echoes_the_spoken_opener(session, text: str) -> bool:
+    """True when every word of ``text`` also appears in the greeting we are
+    currently playing — i.e. these are the AGENT's own words coming back.
+
+    This is the one signal that positively identifies self-echo rather than
+    merely making it plausible, so it is allowed to classify at any point in
+    the playback window. Unknown opener text → False (fail toward treating the
+    caller as real).
+    """
+    spoken = getattr(session, "_instant_opener_spoken_text", None)
+    if not spoken:
+        return False
+    said = _normalise_tokens(text)
+    return bool(said) and said <= _normalise_tokens(spoken)
+
+
 def is_opener_echo(session, text) -> bool:
     """True when a StartOfTurn/BargeInSignal should be treated as the echo of
-    the instant-opener's own greeting rather than a real interruption.
+    our own greeting rather than a real interruption.
 
-    Two-part gate:
-      1. TIMING — only while the opener is actually playing
-         (``_instant_opener_in_flight``) or within the short trailing grace
-         window after it finishes (``_instant_opener_grace_until``). Outside
-         that window this is never an echo, whatever the text says.
-      2. CONTENT — reuses ``is_bare_greeting``, the same classifier that
-         decided to INVOKE the opener in the first place. A bare greeting
-         echoing back is exempt; "stop"/"wait"/any real content is NOT a
-         bare greeting and still cancels normally, so a genuine interrupt
-         during opener playback is never swallowed.
+    WHY THIS IS NOT A GREETING-WORD LIST (rewritten 2026-08-08)
+    ----------------------------------------------------------
+    It used to be exactly that: inside the playback window, ANY bare greeting
+    was echo. Production over 7 days shows what that cost — 25 events where the
+    ignored text was, recovered from the log hashes, literally ``Hello?``,
+    ``Hello.`` and ``Hey.``. Those were callers, and the agent talked over
+    every one of them.
+
+    The list cannot work alone because it has no way to separate two things
+    that produce identical text:
+      (a) the tail of the caller's OWN pickup "Hello?" re-segmented by Flux, or
+          our greeting bleeding back through imperfect carrier echo cancellation
+          — correct to ignore;
+      (b) a caller saying "Hello?" AGAIN because the agent is talking over them
+          — must interrupt.
+
+    So the gate now uses four signals instead of one, ordered so that evidence
+    of deliberate speech always beats evidence of echo:
+
+      1. TIMING — outside playback + grace, never an echo. (unchanged)
+      2. CONTENT — not a bare greeting, never an echo, so "stop"/"wait"/any
+         real sentence still cuts in immediately. (unchanged)
+      3. REPETITION — a bare greeting arriving as a SECOND, distinct utterance
+         inside the same window is someone repeating themselves because they
+         were not heard. That overrides every echo signal below, including (4).
+      4. SIMILARITY / ONSET — the agent's own words coming back are echo
+         whenever they land; anything else is only echo if it arrives promptly
+         after playback starts. True acoustic echo of the pickup is immediate;
+         a greeting five seconds into a long agent-first greeting is a person.
+
+    Echo protection is deliberately NOT removed — the first prompt bare
+    greeting, and any words matching what we are currently saying, are still
+    ignored, so the agent cannot react to its own playback.
+
+    Idempotent within one barge-in: BOTH arming sites (audio_ingest.
+    _on_barge_in_direct and voice_pipeline_service.handle_barge_in) call this
+    for the same event, which is why "repetition" is measured as a new
+    utterance after a debounce rather than as a call count.
     """
+    now = time.monotonic()
+
+    # 1. TIMING.
     if not getattr(session, "_instant_opener_in_flight", False) and \
-       time.monotonic() >= getattr(session, "_instant_opener_grace_until", 0.0):
+       now >= getattr(session, "_instant_opener_grace_until", 0.0):
         return False
-    return is_bare_greeting(text or "")
+
+    # 2. CONTENT. Real words always take the floor.
+    if not is_bare_greeting(text or ""):
+        return False
+
+    # 3. REPETITION beats everything below.
+    last_echo_at = getattr(session, "_instant_opener_echo_at", None)
+    if last_echo_at is not None:
+        if (now - last_echo_at) < _ECHO_SAME_EVENT_DEBOUNCE_S:
+            return True  # second gate call for the SAME utterance — be stable
+        logger.info(
+            "instant_opener_echo_overridden call_id=%s — repeated greeting "
+            "%.2fs after the first is a caller, not an echo",
+            str(getattr(session, "call_id", "?"))[:12], now - last_echo_at,
+        )
+        return False
+
+    # 4a. Our own words, coming back — echo whenever it lands.
+    if _echoes_the_spoken_opener(session, text or ""):
+        session._instant_opener_echo_at = now
+        return True
+
+    # 4b. Otherwise only a PROMPT greeting is plausibly echo of the pickup.
+    started_at = getattr(session, "_instant_opener_started_at", None)
+    if started_at is not None and (now - started_at) > _ECHO_ONSET_WINDOW_S:
+        logger.info(
+            "instant_opener_echo_rejected call_id=%s — greeting %.2fs into "
+            "playback is too late to be pickup echo",
+            str(getattr(session, "call_id", "?"))[:12], now - started_at,
+        )
+        return False
+
+    session._instant_opener_echo_at = now
+    return True
 
 
 async def try_instant_opener(session, transcript: str) -> bool:
@@ -130,6 +231,16 @@ async def try_instant_opener(session, transcript: str) -> bool:
         # ("stop"/real content) is never a bare greeting, so it still cancels
         # this task normally via asyncio.CancelledError below.
         _completed = False
+        # Arm the echo window. `_started_at` bounds how long a bare greeting can
+        # still be pickup echo; `_spoken_text` lets the gate positively identify
+        # our OWN words coming back; `_echo_at` is reset so a greeting ignored
+        # earlier in the call cannot make this opener's first echo look like a
+        # repetition. See is_opener_echo.
+        session._instant_opener_started_at = time.monotonic()
+        session._instant_opener_spoken_text = getattr(
+            vs, "_presynth_greeting_text", None
+        )
+        session._instant_opener_echo_at = None
         session._instant_opener_in_flight = True
         try:
             await _send_outbound_greeting(vs)

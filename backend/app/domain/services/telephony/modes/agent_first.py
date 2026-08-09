@@ -318,6 +318,16 @@ async def _send_outbound_greeting(voice_session) -> None:
     from app.domain.services.voice_pipeline.instant_opener import (
         _INSTANT_OPENER_ECHO_GRACE_S,
     )
+    # Arm the same echo window the caller-first path arms, INCLUDING the onset
+    # bound and the greeting text (see instant_opener.is_opener_echo). This
+    # path matters most for the bound: the window here spans the recording
+    # disclosure AND the opener — several seconds — during which the old
+    # greeting-word-only gate swallowed every "Hello?" the callee offered.
+    session._instant_opener_started_at = _time.monotonic()
+    session._instant_opener_spoken_text = getattr(
+        voice_session, "_presynth_greeting_text", None
+    )
+    session._instant_opener_echo_at = None
     session._instant_opener_in_flight = True
 
     try:

@@ -506,6 +506,42 @@ class AsteriskAdapter(CallControlAdapter):
                 return {}
 
     @staticmethod
+    def _tts_queue_config() -> Dict[str, Any]:
+        """Optional cap on the C++ gateway's TTS queue (frames; 20ms each).
+
+        The gateway defaults to 400 frames = ~8s of audio, which reads alarming
+        — but it is a CEILING, not a working depth. Python paces egress to
+        ``TELEPHONY_TTS_TARGET_AHEAD_S`` (0.3s), so measured live depth is ~15
+        frames and `/stats` reported ``tts_queue_depth_frames: 0``. Lowering it
+        therefore changes nothing in steady state, while adding a real risk:
+        any path that bursts (the pre-synth greeting sends 119-170 chunks) would
+        start DROPPING frames — audio loss, to fix a problem that is not
+        occurring.
+
+        The primary protection against stale audio is generation invalidation
+        (VG-13 utterance_id rotation + 409 on late chunks), which is already in
+        place and verified.
+
+        So this is exposed as a lever, not a default: set
+        ``VOICE_GATEWAY_TTS_MAX_QUEUE_FRAMES=100`` to test a tighter cap without
+        a deploy. Unset (the default) leaves the gateway's own 400.
+        """
+        raw = os.getenv("VOICE_GATEWAY_TTS_MAX_QUEUE_FRAMES", "").strip()
+        if not raw:
+            return {}
+        try:
+            frames = int(raw)
+        except ValueError:
+            logger.warning(
+                "VOICE_GATEWAY_TTS_MAX_QUEUE_FRAMES=%r is not an integer — "
+                "ignoring, gateway default applies", raw,
+            )
+            return {}
+        if frames <= 0:
+            return {}
+        return {"tts_max_queue_frames": frames}
+
+    @staticmethod
     def _stt_reorder_config() -> Dict[str, Any]:
         """VG-01 (fixes garbled spoken emails/phone digits): deliver caller RTP
         to STT in SEQUENCE order via the gateway's reorder window instead of raw
@@ -1088,6 +1124,8 @@ class AsteriskAdapter(CallControlAdapter):
                     "audio_callback_batch_frames": AUDIO_CALLBACK_BATCH_FRAMES,
                     # VG-01 sequence-ordered STT tap (see _stt_reorder_config).
                     **self._stt_reorder_config(),
+                    # Optional TTS queue cap (see _tts_queue_config).
+                    **self._tts_queue_config(),
                     "audio_callback_url": (
                         f"{os.getenv('BACKEND_INTERNAL_URL', 'http://127.0.0.1:8000')}"
                         f"/api/v1/sip/telephony/audio/{session_id}"
@@ -1290,6 +1328,8 @@ class AsteriskAdapter(CallControlAdapter):
                     "audio_callback_batch_frames": AUDIO_CALLBACK_BATCH_FRAMES,
                     # VG-01 sequence-ordered STT tap (see _stt_reorder_config).
                     **self._stt_reorder_config(),
+                    # Optional TTS queue cap (see _tts_queue_config).
+                    **self._tts_queue_config(),
                     # Tell the gateway to POST audio chunks to our backend callback
                     "audio_callback_url": (
                         f"{os.getenv('BACKEND_INTERNAL_URL', 'http://127.0.0.1:8000')}"
@@ -1594,7 +1634,7 @@ class AsteriskAdapter(CallControlAdapter):
             # does not crash the audio path. TtsDeliveryError wraps the cause.
             raise TtsDeliveryError(str(exc)) from exc
 
-    async def interrupt_tts(self, call_id: str) -> None:
+    async def interrupt_tts(self, call_id: str) -> Dict[str, Any]:
         """
         Stop playing TTS audio via the C++ Gateway interrupt endpoint.
 
@@ -1607,32 +1647,67 @@ class AsteriskAdapter(CallControlAdapter):
         id is rotated in every case so post-barge-in straggler chunks are
         rejected by the gateway's idempotency gate (VG-13) even when the
         interrupt POST itself failed.
+
+        RETURNS THE GATEWAY'S ACKNOWLEDGEMENT (2026-08-08). The C++ endpoint has
+        always replied with ``dropped_frames`` and ``interrupted_segments``
+        (http_server.cpp:1697-1703) and Python threw the body away, so "did the
+        agent actually stop, and how much audio did we bin?" was unanswerable
+        from this side. Now returned so one caller can log and meter it:
+
+            {"ok": bool, "dropped_frames": int, "interrupted_segments": int,
+             "attempts": int, "error": str|None, "session_id": str|None}
+
+        ``ok`` False means the agent may STILL BE SPEAKING — treat it as a real
+        failure, never as best-effort.
         """
         import uuid as _uuid
 
+        result: Dict[str, Any] = {
+            "ok": False, "dropped_frames": 0, "interrupted_segments": 0,
+            "attempts": 0, "error": None, "session_id": None,
+        }
+
         session_id = self._gateway_sessions.get(call_id)
         if not session_id:
-            return
+            # No gateway session: nothing is playing, so nothing to stop. This
+            # is success-by-vacancy, not failure — distinguish it from a real
+            # interrupt so the metric does not count teardown races as errors.
+            result["ok"] = True
+            result["error"] = "no_gateway_session"
+            return result
+        result["session_id"] = session_id
         try:
             payload = {"session_id": session_id, "reason": "barge_in"}
             try:
-                await self._gateway(
+                result["attempts"] = 1
+                ack = await self._gateway(
                     "POST", "/v1/sessions/tts/interrupt", payload=payload, ok=(200, 204, 404)
                 )
+                result["ok"] = True
             except Exception as exc:
                 logger.warning(
                     f"[AsteriskAdapter] interrupt_tts failed for {call_id[:12]} "
                     f"(agent may keep speaking) — retrying once: {exc}"
                 )
                 try:
-                    await self._gateway(
+                    result["attempts"] = 2
+                    ack = await self._gateway(
                         "POST", "/v1/sessions/tts/interrupt", payload=payload, ok=(200, 204, 404)
                     )
+                    result["ok"] = True
                 except Exception as exc2:
                     logger.error(
                         f"[AsteriskAdapter] ❌ interrupt_tts retry failed for "
-                        f"{call_id[:12]} — stale audio may play out: {exc2}"
+                        f"{call_id[:12]} session={session_id} — stale audio may "
+                        f"play out: {exc2}"
                     )
+                    result["error"] = str(exc2)
+                    ack = None
+            if isinstance(ack, dict):
+                result["dropped_frames"] = int(ack.get("dropped_frames") or 0)
+                result["interrupted_segments"] = int(
+                    ack.get("interrupted_segments") or 0
+                )
         finally:
             # Rotate AFTER the interrupt attempt: the gateway retired the id it
             # held as current; chunks still in flight with that id now 409,
@@ -1641,6 +1716,9 @@ class AsteriskAdapter(CallControlAdapter):
             if utt is not None:
                 utt["utterance_id"] = _uuid.uuid4().hex[:16]
                 utt["seq"] = 0
+                result["utterance_rotated"] = True
+
+        return result
 
     # ------------------------------------------------------------------
     # CallControlAdapter — call control

@@ -175,12 +175,23 @@ class DeepgramFluxSTTProvider(STTProvider):
         # does NOT immediately interrupt the agent — it defers to the EndOfTurn
         # grow-case. Filters coughs/fillers/STT mishears from cutting the agent
         # off mid-sentence (LiveKit/Pipecat MinWords pattern). 1 = disabled.
+        #
+        # DEFAULT CHANGED 2 -> 1 (2026-08-08). The guard assumed StartOfTurn
+        # carried a whole utterance. It does not — Flux sends a PARTIAL, in
+        # practice the caller's first word. Measured over 14 days of production
+        # it deferred 173 of 415 barge-in attempts (29%), and the deferred text
+        # was real speech taking the floor: 'Listen', "Let's", 'Speaking',
+        # 'Excuse' (i.e. "excuse me", one word in), 'Please.', "What's", 'Bye',
+        # 'Hi.' x21, "I'm" x15. Noise rejection now lives in `is_disfluency`,
+        # which names what to reject instead of guessing from length.
+        #
+        # Kept env-tunable at 2 as an instant rollback if 1 proves too eager.
         try:
             self._min_interrupt_words: int = max(
-                1, int(os.getenv("DEEPGRAM_MIN_INTERRUPT_WORDS", "2"))
+                1, int(os.getenv("DEEPGRAM_MIN_INTERRUPT_WORDS", "1"))
             )
         except (TypeError, ValueError):
-            self._min_interrupt_words = 2
+            self._min_interrupt_words = 1
 
         # Keyterm prompting list (set in initialize()); empty = no biasing.
         self._keyterms: list[str] = []
@@ -757,6 +768,7 @@ class DeepgramFluxSTTProvider(STTProvider):
                             # immediate TTS interruption.
                             from app.domain.services.voice_pipeline.backchannel import (
                                 is_backchannel,
+                                is_disfluency,
                                 is_hard_interrupt,
                             )
                             # Hard interrupts ("stop", "wait", "no") always cut in,
@@ -769,11 +781,22 @@ class DeepgramFluxSTTProvider(STTProvider):
                                         (transcript_text or "")[:24],
                                     )
                                     continue
-                                # (b) min-words guard: a single short, non-backchannel
-                                # word during agent speech is usually a cough, filler,
-                                # or STT mishear — not a real interruption. Defer to
-                                # the EndOfTurn grow-case so the agent isn't cut off
-                                # by noise. (LiveKit/Pipecat MinWords pattern.)
+                                # (b) hesitation noise ("uh", "um", "erm"). This
+                                # is what the old min-words guard was reaching
+                                # for; naming it rejects the noise WITHOUT
+                                # rejecting a caller who is one word into a real
+                                # sentence. See backchannel._DISFLUENCIES.
+                                if is_disfluency(transcript_text):
+                                    logger.info(
+                                        "Flux StartOfTurn disfluency %r — barge-in suppressed",
+                                        (transcript_text or "")[:24],
+                                    )
+                                    continue
+                                # (c) min-words guard, now DISABLED by default
+                                # (_min_interrupt_words=1). Retained as an env
+                                # rollback lever only — see its definition for
+                                # the production evidence that 2 was blocking
+                                # 29% of genuine interruptions.
                                 word_count = len((transcript_text or "").split())
                                 if word_count < self._min_interrupt_words:
                                     logger.info(
