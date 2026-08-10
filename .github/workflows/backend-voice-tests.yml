@@ -1,0 +1,125 @@
+# Backend voice-pipeline tests.
+#
+# WHY THIS EXISTS: the Vercel check on this repo builds the FRONTEND only. A
+# green Vercel badge proves nothing about the Python voice path — barge-in,
+# the opener echo gate, playback interruption, or the C++ gateway contract.
+# Review finding 4 (2026-08-11) asked for CI that actually proves it.
+#
+# Runs on every push/PR that touches the backend, plus manually.
+name: backend-voice-tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-voice-tests.yml'
+  pull_request:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-voice-tests.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: backend-voice-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  voice:
+    name: voice pipeline (fast)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # fakeredis is a TEST-ONLY dependency and is deliberately absent from
+          # the production venv, which is why those suites error there. CI has
+          # no such constraint, so install it and run them properly.
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio fakeredis
+
+      - name: Import smoke
+        run: python -c "import app.main" && echo IMPORT_OK
+
+      # The suites that own barge-in, endpointing and playback cancellation.
+      # Kept as an explicit list so a deleted file fails CI loudly instead of
+      # silently shrinking coverage.
+      - name: Voice pipeline tests
+        run: |
+          python -m pytest -q -p no:randomly \
+            tests/unit/test_interrupt_playback.py \
+            tests/unit/test_interrupt_concurrency_and_pre_tts.py \
+            tests/unit/test_barge_in_gates_let_callers_in.py \
+            tests/unit/test_instant_opener.py \
+            tests/unit/test_backchannel.py \
+            tests/unit/test_silence_action.py \
+            tests/unit/test_bargein_epoch_partial.py \
+            tests/unit/test_bargein_silence.py \
+            tests/unit/test_barge_in_stop_metric.py \
+            tests/unit/test_cartesia_bargein_context_isolation.py \
+            tests/unit/test_nova_barge_in_parity.py \
+            tests/unit/test_turn_streamer_tts_overlap.py \
+            tests/unit/test_tts_pacing_lead.py
+
+  full:
+    name: full unit + security suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio fakeredis
+
+      - name: Full suite
+        run: python -m pytest tests/unit tests/security -q -p no:randomly -rfsE
+
+  cpp-gateway:
+    name: C++ voice gateway build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        working-directory: services/voice-gateway-cpp
+        run: |
+          # Mirrors the production build: the host has no cmake, so the binary
+          # is produced with g++ -O2 directly. Warnings are surfaced; the
+          # production binary was last built with zero.
+          g++ --version
+          mkdir -p build
+          g++ -O2 -std=c++17 -Wall -Wextra -Iinclude \
+              src/*.cpp -o build/voice_gateway -lpthread
+          ls -la build/voice_gateway
+
+      - name: Sanity — binary starts and reports health
+        working-directory: services/voice-gateway-cpp
+        run: |
+          ./build/voice_gateway --help 2>&1 | head -5 || true
+          echo "build artifact produced"

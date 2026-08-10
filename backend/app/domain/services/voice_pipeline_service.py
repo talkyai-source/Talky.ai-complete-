@@ -589,8 +589,21 @@ class VoicePipelineService:
             and getattr(pending, "_turn_type", "final") == "final"
             and not session.tts_active
         ):
+            # 2026-08-11 (review finding 2): NOT cancelling is only half the
+            # decision. The protected answer must also not START speaking while
+            # the caller is still mid-sentence — barge-in cannot save us there,
+            # because it stops audio that is already playing and here the
+            # talk-over begins at the very first packet. Arm a bounded hold so
+            # playback waits for the caller to finish. The answer is preserved
+            # (no silence, which is what this guard exists to prevent) AND the
+            # caller is not spoken over. See voice_pipeline.playback_gate.
+            from app.domain.services.voice_pipeline.playback_gate import (
+                arm_pre_tts_hold,
+            )
+            arm_pre_tts_hold(session)
             logger.info(
-                "barge_in_ignored_final_pre_tts call=%s — protecting in-flight answer",
+                "barge_in_ignored_final_pre_tts call=%s — protecting in-flight "
+                "answer, playback held until the caller stops",
                 call_id[:12],
             )
             # F-08: defensively clear any event this (or the direct STT
@@ -628,8 +641,18 @@ class VoicePipelineService:
         # whose TTS is actively playing (a genuine interruption of audible
         # speech). Both are correct to cancel. A final task that has NOT begun
         # playing was already protected by the early-return guard above.
-        cancelled_task = self._pending_llm_tasks.pop(call_id, None)
-        if cancelled_task:
+        #
+        # 2026-08-11 (review finding 3): this used to run HERE, before
+        # interrupt_playback, so the cancel and the audio stop were two separate
+        # operations that shared no interrupt_id and could interleave. It is now
+        # passed INTO the centralized operation as its step 2, which means one
+        # id across the whole chain and — because interrupt_playback is
+        # single-flight — no possibility of two concurrent barge-ins cancelling
+        # the same task twice.
+        async def _cancel_pending_turn() -> bool:
+            cancelled_task = self._pending_llm_tasks.pop(call_id, None)
+            if not cancelled_task:
+                return False
             # Bounded, NON-blocking cancel: never freeze the single STT consumer
             # waiting for the cancelled turn to unwind. Unbounded awaiting here let
             # rapid barge-ins pile up and dropped every backlogged turn → seconds
@@ -646,9 +669,12 @@ class VoicePipelineService:
             if restore_len is not None and len(session.conversation_history) > restore_len:
                 session.conversation_history = session.conversation_history[:restore_len]
             session._speculative_history_len = None
-            logger.debug(
-                "barge_in: cancelled in-flight turn task for %s", call_id[:12]
-            )
+            return True
+
+        # Capture BEFORE the stop: interrupt_playback sets tts_active False in
+        # its first step, and the annotation below must reflect whether audio
+        # was actually playing when the caller cut in.
+        was_tts_active = session.tts_active
 
         # Annotate the last assistant message so the LLM knows the caller
         # did not hear the full response.  This prevents the LLM from
@@ -662,7 +688,7 @@ class VoicePipelineService:
         # falsely tells the LLM "you were interrupted" — it then behaves as
         # if the previous response was incomplete and loses conversational
         # context, making replies feel disconnected.
-        if session.tts_active and session.conversation_history:
+        if was_tts_active and session.conversation_history:
             last_msg = session.conversation_history[-1]
             if (
                 last_msg.role == MessageRole.ASSISTANT
@@ -686,6 +712,7 @@ class VoicePipelineService:
             session,
             media_gateway=self.media_gateway,
             reason="barge_in",
+            cancel_task=_cancel_pending_turn,
             tts_provider=self.tts_provider,
         )
         if websocket:

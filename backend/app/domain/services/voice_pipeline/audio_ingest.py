@@ -248,6 +248,15 @@ class AudioIngest:
                         call_id[:12], (transcript_text or "")[:24],
                     )
                     return
+                # The caller now holds the floor. Recorded so a FINAL answer that
+                # is still generating does not begin speaking on top of them —
+                # see voice_pipeline.playback_gate. Set only AFTER the echo gate
+                # above, so our own greeting echo never counts as the caller
+                # taking the floor.
+                from app.domain.services.voice_pipeline.playback_gate import (
+                    mark_caller_speaking,
+                )
+                mark_caller_speaking(session)
                 # F-09: bump the per-call utterance counter on every StartOfTurn
                 # so transcript_handler can tag a suppressed backchannel with
                 # the utterance it belongs to (see _utterance_seq docstring).

@@ -76,6 +76,15 @@ class TtsPlayback:
         Returns True if TTS was interrupted by barge-in, False on normal completion.
         """
         call_id = session.call_id
+        # Do not begin speaking on top of a caller who is still mid-sentence.
+        # Only holds when handle_barge_in armed it (a barge-in landed while a
+        # FINAL answer was still generating), is capped, and fails open — see
+        # voice_pipeline.playback_gate for why a hold beats a cancel here.
+        from app.domain.services.voice_pipeline.playback_gate import (
+            await_caller_pause,
+        )
+        await await_caller_pause(session, call_id=call_id)
+
         # Mark TTS as active here so handle_turn_end skips if a greeting
         # or a previous turn is already speaking.
         session.tts_active = True

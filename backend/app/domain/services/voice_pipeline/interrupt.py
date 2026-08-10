@@ -20,21 +20,42 @@ and one `InterruptResult` that says whether the agent actually stopped and how
 much audio was binned. Grep a call by its interrupt_id and the whole chain is
 there in order.
 
-WHAT MAKES IT IDEMPOTENT
-------------------------
+WHAT MAKES IT IDEMPOTENT — TWO MECHANISMS, NOT ONE
+--------------------------------------------------
 Duplicate StartOfTurn / barge-in events are normal — both arming sites fire for
 the same utterance, and Flux can emit several. Re-running the full teardown for
 each would rotate the utterance id repeatedly and re-cancel tasks mid-unwind.
-So a completed interrupt is remembered on the session for
-``_INTERRUPT_DEDUPE_S``; a repeat inside that window returns the FIRST result
-tagged ``deduped=True`` without touching the session again.
 
-The dedupe window is deliberately short. It must cover the duplicate-event
-burst, and must NOT cover a caller who barges in again a moment later — that
-second interruption is real and must do real work.
+  1. IN-FLIGHT REUSE (concurrency). A single-flight Future is published on the
+     session SYNCHRONOUSLY, before the first ``await``. A second coroutine that
+     arrives while the first is still running does not start a second teardown —
+     it awaits the same Future and returns that result.
+
+     This is the mechanism that matters, and a "remember the last result"
+     check alone CANNOT provide it. Review finding, 2026-08-11: the earlier
+     version read ``_last_interrupt`` at entry and wrote it at exit, with four
+     awaits in between (cancel, clear_output_buffer, gateway POST, clear_queue).
+     Two coroutines entering together both saw an empty slot, both passed, and
+     both ran the full teardown — rotating the utterance id twice and cancelling
+     a task mid-unwind. Publishing the Future before any await closes that
+     window completely, because asyncio cannot preempt between the check and
+     the publish.
+
+  2. RECENT-RESULT REUSE (sequential). A completed interrupt is remembered for
+     ``_INTERRUPT_DEDUPE_S`` so a duplicate arriving just AFTER the first
+     finished also reuses it rather than re-running.
+
+Both windows are deliberately short. They must cover the duplicate-event burst,
+and must NOT cover a caller who barges in again a moment later — that second
+interruption is real and must do real work.
+
+An in-flight interrupt that RAISES must not wedge the session: the Future is
+always resolved in a ``finally``, and the slot is cleared, so the next event
+starts a fresh operation.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
@@ -127,7 +148,24 @@ async def interrupt_playback(
     call_id = str(getattr(session, "call_id", "?"))
     now = time.monotonic()
 
-    # ── Idempotency: a repeat inside the window returns the first verdict ──
+    # ── Idempotency 1: an interrupt is ALREADY RUNNING → await it, don't
+    # start a second teardown. Checked and published without an intervening
+    # await, so asyncio cannot interleave two callers into both branches.
+    inflight: Optional[asyncio.Future] = getattr(session, "_interrupt_inflight", None)
+    if inflight is not None and not inflight.done():
+        _log_step("(in-flight)", call_id, "deduped_concurrent", reason=reason)
+        try:
+            prior_result = await inflight
+        except Exception:
+            # The in-flight operation failed. Report honestly rather than
+            # inheriting a success we did not observe.
+            return InterruptResult(
+                interrupt_id="(in-flight-failed)", call_id=call_id,
+                ok=False, deduped=True, errors=["inflight_failed"],
+            )
+        return InterruptResult(**{**prior_result.__dict__, "deduped": True})
+
+    # ── Idempotency 2: one just COMPLETED → reuse its verdict.
     prior: Optional[InterruptResult] = getattr(session, "_last_interrupt", None)
     prior_at = getattr(session, "_last_interrupt_at", None)
     if prior is not None and prior_at is not None and (now - prior_at) < _INTERRUPT_DEDUPE_S:
@@ -136,9 +174,46 @@ async def interrupt_playback(
         duplicate = InterruptResult(**{**prior.__dict__, "deduped": True})
         return duplicate
 
+    # Publish the single-flight Future BEFORE the first await. Everything from
+    # here to the `finally` is guarded.
+    loop = asyncio.get_running_loop()
+    gate: asyncio.Future = loop.create_future()
+    session._interrupt_inflight = gate
+
+    try:
+        result = await _do_interrupt(
+            session, call_id=call_id, media_gateway=media_gateway,
+            reason=reason, cancel_task=cancel_task, tts_provider=tts_provider,
+        )
+    except BaseException as exc:
+        if not gate.done():
+            gate.set_exception(exc)
+        # Swallow the "never retrieved" warning for a Future nobody awaited.
+        gate.exception()
+        session._interrupt_inflight = None
+        raise
+    else:
+        if not gate.done():
+            gate.set_result(result)
+        session._interrupt_inflight = None
+        session._last_interrupt = result
+        session._last_interrupt_at = time.monotonic()
+        return result
+
+
+async def _do_interrupt(
+    session,
+    *,
+    call_id: str,
+    media_gateway,
+    reason: str,
+    cancel_task=None,
+    tts_provider=None,
+) -> InterruptResult:
+    """The actual teardown. Always called under the single-flight gate."""
     interrupt_id = uuid.uuid4().hex[:12]
     result = InterruptResult(interrupt_id=interrupt_id, call_id=call_id)
-    started = now
+    started = time.monotonic()
     _log_step(interrupt_id, call_id, "begin", reason=reason,
               tts_active=getattr(session, "tts_active", None))
 
@@ -236,6 +311,9 @@ async def interrupt_playback(
     except Exception:  # noqa: BLE001 — metrics must never break the audio path
         pass
 
-    session._last_interrupt = result
-    session._last_interrupt_at = time.monotonic()
+    # NB: `_last_interrupt` / `_last_interrupt_at` are written by the caller,
+    # interrupt_playback, inside the single-flight gate's `else` branch. Writing
+    # them here too would record a result before the gate resolves, reopening a
+    # narrow window where a concurrent caller could take the recent-result path
+    # while the Future is still pending.
     return result

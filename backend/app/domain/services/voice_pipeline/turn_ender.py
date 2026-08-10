@@ -446,6 +446,15 @@ class TurnEnder:
             },
         )
 
+        # The caller has yielded the floor. Releases any playback held by
+        # playback_gate.await_caller_pause — a FINAL answer that finished
+        # generating while the caller was still talking can now speak without
+        # talking over them.
+        from app.domain.services.voice_pipeline.playback_gate import (
+            mark_caller_stopped,
+        )
+        mark_caller_stopped(session)
+
         # Clear barge-in event now that EndOfTurn has fired (user stopped speaking).
         # Stale barge-in signals from the user's own speech turn are now irrelevant.
         # Any NEW barge-in signal that fires AFTER this point means the user started
