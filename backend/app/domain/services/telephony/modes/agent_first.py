@@ -19,6 +19,17 @@ the greeting, and therefore before the callee has said anything that could be
 retained. What actually happened is reported to the disclosure ledger in
 ``recording_policy_service``; ``RecordingService.save_and_link`` refuses to
 retain audio for a call whose required notice was not delivered.
+
+2026-08-11: the 2026-07-31 fix that RETRIED the notice from the top after a
+barge-in was itself reverted. Two traced production calls showed
+``recording_disclosure_interrupted_retrying attempt=1/2`` followed by the
+caller hanging up ~2s later — a callee who has already heard "This call may
+be recorded..." start once and then hears it start over reads it as a
+malfunctioning robot, not a re-delivered notice, and hangs up. Restarting
+from the beginning is strictly worse than the "abandon after one interrupt"
+behaviour it replaced: it not only fails to get the notice heard, it also
+loses the caller. See ``_speak_recording_disclosure`` for the single-attempt,
+fail-closed replacement.
 """
 from __future__ import annotations
 
@@ -32,37 +43,90 @@ from app.domain.services.telephony.config import (
 
 logger = logging.getLogger(__name__)
 
-# Recording-disclosure delivery attempts. The notice lands in the two seconds
-# after pickup — precisely when people say "Hello?" / "Who's this?" — so a
-# single attempt loses the recording on a large share of calls (measured: 3 of
-# the first 7 production calls, 43%). Two attempts, with a settle gap between,
-# recovers the common case where the callee simply spoke first.
+# Recording-disclosure delivery attempts (2026-08-11: fixed at 1 — see the
+# module docstring for the production evidence). A prior version of this
+# code retried up to twice, restarting the notice FROM THE TOP each time.
+# That sounds correct on paper ("say it again once they stop talking") but
+# is not what a human hears: they already heard the notice begin, so a
+# restart plays like a broken recording looping, not a second attempt to
+# inform them. Both traced production interruptions were followed by the
+# caller hanging up within ~2 seconds of the restart.
 #
-# Kept small on purpose: this audio plays before the greeting, so each extra
-# attempt delays the actual conversation. Two is enough for "they said hello
-# over it"; a callee who talks through both is genuinely not listening, and
-# the fail-closed path (no recording) is then the correct outcome.
-_DISCLOSURE_MAX_ATTEMPTS = 2
-_DISCLOSURE_RETRY_SETTLE_S = 1.2
+# There is no cheap way to RESUME instead of restart —
+# ``synthesize_and_send_audio`` reports only a bool ("was this call
+# interrupted"), not a text/audio offset to resume from, and synthesizing
+# a resume clause on the fly would require knowing exactly which words the
+# TTS engine had already emitted at the moment barge-in fired, which the
+# pipeline does not track. Of the two lawful options — stop retrying, or
+# resume without restarting — "stop retrying" is the one buildable today
+# without invasive changes to the TTS playback path, and it is also the
+# one directly supported by what production showed: talking over the
+# caller a second time is worse than losing the recording once. The gate
+# stays fail-closed either way: an interrupted notice is never counted as
+# delivered, so the recording is suppressed exactly as it would be if we
+# had never tried a second time.
+_DISCLOSURE_MAX_ATTEMPTS = 1
 
 # 2026-07-08: opener-content guard. Prod surfaced 2 calls where the spoken
 # opener was a bare "Hello?" — the pre-synth greeting text was empty/
 # whitespace or degraded to a filler word, so the callee heard what sounded
-# like a wrong-number call instead of a real introduction. These are the
-# filler-only strings we refuse to speak as a whole opener (punctuation is
-# stripped before the comparison, so "Hello?", "Hello.", "hi" etc. all match).
-_BARE_FILLER_OPENERS = {"hello", "hi", "hey", "hiya", "yo"}
-
-
+# like a wrong-number call instead of a real introduction. At the time EVERY
+# outbound opener was supposed to be a full identity+reason monologue, so a
+# lone filler word was unambiguously a rendering bug.
+#
+# 2026-08-11 (opener redesign): that is no longer true. The DEFAULT outbound
+# opener is now a DELIBERATE short pickup greeting — "Hi there.", "Hello?" —
+# see telephony_session_config.build_telephony_greeting. That is exactly the
+# text the old guard existed to reject, so left unfixed it would silently
+# discard every correctly-built greeting and fall through to the "safe
+# minimal branded opener" below on every single call, undoing the redesign
+# entirely.
+#
+# The underlying bug this guard defends against has NOT changed — an empty
+# or whitespace pre-synth text still means the TTS pipeline had nothing to
+# say — but what counts as "genuine content" has: a short greeting is now
+# correct, not degraded, so no single word (or short phrase) is
+# disqualifying on its own. What is still disqualifying is having NOTHING
+# speakable at all: empty, whitespace-only, or leftover punctuation from a
+# template substitution that failed (e.g. "...", "?" with no words either
+# side of it).
 def _has_real_opener_content(text) -> bool:
-    """True when `text` is genuine greeting content — not empty/whitespace
-    and not just a bare filler word standing in for the whole opener."""
+    """True when `text` has at least one speakable word — not empty,
+    whitespace, or bare punctuation left over from a broken template."""
     if not text or not isinstance(text, str):
         return False
-    stripped = text.strip().strip("?!.,;: ").strip()
+    stripped = text.strip()
     if not stripped:
         return False
-    return stripped.lower() not in _BARE_FILLER_OPENERS
+    return any(ch.isalpha() for ch in stripped)
+
+
+# Word-count threshold distinguishing a BARE pickup greeting ("Hi there.",
+# "Hello?") from text that already carries an introduction (identity +
+# reason, up to the 12-word budget the LLM-authored opener and the persona's
+# relocated STAGE 1 / OPENING turn both use — see llm_opener.py and
+# telephony_session_config.py's OPENER REDESIGN note). A word-count
+# heuristic, not a fixed allowlist, so a new pickup variant added to
+# build_telephony_greeting is recognised as bare without a code change here.
+_BARE_GREETING_MAX_WORDS = 5
+
+
+def _looks_like_bare_pickup_greeting(text) -> bool:
+    """True when the text actually spoken as the opener was just a pickup
+    greeting with no introduction in it.
+
+    Used to decide whether ``session._has_introduced`` may be set True after
+    the greeting plays (see _send_outbound_greeting below): a bare greeting
+    has not introduced the agent, so the flag must stay False and the
+    per-turn LIVE STATE block (prompts/live_state.py) will correctly tell the
+    model, on the turn right after the callee replies, that it still needs to
+    give its opening. Text that is NOT bare — the LLM-authored opener
+    (flag-gated, already validated to contain identity), a legacy longer
+    template, or the "safe minimal branded opener" fallback further below —
+    already contains the introduction, so the flag may be set True as before.
+    """
+    words = [w for w in (text or "").split() if any(c.isalnum() for c in w)]
+    return 0 < len(words) <= _BARE_GREETING_MAX_WORDS
 
 
 def _disclosure_call_ids(voice_session) -> list:
@@ -202,54 +266,32 @@ async def _speak_recording_disclosure(voice_session) -> None:
             "recording_disclosure_speaking call_id=%s reason=%s text=%r",
             call_id[:12], getattr(decision, "reason", "-"), text[:80],
         )
-        # RE-DELIVER rather than give up (2026-07-31). Measured on the first
-        # 7 production calls after this shipped: 4 spoken, 3 INTERRUPTED — 43%
-        # of calls lost their recording entirely. That is the predictable
-        # outcome of putting a ~4-second sentence in the one moment where
-        # people always speak: the two seconds after they pick up.
+        # SINGLE ATTEMPT, NO RESTART (2026-08-11 — see module docstring for
+        # the production traces that drove this). A callee who speaks during
+        # the notice has already heard it begin; playing it again FROM THE
+        # TOP talks over them a second time and reads as a malfunctioning
+        # robot rather than a polite re-delivery. Both traced production
+        # calls hung up ~2s after exactly that restart. So: one attempt,
+        # and if it is interrupted we stop — we do not get a second chance
+        # at this call, but we also do not make things worse.
         #
-        # Abandoning the recording for the whole call because the callee said
-        # "Hi, who's this?" over the notice is the wrong trade. The lawful
-        # requirement is that they were TOLD, not that they were silent the
-        # first time we tried — so say it again once they stop talking.
-        #
-        # Bounded at _DISCLOSURE_MAX_ATTEMPTS and still FAILS CLOSED: if every
-        # attempt is talked over, the state stays DISCLOSURE_FAILED and
-        # save_and_link discards the audio exactly as before. This can only
-        # ever turn a suppressed recording into a delivered notice; it can
-        # never retain audio for a call where the notice was not completed.
-        spoken_ok = False
-        for _attempt in range(1, _DISCLOSURE_MAX_ATTEMPTS + 1):
-            interrupted = await voice_session.pipeline.synthesize_and_send_audio(
-                session, text, websocket=None
-            )
-            if not interrupted:
-                spoken_ok = True
-                break
-
-            if _attempt >= _DISCLOSURE_MAX_ATTEMPTS:
-                break
-
-            # Let the callee finish before trying again — retrying instantly
-            # would talk over the very speech that interrupted us and would be
-            # interrupted again, burning the attempt for nothing.
-            logger.info(
-                "recording_disclosure_interrupted_retrying call_id=%s attempt=%d/%d",
-                call_id[:12], _attempt, _DISCLOSURE_MAX_ATTEMPTS,
-            )
-            await asyncio.sleep(_DISCLOSURE_RETRY_SETTLE_S)
-            try:
-                voice_session.pipeline.clear_barge_in_event(session)
-            except Exception:  # noqa: BLE001 — best effort, never fatal
-                pass
-
-        if not spoken_ok:
-            # Every attempt was talked over, so we cannot claim they heard it.
+        # Still FAILS CLOSED: an interrupted notice is never counted as
+        # delivered, so `record_disclosure_state` below lands on
+        # DISCLOSURE_FAILED and `save_and_link` discards the audio exactly
+        # as it would if we had never attempted a second time. This change
+        # can only ever REMOVE a retry that talked over the caller; it
+        # cannot cause a recording to be kept that previously would not
+        # have been.
+        interrupted = await voice_session.pipeline.synthesize_and_send_audio(
+            session, text, websocket=None
+        )
+        if interrupted:
             record_disclosure_state(DISCLOSURE_FAILED, *call_ids)
             logger.warning(
-                "recording_disclosure_interrupted call_id=%s — notice cut short "
-                "on all %d attempt(s); recording will be suppressed",
-                call_id[:12], _DISCLOSURE_MAX_ATTEMPTS,
+                "recording_disclosure_interrupted call_id=%s — notice cut "
+                "short; not retried (a restart would talk over the caller "
+                "a second time); recording will be suppressed",
+                call_id[:12],
             )
             return
 
@@ -490,10 +532,13 @@ async def _send_outbound_greeting(voice_session) -> None:
         #
         # If the callee barged in mid-greeting, only persist the portion that
         # actually played. Recording the full text would make the LLM think the
-        # callee already heard the question ("Do you have a minute to talk?")
-        # when in reality they cut us off after just the intro — and the LLM
-        # would then respond as if the question was answered, producing a
-        # confused follow-up that sounds like a second greeting.
+        # callee already heard the whole greeting when in reality they cut us
+        # off partway through — and the LLM would then respond as if the rest
+        # was heard too, producing a confused follow-up that sounds like a
+        # second greeting. (Mostly moot for the bare "Hi there." pickup
+        # greeting itself, which has nothing left to cut off mid-thought, but
+        # this path is shared with the LLM-authored and legacy longer openers,
+        # which do.)
         try:
             _spoken_text = greeting
             if was_interrupted and presynth_chunks and chunks_sent > 0:
@@ -510,11 +555,25 @@ async def _send_outbound_greeting(voice_session) -> None:
         )
         # Flip the same flag turn_runner sets after the first LLM-generated
         # reply (see turn_runner.py) so live_state.py's per-turn LIVE STATE
-        # block reflects reality. Without this, agent-first calls leave
-        # _has_introduced False after the greeting plays, and the next turn's
-        # LIVE STATE tells the model it hasn't introduced itself yet — inviting
-        # a second, duplicate introduction.
-        session._has_introduced = True
+        # block reflects reality — but ONLY when what was actually spoken
+        # already contains the introduction.
+        #
+        # 2026-08-11 (opener redesign): this used to be an unconditional
+        # `True` because every greeting WAS the introduction. Now the default
+        # greeting is a bare pickup ("Hi there.") with no identity in it — see
+        # telephony_session_config.build_telephony_greeting — so setting this
+        # True unconditionally would tell LIVE STATE the agent already
+        # introduced itself when the callee has heard nothing but "Hi there.",
+        # and the model would never give its name or reason for calling on any
+        # later turn either (has_introduced=True forever silences that
+        # instruction). `_looks_like_bare_pickup_greeting` reads what was
+        # ACTUALLY spoken (`_spoken_text`, already trimmed for a barge-in
+        # above) rather than the greeting source, so a partial "Hi" cut off
+        # mid-word is still correctly treated as bare. Non-bare text — the
+        # LLM-authored opener (flag-gated, pre-validated to contain identity),
+        # a legacy longer template, or the safe minimal branded fallback in
+        # the slow path above — still flips the flag True exactly as before.
+        session._has_introduced = not _looks_like_bare_pickup_greeting(_spoken_text)
     except Exception as exc:
         logger.warning(f"Outbound greeting failed for {call_id[:12]}: {exc}")
     finally:

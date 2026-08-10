@@ -134,6 +134,178 @@ async def _lookup_campaign_row(campaign_id: Optional[str]):
     return None
 
 
+async def _attach_llm_opener(
+    pre_warm_session,
+    campaign_row,
+    *,
+    lead_first_name: Optional[str],
+    lead_last_name: Optional[str],
+    lead_company: Optional[str],
+) -> None:
+    """Author this call's opening sentence with the LLM, if the flag is on.
+
+    WHERE THE LATENCY GOES (this is the whole reason it lives here)
+    --------------------------------------------------------------
+    ``prepare_prewarmed_session`` is awaited by the bridge endpoint BEFORE it
+    originates the SIP call, so nothing in this function is on the ANSWER path:
+    the callee's phone has not rung yet and no one is listening to silence
+    while we think. It also runs AFTER the strict warmup gate above, so the
+    LLM connection and its streaming path are already hot — the generation is
+    a warm round-trip, not a cold one.
+
+    The answer path (``modes.agent_first._send_outbound_greeting``) only pumps
+    the ``_presynth_greeting_audio`` chunks that ``prepare_pre_originate_
+    greeting`` produces immediately after this returns. It never calls into
+    :mod:`llm_opener`.
+
+    FAIL-SOFT, ALWAYS
+    -----------------
+    Stashing nothing is the safe outcome: ``_build_call_greeting`` falls back
+    to the bare pickup greeting every call gets today (see the 2026-08-11
+    OPENER REDESIGN note in telephony_session_config.py, above
+    ``_PERSONA_GREETINGS``). So every failure — flag off, no campaign, no
+    buyer context, provider error, timeout, output that fails validation —
+    simply leaves the attribute unset. This function must therefore never
+    raise: it sits inside the warmup try-block, and an exception escaping
+    here would tear the session down and refuse to ring a call over a
+    *cosmetic* feature.
+
+    NOTE: if this flag is ever turned on, the LLM-authored opener is spoken
+    as the literal FIRST turn (validate_opener requires identity in it,
+    see llm_opener.py) — which is the monologue-on-turn-1 shape the
+    2026-08-11 redesign removed from the default path. Turning the flag on
+    without revisiting that is a deliberate exception to the new default
+    behaviour, not an oversight.
+    """
+    try:
+        from app.domain.services.telephony.llm_opener import (
+            generate_opener,
+            llm_opener_enabled,
+        )
+
+        # Cheapest possible check first: with the flag off this costs one
+        # env read and the call is byte-for-byte what it is today.
+        if not llm_opener_enabled():
+            return
+
+        call_session = getattr(pre_warm_session, "call_session", None)
+        config = getattr(pre_warm_session, "config", None)
+        if call_session is None or config is None:
+            return
+
+        agent_config = getattr(config, "agent_config", None)
+        if agent_config is None:
+            return
+
+        # campaign_slots is where the operator's real business context lives
+        # (industry, services, value proposition...). Re-use the SAME extractor
+        # the prompt composer uses so a jsonb-as-str campaign row decodes
+        # identically here — see _extract_script_config's 2026-07-09 note.
+        from app.domain.services.telephony_session_config import (
+            _extract_script_config,
+        )
+
+        script_config = _extract_script_config(campaign_row) or {}
+        campaign_slots = script_config.get("campaign_slots")
+
+        opener = await generate_opener(
+            llm_provider=getattr(pre_warm_session, "llm_provider", None),
+            persona_type=getattr(config, "persona_type", None),
+            agent_name=getattr(agent_config, "agent_name", None),
+            company_name=getattr(agent_config, "company_name", None),
+            call_reason=getattr(agent_config, "call_reason", None),
+            campaign_slots=campaign_slots,
+            lead_first_name=lead_first_name,
+            lead_last_name=lead_last_name,
+            lead_company=lead_company,
+            # The bridge only ever ORIGINATES calls, and _build_call_greeting
+            # deliberately speaks the outbound opener in both first-speaker
+            # modes ("user" changes the TIMING, not who dialled whom).
+            direction="outbound",
+            call_id=getattr(pre_warm_session, "call_id", None),
+        )
+        if opener:
+            # Read back by telephony.config._build_call_greeting, which is the
+            # single place the spoken opener text is chosen — so this covers
+            # BOTH the pre-synth fast path and the realtime slow-path fallback
+            # in _send_outbound_greeting.
+            call_session._llm_opener_text = opener
+    except Exception as exc:  # noqa: BLE001 — never fail a call over an opener
+        logger.warning(
+            "llm_opener_attach_failed call_id=%s err=%r — using the template",
+            str(getattr(pre_warm_session, "call_id", "-"))[:12], exc,
+        )
+
+
+def _start_opening_ladder_generation(pre_warm_session, effective_first_speaker: str) -> None:
+    """Fire-and-forget: generate this call's LLM opening ladder in the
+    background, during the ring/warmup window.
+
+    NEVER AWAITED — this is the whole point. The opening "Hello?" ladder is
+    read by audio_ingest.py's silence monitor only once the callee has
+    already gone silent after pickup; an LLM round-trip at that moment is
+    exactly what the task forbids. Firing it here instead (before the strict
+    warmup gate even starts, so it gets the most wall-clock time possible
+    before the phone is answered) means a slow or failing provider costs the
+    call NOTHING: the strict gate below doesn't wait on this task, origination
+    proceeds on schedule either way, and turn_director.choose_silence_phrase
+    simply reads whatever landed on ``call_session._opening_ladder`` by the
+    time a nudge actually fires — the static ladder if this task is still
+    running, errored, or was never started.
+
+    Gated to caller-first ("user" first-speaker) calls only: the opening
+    ladder is only ever consulted when ``_is_caller_first`` is True in
+    audio_ingest.py (see turn_director.OPENING_PHRASES' docstring) — an
+    agent-first call would never read this, so generating it would just be a
+    wasted LLM call.
+    """
+    call_session = getattr(pre_warm_session, "call_session", None)
+    if call_session is None or effective_first_speaker != "user":
+        return
+    try:
+        from app.domain.services.telephony.opening_ladder import (
+            generate_opening_ladder,
+            opening_ladder_enabled,
+        )
+
+        # Cheapest possible check first: flag off costs one env read and
+        # starts no task at all.
+        if not opening_ladder_enabled():
+            return
+
+        llm_provider = getattr(pre_warm_session, "llm_provider", None)
+        if llm_provider is None:
+            return
+
+        call_id = getattr(pre_warm_session, "call_id", None)
+
+        async def _run() -> None:
+            try:
+                ladder = await generate_opening_ladder(
+                    llm_provider=llm_provider, call_id=call_id,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as run_exc:  # noqa: BLE001 - never surface
+                logger.debug(
+                    "opening_ladder_background_failed call=%s err=%r",
+                    str(call_id or "-")[:12], run_exc,
+                )
+                return
+            if ladder:
+                # Stashed exactly like _presynth_greeting_audio /
+                # _presynth_greeting_text below — a plain attribute the
+                # answer-path / nudge-path reads with getattr(..., None).
+                call_session._opening_ladder = ladder
+
+        asyncio.create_task(_run())
+    except Exception as exc:  # noqa: BLE001 - starting the task must never fail a call
+        logger.debug(
+            "opening_ladder_start_failed call=%s err=%r",
+            str(getattr(pre_warm_session, "call_id", "-"))[:12], exc,
+        )
+
+
 async def prepare_prewarmed_session(
     *,
     first_speaker: Optional[str],
@@ -260,6 +432,14 @@ async def prepare_prewarmed_session(
                 failure_reason=None,
             )
 
+        # LLM-authored opening ladder (flag-gated, DEFAULT OFF). Fired here,
+        # BEFORE the strict warmup gate below, so the background task gets the
+        # most possible time to land before the callee picks up — but it is
+        # never awaited, so a slow provider costs this call nothing. See
+        # _start_opening_ladder_generation's docstring for the full fail-soft
+        # story.
+        _start_opening_ladder_generation(pre_warm_session, effective_first_speaker)
+
         # ── Campaign knowledge (vectorless RAG, P2) ─────────────────────
         # Flag-gated + fail-soft: for inline/map_retrieve campaigns this bakes
         # the (compacted) knowledge tree into the session's system prompt now,
@@ -374,6 +554,18 @@ async def prepare_prewarmed_session(
             )
         except Exception:
             pass
+
+        # LLM-authored opener (flag-gated, DEFAULT OFF). Must run BEFORE the
+        # pre-synth below, because pre-synth is what turns the opener TEXT into
+        # the audio the callee actually hears. Never raises; when it stashes
+        # nothing the pre-synth uses the existing template, unchanged.
+        await _attach_llm_opener(
+            pre_warm_session,
+            campaign_row,
+            lead_first_name=lead_first_name,
+            lead_last_name=lead_last_name,
+            lead_company=lead_company,
+        )
 
         # Greeting pre-synth (only when audio will actually be played).
         # By now the TTS voice model is already loaded by step 4 above,

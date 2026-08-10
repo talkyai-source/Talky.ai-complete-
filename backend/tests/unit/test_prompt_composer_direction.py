@@ -125,20 +125,50 @@ class TestDirectionContract:
 
 class TestPerPersonaDirectionalOpeners:
     def test_lead_gen_outbound_opener(self):
-        """Outbound lead_gen — permission-based opener (introduce + reason +
-        an easy out), not a pitch."""
+        """Outbound lead_gen — introduce + the honest reason, not a pitch, and
+        NOT a hang-up invitation."""
         flat = _flat(compose_prompt(
             "lead_gen", "Alex", "Acme", LEAD_GEN_SLOTS,
             direction="outbound",
         ))
-        # Opener rewritten (2026-07-08 gatekeeper/opener audit) to a
-        # permission-to-DECLINE shape (Josh Braun): introduce + honest reason
-        # stated immediately + an easy way to say no, not a bare "have you
-        # got thirty seconds?" permission-to-proceed ask (Gong: "bad time?"
-        # openers cost bookings). Assert that intent, not retired wording.
         assert "Alex from Acme" in flat
-        assert "tell me to get lost" in flat    # permission-to-decline
-        assert "when's better" in flat          # easy out
+        # The reason is the disarming move; it must be instructed.
+        assert "reason" in flat.lower()
+        # A rejected-time callback is still the right recovery.
+        assert "when's better" in flat
+
+    def test_the_worst_measured_opener_is_absent_from_the_whole_prompt(self):
+        """THIS TEST USED TO ASSERT THE OPPOSITE.
+
+        Until 2026-08-07 the assertion above read
+
+            assert "tell me to get lost" in flat    # permission-to-decline
+
+        so the gate actively ENFORCED the presence of the worst-converting
+        opener family in the measured data. Gong (300M+ cold calls) puts the
+        "did I catch you at a bad time?" family — of which "tell me to get
+        lost" is a warmer paraphrase — at 0.9%-2.15%, against 11.18% for
+        own-the-cold-call and 11.24% for social proof.
+
+        The spoken greeting templates banned it on 2026-08-02 and the lead_gen
+        persona dropped it on 2026-08-06, but it survived in
+        `gatekeeper.GATEKEEPER_RULES`, which `composer.py` appends in the
+        TRAILING high-recency slot — so it reached the model on every single
+        call while the rest of the product believed it was gone, and this
+        assertion is why nobody noticed.
+
+        Checked across BOTH directions because the gatekeeper block is
+        direction-independent.
+        """
+        for direction in ("outbound", "inbound"):
+            flat = _flat(compose_prompt(
+                "lead_gen", "Alex", "Acme", LEAD_GEN_SLOTS, direction=direction,
+            )).lower()
+            for banned in ("get lost", "bad moment", "buzz off"):
+                assert banned not in flat, (
+                    f"{banned!r} is back in the composed {direction} prompt — "
+                    "that is the worst-converting opener family in the data"
+                )
 
     def test_lead_gen_inbound_opener(self):
         """Caller-speaks-first lead_gen — still an OUTBOUND call: introduce +

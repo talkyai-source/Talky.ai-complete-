@@ -275,13 +275,28 @@ _BLOCKS: dict[str, str] = {
 # Short "thinking" phrases played when a reply is slow to produce its first
 # audio, so the caller hears a natural hesitation instead of dead air. Matched
 # to the accent so they reinforce the dialect. Kept very short (<~1s of speech).
+#
+# REWRITTEN 2026-08-07. These are SPOKEN, and they were the last place in the
+# product still saying the exact process narration the prompts were scrubbed of
+# on 2026-08-06 — "Okay, let me check...", "Let me have a look...", "One
+# moment, please...". HARD RULE 8 tells the model that thinking and lookups
+# happen silently while this hard-coded audio announced a lookup out loud, so
+# the two halves disagreed and the audio half always won (it bypasses the LLM).
+#
+# What replaces them is what humans actually do in that gap: a filled pause.
+# The research is unambiguous — speakers bridge a hesitation with "uh"/"um"/
+# "er", not with a sentence about what they are about to go and do — and it is
+# also ~1s shorter, which is the whole point on a line where an 11.7s turn got
+# a callee to hang up. Each pool uses only the hesitation sounds its own
+# DIALECT block above prescribes (British "er"/"erm" and never "um"/"uh";
+# Irish "em"; Indian "actually"), so the filler and the dialect now agree too.
 _THINKING_FILLERS: dict[str, tuple] = {
-    AMERICAN: ("Let me see...", "Sure, one sec...", "Okay, let me check...", "Mm, let me see..."),
-    BRITISH: ("Right, let me see...", "Erm, one sec...", "Let me have a look...", "Okay, just a moment..."),
-    AUSTRALIAN: ("Yeah, let me check...", "No worries, one sec...", "Righto, let me see..."),
-    IRISH: ("Right, let me see now...", "Em, one sec...", "Let me have a look there..."),
-    INDIAN: ("Okay, let me check...", "One moment, please...", "Let me see..."),
-    NEUTRAL: ("Let me see...", "One moment...", "Okay, let me check..."),
+    AMERICAN: ("Um, okay...", "Uh, right...", "Hmm...", "Yeah, so..."),
+    BRITISH: ("Erm, right...", "Er, okay...", "Right, so...", "Mm, okay..."),
+    AUSTRALIAN: ("Ah, righto...", "Um, yeah...", "Yeah, so..."),
+    IRISH: ("Em, right...", "Ah, grand...", "Em, so..."),
+    INDIAN: ("Hmm, okay...", "Um, yes...", "Actually..."),
+    NEUTRAL: ("Um, okay...", "Hmm...", "Right, so..."),
 }
 
 

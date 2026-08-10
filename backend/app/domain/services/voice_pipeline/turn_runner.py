@@ -454,9 +454,11 @@ class TurnRunner:
                 session.conversation_history.append(
                     Message(role=MessageRole.ASSISTANT, content=response_text)
                 )
-                # The agent has now delivered a real reply (its opening on turn 1).
-                # Flip the LIVE STATE flag so later turns are told NOT to
-                # re-introduce (see prompts/live_state.py).
+                # The agent has now delivered a real reply — since 2026-08-11
+                # that is the turn AFTER the bare pickup greeting, not turn 1
+                # (turn 1 is TTS-only and runs no LLM call at all). Flip the
+                # LIVE STATE flag so later turns are told NOT to re-introduce
+                # (see prompts/live_state.py). Idempotent: harmless to re-set.
                 session._has_introduced = True
                 self._p.transcript_service.accumulate_turn(
                     call_id=call_id,

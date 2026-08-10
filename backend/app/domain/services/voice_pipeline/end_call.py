@@ -85,6 +85,37 @@ def strip_and_flag(session, text: str) -> str:
 # floor, which keeps the recency slot). Two jobs: give the model its ONE real
 # call-ending capability, and anchor the lead-gen conversation craft the
 # audit found missing (monologues, question-before-intro, no concrete CTA).
+# TURN LENGTH: DELIBERATELY NO NUMBER HERE (2026-08-07).
+#
+# "HOW YOU SELL" said "Under ~30 words a turn" until this date. At 2.8 words/sec
+# that licences a ~10.7s turn — almost exactly the 11-second monologue measured
+# in production (llm_total_ms=11380 / tts_total_ms=10774). A callee hung up the
+# instant 11.7s of unbroken agent audio finished, without ever trying to
+# interrupt.
+#
+# The placement is what made it damaging. `composer.py` appends this block in
+# the TRAILING, high-recency slot, so ~30 was the LAST turn-length figure the
+# model read — after HARD RULE 2 ("the fewest sentences that actually answer
+# it"), after the persona few-shot exemplars, after FINAL_RESPONSE_CONTRACT.
+# Recency wins, so the loosest number sat in the strongest position and quietly
+# overrode every tighter instruction above it.
+#
+# A number here does not reinforce brevity — it REPLACES whatever the upstream
+# blocks agreed. If a future turn-length rule is needed, put it where the other
+# length rules live (guardrails HARD RULE 2) so the blocks can be kept in
+# agreement, not here where it silently wins by position.
+#
+# SAME TRAP, SECOND TIME (2026-08-11). "HOW YOU SELL" opened with an UNSCOPED
+# "Introduce yourself and the company first" — written when the agent spoke
+# first. Turn 1 is now a bare pickup greeting that waits, and identity moved to
+# the reply AFTER the callee speaks. Because this block lands last, that stale
+# sentence sat downstream of BOTH guardrails' "never re-introduce yourself once
+# the conversation is underway" AND live_state's has_introduced=True branch —
+# so on every mid-call turn the last thing the model read was an instruction to
+# introduce itself again, which is precisely the re-introduction bug live_state
+# exists to prevent. Now scoped to the first real reply and deferred to LIVE
+# STATE. The lesson generalises: any sentence in this file that describes a
+# SPECIFIC TURN must name which turn, or recency makes it describe every turn.
 CALL_CONTROL_RULES = f"""\
 ## ENDING THE CALL (your one real control)
 - Call genuinely over — a clear goodbye, a WRONG BUSINESS (they've never heard
@@ -100,8 +131,11 @@ CALL_CONTROL_RULES = f"""\
   back another time instead of leaving a recording.
 
 ## HOW YOU SELL
-- Introduce yourself and the company first, in one short line, then ask ONE
-  question. Under ~30 words a turn — earn the next line by letting them talk.
+- ONCE they have spoken back, your first real reply introduces you and the
+  company in one short line, then asks ONE question. If you have already
+  introduced yourself, never do it again — LIVE STATE tells you which.
+  A few words is usually the whole turn — earn the next line by letting
+  them talk.
 - Discover before you pitch: learn how they handle it today before mentioning
   what we offer.
 - Drive to ONE concrete next step — their email for a sample, or a callback

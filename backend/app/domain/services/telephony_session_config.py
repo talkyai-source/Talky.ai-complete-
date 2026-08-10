@@ -460,37 +460,61 @@ def build_telephony_inbound_greeting(agent_name: str, company_name: str) -> str:
 # Per-persona × direction first-turn TTS opener (T4-A2).
 #
 # Pre-synthesized during the ringing window and played as the AI's
-# first audio after pickup. Each entry is a LIST of str.format templates
-# taking ``{agent_name}`` and ``{company_name}``. The dispatcher picks
-# one randomly per call so consecutive calls don't sound identical.
-# Keep variants SHORT — <= 12 words / ~4.0 seconds spoken, per the LENGTH
-# BUDGET derivation below. The LLM drives every turn after this one and a long
-# static opener does not just waste early air time, it spends the callee's
-# entire decision window (2026-08-05 hang-up, below).
+# first audio after pickup.
 #
-# Adding a new persona: drop a key into this dict and the dispatcher
-# below picks it up. Adding a direction to an existing persona: same.
-# Missing combinations fall through to the generic builders, so a
-# half-configured persona still produces a grammatical greeting.
-# Reason-first openers, used ONLY when the campaign supplies a short
-# `call_reason` (campaign_slots). Activation is by DATA, not a flag: a campaign
-# without a usable reason keeps exactly the templates below, unchanged.
+# ══════════════════════════════════════════════════════════════════════════
+# 2026-08-11 — OPENER REDESIGN: the outbound greeting is now a BARE PICKUP,
+# not a monologue.
+# ══════════════════════════════════════════════════════════════════════════
+# Every OUTBOUND variant used to pack identity + the honest reason + a
+# time-ask into this one pre-synthesised turn ("Hi, it's Sarah at Acme —
+# cold call, about cutting your energy bill. Thirty seconds?"). That is
+# backwards from how a real phone call opens: a human who dials someone
+# says "Hi" / "Hello?" and WAITS for the other side to actually be there
+# before identifying themselves — nobody launches into a name, a company,
+# and a pitch before the callee has said a single word. The owner's
+# direction was explicit: no identity, no company, no reason, no time-ask
+# on the first turn — just a short, natural pickup greeting, then wait.
 #
-# WHY THESE EXIST
-# ---------------
+# So the OUTBOUND branch below (see `build_telephony_greeting`) is now a
+# handful of 2-3 word pickup variants with no persona/reason variation at
+# all — there is nothing left to vary, a hello is a hello. The identity +
+# reason content this section used to hold was NOT deleted: it moved to
+# the SECOND turn, i.e. the model's own first generated reply, once the
+# callee has actually spoken. Concretely:
+#
+#   * `session._has_introduced` stays False after a bare pickup greeting
+#     plays (see telephony.modes.agent_first._looks_like_bare_pickup_greeting)
+#     instead of being force-set True the instant ANY greeting audio
+#     finished, so the per-turn LIVE STATE block (prompts/live_state.py)
+#     tells the model "you have not introduced yourself yet — give your
+#     short opening this turn" on the turn right after the callee replies.
+#   * The exact identity -> own-the-cold-call -> ask shape this section
+#     used to speak now lives as the model's own STAGE 1 / OPENING
+#     instructions in personas/lead_gen.py, personas/customer_support.py,
+#     and personas/receptionist.py — same wording, same word budget,
+#     reframed as "this is your first REAL turn, after they reply to your
+#     hello" instead of "you speak first, the moment they pick up".
+#   * The evidence base (Gong, 300M+ calls) and the 12-word / ~4.0s length
+#     budget below are UNCHANGED and still govern that relocated turn —
+#     they just no longer bound a TTS template in this file. The same
+#     data + budget also drive the (flag-gated, default OFF) LLM-authored
+#     opener in telephony/llm_opener.py, which documents them independently
+#     because it authors that later identity turn directly rather than via
+#     a fixed template.
+#
+# WHY THIS MATTERS BEYOND STYLE
+# ------------------------------
 # The persona prompt has always instructed the model to "give your name, your
 # company, and the honest reason you called ... Lead with the REASON straight
-# after your name (stating the reason early has the biggest lift), then hand
-# them an easy way to say no rather than asking permission to proceed ... and
-# never open with 'is this a bad time?'".
+# after your name (stating the reason early has the biggest lift)". Before
+# this change the model never got the chance to follow it — the PRE-SYNTHESISED
+# greeting spoke first and flipped `_has_introduced` unconditionally, so the
+# identity+reason content documented below was written but never actually
+# reached the callee's ear until several turns in, if at all.
 #
-# The model never got the chance to follow it. On an agent-first call the
-# PRE-SYNTHESISED greeting speaks first and flips `_has_introduced`, so what the
-# callee actually heard was a reason-free permission-to-PROCEED ask ("Got a
-# quick second?") — the precise pattern the prompt says lands worse — and the
-# reason then arrived several turns later, or never.
-#
-# STRUCTURE IS EVIDENCE-BASED, not taste (Gong, 300M+ calls / 90,380-call study):
+# STRUCTURE IS STILL EVIDENCE-BASED, not taste (Gong, 300M+ calls / 90,380-call
+# study) — this is what the RELOCATED turn (STAGE 1 / OPENING below) follows:
 #
 #   "Did I catch you at a bad time?"          2.15%  <- WORST performer
 #   "How's your day going?"                   7.6%
@@ -498,18 +522,9 @@ def build_telephony_inbound_greeting(agent_name: str, company_name: str) -> str:
 #   context-first ("heard our name?")         11.24%  <- best
 #   stating the reason for calling            2.1x lift
 #
-# Prospects decide in 8-12 SECONDS, so the opener's job is to earn the next
-# thirty seconds, not to pitch. Two consequences for the wording below:
-#
-#  * NO "bad time" / "tell me to get lost" out. An earlier draft of these
-#    templates used exactly that, which is the 2.15% line dressed in friendlier
-#    words. The persona prompt's advice to prefer "permission-to-decline" is
-#    only right in its 11.18% form — context FIRST, then owning the cold call,
-#    then asking — not as a bad-time question.
-#  * SHORT — and "short" was measured wrong until 2026-08-05 (see below).
-#
-# LENGTH BUDGET (2026-08-05, from a real call that hung up)
-# ---------------------------------------------------------
+# LENGTH BUDGET (2026-08-05, from a real call that hung up) — still the
+# budget for the RELOCATED identity+reason turn, not for the pickup hello:
+# ---------------------------------------------------------------------------
 # Outbound call answered 20:21:35:
 #
 #   20:21:35 -> 20:21:39   recording notice        4.0s
@@ -517,91 +532,27 @@ def build_telephony_inbound_greeting(agent_name: str, company_name: str) -> str:
 #   20:21:47               callee hung up
 #
 # The callee heard 11.7s of unbroken agent monologue and hung up the instant it
-# stopped. `interrupted=False` is the damning part: they never tried to cut in.
-# They waited it out and quit.
-#
-# The 20-word opener above was itself the bug. The 8-12s decision window does
-# not start when the AGENT finishes — it starts at "hello". The 4.0s legal
-# recording notice is non-negotiable and eats a third of the window before a
-# single greeting word is spoken, so the greeting's real budget is what is LEFT:
+# stopped, with `interrupted=False` — they never tried to cut in, they waited
+# it out and quit. That is the single clearest evidence that identity + reason
+# + ask packed into the very first thing the callee hears, before they have
+# said a word, reads as a recording rather than a person — independent of
+# length. Shortening that turn (the 2026-08-05/06 passes) fixed the length;
+# this pass fixes the SEQUENCING by moving the whole turn to after the callee
+# has spoken:
 #
 #   decision window (worst case)        8.0s
 #   - recording notice                 -4.0s
-#   = greeting budget                   4.0s
+#   = opener budget                     4.0s
 #   x 2.8 words/second (measured: 20 words -> 7.7s incl. TTS pauses ~= 2.6-2.8)
 #   = 11.2 words  ->  TARGET <= 12 WORDS  (punctuation-only tokens don't count)
 #
-# The old "~20 words, roughly six seconds" note above was doing the arithmetic
-# against the whole window and ignoring the notice, so every opener overran by
-# ~2x. The STRUCTURE (identity -> own the cold call -> earn the next thirty
-# seconds) is unchanged and still evidence-backed; only the word count moved.
-#
-# Ending on the ask is deliberate and is NOT the banned pattern: "Got a quick
-# second?" scores badly because it is permission-to-PROCEED with no context in
-# front of it. The same ask AFTER identity + owning the cold call is the 11.18%
-# structure's third beat. What was removed is the words between the beats.
-#
-# "I'll be straight with you, this is a cold call" is the "own the cold call"
-# move from the 11.18% structure. It also sits well with the hard rule that this
-# agent must never pretend to be something it is not.
-#
-# `{call_reason}` is operator text — already whitespace-normalised and
-# length-capped by `_call_reason_for` before it reaches here.
-#
-# WORD BUDGET WITH A REASON IN THE LINE
-# -------------------------------------
-# Every template below spends exactly 8 words on the fixed part (with a
-# one-word agent name and a one-word company name), leaving 4 of the 12 for
-# `{call_reason}`. That split is deliberate: the reason carries a 2.1x lift and
-# the connective tissue around it carries none, so the words removed came out of
-# the padding ("I'll be upfront", "it's about", "Being honest, this is a"), not
-# out of the reason. `_MAX_SPOKEN_CALL_REASON_CHARS` / `_..._WORDS` enforce the
-# 4-word half of the split at the door — see their definitions for the sums.
-_PERSONA_GREETINGS_WITH_REASON: dict[str, list[str]] = {
-    "lead_gen": [
-        # 8 fixed words + reason. e.g. "Sarah at Allstate — cold call about
-        # cutting your energy bill. Thirty seconds?" = 12 words / ~4.3s.
-        "{agent_name} at {company_name} — cold call about {call_reason}. "
-        "Thirty seconds?",
-        "Hi, {agent_name} from {company_name}. Cold call — {call_reason}. "
-        "Thirty seconds?",
-        "{agent_name}, {company_name} — honestly, a cold call: {call_reason}. "
-        "Thirty seconds?",
-    ],
-    "customer_support": [
-        # NOT a cold call (see _PERSONA_GREETINGS below) — the reason IS the
-        # context here, so it does the disarming that "cold call" does for
-        # lead_gen. Same 8 fixed words + 4 for the reason.
-        "Hi, {agent_name} at {company_name} about {call_reason}. Is now OK?",
-        "Hi, {agent_name} at {company_name} — quick one about {call_reason}. "
-        "OK?",
-    ],
-}
-
+# `_PERSONA_GREETINGS` below now holds ONLY the "inbound" (caller-first /
+# genuine inbound) variants — those were never the monologue problem: a
+# caller-first call already waits for the callee before speaking, and a
+# genuine inbound call answers a customer who dialed in and is owed the
+# company name immediately, the way any real receptionist answers a phone.
 _PERSONA_GREETINGS: dict[str, dict[str, list[str]]] = {
     "lead_gen": {
-        # No campaign reason configured. Still the 11.18% shape minus the
-        # reason: identity, own the cold call, then a question that earns the
-        # next thirty seconds. The originals ("Got a quick second?", "Do you
-        # have a minute to talk?") were permission-to-PROCEED asks — the
-        # pattern the measured data puts at the bottom.
-        #
-        # THIS IS THE VARIANT SET FROM THE 2026-08-05 HANG-UP. The campaign had
-        # an empty campaign_slots, so no call_reason, so the reason-first path
-        # above never fired and the callee got 7.7s of this. Every line below is
-        # the same three beats as before at <= 10 words / <= 3.6s, which leaves
-        # ~4s of the 8s decision window for the callee to actually respond in.
-        "outbound": [
-            # 9 words / ~3.2s
-            "Hi, it's {agent_name} at {company_name}. Cold call — thirty "
-            "seconds?",
-            # 10 words / ~3.6s
-            "Hi, {agent_name} from {company_name}. Honest cold call — worth "
-            "thirty seconds?",
-            # 10 words / ~3.6s
-            "{agent_name} here at {company_name}. Straight up, cold call — "
-            "thirty seconds?",
-        ],
         "inbound": [
             "Hi, this is {agent_name} from {company_name} -- "
             "thanks for reaching out. How can I help?",
@@ -610,27 +561,6 @@ _PERSONA_GREETINGS: dict[str, dict[str, list[str]]] = {
         ],
     },
     "customer_support": {
-        # NOT cold calls — these follow an existing enquiry, so claiming
-        # "this is a cold call" would be false. Context-first is already the
-        # right shape here; only the bad-time question is removed.
-        #
-        # These ran 15-17 words (~5.5-6.0s) and had the same overrun as
-        # lead_gen: "on your enquiry" already IS the context, so "Have you got
-        # a minute?" was paying four words for a beat the enquiry reference had
-        # earned. Now <= 11 words / <= 3.9s.
-        "outbound": [
-            # 11 words / ~3.9s
-            "Hi, it's {agent_name} at {company_name} — quick follow-up on your "
-            "enquiry. OK?",
-            # 11 words / ~3.9s
-            "Hi, {agent_name} from {company_name} support. About your enquiry "
-            "— is now OK?",
-            # 12 words / ~4.3s — the longest kept, because "can I run through
-            # it" is the one ask that tells them this is a two-minute call and
-            # not a pitch.
-            "{agent_name} at {company_name} — following up your enquiry. Can I "
-            "run through it?",
-        ],
         "inbound": [
             "Thanks for calling {company_name} -- this is {agent_name}, "
             "how can I help?",
@@ -639,19 +569,6 @@ _PERSONA_GREETINGS: dict[str, dict[str, list[str]]] = {
         ],
     },
     "receptionist": {
-        # Also a follow-up, not a cold call — same treatment as support, same
-        # <= 12 word / <= 4.0s budget.
-        "outbound": [
-            # 11 words / ~3.9s
-            "Hi, it's {agent_name} from {company_name} — just following up. "
-            "OK to talk?",
-            # 11 words / ~3.9s
-            "Hi, {agent_name} calling from {company_name} about your enquiry. "
-            "Is now OK?",
-            # 9 words / ~3.2s
-            "{agent_name} here from {company_name} — quick follow-up. Is now "
-            "OK?",
-        ],
         "inbound": [
             "Thank you for calling {company_name}. This is {agent_name} -- "
             "how can I help you today?",
@@ -670,46 +587,28 @@ def build_persona_greeting(
     direction: str = "outbound",
     call_reason: Optional[str] = None,
 ) -> str:
-    """Pick a per-persona × direction TTS opener at random.
+    """Pick the first-turn TTS opener for this persona × direction.
 
-    Returns one of the variants in :data:`_PERSONA_GREETINGS` for the
-    given persona × direction. Random selection is intentional: it
-    keeps consecutive calls from sounding identical, which lifts the
-    natural-conversation feel and reduces the "robocall pattern" a
-    callee hears when an operator is dialing the same lead twice.
+    INBOUND (a genuine inbound call, or a caller-first outbound call that
+    already waits for the callee to speak): persona-aware, one of the
+    variants in :data:`_PERSONA_GREETINGS`, falling back to
+    ``build_telephony_inbound_greeting`` when the persona is unknown.
 
-    Falls back to the generic ``build_telephony_greeting`` /
-    ``build_telephony_inbound_greeting`` when:
-
-    * ``persona_type`` is ``None`` or unknown — covers the legacy
-      estimation campaign (no persona) and any future persona that
-      hasn't been given dedicated openers yet.
-    * The (persona, direction) pair is missing from the dispatch table —
-      same fallback as above; partial configurations still produce a
-      grammatical greeting rather than crashing the call.
-
-    Both the persona templates and the fallback builders use the same
-    ``{agent_name}`` / ``{company_name}`` slots, so swapping between
-    them at runtime is invisible to the TTS synthesiser.
+    OUTBOUND (default) and any unrecognised direction value: the bare
+    pickup greeting from :func:`build_telephony_greeting` — see the
+    2026-08-11 OPENER REDESIGN note above this dict for why persona and
+    ``call_reason`` no longer vary this turn's text. ``call_reason`` is
+    accepted for call-site / signature compatibility (some callers still
+    pass it) but is a no-op here; the reason is spoken on the RELOCATED
+    turn instead, driven by the persona's own STAGE 1 / OPENING block.
     """
     import random as _random
 
     direction_key = (direction or "outbound").strip().lower()
 
-    # Reason-first opener when the campaign gave us a usable reason. Outbound
-    # only — on an inbound call the caller already knows why they rang.
-    reason = (call_reason or "").strip()
-    if (
-        reason
-        and direction_key == "outbound"
-        and persona_type in _PERSONA_GREETINGS_WITH_REASON
-    ):
-        template = _random.choice(_PERSONA_GREETINGS_WITH_REASON[persona_type])
-        return template.format(
-            agent_name=agent_name,
-            company_name=company_name,
-            call_reason=reason,
-        )
+    if direction_key != "inbound":
+        del call_reason  # unused outbound — see module note above
+        return build_telephony_greeting(agent_name, company_name)
 
     if persona_type and persona_type in _PERSONA_GREETINGS:
         per_persona = _PERSONA_GREETINGS[persona_type]
@@ -720,41 +619,38 @@ def build_persona_greeting(
                 agent_name=agent_name,
                 company_name=company_name,
             )
-    if direction_key == "inbound":
-        return build_telephony_inbound_greeting(agent_name, company_name)
-    return build_telephony_greeting(agent_name, company_name)
+    return build_telephony_inbound_greeting(agent_name, company_name)
 
 
 def build_telephony_greeting(agent_name: str, company_name: str) -> str:
     """
-    Return the opener the agent speaks immediately when the callee answers.
+    Return the FIRST audio spoken on an outbound call: a short, natural
+    pickup greeting and nothing else — no name, no company, no reason, no
+    time-ask. See the 2026-08-11 OPENER REDESIGN note above
+    ``_PERSONA_GREETINGS`` for the full rationale and where the identity +
+    reason content that used to live here moved to.
 
-    Short consent-first opener: introduce the agent by name and ask for
-    permission to continue. The company name and pitch intentionally do
-    NOT appear here — those wait for the callee's yes. On a no, the
-    system prompt's GREETING RESPONSE block closes the call politely
-    with "Sorry to disturb, have a nice day."
-
-    company_name is accepted for signature compatibility but not used
-    in the opener — it is still referenced by the system prompt and
-    the post-consent introduction.
+    ``agent_name`` / ``company_name`` are kept in the signature for
+    call-site compatibility (every caller currently passes both) but are
+    intentionally unused: the entire point of this turn is that it carries
+    no identity yet, so there is nothing to interpolate.
 
     Synthesized directly via TTS (no LLM round-trip) so first audio
     lands within ~100ms of answer.
-
-    TODO(production): greeting template should come from
-                      campaign.prompt_config greeting_override when that
-                      field is populated in the UI.
     """
     import random as _random
 
-    del company_name  # reserved for future per-campaign overrides
-    # 3 short conversational variants — picked at random per call so
-    # consecutive dials don't sound canned. All under ~2s of TTS.
+    del agent_name, company_name  # deliberately unused — see docstring
+    # Plain human pickup variants — 1-3 words, picked at random per call so
+    # consecutive dials don't sound canned. Deliberately NOT questions about
+    # time ("got a minute?") — that ask belongs to the relocated identity
+    # turn, not the hello.
     variants = [
-        f"Hi, this is {agent_name}. Do you have a minute to talk?",
-        f"Hey, {agent_name} here. Got a quick second?",
-        f"Hi! {agent_name} calling — got a moment?",
+        "Hi there.",
+        "Hello?",
+        "Hi, hello.",
+        "Hey there.",
+        "Oh, hi.",
     ]
     return _random.choice(variants)
 
@@ -1420,19 +1316,28 @@ _PERSONA_DEFAULTS: dict[str, tuple[str, str]] = {
 }
 
 
-#: Longest call_reason we will SPEAK in the opener. The reason is free text an
+#: Longest call_reason we will SPEAK in an opener. The reason is free text an
 #: operator types into the campaign form, and some write a paragraph. Past this
 #: the opener stops being a pattern-interrupt and becomes a monologue the callee
-#: talks over — so beyond the cap we fall back to the short generic opener and
-#: let the model deliver the reason conversationally on turn 1 instead.
+#: talks over — so beyond the cap we drop it and let the model deliver the
+#: reason conversationally instead.
+#
+# 2026-08-11: the FIXED spoken-template consumer of this cap
+# (`_PERSONA_GREETINGS_WITH_REASON`) was retired by the opener redesign — see
+# the note above `_PERSONA_GREETINGS` — but the cap itself is still live: it
+# bounds `agent_config.call_reason`, which now feeds ONLY the flag-gated
+# LLM-authored opener (telephony/llm_opener.py, default OFF) as per-call
+# CONTEXT for the model's own relocated identity+reason turn. The arithmetic
+# below is kept for its derivation, not because a template still spends it.
+#
 # ARITHMETIC (re-derived 2026-08-05 after a callee hung up on a 7.7s greeting):
 #
 #   decision window (worst case)                       8.0s
 #   - legal recording notice, spoken BEFORE us        -4.0s
-#   = greeting budget                                  4.0s
+#   = opener budget                                    4.0s
 #   x 2.8 words/second (measured on the 20-word opener that overran)
-#   = 11.2 words  ->  whole opener <= 12 words
-#   - fixed part of every _PERSONA_GREETINGS_WITH_REASON template
+#   = 11.2 words  ->  whole opener <= 12 words (matches llm_opener.MAX_OPENER_WORDS)
+#   - fixed connective words in a typical identity+reason sentence
 #     (8 words, with a one-word agent name and company name)
 #   = 4 words for the reason
 #   x ~6.2 chars/word (English mean ~5.2 + one space)
@@ -1452,8 +1357,8 @@ _PERSONA_DEFAULTS: dict[str, tuple[str, str]] = {
 # is 24 chars but six words — so the word cap below is the real guard and the
 # char cap backstops one absurdly long token. Both must pass.
 #
-# Past either cap we fall back to the short generic opener and let the model
-# deliver the reason conversationally on turn 1 — better than a monologue.
+# Past either cap we drop the reason and let the model deliver it
+# conversationally instead — better than a monologue.
 _MAX_SPOKEN_CALL_REASON_CHARS = 30
 _MAX_SPOKEN_CALL_REASON_WORDS = 4
 

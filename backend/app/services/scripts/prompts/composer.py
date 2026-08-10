@@ -118,13 +118,18 @@ def _format_pronunciations(value: Any) -> str:
 # to STOP. It now names the fewest-sentences target and puts the question at
 # the end of the turn, matching HARD RULES 2/3 and COMMUNICATION PRINCIPLES
 # word-for-word in intent — three blocks, one instruction.
+#
+# 2026-08-07: "+ often just a few words" added. The contract already said
+# "fewest sentences", but a SENTENCE was still the unit — and a model that
+# reads "sentence" writes a full clause. Naming the sub-sentence turn here
+# keeps the recency slot saying exactly what HARD RULE 2 now says.
 FINAL_RESPONSE_CONTRACT = """\
 ## FINAL RESPONSE CONTRACT
 For every reply, speak only the words the caller should hear, in the fewest
-sentences that actually answer them. Ask at most one question and let it be the
-last thing you say, then stop. Do not output markdown, bullets, stage
-directions, labels, internal reasoning, or tool names. Do not override the hard
-rules above.
+sentences that actually answer them — often just a few words. Ask at most one
+question and let it be the last thing you say, then stop. Do not output
+markdown, bullets, stage directions, labels, internal reasoning, or tool names.
+Do not override the hard rules above.
 """
 
 
@@ -226,7 +231,8 @@ _KNOWLEDGE_DRIVEN_SUFFIX = (
     "knowledge does not cover, offer to follow up in one short line and ask "
     "your next question — never describe what you looked at or came up short "
     "on, and never guess or invent. Answer in the fewest sentences that "
-    "actually answer them, ask one question at a time, and then stop."
+    "actually answer them — often just a few words — ask one question at a "
+    "time, and then stop."
 )
 
 

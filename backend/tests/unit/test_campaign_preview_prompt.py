@@ -57,10 +57,19 @@ class TestPreviewPromptEndpoint:
         assert resp.direction == "outbound"
         assert resp.has_inbound_directive is False
         assert resp.prompt_chars == len(resp.system_prompt)
-        # Outbound greeting is the per-persona lead_gen sales opener.
-        assert "Adam" in resp.greeting and "Acme" in resp.greeting
-        # System prompt carries persona-specific markers (stage-machine body).
+        # 2026-08-11 opener redesign: the outbound greeting is now a bare
+        # pickup ("Hi there.", "Hello?") with no identity in it — the
+        # per-persona lead_gen sales opener moved into the system prompt's
+        # STAGE 1 block instead (checked below), spoken on the model's own
+        # first reply once the callee has answered the hello.
+        assert "Adam" not in resp.greeting and "Acme" not in resp.greeting
+        words = [w for w in resp.greeting.split() if any(c.isalnum() for c in w)]
+        assert 1 <= len(words) <= 5, f"expected a bare greeting, got: {resp.greeting!r}"
+        # System prompt still carries persona-specific markers (stage-machine
+        # body) AND the identity+reason opener, now reframed as the model's
+        # first real turn.
         assert "WHO YOU ARE" in resp.system_prompt
+        assert "Adam" in resp.system_prompt and "Acme" in resp.system_prompt
 
     async def test_inbound_carries_directive_and_inbound_greeting(self):
         body = CampaignPromptPreviewRequest(

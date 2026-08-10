@@ -65,10 +65,17 @@ def build_live_state_block(
             "where the conversation is now."
         )
     else:
+        # OPENER BUDGET (2026-08-07): "one or two sentences" was the loosest
+        # number anywhere in the prompt for the same turn — and this block is
+        # PREPENDED above everything else on every turn, so it had the top
+        # attention slot. lead_gen STAGE 1 and the inbound directive both say
+        # "one breath, under twenty words"; all three now agree. Divergent
+        # numbers for one turn is how a 7.7s greeting survived a prompt that
+        # already said "keep it short".
         lines.append(
             "- You have not introduced yourself yet — give your short opening "
-            "this turn: who you are and why you're calling, in one or two "
-            "sentences."
+            "this turn: who you are and why you're calling, in one breath, "
+            "under twenty words. Then stop and let them answer."
         )
     if time_of_day_line:
         lines.append(time_of_day_line)

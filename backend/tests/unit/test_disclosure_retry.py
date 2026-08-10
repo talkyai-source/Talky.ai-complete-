@@ -1,67 +1,141 @@
-"""The recording notice is re-delivered when the callee talks over it.
+"""The recording notice is NOT re-delivered when the callee talks over it.
 
-WHY THIS EXISTS (production measurement, 2026-07-31)
----------------------------------------------------
+WHY THIS EXISTS (production measurement, 2026-07-31, REVERSED 2026-08-11)
+---------------------------------------------------------------------------
 The spoken disclosure is the FIRST audio on the call, which puts a ~4-second
 sentence in the exact moment people always speak: the two seconds after they
-pick up. Any speech that is not a bare greeting counts as an interruption, and
-the original implementation treated one interruption as final — the whole
-call's audio was discarded at teardown.
+pick up. The original implementation (pre-2026-07-31) treated one
+interruption as final — the whole call's recording was suppressed.
 
-Measured on the first 7 production calls after it shipped:
+A 2026-07-31 change tried to recover the lost recordings by RETRYING the
+notice — restarting it from the top — once the callee stopped talking.
+Measured on the first 7 production calls after that shipped:
 
     recording_disclosure_spoken        4
     recording_disclosure_interrupted   3     <- 43% of calls lost their recording
-    recording_suppressed_no_disclosure 3
 
-Abandoning the recording because the callee said "Hi, who's this?" is the wrong
-trade. The lawful requirement is that they were TOLD, not that they happened to
-be silent on the first attempt.
+That looked like progress, but the retry itself was never actually observed
+recovering a call in practice: instead, two later production traces showed
+``recording_disclosure_interrupted_retrying attempt=1/2`` followed by the
+caller hanging up ~2s after the restart played. Restarting from the top means
+the callee hears "This call may be recorded..." begin, get interrupted, and
+then BEGIN AGAIN — which reads as a broken robot, not a considerate
+re-delivery, and it talks over whatever they were saying a second time.
 
-The invariant that must NOT be weakened: this may only ever turn a suppressed
-recording into a delivered notice. It must never retain audio for a call where
-the notice was never completed. `test_fails_closed_when_every_attempt_is_talked_over`
-is the load-bearing test.
+The fix reverts to a single attempt, fail-closed: one attempt, and if it's
+interrupted we stop trying rather than restart over the caller. This can only
+ever REMOVE a retry; it cannot cause a recording to be kept that would not
+have been kept before. `test_a_single_interrupted_attempt_fails_closed` is the
+load-bearing test.
 """
 from __future__ import annotations
+
+import types
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from app.domain.services.telephony.modes import agent_first
+from app.domain.services import recording_policy_service as rps
 from app.domain.services.recording_policy_service import (
     DISCLOSURE_FAILED,
     DISCLOSURE_SPOKEN,
+    RecordingDecision,
     get_disclosure_state,
     record_disclosure_state,
 )
 
+_TENANT = "22222222-2222-2222-2222-222222222222"
+_CALL_UUID = "44444444-4444-4444-4444-444444444444"
 
-def test_retry_is_bounded_and_small():
-    """Each attempt delays the real conversation, so this must stay tight."""
-    assert agent_first._DISCLOSURE_MAX_ATTEMPTS == 2
-    assert 0 < agent_first._DISCLOSURE_RETRY_SETTLE_S <= 2.0
+_ANNOUNCE = RecordingDecision(
+    should_record=True,
+    announcement_required=True,
+    announcement_text="This call may be recorded for quality and training purposes.",
+    opt_out_dtmf_digit=None,
+    retention_days=90,
+    reason="tenant_default_two_party",
+)
 
 
-def test_a_settle_gap_exists_between_attempts():
-    """Retrying instantly would talk over the speech that interrupted us and be
-    interrupted again, burning the attempt for nothing."""
-    assert agent_first._DISCLOSURE_RETRY_SETTLE_S >= 0.5
+class _CountingInterruptedPipeline:
+    """Every call to synthesize_and_send_audio reports an interruption —
+    the callee talked over the notice on the one attempt made."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def clear_barge_in_event(self, session):
+        pass
+
+    async def synthesize_and_send_audio(self, session, text, websocket=None):
+        self.calls += 1
+        return True  # interrupted
 
 
-def test_retry_loop_is_present_and_fails_closed():
-    """Structural pin on both halves of the contract.
+@pytest.mark.asyncio
+async def test_a_single_interrupted_attempt_fails_closed():
+    """Load-bearing test for the 2026-08-11 fix: an interrupted notice is
+    attempted exactly ONCE (no restart-from-the-top), and the ledger ends
+    on DISCLOSURE_FAILED so the recording is suppressed."""
+    pipeline = _CountingInterruptedPipeline()
+    session = types.SimpleNamespace(conversation_history=[])
+    voice_session = types.SimpleNamespace(
+        call_id=_CALL_UUID,
+        call_session=session,
+        pipeline=pipeline,
+        _dialer_tenant_id=_TENANT,
+    )
+    container = types.SimpleNamespace(is_initialized=True, db_pool=object())
 
-    A future edit that keeps the retry but drops the fail-closed branch would
-    silently start retaining audio for calls with no delivered notice — the
-    exact compliance failure this whole mechanism exists to prevent.
+    with patch(
+        "app.core.container.get_container", return_value=container
+    ), patch.object(
+        rps.RecordingPolicyService, "decide", new=AsyncMock(return_value=_ANNOUNCE)
+    ):
+        await agent_first._speak_recording_disclosure(voice_session)
+
+    assert pipeline.calls == 1, (
+        "the notice must be attempted exactly once — a second call means "
+        "the restart-from-the-top bug is back"
+    )
+    assert get_disclosure_state(_CALL_UUID) == DISCLOSURE_FAILED
+    assert session.conversation_history == [], (
+        "an interrupted, never-completed notice must not be recorded as "
+        "having been said to the LLM either"
+    )
+
+
+def test_no_retry_after_interruption():
+    """2026-08-11: restarting from the top talked over the caller a second
+    time and both traced production calls hung up right after. There must
+    be exactly one attempt — no restart, no settle-gap sleep to burn."""
+    assert agent_first._DISCLOSURE_MAX_ATTEMPTS == 1
+    assert not hasattr(agent_first, "_DISCLOSURE_RETRY_SETTLE_S"), (
+        "a settle-gap constant implies a retry loop exists again; the "
+        "restart-from-the-top behaviour it supported is the bug this test "
+        "guards against reintroducing"
+    )
+
+
+def test_disclosure_fn_does_not_restart_or_sleep():
+    """Structural pin: no retry loop, no restart, no sleep between attempts.
+
+    A future edit that reintroduces a `for` loop over synthesize_and_send_audio
+    or an `asyncio.sleep` inside `_speak_recording_disclosure` would bring
+    back exactly the "restart talks over the caller" defect this file exists
+    to prevent.
     """
     import inspect
 
     src = inspect.getsource(agent_first._speak_recording_disclosure)
-    assert "_DISCLOSURE_MAX_ATTEMPTS" in src, "retry bound must be applied"
-    assert "spoken_ok" in src
     assert "DISCLOSURE_FAILED" in src, "the fail-closed path must remain"
-    assert "clear_barge_in_event" in src, "barge-in must be cleared between attempts"
+    assert "asyncio.sleep" not in src, (
+        "a settle-gap sleep implies a retry loop; do not restart the notice"
+    )
+    assert src.count("synthesize_and_send_audio(") == 1, (
+        "the notice must be attempted exactly once — no restart-from-the-top"
+    )
 
 
 def test_ledger_still_fails_closed_for_an_unknown_call():

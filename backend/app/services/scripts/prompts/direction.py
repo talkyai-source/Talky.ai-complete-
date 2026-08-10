@@ -50,6 +50,13 @@ def inbound_directive_block(*, agent_name: str, company_name: str) -> str:
     this block is designed to land at position 0 of the system prompt — its
     framing overrides any outbound-cold-open or receptionist phrasing that
     might sit in the persona body below it.
+
+    OPENER BUDGET (2026-08-07). This block used to say "keep the opening to 1-2
+    short sentences" while lead_gen's STAGE 1 said "ONE breath — under twenty
+    words". Two sizes for the same turn, and THIS one both sits at position 0
+    and literally claims to override the other — so the looser number won on
+    the single turn where an 11.7s monologue got a callee to hang up. The two
+    now state the same budget in the same words.
     """
     return (
         f"{INBOUND_DIRECTIVE_SENTINEL} (this overrides any timing or "
@@ -65,9 +72,10 @@ def inbound_directive_block(*, agent_name: str, company_name: str) -> str:
         '- Do NOT answer like a receptionist. Never open with "how can I '
         'help you?", "thanks for calling", or "you\'ve reached ..." — you '
         "called THEM, so you lead with your reason for reaching out.\n"
-        "- If they instead open with a direct question, answer it in 1-2 "
-        "short sentences first, then continue.\n"
-        "- Keep the opening to 1-2 short sentences and ask at most one "
-        "question. After this opening turn, follow the personality, "
-        "knowledge, and rules below for the rest of the call."
+        "- If they instead open with a direct question, answer it in ONE "
+        "short sentence first, then continue.\n"
+        "- Keep the opening to one breath — under twenty words — and ask at "
+        "most one question, then stop and let them answer. After this opening "
+        "turn, follow the personality, knowledge, and rules below for the "
+        "rest of the call."
     )

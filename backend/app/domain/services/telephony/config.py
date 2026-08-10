@@ -159,6 +159,24 @@ def _build_call_greeting(session, *, first_speaker: str) -> str:
     del first_speaker
     agent_name, company = _resolve_greeting_context(session)
 
+    # ── LLM-authored opener (flag-gated, default OFF) ────────────────────
+    # `prewarm._attach_llm_opener` may have stashed a per-lead opener on the
+    # session during the PRE-ORIGINATE window (before the callee's phone rang).
+    # It is only ever set after passing `llm_opener.validate_opener`, so if the
+    # attribute is present the text is already known to satisfy the word
+    # budget, the banned shapes, the identity requirement and the
+    # ends-in-one-question rule. Absent — which is every call until the flag is
+    # turned on, and every call where generation failed for any reason — this
+    # falls straight through to the templates below, unchanged.
+    #
+    # Read here rather than in prewarm so BOTH spoken paths are covered: the
+    # pre-synth fast path (prepare_pre_originate_greeting) and the realtime
+    # slow-path fallback in modes.agent_first._send_outbound_greeting both
+    # arrive at this one function for their text.
+    generated = getattr(session, "_llm_opener_text", None)
+    if isinstance(generated, str) and generated.strip():
+        return generated.strip()
+
     # Persona drives which greeting template is used. It is mirrored straight
     # onto the CallSession (CallSession.persona_type, copied from the
     # VoiceSessionConfig at session creation). Read it off the session first;

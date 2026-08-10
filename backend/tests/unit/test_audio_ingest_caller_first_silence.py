@@ -30,6 +30,21 @@ from app.domain.models.agent_config import AgentConfig, AgentGoal, ConversationF
 from app.domain.models.conversation_state import ConversationContext, ConversationState
 from app.domain.models.session import CallSession
 from app.domain.services.voice_pipeline.audio_ingest import AudioIngest
+from app.domain.services.voice_pipeline.turn_director import OPENING_PHRASES
+
+# Captured BEFORE any test patches asyncio.sleep, so awaiting it inside a
+# replacement for asyncio.sleep cannot recurse into the patch.
+_REAL_SLEEP = asyncio.sleep
+
+
+async def _instant_yield(*_args, **_kwargs) -> None:
+    """A drop-in for asyncio.sleep that takes no time but DOES yield.
+
+    Tests that collapse every timer need the monitor loop to keep handing
+    control back to the event loop; an AsyncMock does not, which starves the
+    loop and stops timeouts firing. See its use below.
+    """
+    await _REAL_SLEEP(0)
 
 
 def _make_session(first_speaker: str) -> CallSession:
@@ -163,6 +178,71 @@ async def test_stale_backchannel_stamp_does_not_crash_silence_monitor():
         call.args[1] for call in pipeline.synthesize_and_send_audio.await_args_list
     ]
     assert "Hello?" in spoken_phrases
+
+
+@pytest.mark.asyncio
+async def test_opening_ladder_is_bounded_and_never_nags_past_its_cap():
+    """2026-08-11 retune — a human re-checks a silent line 2-3 times, not
+    forever. This collapses every opening timer to near-zero (including the
+    new VOICE_OPENING_NUDGE_GAP_S repeat gap) with asyncio.sleep mocked out,
+    so the loop runs far more ticks than VOICE_OPENING_MAX_NUDGES inside its
+    1.5s wall-clock window — a regression back to an unbounded/forgotten cap
+    would nudge many more than 3 times here. Proves the real
+    ``_silence_monitor`` loop enforces the bound, not just that the pure
+    ``silence_action`` decision alone would (it has no memory of prior
+    nudges — see the NOTE in test_silence_action.py)."""
+    session = _make_session("user")
+    pipeline = _make_pipeline()
+
+    ingest = AudioIngest(pipeline)
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "VOICE_OPENING_HELLO_S": "0.01",
+                "VOICE_MID_NUDGE_S": "0.01",
+                "VOICE_SILENCE_HANGUP_S": "30",
+                "VOICE_NUDGE_MIN_GAP_S": "0.01",
+                "VOICE_OPENING_NUDGE_GAP_S": "0.01",
+                "VOICE_OPENING_MAX_NUDGES": "3",
+            },
+        ),
+        # Collapse the monitor's tick sleep WITHOUT removing its YIELD.
+        #
+        # An AsyncMock here hangs this test indefinitely: awaiting it returns
+        # without ever suspending, so with every timer collapsed the monitor
+        # becomes a tight loop that never hands control back to the event
+        # loop — and the `asyncio.wait_for` timeout below is a loop timer, so
+        # it can never fire. `_instant_yield` awaits the REAL sleep (captured
+        # at import, before this patch is installed, so it cannot recurse into
+        # itself) with a zero delay: instant, but a genuine scheduling point.
+        patch("asyncio.sleep", new=_instant_yield),
+    ):
+        task = asyncio.ensure_future(ingest.process(session))
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=1.5)
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            session.stt_active = False
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    spoken_phrases = [
+        call.args[1] for call in pipeline.synthesize_and_send_audio.await_args_list
+    ]
+    assert 1 <= len(spoken_phrases) <= 3, (
+        f"opening ladder nudged {len(spoken_phrases)} times — "
+        f"VOICE_OPENING_MAX_NUDGES=3 was not enforced: {spoken_phrases}"
+    )
+    # Escalates through the real ladder in order, never repeating a rung or
+    # inventing text outside it. Asserted against the live constant rather
+    # than a hardcoded copy — the rung WORDING is a product decision that has
+    # already changed twice; the ORDER and the CAP are what this test owns.
+    assert spoken_phrases == list(OPENING_PHRASES)[: len(spoken_phrases)]
 
 
 @pytest.mark.asyncio

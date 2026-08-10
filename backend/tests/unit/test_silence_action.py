@@ -3,10 +3,26 @@
 Covers the product flow: caller-first agent waits; ~10s → a soft "Hello?";
 caller speaks → normal; 60s of caller silence → auto-close. Pure decision, so
 the flow is verifiable without a live audio pipeline.
+
+2026-08-11: the OPENING re-greet cadence was retuned to feel like a human who
+just dialled — "Hello?" again after a natural ~2-3s pause, not once every
+10-15s (see audio_ingest.py's docstring for the full rationale). That added
+one new parameter to ``silence_action``: ``opening_gap_s``, an OPENING-only
+repeat gap independent of the MID ``nudge_gap_s``. It defaults to ``None``
+(falls back to ``nudge_gap_s``), which is why every test above this comment
+needed zero changes — they never pass it, so they still exercise the exact
+pre-2026-08-11 shared-gap behaviour. The cadence-specific cases below are new.
 """
 from app.domain.services.voice_pipeline.audio_ingest import silence_action
 
 _KW = dict(hangup_s=60.0, opening_s=10.0, mid_s=10.0, nudge_gap_s=12.0)
+
+# Mirrors the real production defaults wired in audio_ingest.py after the
+# 2026-08-11 retune (VOICE_OPENING_HELLO_S / VOICE_OPENING_NUDGE_GAP_S both
+# 2.5s) — a human's actual re-"Hello?" cadence.
+_PROD_OPENING_KW = dict(
+    hangup_s=60.0, opening_s=2.5, mid_s=10.0, nudge_gap_s=15.0, opening_gap_s=2.5,
+)
 
 
 def _act(**over):
@@ -69,3 +85,85 @@ def test_agent_first_uses_mid_threshold_not_opening():
     # is_caller_first False → opening=False regardless of user_turns.
     assert _act(is_caller_first=False, user_turns=0, activity_silence_s=9.0) == "wait"
     assert _act(is_caller_first=False, user_turns=0, activity_silence_s=10.0) == "nudge"
+
+
+# ── 2026-08-11 retune: OPENING has its own, much shorter, repeat gap ────
+def test_opening_gap_is_independent_of_the_mid_gap():
+    # nudge_gap_s (mid) is 12.0 here — far too long for a re-"Hello?" cadence.
+    # opening_gap_s=2.5 is what actually gates the opening ladder's repeats;
+    # 3.0s since the last nudge clears it even though it wouldn't clear the
+    # mid gap.
+    assert _act(
+        is_caller_first=True, user_turns=0,
+        activity_silence_s=10.0, since_last_nudge_s=3.0, opening_gap_s=2.5,
+    ) == "nudge"
+
+
+def test_opening_gap_still_waits_before_its_own_threshold():
+    assert _act(
+        is_caller_first=True, user_turns=0,
+        activity_silence_s=10.0, since_last_nudge_s=1.0, opening_gap_s=2.5,
+    ) == "wait"
+
+
+def test_opening_gap_defaults_to_the_mid_gap_when_not_supplied():
+    # Backward compatibility: a caller that never learns about opening_gap_s
+    # (e.g. an older test) gets exactly the old shared-gap behaviour.
+    assert _act(
+        is_caller_first=True, user_turns=0,
+        activity_silence_s=10.0, since_last_nudge_s=3.0,
+    ) == "wait"  # falls back to nudge_gap_s=12.0; 3.0 < 12.0
+
+
+def test_opening_gap_never_applies_to_a_mid_conversation_tick():
+    # opening_gap_s must only ever gate the OPENING ladder — a mid-call tick
+    # (user_turns>0) keeps using nudge_gap_s even if opening_gap_s is passed.
+    assert _act(
+        is_caller_first=True, user_turns=2,
+        activity_silence_s=10.0, since_last_nudge_s=3.0, opening_gap_s=2.5,
+    ) == "wait"  # nudge_gap_s=12.0 still applies here, 3.0 < 12.0
+
+
+# ── the new production cadence: first re-greet at ~2.5s, not 10s ────────
+def test_first_regreet_fires_at_the_new_production_interval():
+    assert silence_action(
+        caller_silence_s=2.5, activity_silence_s=2.5, since_last_nudge_s=None,
+        in_grace=False, is_caller_first=True, user_turns=0, **_PROD_OPENING_KW,
+    ) == "nudge"
+
+
+def test_first_regreet_waits_just_under_the_new_interval():
+    assert silence_action(
+        caller_silence_s=2.4, activity_silence_s=2.4, since_last_nudge_s=None,
+        in_grace=False, is_caller_first=True, user_turns=0, **_PROD_OPENING_KW,
+    ) == "wait"
+
+
+# ── nudging never touches the caller-silence (hangup) clock ─────────────
+def test_opening_regreets_never_reset_the_hangup_clock():
+    # Even mid-ladder (a nudge just fired 0.5s ago), 60s of continuous CALLER
+    # silence still hangs up — nudges only ever reset activity_silence_s /
+    # since_last_nudge_s, never caller_silence_s, which is driven solely by
+    # the caller actually speaking.
+    assert silence_action(
+        caller_silence_s=60.0, activity_silence_s=0.5, since_last_nudge_s=0.5,
+        in_grace=False, is_caller_first=True, user_turns=0, **_PROD_OPENING_KW,
+    ) == "hangup"
+
+
+# ── grace still suppresses under the new, tighter opening thresholds ────
+def test_grace_still_suppresses_opening_nudge_under_new_thresholds():
+    assert silence_action(
+        caller_silence_s=5.0, activity_silence_s=5.0, since_last_nudge_s=None,
+        in_grace=True, is_caller_first=True, user_turns=0, **_PROD_OPENING_KW,
+    ) == "wait"
+
+
+# ── NOTE on boundedness: the per-call cap on the number of opening re-greets
+# (VOICE_OPENING_MAX_NUDGES, default 3) is enforced by the _silence_monitor
+# loop in audio_ingest.py, not by this pure function — silence_action decides
+# one tick at a time and has no memory of how many nudges already fired. See
+# test_opening_ladder_is_bounded_and_never_nags_past_its_cap in
+# test_audio_ingest_caller_first_silence.py for the integration-level proof
+# that the real loop actually stops nudging once the ladder is exhausted and
+# falls through to the 60s hangup.

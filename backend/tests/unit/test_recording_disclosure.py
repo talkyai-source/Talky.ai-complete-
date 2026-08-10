@@ -377,7 +377,127 @@ async def test_local_save_blocked_after_known_disclosure_failure():
 
 
 # ---------------------------------------------------------------------------
-# 5. Ledger + text helpers
+# 5. Disabled policy — the LAWFUL way to drop the spoken disclosure
+#
+# The client wants the disclosure gone from the opener. Removing the spoken
+# notice while still recording would be unlawful in a two-party jurisdiction
+# (this is a UK campaign) and the ledger would silently bin every recording
+# anyway (announcement_required=True + never spoken => DISCLOSURE_FAILED =>
+# save_and_link refuses the upload). The compliant route is
+# default_consent_mode='disabled': should_record goes False too, so the
+# announcement is dropped as a CONSEQUENCE of not recording, not by lying
+# about a still-active recording.
+# ---------------------------------------------------------------------------
+
+class _DisabledRowConn:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_):
+        return False
+
+    async def fetchrow(self, *a, **k):
+        return {
+            "default_consent_mode": rps.CONSENT_DISABLED,
+            "retention_days": 90,
+            "announcement_text": (
+                "This call may be recorded for quality and training purposes."
+            ),
+            "opt_out_dtmf_digit": "9",
+            "two_party_country_codes": [],
+        }
+
+
+class _DisabledRowPool:
+    def acquire(self):
+        return _DisabledRowConn()
+
+
+_DISABLED = RecordingDecision(
+    should_record=False,
+    announcement_required=False,
+    announcement_text=None,
+    opt_out_dtmf_digit=None,
+    retention_days=90,
+    reason="tenant_policy_disabled",
+)
+
+
+@pytest.mark.asyncio
+async def test_disabled_policy_turns_off_both_recording_and_announcement():
+    """decide() must turn BOTH knobs off together. A decision that dropped
+    the announcement but left should_record=True would record the callee
+    silently — worse than the two-party default it replaces."""
+    decision = await rps.RecordingPolicyService(_DisabledRowPool()).decide(
+        tenant_id="t-disabled"
+    )
+
+    assert decision.should_record is False
+    assert decision.announcement_required is False
+    assert decision.announcement_text is None
+    assert spoken_disclosure_text(decision) is None, (
+        "no text to speak means the greeting path cannot accidentally "
+        "synthesize an announcement for a disabled tenant"
+    )
+
+
+@pytest.mark.asyncio
+async def test_disabled_policy_speaks_no_announcement_on_a_call():
+    log, session = await _run_greeting(_DISABLED)
+
+    kinds = [kind for kind, _ in log]
+    assert "tts" not in kinds, "a disabled tenant must never hear a recording notice"
+    assert kinds == ["opener_audio"] * len(kinds) and kinds, (
+        "the greeting itself must still play — disabling recording must "
+        "not silence the call"
+    )
+    assert get_disclosure_state(CALL_UUID) == rps.DISCLOSURE_NOT_REQUIRED
+
+
+@pytest.mark.asyncio
+async def test_disabled_policy_never_uploads_a_recording():
+    result, s3 = await _save(_DISABLED)
+
+    assert result is None, "should_record=False must be an absolute gate"
+    assert s3.uploads == []
+
+
+@pytest.mark.asyncio
+async def test_two_party_default_still_announces_and_records():
+    """Non-regression on the flip side of the disabled test above: the
+    ordinary two-party default (what every tenant gets unless disabled is
+    set explicitly) must still both SPEAK the notice and RETAIN the
+    recording. Disabling must be an opt-in per-tenant choice, never an
+    accidental side effect of this fix."""
+    log, _ = await _run_greeting(_ANNOUNCE)
+    assert "tts" in [k for k, _ in log], "two-party default must still announce"
+    assert get_disclosure_state(CALL_UUID) == DISCLOSURE_SPOKEN
+
+    result, s3 = await _save(_ANNOUNCE)  # ledger already SPOKEN from the run above
+    assert result is not None, "two-party default must still record"
+    assert len(s3.uploads) == 1
+
+
+@pytest.mark.asyncio
+async def test_partial_interrupted_notice_never_marks_ledger_spoken_or_retains():
+    """A notice cut short by barge-in must read as FAILED, never SPOKEN —
+    and that must propagate all the way to save_and_link refusing the
+    upload, not just to the ledger state in isolation. This is the ledger
+    honesty guarantee the disclosure-retry fix (agent_first.py) depends
+    on: an attempt that didn't finish must never be reported as delivered
+    just to keep the recording."""
+    await _run_greeting(_ANNOUNCE, interrupted=True)
+
+    assert get_disclosure_state(CALL_UUID) == DISCLOSURE_FAILED
+    assert get_disclosure_state(CALL_UUID) != DISCLOSURE_SPOKEN
+
+    result, s3 = await _save(_ANNOUNCE)
+    assert result is None, "a call whose notice never finished must not be retained"
+    assert s3.uploads == []
+
+
+# ---------------------------------------------------------------------------
+# 6. Ledger + text helpers
 # ---------------------------------------------------------------------------
 
 def test_consent_fails_closed_for_unknown_call():

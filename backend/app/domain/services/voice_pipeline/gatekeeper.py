@@ -52,10 +52,10 @@ GATEKEEPER_RULES = """\
   — stay warm, they could put in a good word.
 
 ## HESITATION / SOFT OBJECTION — acknowledge, don't push
-- "Who is this?" / "I'm busy" / any guarded opener: acknowledge first, state
-  the REASON for your call in one plain sentence, then hand them an easy out
-  ("...feel free to tell me to get lost, but I think it's worth a minute").
-  Permission to DECLINE beats permission to proceed.
+- "Who is this?" / "I'm busy" / any guarded opener: acknowledge in a word or
+  two, then give the REASON for your call in one plain sentence and stop.
+  The reason IS the disarming move — you do not need to offer them an exit on
+  top of it, and offering one costs more words than the reason itself.
 - Mirror their last few words or name the mood before asking anything else.
   One question, then stop. Never repeat the same ask twice — change tack or
   close warmly.

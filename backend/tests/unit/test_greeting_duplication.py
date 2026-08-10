@@ -139,6 +139,42 @@ def _greeting_rung_indexes(phrases: list[str]) -> list[int]:
     return [i for i, p in enumerate(phrases) if _GREETING_RUNG.match(p)]
 
 
+def _greeting_word(phrase: str) -> str:
+    """The greeting word a rung opens with, normalised — '' if it doesn't."""
+    m = _GREETING_RUNG.match(phrase or "")
+    if not m:
+        return ""
+    # Collapse an escalated spelling to its root so "Helloooo" == "Hello".
+    word = m.group(1).lower()
+    return re.sub(r"(.)\1+", r"\1", word)
+
+
+def _fresh_greeting_rung_indexes(phrases: list[str]) -> list[int]:
+    """Rungs that open a NEW greeting rather than escalating the first one.
+
+    REFINED 2026-08-11. The original rule was "only rung 0 may greet at all",
+    which caught the real bug — the old ladder's second rung was
+    "Hi, can you hear me okay?", a DIFFERENT greeting word that reads as
+    starting the conversation over, as though the first attempt never
+    happened.
+
+    But it also banned the thing a human actually does on a silent line:
+    call out the SAME word, louder. "Hello?" -> "Hello??" -> "Helloooo, are
+    you there?" is one person escalating one call-out; it is not two
+    introductions stacked. Rung 0's word may repeat (in any escalated
+    spelling); a different greeting word may not appear.
+    """
+    if not phrases:
+        return []
+    first = _greeting_word(phrases[0])
+    out = []
+    for i, p in enumerate(phrases[1:], start=1):
+        w = _greeting_word(p)
+        if w and w != first:
+            out.append(i)
+    return out
+
+
 # ── #2: the every-turn section must not re-assert the opener ───────────────
 
 def test_every_turn_section_has_no_opening_instruction():
@@ -182,10 +218,24 @@ def test_opening_instruction_still_present_in_every_stage_one():
 
 def test_stage_one_still_covers_reason_first_and_the_easy_out():
     """The two specific ideas carried by the deleted bullet — "reason in your
-    first breath" and "hand them the floor" — are preserved upstream."""
+    first breath" and "hand them the floor" — are preserved upstream.
+
+    2026-08-11: the exact assertion on ordering changed here, deliberately.
+    It used to read `"Lead with the REASON straight after your name" in
+    outbound` — i.e. reason immediately after the name, nothing between them.
+    That is no longer the shape: the owner's explicit ask was name -> a light
+    permission ask -> reason, all in the same breath (see the "TURN 2
+    PERMISSION-ASK REORDER" note above LEAD_GEN_OPENINGS in
+    prompts/personas/lead_gen.py for the evidence — the earlier ban on
+    opening on availability conflated a forward permission ask, which
+    measures near the BEST converting openers, with asking whether now is an
+    inconvenient moment for them, which is the worst). The concept this test
+    guards — reason lands early, in the first breath, not deferred — still
+    holds; only its exact position relative to the permission ask moved.
+    """
     outbound = LEAD_GEN_OPENINGS["outbound"]
     assert "FIRST breath" in outbound
-    assert "Lead with the REASON straight after your name" in outbound
+    assert "Lead with your name, then the permission ask, then the reason" in outbound
     assert "easy way to say no" in outbound
     assert "first breath" in LEAD_GEN_KD_BODY
     assert "easy way to decline" in LEAD_GEN_KD_BODY
@@ -228,14 +278,31 @@ def test_few_shot_keeps_its_teaching_value():
 
 # ── #4: the opening silence ladder must not stack greetings ────────────────
 
-def test_opening_ladder_has_exactly_one_greeting_and_it_is_first():
-    greetings = _greeting_rung_indexes(OPENING_PHRASES)
-    assert greetings == [0], OPENING_PHRASES
+def test_opening_ladder_never_starts_a_FRESH_greeting_after_the_first():
+    """Escalating the same call-out is human; opening a new greeting is the
+    bug. See _fresh_greeting_rung_indexes for why this rule was refined."""
+    assert _fresh_greeting_rung_indexes(OPENING_PHRASES) == [], OPENING_PHRASES
 
 
 def test_opening_ladder_control_flags_the_old_second_rung():
-    """POSITIVE CONTROL — the pre-fix ladder IS flagged (two greetings)."""
-    assert _greeting_rung_indexes(_OLD_OPENING_PHRASES) == [0, 1]
+    """POSITIVE CONTROL — the pre-fix ladder IS still flagged: its rung 1
+    ("Hi, can you hear me okay?") uses a DIFFERENT greeting word, which is
+    what made it read as starting over."""
+    assert _fresh_greeting_rung_indexes(_OLD_OPENING_PHRASES) == [1]
+
+
+def test_escalating_the_same_call_out_is_allowed():
+    """The shape the owner actually asked for, and what a person really does
+    on a silent line — one call-out, repeated louder."""
+    assert _fresh_greeting_rung_indexes(
+        ["Hello?", "Hello??", "Helloooo, are you there?"]
+    ) == []
+
+
+def test_a_second_DIFFERENT_greeting_is_still_rejected():
+    """Non-vacuity — the refinement must not have made the rule toothless."""
+    assert _fresh_greeting_rung_indexes(["Hello?", "Hi there?"]) == [1]
+    assert _fresh_greeting_rung_indexes(["Hello?", "Good morning?"]) == [1]
 
 
 def test_opening_ladder_still_escalates_and_never_repeats_itself():

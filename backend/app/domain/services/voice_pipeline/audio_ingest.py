@@ -37,6 +37,7 @@ def silence_action(
     opening_s: float,
     mid_s: float,
     nudge_gap_s: float,
+    opening_gap_s: Optional[float] = None,
 ) -> str:
     """One silence-monitor tick decision → ``'hangup'`` | ``'nudge'`` | ``'wait'``.
 
@@ -47,7 +48,13 @@ def silence_action(
       2. ``caller_silence_s >= hangup_s`` (60s of no caller speech) → close;
       3. otherwise nudge once the ACTIVITY silence passes the threshold
          (``opening_s`` when caller-first and the caller hasn't spoken yet, else
-         ``mid_s``) AND at least ``nudge_gap_s`` has passed since the last nudge.
+         ``mid_s``) AND at least the applicable gap has passed since the last
+         nudge — ``opening_gap_s`` while opening (a human's re-"Hello?" cadence
+         is a couple of seconds, not the ~15s that's reasonable for a mid-call
+         check-in), else ``nudge_gap_s``. ``opening_gap_s`` defaults to
+         ``None``, which falls back to ``nudge_gap_s`` — keeps every existing
+         caller (incl. the pre-2026-08-11 test suite) working unchanged if it
+         never passes the new parameter.
     """
     if in_grace:
         return "wait"
@@ -57,7 +64,10 @@ def silence_action(
     threshold = opening_s if opening else mid_s
     if activity_silence_s < threshold:
         return "wait"
-    if since_last_nudge_s is not None and since_last_nudge_s < nudge_gap_s:
+    gap = nudge_gap_s
+    if opening and opening_gap_s is not None:
+        gap = opening_gap_s
+    if since_last_nudge_s is not None and since_last_nudge_s < gap:
         return "wait"
     return "nudge"
 
@@ -298,21 +308,36 @@ class AudioIngest:
             # caller is still there.  Phrases are varied each time to avoid sounding
             # robotic.  Runs in parallel with the STT consumer loop; cancelled when
             # the pipeline exits.  Disabled for Ask AI (browser sessions).
-            # Natural, GENTLE silence handling (product flow, 2026-07-07):
+            # Natural, GENTLE silence handling (product flow, 2026-07-07;
+            # opening cadence retuned 2026-08-11):
             #   • agent waits (caller-first sends no greeting);
-            #   • after ~10s of no caller speech, one soft "Hello?" nudge — never
-            #     the old aggressive "Are you still there?";
+            #   • after ~2-3s of dead air — how long a human actually pauses
+            #     before re-checking a silent line, not the old 10s that read
+            #     as a dropped call — one soft "Hello?" nudge, repeated up to
+            #     ``_OPENING_MAX_NUDGES`` times a couple of seconds apart
+            #     (never the old aggressive "Are you still there?");
             #   • once the caller speaks, the LLM introduces itself and the
             #     conversation proceeds naturally (prompt-driven);
+            #   • once the opening ladder is exhausted, no more nudges — the
+            #     existing 60s continuous-caller-silence hangup below is what
+            #     eventually ends the call, so this can never loop forever;
             #   • after 60s of continuous caller silence, close the call politely.
-            _OPENING_HELLO_S = float(os.getenv("VOICE_OPENING_HELLO_S", "10"))
+            _OPENING_HELLO_S = float(os.getenv("VOICE_OPENING_HELLO_S", "2.5"))
             _MID_NUDGE_S = float(os.getenv("VOICE_MID_NUDGE_S", "10"))
             _SILENCE_HANGUP_S = float(os.getenv("VOICE_SILENCE_HANGUP_S", "60"))
             _TTS_GRACE_S = 3.0
             # 2026-07-08: widened 12.0 -> 15.0 (env-overridable) so mid
             # check-ins don't stack up as nagging on a caller who is just
-            # thinking; the opening ("hello?") gap is unaffected.
+            # thinking; the opening ("hello?") gap is unaffected — it now has
+            # its own, much shorter, env var below.
             _NUDGE_MIN_GAP_S = float(os.getenv("VOICE_NUDGE_MIN_GAP_S", "15.0"))
+            # 2026-08-11: a human re-dialling doesn't wait 15s between
+            # "Hello?"s — they say it again after a couple of seconds. This is
+            # the OPENING-only repeat gap (mid-call check-ins keep using
+            # _NUDGE_MIN_GAP_S above); silence_action falls back to
+            # _NUDGE_MIN_GAP_S whenever opening_gap_s is left unset, so mid
+            # behaviour is untouched by this change.
+            _OPENING_NUDGE_GAP_S = float(os.getenv("VOICE_OPENING_NUDGE_GAP_S", "2.5"))
             # Phrase ladders + suppression rule moved to turn_director.py
             # (2026-07-08) — pure, unit-tested, and shared so this monitor
             # never again picks a random needy line at random tiers. See
@@ -354,7 +379,15 @@ class AudioIngest:
                 _silence_since = _now()    # last caller OR AI activity → drives nudges
                 _last_nudge_at: Optional[float] = None
                 _nudge_count = 0
-                _MAX_NUDGES = 2
+                # Opening ("Hello?...Hello?...Hello?") and mid-call
+                # ("Still there?") ladders are capped separately — a human
+                # re-checking a silent pickup gives it 2-3 tries, which is a
+                # different (shorter) budget than a mid-conversation check-in
+                # after the caller has already engaged. Both still fall
+                # through to the unconditional 60s hangup once exhausted, so
+                # neither can nudge forever.
+                _MID_MAX_NUDGES = int(os.getenv("VOICE_MID_MAX_NUDGES", "2"))
+                _OPENING_MAX_NUDGES = int(os.getenv("VOICE_OPENING_MAX_NUDGES", "3"))
                 _prev_user_turns = _count_user_turns()
                 _was_active = False
                 _tts_ended_at: Optional[float] = None
@@ -436,6 +469,7 @@ class AudioIngest:
                             opening_s=_OPENING_HELLO_S,
                             mid_s=_MID_NUDGE_S,
                             nudge_gap_s=_NUDGE_MIN_GAP_S,
+                            opening_gap_s=_OPENING_NUDGE_GAP_S,
                         )
                         if _action == "wait":
                             continue
@@ -467,17 +501,23 @@ class AudioIngest:
                             _last_nudge_at = _now()  # keep the gap clock sane
                             continue
 
-                        # Cap nudges per call: after two check-ins a silent human
-                        # isn't coming back, and a third "still with me?" reads as
-                        # nagging (audited calls had up to SIX). Let the 60s
-                        # caller-silence hangup finish the call quietly.
-                        if _action == "nudge" and _nudge_count >= _MAX_NUDGES:
+                        # _action == "nudge": opening (caller-first, not yet spoken)
+                        # → a soft "Hello?"; otherwise a light check-in. Computed
+                        # before the nudge-count cap below because opening and
+                        # mid now have different budgets (_OPENING_MAX_NUDGES vs
+                        # _MID_MAX_NUDGES).
+                        _opening = _is_caller_first and _prev_user_turns == 0
+
+                        # Cap nudges per call: after the ladder's budget a silent
+                        # human isn't coming back, and one more "still with me?"
+                        # / "Hello?" reads as nagging (audited calls had up to
+                        # SIX). Let the 60s caller-silence hangup finish the call
+                        # quietly — this is the bound that keeps the re-greet
+                        # ladder from ever looping forever.
+                        _max_nudges = _OPENING_MAX_NUDGES if _opening else _MID_MAX_NUDGES
+                        if _action == "nudge" and _nudge_count >= _max_nudges:
                             _last_nudge_at = _now()
                             continue
-
-                        # _action == "nudge": opening (caller-first, not yet spoken)
-                        # → a soft "Hello?"; otherwise a light check-in.
-                        _opening = _is_caller_first and _prev_user_turns == 0
 
                         # 2026-07-08 guard: on an AGENT-FIRST call where the
                         # caller has NEVER spoken (no real turn, no fresh
@@ -505,8 +545,17 @@ class AudioIngest:
                                 )
 
                         try:
+                            # 2026-08-11: read the per-call LLM-generated
+                            # ladder if opening_ladder.py stashed one during
+                            # pre-warm (see prewarm._start_opening_ladder_
+                            # generation). getattr default is None, which
+                            # choose_silence_phrase treats identically to not
+                            # passing the argument at all — this line changes
+                            # nothing for the (default-off) static path.
                             _phrase = turn_director.choose_silence_phrase(
                                 is_opening=_opening, nudge_index=_nudge_count,
+                                ladder=getattr(session, "_opening_ladder", None)
+                                if _opening else None,
                             )
                         except Exception as _phrase_exc:
                             logger.debug(
