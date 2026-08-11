@@ -262,3 +262,48 @@ def test_caller_first_behaviour_is_unchanged_by_the_new_parameter():
     )
     assert silence_action(**caller_first) == "nudge"
     assert silence_action(**caller_first, agent_awaiting_first_reply=True) == "nudge"
+
+
+# ── 2026-08-12: the mid nudge was interrupting people mid-thought ──────────
+#
+# Traced production call, twice in 90 seconds:
+#     20:54:46.881  silence (mid), nudging: 'Still there?'
+#     20:54:49.522  EndOfTurn: 'So what can I do about that ...'   (+2.6s)
+#     20:55:00.009  silence (mid), nudging: 'Still there?'
+#     20:55:01.639  EndOfTurn: 'So what what I do ...'             (+1.6s)
+#
+# The caller was composing a question both times. 10s of quiet mid-conversation
+# is thinking, not a dead line.
+
+def _mid(**over):
+    base = dict(
+        caller_silence_s=12.0, activity_silence_s=12.0, since_last_nudge_s=None,
+        in_grace=False, is_caller_first=False, user_turns=3,
+        hangup_s=60.0, opening_s=2.5, mid_s=16.0,
+        nudge_gap_s=15.0, opening_gap_s=2.5,
+    )
+    base.update(over)
+    return base
+
+
+def test_twelve_seconds_of_thinking_is_no_longer_prodded():
+    """THE REGRESSION. At the old 10s threshold this nudged; at 16s it waits."""
+    assert silence_action(**_mid()) == "wait"
+    assert silence_action(**_mid(mid_s=10.0)) == "nudge"   # the old behaviour
+
+
+def test_a_genuinely_dead_line_is_still_checked():
+    """Non-vacuity — raising the threshold must not disable the mid nudge."""
+    assert silence_action(**_mid(caller_silence_s=17.0, activity_silence_s=17.0)) == "nudge"
+
+
+def test_the_opening_threshold_is_untouched_by_the_mid_change():
+    """A silent PICKUP really might be a dead line — that stays at 2.5s."""
+    assert silence_action(
+        **_mid(caller_silence_s=3.0, activity_silence_s=3.0,
+               is_caller_first=True, user_turns=0)
+    ) == "nudge"
+
+
+def test_the_hangup_clock_is_unaffected():
+    assert silence_action(**_mid(caller_silence_s=61.0, activity_silence_s=61.0)) == "hangup"

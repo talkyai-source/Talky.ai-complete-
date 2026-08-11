@@ -155,6 +155,11 @@ async def test_a_genuinely_later_barge_in_DOES_run_again():
 
     await interrupt_playback(s, media_gateway=gw, reason="barge_in")
     await asyncio.sleep(_INTERRUPT_DEDUPE_S + 0.05)
+    # The agent has started its NEXT reply — which is the only way a second
+    # interrupt has anything to stop. Without this the 2026-08-12
+    # "nothing playing" shortcut correctly skips the teardown, and this test
+    # would be asserting work that production would never do either.
+    s.tts_active = True
     again = await interrupt_playback(s, media_gateway=gw, reason="barge_in")
 
     assert gw.calls == 2
@@ -215,3 +220,61 @@ async def test_gateway_without_the_ack_contract_still_succeeds():
 def test_dropped_ms_is_derived_from_frames():
     assert InterruptResult(interrupt_id="x", call_id="c",
                            gateway_dropped_frames=50).gateway_dropped_ms == 1000
+
+
+# ── 2026-08-12: two measurement defects found in a traced production call ──
+
+@pytest.mark.asyncio
+async def test_nothing_playing_skips_the_teardown_but_still_resets_state():
+    """A caller taking their normal next turn raises the same StartOfTurn as a
+    real barge-in, so this ran a full teardown on every utterance — always
+    finding 0 bytes and 0 frames. Harmless, but it made 'barge-in' in the logs
+    and in voice_interrupt_outcome_total indistinguishable from an ordinary
+    turn, which would have made the canary's interruption numbers meaningless.
+    """
+    from app.domain.models.session import CallState
+
+    s = _session()
+    s.tts_active = False          # nothing is playing
+    gw = _Gateway()
+
+    r = await interrupt_playback(s, media_gateway=gw, reason="barge_in")
+
+    assert gw.calls == 0, "no gateway work when there is nothing to stop"
+    assert r.ok is True
+    assert r.state_changed is True
+    assert s.state == CallState.LISTENING
+    assert s.current_user_input == "", "stale transcript must still be dropped"
+
+
+@pytest.mark.asyncio
+async def test_a_real_barge_in_still_runs_the_full_teardown():
+    """Non-vacuity — the shortcut must not swallow genuine interruptions."""
+    s = _session()
+    s.tts_active = True
+    gw = _Gateway()
+
+    r = await interrupt_playback(s, media_gateway=gw, reason="barge_in")
+
+    assert gw.calls == 1
+    assert r.gateway_dropped_frames == 12
+
+
+@pytest.mark.asyncio
+async def test_a_pending_task_is_cancelled_even_when_nothing_is_playing():
+    """A speculative LLM turn with no audio yet must still be cancelled."""
+    cancelled = {"n": 0}
+
+    async def _cancel():
+        cancelled["n"] += 1
+        return True
+
+    s = _session()
+    s.tts_active = False
+    gw = _Gateway()
+
+    await interrupt_playback(
+        s, media_gateway=gw, reason="barge_in", cancel_task=_cancel
+    )
+    assert cancelled["n"] == 1
+    assert gw.calls == 1

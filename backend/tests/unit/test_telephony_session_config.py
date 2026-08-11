@@ -766,9 +766,14 @@ class TestTenantPromptCap:
 
     # ── unit tests on the helper directly ────────────────────────────────
 
-    def test_default_budget_is_6000_chars(self):
+    def test_default_budget_fits_a_real_campaign(self):
+        # RAISED 6000 -> 12000 on 2026-08-12. A real production campaign
+        # (Estimation, 50847cc9) carries 9,465 chars, so every call was
+        # discarding 3,467 of them — 37% — from the END of the operator's
+        # script, where objection handling and closing steps live.
         from app.domain.services.telephony_session_config import _tenant_prompt_char_budget
-        assert _tenant_prompt_char_budget() == 6000
+        assert _tenant_prompt_char_budget() == 12000
+        assert _tenant_prompt_char_budget() > 9465, "must fit the real campaign that exposed this"
 
     def test_budget_is_env_overridable(self, monkeypatch):
         from app.domain.services.telephony_session_config import _tenant_prompt_char_budget
@@ -778,7 +783,7 @@ class TestTenantPromptCap:
     def test_invalid_env_value_falls_back_to_default(self, monkeypatch):
         from app.domain.services.telephony_session_config import _tenant_prompt_char_budget
         monkeypatch.setenv("TELEPHONY_TENANT_PROMPT_MAX_CHARS", "not-a-number")
-        assert _tenant_prompt_char_budget() == 6000
+        assert _tenant_prompt_char_budget() == 12000
 
     def test_none_and_empty_text_pass_through_untouched(self):
         from app.domain.services.telephony_session_config import (
@@ -840,7 +845,7 @@ class TestTenantPromptCap:
         caplog.set_level(logging.WARNING, logger=self._LOGGER_NAME)
         result = _cap_tenant_additional_instructions(huge, campaign_id="runaway")
 
-        assert len(result) <= 6000
+        assert len(result) <= 12000
         warnings = [
             r for r in caplog.records if "telephony_tenant_prompt_capped" in r.message
         ]

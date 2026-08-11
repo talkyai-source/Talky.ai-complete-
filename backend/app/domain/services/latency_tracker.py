@@ -129,9 +129,17 @@ class LatencyMetrics:
 
     @property
     def tts_first_chunk_ms(self) -> Optional[float]:
-        """Time from TTS start to first TTS audio chunk."""
+        """Time from TTS start to first TTS audio chunk.
+
+        Returns None rather than a NEGATIVE value. A negative here means the
+        two stamps came from different pieces of audio (see mark_tts_start's
+        note on silence nudges) — that is unmeasurable, not fast. Reporting it
+        as a number poisoned the turn total and fed garbage to the P95 alerter
+        on exactly the turns that followed a nudge.
+        """
         if self.tts_start_time is not None and self.tts_first_chunk_time is not None:
-            return (self.tts_first_chunk_time - self.tts_start_time) * 1000
+            ms = (self.tts_first_chunk_time - self.tts_start_time) * 1000
+            return ms if ms >= 0 else None
         return None
 
     @property
@@ -267,9 +275,36 @@ class LatencyTracker:
             self._metrics[call_id].llm_end_time = time.monotonic()
 
     def mark_tts_start(self, call_id: str) -> None:
-        """Mark when TTS synthesis starts."""
-        if call_id in self._metrics:
-            self._metrics[call_id].tts_start_time = time.monotonic()
+        """Mark when TTS synthesis starts.
+
+        Also DISCARDS a first-chunk stamp that predates this turn's LLM call
+        (2026-08-12). The silence monitor speaks its nudges ("Hello?", "Still
+        there?") through the same TTS path, which stamps
+        ``tts_first_chunk_time`` — but a nudge is not a turn and never calls
+        ``start_turn``, so that stamp landed in the CURRENT turn's metrics.
+        ``mark_tts_first_chunk`` is first-wins, so it was never corrected, and
+        when the real reply then set a LATER ``tts_start_time`` the subtraction
+        went negative:
+
+            Turn 2 latency: -2526ms (TTS-first-chunk: -2894ms)
+            Turn 3 latency: -1516ms (TTS-first-chunk: -1900ms)
+
+        Audio emitted before this turn's LLM even started cannot belong to this
+        turn's reply, so that is the exact discriminator used here. It is
+        deliberately narrower than "clear on every TTS start": turn_streamer
+        calls this per sentence, and clearing unconditionally would silently
+        re-point the measurement at the LAST sentence instead of the first.
+        """
+        metrics = self._metrics.get(call_id)
+        if metrics is None:
+            return
+        if (
+            metrics.tts_first_chunk_time is not None
+            and metrics.llm_start_time is not None
+            and metrics.tts_first_chunk_time < metrics.llm_start_time
+        ):
+            metrics.tts_first_chunk_time = None
+        metrics.tts_start_time = time.monotonic()
 
     def mark_tts_first_chunk(self, call_id: str) -> None:
         """Mark first TTS audio chunk for the active turn if unset."""

@@ -342,7 +342,22 @@ class AudioIngest:
             #     eventually ends the call, so this can never loop forever;
             #   • after 60s of continuous caller silence, close the call politely.
             _OPENING_HELLO_S = float(os.getenv("VOICE_OPENING_HELLO_S", "2.5"))
-            _MID_NUDGE_S = float(os.getenv("VOICE_MID_NUDGE_S", "10"))
+            # RAISED 10 -> 16 on 2026-08-12. A traced production call nudged
+            # "Still there?" twice while the caller was composing a question,
+            # and both times they began speaking 1.6-2.6s AFTER the prod:
+            #
+            #   20:54:46.881  silence (mid), nudging: 'Still there?'
+            #   20:54:49.522  EndOfTurn: 'So what can I do about that ...'
+            #   20:55:00.009  silence (mid), nudging: 'Still there?'
+            #   20:55:01.639  EndOfTurn: 'So what what I do ...'
+            #
+            # Ten seconds of quiet mid-conversation is not a dead line, it is
+            # someone thinking — and prodding them then is the same naggy
+            # behaviour the opening ladder was retuned to avoid, just at the
+            # other end of the call. The OPENING threshold stays short (2.5s:
+            # a silent pickup really might be a dead line); this one is about
+            # a person who has already spoken and is deciding what to say.
+            _MID_NUDGE_S = float(os.getenv("VOICE_MID_NUDGE_S", "16"))
             _SILENCE_HANGUP_S = float(os.getenv("VOICE_SILENCE_HANGUP_S", "60"))
             _TTS_GRACE_S = 3.0
             # 2026-07-08: widened 12.0 -> 15.0 (env-overridable) so mid

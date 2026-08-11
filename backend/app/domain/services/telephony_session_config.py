@@ -283,7 +283,26 @@ def _fallback_agent_name(
 # maps to roughly ``TELEPHONY_TENANT_PROMPT_MAX_CHARS / 4`` tokens.
 # Env-overridable so it can be tuned per deployment without a redeploy.
 # ---------------------------------------------------------------------------
-_DEFAULT_TENANT_PROMPT_MAX_CHARS = 6000  # ~1500 tokens at ~4 chars/token
+# RAISED 6000 -> 12000 on 2026-08-12. A real production campaign (Estimation,
+# 50847cc9) carries 9,465 characters of operator instructions, so every single
+# call was logging:
+#
+#     telephony_tenant_prompt_capped original_chars=9465 capped_chars=5998
+#
+# i.e. 3,467 characters — 37% of what the operator wrote — silently discarded
+# from the TAIL of their script on every turn of every call. Objection
+# handling, pricing rules and closing steps live at the end of a script, so
+# the agent had never seen them. That is a worse failure than the token cost
+# this cap exists to bound.
+#
+# 12000 chars is ~3000 tokens, and it is a CEILING, not a target: a campaign
+# under budget is passed through untouched, so tenants with short scripts pay
+# nothing for this. Still env-overridable in both directions.
+#
+# The real fix for a very long script is to move FACTS into the knowledge base
+# (retrieved per turn, only when relevant) and keep only BEHAVIOUR in the
+# prompt. This cap is the backstop for when that has not been done.
+_DEFAULT_TENANT_PROMPT_MAX_CHARS = 12000  # ~3000 tokens at ~4 chars/token
 
 
 def _tenant_prompt_char_budget() -> int:
@@ -318,10 +337,16 @@ def _cap_tenant_additional_instructions(text, *, campaign_id=None):
     head = text[:budget]
     cut = head.rsplit(" ", 1)[0] if " " in head else head
     capped = cut.rstrip()
+    lost = original_len - len(capped)
     logger.warning(
         "telephony_tenant_prompt_capped campaign=%s original_chars=%d "
-        "capped_chars=%d budget_chars=%d",
+        "capped_chars=%d budget_chars=%d LOST_chars=%d (%.0f%%) — the END of "
+        "this campaign's instructions was DISCARDED and the agent will never "
+        "see it. Objection handling and closing steps usually live there. "
+        "Fix: shorten the script, move FACTS into the knowledge base, or raise "
+        "TELEPHONY_TENANT_PROMPT_MAX_CHARS.",
         campaign_id, original_len, len(capped), budget,
+        lost, 100.0 * lost / max(original_len, 1),
     )
     return capped
 

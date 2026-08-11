@@ -138,6 +138,7 @@ async def test_a_failing_in_flight_interrupt_does_not_wedge_the_session():
 
     gw = _SlowGateway()
     await asyncio.sleep(0.4)          # past the recent-result window
+    s.tts_active = True               # the next reply is playing
     r2 = await interrupt_playback(s, media_gateway=gw, reason="barge_in")
     assert gw.calls == 1 and r2.ok is True
 
@@ -148,6 +149,7 @@ async def test_sequential_interrupts_past_the_window_still_work():
     s, gw = _session(), _SlowGateway(delay=0.0)
     await interrupt_playback(s, media_gateway=gw, reason="barge_in")
     await asyncio.sleep(0.4)
+    s.tts_active = True          # the next reply is playing — see below
     await interrupt_playback(s, media_gateway=gw, reason="barge_in")
     assert gw.calls == 2
 

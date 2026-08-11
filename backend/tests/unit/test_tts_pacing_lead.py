@@ -129,3 +129,57 @@ def test_clear_output_buffer_drops_the_gateway_queue():
         "clear_output_buffer must flush the C++ gateway queue, not just the "
         "local buffer — otherwise buffered audio plays on after a barge-in"
     )
+
+
+# ── 2026-08-12: negative latency from a silence nudge ──────────────────────
+
+def test_a_first_chunk_stamp_from_before_the_turn_is_discarded():
+    """THE REGRESSION. Silence nudges ("Hello?", "Still there?") speak through
+    the same TTS path and stamp tts_first_chunk_time, but a nudge is not a turn
+    and never calls start_turn — so the stamp landed in the CURRENT turn's
+    metrics. mark_tts_first_chunk is first-wins, so it was never corrected, and
+    when the real reply set a LATER tts_start_time the subtraction went
+    negative:
+
+        Turn 2 latency: -2526ms (TTS-first-chunk: -2894ms)
+    """
+    from app.domain.services.latency_tracker import LatencyTracker
+
+    t = LatencyTracker()
+    t.start_turn("c1", 1)
+    m = t._metrics["c1"]
+
+    m.tts_first_chunk_time = 100.0     # the nudge's audio
+    m.llm_start_time = 105.0           # this turn started thinking AFTER it
+    t.mark_tts_start("c1")             # the real reply's TTS begins now
+
+    assert m.tts_first_chunk_time is None, (
+        "audio emitted before this turn's LLM started cannot belong to it"
+    )
+    assert m.tts_first_chunk_ms is None
+
+
+def test_a_legitimate_first_chunk_is_kept():
+    """Non-vacuity — a stamp from AFTER the LLM started is this turn's."""
+    from app.domain.services.latency_tracker import LatencyTracker
+
+    t = LatencyTracker()
+    t.start_turn("c2", 1)
+    m = t._metrics["c2"]
+
+    m.llm_start_time = 100.0
+    m.tts_first_chunk_time = 106.0     # after the LLM started — ours
+    t.mark_tts_start("c2")
+
+    assert m.tts_first_chunk_time == 106.0
+
+
+def test_a_negative_measurement_is_reported_as_unmeasurable_not_fast():
+    """Belt and braces: even if two stamps ever disagree again, the property
+    must not hand a negative number to the P95 alerter."""
+    from app.domain.services.latency_tracker import LatencyMetrics
+
+    m = LatencyMetrics(call_id="c", turn_id=1)
+    m.tts_start_time = 200.0
+    m.tts_first_chunk_time = 190.0
+    assert m.tts_first_chunk_ms is None

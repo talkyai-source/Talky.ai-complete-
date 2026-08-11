@@ -214,6 +214,35 @@ async def _do_interrupt(
     interrupt_id = uuid.uuid4().hex[:12]
     result = InterruptResult(interrupt_id=interrupt_id, call_id=call_id)
     started = time.monotonic()
+
+    # NOTHING IS PLAYING (2026-08-12). A caller taking their normal next turn
+    # raises the same StartOfTurn as a genuine barge-in, so this ran a full
+    # teardown on every utterance — always finding 0 local bytes and 0 gateway
+    # frames to discard. Harmless (0.2ms) but it made "barge-in" in the logs
+    # and in voice_interrupt_outcome_total indistinguishable from an ordinary
+    # turn, which would have made the canary's interruption-success numbers
+    # meaningless.
+    #
+    # State is still reset — a stale tts_active or a leftover transcript must
+    # not survive — but the gateway/provider calls and the metric are skipped,
+    # and the result says plainly that there was nothing to stop.
+    _tts_playing = bool(getattr(session, "tts_active", False))
+    if not _tts_playing and cancel_task is None:
+        try:
+            from app.domain.models.session import CallState
+
+            session.tts_active = False
+            session.state = CallState.LISTENING
+            session.current_ai_response = ""
+            session.current_user_input = ""
+            result.state_changed = True
+        except Exception as exc:  # noqa: BLE001
+            result.errors.append(f"state:{exc}")
+        result.ok = True
+        result.elapsed_ms = (time.monotonic() - started) * 1000.0
+        _log_step(interrupt_id, call_id, "nothing_playing", reason=reason)
+        return result
+
     _log_step(interrupt_id, call_id, "begin", reason=reason,
               tts_active=getattr(session, "tts_active", None))
 
