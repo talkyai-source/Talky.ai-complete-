@@ -10,6 +10,7 @@ for the exact production migration steps. Every hardcoded value is marked with
 """
 import logging
 import os
+import hashlib
 import random
 import re
 import unicodedata
@@ -56,24 +57,18 @@ AGENT_NAMES = [
 ]
 
 # ---------------------------------------------------------------------------
-# Gendered split of AGENT_NAMES, used ONLY for the no-pool fallback (a campaign
-# that never configured `script_config.agent_names`, or an invalid pool).
+# The gendered split that used to live here (_MALE_AGENT_NAMES /
+# _FEMALE_AGENT_NAMES) was DELETED 2026-08-12.
 #
-# HEURISTIC — these are conventional US-English gender associations for this
-# specific 20-name list, not a general name-gender oracle. It is deliberately
-# small and closed: it never classifies a TENANT-supplied name (those go
-# through the pool, where the operator's own choice always wins). Its only job
-# is to stop the built-in fallback from putting "Sarah" on a male voice.
-# Every name in AGENT_NAMES must appear in exactly one of these two lists.
+# It was a second source of truth for "which gender is this name", duplicating
+# global_ai_config.MALE_NAMES / FEMALE_NAMES — and the two had drifted: 12 of
+# its 20 names were unclassifiable by the oracle, so a name this module handed
+# out was invisible to the mismatch guard that exists to protect it.
+#
+# Name -> gender now has exactly ONE home: global_ai_config. Read it through
+# agent_name_rotator (_inferred_gender to classify, substitute_name_for_voice
+# to pick). Do not re-introduce a local copy — that is the bug.
 # ---------------------------------------------------------------------------
-_MALE_AGENT_NAMES = [
-    "John", "Michael", "David", "Chris", "Ryan",
-    "James", "Daniel", "Matthew", "Andrew", "Joshua",
-]
-_FEMALE_AGENT_NAMES = [
-    "Sarah", "Emily", "Jessica", "Ashley", "Amanda",
-    "Melissa", "Stephanie", "Nicole", "Rachel", "Lauren",
-]
 
 
 def _resolve_voice_gender_safe(voice_id: Optional[str]) -> Optional[str]:
@@ -249,10 +244,14 @@ def _fallback_agent_name(
     matched = substitute_name_for_voice(voice_gender, seed=seed)
     if matched:
         return matched
-    if voice_gender == "male":
-        return random.choice(_MALE_AGENT_NAMES)
-    if voice_gender == "female":
-        return random.choice(_FEMALE_AGENT_NAMES)
+    # Voice gender unknown (an uncatalogued voice) — any name is as good as
+    # any other, but it must still be STABLE for this campaign. An unseeded
+    # random.choice here was the last remaining source of a call-to-call name
+    # change, and it is the path an unrecognised voice always takes.
+    if seed:
+        return AGENT_NAMES[
+            int(hashlib.sha256(str(seed).encode()).hexdigest(), 16) % len(AGENT_NAMES)
+        ]
     return random.choice(AGENT_NAMES)
 # ---------------------------------------------------------------------------
 # Legacy hardcoded estimation + inbound prompts were RETIRED 2026-06-18.
@@ -940,7 +939,13 @@ def build_telephony_session_config(
     # Seed the substitution on the campaign so a retry, or a second call on the
     # same campaign, does not introduce itself with a different name than the
     # attempt before it.
-    _name_seed = _campaign_id(campaign) or None
+    # Stable per CAMPAIGN, varied across campaigns. `_campaign_id` returns the
+    # placeholder "-" when there is no campaign at all, which is truthy — using
+    # it as a seed would pin every campaign-less call in the deployment to the
+    # SAME name. Treat it (and any blank) as "no identity", so those calls stay
+    # varied while a real campaign stays stable across retries.
+    _raw_seed = (_campaign_id(campaign) or "").strip()
+    _name_seed = _raw_seed if _raw_seed and _raw_seed != "-" else None
     _script_text = script_config.get("additional_instructions")
 
     if agent_name_override:

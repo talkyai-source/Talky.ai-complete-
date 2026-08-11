@@ -14,10 +14,9 @@ built, so they cover every one of those paths at once.
 """
 from __future__ import annotations
 
+from app.domain.services.global_ai_config import FEMALE_NAMES, MALE_NAMES
 from app.domain.services.telephony_session_config import (
     AGENT_NAMES,
-    _FEMALE_AGENT_NAMES,
-    _MALE_AGENT_NAMES,
     _fallback_agent_name,
     agent_name_voice_mismatch,
     build_telephony_session_config,
@@ -82,10 +81,34 @@ def test_unknown_voice_keeps_the_legacy_mixed_fallback():
     assert cfg.agent_config.agent_name in AGENT_NAMES
 
 
-def test_gendered_fallback_lists_partition_agent_names():
-    # Documented invariant: every built-in name is classified exactly once.
-    assert sorted(_MALE_AGENT_NAMES + _FEMALE_AGENT_NAMES) == sorted(AGENT_NAMES)
-    assert not set(_MALE_AGENT_NAMES) & set(_FEMALE_AGENT_NAMES)
+def test_name_to_gender_has_exactly_one_home():
+    """2026-08-12 — replaces test_gendered_fallback_lists_partition_agent_names.
+
+    That test policed a LOCAL gendered split in telephony_session_config, which
+    was itself the bug: a second source of truth that drifted from the real
+    oracle. The lists are gone; the invariant that matters now is that
+    global_ai_config is the only classifier, and that it classifies each name
+    unambiguously (a name in BOTH lists reads as unisex and silently disables
+    the mismatch guard for it).
+    """
+    overlap = set(n.lower() for n in MALE_NAMES) & set(n.lower() for n in FEMALE_NAMES)
+    assert not overlap, f"a name in both lists is unclassifiable: {overlap}"
+
+    import app.domain.services.telephony_session_config as tsc
+
+    assert not hasattr(tsc, "_MALE_AGENT_NAMES"), (
+        "the local gendered copy is back — that duplication is the bug"
+    )
+    assert not hasattr(tsc, "_FEMALE_AGENT_NAMES")
+
+
+def test_every_builtin_agent_name_is_classifiable():
+    """AGENT_NAMES is the unknown-voice-gender pool. Every name in it must
+    still be placeable by the oracle, or it is invisible to the guard."""
+    from app.services.scripts.prompts.agent_name_rotator import _inferred_gender
+
+    unplaceable = [n for n in AGENT_NAMES if _inferred_gender(n) is None]
+    assert not unplaceable, unplaceable
 
 
 # ── a configured pool: the OPERATOR's names always win ───────────────
@@ -265,11 +288,7 @@ def test_substituted_name_matches_the_voice():
     name, replaced = resolve_name_against_voice(
         "Sarah jones", ["Sarah jones"], None, "male", seed="c"
     )
-    assert replaced and name in _MALE_AGENT_NAMES + list(
-        __import__(
-            "app.domain.services.global_ai_config", fromlist=["MALE_NAMES"]
-        ).MALE_NAMES
-    )
+    assert replaced and name in MALE_NAMES
 
 
 def test_operator_script_naming_the_agent_blocks_substitution():
@@ -336,21 +355,25 @@ def test_resolver_never_raises_on_garbage():
 # meant to protect it. And the unseeded pick meant a campaign with no name
 # pool introduced itself differently on every call and every retry.
 
-def test_every_fallback_name_is_classifiable_by_the_inference_oracle():
-    """THE DRIFT GUARD. The fallback pool and the gender oracle must agree, or
-    a built-in name is invisible to the very check that protects it."""
+def test_every_name_the_oracle_holds_classifies_back_to_its_own_list():
+    """THE DRIFT GUARD, now pointed at the single list.
+
+    Every name the system can hand out must classify back to the gender it was
+    filed under. A name that does not is invisible to the mismatch guard — the
+    exact defect that let a fallback "Rachel" survive a switch to a male voice.
+    """
     from app.services.scripts.prompts.agent_name_rotator import _inferred_gender
 
     wrong = [
         (n, "male", _inferred_gender(n))
-        for n in _MALE_AGENT_NAMES if _inferred_gender(n) != "male"
+        for n in MALE_NAMES if _inferred_gender(n) != "male"
     ] + [
         (n, "female", _inferred_gender(n))
-        for n in _FEMALE_AGENT_NAMES if _inferred_gender(n) != "female"
+        for n in FEMALE_NAMES if _inferred_gender(n) != "female"
     ]
     assert not wrong, (
-        "these built-in fallback names are not classifiable by the oracle, so "
-        "the mismatch guard cannot see them: " + repr(wrong)
+        "these names are not classifiable back to their own list, so the "
+        "mismatch guard cannot see them: " + repr(wrong)
     )
 
 
