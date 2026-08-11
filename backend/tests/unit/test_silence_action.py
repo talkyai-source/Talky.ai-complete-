@@ -167,3 +167,98 @@ def test_grace_still_suppresses_opening_nudge_under_new_thresholds():
 # test_audio_ingest_caller_first_silence.py for the integration-level proof
 # that the real loop actually stops nudging once the ladder is exhausted and
 # falls through to the 60s hangup.
+
+
+# ── 2026-08-12 regression: a bare hello with no follow-up ──────────────────
+#
+# Reported from a live test: "it stops after speaking one time hi there or
+# hello, no follow up again." An AGENT-FIRST call fell into a hole once turn 1
+# became a bare two-word greeting:
+#
+#   opening = is_caller_first and user_turns == 0   -> False (agent-first)
+#             => the re-greet ladder never applied
+#   should_suppress_mid_nudge(is_caller_first=False,
+#                             caller_has_ever_spoken=False) -> True
+#             => the mid nudge was skipped too
+#
+# Net: "Hi there." then total silence until the 60s hangup. This was safe only
+# while agent-first opened with a full introduction ending in a question. A
+# bare hello and the re-greet ladder are two halves of one design.
+
+def _agent_first_silent_callee(**over):
+    base = dict(
+        caller_silence_s=3.0, activity_silence_s=3.0, since_last_nudge_s=None,
+        in_grace=False, is_caller_first=False, user_turns=0,
+        hangup_s=60.0, opening_s=2.5, mid_s=10.0,
+        nudge_gap_s=15.0, opening_gap_s=2.5,
+    )
+    base.update(over)
+    return base
+
+
+def test_agent_first_bare_hello_still_gets_a_re_greet():
+    """THE REGRESSION. Agent said a bare hello, callee silent 3s — the ladder
+    must fire. Before the fix this returned 'wait' forever."""
+    assert silence_action(
+        **_agent_first_silent_callee(agent_awaiting_first_reply=True)
+    ) == "nudge"
+
+
+def test_agent_first_bare_hello_uses_the_OPENING_threshold_not_mid():
+    """3s is past the 2.5s opening threshold but well short of the 10s mid
+    threshold — proving it took the opening path."""
+    assert silence_action(
+        **_agent_first_silent_callee(
+            caller_silence_s=3.0, activity_silence_s=3.0,
+            agent_awaiting_first_reply=True,
+        )
+    ) == "nudge"
+    # ...and at 1s, still inside the opening threshold, it waits.
+    assert silence_action(
+        **_agent_first_silent_callee(
+            caller_silence_s=1.0, activity_silence_s=1.0,
+            agent_awaiting_first_reply=True,
+        )
+    ) == "wait"
+
+
+def test_once_introduced_the_agent_first_call_returns_to_the_MID_cadence():
+    """Non-vacuity — the opening path must not swallow the whole call. After a
+    real introduction, the slower mid threshold applies again."""
+    assert silence_action(
+        **_agent_first_silent_callee(
+            caller_silence_s=3.0, activity_silence_s=3.0,
+            agent_awaiting_first_reply=False,
+        )
+    ) == "wait"
+
+
+def test_the_hangup_clock_is_untouched_by_the_fix():
+    """60s of caller silence still closes the call, opening state or not."""
+    assert silence_action(
+        **_agent_first_silent_callee(
+            caller_silence_s=61.0, activity_silence_s=61.0,
+            agent_awaiting_first_reply=True,
+        )
+    ) == "hangup"
+
+
+def test_grace_still_suppresses_the_new_opening_path():
+    """The agent must never nudge over its own playback."""
+    assert silence_action(
+        **_agent_first_silent_callee(
+            in_grace=True, agent_awaiting_first_reply=True,
+        )
+    ) == "wait"
+
+
+def test_caller_first_behaviour_is_unchanged_by_the_new_parameter():
+    """The default is False, so every pre-existing caller is byte-identical."""
+    caller_first = dict(
+        caller_silence_s=3.0, activity_silence_s=3.0, since_last_nudge_s=None,
+        in_grace=False, is_caller_first=True, user_turns=0,
+        hangup_s=60.0, opening_s=2.5, mid_s=10.0,
+        nudge_gap_s=15.0, opening_gap_s=2.5,
+    )
+    assert silence_action(**caller_first) == "nudge"
+    assert silence_action(**caller_first, agent_awaiting_first_reply=True) == "nudge"

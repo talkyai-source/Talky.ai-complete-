@@ -38,6 +38,7 @@ def silence_action(
     mid_s: float,
     nudge_gap_s: float,
     opening_gap_s: Optional[float] = None,
+    agent_awaiting_first_reply: bool = False,
 ) -> str:
     """One silence-monitor tick decision → ``'hangup'`` | ``'nudge'`` | ``'wait'``.
 
@@ -60,7 +61,25 @@ def silence_action(
         return "wait"
     if caller_silence_s >= hangup_s:
         return "hangup"
-    opening = is_caller_first and user_turns == 0
+    # "Opening" = the callee has not spoken yet AND the agent has not yet
+    # delivered a real introduction — it has, at most, said a bare hello.
+    #
+    # 2026-08-12 REGRESSION FIX. This used to be `is_caller_first and
+    # user_turns == 0`, which was correct only while agent-first calls opened
+    # with a full introduction ending in a question ("Hi! Alexia calling — got
+    # a moment?"). Once turn 1 became a bare two-word pickup greeting, an
+    # agent-first call fell into a hole: `opening` was False (not caller-first)
+    # so the re-greet ladder never applied, AND `should_suppress_mid_nudge`
+    # returned True (not caller-first, callee never spoke) so the mid nudge was
+    # skipped too. The agent said "Hi there." and then went silent until the
+    # 60s hangup — reported from a live test as "it stops after speaking one
+    # time, no follow up".
+    #
+    # A bare hello and the re-greet ladder are two halves of ONE design: a
+    # two-word greeting is only safe if something follows it up. So the trigger
+    # is now the state that actually matters — nobody has spoken and we have
+    # not introduced ourselves — not which side happened to dial.
+    opening = user_turns == 0 and (is_caller_first or agent_awaiting_first_reply)
     threshold = opening_s if opening else mid_s
     if activity_silence_s < threshold:
         return "wait"
@@ -470,6 +489,14 @@ class AudioIngest:
                             mid_s=_MID_NUDGE_S,
                             nudge_gap_s=_NUDGE_MIN_GAP_S,
                             opening_gap_s=_OPENING_NUDGE_GAP_S,
+                            # An agent-first call that has only said a bare
+                            # pickup greeting is in the OPENING state too —
+                            # see silence_action for the regression this fixes.
+                            # _has_introduced is set False by agent_first
+                            # precisely when the greeting was a bare hello.
+                            agent_awaiting_first_reply=(
+                                not getattr(session, "_has_introduced", False)
+                            ),
                         )
                         if _action == "wait":
                             continue
@@ -506,7 +533,24 @@ class AudioIngest:
                         # before the nudge-count cap below because opening and
                         # mid now have different budgets (_OPENING_MAX_NUDGES vs
                         # _MID_MAX_NUDGES).
-                        _opening = _is_caller_first and _prev_user_turns == 0
+                        # MUST match silence_action's `opening` rule exactly.
+                        # 2026-08-12: these two drifted apart and the bug was
+                        # subtle — silence_action correctly decided to nudge an
+                        # agent-first call that had only said a bare hello, but
+                        # THIS line still said "not opening", so the phrase came
+                        # from the MID ladder: "No rush — I'm still on the line
+                        # whenever you're ready." That needy re-offer landing
+                        # before the prospect has spoken is precisely the
+                        # 2026-07-08 bug should_suppress_mid_nudge exists to
+                        # prevent — so a half-applied fix turned dead air into
+                        # the wrong words. Deciding WHETHER to nudge and
+                        # choosing WHAT to say must read the same state.
+                        _awaiting_first_reply = not getattr(
+                            session, "_has_introduced", False
+                        )
+                        _opening = _prev_user_turns == 0 and (
+                            _is_caller_first or _awaiting_first_reply
+                        )
 
                         # Cap nudges per call: after the ladder's budget a silent
                         # human isn't coming back, and one more "still with me?"
@@ -531,7 +575,19 @@ class AudioIngest:
                                 _caller_spoke = bool(
                                     getattr(session, "_caller_spoke_since_greeting", False)
                                 ) or _prev_user_turns > 0
-                                if turn_director.should_suppress_mid_nudge(
+                                # An agent that has only said a bare hello is
+                                # in the OPENING ladder, not the MID one — the
+                                # suppression below exists to stop "I'm still
+                                # here whenever you're ready" landing before
+                                # the prospect has spoken, which is a MID
+                                # phrase. Suppressing here instead left a bare
+                                # "Hi there." with no follow-up at all (see
+                                # silence_action, 2026-08-12).
+                                # _awaiting_first_reply computed once above,
+                                # with _opening — the three decisions (nudge?
+                                # / suppress? / which words?) must read one
+                                # value, not three copies that can drift.
+                                if not _awaiting_first_reply and turn_director.should_suppress_mid_nudge(
                                     is_caller_first=_is_caller_first,
                                     caller_has_ever_spoken=_caller_spoke,
                                 ):

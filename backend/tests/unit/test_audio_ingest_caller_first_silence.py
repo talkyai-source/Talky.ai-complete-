@@ -246,18 +246,47 @@ async def test_opening_ladder_is_bounded_and_never_nags_past_its_cap():
 
 
 @pytest.mark.asyncio
-async def test_agent_first_session_still_suppresses_mid_nudge():
-    """Same silent-callee scenario, but agent-first: should_suppress_mid_nudge
-    must still swallow the nudge (the caller never spoke, so a MID nudge
-    would be the first thing they hear from us — the 2026-07-08 bug this
-    suppression exists for). Confirms the FIX 2 change to '== "user"' does
-    not accidentally flip agent-first behaviour."""
+async def test_agent_first_after_a_real_introduction_still_suppresses_mid_nudge():
+    """The 2026-07-08 guard, intact. Agent-first, caller never spoke, and the
+    agent HAS already introduced itself — a MID nudge here would make "I'm
+    still here whenever you're ready" the second thing the prospect hears.
+    should_suppress_mid_nudge must still swallow it."""
     session = _make_session("agent")
+    session._has_introduced = True          # a full opener was delivered
     pipeline = _make_pipeline()
 
     await _run_until_silence_tick(session, pipeline)
 
     assert not pipeline.synthesize_and_send_audio.await_args_list, (
-        "agent-first session with a caller who never spoke must not be "
-        "nudged — should_suppress_mid_nudge should have swallowed it"
+        "agent-first session with a caller who never spoke must not get a MID "
+        "nudge — should_suppress_mid_nudge should have swallowed it"
+    )
+
+
+@pytest.mark.asyncio
+async def test_agent_first_after_a_BARE_HELLO_does_get_re_greeted():
+    """THE 2026-08-12 REGRESSION.
+
+    Once turn 1 became a bare two-word pickup greeting, an agent-first call
+    fell into a hole: `opening` required is_caller_first (False here) so the
+    ladder never applied, AND should_suppress_mid_nudge fired (not caller-
+    first, callee never spoke) so the mid nudge was skipped too. The agent
+    said "Hi there." and went silent until the 60s hangup — reported live as
+    "it stops after speaking one time, no follow up".
+
+    A bare hello and the re-greet ladder are two halves of one design.
+    """
+    session = _make_session("agent")
+    session._has_introduced = False         # only a bare hello was spoken
+    pipeline = _make_pipeline()
+
+    await _run_until_silence_tick(session, pipeline)
+
+    spoken = [c.args[1] for c in pipeline.synthesize_and_send_audio.await_args_list]
+    assert spoken, "a bare hello with no follow-up is dead air — must re-greet"
+    # And it must be the OPENING ladder, NOT the needy MID phrase that the
+    # suppression above exists to prevent.
+    assert spoken[0] == OPENING_PHRASES[0], spoken
+    assert "still here" not in spoken[0].lower(), (
+        "the MID re-offer must never be the first thing a prospect hears"
     )
