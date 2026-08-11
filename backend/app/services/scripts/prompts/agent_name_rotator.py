@@ -10,6 +10,7 @@ restarts.
 """
 from __future__ import annotations
 
+import re
 import random
 from typing import Mapping, Optional, Sequence
 
@@ -181,6 +182,45 @@ def name_is_referenced_in(text: Optional[str], pool: Sequence[str]) -> bool:
         if _re.search(rf"\b{_re.escape(first)}\b", haystack):
             return True
     return False
+
+
+def rename_agent_in_script(text: Optional[str], old: str, new: str) -> Optional[str]:
+    """Rewrite the operator's own script so it names the agent we will speak as.
+
+    WHY THIS EXISTS (2026-08-12). ``resolve_name_against_voice`` used to face a
+    false choice when a campaign's only name conflicted with its voice AND the
+    campaign's own instructions referenced that name:
+
+      * substitute  -> the agent says "Michael" while its 9,000-character
+        script asserts "You are Sarah" (the 2026-07-09 self-contradiction), or
+      * keep        -> a male voice introduces itself as "Sarah" (the audible
+        defect this whole module exists to prevent).
+
+    It chose KEEP, so production campaign 50847cc9 shipped a male London voice
+    saying "this is Sarah" — logged, correctly, as agent_name_conflict_kept,
+    and still wrong in the caller's ear.
+
+    There is no need to choose. Rename the agent in the script too and both
+    problems disappear: the spoken name matches the voice AND the prompt agrees
+    with itself.
+
+    Matches the FIRST TOKEN on a word boundary, case-insensitively — the same
+    rule ``name_is_referenced_in`` uses to detect the reference in the first
+    place, so detection and rewrite can never disagree. Returns ``text``
+    unchanged when there is nothing to do.
+    """
+    if not text or not old or not new:
+        return text
+    first = str(old).strip().split()
+    if not first:
+        return text
+    token = first[0].strip()
+    if len(token) < 2:
+        return text
+    replacement = str(new).strip().split()[0] if str(new).strip() else new
+    return re.sub(
+        rf"\b{re.escape(token)}\b", replacement, str(text), flags=re.IGNORECASE
+    )
 
 
 def substitute_name_for_voice(

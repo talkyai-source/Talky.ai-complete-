@@ -196,15 +196,22 @@ def resolve_name_against_voice(
         if not pool_wholly_conflicts(pool, genders, voice_gender):
             return chosen, None
         if name_is_referenced_in(script_text, pool):
-            logger.warning(
-                "agent_name_conflict_kept campaign_script_names_the_agent — "
-                "every configured name conflicts with the %s voice, but the "
-                "campaign's own instructions reference one of them, so it is "
-                "KEPT to avoid a self-contradicting prompt. Fix the campaign: "
-                "change the voice, or the names, or tag the name's gender.",
+            # 2026-08-12: this used to RETURN THE CONFLICTING NAME here, to
+            # avoid a self-contradicting prompt. That traded an AUDIBLE defect
+            # (a male voice saying "this is Sarah" — campaign 50847cc9, logged
+            # as agent_name_conflict_kept and still wrong in the caller's ear)
+            # for a TEXTUAL one nobody hears. It was a false choice: the caller
+            # renames the agent in the script too (rename_agent_in_script), so
+            # the spoken name matches the voice AND the prompt agrees with
+            # itself. We fall through to the substitution below; the caller is
+            # told via `substituted_from` and rewrites its script text.
+            logger.info(
+                "agent_name_conflict_script_rename — every configured name "
+                "conflicts with the %s voice and the campaign's own "
+                "instructions reference one of them, so the name is being "
+                "substituted AND the script rewritten to match.",
                 voice_gender,
             )
-            return chosen, None
         replacement = substitute_name_for_voice(voice_gender, seed=seed)
         if not replacement or replacement == chosen:
             return chosen, None
@@ -946,6 +953,10 @@ def build_telephony_session_config(
     # varied while a real campaign stays stable across retries.
     _raw_seed = (_campaign_id(campaign) or "").strip()
     _name_seed = _raw_seed if _raw_seed and _raw_seed != "-" else None
+    # Set by the two resolve_name_against_voice branches below; the fallback
+    # and pool-invalid branches never substitute, so initialise it here or the
+    # script-rename block further down raises NameError on those paths.
+    _substituted_from: Optional[str] = None
     _script_text = script_config.get("additional_instructions")
 
     if agent_name_override:
@@ -1015,6 +1026,38 @@ def build_telephony_session_config(
         script_config.get("additional_instructions"),
         campaign_id=_campaign_id(campaign),
     )
+
+    # If the agent's name was substituted because the configured one could not
+    # be spoken by this voice, rename it in the operator's own ROLE/GOAL text
+    # too. Without this the prompt would assert "You are Sarah" while the agent
+    # introduces itself as someone else — the 2026-07-09 self-contradiction,
+    # which is exactly why the substitution used to be abandoned entirely
+    # (leaving a male voice saying "Sarah"). Renaming both sides removes the
+    # need to choose. Never raises: a failed rewrite leaves the text as-is,
+    # which is no worse than before.
+    if _substituted_from and _tenant_additional_instructions:
+        try:
+            from app.services.scripts.prompts.agent_name_rotator import (
+                rename_agent_in_script,
+            )
+
+            _renamed = rename_agent_in_script(
+                _tenant_additional_instructions, _substituted_from, agent_name
+            )
+            if _renamed != _tenant_additional_instructions:
+                logger.info(
+                    "agent_name_renamed_in_script campaign=%s %r -> %r — the "
+                    "campaign's own instructions referenced the substituted "
+                    "name and were rewritten so the prompt agrees with what "
+                    "the agent actually says",
+                    _campaign_id(campaign), _substituted_from, agent_name,
+                )
+                _tenant_additional_instructions = _renamed
+        except Exception as _rename_exc:  # pragma: no cover - never break a call
+            logger.warning(
+                "agent_name_script_rename_failed campaign=%s err=%s",
+                _campaign_id(campaign), _rename_exc,
+            )
 
     def _compose(kd: bool) -> str:
         return compose_prompt(

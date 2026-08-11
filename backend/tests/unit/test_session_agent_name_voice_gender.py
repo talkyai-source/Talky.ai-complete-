@@ -291,15 +291,28 @@ def test_substituted_name_matches_the_voice():
     assert replaced and name in MALE_NAMES
 
 
-def test_operator_script_naming_the_agent_blocks_substitution():
-    """THE regression guard. If the campaign's own ROLE/GOAL text names the
-    agent, substituting would contradict it — keep the name, warn instead."""
+def test_operator_script_naming_the_agent_no_longer_blocks_substitution():
+    """2026-08-12 — INVERTED, deliberately.
+
+    This used to assert that a script naming the agent KEEPS the conflicting
+    name ("substituting would contradict it — keep the name, warn instead").
+    The concern is real, but the resolution was wrong: it kept a female name on
+    a male voice — a defect the CALLER HEARS — to avoid a contradiction inside
+    a prompt that nobody hears. Production campaign 50847cc9 shipped exactly
+    that, logged as agent_name_conflict_kept.
+
+    It was a false choice. The name is now substituted AND
+    `rename_agent_in_script` rewrites the operator's text to match, so the
+    prompt still agrees with itself. The end-to-end proof is
+    test_the_composed_prompt_no_longer_contradicts_the_spoken_name.
+    """
     name, replaced = resolve_name_against_voice(
         "Sarah jones", ["Sarah jones"], None, "male",
         script_text="You are Sarah, a friendly estimator for All-state.",
         seed="c",
     )
-    assert (name, replaced) == ("Sarah jones", None)
+    assert replaced == "Sarah jones", "the caller must be told what to rename"
+    assert name in MALE_NAMES, name
 
 
 def test_script_match_is_word_bounded():
@@ -404,3 +417,105 @@ def test_unknown_voice_gender_still_yields_a_usable_name():
     """No voice gender -> the legacy mixed pick, never an empty name."""
     assert _fallback_agent_name(None, seed="c1")
     assert _fallback_agent_name("", seed="c1")
+
+
+# ── 2026-08-12: the false choice between an audible defect and a textual one ─
+#
+# Production campaign 50847cc9, AFTER the pool_wholly_conflicts fix:
+#     pool_wholly_conflicts(['Sarah'], {'Sarah':'female'}, 'male') -> True
+#     name_is_referenced_in(instructions, ['Sarah'])               -> True
+#     resolve_name_against_voice(...)                              -> 'Sarah'
+#
+# The conflict WAS detected, then abandoned: the campaign's own 9,465-character
+# instructions mention "Sarah", so substituting would have produced a prompt
+# asserting "You are Sarah" while the agent introduced itself as someone else
+# (the 2026-07-09 self-contradiction). It chose to keep the conflicting name —
+# trading an AUDIBLE defect a caller hears for a TEXTUAL one nobody does.
+#
+# It was a false choice. Rename the agent in the script too.
+
+def test_rename_agent_in_script_rewrites_every_reference():
+    from app.services.scripts.prompts.agent_name_rotator import rename_agent_in_script
+
+    out = rename_agent_in_script(
+        "You are Sarah, an estimator. Sarah always confirms the address.",
+        "Sarah", "James",
+    )
+    assert "Sarah" not in out
+    assert out.count("James") == 2
+
+
+def test_rename_is_case_insensitive_and_word_bounded():
+    from app.services.scripts.prompts.agent_name_rotator import rename_agent_in_script
+
+    # matches "sarah" regardless of case ...
+    assert "James" in rename_agent_in_script("you are sarah here", "Sarah", "James")
+    # ... but never inside another word
+    assert rename_agent_in_script(
+        "the samples are ready", "Sam", "James"
+    ) == "the samples are ready"
+
+
+def test_rename_uses_the_first_token_like_the_detector_does():
+    """name_is_referenced_in matches on the first token, so the rewrite must
+    too — or a name could be detected and then not replaced."""
+    from app.services.scripts.prompts.agent_name_rotator import (
+        name_is_referenced_in,
+        rename_agent_in_script,
+    )
+
+    script = "You are Sarah, the estimator."
+    assert name_is_referenced_in(script, ["Sarah jones"]) is True
+    out = rename_agent_in_script(script, "Sarah jones", "James")
+    assert "Sarah" not in out and "James" in out
+
+
+def test_rename_is_a_no_op_when_there_is_nothing_to_do():
+    from app.services.scripts.prompts.agent_name_rotator import rename_agent_in_script
+
+    assert rename_agent_in_script(None, "Sarah", "James") is None
+    assert rename_agent_in_script("", "Sarah", "James") == ""
+    assert rename_agent_in_script("no names here", "Sarah", "James") == "no names here"
+
+
+def test_THE_50847cc9_CASE_substitutes_instead_of_keeping():
+    """THE REGRESSION, end to end. A female-only pool on a male voice whose
+    script names the agent must now substitute, not keep."""
+    from app.domain.services.telephony_session_config import (
+        resolve_name_against_voice,
+    )
+
+    name, substituted = resolve_name_against_voice(
+        "Sarah", ["Sarah"], {"Sarah": "female"}, "male",
+        script_text="You are Sarah, an estimator for Acme. " * 40,
+        seed="50847cc9",
+    )
+    assert substituted == "Sarah", "the conflicting name must be reported"
+    assert name != "Sarah"
+    assert name in MALE_NAMES, name
+
+
+def test_the_composed_prompt_no_longer_contradicts_the_spoken_name():
+    """The whole point: after substitution the script must not still say the
+    old name."""
+    camp = {
+        "id": "camp-rename",
+        "voice_id": MALE_VOICE,
+        "script_config": {
+            "company_name": "Acme",
+            "knowledge_driven": True,
+            "agent_names": ["Sarah"],
+            "agent_name_genders": {"Sarah": "female"},
+            "additional_instructions": "You are Sarah, an estimator for Acme.",
+        },
+    }
+    cfg = _cfg(camp)
+    spoken = cfg.agent_config.agent_name
+    prompt = cfg.system_prompt or ""
+
+    assert spoken != "Sarah"
+    assert spoken in MALE_NAMES
+    assert "Sarah" not in prompt, (
+        "the prompt still names the agent Sarah while it speaks as "
+        f"{spoken!r} — the self-contradiction the rename exists to remove"
+    )
