@@ -18,6 +18,7 @@ from app.domain.services.telephony_session_config import (
     AGENT_NAMES,
     _FEMALE_AGENT_NAMES,
     _MALE_AGENT_NAMES,
+    _fallback_agent_name,
     agent_name_voice_mismatch,
     build_telephony_session_config,
 )
@@ -51,15 +52,28 @@ def _campaign(voice_id, *, agent_names=None, genders=None):
 def test_no_pool_male_voice_never_picks_a_female_name():
     # THE reported bug. Repeat: the old code was a coin flip over a
     # mixed-gender list, so a single run could pass by luck.
-    for _ in range(60):
-        cfg = _cfg(_campaign(MALE_VOICE))
-        assert cfg.agent_config.agent_name in _MALE_AGENT_NAMES
+    #
+    # 2026-08-12: asserts the name's inferred GENDER rather than membership of
+    # one specific list. The fallback now delegates to the single shared
+    # implementation, and the property that matters is "this name reads as
+    # male", not "this name came from that particular array".
+    from app.services.scripts.prompts.agent_name_rotator import _inferred_gender
+
+    for i in range(60):
+        cfg = _cfg(_campaign(MALE_VOICE), agent_name_override=None)
+        assert _inferred_gender(cfg.agent_config.agent_name) == "male", (
+            cfg.agent_config.agent_name
+        )
 
 
 def test_no_pool_female_voice_never_picks_a_male_name():
+    from app.services.scripts.prompts.agent_name_rotator import _inferred_gender
+
     for _ in range(60):
         cfg = _cfg(_campaign(FEMALE_VOICE))
-        assert cfg.agent_config.agent_name in _FEMALE_AGENT_NAMES
+        assert _inferred_gender(cfg.agent_config.agent_name) == "female", (
+            cfg.agent_config.agent_name
+        )
 
 
 def test_unknown_voice_keeps_the_legacy_mixed_fallback():
@@ -304,3 +318,66 @@ def test_resolver_never_raises_on_garbage():
     for pool in (None, [], [""], [None], ["Sarah", None]):
         name, _ = resolve_name_against_voice("Sarah", pool, None, "male", seed="c")
         assert isinstance(name, str)
+
+
+# ── 2026-08-12: duplicate code + drifted data + non-determinism ────────────
+#
+# Found while auditing the naming path for exactly this class of bug. TWO
+# functions answered the same question — "give me a built-in name matching
+# this voice gender" — from TWO different lists:
+#
+#   substitute_name_for_voice   -> global_ai_config MALE_NAMES/FEMALE_NAMES,
+#                                  SEEDED (stable across retries)
+#   _fallback_agent_name        -> its own _MALE/_FEMALE_AGENT_NAMES copies,
+#                                  UNSEEDED (a fresh random pick every call)
+#
+# The lists had drifted: 12 of the 20 fallback names were not classifiable by
+# _inferred_gender, so a fallback name was invisible to the mismatch guard
+# meant to protect it. And the unseeded pick meant a campaign with no name
+# pool introduced itself differently on every call and every retry.
+
+def test_every_fallback_name_is_classifiable_by_the_inference_oracle():
+    """THE DRIFT GUARD. The fallback pool and the gender oracle must agree, or
+    a built-in name is invisible to the very check that protects it."""
+    from app.services.scripts.prompts.agent_name_rotator import _inferred_gender
+
+    wrong = [
+        (n, "male", _inferred_gender(n))
+        for n in _MALE_AGENT_NAMES if _inferred_gender(n) != "male"
+    ] + [
+        (n, "female", _inferred_gender(n))
+        for n in _FEMALE_AGENT_NAMES if _inferred_gender(n) != "female"
+    ]
+    assert not wrong, (
+        "these built-in fallback names are not classifiable by the oracle, so "
+        "the mismatch guard cannot see them: " + repr(wrong)
+    )
+
+
+def test_the_fallback_delegates_to_the_single_implementation():
+    """One list, one implementation. A name handed out by the fallback must be
+    one the substitution path would also produce."""
+    from app.domain.services.global_ai_config import FEMALE_NAMES, MALE_NAMES
+
+    assert _fallback_agent_name("male", seed="c1") in MALE_NAMES
+    assert _fallback_agent_name("female", seed="c1") in FEMALE_NAMES
+
+
+def test_the_fallback_is_stable_for_a_given_campaign():
+    """THE REGRESSION. Unseeded, this re-rolled on every call and every retry —
+    a prospect called back by "Michael" after speaking to "Sarah"."""
+    first = _fallback_agent_name("male", seed="campaign-abc")
+    for _ in range(25):
+        assert _fallback_agent_name("male", seed="campaign-abc") == first
+
+
+def test_different_campaigns_still_get_different_names():
+    """Non-vacuity — stability must not collapse every campaign onto one name."""
+    names = {_fallback_agent_name("female", seed=f"campaign-{i}") for i in range(30)}
+    assert len(names) > 1, "seeding must not make every campaign identical"
+
+
+def test_unknown_voice_gender_still_yields_a_usable_name():
+    """No voice gender -> the legacy mixed pick, never an empty name."""
+    assert _fallback_agent_name(None, seed="c1")
+    assert _fallback_agent_name("", seed="c1")

@@ -219,12 +219,36 @@ def resolve_name_against_voice(
         return chosen, None
 
 
-def _fallback_agent_name(voice_gender: Optional[str]) -> str:
+def _fallback_agent_name(
+    voice_gender: Optional[str], *, seed: Optional[str] = None
+) -> str:
     """Built-in agent name for a campaign with no configured name pool.
 
     Matches the voice's gender so a male voice never introduces itself with a
     female name. Unknown voice gender → the legacy mixed pick.
+
+    DELEGATES to ``substitute_name_for_voice`` (2026-08-12). This used to pick
+    from its own ``_MALE_AGENT_NAMES``/``_FEMALE_AGENT_NAMES`` copies, which
+    were a second source of truth for the same question, and the two had
+    drifted: 12 of the 20 names here were NOT classifiable by
+    ``_inferred_gender`` (which reads global_ai_config's lists), so a fallback
+    name like "Rachel" or "Joshua" was invisible to the very mismatch guard
+    meant to protect it. If the campaign's voice was later switched — exactly
+    what happened on 50847cc9 — nothing would flag or correct it.
+
+    ``seed`` makes the pick STABLE. Without it this used bare
+    ``random.choice``, so a campaign with no pool got a different agent name on
+    every call AND on every retry of the same lead: a prospect called back by
+    "Michael" after speaking to "Sarah". ``substitute_name_for_voice`` already
+    took a seed for precisely this reason; this path simply never passed one.
     """
+    from app.services.scripts.prompts.agent_name_rotator import (
+        substitute_name_for_voice,
+    )
+
+    matched = substitute_name_for_voice(voice_gender, seed=seed)
+    if matched:
+        return matched
     if voice_gender == "male":
         return random.choice(_MALE_AGENT_NAMES)
     if voice_gender == "female":
@@ -958,7 +982,7 @@ def build_telephony_session_config(
                 "agent_name_pool_invalid campaign=%s err=%s — falling back",
                 _campaign_id(campaign), exc,
             )
-            agent_name = _fallback_agent_name(_voice_gender)
+            agent_name = _fallback_agent_name(_voice_gender, seed=_name_seed)
         else:
             agent_name, _substituted_from = resolve_name_against_voice(
                 agent_name, agent_names_pool, _agent_name_genders, _voice_gender,
@@ -977,7 +1001,7 @@ def build_telephony_session_config(
                     campaign_id=_campaign_id(campaign), voice_id=tts_voice_id,
                 )
     else:
-        agent_name = _fallback_agent_name(_voice_gender)
+        agent_name = _fallback_agent_name(_voice_gender, seed=_name_seed)
 
     # Cap the tenant-authored ROLE/GOAL text once, up front, so both the
     # primary compose attempt and the knowledge-driven retry below (see

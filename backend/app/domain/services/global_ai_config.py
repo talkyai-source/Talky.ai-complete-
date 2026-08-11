@@ -28,8 +28,33 @@ from app.domain.models.ai_config import (
 _global_config: Optional[AIProviderConfig] = None
 
 # Random names for variety in each session
-MALE_NAMES = ["Alex", "James", "Michael", "David", "Ryan", "Daniel", "Chris", "Nathan", "Jake", "Ethan", "Marcus", "Leo", "Adam", "Tom", "Ben"]
-FEMALE_NAMES = ["Sarah", "Emma", "Olivia", "Sophia", "Mia", "Isabella", "Ava", "Emily", "Grace", "Lily", "Chloe", "Zoe", "Anna", "Kate", "Maya"]
+# THE single source of truth for name -> gender across the voice path. Used by
+# agent_name_rotator._inferred_gender (the mismatch guard) and by
+# substitute_name_for_voice / _fallback_agent_name (which hand out built-in
+# names when a campaign's own pool cannot match the voice).
+#
+# 2026-08-12: extended by 12 names. telephony_session_config kept a SECOND
+# gendered list for the no-pool fallback, and the two had drifted — 12 of its
+# 20 names ("John", "Rachel", "Joshua", "Lauren" ...) were absent here, so a
+# name this system handed out was invisible to the mismatch guard that exists
+# to protect it. If the campaign's voice was later switched, nothing would
+# flag or correct it. The fallback now delegates here; keeping every one of
+# its names classifiable is enforced by
+# test_every_fallback_name_is_classifiable_by_the_inference_oracle.
+#
+# A name must appear in exactly ONE list — _inferred_gender returns None for
+# anything in both, which reads as "unisex" and disables the guard for it.
+MALE_NAMES = [
+    "Alex", "James", "Michael", "David", "Ryan", "Daniel", "Chris", "Nathan",
+    "Jake", "Ethan", "Marcus", "Leo", "Adam", "Tom", "Ben",
+    "John", "Matthew", "Andrew", "Joshua",
+]
+FEMALE_NAMES = [
+    "Sarah", "Emma", "Olivia", "Sophia", "Mia", "Isabella", "Ava", "Emily",
+    "Grace", "Lily", "Chloe", "Zoe", "Anna", "Kate", "Maya",
+    "Jessica", "Ashley", "Amanda", "Melissa", "Stephanie", "Nicole",
+    "Rachel", "Lauren",
+]
 
 
 def get_global_config() -> AIProviderConfig:
