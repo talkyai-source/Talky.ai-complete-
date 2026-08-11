@@ -111,15 +111,30 @@ def pool_wholly_conflicts(
     name matches — or is merely unknown ("Sam", "Jordan") — this is False and
     ``pick_agent_name_for_voice`` can do its job within the pool.
 
-    AN EXPLICIT GENDER TAG ANYWHERE IN THE POOL DISABLES THIS ENTIRELY.
-    Tagging is a deliberate act: the operator opened the gender control and
-    made a choice, so a tagged name that disagrees with the voice is an
-    intentional casting decision, not the accident this exists to correct.
-    The failure being fixed is specifically the UNTAGGED one — campaign forms
-    never sent tags, so ``agent_name_genders`` is null on real campaigns (it
-    was null on 50847cc9, which is how a male London voice ended up saying
-    "this is Sarah"). Honouring tags also keeps the operator's escape hatch
-    total: tag the name and we never touch it, whichever way you tag it.
+    THE ESCAPE HATCH IS A TAG THAT MATCHES THE VOICE — not any tag at all.
+
+    Rewritten 2026-08-12. This used to return False whenever ANY pool name
+    carried ANY gender tag, on a stated premise: "campaign forms never sent
+    tags, so ``agent_name_genders`` is null on real campaigns". That premise
+    silently stopped being true. Campaign 50847cc9 now stores
+    ``{'Sarah': 'female'}`` against a MALE voice, and because a tag was
+    present the whole conflict check switched itself off — production logged
+    ``agent_name_voice_gender_mismatch ... 'Sarah' ... voice_gender=male``
+    twenty-one times in fourteen days while this function reported no conflict.
+
+    It also contradicted its own caller: ``resolve_name_against_voice``
+    documents the escape hatch as "tag it explicitly in ``agent_name_genders``
+    WITH THE VOICE'S GENDER". That is the coherent reading, and it is what we
+    now implement:
+
+      * tag == voice gender  -> deliberate casting ("yes, use this name on
+        this voice"). Hands off, exactly as documented.
+      * tag != voice gender  -> this is not a casting decision, it is the
+        operator recording what the name obviously is. It is the STRONGEST
+        evidence of a conflict, not a reason to ignore one.
+
+    An untagged name is still judged by inference, and a name that is merely
+    unknown/unisex ("Sam", "Jordan") still never counts as a conflict.
     """
     vg = (voice_gender or "").strip().lower()
     if vg not in ("male", "female"):
@@ -131,10 +146,11 @@ def pool_wholly_conflicts(
         str(k).strip().lower(): str(v)
         for k, v in (genders or {}).items()
     }
-    # Any deliberate tag on any pool name → hands off the whole pool.
+    # A tag AGREEING with the voice is the operator's deliberate casting
+    # choice — that name is usable, so the pool is satisfiable. Hands off.
     for name in names:
         tag = str(gmap.get(str(name).strip().lower(), "")).strip().lower()
-        if tag in ("male", "female"):
+        if tag == vg:
             return False
     return all(_positively_conflicts(n, gmap, vg) for n in names)
 

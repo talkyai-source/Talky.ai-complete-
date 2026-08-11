@@ -85,10 +85,39 @@ def test_pool_prefers_the_name_matching_the_voice():
         assert _cfg(camp).agent_config.agent_name == "James"
 
 
-def test_pool_wins_even_when_nothing_matches_the_voice():
-    # Never invent a name the campaign did not configure (the "Emily" bug):
-    # an all-female pool on a male voice still uses the configured names.
+def test_an_unusable_pool_is_substituted_not_spoken():
+    """2026-08-12 — THIS TEST WAS INVERTED, deliberately.
+
+    It used to assert the pool wins even when nothing in it matches the voice
+    ("never invent a name the campaign did not configure" — the 2026-07-09
+    "Emily" bug). That protection is real, but it was implemented far too
+    broadly: any gender tag switched the conflict check off entirely, and once
+    campaign forms began AUTO-tagging names, every campaign became untouchable.
+    Production shipped a male voice introducing itself as "Sarah" 21 times in
+    14 days.
+
+    A female voice whose only configured name is explicitly tagged male cannot
+    be satisfied — speaking "James" through a female voice is the exact defect
+    this whole module exists to prevent. So we substitute.
+
+    The 2026-07-09 protection is NOT lost: `name_is_referenced_in` still blocks
+    substitution when the campaign's own ROLE/GOAL text names the agent, which
+    is the case that actually produced a self-contradicting prompt. That guard
+    is exercised directly below (see the script_text= cases).
+    """
     camp = _campaign(FEMALE_VOICE, agent_names=["James"], genders={"James": "male"})
+    name = _cfg(camp).agent_config.agent_name
+    assert name != "James", (
+        "a male-tagged name on a female voice must not be spoken — this is "
+        "the male-voice-says-Sarah defect in the other direction"
+    )
+    assert name, "substitution must yield a usable name, not nothing"
+
+
+def test_a_pool_tagged_to_MATCH_the_voice_is_still_honoured():
+    """The escape hatch, intact: tag a name with the VOICE's gender and it is
+    a deliberate casting choice we never override."""
+    camp = _campaign(FEMALE_VOICE, agent_names=["James"], genders={"James": "female"})
     assert _cfg(camp).agent_config.agent_name == "James"
 
 
@@ -177,8 +206,17 @@ from app.services.scripts.prompts.agent_name_rotator import (
         (["Sarah", "James"], None, "male", False),  # one name fits
         (["Sarah", "Alex"], None, "male", False),   # unknown != conflict
         (["Sarah"], {"Sarah": "male"}, "male", False),  # explicit tag wins
-        (["Sarah"], {"Sarah": "female"}, "male", False),  # tagged AGAINST the
-        # voice is still hands-off: tagging is a deliberate casting choice.
+        # 2026-08-12 — THIS EXPECTATION WAS INVERTED. It used to be False, on
+        # the premise that "tagging is a deliberate casting choice". That
+        # premise died: campaign forms began auto-tagging names with their
+        # obvious gender, so `{'Sarah': 'female'}` is not a casting decision,
+        # it is the form recording what Sarah is. Production ran campaign
+        # 50847cc9 with exactly this config against a MALE voice and logged
+        # agent_name_voice_gender_mismatch 21 times in 14 days while this
+        # function reported no conflict. The escape hatch is now a tag that
+        # MATCHES the voice — which is what resolve_name_against_voice's own
+        # docstring always said it was.
+        (["Sarah"], {"Sarah": "female"}, "male", True),
         (["Sarah"], None, None, False),             # unknown voice -> never
         ([], None, "male", False),                  # empty pool
     ],
