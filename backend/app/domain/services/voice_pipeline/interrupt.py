@@ -215,36 +215,30 @@ async def _do_interrupt(
     result = InterruptResult(interrupt_id=interrupt_id, call_id=call_id)
     started = time.monotonic()
 
-    # NOTHING IS PLAYING (2026-08-12). A caller taking their normal next turn
-    # raises the same StartOfTurn as a genuine barge-in, so this ran a full
-    # teardown on every utterance — always finding 0 local bytes and 0 gateway
-    # frames to discard. Harmless (0.2ms) but it made "barge-in" in the logs
-    # and in voice_interrupt_outcome_total indistinguishable from an ordinary
-    # turn, which would have made the canary's interruption-success numbers
-    # meaningless.
+    # WAS THERE ANYTHING TO STOP? (2026-08-12, corrected 2026-08-12)
     #
-    # State is still reset — a stale tts_active or a leftover transcript must
-    # not survive — but the gateway/provider calls and the metric are skipped,
-    # and the result says plainly that there was nothing to stop.
+    # A caller taking their normal next turn raises the same StartOfTurn as a
+    # genuine barge-in, so a full teardown ran on every utterance — always
+    # finding 0 local bytes and 0 gateway frames. Harmless at 0.2ms, but it
+    # made "barge-in" in the logs and in voice_interrupt_outcome_total
+    # indistinguishable from an ordinary turn, which would have made the
+    # canary's interruption-success numbers meaningless.
+    #
+    # MY FIRST ATTEMPT GATED ON `cancel_task is None`, WHICH IS NEVER TRUE:
+    # handle_barge_in always passes a closure, so the shortcut was dead code
+    # and production kept logging interrupt_step=begin with tts_active=False.
+    # That was gating on a PROXY ("nobody gave me a canceller") instead of the
+    # real question ("was anything actually running?").
+    #
+    # The real question cannot be answered up front — whether a speculative
+    # turn exists is only knowable by trying to cancel it. So the order is:
+    # do the CHEAP LOCAL work unconditionally (state reset, task cancel — both
+    # are attribute writes and a dict pop), then decide. The expensive part is
+    # the gateway round-trip and the TTS provider call, and those are what we
+    # skip when nothing was playing and nothing was cancelled.
     _tts_playing = bool(getattr(session, "tts_active", False))
-    if not _tts_playing and cancel_task is None:
-        try:
-            from app.domain.models.session import CallState
-
-            session.tts_active = False
-            session.state = CallState.LISTENING
-            session.current_ai_response = ""
-            session.current_user_input = ""
-            result.state_changed = True
-        except Exception as exc:  # noqa: BLE001
-            result.errors.append(f"state:{exc}")
-        result.ok = True
-        result.elapsed_ms = (time.monotonic() - started) * 1000.0
-        _log_step(interrupt_id, call_id, "nothing_playing", reason=reason)
-        return result
-
     _log_step(interrupt_id, call_id, "begin", reason=reason,
-              tts_active=getattr(session, "tts_active", None))
+              tts_active=_tts_playing)
 
     # ── 1. state ──────────────────────────────────────────────────────────
     try:
@@ -270,6 +264,19 @@ async def _do_interrupt(
         except Exception as exc:  # noqa: BLE001
             result.errors.append(f"cancel:{exc}")
             logger.warning("interrupt %s: task cancel failed: %s", interrupt_id, exc)
+
+    # ── Decide: was this a real interruption, or an ordinary turn? ────────
+    # Nothing audible was playing AND no in-flight turn was cancelled — there
+    # is nothing for the gateway or the TTS provider to stop. Skip both, and
+    # skip the metric, so voice_interrupt_outcome_total counts only genuine
+    # interruptions. The local state above has already been reset, which is
+    # the part that must happen either way.
+    if not _tts_playing and not result.task_cancelled:
+        result.ok = True
+        result.elapsed_ms = (time.monotonic() - started) * 1000.0
+        _log_step(interrupt_id, call_id, "nothing_playing", reason=reason,
+                  elapsed_ms=round(result.elapsed_ms, 2))
+        return result
 
     # ── 3+4. Python buffers, then the C++ queue (one call does both) ──────
     try:

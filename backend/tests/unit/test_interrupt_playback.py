@@ -278,3 +278,50 @@ async def test_a_pending_task_is_cancelled_even_when_nothing_is_playing():
     )
     assert cancelled["n"] == 1
     assert gw.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_nothing_playing_shortcut_fires_even_WITH_a_canceller():
+    """2026-08-12 CORRECTION. The first version of this shortcut gated on
+    `cancel_task is None`, but handle_barge_in ALWAYS passes a closure — so it
+    was dead code and production kept logging interrupt_step=begin with
+    tts_active=False on every ordinary turn.
+
+    The real question is "was anything running", which is only knowable after
+    trying the cancel. So the cheap local work runs unconditionally and the
+    GATEWAY work is what gets skipped.
+    """
+    async def _cancel_nothing():
+        return False          # no pending task — the common case
+
+    s = _session()
+    s.tts_active = False
+    gw = _Gateway()
+
+    r = await interrupt_playback(
+        s, media_gateway=gw, reason="barge_in", cancel_task=_cancel_nothing
+    )
+
+    assert gw.calls == 0, "a canceller being supplied must not force gateway work"
+    assert r.ok is True
+    assert r.task_cancelled is False
+    assert r.state_changed is True
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_speculative_turn_still_does_the_full_teardown():
+    """Nothing audible, but a real turn was cancelled — its buffers may hold
+    audio the gateway has already queued, so the full path must run."""
+    async def _cancel_something():
+        return True
+
+    s = _session()
+    s.tts_active = False
+    gw = _Gateway()
+
+    r = await interrupt_playback(
+        s, media_gateway=gw, reason="barge_in", cancel_task=_cancel_something
+    )
+
+    assert gw.calls == 1
+    assert r.task_cancelled is True

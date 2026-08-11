@@ -721,20 +721,46 @@ async def warm_llm_stream(pre_warm_session) -> None:
     Fire a minimal "hi" through ``stream_chat`` with ``max_tokens=2`` and
     drain whatever comes back. Discard the result. Both modes run this
     so pickup always lands on a fully-warmed LLM streaming path.
+
+    WARMS WITH THE CALL'S REAL SYSTEM PROMPT (2026-08-12). This used to send
+    the 30-character placeholder "Reply with a single word only." That warms
+    the connection and the inference worker, but provider prompt caches are
+    keyed on the PROMPT CONTENT — so the campaign's actual system prompt was
+    still cold on turn 0, and the model paid full prefill for every one of its
+    thousands of tokens while the callee waited.
+
+    Measured on a traced production call:
+
+        Turn 0: LLM-first-token  835ms
+        Turn 1: LLM-first-token 1437ms   [voice_slow_turn]
+        Turn 2: LLM-first-token  336ms
+        Turn 3: LLM-first-token  294ms
+
+    First token drops ~5x once the prompt is warm. Raising the tenant prompt
+    budget 6000 -> 12000 chars the same day made that first-turn cost worse,
+    which is exactly the case for warming the real thing rather than a stand-in.
+
+    Falls back to the placeholder when no prompt is available (realtime
+    sessions, or a config that never composed one) — warming something is
+    still better than warming nothing.
     """
     from app.domain.models.conversation import Message, MessageRole
+
+    config = getattr(pre_warm_session, "config", None)
+    real_prompt = (getattr(config, "system_prompt", "") or "").strip()
+    system_prompt = real_prompt or "Reply with a single word only."
 
     msgs = [Message(role=MessageRole.USER, content="hi")]
     try:
         async for _token in pre_warm_session.llm_provider.stream_chat(
             msgs,
-            system_prompt="Reply with a single word only.",
+            system_prompt=system_prompt,
             max_tokens=2,
         ):
             pass  # discard
         logger.info(
-            "llm_stream_warmed call_id=%s",
-            pre_warm_session.call_id[:12],
+            "llm_stream_warmed call_id=%s prompt_chars=%d real_prompt=%s",
+            pre_warm_session.call_id[:12], len(system_prompt), bool(real_prompt),
         )
     except Exception as exc:
         # Re-raise so the strict warmup gate refuses to ring rather than

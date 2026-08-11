@@ -656,8 +656,28 @@ class TurnEnder:
                     session.add_latency_measurement("llm", llm_latency)
                     session.add_latency_measurement("tts", tts_latency)
 
+                # The agent's own words go in the MESSAGE, not only in `extra`
+                # (2026-08-12). `extra` fields are dropped by the console
+                # formatter, so the journal showed a bare "llm_response" and a
+                # call could not be reviewed after the fact — the campaign
+                # "Test agent" WS persists no call row and no transcript at
+                # all, so this log line is the ONLY record a test call leaves.
+                # Diagnosing "the agent asked for information too early" was
+                # impossible without it.
+                #
+                # scrub_text (not summarize_sensitive) is deliberate: this is
+                # the AGENT's generated text, not caller speech, so it should
+                # stay readable for QA — but the agent reads emails and phone
+                # numbers back to confirm them, so those shapes are masked.
+                try:
+                    from app.core.log_redact import scrub_text
+
+                    _spoken = scrub_text((response_text or "").strip())[:300]
+                except Exception:  # pragma: no cover - never break a turn
+                    _spoken = ""
                 logger.info(
-                    "llm_response",
+                    "llm_response turn=%s said=%r",
+                    session.turn_id, _spoken,
                     extra={
                         "call_id": call_id,
                         "turn_id": session.turn_id,
