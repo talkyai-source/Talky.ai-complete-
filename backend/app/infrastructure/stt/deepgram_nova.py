@@ -213,6 +213,28 @@ class DeepgramNovaSTTProvider(STTProvider):
                                 # SpeechStarted is a pure VAD event with no transcript
                                 # yet. BargeInSignal documents this exact case, and
                                 # TranscriptHandler already reads it defensively.
+                                #
+                                # KNOWN ASYMMETRY WITH FLUX (documented 2026-08-13).
+                                # Flux gates barge-in on the StartOfTurn transcript —
+                                # hard-interrupt allow-list, then backchannel, then
+                                # disfluency (see deepgram_flux.py). Nova CANNOT run
+                                # any of those: SpeechStarted carries no text, so
+                                # there is nothing to classify. A "yeah" or an "um"
+                                # that Flux absorbs as a non-interrupt will cut the
+                                # agent off under Nova.
+                                #
+                                # Deliberately NOT "fixed" by waiting for Nova's first
+                                # interim transcript before firing. Nova is the STT
+                                # FAILOVER; the moment it is serving, the primary has
+                                # already failed, and adding transcript-wait latency
+                                # to barge-in on the degraded path trades a rare
+                                # over-interrupt for a guaranteed slower stop. Being
+                                # too eager to stop talking is the safer failure.
+                                #
+                                # The cost is real and bounded: under failover only,
+                                # backchannels interrupt. If Nova ever becomes a
+                                # primary engine rather than a fallback, this must be
+                                # revisited — gate on the first interim there.
                                 if on_barge_in is not None:
                                     try:
                                         on_barge_in()

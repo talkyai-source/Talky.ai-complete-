@@ -72,11 +72,62 @@ def build_live_state_block(
         # "one breath, under twenty words"; all three now agree. Divergent
         # numbers for one turn is how a 7.7s greeting survived a prompt that
         # already said "keep it short".
+        # OPENER WORDING (2026-08-13): the budget alone was not enough. A
+        # production call opened with "hope I've not caught you at a bad
+        # time?" — the worst-converting opener family measured, and the exact
+        # move the persona was rewritten to replace. The rewrite landed in
+        # lead_gen's STAGE 1, mid-prompt, stated as a CONCEPT with one
+        # positive example and (deliberately, to avoid priming) no negative
+        # one. Nothing in the four trailing blocks mentions it, and THIS
+        # block — the last thing read before turn 0 is generated — carried
+        # only the length rule. So on the highest-stakes sentence of the
+        # call, the freshest instruction was silent on the one distinction
+        # that decides it.
+        #
+        # The fix is the pattern that made "never re-introduce" stick: state
+        # it early, and carry it forward HERE every turn. Phrased as the
+        # positive move plus what to open ON, so it constrains without
+        # quoting the banned sentence.
         lines.append(
             "- You have not introduced yourself yet — give your short opening "
             "this turn: who you are and why you're calling, in one breath, "
             "under twenty words. Then stop and let them answer."
         )
+        lines.append(
+            "- Open on your REASON for calling, never on their availability. "
+            "A forward ask like \"got a minute?\" is fine; anything that asks "
+            "whether you have caught them at an awkward or inconvenient "
+            "moment is the worst-performing opening there is — it invites a "
+            "no before they know what you want."
+        )
+    # ANSWER BEFORE YOU ASK (2026-08-13). A production call escalated from
+    # confusion to profanity in six turns because the caller asked "why are
+    # you calling me" THREE times and never got a straight answer: turn 1
+    # re-introduced and appended a question, turn 2 restated vaguely and
+    # appended a question, turn 4 asked HIM to qualify himself while his own
+    # question was still open.
+    #
+    # Nothing in the prompt caused that on purpose — it is what happens when
+    # FOUR separate blocks teach "acknowledge, then ask" (HARD RULE 3,
+    # COMMUNICATION_PRINCIPLES, the persona's HOW YOU SOUND, and
+    # FINAL_RESPONSE_CONTRACT in the trailing slot) and exactly ONE
+    # mid-prompt line says to answer a direct question outright. By recency
+    # and by repetition the ask-reflex wins, so the model kept advancing its
+    # own agenda over an open question.
+    #
+    # This is the missing priority rule, in the one block that is re-read on
+    # every single turn. It deliberately does NOT list example phrasings: the
+    # last attempt at this failed because its three examples ("what makes you
+    # different?", "why you?", "what is this?") did not match what the caller
+    # actually said, and the model would not generalise.
+    lines.append(
+        "- If they asked you something and you have not answered it, ANSWER "
+        "IT FIRST — plainly, in one sentence, and add no question of your "
+        "own that turn. An unanswered question outranks your next step, your "
+        "qualifying, and any stage you are working through. If they ask the "
+        "same thing again, you did not answer it: say the plain answer with "
+        "nothing attached."
+    )
     if time_of_day_line:
         lines.append(time_of_day_line)
     if not lines:

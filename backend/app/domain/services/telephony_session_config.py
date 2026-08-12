@@ -334,17 +334,69 @@ def _cap_tenant_additional_instructions(text, *, campaign_id=None):
     original_len = len(text)
     if original_len <= budget:
         return text
-    head = text[:budget]
-    cut = head.rsplit(" ", 1)[0] if " " in head else head
-    capped = cut.rstrip()
+
+    # KEEP THE END, NOT JUST THE BEGINNING (2026-08-13).
+    #
+    # This used to be a plain head-truncation: text[:budget]. Raising the
+    # budget 6000 -> 12000 on 2026-08-12 fixed the campaign in front of us and
+    # a longer one hit the new ceiling the very next day:
+    #
+    #   telephony_tenant_prompt_capped original_chars=14665 capped_chars=11998
+    #   budget_chars=12000 LOST_chars=2667 (18%)
+    #
+    # Raising a ceiling does not fix head-truncation, it moves the cliff. And
+    # the tail is the worst part to lose: operators write role and context
+    # first, then objection handling, pricing rules and closing steps LAST.
+    # Head-truncation reliably discards the part of the script that decides
+    # how a call ENDS.
+    #
+    # So: keep the first 60% of the budget and the last 40%, with an explicit
+    # elision marker between them. The model sees how to open AND how to
+    # close, and — because the marker is visible — it knows something was
+    # removed rather than silently believing the script simply stops.
+    _HEAD_SHARE = 0.60
+    _MARKER = "\n\n[... middle of these instructions omitted for length ...]\n\n"
+
+    usable = max(0, budget - len(_MARKER))
+    head_len = int(usable * _HEAD_SHARE)
+    tail_len = usable - head_len
+
+    # A budget too small to carry the marker AND a useful head and tail must
+    # fall back to plain head-truncation. Otherwise a tiny budget spends its
+    # whole allowance on the elision notice and ships a prompt that says only
+    # "some instructions were omitted" — strictly worse than the first
+    # sentence of the operator's script. The threshold is deliberately
+    # generous: below this the head/tail split is not buying anything.
+    if usable < 200 or tail_len < 60:
+        head = text[:budget]
+        capped = (head.rsplit(" ", 1)[0] if " " in head else head).rstrip()
+        lost = original_len - len(capped)
+        logger.warning(
+            "telephony_tenant_prompt_capped campaign=%s original_chars=%d "
+            "capped_chars=%d budget_chars=%d LOST_chars=%d (%.0f%%) — budget "
+            "too small to preserve the ending, so the TAIL was discarded.",
+            campaign_id, original_len, len(capped), budget,
+            lost, 100.0 * lost / max(original_len, 1),
+        )
+        return capped
+
+    head = text[:head_len]
+    head = head.rsplit(" ", 1)[0] if " " in head else head
+
+    tail = text[-tail_len:] if tail_len > 0 else ""
+    # Start the tail at a word boundary so it does not open mid-token.
+    if " " in tail:
+        tail = tail.split(" ", 1)[1]
+
+    capped = (head.rstrip() + _MARKER + tail.lstrip()).rstrip()
     lost = original_len - len(capped)
     logger.warning(
         "telephony_tenant_prompt_capped campaign=%s original_chars=%d "
-        "capped_chars=%d budget_chars=%d LOST_chars=%d (%.0f%%) — the END of "
-        "this campaign's instructions was DISCARDED and the agent will never "
-        "see it. Objection handling and closing steps usually live there. "
-        "Fix: shorten the script, move FACTS into the knowledge base, or raise "
-        "TELEPHONY_TENANT_PROMPT_MAX_CHARS.",
+        "capped_chars=%d budget_chars=%d LOST_chars=%d (%.0f%%) — the MIDDLE "
+        "of this campaign's instructions was omitted; the opening and the "
+        "closing/objection sections are both kept. Fix: shorten the script, "
+        "or move FACTS into the knowledge base so they are retrieved per turn "
+        "instead of competing for prompt budget.",
         campaign_id, original_len, len(capped), budget,
         lost, 100.0 * lost / max(original_len, 1),
     )

@@ -821,6 +821,13 @@ class TestTenantPromptCap:
         assert len(result) <= 50
         # Boundary-safe: the capped text must be a clean prefix ending on a
         # whole word, never a word severed mid-token.
+        #
+        # 2026-08-13: a 50-char budget is BELOW the threshold at which the
+        # head-and-tail split is worth doing (the elision marker alone is
+        # ~50 chars), so this deliberately still exercises the plain
+        # head-truncation fallback — which is why `startswith` still holds.
+        # The head-and-tail behaviour at realistic budgets is covered by
+        # TestPromptCapKeepsTheEnding below.
         assert text.startswith(result)
         assert not result.endswith("wor")
 
@@ -1010,3 +1017,72 @@ class TestPipelineModeThreading:
         ):
             config = build_telephony_session_config(campaign=campaign)
         assert config.pipeline_mode == "cascaded"
+
+
+class TestPromptCapKeepsTheEnding:
+    """2026-08-13. Head-truncation reliably discarded the part of a script that
+    decides how a call ENDS.
+
+    Raising the budget 6000 -> 12000 on 2026-08-12 fixed one campaign and the
+    very next day a longer one hit the new ceiling:
+
+        telephony_tenant_prompt_capped original_chars=14665 capped_chars=11998
+        budget_chars=12000 LOST_chars=2667 (18%)
+
+    Raising a ceiling moves a cliff; it does not remove one. Operators write
+    role and context first and objection handling, pricing and closing steps
+    LAST, so the tail is the worst possible thing to drop.
+    """
+
+    def _cap(self, text, **kw):
+        from app.domain.services.telephony_session_config import (
+            _cap_tenant_additional_instructions,
+        )
+        return _cap_tenant_additional_instructions(text, **kw)
+
+    def test_the_ending_survives_truncation(self):
+        """THE REGRESSION. The last line of a long script must still reach the
+        model."""
+        opening = "OPENING: introduce yourself warmly. " * 500
+        closing = "CLOSING RULE: always confirm the callback time before you hang up."
+        out = self._cap(opening + closing, campaign_id="c")
+
+        assert len(out) < len(opening + closing), "should have been capped"
+        assert "CLOSING RULE" in out, (
+            "the closing instructions were discarded — this is the defect"
+        )
+
+    def test_the_opening_also_survives(self):
+        opening = "OPENING RULE: you are a estimator for Acme."
+        filler = " Some middle guidance about tenders and takeoffs." * 400
+        out = self._cap(opening + filler + " CLOSING RULE: confirm the email.",
+                        campaign_id="c")
+        assert "OPENING RULE" in out
+        assert "CLOSING RULE" in out
+
+    def test_the_omission_is_visible_to_the_model(self):
+        """The model must know something was removed rather than believe the
+        script simply stops."""
+        out = self._cap("A" * 200 + " " + ("filler word " * 3000), campaign_id="c")
+        assert "omitted for length" in out
+
+    def test_still_within_budget(self):
+        from app.domain.services.telephony_session_config import (
+            _tenant_prompt_char_budget,
+        )
+        out = self._cap("word " * 20000, campaign_id="c")
+        assert len(out) <= _tenant_prompt_char_budget()
+
+    def test_short_scripts_are_untouched(self):
+        """Non-vacuity — a campaign under budget must pass through byte-identical."""
+        short = "You are an estimator for Acme. Confirm the callback time."
+        assert self._cap(short, campaign_id="c") == short
+
+    def test_no_word_is_severed_at_either_seam(self):
+        text = " ".join(f"token{i}" for i in range(6000))
+        out = self._cap(text, campaign_id="c")
+        head, _, tail = out.partition("[... middle of these instructions omitted")
+        # every whole token in the kept head/tail must be a real token
+        for piece in (head.split()[-3:], tail.split("]")[-1].split()[:3]):
+            for tok in piece:
+                assert tok.startswith("token") or tok in ("...", "]"), tok
