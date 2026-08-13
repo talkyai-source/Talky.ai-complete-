@@ -39,6 +39,7 @@ def silence_action(
     nudge_gap_s: float,
     opening_gap_s: Optional[float] = None,
     agent_awaiting_first_reply: bool = False,
+    caller_audio_active: bool = False,
 ) -> str:
     """One silence-monitor tick decision → ``'hangup'`` | ``'nudge'`` | ``'wait'``.
 
@@ -56,11 +57,28 @@ def silence_action(
          ``None``, which falls back to ``nudge_gap_s`` — keeps every existing
          caller (incl. the pre-2026-08-11 test suite) working unchanged if it
          never passes the new parameter.
+
+    ``caller_audio_active`` is the ACOUSTIC signal — the caller's line is
+    carrying speech-level energy right now — and it suppresses nudging only.
+    Every other input to this function is derived from transcripts, which is
+    why 2026-08-13 went the way it did: on two calls Deepgram accepted the
+    audio and returned nothing at all, so by every transcript-derived measure
+    the caller was silent, and the ladder talked over someone who was speaking
+    at RMS 3504. 28 of 35 nudges that day (80%, across 20 of 40 calls) landed
+    on a caller who was audibly mid-sentence.
+
+    It deliberately does NOT block ``hangup``. Energy on the line is not proof
+    of a conversation — it is also what a TV in the background looks like — so
+    the 60s bound stays absolute and no call can be held open by noise alone.
+    A live person whose STT has died is rescued by the failover in
+    ``resilient_stt``, not by refusing to ever hang up.
     """
     if in_grace:
         return "wait"
     if caller_silence_s >= hangup_s:
         return "hangup"
+    if caller_audio_active:
+        return "wait"
     # "Opening" = the callee has not spoken yet AND the agent has not yet
     # delivered a real introduction — it has, at most, said a bare hello.
     #
@@ -218,15 +236,25 @@ class AudioIngest:
                                 call_id, _now - _level_bucket_t0,
                                 _chunks_yielded, rms, _level_max, _level_samples,
                             )
-                            # Stash on the session so user-first's silence
-                            # handler can read pre-Flux audio activity. Without
-                            # this signal it fires the fallback greeting on
-                            # top of the caller's first "Hello?" because Flux
-                            # hadn't yet committed StartOfTurn.
+                            # Stash on the session so the silence monitor can
+                            # read ACOUSTIC caller activity. Every other signal
+                            # it has is derived from transcripts, so when STT
+                            # goes deaf this is the only evidence left that
+                            # somebody is talking — see silence_action's
+                            # `caller_audio_active` and the 2026-08-13 calls
+                            # where the ladder shouted over a live caller.
+                            #
+                            # Stamped with time.monotonic() explicitly, NOT the
+                            # loop clock used for bucketing above. They happen
+                            # to be the same clock on the default event loop,
+                            # and a freshness check that silently depends on
+                            # that is one custom loop away from comparing two
+                            # unrelated timebases and reading as "always
+                            # stale" — i.e. this guard quietly not existing.
                             try:
                                 session.last_audio_rms = rms
                                 session.last_audio_peak = _level_max
-                                session.last_audio_rms_at = _now
+                                session.last_audio_rms_at = time.monotonic()
                             except Exception:
                                 pass
                             _level_bucket_t0 = _now
@@ -360,6 +388,17 @@ class AudioIngest:
             _MID_NUDGE_S = float(os.getenv("VOICE_MID_NUDGE_S", "16"))
             _SILENCE_HANGUP_S = float(os.getenv("VOICE_SILENCE_HANGUP_S", "60"))
             _TTS_GRACE_S = 3.0
+            # ACOUSTIC nudge guard (2026-08-13). Same 500 RMS that every
+            # audio_level log line already prints as ">500=speech-likely", so
+            # the number a human reads while debugging is the number the code
+            # acts on. The stash refreshes ~1/s, so 2.0s of tolerance accepts
+            # the current reading and rejects a stale one — tighter than the
+            # 2.5s opening nudge gap, so a guard can never outlive the decision
+            # it was meant to inform.
+            _AUDIO_ACTIVE_RMS = float(os.getenv("VOICE_AUDIO_ACTIVE_RMS", "500"))
+            _AUDIO_ACTIVE_MAX_AGE_S = float(
+                os.getenv("VOICE_AUDIO_ACTIVE_MAX_AGE_S", "2.0")
+            )
             # 2026-07-08: widened 12.0 -> 15.0 (env-overridable) so mid
             # check-ins don't stack up as nagging on a caller who is just
             # thinking; the opening ("hello?") gap is unaffected — it now has
@@ -489,7 +528,30 @@ class AudioIngest:
                         _in_grace = _tts_ended_at is not None and (
                             _now() - _tts_ended_at
                         ) < _TTS_GRACE_S
+                        # ACOUSTIC caller activity, published once a second by
+                        # the ingest loop. Read here rather than inside
+                        # silence_action so that function stays pure, and
+                        # required to be FRESH: the stash is ~1s granular, so
+                        # anything older than _AUDIO_ACTIVE_MAX_AGE_S is a
+                        # reading about a moment that has passed and must not
+                        # suppress a nudge now. Missing attribute → False →
+                        # exactly the pre-2026-08-13 behaviour, so a session
+                        # object that never carries the field is unaffected.
+                        _audio_active = False
+                        try:
+                            _rms_at = getattr(session, "last_audio_rms_at", None)
+                            if _rms_at is not None and (
+                                _now() - _rms_at
+                            ) <= _AUDIO_ACTIVE_MAX_AGE_S:
+                                _audio_active = (
+                                    float(getattr(session, "last_audio_rms", 0.0) or 0.0)
+                                    >= _AUDIO_ACTIVE_RMS
+                                )
+                        except Exception:
+                            _audio_active = False
+
                         _action = silence_action(
+                            caller_audio_active=_audio_active,
                             caller_silence_s=(_now() - _last_caller_at),
                             activity_silence_s=(_now() - _silence_since),
                             since_last_nudge_s=(

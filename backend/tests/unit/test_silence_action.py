@@ -307,3 +307,60 @@ def test_the_opening_threshold_is_untouched_by_the_mid_change():
 
 def test_the_hangup_clock_is_unaffected():
     assert silence_action(**_mid(caller_silence_s=61.0, activity_silence_s=61.0)) == "hangup"
+
+
+# ── acoustic nudge guard (2026-08-13) ────────────────────────────────────────
+#
+# THE INCIDENT. Every other input to silence_action is derived from
+# transcripts. On 2026-08-13 two production calls had an STT stream that
+# connected, accepted 400+ chunks and returned ZERO events, so by every
+# transcript-derived measure the caller was silent — while they were in fact
+# talking at RMS 3504, peak 28988. The re-greet ladder ran to exhaustion over
+# a live human, who hung up. Across the day 28 of 35 nudges (80%, in 20 of 40
+# calls) landed on a caller who was audibly mid-sentence.
+#
+# `caller_audio_active` is the acoustic escape hatch: the one signal that does
+# not go through STT at all.
+
+def _speaking(**over):
+    """A tick that WOULD nudge on the transcript-derived signals alone."""
+    base = dict(
+        caller_silence_s=12.0, activity_silence_s=12.0, since_last_nudge_s=None,
+        in_grace=False, is_caller_first=True, user_turns=0,
+        hangup_s=60.0, opening_s=2.5, mid_s=16.0,
+        nudge_gap_s=15.0, opening_gap_s=2.5,
+    )
+    base.update(over)
+    return base
+
+
+def test_audible_speech_suppresses_the_nudge():
+    """THE FIX. Same tick, one bit different — the caller is making noise."""
+    assert silence_action(**_speaking()) == "nudge"
+    assert silence_action(**_speaking(caller_audio_active=True)) == "wait"
+
+
+def test_the_guard_defaults_off():
+    """Omitting the parameter must reproduce the pre-fix behaviour exactly, so
+    no existing caller (or test) changes meaning by upgrading."""
+    assert silence_action(**_speaking()) == "nudge"
+
+
+def test_audible_speech_does_not_block_the_hangup():
+    """DELIBERATE. Energy on the line is not proof of a conversation — it is
+    also what a television in the background looks like. If noise could hold a
+    call open, the 60s bound would stop being a bound. A live person whose STT
+    has died is rescued by the failover in resilient_stt, not by never hanging
+    up."""
+    assert silence_action(
+        **_speaking(caller_silence_s=61.0, activity_silence_s=61.0,
+                    caller_audio_active=True)
+    ) == "hangup"
+
+
+def test_the_guard_cannot_resurrect_a_suppressed_tick():
+    """It only ever turns 'nudge' into 'wait' — never the reverse."""
+    assert silence_action(**_speaking(in_grace=True, caller_audio_active=True)) == "wait"
+    assert silence_action(
+        **_speaking(activity_silence_s=0.0, caller_audio_active=True)
+    ) == "wait"

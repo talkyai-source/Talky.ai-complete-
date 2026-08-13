@@ -33,6 +33,22 @@ DESIGN CHOICES
   wrapper yields no transcripts. The pipeline's existing watchdog
   already tears down silent calls after the inactivity timeout —
   this wrapper doesn't invent a new hangup path.
+
+- **Silence is a failure mode too (2026-08-13).** Every trigger above
+  is an *exception*. A socket that connects, accepts audio and simply
+  never answers raises nothing, so it fell straight through all of
+  them. On 2 of 36 answered calls that day Flux was pre-connected,
+  took 400+ chunks, and returned zero events — not one StartOfTurn —
+  while the caller talked at RMS 3504 (peak 28988). Nothing failed
+  over, because from here a dead stream and a quiet room are the same
+  observation: no transcripts.
+
+  They are only distinguishable acoustically, so the wrapper now
+  measures the one thing that separates them — VOICED audio going in
+  with nothing coming out. That check belongs here rather than in any
+  one caller: this is the component whose whole job is keeping
+  transcripts flowing, and fixing it here covers telephony, browser
+  and ask-AI at once. See ``_SilentStreamWatchdog``.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Integration — DO NOT wire into the live pipeline as part of the
@@ -64,6 +80,15 @@ class ReconnectPolicy:
     audio_buffer_ms: int = 500
     failure_threshold: int = 3
     recovery_timeout_seconds: float = 30.0
+    # Seconds of VOICED caller audio with zero transcript events before the
+    # stream is declared dead and we fail over. Not wall-clock: a quiet caller
+    # never accumulates any of it, so this can never fire on plain silence.
+    #
+    # 6s is chosen against the two observed dead calls (17s and 19s of wasted
+    # audio) and against the re-greet ladder, which starts at 2.5s and is spent
+    # by ~15s: firing at 6s salvages the call while the caller is still on the
+    # line. Set to 0 to disable the watchdog entirely.
+    silent_stream_voiced_seconds: float = 6.0
 
 
 @dataclass
@@ -99,6 +124,107 @@ def _chunk_duration_ms(chunk: AudioChunk) -> float:
         # Assume 16-bit mono PCM or similar; 2 bytes per sample.
         return (len(data) / max(sr, 1)) * 500.0
     return 20.0
+
+
+# Matches the threshold audio_ingest already documents on every audio_level
+# line it emits: ">500=speech-likely, <100=silence-likely". Deliberately the
+# same number so the log a human reads while debugging and the number the code
+# acts on cannot drift apart.
+_SPEECH_RMS_THRESHOLD = 500.0
+
+# Stride for the RMS estimate. A 40ms/16kHz frame is 640 samples; every 8th
+# sample is 80 multiply-adds per frame, ~2k/second per call. Speech energy is
+# broadband, so decimating it barely moves the RMS while making the check free
+# enough to run on every frame of every call.
+_RMS_STRIDE = 8
+
+
+def _chunk_rms(chunk: AudioChunk, stride: int = _RMS_STRIDE) -> float:
+    """Approximate RMS of a 16-bit mono PCM chunk. Returns 0.0 for anything
+    it cannot interpret, which fails SAFE: an unreadable chunk contributes no
+    voiced time and so can never trip the watchdog on its own."""
+    data = getattr(chunk, "data", None)
+    if not data or len(data) < 2:
+        return 0.0
+    try:
+        import struct as _struct
+
+        count = len(data) // 2
+        samples = _struct.unpack_from(f"<{count}h", data, 0)
+    except Exception:
+        return 0.0
+    stride = max(1, stride)
+    total = 0.0
+    n = 0
+    for i in range(0, count, stride):
+        s = samples[i]
+        total += s * s
+        n += 1
+    if not n:
+        return 0.0
+    return (total / n) ** 0.5
+
+
+class _SilentStreamWatchdog:
+    """Trips when VOICED audio has been fed to an STT stream for long enough
+    that a working provider would certainly have answered by now.
+
+    Why voiced-time and not wall-clock: a caller who says nothing produces the
+    same empty transcript stream as a provider that has died. Wall-clock cannot
+    tell them apart and would fail over on every thoughtful pause. Acoustic
+    energy can, and it is the only signal that can.
+
+    Three properties matter and each one is load-bearing:
+
+    * **It re-arms.** ``observe_transcript`` zeroes the counter, so this
+      detects a stream that dies at minute nine exactly as well as one that was
+      never alive. The observed incident is just the turn-0 case.
+    * **It ignores muted audio.** While the agent speaks, STT is muted and the
+      provider deliberately drops frames (``deepgram_flux`` line ~644) — but
+      those frames still travel through this wrapper, and on a 2-wire line they
+      carry our own TTS at full volume. Counting them would trip the watchdog on
+      every talkative agent. The caller passes ``muted`` per chunk.
+    * **It fails safe.** Anything unparseable scores 0.0 and contributes no
+      voiced time, so a malformed chunk can never cause a spurious failover.
+    """
+
+    def __init__(
+        self,
+        *,
+        voiced_seconds: float,
+        rms_threshold: float = _SPEECH_RMS_THRESHOLD,
+    ) -> None:
+        self._voiced_needed_ms = max(0.0, voiced_seconds) * 1000.0
+        self._rms_threshold = rms_threshold
+        self._enabled = voiced_seconds > 0
+        self.voiced_ms = 0.0
+        self.tripped = False
+
+    def observe_transcript(self) -> None:
+        """The stream answered — it is alive; start the clock over."""
+        self.voiced_ms = 0.0
+
+    def observe_audio(self, chunk: AudioChunk, *, muted: bool = False) -> bool:
+        """Feed one outbound chunk. Returns True once the stream is judged
+        dead (and stays True thereafter)."""
+        if not self._enabled or self.tripped or muted:
+            return self.tripped
+        if _chunk_rms(chunk) < self._rms_threshold:
+            return False
+        self.voiced_ms += _chunk_duration_ms(chunk)
+        if self.voiced_ms >= self._voiced_needed_ms:
+            self.tripped = True
+        return self.tripped
+
+
+class STTStreamSilentError(RuntimeError):
+    """The active STT stream accepted voiced audio and never answered.
+
+    Raised into the failover path so a dead-but-not-erroring provider is
+    treated exactly like one that raised — including the replay buffer, so the
+    utterance the caller was mid-way through is re-transcribed by the secondary
+    rather than lost.
+    """
 
 
 class ResilientSTTProvider(STTProvider):
@@ -208,10 +334,52 @@ class ResilientSTTProvider(STTProvider):
         self._active = self._primary
         chosen = self._primary
 
+        watchdog = _SilentStreamWatchdog(
+            voiced_seconds=policy.silent_stream_voiced_seconds,
+        )
+
+        def _provider_muted(provider: STTProvider) -> bool:
+            """True while the provider is deliberately discarding frames, so
+            the watchdog does not count our own TTS echo as caller speech."""
+            if not call_id:
+                return False
+            fn = getattr(provider, "is_muted", None)
+            if fn is None:
+                return False
+            try:
+                return bool(fn(call_id))
+            except Exception:
+                return False
+
         async def _tee_audio() -> AsyncIterator[AudioChunk]:
-            """Pass-through that also populates the replay buffer."""
+            """Pass-through that also populates the replay buffer and feeds the
+            silent-stream watchdog.
+
+            Raising from here is what converts "dead but not erroring" into the
+            ordinary failover path: the exception travels out through the
+            provider's own ``async for`` over this iterator and lands in the
+            ``except Exception`` below. A provider that swallows it instead is
+            covered by the ``watchdog.tripped`` re-check after the loop, so the
+            failover happens either way.
+            """
             async for chunk in audio_stream:
                 buffer.add(chunk)
+                if watchdog.observe_audio(chunk, muted=_provider_muted(chosen)):
+                    logger.error(
+                        "resilient_stt_stream_silent provider=%s voiced_s=%.1f "
+                        "— %.1fs of caller speech went in and no transcript "
+                        "event came back; treating the stream as dead and "
+                        "failing over",
+                        chosen.name,
+                        policy.silent_stream_voiced_seconds,
+                        watchdog.voiced_ms / 1000.0,
+                        extra={"call_id": call_id},
+                    )
+                    raise STTStreamSilentError(
+                        f"{chosen.name} accepted "
+                        f"{watchdog.voiced_ms / 1000.0:.1f}s of voiced audio "
+                        f"without emitting a transcript event"
+                    )
                 yield chunk
 
         try:
@@ -224,11 +392,19 @@ class ResilientSTTProvider(STTProvider):
                 on_eager_end_of_turn=on_eager_end_of_turn,
                 on_barge_in=on_barge_in,
             ):
+                watchdog.observe_transcript()
                 yield out
-            return
+            # A provider that swallowed the watchdog's exception ends its
+            # stream cleanly instead of raising. Without this re-check that
+            # would look like a normal end-of-call and return silently — the
+            # exact failure this watchdog exists to stop.
+            if not watchdog.tripped:
+                return
         except CircuitOpenError:
             logger.info("resilient_stt_circuit_open_at_start", extra={"call_id": call_id})
             # fallthrough to failover
+        except STTStreamSilentError:
+            pass  # already logged at ERROR above; fall through to failover
         except Exception as exc:
             logger.warning(
                 "resilient_stt_primary_failed provider=%s err=%s",
@@ -250,10 +426,36 @@ class ResilientSTTProvider(STTProvider):
             extra={"call_id": call_id},
         )
 
+        # The secondary gets a watchdog too, but a LOGGING one: there is no
+        # third provider to fail over to, so tripping it must not raise and
+        # kill the stream. Its value is diagnostic — "both engines went deaf"
+        # and "the caller genuinely said nothing" produce identical transcripts
+        # and, without this line, identical logs.
+        secondary_watchdog = _SilentStreamWatchdog(
+            voiced_seconds=policy.silent_stream_voiced_seconds,
+        )
+        secondary_reported = False
+
         async def _replay_then_live() -> AsyncIterator[AudioChunk]:
+            nonlocal secondary_reported
             for past in buffer.drain():
                 yield past
             async for chunk in audio_stream:
+                if (
+                    secondary_watchdog.observe_audio(
+                        chunk, muted=_provider_muted(self._secondary)
+                    )
+                    and not secondary_reported
+                ):
+                    secondary_reported = True
+                    logger.error(
+                        "resilient_stt_secondary_also_silent provider=%s "
+                        "voiced_s=%.1f — both STT engines accepted caller "
+                        "speech without answering; no further failover exists",
+                        self._secondary.name,
+                        secondary_watchdog.voiced_ms / 1000.0,
+                        extra={"call_id": call_id},
+                    )
                 yield chunk
 
         async for out in self._stream_with_provider(
@@ -265,6 +467,7 @@ class ResilientSTTProvider(STTProvider):
             on_eager_end_of_turn=on_eager_end_of_turn,
             on_barge_in=on_barge_in,
         ):
+            secondary_watchdog.observe_transcript()
             yield out
 
     # ──────────────────────────────────────────────────────────────────

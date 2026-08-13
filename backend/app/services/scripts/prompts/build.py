@@ -30,12 +30,62 @@ by tests):
                                 LAST so the safety invariants keep the recency slot
                                 even after the optional blocks are appended)
     then the CAPTURED facts header is prepended on top.
+
+  (That was the order until 2026-08-13 — it is now the ``cache_friendly_order
+  =False`` path, kept executable so the revert switch stays tested.)
+
+CACHE-FRIENDLY ORDER (2026-08-13)
+--------------------------------
+The order above put the two most volatile blocks — LIVE STATE and CAPTURED —
+at character 0, above an 8.5k-token prompt that is otherwise identical from
+turn to turn. Prompt caches key on the longest common prefix from the first
+token, so a block that changes every turn at the very front means no prefix
+can ever match. Production bore that out exactly: 426 of 426 voice LLM calls
+over 7 days returned ``cache_hit_ratio=0.00``, while the same Groq account was
+getting hits of up to 6656 tokens on another model whose prefix happened to be
+stable. It was never a model limitation; it was this line.
+
+The price was the dominant term in call latency: ``prompt_time`` p50 614ms out
+of a 788ms time-to-first-token, i.e. ~60% of the 1014ms a caller waits between
+finishing their sentence and hearing a reply — spent re-reading a prompt the
+provider had already read seconds earlier.
+
+So the rule is now: **stable-for-the-call blocks first, per-turn blocks last.**
+
+    [base]  [end-session]  [audio-tags]  [accent]   <- identical all call: CACHED
+    [ask-AI]  [knowledge]  [CAPTURED]  [LIVE STATE] <- per-turn
+    [trailing]                                      <- safety floor keeps LAST
+
+Two things worth stating plainly, because they look like risks and are not:
+
+* **LIVE STATE does not get weaker, it gets stronger.** It moves from position
+  0 to a few hundred tokens from the end. This codebase's own hard-won finding
+  is that the trailing slot wins — that is precisely why ``trailing_block``
+  exists and why the per-turn re-anchor was put there. Moving a block from the
+  front of 8.5k tokens to the back is a promotion.
+* **The compliance floor keeps the final word.** ``trailing_block`` is still
+  the last text in the prompt, unchanged. It sits after the volatile blocks
+  and so is not itself cached; at ~1k characters that is a rounding error
+  against the 6.6k tokens that now are.
+
+``VOICE_PROMPT_CACHE_ORDER=false`` restores the pre-2026-08-13 order exactly,
+without a redeploy — the same instant-revert pattern used for the STT reorder.
 """
 from __future__ import annotations
 
+import os
 from typing import Optional
 
 from app.services.scripts.prompt_builder import compose_system_prompt
+
+
+def _cache_friendly_default() -> bool:
+    """Read at CALL time, not import time, so flipping the env var takes effect
+    on a restart without also needing a redeploy — and so tests can toggle it
+    with monkeypatch instead of reloading the module."""
+    return os.getenv("VOICE_PROMPT_CACHE_ORDER", "true").strip().lower() not in (
+        "0", "false", "no", "off",
+    )
 
 
 def build_turn_prompt(
@@ -49,6 +99,7 @@ def build_turn_prompt(
     accent_block: Optional[str] = None,
     trailing_block: Optional[str] = None,
     captured_slots=None,
+    cache_friendly_order: Optional[bool] = None,
 ) -> str:
     """Assemble the final per-turn system prompt from the base + resolved
     optional blocks. Pure: same inputs → same string, no I/O.
@@ -57,23 +108,58 @@ def build_turn_prompt(
     / ``""`` to skip it (a falsy block is never appended). ``captured_slots``
     (a ``CallState`` or ``None``) drives the CAPTURED header.
 
-    Top-of-prompt order (highest-attention first): LIVE STATE → CAPTURED → base.
-    Both are per-turn facts that must dominate, so they are prepended last.
+    ``cache_friendly_order`` selects the layout (see the module docstring).
+    ``None`` reads ``VOICE_PROMPT_CACHE_ORDER``, which defaults to on. Passing
+    ``False`` reproduces the pre-2026-08-13 order byte for byte, which is what
+    the legacy-order tests assert.
     """
-    parts = [base_prompt]
-    for block in (
-        ask_ai_block,
-        knowledge_block,
-        end_session_block,
-        audio_tags_block,
-        accent_block,
-        trailing_block,
-    ):
+    if cache_friendly_order is None:
+        cache_friendly_order = _cache_friendly_default()
+
+    if not cache_friendly_order:
+        # LEGACY ORDER — kept executable, not just described, so the revert
+        # switch is covered by tests rather than being a claim in a comment.
+        parts = [base_prompt]
+        for block in (
+            ask_ai_block,
+            knowledge_block,
+            end_session_block,
+            audio_tags_block,
+            accent_block,
+            trailing_block,
+        ):
+            if block:
+                parts.append(block)
+        prompt = "\n\n".join(parts)
+        if captured_slots is not None:
+            prompt = compose_system_prompt(prompt, captured_slots)
+        if live_state_block:
+            prompt = live_state_block + "\n\n" + prompt
+        return prompt
+
+    # ── stable-for-the-call prefix: this is the part the provider caches ──
+    stable = [base_prompt]
+    for block in (end_session_block, audio_tags_block, accent_block):
         if block:
-            parts.append(block)
-    prompt = "\n\n".join(parts)
+            stable.append(block)
+
+    # ── per-turn tail: everything that can differ between two turns of the
+    # same call. Nothing here is cacheable, so it all goes after the prefix.
+    volatile = [block for block in (ask_ai_block, knowledge_block) if block]
+    tail = "\n\n".join(volatile)
     if captured_slots is not None:
-        prompt = compose_system_prompt(prompt, captured_slots)
+        # compose_system_prompt PREPENDS the CAPTURED header to whatever it is
+        # given. Handing it the tail (rather than the whole prompt, as the
+        # legacy path does) is what moves CAPTURED out of the cached prefix
+        # while keeping it above the blocks it qualifies. Returns its input
+        # unchanged when no slot is filled, so an empty tail stays empty.
+        tail = compose_system_prompt(tail, captured_slots)
     if live_state_block:
-        prompt = live_state_block + "\n\n" + prompt
-    return prompt
+        tail = f"{tail}\n\n{live_state_block}" if tail else live_state_block
+
+    parts = stable
+    if tail:
+        parts = parts + [tail]
+    if trailing_block:
+        parts = parts + [trailing_block]
+    return "\n\n".join(parts)
