@@ -111,3 +111,10 @@ id_rsa_openssh
 id_rsa
 *.ppk
 convert_ppk.py
+
+# Raw production journal — contains client IPs, call/tenant UUIDs, hostnames.
+# This repository is PUBLIC. Never commit raw logs.
+call_logs.md
+call_logs2.md
+raw_logs*.md
+*_raw_logs.md

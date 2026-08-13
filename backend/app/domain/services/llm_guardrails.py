@@ -318,24 +318,73 @@ class LLMGuardrails:
         # "So, I'm calling because..." was reaching TTS as "I'm calling
         # because..." (the filler vanished). Keep the canned-politeness strips.
         # Multi-word phrases must come before single-word so the longer match wins.
+        # 2026-08-13: every pattern here requires a SEPARATOR after the filler
+        # (`\s+`, or the sentence ending). "Sure thing" alone used `\s*`, which
+        # matches the empty string — so "Sure thing." stripped to a bare "."
+        # and "Sure thing. The weather today is actually quite nice." stripped
+        # to ". The weather today is actually quite nice.". Both were spoken on
+        # production calls that day.
+        #
+        # The bare "." was the worse of the two: turn_streamer drops any
+        # sentence with no speakable content, so the agent said NOTHING that
+        # turn. From the caller's side that is dead air in the middle of a
+        # conversation — the model had answered, and the answer was deleted
+        # between the LLM and the wire by a stray quantifier.
+        # Each filler must be followed by a SEPARATOR or the end of the text.
+        # `(?:\s+|$)` rather than `\s+` matters for the longest-match ordering
+        # below: with `\s+`, "Sure thing." failed the two-word pattern (no
+        # trailing space) and fell through to the one-word `^Sure` pattern,
+        # which ate "Sure " and left "thing." — the bug simply moved.
+        # Anchoring on `$` lets the longer phrase win even when it IS the whole
+        # message, and the "filler was everything" guard below then restores it.
         filler_starts = [
-            r'^Sure thing[!,]?\s*',     # "Sure thing!" / "Sure thing," / "Sure thing"
-            r'^No problem[!,]?\s+',     # "No problem!" / "No problem,"
-            r'^Happy to help[!,]?\s+',  # "Happy to help!"
-            r'^Sure[!,]?\s+',           # "Sure!" / "Sure," / bare "Sure "
-            r'^(Of course[!,]?\s+)',
-            r'^(Absolutely[!,]?\s+)',
-            r'^(Certainly[!,]?\s+)',
-            r'^(Definitely[!,]?\s+)',
+            r'^Sure thing(?:\s*[!,.])?(?:\s+|$)',
+            r'^No problem(?:\s*[!,.])?(?:\s+|$)',
+            r'^Happy to help(?:\s*[!,.])?(?:\s+|$)',
+            r'^Sure(?:\s*[!,.])?(?:\s+|$)',
+            r'^Of course(?:\s*[!,.])?(?:\s+|$)',
+            r'^Absolutely(?:\s*[!,.])?(?:\s+|$)',
+            r'^Certainly(?:\s*[!,.])?(?:\s+|$)',
+            r'^Definitely(?:\s*[!,.])?(?:\s+|$)',
             r'^(Great[!,]\s+)',         # "Great!" or "Great," as opener only
         ]
 
+        before_fillers = cleaned
         for pattern in filler_starts:
             cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
-        
-        # Strip leading em-dashes / en-dashes left behind after filler removal
-        # e.g. "Sure thing! —I'm offering..." → after stripping "Sure thing! " → "—I'm..." → "I'm..."
-        cleaned = re.sub(r'^[—–\-]+\s*', '', cleaned)
+
+        if cleaned != before_fillers:
+            # Strip punctuation orphaned by the filler removal. The em-dash case
+            # below was the known one ("Sure thing! —I'm offering..."); the same
+            # thing happens with ordinary sentence punctuation and went unhandled
+            # until it reached production as a spoken ". The weather today is
+            # actually quite nice."
+            #
+            # Generalised deliberately rather than adding "." to the dash class:
+            # the defect is not which character was left behind, it is that
+            # removing a leading phrase can leave ANY leading punctuation
+            # dangling. Gated on the text having actually changed, so a reply
+            # that legitimately opens with punctuation is untouched.
+            cleaned = re.sub(r'^[\s—–\-.,;:!?]+', '', cleaned)
+
+            # If the filler WAS the whole message, keep the original. Speaking
+            # "Sure thing." is right; speaking "." is not, and — because a
+            # sentence with no speakable content is dropped downstream — saying
+            # nothing at all is worse than either.
+            if not re.search(r'[A-Za-z0-9]', cleaned):
+                cleaned = before_fillers
+            else:
+                # Restore sentence case. The filler carried the capital, so
+                # "Sure, take your time." became "take your time." — which is
+                # what the persisted transcript and every QA review then shows.
+                # Only touches a lowercase ASCII letter, so "iPhone" or a
+                # capitalised name is never rewritten.
+                if cleaned[:1].islower():
+                    cleaned = cleaned[0].upper() + cleaned[1:]
+        else:
+            # Unchanged text: keep the original narrow dash strip so behaviour
+            # is identical for every reply that had no filler to remove.
+            cleaned = re.sub(r'^[—–\-]+\s*', '', cleaned)
 
         # Clean up whitespace
         cleaned = re.sub(r'\s+', ' ', cleaned).strip()

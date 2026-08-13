@@ -43,6 +43,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from app.domain.interfaces.media_gateway import MediaGateway
 from app.domain.services.telephony.config import AUDIO_CALLBACK_INTERVAL_MS
+from app.utils import event_loop_lag
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +147,12 @@ class TelephonySession:
     # Gap detection — tracks C++ gateway fire-and-forget callback drops
     last_audio_received_at: float = 0.0
     audio_gap_count: int = 0
+    # Loop-clock stamp of the first audio callback, so a gap warning can state
+    # how much audio has arrived against how much was owed for the elapsed
+    # time. Without it a gap is just "late", and "late" cannot be told apart
+    # from "lost" — which is exactly the ambiguity that left 421 warnings
+    # unactionable on 2026-08-13.
+    first_audio_received_at: float = 0.0
 
     # Rate-limit timestamp for the queue-overrun warning (one log/sec/call).
     last_queue_drop_warn_at: float = 0.0
@@ -339,6 +346,8 @@ class TelephonyMediaGateway(MediaGateway):
         now = loop.time()
         gap_ms = (now - session.last_audio_received_at) * 1000
         session.last_audio_received_at = now
+        if not session.first_audio_received_at:
+            session.first_audio_received_at = now
         # The expected inter-arrival is derived from the batch size the adapter
         # actually configures, NOT hardcoded — the two had drifted (the batch
         # was halved to 40ms while this still assumed 80ms), which silently made
@@ -346,27 +355,59 @@ class TelephonyMediaGateway(MediaGateway):
         # telephony.config.AUDIO_CALLBACK_INTERVAL_MS.
         if session.chunks_received > 0 and gap_ms > _AUDIO_GAP_WARN_MS:
             session.audio_gap_count += 1
-            # The cause is NOT asserted. A gap here means audio did not ARRIVE
-            # on time; that is equally consistent with the gateway dropping a
-            # callback, this process being blocked so the callback timed out at
-            # the 200ms fire-and-forget deadline, or genuine upstream RTP loss.
-            # The gateway's own counters cannot settle it after the fact either
-            # — /stats sums only LIVE sessions, so a finished call's loss
-            # figures are gone. Naming one suspect in the message sent an
-            # earlier investigation down the wrong path, so state the fact and
-            # the expected cadence, and let the reader judge.
+            # The cause is STILL not asserted — but as of 2026-08-13 the line
+            # now carries the two measurements that let a reader settle it,
+            # instead of listing three suspects and leaving it there.
+            #
+            # That run produced 421 of these across 36 of 38 calls and nobody
+            # could act on any of them. Reconstructing the answer afterwards
+            # from the audio_level sample counts showed a delivery ratio of
+            # p50 1.000 / mean 1.0089, with 3.4% of one-second windows short
+            # and 3.1% long — near-symmetric, i.e. BUNCHING, not loss. Every
+            # byte arrived; some arrived late and in bursts. RTP loss was
+            # therefore never the cause, and one of the three suspects could
+            # have been struck off on day one if the line had said so.
+            #
+            #   arrived_ratio  — audio delivered vs audio owed for the elapsed
+            #                    call time. ~1.0 means nothing was lost and
+            #                    this is purely a timing artefact; a sustained
+            #                    dip below 1.0 is real loss and a different
+            #                    problem entirely.
+            #   loop_lag_ms    — whether THIS process could be scheduled at the
+            #                    moment the batch was due. High: the callback
+            #                    was late because we were busy, and it is ours
+            #                    to fix. ~0: we were idle and waiting, so the
+            #                    audio genuinely arrived late from outside.
+            #
+            # `unmeasured` is reported distinctly from 0.0 on purpose: "we did
+            # not look" and "the loop was fine" are different claims.
+            elapsed_s = max(0.0, now - session.first_audio_received_at)
+            owed_chunks = (
+                (elapsed_s * 1000.0) / AUDIO_CALLBACK_INTERVAL_MS
+                if elapsed_s > 0 and AUDIO_CALLBACK_INTERVAL_MS
+                else 0.0
+            )
+            arrived_ratio = (
+                session.chunks_received / owed_chunks if owed_chunks > 0 else float("nan")
+            )
             logger.warning(
                 "telephony_audio_gap call_id=%s gap_ms=%.0f expected_ms=%d "
-                "(%.1fx) total_gaps=%d — inbound audio batch arrived late; "
-                "cause may be gateway callback drop, event-loop stall, or RTP loss",
+                "(%.1fx) total_gaps=%d arrived_ratio=%.3f %s "
+                "— inbound audio batch arrived late",
                 call_id, gap_ms, AUDIO_CALLBACK_INTERVAL_MS,
                 gap_ms / AUDIO_CALLBACK_INTERVAL_MS if AUDIO_CALLBACK_INTERVAL_MS else 0.0,
                 session.audio_gap_count,
+                arrived_ratio,
+                event_loop_lag.describe(),
                 extra={
                     "call_id": call_id,
                     "gap_ms": round(gap_ms),
                     "expected_ms": AUDIO_CALLBACK_INTERVAL_MS,
                     "audio_gap_count": session.audio_gap_count,
+                    "arrived_ratio": round(arrived_ratio, 3)
+                    if arrived_ratio == arrived_ratio  # NaN-safe
+                    else None,
+                    "loop_lag_ms": event_loop_lag.current_ms(),
                 },
             )
 

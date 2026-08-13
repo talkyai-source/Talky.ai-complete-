@@ -705,7 +705,25 @@ class TurnStreamer:
                         protected_values=_protected_readback,
                     )
 
-                    if not sentence or len(sentence) < 6:
+                    # Drop only what cannot be SPOKEN — punctuation or
+                    # whitespace left over from cleaning. The test used to be
+                    # `len(sentence) < 6`, which also silently deleted every
+                    # short real reply: "Yes.", "Okay.", "Sure.", "Got it."
+                    # are all under six characters. The caller heard nothing at
+                    # all on those turns.
+                    #
+                    # That got sharply worse on 2026-08-13, from two directions
+                    # at once. A guardrail bug was cleaning "Sure thing." down
+                    # to a bare "." — which this line then swallowed, so the
+                    # agent went silent mid-conversation. And the answer-first
+                    # rule added the same week explicitly asks the model to
+                    # reply plainly in one short sentence, which is exactly the
+                    # shape this discarded.
+                    #
+                    # A length threshold was always the wrong instrument: the
+                    # question is whether there is anything to say, not how
+                    # many characters it takes to say it.
+                    if not sentence or not any(c.isalnum() for c in sentence):
                         continue
 
                     if _barged():

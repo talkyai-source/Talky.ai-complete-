@@ -379,9 +379,17 @@ def test_sure_exclamation_filler_is_stripped(guardrails):
 
 
 def test_sure_comma_filler_is_stripped(guardrails):
-    """'Sure, ' followed by real content IS a filler and should be stripped."""
+    """'Sure, ' followed by real content IS a filler and should be stripped.
+
+    2026-08-13: the expected value gained its capital. Stripping the filler
+    also strips the capital it was carrying, so this returned "let me check
+    that for you." — and that lowercase fragment is what every persisted
+    transcript and QA review then showed. Production turns read "take your
+    time.", "go ahead.", "what did you have in mind?". Sentence case is now
+    restored after a strip; the stripping itself is unchanged.
+    """
     result = guardrails.clean_response("Sure, let me check that for you.")
-    assert result == "let me check that for you."
+    assert result == "Let me check that for you."
 
 
 # ── Other filler patterns must still work ────────────────────────────────────

@@ -47,6 +47,7 @@ async def _event_loop_lag_heartbeat(stop_event: asyncio.Event) -> None:
     from app.infrastructure.metrics.voice_metrics import (
         observe_event_loop_lag_seconds,
     )
+    from app.utils import event_loop_lag as _lag_view
 
     loop = asyncio.get_running_loop()
     period = 0.010
@@ -57,6 +58,12 @@ async def _event_loop_lag_heartbeat(stop_event: asyncio.Event) -> None:
             now = loop.time()
             lag = max(0.0, now - deadline)
             observe_event_loop_lag_seconds(lag)
+            # Same observation, published for SYNCHRONOUS readers. The
+            # histogram answers "how has the loop been lately"; it cannot
+            # answer "was the loop stalled when THIS audio batch arrived
+            # late", which needs a value in hand at the moment of the log
+            # call. telephony_audio_gap reads it — see event_loop_lag.
+            _lag_view.record(lag)
             deadline += period
             if now > deadline:
                 # Still behind after advancing by one period means the stall

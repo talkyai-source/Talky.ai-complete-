@@ -827,6 +827,69 @@ def _keep_shape_chars(text: str, allowed: frozenset, *, allow_digits: bool) -> s
     return " ".join("".join(out).split())
 
 
+# Words that are not names, in a column that is supposed to hold one.
+#
+# 2026-08-13: a campaign's only lead was `first_name='Call', last_name='30'` —
+# somebody had typed "Call 30" (as in "call thirty numbers") into the name
+# field. The digits were already stripped by the shape allowlist, but "Call"
+# sailed through, so all 40 calls that day opened "Hi, is this Call?".
+#
+# The list is deliberately SHORT and biased towards leaving names alone. Every
+# entry is either campaign-operations vocabulary, a placeholder, or a title —
+# never a word that is also a plausible given name. Months (May, June, April),
+# virtue names (Grace, Hope, Faith) and surnames-as-forenames (Lee) are exactly
+# what a longer list would start eating, so they are not here and should not be
+# added: addressing someone by the wrong word is a small embarrassment, while
+# refusing to use a real person's name is a worse one.
+_NON_NAME_WORDS = frozenset({
+    "call", "calls", "caller", "dial", "dialer", "dialler",
+    "test", "tests", "testing", "tester",
+    "lead", "leads", "prospect", "contact", "customer", "client", "user",
+    "unknown", "none", "null", "nil", "na", "n/a", "blank", "empty",
+    "placeholder", "sample", "demo", "example", "dummy", "temp", "default",
+    "tbd", "todo", "xxx", "asdf", "qwerty",
+    "mr", "mrs", "ms", "miss", "sir", "madam", "dr", "prof",
+    "admin", "info", "number", "phone", "mobile", "recipient",
+})
+
+
+def _is_implausible_person_name(cleaned: str) -> bool:
+    """True when a sanitized PERSON name is not usable as a form of address.
+
+    Runs only on person names — a company legitimately can be called "Test
+    Kitchen" or "Number 10". Three shapes are rejected, all of them things that
+    make the agent address someone by a non-name:
+
+      * nothing but digits/punctuation once the shape allowlist has run;
+      * a single ASCII character ("A", "-") — the ASCII qualifier matters: in
+        Han, Kana and other logographic scripts one glyph is a whole name
+        ("张 伟"), and a bare length test rejects those outright;
+      * every word in the placeholder vocabulary above.
+
+    The last check is on ALL words, counting a bare number as a placeholder
+    too, so "Call 30" and "test test" go while "Call Robertson" — implausible
+    but conceivably a surname — is kept. When in doubt this returns False and
+    the name is used.
+
+    ("Call 30" only ever reaches here as "Call", since the shape allowlist
+    strips digits from person names first. The digit clause is here so the rule
+    is true on its own terms rather than relying on an upstream step.)
+    """
+    tokens = [
+        "".join(c for c in w.lower() if c.isalnum() or c == "/")
+        for w in cleaned.split()
+    ]
+    tokens = [t for t in tokens if t]
+    if not tokens:
+        return True
+    if all(t.isdigit() for t in tokens):
+        return True
+    joined = "".join(tokens)
+    if len(joined) < 2 and joined.isascii():
+        return True
+    return all(t in _NON_NAME_WORDS or t.isdigit() for t in tokens)
+
+
 def _sanitize_lead_field(
     value: Optional[str], *, field: str, is_company: bool = False
 ) -> str:
@@ -875,6 +938,19 @@ def _sanitize_lead_field(
     # No dangling separators. The period is deliberately NOT stripped so
     # "Acme (UK) Ltd." and "St. John" keep their real spelling.
     cleaned = cleaned.strip(" -'’‐‑‒–—")
+
+    # (5) Plausibility — person names only. Dropping to "" degrades to the
+    # other name field, or to an opening with no name at all: both are states
+    # the pipeline already supports, and both are better than greeting someone
+    # as "Call".
+    if not is_company and cleaned and _is_implausible_person_name(cleaned):
+        logger.info(
+            "call_target_field_dropped field=%s reason=implausible_person_name "
+            "chars=%d — the agent will open without a name rather than address "
+            "the callee by a placeholder",
+            field, len(cleaned),
+        )
+        return ""
 
     if cleaned != flat:
         logger.info(
