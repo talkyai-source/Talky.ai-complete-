@@ -58,10 +58,10 @@ def note_voice_activity(session, sum_sq: float, sample_count: int) -> None:
         if (sum_sq / sample_count) ** 0.5 < _VOICE_ONSET_RMS:
             return
         now = time.monotonic()
-        last = getattr(session, "caller_voice_last_at", None)
+        last = getattr(session, "_caller_voice_last_at", None)
         if last is None or (now - last) > _VOICE_ONSET_GAP_S:
-            session.caller_voice_onset_at = now
-        session.caller_voice_last_at = now
+            session._caller_voice_onset_at = now
+        session._caller_voice_last_at = now
     except Exception:
         pass
 
@@ -72,7 +72,7 @@ def voice_onset_age_s(session, *, now: Optional[float] = None) -> Optional[float
     None means "no usable measurement" and must be reported as such — never
     substituted with 0.0, which would read as an instantaneous response.
     """
-    onset = getattr(session, "caller_voice_onset_at", None)
+    onset = getattr(session, "_caller_voice_onset_at", None)
     if onset is None:
         return None
     age = (now if now is not None else time.monotonic()) - onset
@@ -318,9 +318,9 @@ class AudioIngest:
                             # unrelated timebases and reading as "always
                             # stale" — i.e. this guard quietly not existing.
                             try:
-                                session.last_audio_rms = rms
-                                session.last_audio_peak = _level_max
-                                session.last_audio_rms_at = time.monotonic()
+                                session._last_audio_rms = rms
+                                session._last_audio_peak = _level_max
+                                session._last_audio_rms_at = time.monotonic()
                             except Exception:
                                 pass
                             _level_bucket_t0 = _now
@@ -610,12 +610,12 @@ class AudioIngest:
                         # object that never carries the field is unaffected.
                         _audio_active = False
                         try:
-                            _rms_at = getattr(session, "last_audio_rms_at", None)
+                            _rms_at = getattr(session, "_last_audio_rms_at", None)
                             if _rms_at is not None and (
                                 _now() - _rms_at
                             ) <= _AUDIO_ACTIVE_MAX_AGE_S:
                                 _audio_active = (
-                                    float(getattr(session, "last_audio_rms", 0.0) or 0.0)
+                                    float(getattr(session, "_last_audio_rms", 0.0) or 0.0)
                                     >= _AUDIO_ACTIVE_RMS
                                 )
                         except Exception:
@@ -701,7 +701,7 @@ class AudioIngest:
                                             "caller audio live rms=%.0f n=%d "
                                             "(would have talked over them)",
                                             call_id[:12],
-                                            float(getattr(session, "last_audio_rms", 0.0) or 0.0),
+                                            float(getattr(session, "_last_audio_rms", 0.0) or 0.0),
                                             _nudge_suppressed,
                                         )
                                 else:

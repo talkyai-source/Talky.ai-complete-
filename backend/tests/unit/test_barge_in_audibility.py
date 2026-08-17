@@ -49,7 +49,7 @@ def _blank():
 def test_a_voiced_frame_arms_the_onset():
     s = _blank()
     note_voice_activity(s, _sum_sq(3000), 640)
-    assert s.caller_voice_onset_at is not None
+    assert s._caller_voice_onset_at is not None
     assert voice_onset_age_s(s) is not None
 
 
@@ -58,7 +58,7 @@ def test_a_quiet_frame_arms_nothing():
     onset, every barge-in would be timed from the start of the call."""
     s = _blank()
     note_voice_activity(s, _sum_sq(12), 640)
-    assert getattr(s, "caller_voice_onset_at", None) is None
+    assert getattr(s, "_caller_voice_onset_at", None) is None
     assert voice_onset_age_s(s) is None
 
 
@@ -68,10 +68,10 @@ def test_one_continuous_utterance_reports_one_onset():
     would always look excellent."""
     s = _blank()
     note_voice_activity(s, _sum_sq(3000), 640)
-    first = s.caller_voice_onset_at
+    first = s._caller_voice_onset_at
     for _ in range(50):                       # ~2s of continuous speech
         note_voice_activity(s, _sum_sq(3000), 640)
-    assert s.caller_voice_onset_at == first
+    assert s._caller_voice_onset_at == first
 
 
 def test_a_pause_starts_a_new_utterance(monkeypatch):
@@ -79,13 +79,13 @@ def test_a_pause_starts_a_new_utterance(monkeypatch):
     previous turn — that would report a latency of many seconds."""
     s = _blank()
     note_voice_activity(s, _sum_sq(3000), 640)
-    first = s.caller_voice_onset_at
+    first = s._caller_voice_onset_at
 
     # Simulate the gap by ageing the last-voiced stamp past the threshold.
-    s.caller_voice_last_at = s.caller_voice_last_at - (_VOICE_ONSET_GAP_S + 0.1)
+    s._caller_voice_last_at = s._caller_voice_last_at - (_VOICE_ONSET_GAP_S + 0.1)
     note_voice_activity(s, _sum_sq(3000), 640)
 
-    assert s.caller_voice_onset_at != first
+    assert s._caller_voice_onset_at != first
 
 
 def test_an_unmeasured_onset_is_none_not_zero():
@@ -99,7 +99,7 @@ def test_a_stale_onset_is_discarded():
     would put an absurd outlier into the latency distribution."""
     s = _blank()
     note_voice_activity(s, _sum_sq(3000), 640)
-    s.caller_voice_onset_at -= 120.0
+    s._caller_voice_onset_at -= 120.0
     assert voice_onset_age_s(s) is None
 
 
@@ -137,8 +137,8 @@ def _speaking_session(*, onset_age_s: float | None = None):
         current_user_input="",
     )
     if onset_age_s is not None:
-        s.caller_voice_onset_at = _t.monotonic() - onset_age_s
-        s.caller_voice_last_at = _t.monotonic()
+        s._caller_voice_onset_at = _t.monotonic() - onset_age_s
+        s._caller_voice_last_at = _t.monotonic()
     return s
 
 
