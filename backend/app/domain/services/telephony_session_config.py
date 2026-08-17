@@ -1226,8 +1226,21 @@ def build_telephony_session_config(
     try:
         system_prompt = _compose(knowledge_driven)
         logger.info(
-            "telephony_prompt_composed persona=%s agent=%s company=%s campaign=%s kd=%s",
-            persona_type, agent_name, company_name, _campaign_id(campaign), knowledge_driven,
+            # prompt_chars added 2026-08-17. Prompt SIZE is the dominant term in
+            # per-turn latency (measured: 6,498 tokens at turn 0, prompt_time
+            # p50 634ms, and Groq does not cache this model — see report 6), so
+            # it needs to be readable at composition time rather than inferred
+            # from llm_usage after the fact.
+            #
+            # This line carries NO call_id on purpose: the prompt is composed
+            # while building the session config, before a call exists. Threading
+            # a call id through a public builder for the sake of a log line
+            # would be the tail wagging the dog — the per-call view comes from
+            # llm_usage, which does carry one.
+            "telephony_prompt_composed persona=%s agent=%s company=%s campaign=%s "
+            "kd=%s prompt_chars=%d",
+            persona_type, agent_name, company_name, _campaign_id(campaign),
+            knowledge_driven, len(system_prompt or ""),
         )
     except PromptCompositionError as exc:
         # A slot-based persona with incomplete campaign_slots. Strict mode (the

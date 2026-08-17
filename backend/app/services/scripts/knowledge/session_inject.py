@@ -160,7 +160,14 @@ def _bake_inline_knowledge(call_session, tree: str, header: str,
         f"{DATA_ONLY_NOTE(_KB_TAG)}\n{fenced}\n{KNOWLEDGE_PRICE_GUARD}"
     )
     logger.info(
-        "campaign_knowledge_injected campaign=%s mode=%s chars=%d",
-        campaign_id[:12], mode, len(tree),
+        "campaign_knowledge_injected campaign=%s mode=%s chars=%d prompt_chars=%d",
+        campaign_id[:12], mode, len(tree), len(call_session.system_prompt or ""),
+        # Attributed to the call (2026-08-17): without this the line logs as
+        # [call=-] and cannot be joined to the call it belongs to, so the
+        # scorecard reported knowledge=0 for every call regardless of the truth.
+        # prompt_chars is here because knowledge injection is the one block that
+        # varies most by campaign, and prompt SIZE is now the dominant term in
+        # turn latency — see report 6.
+        extra={"call_id": getattr(call_session, "call_id", None)},
     )
     return True

@@ -123,6 +123,15 @@ class Call:
     prompt_tokens: int = 0
     prompt_times: List[float] = field(default_factory=list)
     models: set = field(default_factory=set)
+    # Prompt SIZE, first turn -> last turn. Promoted to a first-class column on
+    # 2026-08-17: caching is unavailable on this model (proven), so prefill cost
+    # is governed by size alone and size is what has to be watched.
+    ptok_first: Optional[int] = None
+    ptok_last: Optional[int] = None
+
+    # TTS returning nothing
+    tts_empty_streams: int = 0
+    tts_empty_after_retry: int = 0
 
     # 4. latency
     speech_to_audio_ms: Optional[float] = None
@@ -347,6 +356,10 @@ class Scorecard:
                 ct = _num(r"cached_tokens=(\d+)", msg, int) or 0
                 c.prompt_tokens += int(pt)
                 c.cached_tokens += int(ct)
+                if pt:
+                    if c.ptok_first is None:
+                        c.ptok_first = int(pt)
+                    c.ptok_last = int(pt)
                 if ct:
                     c.cache_hits += 1
                 ptime = _num(r"prompt_time=([\d.]+)", msg)
@@ -391,6 +404,10 @@ class Scorecard:
                     c.opener = said
         elif msg.startswith("turn_silent_reason"):
             c.silent_turns += 1
+        elif msg.startswith("tts_empty_stream_after_retry"):
+            c.tts_empty_after_retry += 1
+        elif msg.startswith("tts_empty_stream"):
+            c.tts_empty_streams += 1
 
         # 7 ── lead-name handling
         if msg.startswith("call_target_field_sanitized"):
@@ -472,20 +489,29 @@ class Scorecard:
 
 _COLUMNS = [
     ("call", 9), ("start", 9), ("stt", 14), ("stt-ok", 6), ("nudge s/x", 10),
-    ("cache", 7), ("m2e ms", 7), ("ttft", 6), ("reply", 7), ("name", 12),
+    ("prompt tok", 12), ("m2e ms", 7), ("ttft", 6), ("reply", 7), ("name", 12),
     ("barge r/t", 10), ("stop ms", 8), ("resume", 11), ("gaps", 6),
 ]
 
 
+def _prompt_growth(c: Call) -> str:
+    """First turn -> last turn. One number would hide the growth, which is the
+    half of the cost that compounds over a long call."""
+    if c.ptok_first is None:
+        return "?"
+    if c.ptok_last is None or c.ptok_last == c.ptok_first:
+        return f"{c.ptok_first}"
+    return f"{c.ptok_first}>{c.ptok_last}"
+
+
 def _row(c: Call) -> List[str]:
-    ratio = c.cache_ratio()
     return [
         c.short,
         c.first_seen,
         c.stt_verdict(),
         str(c.transcripts or 0),
         c.nudge_verdict(),
-        "?" if ratio is None else f"{ratio*100:.0f}%",
+        _prompt_growth(c),
         _fmt(c.speech_to_audio_ms),
         _fmt(_p50(c.ttft_ms)),
         c.short_reply_verdict(),
@@ -556,12 +582,15 @@ def render_summary(sc: Scorecard, calls: List[Call]) -> str:
         f"  suppressed over speech  {suppressed}"
         + ("   <- the acoustic guard doing its job" if suppressed else ""),
         "",
-        "PROMPT CACHE",
-        f"  turns measured          {cache_calls}",
-        f"  turns with any hit      {cache_hits}  ({_pct(cache_hits, cache_calls)})",
-        f"  token hit ratio         {_pct(cached_tokens, prompt_tokens)}"
-        f"   ({cached_tokens}/{prompt_tokens})",
-        f"  prompt_time p50         {_fmt(_p50([v for c in calls for v in c.prompt_times]), 'ms')}",
+        "PROMPT SIZE  (the dominant term in time-to-first-token)",
+        f"  turn-0 prompt p50       "
+        f"{_fmt(_p50([c.ptok_first for c in calls if c.ptok_first]), ' tok')}",
+        f"  largest prompt seen     "
+        f"{_fmt(max([c.ptok_last for c in calls if c.ptok_last], default=None), ' tok')}",
+        f"  prompt_time p50         {_fmt(_p50([v for c in calls for v in c.prompt_times]), 'ms')}"
+        "   <- prefill; NOT recoverable by caching on this model",
+        f"  cache hits              {cache_hits}/{cache_calls} turns"
+        f"  ({_pct(cached_tokens, prompt_tokens)} of {prompt_tokens} tokens)",
         "",
         "LATENCY",
         f"  first-turn mouth-to-ear p50   {_fmt(_p50(m2e), 'ms')}"
@@ -588,6 +617,8 @@ def render_summary(sc: Scorecard, calls: List[Call]) -> str:
         f"  recordings lost to disclosure   "
         f"{sum(c.disclosure_suppressed for c in calls)}",
         f"  silent turns (no audio spoken)  {sum(c.silent_turns for c in calls)}",
+        f"  TTS empty streams (retried)     {sum(c.tts_empty_streams for c in calls)}",
+        f"  TTS empty after retry           {sum(c.tts_empty_after_retry for c in calls)}",
     ]
     if sc.global_notes:
         lines += ["", "FAULT INJECTION ACTIVE:"] + [f"  {x}" for x in sc.global_notes[:5]]

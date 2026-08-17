@@ -34,23 +34,46 @@ by tests):
   (That was the order until 2026-08-13 — it is now the ``cache_friendly_order
   =False`` path, kept executable so the revert switch stays tested.)
 
-CACHE-FRIENDLY ORDER (2026-08-13)
---------------------------------
-The order above put the two most volatile blocks — LIVE STATE and CAPTURED —
-at character 0, above an 8.5k-token prompt that is otherwise identical from
-turn to turn. Prompt caches key on the longest common prefix from the first
-token, so a block that changes every turn at the very front means no prefix
-can ever match. Production bore that out exactly: 426 of 426 voice LLM calls
-over 7 days returned ``cache_hit_ratio=0.00``, while the same Groq account was
-getting hits of up to 6656 tokens on another model whose prefix happened to be
-stable. It was never a model limitation; it was this line.
+CACHE-FRIENDLY ORDER (2026-08-13) — AND WHY IT DID NOT WORK (2026-08-17)
+------------------------------------------------------------------------
+⚠️ **READ THIS BEFORE TRUSTING ANYTHING BELOW ABOUT CACHING.** The reordering
+described here is real, is live, and is harmless. It also delivers **nothing**
+on the model this system actually runs, and the reasoning that motivated it was
+wrong. Both facts are kept here rather than quietly edited away, because the
+mistake is more instructive than the fix.
 
-The price was the dominant term in call latency: ``prompt_time`` p50 614ms out
-of a 788ms time-to-first-token, i.e. ~60% of the 1014ms a caller waits between
-finishing their sentence and hearing a reply — spent re-reading a prompt the
-provider had already read seconds earlier.
+The original argument: the order above put the two most volatile blocks — LIVE
+STATE and CAPTURED — at character 0, above an 8.5k-token prompt otherwise
+identical from turn to turn. Prompt caches key on the longest common prefix
+from the first token, so a block that changes every turn at the very front
+means no prefix can ever match. Production seemed to bear that out: 426 of 426
+voice LLM calls over 7 days returned ``cache_hit_ratio=0.00``, while the same
+Groq account showed hits of up to 6656 tokens on ``llama-3.1-8b-instant``. That
+comparison was read as proof the account caches fine and the prefix was at
+fault — "never a model limitation".
 
-So the rule is now: **stable-for-the-call blocks first, per-turn blocks last.**
+**That conclusion was wrong, and measurement settled it.** Four days after the
+reorder shipped, the voice model had taken **0 cache hits across 561,106 prompt
+tokens over 81 turns**. A direct two-request probe (2026-08-17) sent two
+byte-identical 2,418-token prompts back to back:
+
+    qwen/qwen3.6-27b       first  200  prompt_tokens=2418  cached=None
+                           second 200  prompt_tokens=2418  cached=None
+    llama-3.1-8b-instant   404 — model_not_found
+
+``cached`` is **None, not 0** — Groq reports no caching for this model at all.
+And the model used as the control no longer exists on the account, so the
+comparison that anchored the whole diagnosis was never valid in the first place.
+
+What remains true: ``prompt_time`` p50 ~634ms is the dominant term in
+time-to-first-token. What is now known: **no ordering change can recover it.**
+The prompt is ~6,498 tokens at turn 0 and grows ~115 tokens per turn; the only
+real levers are making the prompt smaller or moving to a model that caches.
+
+So the rule below stays — stable-for-the-call blocks first, per-turn blocks
+last — because it is correct by construction and costs nothing. Just do not
+expect it to buy latency here, and do not cite the 6656-token llama hits as
+evidence of anything.
 
     [base]  [end-session]  [audio-tags]  [accent]   <- identical all call: CACHED
     [ask-AI]  [knowledge]  [CAPTURED]  [LIVE STATE] <- per-turn
