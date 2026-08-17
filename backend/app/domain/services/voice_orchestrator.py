@@ -1144,7 +1144,13 @@ class VoiceOrchestrator:
     # secondary at another vendor (LLM_SECONDARY_PROVIDER=gemini) for true vendor
     # isolation, or override the model with LLM_SECONDARY_MODEL.
     _LLM_DEFAULT_SECONDARY_MODEL = {
-        "groq": "llama-3.1-8b-instant",
+        # Was llama-3.1-8b-instant until 2026-08-17, by which point that model
+        # 404'd on this account — so the default same-vendor fallback was a
+        # model that could not answer, i.e. failover to nothing. Production is
+        # unaffected because LLM_SECONDARY_PROVIDER=gemini overrides it, but a
+        # deployment without that env var had a silently dead safety net.
+        # gpt-oss-20b is the fastest id this account can actually serve.
+        "groq": "openai/gpt-oss-20b",
     }
 
     # Map TTS primary provider name → secondary provider config tuple

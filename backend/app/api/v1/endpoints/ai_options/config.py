@@ -269,12 +269,24 @@ async def save_config(
 
     # Compute soft latency warnings — advisory only, never blocks saving.
     # Sources: Groq official docs 2025, Cresta voice latency post 2025.
+    # Rebuilt 2026-08-17 from measurement on this account rather than from the
+    # vendor's published throughput. The old set named llama-3.1-8b-instant,
+    # which 404s here, so the "for lowest latency use X" advice pointed at a
+    # model nobody could select.
+    #
+    # Measured, 7,281-token prompt, warm (second identical request):
+    #   openai/gpt-oss-120b   102ms TTFT   (prompt caching hit 7168/7281)
+    #   openai/gpt-oss-20b    119ms TTFT   (prompt caching hit 7168/7281)
+    #   qwen/qwen3.6-27b      672ms TTFT   (no caching on this model)
     FAST_MODELS = {
-        "llama-3.1-8b-instant",
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
     }
     SLOW_MODELS: set[str] = set()
     PREVIEW_MODELS = {
         "qwen/qwen3.6-27b",
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
         # Superseded by the GA "gemini-3.1-flash-lite"; still selectable so
         # already-saved tenants can write their config. Warn on it so nobody
         # newly adopts a preview id that Google can retire.

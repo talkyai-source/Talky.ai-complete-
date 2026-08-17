@@ -30,14 +30,48 @@ class TTSProvider(str, Enum):
 
 
 class GroqModel(str, Enum):
-    """Available Groq models - Production and Preview"""
-    # Production Models
-    LLAMA_3_3_70B = "llama-3.3-70b-versatile"
-    LLAMA_3_1_8B = "llama-3.1-8b-instant"
-    # GPT-OSS (120B/20B) removed from the menu 2026-06-25: they are agentic
-    # task-completion reasoners that misbehave on conversational voice (stack
-    # questions, NATO-spell). The provider still HANDLES openai/gpt-oss-* if one
-    # is passed (see _is_gpt_oss_model) — they are just not offered.
+    """Available Groq models — verified against a live /v1/models call.
+
+    MENU REBUILT 2026-08-17. Both Llama entries were removed because they are
+    GONE FROM THE ACCOUNT, not because we deselected them:
+
+        $ GET https://api.groq.com/openai/v1/models
+        13 models: allam-2-7b, canopylabs/orpheus-*, groq/compound,
+        groq/compound-mini, meta-llama/llama-prompt-guard-2-*,
+        openai/gpt-oss-120b, openai/gpt-oss-20b,
+        openai/gpt-oss-safeguard-20b, qwen/qwen3.6-27b, whisper-large-v3*
+
+        $ POST /chat/completions model=llama-3.1-8b-instant
+        404 "The model `llama-3.1-8b-instant` does not exist or you do not
+             have access to it."   (same for llama-3.3-70b-versatile)
+
+    Offering an id the account cannot serve is worse than offering nothing: the
+    call fails at the first turn, and with LLM failover on it silently runs a
+    different model than the tenant chose.
+
+    THE GPT-OSS DECISION HAS BEEN REOPENED, DELIBERATELY. They were removed on
+    2026-06-25 as "agentic task-completion reasoners that misbehave on
+    conversational voice (stack questions, NATO-spell)". That judgement was made
+    when Llama was available, i.e. it was "gpt-oss vs a better-behaved option".
+    It no longer is: after the Llama removals the only conversational LLMs this
+    account can serve are Qwen 3.6 and the GPT-OSS family, and the latency gap
+    between them is not marginal (measured on this account, 7,281-token prompt,
+    reasoning_effort=low):
+
+        qwen/qwen3.6-27b      cold TTFT 697ms   warm TTFT 672ms   cached: none
+        openai/gpt-oss-120b   cold TTFT 451ms   warm TTFT 102ms   cached 7168/7281
+        openai/gpt-oss-20b    cold ---- 475ms   warm ---- 119ms   cached 7168/7281
+
+    Groq supports prompt caching on the GPT-OSS family only, which is why the
+    warm number collapses — and our prompt order already puts static content
+    first, exactly as Groq's caching docs require, so the 2026-08-13 reorder
+    pays off the moment one of these is selected.
+
+    They are listed as PREVIEW and are not the default. The June behavioural
+    finding stands until someone re-tests it against the current prompt, which
+    has been substantially reworked since (see the prompt-craft audit). Latency
+    alone does not overturn a conversation-quality finding.
+    """
     # Preview Models
     # qwen3-32b removed 2026-06-27: it dodged the AI-disclosure question and
     # hallucinated prices / leaked a card number in the weakness audit — qwen3.6
@@ -45,6 +79,8 @@ class GroqModel(str, Enum):
     # Qwen 3.6 27B — reasoning toggles between "default" and "none"; we run it
     # with thinking disabled (reasoning_effort="none") for low-latency voice.
     QWEN_3_6_27B = "qwen/qwen3.6-27b"
+    GPT_OSS_120B = "openai/gpt-oss-120b"
+    GPT_OSS_20B = "openai/gpt-oss-20b"
 
 
 class GeminiModel(str, Enum):
@@ -172,7 +208,10 @@ class AIProviderConfig(BaseModel):
     """
     # LLM Configuration
     llm_provider: LLMProvider = LLMProvider.GROQ
-    llm_model: str = GroqModel.LLAMA_3_1_8B.value  # llama-3.1-8b-instant — Groq's recommended voice model (560 t/s, ~90ms TTFT)
+    # Was llama-3.1-8b-instant until 2026-08-17, by which time that id 404'd on
+    # this account — so every tenant WITHOUT a saved config defaulted to a model
+    # that could not answer. Qwen 3.6 is what production actually runs today.
+    llm_model: str = GroqModel.QWEN_3_6_27B.value
     llm_temperature: float = Field(default=0.6, ge=0.0, le=2.0)
     llm_max_tokens: int = Field(default=90, ge=1, le=5000)  # ceiling raised for consultative replies; per-turn length still governed by the persona + sentence cap
     
@@ -255,7 +294,7 @@ class LatencyTestResult(BaseModel):
 
 class LLMTestRequest(BaseModel):
     """Request for LLM testing"""
-    model: str = GroqModel.LLAMA_3_3_70B.value
+    model: str = GroqModel.QWEN_3_6_27B.value  # was LLAMA_3_3_70B — 404s here
     message: str
     temperature: float = Field(default=0.6, ge=0.0, le=2.0)
     max_tokens: int = Field(default=150, ge=1, le=5000)
@@ -293,34 +332,50 @@ class TTSTestResponse(BaseModel):
 # =============================================================================
 
 GROQ_MODELS = [
-    # Production Models (recommended for production use)
-    ModelInfo(
-        id=GroqModel.LLAMA_3_3_70B.value,
-        name="Llama 3.3 70B Versatile",
-        description="Best quality/speed balance for voice AI. Strong all-rounder; for price- or fact-heavy campaigns lean on the knowledge base, as it states specifics confidently.",
-        speed="280 tokens/s",
-        price="$0.59 input / $0.79 output per 1M tokens",
-        context_window=131072,
-        is_preview=False,
-        provider="groq",
-    ),
-    ModelInfo(
-        id=GroqModel.LLAMA_3_1_8B.value,
-        name="Llama 3.1 8B Instant",
-        description="Fastest model, ideal for real-time voice applications.",
-        speed="560 tokens/s",
-        price="$0.05 input / $0.08 output per 1M tokens",
-        context_window=131072,
-        is_preview=False,
-        provider="groq",
-    ),
-    # Preview Models (for evaluation, may change)
+    # Both Llama entries removed 2026-08-17 — they 404 on this account. See the
+    # GroqModel docstring for the /v1/models output and the probe.
     ModelInfo(
         id=GroqModel.QWEN_3_6_27B.value,
         name="Qwen 3.6 27B",
-        description="Alibaba's Qwen 3.6 with toggleable reasoning — run with thinking disabled for fast voice replies.",
+        description=(
+            "Current default for voice. Toggleable reasoning — run with thinking "
+            "disabled for fast replies. No prompt caching on Groq, so a large "
+            "system prompt is re-read every turn (~630ms of the ~640ms "
+            "time-to-first-token measured in production)."
+        ),
         speed="~400 tokens/s",
         price="$0.29 input / $0.59 output per 1M tokens",
+        context_window=131072,
+        is_preview=True,
+        provider="groq",
+    ),
+    ModelInfo(
+        id=GroqModel.GPT_OSS_120B.value,
+        name="GPT-OSS 120B",
+        description=(
+            "Only Groq family with prompt caching: measured 102ms warm "
+            "time-to-first-token vs 672ms for Qwen on an identical 7.3k-token "
+            "prompt (98% of it cached). CAVEAT — removed from this menu in June "
+            "for stacking questions and spelling things out on voice calls; that "
+            "finding predates the current prompt and has not been re-tested. "
+            "Try it on internal calls before pointing a real campaign at it."
+        ),
+        speed="~500 tokens/s",
+        price="$0.15 input / $0.60 output per 1M tokens (50% off cached input)",
+        context_window=131072,
+        is_preview=True,
+        provider="groq",
+    ),
+    ModelInfo(
+        id=GroqModel.GPT_OSS_20B.value,
+        name="GPT-OSS 20B",
+        description=(
+            "Smaller sibling of GPT-OSS 120B; also caches (119ms warm "
+            "time-to-first-token measured). Cheaper and lighter, and the same "
+            "June conversational caveat applies."
+        ),
+        speed="~1000 tokens/s",
+        price="$0.075 input / $0.30 output per 1M tokens (50% off cached input)",
         context_window=131072,
         is_preview=True,
         provider="groq",

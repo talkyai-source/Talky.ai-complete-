@@ -9,7 +9,17 @@ import os
 from typing import Any
 from app.domain.models.ai_config import CEREBRAS_MODELS, GROQ_MODELS
 
-DEFAULT_ASSISTANT_MODEL = "llama-3.3-70b-versatile"
+# Was llama-3.3-70b-versatile until 2026-08-17. That id 404s on this Groq
+# account ("does not exist or you do not have access to it"), which made it the
+# default for the in-app assistant AND the value `resolve_model` fell back to
+# whenever a tenant's stored choice failed validation — so the failure path led
+# straight to a dead model.
+#
+# GPT-OSS 120B rather than Qwen here, deliberately: the June objection to
+# GPT-OSS was about CONVERSATIONAL VOICE behaviour (stacking questions,
+# spelling things out), none of which applies to a text assistant, and it is
+# the fastest id this account serves with prompt caching on top.
+DEFAULT_ASSISTANT_MODEL = "openai/gpt-oss-120b"
 
 # Validation accepts Cerebras ids unconditionally, even when the key is unset.
 # Otherwise a tenant who had selected a Cerebras model would silently fall back

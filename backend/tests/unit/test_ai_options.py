@@ -32,7 +32,10 @@ class TestAIConfig:
         config = AIProviderConfig()
         
         assert config.llm_provider == "groq"
-        assert config.llm_model == "llama-3.1-8b-instant"
+        # Changed 2026-08-17 together with the id itself: llama-3.1-8b-instant
+        # 404s on this account, so the default handed every tenant without a
+        # saved config a model that could not answer a single turn.
+        assert config.llm_model == "qwen/qwen3.6-27b"
         assert config.stt_provider == "deepgram"
         assert config.stt_model == "nova-3"
         assert config.tts_provider == "deepgram"
@@ -43,13 +46,15 @@ class TestAIConfig:
     def test_custom_config(self):
         """Test custom configuration values"""
         config = AIProviderConfig(
-            llm_model="llama-3.1-8b-instant",
+            llm_model="openai/gpt-oss-120b",
             llm_temperature=0.3,
             stt_model="nova-2",
             tts_voice_id="custom-voice-id"
         )
-        
-        assert config.llm_model == "llama-3.1-8b-instant"
+
+        # An explicit choice overrides the default — that is what this test is
+        # for, so the value must NOT be the default one.
+        assert config.llm_model == "openai/gpt-oss-120b"
         assert config.llm_temperature == 0.3
         assert config.stt_model == "nova-2"
         assert config.tts_voice_id == "custom-voice-id"
@@ -96,9 +101,12 @@ class TestModelInfo:
         """Verify Groq model list contains expected models"""
         model_ids = [m.id for m in GROQ_MODELS]
 
-        assert GroqModel.LLAMA_3_3_70B.value in model_ids
-        assert GroqModel.LLAMA_3_1_8B.value in model_ids
+        # The two Llama ids this used to assert were removed 2026-08-17: they
+        # 404 on the account. Asserting their PRESENCE was actively harmful —
+        # it would have blocked the fix. test_groq_model_menu.py now asserts
+        # their absence, with the probe output that proved it.
         assert GroqModel.QWEN_3_6_27B.value in model_ids
+        assert GroqModel.GPT_OSS_120B.value in model_ids
 
         # Verify each model has required fields
         for model in GROQ_MODELS:
@@ -157,7 +165,7 @@ class TestRequestModels:
         request = LLMTestRequest(message="Hello")
         
         assert request.message == "Hello"
-        assert request.model == GroqModel.LLAMA_3_3_70B.value
+        assert request.model == GroqModel.QWEN_3_6_27B.value
         assert request.temperature == 0.6
         assert request.max_tokens == 150
     
@@ -211,7 +219,7 @@ class TestConfigSerialization:
         """Test configuration can be loaded from dict"""
         config_dict = {
             "llm_provider": "groq",
-            "llm_model": "llama-3.1-8b-instant",
+            "llm_model": "openai/gpt-oss-120b",
             "llm_temperature": 0.5,
             "llm_max_tokens": 100,
             "stt_provider": "deepgram",
@@ -224,8 +232,10 @@ class TestConfigSerialization:
         }
         
         config = AIProviderConfig(**config_dict)
-        
-        assert config.llm_model == "llama-3.1-8b-instant"
+
+        # An EXPLICIT value must survive, unlike the two default assertions
+        # above — this test is about deserialisation, not about the default.
+        assert config.llm_model == "openai/gpt-oss-120b"
         assert config.llm_temperature == 0.5
         assert config.stt_model == "nova-2"
         assert config.stt_language == "es"
