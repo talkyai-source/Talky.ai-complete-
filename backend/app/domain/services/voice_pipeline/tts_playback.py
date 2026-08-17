@@ -76,6 +76,14 @@ class TtsPlayback:
         Returns True if TTS was interrupted by barge-in, False on normal completion.
         """
         call_id = session.call_id
+        # Is THIS invocation the recovery attempt rather than the turn itself?
+        # Both fallback paths set the flag before recursing, and the nested
+        # call's finally clears it, so reading it at entry is the one place the
+        # answer is unambiguous. A fallback that also produces no audio must not
+        # file its own silent-turn record: the turn was already going to be
+        # reported by the outer call, and counting both would double every
+        # unrecoverable turn in the metric that exists to measure exactly that.
+        _is_recovery_attempt = bool(getattr(session, "_tts_fallback_attempted", False))
         # Do not begin speaking on top of a caller who is still mid-sentence.
         # Only holds when handle_barge_in armed it (a barge-in landed while a
         # FINAL answer was still generating), is capped, and fails open — see
@@ -155,6 +163,15 @@ class TtsPlayback:
             # timeout (a brief stall before the sentence starts). Safe — nothing
             # has played yet, so no duplicate audio.
             stall_retried = False
+            empty_retried = False
+            # Captured at the moment the stream ends empty, NOT re-read in the
+            # finally. The fallback below is a nested synthesize_and_send, and
+            # its own finally clears session.tts_active — so a finally that
+            # re-read the flag would see the NESTED call's teardown and label
+            # this turn "interrupted_before_audio" when no caller interrupted
+            # anything. Caught by test_the_two_silent_causes_are_labelled_
+            # differently; the whole point of the label is to be trustworthy.
+            stopped_by_caller_at_end: Optional[bool] = None
             while True:
                 try:
                     audio_chunk = await asyncio.wait_for(
@@ -162,6 +179,60 @@ class TtsPlayback:
                         timeout=_TTS_INTER_CHUNK_TIMEOUT_S,
                     )
                 except StopAsyncIteration:
+                    # A PROVIDER THAT RETURNS NOTHING, AND DOES SO CLEANLY.
+                    #
+                    # 2026-08-17, call b3350aee: a turn was recorded as
+                    # `turn_silent_reason reason=provider_empty_stream` — the
+                    # agent had a reply and said none of it. The stall retry
+                    # below never had a chance: it triggers on TimeoutError,
+                    # and a stream that ends immediately with zero chunks does
+                    # not time out. It does not raise either. So the one
+                    # failure mode with no symptom was also the one with no
+                    # recovery, which is the same shape as the STT stream that
+                    # went deaf on 2026-08-13 and the TTS exception path that
+                    # has had a fallback for months.
+                    #
+                    # Retrying is safe for exactly the reason the stall retry
+                    # is safe: nothing has reached the gateway, so there is no
+                    # audio to duplicate. Re-opening the iterator also gets a
+                    # fresh provider socket if the old one had quietly died.
+                    # ...BUT NOT IF THE CALLER IS THE REASON IT IS EMPTY.
+                    #
+                    # The production case that started this (b3350aee, 21:02:29)
+                    # turned out to be a barge-in landing before the first chunk
+                    # played: the interrupt cancelled the turn, the stream ended
+                    # with zero chunks, and the finally block labelled it
+                    # `provider_empty_stream` — a provider fault it never was.
+                    # Retrying THAT would re-synthesise a reply the caller had
+                    # just talked over and speak it at them, which is worse than
+                    # the silence being fixed. `tts_active` is set False by
+                    # interrupt_playback's first step, so it is the precise
+                    # question: is this turn still supposed to be speaking?
+                    _stopped_by_caller = (
+                        (barge_in_event is not None and barge_in_event.is_set())
+                        or not getattr(session, "tts_active", True)
+                    )
+                    if not first_chunk_sent:
+                        stopped_by_caller_at_end = _stopped_by_caller
+                    if not first_chunk_sent and not empty_retried and not _stopped_by_caller:
+                        empty_retried = True
+                        logger.warning(
+                            "tts_empty_stream call=%s text=%r — provider ended "
+                            "with zero audio chunks; retrying synthesis once "
+                            "(nothing has played, so no duplication)",
+                            call_id[:12], text[:60],
+                        )
+                        try:
+                            await _tts_iter.aclose()
+                        except Exception:
+                            pass
+                        _tts_iter = self._p.tts_provider.stream_synthesize(
+                            text,
+                            voice_id=session.voice_id,
+                            sample_rate=self._p.tts_sample_rate,
+                            call_id=call_id,
+                        ).__aiter__()
+                        continue
                     provider_exhausted = True
                     break
                 except asyncio.TimeoutError:
@@ -275,6 +346,45 @@ class TtsPlayback:
                         except Exception as _exc:
                             logger.debug("tts_interrupted post-send WS send failed: %s", _exc)
                     break
+            if (
+                provider_exhausted
+                and not interrupted
+                and not first_chunk_sent
+                and not getattr(session, "_tts_fallback_attempted", False)
+                # Same guard as the retry, for the same reason: a caller who
+                # just interrupted must not be answered with "could you say
+                # that again?".
+                and getattr(session, "tts_active", True)
+                and not (barge_in_event is not None and barge_in_event.is_set())
+            ):
+                # Both attempts produced no audio. The turn is otherwise about
+                # to end in total silence, which on a phone call is the worst
+                # available outcome — the caller hears nothing and cannot tell
+                # whether the line dropped. Say something short instead.
+                #
+                # Deliberately NOT the original text: it has now failed to
+                # synthesise twice, so a third attempt at the same string is
+                # the least likely thing to work. A brief line is both more
+                # likely to come back and more honest about what happened.
+                # Guarded by the same _tts_fallback_attempted flag the
+                # exception path uses, so a failing fallback cannot recurse.
+                session._tts_fallback_attempted = True
+                logger.error(
+                    "tts_empty_stream_after_retry call=%s text=%r — speaking a "
+                    "short fallback so the turn is not silent",
+                    call_id[:12], text[:60],
+                )
+                try:
+                    await self.synthesize_and_send(
+                        session,
+                        "Sorry — could you say that again?",
+                        websocket,
+                        barge_in_event=barge_in_event,
+                        track_latency=False,
+                    )
+                except Exception:
+                    pass
+
             if provider_exhausted and not interrupted:
                 # Normal completion (not interrupted by barge-in) — flush any
                 # remaining bytes in the gateway output buffer so the last
@@ -315,8 +425,31 @@ class TtsPlayback:
         finally:
             if not interrupted and first_chunk:
                 if silent_reason is None and completed:
-                    silent_reason = "provider_empty_stream"
-                if silent_reason is not None:
+                    # DISTINGUISH THE TWO REASONS A TURN CAN END WITH NO AUDIO.
+                    #
+                    # Until 2026-08-17 both were filed as `provider_empty_stream`,
+                    # and the label cost real time: a turn that produced no audio
+                    # because the CALLER interrupted it before playback started
+                    # read in the logs as a broken TTS provider. Chasing that
+                    # label nearly shipped a retry that would have re-spoken a
+                    # reply over the top of the person who had just interrupted.
+                    #
+                    # `tts_active` is cleared by interrupt_playback's first step,
+                    # so a False here means an interrupt ran during this turn.
+                    # A turn nobody stopped, that still yielded nothing, is the
+                    # genuine provider fault the retry above exists for.
+                    if stopped_by_caller_at_end is not None:
+                        _caller_stopped_it = stopped_by_caller_at_end
+                    else:
+                        _caller_stopped_it = (
+                            (barge_in_event is not None and barge_in_event.is_set())
+                            or not getattr(session, "tts_active", True)
+                        )
+                    silent_reason = (
+                        "interrupted_before_audio" if _caller_stopped_it
+                        else "provider_empty_stream"
+                    )
+                if silent_reason is not None and not _is_recovery_attempt:
                     self._p._record_silent_turn(call_id, silent_reason)
             session._tts_fallback_attempted = False
             if track_latency:
