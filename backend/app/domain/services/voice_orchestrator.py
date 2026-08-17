@@ -1073,7 +1073,25 @@ class VoiceOrchestrator:
             primary, primary_init = _build_flux(config.stt_model or "flux-general-en")
         await primary.initialize(primary_init)
 
-        if not _failover_enabled("STT_FAILOVER_ENABLED"):
+        failover_on = _failover_enabled("STT_FAILOVER_ENABLED")
+
+        # Controlled fault injection (2026-08-18). Off unless an operator names
+        # THIS campaign in VOICE_STT_FAULT_SILENT_CAMPAIGN with a live expiry,
+        # and refused outright when there is no secondary to promote. Applied
+        # here, to the initialised primary, so the deaf provider still opens a
+        # real socket and still receives real audio — the failure being
+        # simulated is a provider that answers nothing, not one that never
+        # connected. See stt_fault_injection for why it is shaped this way.
+        from app.domain.services.stt_fault_injection import maybe_deafen_primary
+
+        primary = maybe_deafen_primary(
+            primary,
+            campaign_id=str(config.campaign_id) if config.campaign_id else None,
+            call_id=getattr(config, "call_id", None),
+            failover_enabled=failover_on,
+        )
+
+        if not failover_on:
             return primary
 
         # SECONDARY = the OTHER engine (cross-engine resilience). A Flux-side
