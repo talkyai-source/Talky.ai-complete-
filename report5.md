@@ -1404,7 +1404,7 @@ VOICE_AUDIO_ACTIVE_MAX_AGE_S     =      2.0   NEW — max age of the RMS reading
 VOICE_PROMPT_CACHE_ORDER         =     true   NEW — stable-prefix prompt order
 DEEPGRAM_MIN_INTERRUPT_WORDS     =  (unset)
 FLUX_NUMERALS                    =  (unset)
-STT_FAILOVER_ENABLED             =  (unset)
+STT_FAILOVER_ENABLED             =     true   CORRECTED 2026-08-18 — see below
 VOICE_GATEWAY_STT_REORDER        =  (unset)
 
 ReconnectPolicy (STT failover)
@@ -1430,6 +1430,38 @@ Deepgram Flux (per call)
 The four `NEW` rows did not exist during the run. They are the defaults shipped
 afterwards, listed so this file records the configuration the **next** run will
 use.
+
+### Correction — `STT_FAILOVER_ENABLED` (2026-08-18)
+
+This table originally reported `STT_FAILOVER_ENABLED = (unset)`. **That was
+wrong.** The value is `true` in the server environment, and the wrapper was
+active on every call of the run:
+
+```
+$ grep -c "^STT_FAILOVER_ENABLED" /opt/talky/backend/.env
+1                                       # STT_FAILOVER_ENABLED=true
+
+$ journalctl -u talky-api -u talky-voice-worker \
+      --since "2026-08-13 13:00" --until "2026-08-13 16:00" \
+    | grep -c stt_resilient_wrapper_active
+41
+
+$ ... | grep -m1 stt_resilient_wrapper_active
+stt_resilient_wrapper_active primary=flux-flux-general-en secondary=nova-nova-3
+```
+
+The error came from reading `os.getenv` in a shell that had not loaded the
+service's environment file, and it matters more than a typo would: had it been
+true, the silent-stream watchdog shipped in `3205c7ef` would have been
+unreachable code in production — a fix that could never fire, described in this
+report as live. It also means the two lost calls had a working Nova-3 secondary
+sitting behind them the whole time, unused, because nothing raised. That is the
+finding, restated: the failover was present, correctly configured, and blind.
+
+The general lesson is the same one as the rest of this document. I asked the
+environment a question in a context that could not answer it, and wrote the
+answer down. `41 stt_resilient_wrapper_active` lines is evidence about the
+running process; `os.getenv` in a detached shell is evidence about the shell.
 
 ---
 
