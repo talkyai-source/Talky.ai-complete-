@@ -24,6 +24,62 @@ from app.domain.services.voice_pipeline import turn_director
 
 logger = logging.getLogger(__name__)
 
+# ── caller voice-onset anchor ────────────────────────────────────────────────
+# The instant the caller STARTED talking, as distinct from the instant we
+# noticed. Everything the pipeline knows about interruption timing is derived
+# from STT (StartOfTurn), which arrives after the provider has heard enough of a
+# word to be confident — so measuring a barge-in from there measures our
+# reaction to a decision, not the caller's experience of being talked over.
+# Acoustic onset is the only clock the caller shares with us.
+#
+# Same 500 threshold as everything else in the audio path (see
+# resilient_stt._SPEECH_RMS_THRESHOLD) so one number moves them all.
+_VOICE_ONSET_RMS = float(os.getenv("VOICE_ONSET_RMS", "500"))
+# A pause longer than this ends the current run of speech, so the next voiced
+# frame counts as a NEW utterance. 0.4s sits above an inter-word gap and below
+# a turn boundary; too short and one sentence reports several onsets, too long
+# and a barge-in inherits the onset of the caller's previous turn.
+_VOICE_ONSET_GAP_S = float(os.getenv("VOICE_ONSET_GAP_S", "0.4"))
+# Beyond this an onset is treated as unusable rather than reported as a
+# ludicrous latency. Nothing legitimate keeps one utterance open this long.
+_VOICE_ONSET_MAX_AGE_S = 60.0
+
+
+def note_voice_activity(session, sum_sq: float, sample_count: int) -> None:
+    """Record that this frame was voiced, and when the current run began.
+
+    Called per frame on the hot audio path, so it does no work beyond one
+    square root and two attribute writes, and it never raises: a failure to
+    take a measurement must not cost a call.
+    """
+    if sample_count <= 0:
+        return
+    try:
+        if (sum_sq / sample_count) ** 0.5 < _VOICE_ONSET_RMS:
+            return
+        now = time.monotonic()
+        last = getattr(session, "caller_voice_last_at", None)
+        if last is None or (now - last) > _VOICE_ONSET_GAP_S:
+            session.caller_voice_onset_at = now
+        session.caller_voice_last_at = now
+    except Exception:
+        pass
+
+
+def voice_onset_age_s(session, *, now: Optional[float] = None) -> Optional[float]:
+    """Seconds since the caller began their current utterance, or None.
+
+    None means "no usable measurement" and must be reported as such — never
+    substituted with 0.0, which would read as an instantaneous response.
+    """
+    onset = getattr(session, "caller_voice_onset_at", None)
+    if onset is None:
+        return None
+    age = (now if now is not None else time.monotonic()) - onset
+    if age < 0 or age > _VOICE_ONSET_MAX_AGE_S:
+        return None
+    return age
+
 
 def silence_action(
     *,
@@ -216,11 +272,21 @@ class AudioIngest:
                         if raw_bytes and len(raw_bytes) >= 2 and len(raw_bytes) % 2 == 0:
                             try:
                                 samples = _struct.unpack(f"<{len(raw_bytes)//2}h", raw_bytes)
+                                _chunk_sum_sq = 0.0
                                 for s in samples:
                                     if abs(s) > _level_max:
                                         _level_max = abs(s)
-                                    _level_sum_sq += s * s
+                                    _chunk_sum_sq += s * s
+                                _level_sum_sq += _chunk_sum_sq
                                 _level_samples += len(samples)
+                                # Per-FRAME, not per-second: the once-a-second
+                                # audio_level bucket below is far too coarse to
+                                # time a barge-in against. Reuses the sum of
+                                # squares already computed above, so the onset
+                                # anchor costs one square root per frame.
+                                note_voice_activity(
+                                    session, _chunk_sum_sq, len(samples)
+                                )
                             except Exception:
                                 pass
                         # Emit a level log roughly once per second
@@ -452,6 +518,11 @@ class AudioIngest:
                 _silence_since = _now()    # last caller OR AI activity → drives nudges
                 _last_nudge_at: Optional[float] = None
                 _nudge_count = 0
+                # Acoustic-guard bookkeeping. `_suppressing` makes the log one
+                # line per EPISODE rather than one per tick — a caller talking
+                # through a due nudge would otherwise produce a line every tick.
+                _nudge_suppressed = 0
+                _suppressing = False
                 # Opening ("Hello?...Hello?...Hello?") and mid-call
                 # ("Still there?") ladders are capped separately — a human
                 # re-checking a silent pickup gives it 2-3 tries, which is a
@@ -576,7 +647,69 @@ class AudioIngest:
                             ),
                         )
                         if _action == "wait":
+                            # DID THE ACOUSTIC GUARD ACTUALLY DO ANYTHING?
+                            #
+                            # The 2026-08-13 fix stops the ladder shouting over
+                            # a caller the STT cannot hear, and its entire
+                            # observable effect is a nudge that does NOT happen.
+                            # Absence is not evidence: a guard that silently
+                            # never fires and a guard that saved twenty calls
+                            # produce identical logs, which is the reporting
+                            # failure that hid two dead STT streams in the first
+                            # place. So say it out loud — but only when the
+                            # guard was DECISIVE. Re-running the pure decision
+                            # without the acoustic input is the exact test of
+                            # that, and it only runs on ticks where the caller
+                            # is audibly talking, so it costs nothing per call.
+                            if _audio_active:
+                                _would_have = silence_action(
+                                    caller_audio_active=False,
+                                    caller_silence_s=(_now() - _last_caller_at),
+                                    activity_silence_s=(_now() - _silence_since),
+                                    since_last_nudge_s=(
+                                        (_now() - _last_nudge_at)
+                                        if _last_nudge_at is not None else None
+                                    ),
+                                    in_grace=_in_grace,
+                                    is_caller_first=_is_caller_first,
+                                    user_turns=_prev_user_turns,
+                                    hangup_s=_SILENCE_HANGUP_S,
+                                    opening_s=_OPENING_HELLO_S,
+                                    mid_s=_MID_NUDGE_S,
+                                    nudge_gap_s=_NUDGE_MIN_GAP_S,
+                                    opening_gap_s=_OPENING_NUDGE_GAP_S,
+                                    agent_awaiting_first_reply=(
+                                        not getattr(session, "_has_introduced", False)
+                                    ),
+                                )
+                                if _would_have == "nudge":
+                                    _nudge_suppressed += 1
+                                    # Mirrored onto the session so the per-call
+                                    # audit can be written from outside this
+                                    # coroutine. The monitor is ended by
+                                    # task.cancel() at hangup, so anything that
+                                    # relies on falling out of this loop never
+                                    # runs.
+                                    try:
+                                        session._nudges_suppressed = _nudge_suppressed
+                                    except Exception:
+                                        pass
+                                    if not _suppressing:
+                                        _suppressing = True
+                                        logger.info(
+                                            "[SilenceMonitor] %s — nudge SUPPRESSED, "
+                                            "caller audio live rms=%.0f n=%d "
+                                            "(would have talked over them)",
+                                            call_id[:12],
+                                            float(getattr(session, "last_audio_rms", 0.0) or 0.0),
+                                            _nudge_suppressed,
+                                        )
+                                else:
+                                    _suppressing = False
+                            else:
+                                _suppressing = False
                             continue
+                        _suppressing = False
 
                         if _action == "hangup":
                             logger.info(
@@ -707,6 +840,10 @@ class AudioIngest:
                             logger.debug("[SilenceMonitor] TTS failed: %s", _sm_exc)
                         _last_nudge_at = _now()
                         _nudge_count += 1
+                        try:
+                            session._nudges_spoken = _nudge_count
+                        except Exception:
+                            pass
                         _silence_since = _now()  # give them room to answer before re-nudging
                     except Exception as exc:
                         logger.warning(
@@ -751,6 +888,17 @@ class AudioIngest:
                         await _silence_task
                     except asyncio.CancelledError:
                         pass
+                if _silence_task is not None:
+                    # One verdict per call, written whether or not the acoustic
+                    # guard ever fired. "suppressed=0" is a measurement;
+                    # an absent line is not, and the difference is exactly what
+                    # made a dead STT stream look like a quiet caller.
+                    logger.info(
+                        "[SilenceMonitor] %s — nudge_audit nudges=%d suppressed=%d",
+                        call_id[:12],
+                        int(getattr(session, "_nudges_spoken", 0) or 0),
+                        int(getattr(session, "_nudges_suppressed", 0) or 0),
+                    )
                 record_latency(stt_span, "stt", (time.monotonic() - t_stt_start) * 1000)
                 get_stats = getattr(self._p.stt_provider, "get_stream_stats", None)
                 if get_stats:

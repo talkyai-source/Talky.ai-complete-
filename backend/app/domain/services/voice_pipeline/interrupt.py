@@ -88,6 +88,11 @@ class InterruptResult:
     gateway_interrupted_segments: int = 0
     gateway_attempts: int = 0
     elapsed_ms: float = 0.0
+    # ── what the CALLER experienced, as opposed to what we did ────────────
+    # Both are None when no acoustic onset was available. None must stay None:
+    # reporting 0.0 for "not measured" would read as a perfect response.
+    detect_ms: Optional[float] = None
+    speech_to_stop_ms: Optional[float] = None
     errors: list = field(default_factory=list)
 
     @property
@@ -107,6 +112,11 @@ class InterruptResult:
             "gw_segments": self.gateway_interrupted_segments,
             "gw_attempts": self.gateway_attempts,
             "elapsed_ms": round(self.elapsed_ms, 1),
+            "detect_ms": None if self.detect_ms is None else round(self.detect_ms, 1),
+            "speech_to_stop_ms": (
+                None if self.speech_to_stop_ms is None
+                else round(self.speech_to_stop_ms, 1)
+            ),
             "errors": self.errors,
         }
 
@@ -215,6 +225,27 @@ async def _do_interrupt(
     result = InterruptResult(interrupt_id=interrupt_id, call_id=call_id)
     started = time.monotonic()
 
+    # HOW LONG HAD THE CALLER ALREADY BEEN TALKING? (2026-08-18)
+    #
+    # `elapsed_ms` below measures our teardown, and it is ~1ms — which made the
+    # interrupt path look flawless while saying nothing about the experience it
+    # exists to protect. The caller does not perceive the teardown; they
+    # perceive the whole interval between opening their mouth and the agent
+    # going quiet, and almost all of that interval is spent BEFORE this
+    # function is called, waiting for Flux to emit StartOfTurn.
+    #
+    # Read once, synchronously, against `started`, so the split between
+    # detection and teardown is exact rather than smeared by awaits.
+    try:
+        from app.domain.services.voice_pipeline.audio_ingest import (
+            voice_onset_age_s,
+        )
+        _onset_age = voice_onset_age_s(session, now=started)
+    except Exception:  # noqa: BLE001 — a measurement must never stop the stop
+        _onset_age = None
+    if _onset_age is not None:
+        result.detect_ms = _onset_age * 1000.0
+
     # WAS THERE ANYTHING TO STOP? (2026-08-12, corrected 2026-08-12)
     #
     # A caller taking their normal next turn raises the same StartOfTurn as a
@@ -274,8 +305,16 @@ async def _do_interrupt(
     if not _tts_playing and not result.task_cancelled:
         result.ok = True
         result.elapsed_ms = (time.monotonic() - started) * 1000.0
+        # No audio was playing, so there was nothing for the caller to stop
+        # hearing. Recording detect_ms is still worth it — on this path it is a
+        # clean measurement of ordinary turn-detection latency, uncontaminated
+        # by any teardown — but speech_to_stop_ms stays None because no audible
+        # stop occurred, and inventing one would pollute the barge-in figures
+        # with the 70% of interrupts that are ordinary turns.
         _log_step(interrupt_id, call_id, "nothing_playing", reason=reason,
-                  elapsed_ms=round(result.elapsed_ms, 2))
+                  elapsed_ms=round(result.elapsed_ms, 2),
+                  detect_ms=(None if result.detect_ms is None
+                             else round(result.detect_ms, 1)))
         return result
 
     # ── 3+4. Python buffers, then the C++ queue (one call does both) ──────
@@ -325,6 +364,16 @@ async def _do_interrupt(
             logger.debug("interrupt %s: tts clear_queue failed: %s", interrupt_id, exc)
 
     result.elapsed_ms = (time.monotonic() - started) * 1000.0
+
+    # THE CALLER-FACING NUMBER: mouth open -> agent silent. Detection plus
+    # teardown, both measured. One further term is real and NOT included
+    # because it is not observable from this process: after the gateway
+    # acknowledges, whatever it has already handed to the RTP socket still
+    # reaches the caller — one 20ms frame plus the receiving jitter buffer.
+    # Treat this figure as a floor accurate to a few tens of ms, and never
+    # quote it as if the ear were instrumented.
+    if result.detect_ms is not None:
+        result.speech_to_stop_ms = result.detect_ms + result.elapsed_ms
 
     # A failed interrupt is the loudest failure this system has — it means the
     # caller is still being talked over. Never let it sit at debug.

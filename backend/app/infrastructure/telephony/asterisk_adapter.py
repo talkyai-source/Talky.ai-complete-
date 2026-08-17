@@ -25,6 +25,7 @@ import asyncio
 import logging
 import os
 import random
+import time
 import uuid
 from dataclasses import dataclass
 from typing import Any, Callable, Coroutine, Dict, List, Optional
@@ -33,6 +34,23 @@ import aiohttp
 
 from app.domain.interfaces.call_control_adapter import CallControlAdapter
 from app.domain.services.telephony.config import AUDIO_CALLBACK_BATCH_FRAMES
+
+# How long after an interrupt an ACCEPTED TTS chunk is still attributed to the
+# cancelled utterance rather than to the next legitimate turn.
+#
+# 0.75s is chosen from the measured turn budget, not picked round: after a
+# barge-in the agent cannot legitimately speak again until the caller stops
+# (Flux eot_timeout alone is 500ms), the LLM answers (p50 TTFT 788ms on
+# 2026-08-13) and TTS returns its first chunk. The floor on a genuine next
+# utterance is therefore comfortably above a second, so audio arriving inside
+# 750ms of the interrupt is the old generation, not the new one.
+#
+# This is a MEASUREMENT boundary, never a gate — nothing is blocked or delayed
+# by it. If the counters it feeds ever come back non-zero, the fix is to mint
+# the post-rotation utterance id lazily at the start of the next turn instead
+# of eagerly during the interrupt; until then, changing behaviour here would be
+# guessing at a problem we have not shown exists.
+_RESUME_WINDOW_S = 0.75
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +216,18 @@ class AsteriskAdapter(CallControlAdapter):
         # chunk_seq; interrupt_tts rotates the id, and the gateway rejects (409)
         # any straggler chunk still carrying the retired id — so a delayed HTTP
         # delivery can never re-speak audio from before a barge-in.
+        #
+        # THAT GUARANTEE HAS A GAP, AND WE NOW MEASURE IT (2026-08-18). It holds
+        # for a chunk whose payload was already stamped before the rotation. A
+        # chunk that enters send_tts_audio AFTER the rotation reads the FRESH id
+        # from this same dict, so the gateway accepts it — the cancelled
+        # generation would resume under a new identity, indistinguishable from
+        # the next legitimate turn. Several layers are supposed to make that
+        # impossible (the in-flight task is cancelled and awaited before the
+        # rotation, and the Python send buffer is cleared first), but "supposed
+        # to" was exactly the standard of evidence that lost two calls on
+        # 2026-08-13. The counters below turn it into an observation. See
+        # _RESUME_WINDOW_S and the interrupt_audio_audit line at call teardown.
         self._tts_utterances: Dict[str, Dict[str, Any]] = {}
 
         # Phase C — inbound routing. channel_id → {"called_did", "context",
@@ -1413,6 +1443,31 @@ class AsteriskAdapter(CallControlAdapter):
             except Exception as exc:
                 logger.debug(f"on_any_call_end dispatch failed for {channel_id[:12]}: {exc}")
 
+    def _emit_interrupt_audio_audit(self, call_id: str) -> None:
+        """One line per call stating whether cancelled audio ever resumed.
+
+        Emitted for EVERY call that had at least one barge-in, including — in
+        fact especially — the calls where nothing went wrong. A verdict that is
+        only written when something fails cannot be told apart from a verdict
+        that was never computed, which is the exact reporting failure that let
+        two dead STT streams look like quiet callers on 2026-08-13.
+        """
+        utt = self._tts_utterances.get(call_id)
+        if not utt:
+            return
+        interrupts = int(utt.get("total_interrupts", 0) or 0)
+        if not interrupts:
+            return  # no barge-in on this call; nothing to attest to
+        resumed = int(utt.get("total_resumed_chunks", 0) or 0)
+        rejected = int(utt.get("total_stale_rejected", 0) or 0)
+        log = logger.warning if resumed else logger.info
+        log(
+            "interrupt_audio_audit call=%s interrupts=%d resumed_chunks=%d "
+            "stale_rejected=%d verdict=%s",
+            call_id[:12], interrupts, resumed, rejected,
+            "AUDIO_RESUMED" if resumed else "clean",
+        )
+
     async def _on_stasis_end(self, channel_id: str, reason: str) -> None:
         """Tear down C++ Gateway session and ARI bridge when a call ends."""
         session_info = self._active_sessions.pop(channel_id, None)
@@ -1420,6 +1475,7 @@ class AsteriskAdapter(CallControlAdapter):
         bridge_id = self._bridges.pop(channel_id, None)
         session_id = self._gateway_sessions.pop(channel_id, None)
         self._tts_error_counts.pop(channel_id, None)
+        self._emit_interrupt_audio_audit(channel_id)
         self._tts_utterances.pop(channel_id, None)
         self._inbound_call_meta.pop(channel_id, None)
 
@@ -1584,8 +1640,10 @@ class AsteriskAdapter(CallControlAdapter):
 
         # Stamp the chunk with its utterance identity (VG-13). The id lives for
         # the whole utterance; interrupt_tts rotates it, after which the gateway
-        # 409s any straggler still carrying the old id. Gaps in chunk_seq are
-        # fine — the gateway only requires monotonic increase per utterance.
+        # 409s any straggler ALREADY STAMPED with the old id. Gaps in chunk_seq
+        # are fine — the gateway only requires monotonic increase per utterance.
+        # A chunk arriving here after the rotation picks up the new id and is
+        # accepted; that residual window is counted below, not assumed away.
         utt = self._tts_utterances.get(call_id)
         if utt is None:
             utt = {"utterance_id": _uuid.uuid4().hex[:16], "seq": 0}
@@ -1609,11 +1667,45 @@ class AsteriskAdapter(CallControlAdapter):
             )
             # Reset error counter on first successful delivery.
             self._tts_error_counts.pop(call_id, None)
+
+            # DID CANCELLED AUDIO RESUME? The gateway just ACCEPTED this chunk.
+            # If we are still inside the window after an interrupt, this is the
+            # cancelled generation getting through — the caller hears the agent
+            # carry on after being told to stop. Recorded, never suppressed:
+            # blocking here on an unproven hypothesis could mute a legitimate
+            # turn, which is the worse of the two failures.
+            retired_at = utt.get("retired_at")
+            if retired_at is not None:
+                age_s = time.monotonic() - retired_at
+                if age_s <= _RESUME_WINDOW_S:
+                    utt["resumed_chunks"] = utt.get("resumed_chunks", 0) + 1
+                    utt["resumed_bytes"] = utt.get("resumed_bytes", 0) + len(pcmu_audio)
+                    utt["total_resumed_chunks"] = utt.get("total_resumed_chunks", 0) + 1
+                    # First few only — a genuine resumption is a burst, and the
+                    # per-call audit line at teardown carries the full total.
+                    if utt["resumed_chunks"] <= 3:
+                        logger.warning(
+                            "tts_resumed_after_interrupt call=%s ms_after=%.0f "
+                            "chunk=%d bytes=%d — audio from the CANCELLED "
+                            "utterance was accepted by the gateway after the "
+                            "barge-in; the caller heard the agent continue",
+                            call_id[:12], age_s * 1000.0,
+                            utt["resumed_chunks"], len(pcmu_audio),
+                        )
+                else:
+                    # Window closed with a legitimate next turn. Stop attributing.
+                    utt.pop("retired_at", None)
         except Exception as exc:
             # A 409 is the idempotency gate doing its job: this chunk belongs to
             # an utterance that was already barged-in/replaced. Expected after an
             # interrupt — count it undelivered but don't log it as a failure.
             stale = "409" in str(exc)
+            if stale:
+                # POSITIVE evidence the idempotency gate worked. Counted so the
+                # teardown audit can say "the gate rejected N stragglers" rather
+                # than reporting silence, which would be indistinguishable from
+                # the gate never having been exercised.
+                utt["total_stale_rejected"] = utt.get("total_stale_rejected", 0) + 1
             count = self._tts_error_counts.get(call_id, 0) + 1
             self._tts_error_counts[call_id] = count
             if stale:
@@ -1717,6 +1809,15 @@ class AsteriskAdapter(CallControlAdapter):
                 utt["utterance_id"] = _uuid.uuid4().hex[:16]
                 utt["seq"] = 0
                 result["utterance_rotated"] = True
+                # Open the attribution window: any chunk the gateway ACCEPTS
+                # from here until _RESUME_WINDOW_S elapses belongs to the
+                # utterance we just cancelled. Per-interrupt counters reset;
+                # the total_* keys deliberately do not, so the teardown audit
+                # covers the whole call rather than only its last barge-in.
+                utt["retired_at"] = time.monotonic()
+                utt["resumed_chunks"] = 0
+                utt["resumed_bytes"] = 0
+                utt["total_interrupts"] = utt.get("total_interrupts", 0) + 1
 
         return result
 
