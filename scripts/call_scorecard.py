@@ -479,9 +479,16 @@ class Scorecard:
             mm = re.search(r"outcome=(\S+)", msg)
             if mm:
                 c.outcome = mm.group(1)
-        # Evidence that STT produced a FINAL for this caller. Counted from the
-        # latency marker rather than from transcript text, which is redacted.
-        if "t_stt_first_final" in msg:
+        # Evidence that SOME engine produced a transcript for this caller.
+        #
+        # Corrected 2026-08-18: this counted only `t_stt_first_final`, which is
+        # emitted by the FLUX provider. Every call that failed over to Nova
+        # therefore read as `stt-ok=0` — untranscribed — while Nova was in fact
+        # transcribing normally, and the report said calls had been lost that
+        # had merely changed engine. `transcript_received` comes from the
+        # pipeline's transcript_handler and is provider-agnostic, so it answers
+        # the question actually being asked.
+        if "t_stt_first_final" in msg or msg.startswith("transcript_received"):
             c.transcripts += 1
 
 

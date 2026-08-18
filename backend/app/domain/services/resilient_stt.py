@@ -61,6 +61,7 @@ from __future__ import annotations
 import asyncio
 import collections
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Callable, Optional
 
@@ -138,6 +139,13 @@ _SPEECH_RMS_THRESHOLD = 500.0
 # enough to run on every frame of every call.
 _RMS_STRIDE = 8
 
+# How long the agent's echo keeps arriving after it stops speaking. Matches the
+# post-TTS unmute tail the pipeline already uses (`_STT_UNMUTE_TAIL_S`, 0.25s),
+# which was itself set from SOTA guidance (Coval / Gladia / Deepgram / Retell
+# all recommend a 200-500ms decay window on PSTN before trusting the mic again).
+# One constant governs both, so the two cannot drift apart.
+_ECHO_TAIL_S = float(os.getenv("VOICE_STT_ECHO_TAIL_S", "0.25"))
+
 
 def _chunk_rms(chunk: AudioChunk, stride: int = _RMS_STRIDE) -> float:
     """Approximate RMS of a 16-bit mono PCM chunk. Returns 0.0 for anything
@@ -179,13 +187,42 @@ class _SilentStreamWatchdog:
     * **It re-arms.** ``observe_transcript`` zeroes the counter, so this
       detects a stream that dies at minute nine exactly as well as one that was
       never alive. The observed incident is just the turn-0 case.
-    * **It ignores muted audio.** While the agent speaks, STT is muted and the
-      provider deliberately drops frames (``deepgram_flux`` line ~644) — but
-      those frames still travel through this wrapper, and on a 2-wire line they
-      carry our own TTS at full volume. Counting them would trip the watchdog on
-      every talkative agent. The caller passes ``muted`` per chunk.
+    * **It ignores audio it cannot attribute to the caller.** See below — this
+      is the property that was wrong until 2026-08-18.
     * **It fails safe.** Anything unparseable scores 0.0 and contributes no
       voiced time, so a malformed chunk can never cause a spurious failover.
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    WHOSE VOICE IS IT? (2026-08-18 — the correction that matters)
+
+    The original version discounted audio only while the provider reported
+    itself ``muted``. That guard was written for a platform that does not exist
+    here: on telephony ``mute_during_tts`` is **False by design**
+    (``telephony_settings.py:214``), because muting STT while the agent speaks
+    would destroy barge-in. There is not one ``mute()`` call anywhere in the
+    telephony path. So ``muted`` was constant-False on every phone call, and the
+    echo protection documented above **never once applied**.
+
+    What that cost: on 2026-08-18, six of fourteen answered calls abandoned Flux
+    within seconds of answering. In all six the agent was mid-utterance — the
+    recording disclosure, the pre-synthesised greeting, or a normal reply — and
+    the "voiced caller audio" the watchdog counted was our own TTS returning on
+    a 2-wire line at RMS 700-4200. Every trip was a false positive.
+
+    PSTN has no client-side echo cancellation (a browser gets it free from
+    getUserMedia; a phone does not), and we have no server-side AEC, so the echo
+    genuinely arrives. The fix is therefore NOT to duck the microphone — that is
+    the industry's other option and it trades away barge-in, which is the whole
+    reason telephony leaves STT live. The fix is to stop **counting** audio we
+    cannot attribute.
+
+    While the agent is speaking, line energy is either echo or a real barge-in
+    and we cannot tell which without AEC. "Caller talked and got nothing back"
+    is therefore unprovable during that window, so the watchdog abstains and
+    resumes counting once the agent is quiet. Detection of a genuinely dead
+    stream is deferred to the next listening window, which is seconds away
+    because a caller who is talking keeps talking.
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     """
 
     def __init__(
@@ -193,25 +230,59 @@ class _SilentStreamWatchdog:
         *,
         voiced_seconds: float,
         rms_threshold: float = _SPEECH_RMS_THRESHOLD,
+        echo_tail_seconds: float = _ECHO_TAIL_S,
     ) -> None:
         self._voiced_needed_ms = max(0.0, voiced_seconds) * 1000.0
         self._rms_threshold = rms_threshold
         self._enabled = voiced_seconds > 0
+        self._echo_tail_ms = max(0.0, echo_tail_seconds) * 1000.0
         self.voiced_ms = 0.0
+        # Voiced audio deliberately NOT counted, so "the guard is working" and
+        # "the guard was never wired up" are different observations. The whole
+        # class of bug this replaces was invisible precisely because a guard
+        # that does nothing and a guard with nothing to do logged identically.
+        self.suppressed_ms = 0.0
         self.tripped = False
+        # Distance, in un-attributable audio, since the agent last spoke. Used
+        # to keep suppressing through the echo decay tail after TTS stops.
+        self._tail_remaining_ms = 0.0
 
     def observe_transcript(self) -> None:
         """The stream answered — it is alive; start the clock over."""
         self.voiced_ms = 0.0
 
-    def observe_audio(self, chunk: AudioChunk, *, muted: bool = False) -> bool:
+    def observe_audio(
+        self,
+        chunk: AudioChunk,
+        *,
+        muted: bool = False,
+        agent_speaking: bool = False,
+    ) -> bool:
         """Feed one outbound chunk. Returns True once the stream is judged
-        dead (and stays True thereafter)."""
-        if not self._enabled or self.tripped or muted:
+        dead (and stays True thereafter).
+
+        ``agent_speaking`` is the telephony-truthful form of ``muted``: the
+        provider is not muted, but the audio on the line cannot be attributed
+        to the caller, so it must not count toward "the caller went unanswered".
+        """
+        if not self._enabled or self.tripped:
             return self.tripped
+
+        duration_ms = _chunk_duration_ms(chunk)
+        if agent_speaking:
+            # Re-arm the decay tail for as long as the agent keeps talking.
+            self._tail_remaining_ms = self._echo_tail_ms
+        elif self._tail_remaining_ms > 0.0:
+            self._tail_remaining_ms -= duration_ms
+
+        unattributable = muted or agent_speaking or self._tail_remaining_ms > 0.0
         if _chunk_rms(chunk) < self._rms_threshold:
             return False
-        self.voiced_ms += _chunk_duration_ms(chunk)
+        if unattributable:
+            self.suppressed_ms += duration_ms
+            return False
+
+        self.voiced_ms += duration_ms
         if self.voiced_ms >= self._voiced_needed_ms:
             self.tripped = True
         return self.tripped
@@ -248,6 +319,28 @@ class ResilientSTTProvider(STTProvider):
             recovery_timeout=self._policy.recovery_timeout_seconds,
         )
         self._active: STTProvider = primary
+        # Set by whoever owns the session (see set_agent_speaking_probe). None
+        # means "nobody told us", which is reported per call rather than
+        # assumed benign — an uninstalled probe is exactly how the previous
+        # version of this guard came to be dead code for four days.
+        self._agent_speaking_probe: Optional[Callable[[], bool]] = None
+        self._probe_errors = 0
+
+    def set_agent_speaking_probe(
+        self, probe: Optional[Callable[[], bool]]
+    ) -> None:
+        """Tell the watchdog how to ask "is the agent talking right now?".
+
+        Deliberately a callable rather than a flag we cache: the answer changes
+        many times per second and there must be exactly ONE source of truth for
+        it (``CallSession.tts_active``). A mirrored copy would drift, and a
+        drifted copy of this particular signal silently re-creates the bug.
+
+        Optional on purpose — the wrapper is constructed by the orchestrator,
+        which has the config but not yet the live session, so the session owner
+        installs this later. ``stream_transcribe`` reports whether it arrived.
+        """
+        self._agent_speaking_probe = probe
 
     # ──────────────────────────────────────────────────────────────────
     # STTProvider interface
@@ -340,7 +433,13 @@ class ResilientSTTProvider(STTProvider):
 
         def _provider_muted(provider: STTProvider) -> bool:
             """True while the provider is deliberately discarding frames, so
-            the watchdog does not count our own TTS echo as caller speech."""
+            the watchdog does not count our own TTS echo as caller speech.
+
+            NOTE: constant False on telephony — ``mute_during_tts`` is off by
+            design there so barge-in works. That is why ``_agent_speaking``
+            below exists; do not delete this as redundant, it still covers the
+            browser and ask-AI paths where muting IS used.
+            """
             if not call_id:
                 return False
             fn = getattr(provider, "is_muted", None)
@@ -350,6 +449,48 @@ class ResilientSTTProvider(STTProvider):
                 return bool(fn(call_id))
             except Exception:
                 return False
+
+        def _agent_speaking() -> bool:
+            """Is our own TTS on the line right now?
+
+            Fails toward the PREVIOUS behaviour (counting the audio) rather
+            than toward suppression, because a broken probe must not be able to
+            silently disable dead-stream detection. The failure is counted, and
+            the count is reported per call, so "the probe is broken" cannot
+            masquerade as "the agent never spoke".
+            """
+            probe = self._agent_speaking_probe
+            if probe is None:
+                return False
+            try:
+                return bool(probe())
+            except Exception:
+                self._probe_errors += 1
+                return False
+
+        # WIRING CHECK, reported once per call. The guard above is worthless if
+        # nobody installed the probe, and the entire class of bug it replaces
+        # was invisible because a guard that never ran logged exactly like a
+        # guard with nothing to do. One grep now answers it:
+        #     journalctl ... | grep resilient_stt_echo_guard | grep ABSENT
+        logger.info(
+            "resilient_stt_echo_guard probe=%s echo_tail_s=%.2f voiced_needed_s=%.1f",
+            "installed" if self._agent_speaking_probe is not None else "ABSENT",
+            _ECHO_TAIL_S,
+            policy.silent_stream_voiced_seconds,
+            extra={"call_id": call_id},
+        )
+
+        def _emit_audit(outcome: str) -> None:
+            """Per-call verdict, written on healthy calls too."""
+            logger.info(
+                "resilient_stt_audit provider=%s outcome=%s counted_voiced_ms=%.0f "
+                "suppressed_ms=%.0f probe=%s probe_errors=%d",
+                chosen.name, outcome, watchdog.voiced_ms, watchdog.suppressed_ms,
+                "installed" if self._agent_speaking_probe is not None else "ABSENT",
+                self._probe_errors,
+                extra={"call_id": call_id},
+            )
 
         async def _tee_audio() -> AsyncIterator[AudioChunk]:
             """Pass-through that also populates the replay buffer and feeds the
@@ -364,17 +505,24 @@ class ResilientSTTProvider(STTProvider):
             """
             async for chunk in audio_stream:
                 buffer.add(chunk)
-                if watchdog.observe_audio(chunk, muted=_provider_muted(chosen)):
+                if watchdog.observe_audio(
+                    chunk,
+                    muted=_provider_muted(chosen),
+                    agent_speaking=_agent_speaking(),
+                ):
                     logger.error(
                         "resilient_stt_stream_silent provider=%s voiced_s=%.1f "
                         "— %.1fs of caller speech went in and no transcript "
                         "event came back; treating the stream as dead and "
-                        "failing over",
+                        "failing over (suppressed_ms=%.0f of agent audio was "
+                        "correctly not counted)",
                         chosen.name,
                         policy.silent_stream_voiced_seconds,
                         watchdog.voiced_ms / 1000.0,
+                        watchdog.suppressed_ms,
                         extra={"call_id": call_id},
                     )
+                    _emit_audit("failover")
                     raise STTStreamSilentError(
                         f"{chosen.name} accepted "
                         f"{watchdog.voiced_ms / 1000.0:.1f}s of voiced audio "
@@ -399,6 +547,7 @@ class ResilientSTTProvider(STTProvider):
             # would look like a normal end-of-call and return silently — the
             # exact failure this watchdog exists to stop.
             if not watchdog.tripped:
+                _emit_audit("healthy")
                 return
         except CircuitOpenError:
             logger.info("resilient_stt_circuit_open_at_start", extra={"call_id": call_id})

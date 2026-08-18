@@ -867,6 +867,32 @@ class AudioIngest:
             )
 
             try:
+                # Tell the STT failover watchdog how to ask "is the agent
+                # talking right now?".
+                #
+                # 2026-08-18: without this the watchdog counted our own TTS,
+                # echoing back on a 2-wire line, as unanswered caller speech,
+                # and abandoned Flux on six of fourteen answered calls within
+                # seconds of the greeting. It cannot use the provider's `muted`
+                # flag because telephony deliberately never mutes (barge-in),
+                # and it cannot hold its own copy of the state because a
+                # mirrored copy of a signal that changes several times per
+                # second is guaranteed to drift. So it reads the one source of
+                # truth, live, through this probe.
+                #
+                # Installed HERE because this is the first point that has both
+                # the session and the provider. Absence is reported per call by
+                # `resilient_stt_echo_guard probe=ABSENT` rather than assumed
+                # harmless — an uninstalled guard is how the previous version
+                # of this protection managed to be dead code for four days.
+                _install_probe = getattr(
+                    self._p.stt_provider, "set_agent_speaking_probe", None
+                )
+                if _install_probe is not None:
+                    _install_probe(
+                        lambda: bool(getattr(session, "tts_active", False))
+                    )
+
                 async for transcript in self._p.stt_provider.stream_transcribe(
                     audio_stream(),
                     call_id=call_id,
