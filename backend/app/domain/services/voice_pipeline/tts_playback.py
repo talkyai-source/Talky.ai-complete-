@@ -329,6 +329,24 @@ class TtsPlayback:
                         pass
                 await self._p.media_gateway.send_audio(call_id, raw)
                 first_chunk_sent = True  # at least one chunk reached the gateway
+                # WHEN DID AUDIO LAST LEAVE FOR THE CALLER?
+                #
+                # `tts_active` answers "is Python still streaming", and it goes
+                # False the instant this loop ends. The caller's ear is further
+                # downstream: the C++ gateway holds its own queue and paces it
+                # in real time — every interrupt today that asked found 240-300ms
+                # still sitting in it. So a barge-in landing just after this loop
+                # finishes can be told "nothing is playing" while the gateway is
+                # still draining.
+                #
+                # Underscore-prefixed because CallSession is a pydantic model
+                # that REJECTS undeclared public attributes (see
+                # test_session_scratch_attrs — two features were silently dead
+                # for days on exactly that).
+                try:
+                    session._last_tts_chunk_at = time.monotonic()
+                except Exception:
+                    pass
                 # Check barge-in again immediately after send: barge-in may have
                 # fired during the gateway send await before the next TTS chunk arrives.
                 if barge_in_event and barge_in_event.is_set():

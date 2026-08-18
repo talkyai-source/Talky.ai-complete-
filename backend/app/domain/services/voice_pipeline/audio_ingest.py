@@ -66,6 +66,78 @@ def note_voice_activity(session, sum_sq: float, sample_count: int) -> None:
         pass
 
 
+# ── barge-in margin probe ────────────────────────────────────────────────────
+# Buckets for a cheap per-call RMS distribution. Log-ish spacing because the
+# interesting question spans two orders of magnitude: the agent's echo measured
+# 287-755 on call d068f4b8 while the caller's own voice measured 2360-4890.
+_RMS_BUCKETS = (100.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0)
+
+
+class BargeInMarginProbe:
+    """How far apart are the agent's echo and the caller's voice, acoustically?
+
+    MEASUREMENT ONLY — nothing reads this to make a decision, by design.
+
+    2026-08-18: barge-in is detected from Flux's ``StartOfTurn``, and that costs
+    a measured p50 of 664ms and a p90 of 3,318ms between the caller opening
+    their mouth and us beginning to stop (``detect_ms``, n=252). The obvious
+    accelerator is to trigger on acoustic energy instead of waiting for Flux —
+    but on PSTN, with no echo cancellation, the line also carries our own TTS,
+    and firing on that would make the agent interrupt itself on every turn.
+
+    That trade is only decidable with numbers. One call showed a 5-10x gap
+    between echo and caller speech, which would be plenty. One call is not
+    evidence: a louder trunk, a speakerphone, or a different handset could
+    close it. So this measures the separation on EVERY call and reports it, and
+    the decision waits for the distribution rather than the anecdote.
+
+    Costs one comparison and one bucket increment per frame; the RMS it uses is
+    already computed by the level accumulator.
+    """
+
+    __slots__ = ("echo", "caller")
+
+    def __init__(self) -> None:
+        # index 0..len(_RMS_BUCKETS) — one more bucket than edges (the tail).
+        self.echo = [0] * (len(_RMS_BUCKETS) + 1)
+        self.caller = [0] * (len(_RMS_BUCKETS) + 1)
+
+    def observe(self, rms: float, *, agent_speaking: bool) -> None:
+        i = 0
+        for edge in _RMS_BUCKETS:
+            if rms < edge:
+                break
+            i += 1
+        (self.echo if agent_speaking else self.caller)[i] += 1
+
+    @staticmethod
+    def _pct(buckets: list, q: float) -> Optional[float]:
+        """Upper edge of the bucket containing the q-th percentile. Coarse on
+        purpose — we need to know whether a gap exists, not its third digit."""
+        total = sum(buckets)
+        if not total:
+            return None
+        target, seen = total * q, 0
+        for i, n in enumerate(buckets):
+            seen += n
+            if seen >= target:
+                return _RMS_BUCKETS[i] if i < len(_RMS_BUCKETS) else float(_RMS_BUCKETS[-1] * 2)
+        return None
+
+    def describe(self) -> str:
+        e95 = self._pct(self.echo, 0.95)
+        c50 = self._pct(self.caller, 0.50)
+        c95 = self._pct(self.caller, 0.95)
+        margin = (c50 / e95) if (e95 and c50) else None
+        return (
+            f"echo_frames={sum(self.echo)} echo_rms_p95={'?' if e95 is None else f'{e95:.0f}'} "
+            f"caller_frames={sum(self.caller)} "
+            f"caller_rms_p50={'?' if c50 is None else f'{c50:.0f}'} "
+            f"caller_rms_p95={'?' if c95 is None else f'{c95:.0f}'} "
+            f"margin={'?' if margin is None else f'{margin:.1f}x'}"
+        )
+
+
 def voice_onset_age_s(session, *, now: Optional[float] = None) -> Optional[float]:
     """Seconds since the caller began their current utterance, or None.
 
@@ -255,6 +327,7 @@ class AudioIngest:
             _level_max = 0
             _level_sum_sq = 0.0
             _level_samples = 0
+            _margin = BargeInMarginProbe()
             while session.stt_active:
                 try:
                     chunk = await asyncio.wait_for(queue.get(), timeout=0.02)
@@ -287,6 +360,17 @@ class AudioIngest:
                                 note_voice_activity(
                                     session, _chunk_sum_sq, len(samples)
                                 )
+                                # Same square root, two uses: the onset anchor
+                                # above and the echo-vs-caller separation the
+                                # early-barge-in decision is waiting on. See
+                                # BargeInMarginProbe — measurement only.
+                                if samples:
+                                    _margin.observe(
+                                        (_chunk_sum_sq / len(samples)) ** 0.5,
+                                        agent_speaking=bool(
+                                            getattr(session, "tts_active", False)
+                                        ),
+                                    )
                             except Exception:
                                 pass
                         # Emit a level log roughly once per second
@@ -336,6 +420,15 @@ class AudioIngest:
             logger.info(
                 "audio_stream_ended call_id=%s chunks_yielded=%d stt_active=%s",
                 call_id, _chunks_yielded, session.stt_active,
+            )
+            # One line per call. `margin` is the ratio between the caller's
+            # median speech level and the 95th percentile of the agent's echo:
+            # how much acoustic headroom an energy-triggered barge-in would
+            # have. Written on every call, including quiet ones, so the
+            # distribution can be read rather than the anecdote.
+            logger.info(
+                "barge_in_margin call_id=%s %s",
+                call_id, _margin.describe(),
             )
 
         # STT span wraps the full transcription stream

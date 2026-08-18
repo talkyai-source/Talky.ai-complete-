@@ -57,6 +57,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -68,6 +69,38 @@ logger = logging.getLogger(__name__)
 # (the two arming sites are microseconds apart). 0.35s covers that burst with
 # margin while staying well under a human's re-interruption time.
 _INTERRUPT_DEDUPE_S = 0.35
+
+# How long after Python's last TTS chunk the C++ gateway may still be putting
+# audio in the caller's ear.
+#
+# Measured, not guessed: every interrupt on 2026-08-18 that actually asked the
+# gateway found 240-300ms of queued audio (`dropped_ms` p50 240, max 300). 0.6s
+# is that with margin, and it is deliberately far below a genuine next turn —
+# the caller has to finish speaking, the LLM has to answer (p50 TTFT 639ms) and
+# TTS has to return, so an ordinary turn is seconds away and still takes the
+# cheap `nothing_playing` path. Set to 0 to restore the pre-2026-08-18
+# behaviour exactly.
+_GATEWAY_DRAIN_S = float(os.getenv("VOICE_GATEWAY_DRAIN_S", "0.6"))
+
+
+def _playback_may_still_be_audible(session) -> Optional[float]:
+    """Milliseconds since Python's last TTS chunk, if still inside the drain
+    window — else None.
+
+    None means "certainly nothing playing"; a number means "the gateway might
+    still be draining, so ASK it rather than assume". Never raises: a missing
+    stamp degrades to the previous behaviour rather than to a wrong answer.
+    """
+    if _GATEWAY_DRAIN_S <= 0:
+        return None
+    last = getattr(session, "_last_tts_chunk_at", None)
+    if last is None:
+        return None
+    try:
+        age = time.monotonic() - last
+    except Exception:  # noqa: BLE001
+        return None
+    return age * 1000.0 if 0 <= age < _GATEWAY_DRAIN_S else None
 
 
 @dataclass
@@ -93,6 +126,10 @@ class InterruptResult:
     # reporting 0.0 for "not measured" would read as a perfect response.
     detect_ms: Optional[float] = None
     speech_to_stop_ms: Optional[float] = None
+    # True when the full teardown ran ONLY because the gateway might still have
+    # been draining — Python already believed it had finished. Kept distinct so
+    # a probe that found nothing cannot be counted as a barge-in.
+    drain_probe: bool = False
     errors: list = field(default_factory=list)
 
     @property
@@ -111,6 +148,7 @@ class InterruptResult:
             "gw_ms": self.gateway_dropped_ms,
             "gw_segments": self.gateway_interrupted_segments,
             "gw_attempts": self.gateway_attempts,
+            "drain_probe": self.drain_probe,
             "elapsed_ms": round(self.elapsed_ms, 1),
             "detect_ms": None if self.detect_ms is None else round(self.detect_ms, 1),
             "speech_to_stop_ms": (
@@ -268,8 +306,13 @@ async def _do_interrupt(
     # the gateway round-trip and the TTS provider call, and those are what we
     # skip when nothing was playing and nothing was cancelled.
     _tts_playing = bool(getattr(session, "tts_active", False))
+    # ...and if Python has just finished, the gateway may not have. Asking is
+    # ~1ms; assuming is how a caller gets talked over by audio we already
+    # believed had stopped. Recorded either way so the choice is attributable.
+    _drain_ms = None if _tts_playing else _playback_may_still_be_audible(session)
     _log_step(interrupt_id, call_id, "begin", reason=reason,
-              tts_active=_tts_playing)
+              tts_active=_tts_playing,
+              drain_ms=("-" if _drain_ms is None else round(_drain_ms)))
 
     # ── 1. state ──────────────────────────────────────────────────────────
     try:
@@ -302,7 +345,7 @@ async def _do_interrupt(
     # skip the metric, so voice_interrupt_outcome_total counts only genuine
     # interruptions. The local state above has already been reset, which is
     # the part that must happen either way.
-    if not _tts_playing and not result.task_cancelled:
+    if not _tts_playing and not result.task_cancelled and _drain_ms is None:
         result.ok = True
         result.elapsed_ms = (time.monotonic() - started) * 1000.0
         # No audio was playing, so there was nothing for the caller to stop
@@ -316,6 +359,9 @@ async def _do_interrupt(
                   detect_ms=(None if result.detect_ms is None
                              else round(result.detect_ms, 1)))
         return result
+
+    result.drain_probe = bool(_drain_ms is not None and not _tts_playing
+                              and not result.task_cancelled)
 
     # ── 3+4. Python buffers, then the C++ queue (one call does both) ──────
     try:
@@ -388,11 +434,17 @@ async def _do_interrupt(
     try:
         from app.infrastructure.metrics.voice_metrics import record_interrupt_outcome
 
-        record_interrupt_outcome(
-            ok=result.ok,
-            dropped_frames=result.gateway_dropped_frames,
-            attempts=result.gateway_attempts,
-        )
+        # A drain probe that found the gateway already empty was not a barge-in
+        # — Python had finished AND the queue was clear, so nothing was stopped.
+        # Counting it would re-introduce the noise the `nothing_playing`
+        # shortcut was added to remove. A probe that DID drop frames is a real
+        # interruption and counts normally.
+        if not (result.drain_probe and result.gateway_dropped_frames == 0):
+            record_interrupt_outcome(
+                ok=result.ok,
+                dropped_frames=result.gateway_dropped_frames,
+                attempts=result.gateway_attempts,
+            )
     except Exception:  # noqa: BLE001 — metrics must never break the audio path
         pass
 
