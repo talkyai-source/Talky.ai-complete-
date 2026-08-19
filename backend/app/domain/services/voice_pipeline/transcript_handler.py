@@ -84,6 +84,42 @@ class TranscriptHandler:
             session._speculative_history_len = None
             return
 
+        # ── The caller has yielded the floor. Say so NOW. ────────────────────
+        #
+        # `_caller_speaking` is set on every StartOfTurn (audio_ingest.
+        # _on_barge_in_direct) and gates playback_gate's pre-TTS hold. It used
+        # to be cleared in exactly one place — turn_ender.py, immediately after
+        # the `turn_end` log — which sits behind TWELVE early returns: four in
+        # this method (backchannel-during-TTS, suppressed empty marker,
+        # duplicate EndOfTurn, queued-behind-pending) and eight in
+        # turn_ender.handle (empty transcript, turn-0 rejection, instant
+        # opener, repetitive hallucination, backchannel suppression, pending
+        # task, llm busy, self-echo).
+        #
+        # Any EndOfTurn that took one of those exits left the flag stuck True,
+        # so the NEXT armed hold burned its full 2.5s cap and spoke anyway.
+        # Production, every day since the gate shipped: 16 pre_tts_hold_timeout
+        # and ZERO pre_tts_hold_released. Not one hold was ever released early.
+        #
+        # So the clear belongs where the FACT becomes true — the moment the
+        # provider says the turn ended — not at the end of the happy path. The
+        # clear in turn_ender stays as defence in depth (it also covers the
+        # queued-turn dispatch, which re-enters turn_ender without a fresh
+        # EndOfTurn).
+        #
+        # Computed once and reused at the dispatch branch below: detect_turn_end
+        # is pure (`is_final and not text`), but reading it twice invites the two
+        # reads drifting apart later.
+        try:
+            _is_turn_end = bool(self._p.stt_provider.detect_turn_end(transcript))
+        except Exception:  # noqa: BLE001 — an odd chunk must not kill the turn
+            _is_turn_end = False
+        if _is_turn_end:
+            from app.domain.services.voice_pipeline.playback_gate import (
+                mark_caller_stopped,
+            )
+            mark_caller_stopped(session)
+
         metadata = transcript.metadata or {}
         self._p.transcript_service.bind_call_identity(call_id, session.talklee_call_id)
 
@@ -166,7 +202,7 @@ class TranscriptHandler:
                 )
                 return
 
-        if self._p.stt_provider.detect_turn_end(transcript):
+        if _is_turn_end:
             # Grow case: a turn that began as a backchannel (so the StartOfTurn
             # audio barge-in was suppressed) but turned into real speech. The
             # agent's TTS may still be playing — stop it now before we respond.
