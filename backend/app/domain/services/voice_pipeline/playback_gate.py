@@ -149,6 +149,23 @@ async def await_caller_pause(session, *, call_id: str = "") -> float:
     disarm_pre_tts_hold(session)
 
     if not caller_is_speaking(session):
+        # THE FIX WORKING LOOKS LIKE NOTHING HAPPENING (2026-08-20)
+        #
+        # This is the good outcome — a barge-in armed the hold, the caller's
+        # EndOfTurn lowered the flag before playback was ready, and there is
+        # nothing to wait for. But it returns silently, so it produces no log
+        # line at all, and "the clear ran in time" is indistinguishable in the
+        # journal from "the hold was never armed".
+        #
+        # That matters because `pre_tts_hold_released` can only fire when the
+        # hold ENTERS the wait loop and the flag drops while it waits. The
+        # better the clear gets, the rarer that becomes — so counting releases
+        # alone would read a working fix as a dead one. Count this instead.
+        logger.info(
+            "pre_tts_hold_not_needed call=%s reason=%s — caller had already "
+            "yielded when playback became ready; nothing to wait for",
+            call_id[:12], getattr(session, "_defer_playback_reason", "unknown"),
+        )
         return 0.0
 
     reason = getattr(session, "_defer_playback_reason", "unknown")

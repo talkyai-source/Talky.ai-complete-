@@ -8,11 +8,12 @@ Every pre-TTS hold that ever ran in production hit its 2.5s cap:
 
 Clearing `_caller_speaking` at the EndOfTurn (see
 test_caller_speaking_cleared_on_end_of_turn) fixes the holds where an EndOfTurn
-arrived and a filter swallowed it. Classifying all fourteen timeouts in the
-journal window showed that is the MINORITY:
+arrived and a filter swallowed it. Classifying all sixteen timeouts in the
+journal — anchored on the moment each hold was ARMED, so an EndOfTurn belonging
+to the previous turn cannot be miscounted — showed that is the small minority:
 
-    (a) EndOfTurn arrived but was swallowed :  5
-    (b) no EndOfTurn ever arrived           :  9
+    (a) EndOfTurn arrived but was swallowed :  3
+    (b) no EndOfTurn ever arrived           : 13
 
 Case (b) has nothing to clear. Flux raises StartOfTurn on any speech-like sound
 but only raises EndOfTurn on a real turn boundary, so a cough, a line blip or a
@@ -295,3 +296,32 @@ def test_the_window_sits_between_a_sentence_pause_and_the_cap():
     """A bound below ~0.4s fires inside ordinary speech; at or above the cap it
     can never fire at all. Both make the change pointless or harmful."""
     assert 0.4 < _QUIET_RELEASE_S < _MAX_HOLD_S
+
+
+@pytest.mark.asyncio
+async def test_a_hold_that_was_not_needed_says_so(caplog):
+    """The fix working must not be silent.
+
+    A barge-in armed the hold, the EndOfTurn lowered the flag before playback
+    was ready, and there is nothing to wait for. That is the GOOD outcome, but
+    it returns immediately and used to log nothing — making "the clear ran in
+    time" indistinguishable from "the hold was never armed".
+
+    It matters because `pre_tts_hold_released` only fires when the hold enters
+    the wait loop AND the flag drops while it waits. The better the clear gets,
+    the rarer that is. Counting releases alone would read a working fix as a
+    dead one.
+    """
+    s = real_session()
+    mark_caller_stopped(s)          # EndOfTurn already lowered it
+    arm_pre_tts_hold(s)
+
+    with caplog.at_level("INFO"):
+        waited = await await_caller_pause(s, call_id=s.call_id)
+
+    assert waited == 0.0
+    assert "pre_tts_hold_not_needed" in caplog.text
+    assert "pre_tts_hold_released" not in caplog.text, (
+        "an instant return must not be counted as a release — that would "
+        "inflate the metric that proves the hold does its job"
+    )
