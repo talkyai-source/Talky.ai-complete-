@@ -262,10 +262,21 @@ def main() -> int:
           f"{FRAME_MS:.0f}ms frames · speech at RMS >= {SPEECH_RMS:.0f}")
     print("=" * 78)
 
-    # Which leg is the agent? The agent speaks first (disclosure + greeting) and
-    # speaks more, so it is the channel whose first onset is earliest with a
-    # substantial voiced total. Stated rather than assumed, and printed so a
-    # wrong guess is visible instead of silently inverting the whole report.
+    # Which leg is the agent? DECIDED FROM EVIDENCE, never from who speaks
+    # first.
+    #
+    # The first version of this script assumed "the agent speaks first
+    # (disclosure, then greeting) and speaks more". That is wrong on every call
+    # measured: the CALLER answers the phone and says "hello" before the agent's
+    # disclosure. Getting it backwards inverts the entire report — the caller
+    # continuing to talk after they barge in (completely normal) reads as the
+    # agent failing to stop (a serious bug). It produced exactly that false
+    # finding, on three separate calls, before this check existed.
+    #
+    # The sound test: the agent's audio must appear right after each
+    # TTS_FMT_DEBUG (synthesis start) and be absent otherwise. Score both
+    # channels against every synthesis event in the call and take the winner.
+    # On real calls the separation is not marginal — 75% vs 4%.
     oa, ob = ch_a.first_onset_s(), ch_b.first_onset_s()
     print(f"\nchannel 0: first onset {oa if oa is None else f'{oa:6.2f}s'} · "
           f"voiced {ch_a.voiced_seconds():6.1f}s")
@@ -274,11 +285,42 @@ def main() -> int:
     if oa is None and ob is None:
         print("\nboth channels silent — nothing to reconcile")
         return 1
-    agent_is_a = (ob is None) or (oa is not None and oa <= ob)
+
+    tts_times = [e.t for e in evs if e.kind == "tts_first_send"]
+    if not tts_times:
+        print("\nno synthesis events — cannot identify the agent leg safely")
+        return 1
+
+    def _score(env: Envelope, own_onset: Optional[float]) -> float:
+        """Fraction of the second after each synthesis start that is voiced,
+        anchoring on this channel's own first onset so the hypothesis is
+        self-consistent."""
+        if own_onset is None:
+            return -1.0
+        org = tts_times[0] - timedelta(seconds=own_onset)
+        tot = 0.0
+        for t in tts_times:
+            s = (t - org).total_seconds()
+            i0 = int((s + 0.1) * 1000 / FRAME_MS)
+            i1 = int((s + 1.1) * 1000 / FRAME_MS)
+            i0, i1 = max(0, i0), min(len(env.rms), i1)
+            if i1 > i0:
+                tot += sum(1 for i in range(i0, i1)
+                           if env.rms[i] >= SPEECH_RMS) / (i1 - i0)
+        return tot / len(tts_times)
+
+    sa, sb = _score(ch_a, oa), _score(ch_b, ob)
+    agent_is_a = sa > sb
     agent, caller = (ch_a, ch_b) if agent_is_a else (ch_b, ch_a)
+    print(f"\nagent-channel test — voiced in the 1s after each of "
+          f"{len(tts_times)} synthesis starts:")
+    print(f"    channel 0: {sa * 100:5.1f}%        channel 1: {sb * 100:5.1f}%")
     print(f"=> AGENT = channel {0 if agent_is_a else 1}, "
-          f"CALLER = channel {1 if agent_is_a else 0} "
-          "(agent speaks first: disclosure, then greeting)")
+          f"CALLER = channel {1 if agent_is_a else 0}")
+    if abs(sa - sb) < 0.15:
+        print("    WARNING: the two channels score within 15 points of each "
+              "other.\n    Treat every number below as unsafe — the legs may "
+              "not be separated.")
 
     first_tts = next((e for e in evs if e.kind == "tts_first_send"), None)
     agent_onset = agent.first_onset_s()
