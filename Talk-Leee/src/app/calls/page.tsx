@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
-import { Phone, PhoneOff, PhoneIncoming, Clock, ChevronRight, ChevronDown, FileText, Megaphone, Loader2, Sparkles, Play, Pause, Search } from "lucide-react";
+import { Phone, PhoneOff, PhoneIncoming, Clock, ChevronRight, ChevronDown, FileText, Megaphone, Loader2, Sparkles, Play, Pause, Search, Mic } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { useCalls, useCallTranscript, useCallSummary } from "@/lib/api-hooks";
@@ -188,6 +188,21 @@ function CallRow({ call }: { call: Call }) {
                 ) : (
                     <span aria-hidden className="inline-block h-8 w-8" />
                 )}
+                {/* Agent-feedback voice note. Filled when this call already has
+                    one. `has_feedback` is computed per row by an EXISTS in the
+                    calls list query, so it reflects reality rather than being a
+                    flag that is always false. */}
+                <Link
+                    href={`/calls/${call.id}`}
+                    aria-label={call.has_feedback ? "Agent feedback left — open call" : "Leave agent feedback"}
+                    title={call.has_feedback ? "Agent feedback left" : "Leave agent feedback"}
+                    className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${call.has_feedback
+                        ? "border-primary/50 bg-primary/10 text-primary"
+                        : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground"
+                        }`}
+                >
+                    <Mic className="h-4 w-4" />
+                </Link>
                 <Link
                     href={`/calls/${call.id}`}
                     aria-label="Open call details"

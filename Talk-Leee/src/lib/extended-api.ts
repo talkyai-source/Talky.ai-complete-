@@ -1,4 +1,23 @@
 import { sharedHttpClient } from "@/lib/api";
+import { ApiClientError } from "@/lib/http-client";
+import { FEEDBACK_MAX_SECONDS, feedbackFileName } from "@/lib/audio-recording";
+
+/** One reviewer voice note about how the agent handled a call. */
+export interface CallFeedback {
+    id: string;
+    call_id: string;
+    audio_url: string;
+    audio_mime_type: string;
+    audio_size_bytes: number;
+    duration_seconds: number | null;
+    transcript: string | null;
+    transcript_status: "pending" | "done" | "failed";
+    transcript_error: string | null;
+    transcription_attempts: number;
+    retryable: boolean;
+    created_at: string;
+    updated_at: string;
+}
 
 // CSV Upload Response
 export interface BulkImportResponse {
@@ -230,6 +249,83 @@ class ExtendedApi {
         });
         const blob = await response.blob();
         return URL.createObjectURL(blob);
+    }
+
+    // ── Call feedback voice notes ─────────────────────────────────────────
+    // One note per call. Recorded in the browser, stored durably, then
+    // transcribed by Deepgram inside the same request.
+
+    /**
+     * The note on this call, or null when there isn't one yet.
+     *
+     * `requestRaw` throws ApiClientError on every non-2xx, so "this call has no
+     * note" arrives as a thrown 404 and has to be turned back into an ordinary
+     * empty result — otherwise the commonest state renders as an error.
+     */
+    async getCallFeedback(callId: string): Promise<CallFeedback | null> {
+        try {
+            const res = await this.client.requestRaw({
+                path: `/calls/${callId}/feedback`,
+                method: "GET",
+            });
+            return (await res.json()) as CallFeedback;
+        } catch (err) {
+            if (err instanceof ApiClientError && err.status === 404) return null;
+            throw err;
+        }
+    }
+
+    /**
+     * Upload a recording. `replace` supersedes an existing note atomically;
+     * without it the backend answers 409 rather than overwrite someone's work.
+     *
+     * A 2xx here means the audio is durable. It does NOT mean transcription
+     * succeeded — read `transcript_status`, which may be "failed".
+     */
+    async submitCallFeedback(
+        callId: string,
+        audio: Blob,
+        opts: { durationSeconds?: number; replace?: boolean } = {},
+    ): Promise<CallFeedback> {
+        const form = new FormData();
+        // Send the container the browser actually produced, and give the blob a
+        // filename whose extension agrees with it.
+        const type = audio.type || "audio/webm";
+        form.append("audio", new File([audio], feedbackFileName(type), { type }));
+        if (typeof opts.durationSeconds === "number" && Number.isFinite(opts.durationSeconds)) {
+            const clamped = Math.min(Math.max(opts.durationSeconds, 0), FEEDBACK_MAX_SECONDS);
+            form.append("duration_seconds", clamped.toFixed(2));
+        }
+        if (opts.replace) form.append("replace", "true");
+
+        const res = await this.client.requestRaw({
+            path: `/calls/${callId}/feedback`,
+            method: "POST",
+            body: form,
+        });
+        return (await res.json()) as CallFeedback;
+    }
+
+    /** Re-run transcription against the already-stored audio. */
+    async retryCallFeedbackTranscription(callId: string): Promise<CallFeedback> {
+        const res = await this.client.requestRaw({
+            path: `/calls/${callId}/feedback/transcription/retry`,
+            method: "POST",
+        });
+        return (await res.json()) as CallFeedback;
+    }
+
+    /**
+     * Same reasoning as fetchRecordingBlob: route the binary through requestRaw
+     * so it carries auth and inherits refresh-on-401. In production this 302s
+     * to a short-lived S3 URL, which fetch follows on our behalf.
+     */
+    async fetchCallFeedbackAudioBlob(callId: string): Promise<string> {
+        const res = await this.client.requestRaw({
+            path: `/calls/${callId}/feedback/audio`,
+            method: "GET",
+        });
+        return URL.createObjectURL(await res.blob());
     }
 
     // Campaign call transcripts (Script Card)

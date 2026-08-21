@@ -9,6 +9,7 @@ import { motion } from "framer-motion";
 import { useCall, useCallTranscript } from "@/lib/api-hooks";
 import { extendedApi } from "@/lib/extended-api";
 import { statusPillClass } from "@/lib/status-colors";
+import { VoiceFeedbackRecorder } from "@/components/calls/voice-feedback-recorder";
 
 // Shared util so call detail agrees with call history + contacts on green/red.
 const getStatusStyle = statusPillClass;
@@ -239,6 +240,17 @@ export default function CallDetailPage() {
                                 </div>
                             </motion.div>
                         )}
+
+                        {/* Reviewer voice note about the agent's responses. It
+                            sits with the recording because the two are always
+                            reviewed together — you listen, then you comment. */}
+                        <motion.div
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.25 }}
+                        >
+                            <VoiceFeedbackRecorder callId={callId} />
+                        </motion.div>
                     </div>
 
                     {/* Transcript */}

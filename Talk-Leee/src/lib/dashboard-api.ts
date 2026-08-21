@@ -124,6 +124,8 @@ export interface Call {
     recording_id?: string | null;
     /** AI per-call verdict ("qualified | …", "callback | …", "no_interest | …") — the "was this call a success" answer. */
     lead_outcome?: string | null;
+    /** True when a reviewer has left a voice note on this call. */
+    has_feedback?: boolean;
 }
 
 // AI Call Summary Types
@@ -210,6 +212,7 @@ interface CallListItem {
     campaign_name?: string;
     recording_id?: string | null;
     lead_outcome?: string | null;
+    has_feedback?: boolean;
 }
 
 // Dashboard API - Real backend integration.
@@ -479,6 +482,7 @@ class DashboardApi {
             summary: item.summary,
             recording_id: item.recording_id,
             lead_outcome: item.lead_outcome,
+            has_feedback: item.has_feedback,
         }));
         
         return {
