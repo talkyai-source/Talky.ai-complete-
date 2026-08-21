@@ -32,6 +32,11 @@ class CallListItem(BaseModel):
     # AI per-call verdict from the post-call summary (e.g. "qualified | …",
     # "callback | …", "no_interest | …") — the "was this call a success" answer.
     lead_outcome: Optional[str] = None
+    # Whether a reviewer has left a voice note on this call. Computed per row by
+    # an EXISTS against call_feedback, so it varies with the data instead of
+    # defaulting to False forever — a list flag wired to nothing looks identical
+    # to a list where nobody has left feedback yet.
+    has_feedback: bool = False
 
 
 class CallDetail(BaseModel):
@@ -551,7 +556,9 @@ async def list_calls(
                            camp.name AS campaign_name,
                            (SELECT r.id FROM recordings_s3 r
                              WHERE r.call_id = c.id AND r.status = 'uploaded'
-                             ORDER BY r.created_at DESC LIMIT 1) AS recording_id
+                             ORDER BY r.created_at DESC LIMIT 1) AS recording_id,
+                           EXISTS (SELECT 1 FROM call_feedback f
+                                    WHERE f.call_id = c.id) AS has_feedback
                     FROM calls c
                     LEFT JOIN campaigns camp ON camp.id = c.campaign_id
                     WHERE {where}
@@ -580,6 +587,7 @@ async def list_calls(
                 summary=row["summary"],
                 recording_id=str(row["recording_id"]) if row["recording_id"] is not None else None,
                 lead_outcome=row["lead_outcome"],
+                has_feedback=bool(row["has_feedback"]),
             ))
 
         return CallListResponse(

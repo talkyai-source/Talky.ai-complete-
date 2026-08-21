@@ -23,6 +23,7 @@ from app.api.v1.endpoints.assistant_ws import router as assistant_ws_router
 from app.api.v1.endpoints.auth import router as auth_router
 from app.api.v1.endpoints.billing import router as billing_router
 from app.api.v1.endpoints.calls import router as calls_router
+from app.api.v1.endpoints.call_feedback import router as call_feedback_router
 from app.api.v1.endpoints.campaigns import router as campaigns_router
 from app.api.v1.endpoints.campaign_knowledge import router as campaign_knowledge_router
 from app.api.v1.endpoints.clients import router as clients_router
@@ -73,6 +74,7 @@ api_router.include_router(campaign_knowledge_router)
 api_router.include_router(contacts_router)
 api_router.include_router(contact_lists_router)
 api_router.include_router(calls_router)
+api_router.include_router(call_feedback_router)
 api_router.include_router(recordings_router)
 api_router.include_router(health_router)
 api_router.include_router(dashboard_router)

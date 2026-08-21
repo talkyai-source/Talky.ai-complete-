@@ -63,6 +63,7 @@ backend/audio_files/*.wav
 backend/audio_files/*.mp3
 backend/audio_files/*.ogg
 freeswitch-recordings/
+feedback_audio/
 *.wav
 *.mp3
 *.ogg

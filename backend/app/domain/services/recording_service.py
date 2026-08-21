@@ -185,6 +185,17 @@ class S3Client:
         """Delete an object. Used by retention cleanup."""
         self._client.delete_object(Bucket=self.bucket, Key=key)
 
+    def download(self, key: str) -> bytes:
+        """Download one object as bytes. Raises on storage/network failure."""
+        response = self._client.get_object(Bucket=self.bucket, Key=key)
+        body = response["Body"]
+        try:
+            return body.read()
+        finally:
+            close = getattr(body, "close", None)
+            if close:
+                close()
+
     def head(self, key: str) -> Optional[Dict[str, Any]]:
         """Return object metadata or None if not found."""
         try:
