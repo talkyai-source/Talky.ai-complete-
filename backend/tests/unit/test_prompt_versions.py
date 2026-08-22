@@ -76,6 +76,12 @@ _EXPECTED_HASHES: dict[str, str] = {
     "lead_gen@2": "8769df7d266c495e",
     "customer_support@2": "08caf26f65d3f2bf",
     "receptionist@2": "cfb86fd5b26e3d82",
+    # v3 adds the "when the call should stop being a sales call" section:
+    # wrong number, abuse, distress, bad moment, plus the two things never said
+    # aloud (that someone was graded, and anything about the machinery) and a
+    # timezone rule. lead_gen only — the other two personas are untouched, and
+    # their hashes above are unchanged, which is the mechanism behaving.
+    "lead_gen@3": "6a98b67eaa7a65e8",
 }
 
 

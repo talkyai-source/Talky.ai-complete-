@@ -92,7 +92,7 @@ _TEMPLATES: Final[Mapping[str, str]] = {
 
 #: Current version per persona. Bump on any change to the composed text.
 _VERSIONS: Final[Mapping[str, str]] = {
-    "lead_gen": "lead_gen@2",
+    "lead_gen": "lead_gen@3",
     "customer_support": "customer_support@2",
     "receptionist": "receptionist@2",
 }
