@@ -197,6 +197,15 @@ async def campaign_test_websocket(
         "agent",
         description="'agent' (agent greets first) or 'user' (caller speaks first)",
     ),
+    allow_barge_in: bool = Query(
+        False,
+        description=(
+            "Keep barge-in on for this browser session. OFF by default: without "
+            "a carrier's echo cancellation the microphone hears the agent's own "
+            "speech and cuts it off mid-sentence every turn. Turn this on only "
+            "when wearing headphones."
+        ),
+    ),
 ):
     """Browser WebSocket that runs the real agent for ``campaign_id``.
 
@@ -322,6 +331,7 @@ async def campaign_test_websocket(
                 direction=direction,
                 ai_config_override=ai_cfg,
                 voice_tuning_override=vt,
+                allow_browser_barge_in=allow_barge_in,
             )
 
             orchestrator = container.voice_orchestrator

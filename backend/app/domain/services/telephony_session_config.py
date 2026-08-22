@@ -429,6 +429,41 @@ def _telephony_mute_during_tts_default() -> bool:
     return get_telephony_settings().mute_during_tts
 
 
+def _mute_during_tts_for(gateway_type: str) -> bool:
+    """Same knob, but the right default for the surface you are on.
+
+    THE BROWSER IS NOT A PHONE LINE (2026-08-23)
+    --------------------------------------------
+    The reasoning above — that barge-in matters more than echo — assumes a
+    CARRIER doing echo cancellation. A browser test call has no carrier. It has
+    ``echoCancellation: true`` on getUserMedia, which is best-effort, and a
+    laptop speaker two feet from the microphone.
+
+    Measured on a real test session (campaign 50847cc9, 21:57): a
+    ``barge_in_detected`` fired roughly ONE SECOND after every single agent
+    reply began — turn 2 at 21:57:41 interrupted at :42, turn 3 at :46
+    interrupted at :47, turn 4 at :53 interrupted at :54. Eleven barge-ins
+    against six replies. The agent was hearing itself and cutting itself off
+    mid-sentence, every turn.
+
+    The existing self-echo guard cannot help here: it is text-based and runs at
+    turn end (turn_ender.py), while barge-in fires on StartOfTurn — acoustic,
+    before any transcript exists.
+
+    So the browser path mutes STT during playback by default. It costs barge-in
+    in the test call, which is the correct trade when the alternative is an
+    agent that cannot finish a sentence. Anyone on headphones can turn it back
+    on per session (see campaign_test_ws's allow_barge_in).
+    """
+    if (gateway_type or "").strip().lower() == "browser":
+        import os
+        override = os.getenv("BROWSER_MUTE_DURING_TTS")
+        if override is not None:
+            return override.strip().lower() in {"1", "true", "yes", "on"}
+        return True
+    return _telephony_mute_during_tts_default()
+
+
 # Common words that survive the proper-noun heuristic but aren't product names
 # (sentence-initial capitals, persona boilerplate). Kept lowercase for compare.
 _PRODUCT_TERM_STOPWORDS = frozenset({
@@ -1021,6 +1056,7 @@ def build_telephony_session_config(
     lead_first_name: Optional[str] = None,
     lead_last_name: Optional[str] = None,
     lead_company: Optional[str] = None,
+    allow_browser_barge_in: bool = False,
 ) -> VoiceSessionConfig:
     """
     Build a VoiceSessionConfig for a telephony call.
@@ -1488,7 +1524,11 @@ def build_telephony_session_config(
         gateway_channels=1,
         gateway_bit_depth=16,
         gateway_target_buffer_ms=40,
-        mute_during_tts=_telephony_mute_during_tts_default(),
+        # Browser test calls default to muting during playback — without a
+        # carrier's echo cancellation the agent interrupts itself every turn.
+        mute_during_tts=(
+            False if allow_browser_barge_in else _mute_during_tts_for(gateway_type)
+        ),
         session_type="telephony",
         campaign_id=str(_campaign_id(campaign)) if campaign else "telephony",
         lead_id="sip-caller",
