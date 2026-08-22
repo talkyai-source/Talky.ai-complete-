@@ -24,6 +24,9 @@ from app.api.v1.endpoints.auth import router as auth_router
 from app.api.v1.endpoints.billing import router as billing_router
 from app.api.v1.endpoints.calls import router as calls_router
 from app.api.v1.endpoints.call_feedback import router as call_feedback_router
+from app.api.v1.endpoints.conversation_reviews import (
+    router as conversation_reviews_router,
+)
 from app.api.v1.endpoints.campaigns import router as campaigns_router
 from app.api.v1.endpoints.campaign_knowledge import router as campaign_knowledge_router
 from app.api.v1.endpoints.clients import router as clients_router
@@ -75,6 +78,10 @@ api_router.include_router(contacts_router)
 api_router.include_router(contact_lists_router)
 api_router.include_router(calls_router)
 api_router.include_router(call_feedback_router)
+# Before calls_router: this one owns literal paths under /calls (e.g.
+# /calls/reviews/options) and FastAPI matches in registration order, so a
+# later /calls/{call_id} must not get first refusal on them.
+api_router.include_router(conversation_reviews_router)
 api_router.include_router(recordings_router)
 api_router.include_router(health_router)
 api_router.include_router(dashboard_router)

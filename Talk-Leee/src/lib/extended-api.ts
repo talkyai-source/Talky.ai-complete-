@@ -2,6 +2,34 @@ import { sharedHttpClient } from "@/lib/api";
 import { ApiClientError } from "@/lib/http-client";
 import { FEEDBACK_MAX_SECONDS, feedbackFileName } from "@/lib/audio-recording";
 
+/** A structured review of how the agent handled a call (goals.md §3). */
+export interface ConversationReview {
+    id: string;
+    call_id: string;
+    campaign_id: string | null;
+    user_id: string;
+    rating: number;
+    tags: string[];
+    comment: string | null;
+    prompt_template: string | null;
+    prompt_version: string | null;
+    prompt_hash: string | null;
+    /** Points granted by this submission. 0 on an edit — the reward is tied to
+     *  the review once, by a database constraint. */
+    awarded_points: number;
+    created_at: string;
+    updated_at: string;
+}
+
+/** Tag vocabulary and reward rules, served by the API so the UI never hardcodes them. */
+export interface ReviewOptions {
+    tags: string[];
+    rewards_enabled: boolean;
+    points_per_review: number;
+    daily_cap: number;
+    bare_rating_earns_reward: boolean;
+}
+
 /** One reviewer voice note about how the agent handled a call. */
 export interface CallFeedback {
     id: string;
@@ -304,6 +332,52 @@ class ExtendedApi {
             body: form,
         });
         return (await res.json()) as CallFeedback;
+    }
+
+    // ── Conversation reviews (goals.md §3) ────────────────────────────────
+    // Distinct from the voice note above: a structured rating + tags + comment,
+    // one per USER per call, so teammates can review the same call separately.
+
+    /** Tag vocabulary and reward rules. Fetch once, render the form from it. */
+    async getReviewOptions(): Promise<ReviewOptions> {
+        return this.client.request({ path: "/calls/reviews/options", method: "GET" });
+    }
+
+    /**
+     * This user's own review of the call, or null when they have not left one.
+     * Like getCallFeedback, "none yet" arrives as a thrown 404 and has to be
+     * turned back into an ordinary empty result.
+     */
+    async getMyReview(callId: string): Promise<ConversationReview | null> {
+        try {
+            return await this.client.request({
+                path: `/calls/${callId}/review`, method: "GET",
+            });
+        } catch (err) {
+            if (err instanceof ApiClientError && err.status === 404) return null;
+            throw err;
+        }
+    }
+
+    /** Every review on this call — several teammates may have rated it. */
+    async listCallReviews(callId: string): Promise<ConversationReview[]> {
+        return this.client.request({ path: `/calls/${callId}/reviews`, method: "GET" });
+    }
+
+    /**
+     * Leave or update this user's review. PUT, not POST: a user has at most one
+     * review per call, so submitting again edits the same row rather than
+     * creating a second.
+     */
+    async submitReview(
+        callId: string,
+        review: { rating: number; tags: string[]; comment?: string | null },
+    ): Promise<ConversationReview> {
+        return this.client.request({
+            path: `/calls/${callId}/review`,
+            method: "PUT",
+            body: { rating: review.rating, tags: review.tags, comment: review.comment ?? null },
+        });
     }
 
     /** Re-run transcription against the already-stored audio. */

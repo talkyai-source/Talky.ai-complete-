@@ -406,6 +406,52 @@ class VoiceOrchestrator:
     # 1. Create session
     # ------------------------------------------------------------------
 
+    async def _persist_prompt_identity(
+        self, talklee_call_id: Any, config: VoiceSessionConfig
+    ) -> None:
+        """Write the prompt identity onto the call row (goals.md §6, task #90).
+
+        Best-effort by design. A failed bookkeeping write must never fail a
+        call — losing a conversation because an UPDATE hit a busy row would be
+        the wrong trade every time. The identity is still in the log line above,
+        so a failure costs queryability, not the fact.
+        """
+        pool = getattr(self._db_client, "pool", None)
+        if pool is None or not talklee_call_id:
+            return
+        try:
+            from app.core.db_utils import acquire_with_tenant
+
+            # Tenant context so this keeps working once the app role stops
+            # bypassing row security (task #80). None routes through the
+            # documented bypass path for sessions with no tenant.
+            tenant = getattr(config, "tenant_id", None)
+            async with acquire_with_tenant(pool, str(tenant) if tenant else None) as conn:
+                updated = await conn.execute(
+                    """UPDATE calls
+                          SET prompt_template = $2,
+                              prompt_version  = $3,
+                              prompt_hash     = $4
+                        WHERE talklee_call_id = $1""",
+                    str(talklee_call_id),
+                    config.prompt_template,
+                    config.prompt_version,
+                    config.prompt_hash,
+                )
+            # "UPDATE 0" means the join key was wrong — which is invisible
+            # otherwise, and would leave every review unattributable.
+            if isinstance(updated, str) and updated.endswith(" 0"):
+                logger.warning(
+                    "prompt_identity_persist_matched_no_row talklee=%s — the "
+                    "calls row was not found by talklee_call_id",
+                    str(talklee_call_id)[:12],
+                )
+        except Exception:  # noqa: BLE001 — see docstring
+            logger.warning(
+                "prompt_identity_persist_failed talklee=%s",
+                str(talklee_call_id)[:12], exc_info=True,
+            )
+
     async def create_voice_session(self, config: VoiceSessionConfig) -> VoiceSession:
         """
         Initialise providers, create a CallSession, and set up event logging.
@@ -523,6 +569,14 @@ class VoiceOrchestrator:
                 str(call_id)[:12], config.campaign_id, config.prompt_template,
                 config.prompt_version, config.prompt_hash,
             )
+            # AND PERSIST IT (task #90). Logs rotate, and neither the QA release
+            # gate ("every call has a prompt version") nor a conversation review
+            # can JOIN on a log line. The row is the only durable home.
+            #
+            # Matched on talklee_call_id, NOT call_id: this session's call_id is
+            # the voice-session identifier, a different UUID from the dialer's
+            # calls.id. Getting that wrong updates zero rows and looks fine.
+            await self._persist_prompt_identity(talklee_call_id, config)
 
         # --- Event logging ---
         event_repo = None

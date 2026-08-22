@@ -10,6 +10,7 @@ import { useCall, useCallTranscript } from "@/lib/api-hooks";
 import { extendedApi } from "@/lib/extended-api";
 import { statusPillClass } from "@/lib/status-colors";
 import { VoiceFeedbackRecorder } from "@/components/calls/voice-feedback-recorder";
+import { ConversationReviewPanel } from "@/components/calls/conversation-review-panel";
 
 // Shared util so call detail agrees with call history + contacts on green/red.
 const getStatusStyle = statusPillClass;
@@ -250,6 +251,17 @@ export default function CallDetailPage() {
                             transition={{ delay: 0.25 }}
                         >
                             <VoiceFeedbackRecorder callId={callId} />
+                        </motion.div>
+
+                        {/* Structured review (goals.md §3). Sits with the
+                            recording and the voice note because all three are
+                            the same act: listen, then say what happened. */}
+                        <motion.div
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.3 }}
+                        >
+                            <ConversationReviewPanel callId={callId} />
                         </motion.div>
                     </div>
 
