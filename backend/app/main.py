@@ -235,6 +235,26 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.debug("legacy_campaign_audit_raised err=%s", exc)
 
+    # ── 2b. Prompt version archive (goals.md §6 rollback) ─────────
+    # Capture this build's persona bodies so an earlier version can be rolled
+    # back to without a redeploy, then load them into the sync cache the
+    # (synchronous) session-config builder reads. Both are best-effort: a
+    # failure here costs the ability to roll back, never the ability to call.
+    try:
+        from app.services.scripts.prompts.bodies import (
+            load_cache as _load_prompt_bodies,
+            record_current_versions as _record_prompt_versions,
+        )
+        _pool = getattr(container, "db_pool", None)
+        _new = await _record_prompt_versions(_pool)
+        _cached = await _load_prompt_bodies(_pool)
+        logger.info(
+            "prompt_version_archive newly_recorded=%d cached=%d", _new, _cached
+        )
+        app.state.prompt_versions_cached = _cached
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("prompt_version_archive_failed err=%s", exc)
+
     # ── 3. Provider validation ────────────────────────────────────
     try:
         from app.core.validation import validate_providers_on_startup

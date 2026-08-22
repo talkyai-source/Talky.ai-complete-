@@ -30,6 +30,7 @@ from app.services.scripts.prompts import (
     pick_agent_name,
     pick_agent_name_for_voice,
 )
+from app.services.scripts.prompts.bodies import resolve_body_sync as resolve_pinned_body
 from app.services.scripts.prompts.versions import identify as identify_prompt
 from app.services.scripts.prompts.prompt_safety import (
     MAX_COMPANY_NAME,
@@ -1213,6 +1214,20 @@ def build_telephony_session_config(
                 _campaign_id(campaign), _rename_exc,
             )
 
+    # ── prompt rollback (goals.md §6) ───────────────────────────────────────
+    # A campaign may be pinned to an earlier prompt version. Resolution is
+    # synchronous against an immutable cache because this builder is sync; an
+    # unresolvable pin logs loudly and composes from code rather than failing
+    # the call.
+    _pin = None
+    try:
+        _pin = getattr(campaign, "prompt_version_pin", None) or (
+            campaign.get("prompt_version_pin") if isinstance(campaign, dict) else None
+        )
+    except Exception:  # noqa: BLE001 — a pin lookup must never break a call
+        _pin = None
+    _body_override, _pinned_version = resolve_pinned_body(persona_type, _pin)
+
     def _compose(kd: bool) -> str:
         return compose_prompt(
             persona_type=persona_type,
@@ -1222,6 +1237,7 @@ def build_telephony_session_config(
             additional_instructions=_tenant_additional_instructions,
             direction=direction.value,
             knowledge_driven=kd,
+            body_override=_body_override,
         )
 
     try:
@@ -1277,6 +1293,11 @@ def build_telephony_session_config(
     # would make it unique per call, which answers "same prompt?" with "no"
     # forever.
     prompt_identity = identify_prompt(persona_type, system_prompt)
+    if _pinned_version:
+        # Report the version that actually composed, not the one this build
+        # ships. A rolled-back call logged under the current version would be
+        # exactly the mislabelling the identity mechanism exists to prevent.
+        prompt_identity = prompt_identity._replace(version=_pinned_version)
     logger.info(
         "telephony_prompt_identity campaign=%s persona=%s template=%s "
         "version=%s hash=%s kd=%s prompt_chars=%d",

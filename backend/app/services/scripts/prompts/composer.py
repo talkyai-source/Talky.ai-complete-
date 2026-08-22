@@ -238,7 +238,10 @@ _KNOWLEDGE_DRIVEN_SUFFIX = (
 
 
 def _compose_knowledge_driven_body(
-    persona_type: str, agent_name: str, company_name: str
+    persona_type: str,
+    agent_name: str,
+    company_name: str,
+    body_override: str | None = None,
 ) -> str:
     """Persona body for knowledge-driven (slot-free) campaigns.
 
@@ -248,6 +251,14 @@ def _compose_knowledge_driven_body(
     the lean identity shell for now. The knowledge-precedence rule is added
     once for every persona by compose_prompt.
     """
+    # ROLLBACK (goals.md §6). `body_override` is an archived template body for a
+    # pinned earlier version, resolved by prompts.bodies. It substitutes the
+    # template only — composition continues normally, so a pinned campaign still
+    # gets its own agent and company name.
+    if body_override:
+        return body_override.format(
+            agent_name=agent_name, company_name=company_name
+        )
     if persona_type == "lead_gen":
         from app.services.scripts.prompts.personas.lead_gen import LEAD_GEN_KD_BODY
         return LEAD_GEN_KD_BODY.format(
@@ -268,6 +279,7 @@ def compose_prompt(
     *,
     direction: str = "outbound",
     knowledge_driven: bool = False,
+    body_override: str | None = None,
 ) -> str:
     """Return the final system prompt string.
 
@@ -314,7 +326,7 @@ def compose_prompt(
         # a lean identity + tone body. The substance is injected from the
         # campaign's knowledge base at call time (knowledge/session_inject).
         persona_block = _compose_knowledge_driven_body(
-            persona_type, agent_name, company_name
+            persona_type, agent_name, company_name, body_override=body_override
         )
     else:
         persona_openings = PERSONA_OPENINGS[persona_type]
