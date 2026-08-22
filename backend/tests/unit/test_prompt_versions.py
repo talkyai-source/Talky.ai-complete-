@@ -71,6 +71,11 @@ _EXPECTED_HASHES: dict[str, str] = {
     "lead_gen@1": "ea102992398cf3c3",
     "customer_support@1": "e024291ac232950b",
     "receptionist@1": "8e8098110acf3651",
+    # Version 2 adds direct-question/turn priority and confirmed-action
+    # guardrails. lead_gen@2 also carries the optional campaign approvals block.
+    "lead_gen@2": "8769df7d266c495e",
+    "customer_support@2": "08caf26f65d3f2bf",
+    "receptionist@2": "cfb86fd5b26e3d82",
 }
 
 

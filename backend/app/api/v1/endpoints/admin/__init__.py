@@ -12,6 +12,7 @@ from .actions import router as actions_router
 from .connectors import router as connectors_router
 from .usage import router as usage_router
 from .health import router as health_router
+from .media import router as media_router
 
 # Create main admin router
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -25,3 +26,4 @@ router.include_router(actions_router)
 router.include_router(connectors_router)
 router.include_router(usage_router)
 router.include_router(health_router)
+router.include_router(media_router)

@@ -17,7 +17,7 @@ export function SystemHealth() {
             } else if (response.error) {
                 setError(response.error.message);
             }
-        } catch (err) {
+        } catch {
             setError('Failed to fetch health status');
         } finally {
             setLoading(false);

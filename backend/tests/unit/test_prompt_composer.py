@@ -97,6 +97,9 @@ def test_compose_lead_gen_full():
     assert "Alex" in out
     assert "Acme" in out
     assert "greater Austin" in out
+    # The existing differentiator field is now actually available to the
+    # agent as an explicitly approved campaign fact.
+    assert "Approved differentiator: 10-year warranty" in out
     _no_unfilled_placeholders(out)
 
 
@@ -141,11 +144,45 @@ def test_composed_prompt_has_voice_safe_output_rules():
     assert "## PRIVACY" in out
     assert "FINAL RESPONSE CONTRACT" in out
     assert "Never claim you checked a calendar" in out
+    assert "unless the connected action confirms" in out
     # The dedicated "## CAPTURED BLOCK" section (incl. the no-block fallback
     # guidance) was folded into HARD RULE 4 by the 2026-07-08 compression —
     # same never-re-ask invariant, one copy instead of two.
     assert "every line in it is a fact" in out
     assert "never re-ask" in out
+
+
+def test_optional_lead_gen_campaign_controls_render_only_when_configured():
+    slots = {
+        **LEAD_GEN_SLOTS,
+        "approved_offer": "A no-cost discovery call; no discount is promised",
+        "approved_data_source_explanation": "You requested information on our website",
+        "approved_objection_responses": [
+            {
+                "issue": "We already have a provider",
+                "solution": "Ask what they would improve about the current service",
+            }
+        ],
+        "restricted_claims": "Do not promise guaranteed savings",
+    }
+    out = compose_prompt("lead_gen", "Alex", "Acme", slots)
+
+    assert "CAMPAIGN-SPECIFIC APPROVALS" in out
+    assert "Approved offer or incentive: A no-cost discovery call" in out
+    assert "You requested information on our website" in out
+    assert "We already have a provider → Ask what they would improve" in out
+    assert "Restricted claims or topics: Do not promise guaranteed savings" in out
+    assert "Company knowledge wins on any factual conflict" in out
+    _no_unfilled_placeholders(out)
+
+
+def test_optional_lead_gen_campaign_controls_add_no_empty_section():
+    slots = dict(LEAD_GEN_SLOTS)
+    slots.pop("company_differentiator")
+    out = compose_prompt("lead_gen", "Alex", "Acme", slots)
+
+    assert "\nCAMPAIGN-SPECIFIC APPROVALS\n" not in out
+    assert "Approved offer or incentive:" not in out
 
 
 def test_communication_frameworks_and_persuasion_present():

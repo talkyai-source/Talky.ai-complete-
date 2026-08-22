@@ -108,6 +108,7 @@ async def test_dnc_clean_number_passes():
 # ── generic per-check exception handler in evaluate() ───────────────────────
 
 def test_fail_closed_set_contains_dnc_and_spend_only_the_intended_checks():
+    assert GuardCheck.PLATFORM_CALLS_ENABLED in _FAIL_CLOSED_ON_ERROR_CHECKS
     assert GuardCheck.DNC_CHECK in _FAIL_CLOSED_ON_ERROR_CHECKS
     assert GuardCheck.SPEND_LIMIT in _FAIL_CLOSED_ON_ERROR_CHECKS
     # Availability checks must be preserved as fail-OPEN — an infra blip in
@@ -140,6 +141,9 @@ async def test_evaluate_blocks_when_dnc_check_raises_unexpectedly():
     async def _pass(check, **kwargs):
         return CheckResult(check=check, passed=True)
 
+    guard._check_platform_calls_enabled = lambda **kw: _pass(
+        GuardCheck.PLATFORM_CALLS_ENABLED, **kw
+    )
     guard._check_tenant_active = lambda **kw: _pass(GuardCheck.TENANT_ACTIVE, **kw)
     guard._check_partner_active = lambda **kw: _pass(GuardCheck.PARTNER_ACTIVE, **kw)
     guard._check_subscription = lambda **kw: _pass(GuardCheck.SUBSCRIPTION_VALID, **kw)

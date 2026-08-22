@@ -103,7 +103,7 @@ export interface LiveCallItem {
     tenant_name: string;
     phone_number: string;
     campaign_name: string | null;
-    status: 'in_progress' | 'ringing' | 'queued' | 'initiated';
+    status: 'queued' | 'dialing' | 'ringing' | 'answered' | 'in_call' | 'initiated' | string;
     started_at: string | null;
     duration_seconds: number;
 }
@@ -120,6 +120,9 @@ export interface CallHistoryItem {
     started_at: string | null;
     ended_at: string | null;
     created_at: string;
+    has_recording: boolean;
+    has_feedback: boolean;
+    feedback_transcript_status: string | null;
 }
 
 export interface CallHistoryResponse {
@@ -159,6 +162,7 @@ export interface AdminCallDetail {
     transcript: string | null;
     transcript_json: TranscriptTurn[] | null;
     summary: string | null;
+    summary_json: Record<string, unknown> | null;
     recording_url: string | null;
     cost: number | null;
     timeline: TimelineEvent[];
@@ -174,6 +178,80 @@ export interface CallHistoryParams {
     tenant_id?: string;
     from_date?: string;
     to_date?: string;
+}
+
+export interface AdminRecordingItem {
+    id: string;
+    call_id: string;
+    tenant_id: string;
+    tenant_name: string;
+    phone_number: string;
+    campaign_id: string | null;
+    campaign_name: string | null;
+    status: string;
+    mime_type: string;
+    storage: 'local' | 'object' | string;
+    duration_seconds: number | null;
+    file_size_bytes: number | null;
+    created_at: string;
+    updated_at: string | null;
+    playable: boolean;
+}
+
+export interface AdminRecordingListResponse {
+    items: AdminRecordingItem[];
+    page: number;
+    page_size: number;
+    total: number;
+}
+
+export interface AdminFeedbackItem {
+    id: string;
+    call_id: string;
+    tenant_id: string;
+    tenant_name: string;
+    phone_number: string;
+    campaign_id: string | null;
+    campaign_name: string | null;
+    created_by: string | null;
+    created_by_name: string | null;
+    created_by_email: string | null;
+    audio_mime_type: string;
+    audio_size_bytes: number;
+    duration_seconds: number | null;
+    transcript: string | null;
+    transcript_status: 'pending' | 'done' | 'failed' | string;
+    transcript_error: string | null;
+    transcription_attempts: number;
+    transcript_provider: string | null;
+    created_at: string;
+    updated_at: string;
+    retryable: boolean;
+}
+
+export interface AdminFeedbackListResponse {
+    items: AdminFeedbackItem[];
+    page: number;
+    page_size: number;
+    total: number;
+}
+
+export interface AdminMediaParams {
+    page?: number;
+    page_size?: number;
+    search?: string;
+    tenant_id?: string;
+    call_id?: string;
+    from_date?: string;
+    to_date?: string;
+}
+
+export interface AdminRecordingParams extends AdminMediaParams {
+    status?: string;
+}
+
+export interface AdminFeedbackParams extends AdminMediaParams {
+    transcript_status?: string;
 }
 
 // =============================================================================
@@ -624,6 +702,8 @@ export interface SystemHealthResponse {
 export interface PauseCallsResponse {
     paused: boolean;
     paused_at: string | null;
+    paused_by: string | null;
+    reason: string | null;
     message: string;
 }
 
@@ -683,12 +763,14 @@ export interface QueuesResponse {
 }
 
 export interface DatabaseHealthResponse {
-    status: string;
+    connected: boolean;
     latency_ms: number;
-    connections_active: number;
-    connections_max: number;
-    pool_utilization_percent: number;
-    checked_at: string;
+    pool_size: number;
+    active_connections: number;
+    available_connections: number;
+    database_size_mb: number;
+    table_count: number;
+    last_check: string;
 }
 
 export interface IncidentItem {
@@ -811,6 +893,25 @@ class ApiClient {
                 },
             };
         }
+    }
+
+    private async requestBlob(endpoint: string): Promise<Blob> {
+        const headers: Record<string, string> = {};
+        if (this.token) {
+            headers.Authorization = `Bearer ${this.token}`;
+        }
+        const response = await fetch(`${this.baseUrl}${endpoint}`, { headers });
+        if (!response.ok) {
+            let message = `Media request failed (${response.status})`;
+            try {
+                const payload = await response.json();
+                message = payload.detail || payload.error?.message || message;
+            } catch {
+                // Non-JSON storage/provider errors retain the status message.
+            }
+            throw new Error(message);
+        }
+        return response.blob();
     }
 
     // Auth Endpoints
@@ -963,6 +1064,13 @@ class ApiClient {
         });
     }
 
+    async setPauseAllCalls(paused: boolean, reason?: string) {
+        return this.request<PauseCallsResponse>('/admin/calls/pause', {
+            method: 'PUT',
+            body: { paused, reason: reason?.trim() || undefined },
+        });
+    }
+
     async getPauseStatus() {
         return this.request<PauseCallsResponse>('/admin/calls/pause-status');
     }
@@ -1025,10 +1133,72 @@ class ApiClient {
     }
 
     async terminateCall(callId: string) {
-        return this.request<{ detail: string; call_id: string; new_status: string }>(
+        return this.request<{
+            detail: string;
+            call_id: string;
+            previous_status: string;
+            new_status: string;
+            provider_hangup_requested: boolean;
+            provider_hangup_error: string | null;
+        }>(
             `/admin/calls/${callId}/terminate`,
             { method: 'POST' }
         );
+    }
+
+    async getAdminRecordings(params?: AdminRecordingParams) {
+        const query = new URLSearchParams();
+        if (params?.page) query.set('page', String(params.page));
+        if (params?.page_size) query.set('page_size', String(params.page_size));
+        if (params?.search) query.set('search', params.search);
+        if (params?.status) query.set('status', params.status);
+        if (params?.tenant_id) query.set('tenant_id', params.tenant_id);
+        if (params?.call_id) query.set('call_id', params.call_id);
+        if (params?.from_date) query.set('from_date', params.from_date);
+        if (params?.to_date) query.set('to_date', params.to_date);
+        const suffix = query.size ? `?${query.toString()}` : '';
+        return this.request<AdminRecordingListResponse>(`/admin/recordings${suffix}`);
+    }
+
+    async getAdminFeedback(params?: AdminFeedbackParams) {
+        const query = new URLSearchParams();
+        if (params?.page) query.set('page', String(params.page));
+        if (params?.page_size) query.set('page_size', String(params.page_size));
+        if (params?.search) query.set('search', params.search);
+        if (params?.transcript_status) query.set('transcript_status', params.transcript_status);
+        if (params?.tenant_id) query.set('tenant_id', params.tenant_id);
+        if (params?.call_id) query.set('call_id', params.call_id);
+        if (params?.from_date) query.set('from_date', params.from_date);
+        if (params?.to_date) query.set('to_date', params.to_date);
+        const suffix = query.size ? `?${query.toString()}` : '';
+        return this.request<AdminFeedbackListResponse>(`/admin/feedback${suffix}`);
+    }
+
+    async retryAdminFeedbackTranscription(feedbackId: string) {
+        return this.request<AdminFeedbackItem>(
+            `/admin/feedback/${feedbackId}/transcription/retry`,
+            { method: 'POST' },
+        );
+    }
+
+    async deleteAdminRecording(recordingId: string) {
+        return this.request<{ detail: string }>(`/admin/recordings/${recordingId}`, {
+            method: 'DELETE',
+        });
+    }
+
+    async deleteAdminFeedback(feedbackId: string) {
+        return this.request<{ detail: string }>(`/admin/feedback/${feedbackId}`, {
+            method: 'DELETE',
+        });
+    }
+
+    getAdminRecordingAudio(recordingId: string) {
+        return this.requestBlob(`/admin/recordings/${recordingId}/audio`);
+    }
+
+    getAdminFeedbackAudio(feedbackId: string) {
+        return this.requestBlob(`/admin/feedback/${feedbackId}/audio`);
     }
 
     // =========================================================================
@@ -1187,9 +1357,9 @@ class ApiClient {
         try {
             const response = await this.request<{ has_passkeys: boolean }>('/auth/passkey-check', {
                 method: 'POST',
-                body: JSON.stringify({ email }),
+                body: { email },
             });
-            return response.has_passkeys;
+            return response.data?.has_passkeys ?? false;
         } catch {
             return false;
         }
@@ -1199,13 +1369,20 @@ class ApiClient {
         authenticatorType: 'platform' | 'cross-platform' | 'any' = 'any',
         displayName?: string
     ): Promise<{ ceremony_id: string; options: Record<string, unknown> }> {
-        return this.request('/auth/passkeys/register/begin', {
+        const response = await this.request<{
+            ceremony_id: string;
+            options: Record<string, unknown>;
+        }>('/auth/passkeys/register/begin', {
             method: 'POST',
-            body: JSON.stringify({
+            body: {
                 authenticator_type: authenticatorType,
                 display_name: displayName,
-            }),
+            },
         });
+        if (response.error || !response.data) {
+            throw new Error(response.error?.message || 'Could not begin passkey registration');
+        }
+        return response.data;
     }
 
     async completePasskeyRegistration(
@@ -1213,14 +1390,19 @@ class ApiClient {
         credentialResponse: Record<string, unknown>,
         displayName?: string
     ): Promise<{ passkey_id: string; message: string }> {
-        return this.request('/auth/passkeys/register/complete', {
+        const response = await this.request<{ passkey_id: string; message: string }>(
+            '/auth/passkeys/register/complete', {
             method: 'POST',
-            body: JSON.stringify({
+            body: {
                 ceremony_id: ceremonyId,
                 credential_response: credentialResponse,
                 display_name: displayName,
-            }),
+            },
         });
+        if (response.error || !response.data) {
+            throw new Error(response.error?.message || 'Could not complete passkey registration');
+        }
+        return response.data;
     }
 
     async beginPasskeyLogin(email?: string): Promise<{
@@ -1228,23 +1410,35 @@ class ApiClient {
         options: Record<string, unknown>;
         has_passkeys: boolean;
     }> {
-        return this.request('/auth/passkeys/login/begin', {
+        const response = await this.request<{
+            ceremony_id: string;
+            options: Record<string, unknown>;
+            has_passkeys: boolean;
+        }>('/auth/passkeys/login/begin', {
             method: 'POST',
-            body: JSON.stringify({ email }),
+            body: { email },
         });
+        if (response.error || !response.data) {
+            throw new Error(response.error?.message || 'Could not begin passkey login');
+        }
+        return response.data;
     }
 
     async completePasskeyLogin(
         ceremonyId: string,
         credentialResponse: Record<string, unknown>
     ): Promise<AuthResponse> {
-        return this.request('/auth/passkeys/login/complete', {
+        const response = await this.request<AuthResponse>('/auth/passkeys/login/complete', {
             method: 'POST',
-            body: JSON.stringify({
+            body: {
                 ceremony_id: ceremonyId,
                 credential_response: credentialResponse,
-            }),
+            },
         });
+        if (response.error || !response.data) {
+            throw new Error(response.error?.message || 'Could not complete passkey login');
+        }
+        return response.data;
     }
 
     async listPasskeys(): Promise<Array<{
@@ -1267,20 +1461,25 @@ class ApiClient {
             created_at: string;
             last_used_at?: string;
         }> }>('/auth/passkeys');
-        return response.passkeys;
+        if (response.error || !response.data) {
+            throw new Error(response.error?.message || 'Could not list passkeys');
+        }
+        return response.data.passkeys;
     }
 
     async updatePasskey(passkeyId: string, displayName: string): Promise<void> {
-        await this.request(`/auth/passkeys/${passkeyId}`, {
+        const response = await this.request(`/auth/passkeys/${passkeyId}`, {
             method: 'PATCH',
-            body: JSON.stringify({ display_name: displayName }),
+            body: { display_name: displayName },
         });
+        if (response.error) throw new Error(response.error.message);
     }
 
     async deletePasskey(passkeyId: string): Promise<void> {
-        await this.request(`/auth/passkeys/${passkeyId}`, {
+        const response = await this.request(`/auth/passkeys/${passkeyId}`, {
             method: 'DELETE',
         });
+        if (response.error) throw new Error(response.error.message);
     }
 }
 

@@ -41,3 +41,12 @@ def test_empty_identity_returns_blank():
 def test_name_only_still_renders():
     out = build_live_state_block(agent_name="Sarah", company_name="", has_introduced=False)
     assert "Sarah" in out
+
+
+def test_turn_priority_puts_compliance_and_open_questions_before_qualification():
+    out = build_live_state_block(agent_name="Sarah", company_name="Dojo", has_introduced=True)
+
+    assert "stop or opt-out request" in out
+    assert "urgent safety issue first" in out
+    assert "unanswered direct question" in out
+    assert out.index("stop or opt-out request") < out.index("continue discovery, qualification")

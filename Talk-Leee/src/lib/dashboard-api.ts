@@ -132,6 +132,12 @@ export interface Call {
 export interface CallSummaryObj {
     headline: string;
     outcome: string;
+    /** Structured lead qualification extracted after the call; optional on historical summaries. */
+    qualification_status?: "qualified" | "nurture" | "unqualified" | "unknown" | string;
+    decision_maker_status?: string;
+    identified_need?: string;
+    timeline?: string;
+    budget_information?: string;
     what_happened: string;
     key_points: string[];
     objections: Array<{ objection: string; handled: string }>;

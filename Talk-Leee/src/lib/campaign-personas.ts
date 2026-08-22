@@ -53,6 +53,10 @@ export const PERSONAS: PersonaSpec[] = [
             { key: "qualification_questions", label: "Qualification questions", help: "One per line", kind: "list", required: true },
             { key: "disqualifying_answers", label: "Disqualifying answers", help: "Comma-separated or one per line", kind: "list", required: true },
             { key: "calendar_booking_type", label: "What you book", placeholder: "e.g. a free home assessment", kind: "text", required: true },
+            { key: "approved_offer", label: "Approved offer or incentive (optional)", placeholder: "Only offers the agent may state, including any conditions", kind: "textarea" },
+            { key: "approved_data_source_explanation", label: "Contact-source explanation (optional)", placeholder: "What the agent may truthfully say if asked how you got the number", kind: "textarea" },
+            { key: "approved_objection_responses", label: "Approved objection responses (optional)", help: "One per line: Objection | Approved response", kind: "kv-list" },
+            { key: "restricted_claims", label: "Restricted claims or topics (optional)", placeholder: "Claims the agent must not make or topics it must not discuss", kind: "textarea" },
         ],
     },
     {

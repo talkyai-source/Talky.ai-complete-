@@ -1,21 +1,32 @@
-"""
-Admin Base Endpoints
-Dashboard stats, system health, and pause controls
-"""
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
-from typing import List, Optional
-from datetime import datetime, timedelta
-from app.core.postgres_adapter import Client
+"""Admin dashboard, system health, and platform runtime controls."""
 
-from app.api.v1.dependencies import get_db_client, require_admin, CurrentUser
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timedelta
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+
+from app.api.v1.dependencies import (
+    CurrentUser,
+    get_audit_logger,
+    get_db_client,
+    require_admin,
+    require_platform_admin,
+)
+from app.core.postgres_adapter import Client
 from app.domain.services.dialer.job_states import LIVE_CALL_STATUSES
+from app.domain.services.audit_logger import AuditEvent, AuditLogger
+from app.domain.services.platform_runtime_controls import (
+    OutboundCallPause,
+    get_outbound_call_pause,
+    set_outbound_call_pause,
+)
 
 router = APIRouter()
-
-# Global state for pause functionality
-_system_paused = False
-_paused_at: Optional[str] = None
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -47,7 +58,35 @@ class PauseCallsResponse(BaseModel):
     """Pause calls response"""
     paused: bool
     paused_at: Optional[str] = None
+    paused_by: Optional[str] = None
+    reason: Optional[str] = None
     message: str
+
+
+class SetPauseCallsRequest(BaseModel):
+    paused: bool
+    reason: Optional[str] = Field(None, max_length=500)
+
+
+def _pause_response(state: OutboundCallPause) -> PauseCallsResponse:
+    return PauseCallsResponse(
+        paused=state.paused,
+        paused_at=state.paused_at.isoformat() if state.paused_at else None,
+        paused_by=state.paused_by,
+        reason=state.reason,
+        message=(
+            "Outbound call initiation is paused across all workers."
+            if state.paused
+            else "Outbound call initiation is enabled."
+        ),
+    )
+
+
+async def _safe_audit(audit_logger: AuditLogger, **kwargs) -> None:
+    try:
+        await audit_logger.log(**kwargs)
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.warning("platform control audit failed: %s", exc)
 
 
 # =============================================================================
@@ -155,50 +194,75 @@ async def get_system_health(
     return SystemHealthResponse(providers=providers)
 
 
+async def _set_pause(
+    *,
+    paused: bool,
+    reason: str | None,
+    admin_user: CurrentUser,
+    db_client: Client,
+    audit_logger: AuditLogger,
+) -> PauseCallsResponse:
+    state = await set_outbound_call_pause(
+        db_client.pool,
+        paused=paused,
+        actor_id=str(admin_user.id),
+        reason=reason,
+    )
+    await _safe_audit(
+        audit_logger,
+        event_type=AuditEvent.CONFIG_CHANGED,
+        actor_id=admin_user.id,
+        actor_type="user",
+        resource_type="platform_runtime_controls",
+        action="outbound_calls_paused" if paused else "outbound_calls_resumed",
+        description=(
+            "Platform admin paused new outbound calls"
+            if paused
+            else "Platform admin resumed new outbound calls"
+        ),
+        metadata={"paused": paused, "reason": state.reason},
+    )
+    return _pause_response(state)
+
+
+@router.put("/calls/pause", response_model=PauseCallsResponse)
+async def set_pause_all_calls(
+    body: SetPauseCallsRequest,
+    admin_user: CurrentUser = Depends(require_platform_admin),
+    db_client: Client = Depends(get_db_client),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
+):
+    """Idempotently pause or resume all new outbound call initiation."""
+    return await _set_pause(
+        paused=body.paused,
+        reason=body.reason,
+        admin_user=admin_user,
+        db_client=db_client,
+        audit_logger=audit_logger,
+    )
+
+
 @router.post("/calls/pause", response_model=PauseCallsResponse)
 async def pause_all_calls(
-    admin_user: CurrentUser = Depends(require_admin)
+    admin_user: CurrentUser = Depends(require_platform_admin),
+    db_client: Client = Depends(get_db_client),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
-    """
-    Toggle global pause state for all calls.
-    
-    When paused:
-        - No new calls will be initiated
-        - Existing calls continue to completion
-    """
-    global _system_paused, _paused_at
-    
-    if _system_paused:
-        # Unpause
-        _system_paused = False
-        _paused_at = None
-        return PauseCallsResponse(
-            paused=False,
-            paused_at=None,
-            message="System resumed. Calls can now be initiated."
-        )
-    else:
-        # Pause
-        _system_paused = True
-        _paused_at = datetime.utcnow().isoformat() + "Z"
-        return PauseCallsResponse(
-            paused=True,
-            paused_at=_paused_at,
-            message="System paused. No new calls will be initiated."
-        )
+    """Backward-compatible toggle; new clients should use the idempotent PUT."""
+    current = await get_outbound_call_pause(db_client.pool)
+    return await _set_pause(
+        paused=not current.paused,
+        reason="Legacy Admin toggle",
+        admin_user=admin_user,
+        db_client=db_client,
+        audit_logger=audit_logger,
+    )
 
 
 @router.get("/calls/pause-status", response_model=PauseCallsResponse)
 async def get_pause_status(
-    admin_user: CurrentUser = Depends(require_admin)
+    admin_user: CurrentUser = Depends(require_platform_admin),
+    db_client: Client = Depends(get_db_client),
 ):
-    """
-    Get current pause status.
-    """
-    global _system_paused, _paused_at
-    
-    return PauseCallsResponse(
-        paused=_system_paused,
-        paused_at=_paused_at,
-        message="System is paused." if _system_paused else "System is running normally."
-    )
+    """Get the persisted pause state shared by every worker."""
+    return _pause_response(await get_outbound_call_pause(db_client.pool))

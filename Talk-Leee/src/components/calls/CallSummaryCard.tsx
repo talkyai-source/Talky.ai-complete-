@@ -9,10 +9,12 @@ import type { CallSummaryObj, CallSummaryEnvelope } from "@/lib/dashboard-api";
 
 function outcomeColor(outcome: string) {
     const o = outcome.toLowerCase();
+    // Check negative qualification labels first: "disqualified" and
+    // "unqualified" both contain the substring "qualified".
+    if (o.includes("negative") || o.includes("disqualified") || o.includes("unqualified") || o.includes("not_achieved") || o.includes("no_interest") || o.includes("fail"))
+        return "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300";
     if (o.includes("positive") || o.includes("qualified") || o.includes("achieved") || o.includes("success"))
         return "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
-    if (o.includes("negative") || o.includes("disqualified") || o.includes("not_achieved") || o.includes("fail"))
-        return "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300";
     return "border-muted-foreground/30 bg-muted text-muted-foreground";
 }
 
@@ -50,6 +52,11 @@ function BulletList({ items }: { items: string[] }) {
     );
 }
 
+function knownSummaryValue(value?: string): value is string {
+    const normalized = value?.trim().toLowerCase();
+    return Boolean(normalized && normalized !== "unknown" && normalized !== "none");
+}
+
 // ---------------------------------------------------------------------------
 // Main card
 // ---------------------------------------------------------------------------
@@ -62,6 +69,18 @@ function SummaryBody({ summary }: { summary: CallSummaryObj }) {
     const hasNextStep = Boolean(summary.next_step?.trim());
     const hasFollowUpTips = (summary.follow_up_tips?.length ?? 0) > 0;
     const hasNotableQuotes = summary.notable_quotes.length > 0;
+    const qualificationStatus = knownSummaryValue(summary.qualification_status)
+        ? summary.qualification_status
+        : null;
+    const qualificationDetails = [
+        { label: "Identified need", value: summary.identified_need },
+        { label: "Decision role", value: summary.decision_maker_status },
+        { label: "Timeline", value: summary.timeline },
+        { label: "Budget", value: summary.budget_information },
+    ].filter(
+        (item): item is { label: string; value: string } => knownSummaryValue(item.value),
+    );
+    const hasQualification = Boolean(qualificationStatus || qualificationDetails.length > 0);
 
     return (
         <div className="space-y-4">
@@ -83,6 +102,36 @@ function SummaryBody({ summary }: { summary: CallSummaryObj }) {
             {/* What happened */}
             {summary.what_happened?.trim() && (
                 <p className="text-sm text-foreground leading-relaxed">{summary.what_happened}</p>
+            )}
+
+            {/* Structured qualification — absent on historical summaries. */}
+            {hasQualification && (
+                <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <SectionHeading>Qualification</SectionHeading>
+                        {qualificationStatus && (
+                            <span
+                                className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${outcomeColor(qualificationStatus)}`}
+                            >
+                                {qualificationStatus.replace(/_/g, " ")}
+                            </span>
+                        )}
+                    </div>
+                    {qualificationDetails.length > 0 && (
+                        <dl className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
+                            {qualificationDetails.map((item) => (
+                                <div key={item.label}>
+                                    <dt className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                        {item.label}
+                                    </dt>
+                                    <dd className="text-sm text-foreground leading-relaxed">
+                                        {item.value}
+                                    </dd>
+                                </div>
+                            ))}
+                        </dl>
+                    )}
+                </div>
             )}
 
             {/* Key points */}

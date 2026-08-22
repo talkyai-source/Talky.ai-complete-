@@ -121,6 +121,12 @@ def build_live_state_block(
     # different?", "why you?", "what is this?") did not match what the caller
     # actually said, and the model would not generalise.
     lines.append(
+        "- Turn priority: honor a clear stop or opt-out request and any urgent "
+        "safety issue first. Otherwise resolve an unanswered direct question, "
+        "then handle wrong-person, identity, or timing issues; only after that "
+        "continue discovery, qualification, or your next step."
+    )
+    lines.append(
         "- If they asked you something and you have not answered it, ANSWER "
         "IT FIRST — plainly, in one sentence, and add no question of your "
         "own that turn. An unanswered question outranks your next step, your "

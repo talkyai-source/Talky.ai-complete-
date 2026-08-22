@@ -5,6 +5,7 @@ import type { LiveCallItem } from '../lib/api';
 
 interface LiveCallsTableProps {
     onRefresh?: () => void;
+    onCallSelect?: (callId: string) => void;
 }
 
 function formatDuration(seconds: number): string {
@@ -16,7 +17,10 @@ function formatDuration(seconds: number): string {
 function StatusBadge({ status }: { status: string }) {
     const statusConfig: Record<string, { label: string; className: string }> = {
         'in_progress': { label: 'In Progress', className: 'status-in-progress' },
+        'dialing': { label: 'Dialing', className: 'status-ringing' },
         'ringing': { label: 'Ringing', className: 'status-ringing' },
+        'answered': { label: 'Answered', className: 'status-in-progress' },
+        'in_call': { label: 'In Call', className: 'status-in-progress' },
         'queued': { label: 'Queued', className: 'status-queued' },
         'initiated': { label: 'Initiated', className: 'status-initiated' },
     };
@@ -30,7 +34,7 @@ function StatusBadge({ status }: { status: string }) {
     );
 }
 
-export function LiveCallsTable({ onRefresh }: LiveCallsTableProps) {
+export function LiveCallsTable({ onRefresh, onCallSelect }: LiveCallsTableProps) {
     const [calls, setCalls] = useState<LiveCallItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -40,6 +44,7 @@ export function LiveCallsTable({ onRefresh }: LiveCallsTableProps) {
     const fetchLiveCalls = useCallback(async () => {
         try {
             const response = await api.getLiveCalls();
+            if (response.error) throw new Error(response.error.message);
             if (response.data) {
                 setCalls(response.data);
             }
@@ -66,11 +71,12 @@ export function LiveCallsTable({ onRefresh }: LiveCallsTableProps) {
 
         setTerminatingId(callId);
         try {
-            await api.terminateCall(callId);
+            const response = await api.terminateCall(callId);
+            if (response.error) throw new Error(response.error.message);
             await fetchLiveCalls();
             onRefresh?.();
         } catch (err) {
-            console.error('Failed to terminate call:', err);
+            setError(err instanceof Error ? err.message : 'Failed to terminate call');
         } finally {
             setTerminatingId(null);
             setConfirmTerminate(null);
@@ -111,7 +117,7 @@ export function LiveCallsTable({ onRefresh }: LiveCallsTableProps) {
 
     return (
         <div className="table-container">
-            <table className="data-table">
+            <table className="data-table clickable-rows">
                 <thead>
                     <tr>
                         <th>Call ID</th>
@@ -125,7 +131,11 @@ export function LiveCallsTable({ onRefresh }: LiveCallsTableProps) {
                 </thead>
                 <tbody>
                     {calls.map((call) => (
-                        <tr key={call.id}>
+                        <tr
+                            key={call.id}
+                            className={onCallSelect ? 'clickable-row' : undefined}
+                            onClick={() => onCallSelect?.(call.id)}
+                        >
                             <td className="call-id-cell">{call.id.substring(0, 8)}...</td>
                             <td>
                                 <div className="tenant-name-cell">
@@ -148,14 +158,20 @@ export function LiveCallsTable({ onRefresh }: LiveCallsTableProps) {
                                         <span>Terminate?</span>
                                         <button
                                             className="btn btn-danger btn-sm"
-                                            onClick={() => handleTerminate(call.id)}
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+                                                handleTerminate(call.id);
+                                            }}
                                             disabled={terminatingId === call.id}
                                         >
                                             {terminatingId === call.id ? '...' : 'Yes'}
                                         </button>
                                         <button
                                             className="btn btn-secondary btn-sm"
-                                            onClick={cancelTerminate}
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+                                                cancelTerminate();
+                                            }}
                                         >
                                             No
                                         </button>
@@ -163,7 +179,10 @@ export function LiveCallsTable({ onRefresh }: LiveCallsTableProps) {
                                 ) : (
                                     <button
                                         className="btn btn-danger btn-sm"
-                                        onClick={() => handleTerminate(call.id)}
+                                        onClick={(event) => {
+                                            event.stopPropagation();
+                                            handleTerminate(call.id);
+                                        }}
                                     >
                                         <PhoneOff size={14} />
                                         End

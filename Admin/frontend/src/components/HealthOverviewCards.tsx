@@ -17,7 +17,7 @@ export function HealthOverviewCards() {
             } else if (response.error) {
                 setError(response.error.message);
             }
-        } catch (err) {
+        } catch {
             setError('Failed to fetch health data');
         } finally {
             setLoading(false);

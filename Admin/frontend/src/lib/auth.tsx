@@ -198,7 +198,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         void checkAuth();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     return (
@@ -215,6 +214,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
 }
 
+// The provider and its hook deliberately share one module so they cannot drift.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
     const context = useContext(AuthContext);
     if (context === undefined) {

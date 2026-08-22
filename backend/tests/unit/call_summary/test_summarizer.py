@@ -31,6 +31,11 @@ _SCHEMA_KEYS = set(EMPTY_SUMMARY.keys())
 _FULL_RESPONSE = {
     "headline": "Qualified — wants a demo next week",
     "outcome": "qualified — expressed strong interest and budget confirmed",
+    "qualification_status": "qualified",
+    "decision_maker_status": "decision_maker",
+    "identified_need": "Needs faster quote turnaround",
+    "timeline": "Next week",
+    "budget_information": "$5k per month confirmed",
     "what_happened": "Agent introduced the product. Prospect asked about pricing. Agent provided a quote. Prospect agreed to a demo.",
     "key_points": ["Budget confirmed at $5k/mo", "Decision maker on the call"],
     "objections": [{"objection": "Price too high", "handled": "Offered 20% pilot discount"}],
@@ -80,6 +85,11 @@ class TestCoerce:
         assert result["what_happened"] == ""
         assert result["sentiment"] == ""
         assert result["next_step"] == ""
+        assert result["qualification_status"] == "unknown"
+        assert result["decision_maker_status"] == "unknown"
+        assert result["identified_need"] == "unknown"
+        assert result["timeline"] == "unknown"
+        assert result["budget_information"] == "unknown"
 
     def test_scalar_coerced_to_list_for_list_keys(self):
         raw = {**deepcopy(_FULL_RESPONSE), "key_points": "just one point"}
@@ -98,6 +108,15 @@ class TestCoerce:
         result = _coerce(raw)
         assert result["commitments"] == []
 
+    def test_qualification_fields_are_preserved_as_structured_strings(self):
+        result = _coerce(deepcopy(_FULL_RESPONSE))
+
+        assert result["qualification_status"] == "qualified"
+        assert result["decision_maker_status"] == "decision_maker"
+        assert result["identified_need"] == "Needs faster quote turnaround"
+        assert result["timeline"] == "Next week"
+        assert result["budget_information"] == "$5k per month confirmed"
+
 
 # ---------------------------------------------------------------------------
 # summarize_transcript async tests
@@ -115,7 +134,7 @@ class TestSummarizeTranscript:
         assert set(result.keys()) == _SCHEMA_KEYS
 
     async def test_partial_response_filled_with_empty_keys(self):
-        """Model returns only headline + outcome — all 10 keys must appear."""
+        """Model returns only headline + outcome — every schema key must appear."""
         partial = json.dumps({"headline": "Qualified", "outcome": "interested"})
         mock_client = _make_async_groq([partial])
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import {
     X,
     Phone,
@@ -6,13 +6,24 @@ import {
     Building2,
     Calendar,
     FileText,
-    Play,
     MessageSquare,
     DollarSign,
-    Target
+    Target,
+    AudioLines,
+    Mic2,
+    RefreshCw,
+    Trash2,
+    AlertCircle,
 } from 'lucide-react';
 import { api } from '../lib/api';
-import type { AdminCallDetail, TranscriptTurn } from '../lib/api';
+import type {
+    AdminCallDetail,
+    AdminFeedbackItem,
+    AdminRecordingItem,
+    TranscriptTurn,
+} from '../lib/api';
+import { AdminMediaPlayer } from './AdminMediaPlayer';
+import { ConfirmationModal } from './ConfirmationModal';
 
 interface CallDetailDrawerProps {
     callId: string | null;
@@ -34,6 +45,18 @@ function formatDuration(seconds: number | null): string {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}m ${secs}s`;
+}
+
+function summaryString(summary: Record<string, unknown> | null, key: string): string | null {
+    const value = summary?.[key];
+    if (typeof value !== 'string') return null;
+    const normalized = value.trim();
+    if (!normalized || ['unknown', 'none'].includes(normalized.toLowerCase())) return null;
+    return normalized;
+}
+
+function humanize(value: string): string {
+    return value.replace(/_/g, ' ');
 }
 
 function TimelineSection({ timeline }: { timeline: AdminCallDetail['timeline'] }) {
@@ -86,26 +109,51 @@ function TranscriptSection({ transcript, transcriptJson }: {
     return <p className="no-data">No transcript available</p>;
 }
 
+type DetailTab = 'timeline' | 'transcript' | 'recordings' | 'feedback';
+type MediaDeleteTarget =
+    | { kind: 'recording'; item: AdminRecordingItem }
+    | { kind: 'feedback'; item: AdminFeedbackItem };
+
 export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
     const [call, setCall] = useState<AdminCallDetail | null>(null);
+    const [recordings, setRecordings] = useState<AdminRecordingItem[]>([]);
+    const [feedback, setFeedback] = useState<AdminFeedbackItem | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [activeTab, setActiveTab] = useState<'timeline' | 'transcript'>('timeline');
+    const [activeTab, setActiveTab] = useState<DetailTab>('timeline');
+    const [retryingFeedback, setRetryingFeedback] = useState(false);
+    const [deleteTarget, setDeleteTarget] = useState<MediaDeleteTarget | null>(null);
+    const [deleting, setDeleting] = useState(false);
+
+    const loadMedia = useCallback(async (selectedCallId: string) => {
+        const [recordingResponse, feedbackResponse] = await Promise.all([
+            api.getAdminRecordings({ call_id: selectedCallId, page_size: 20 }),
+            api.getAdminFeedback({ call_id: selectedCallId, page_size: 1 }),
+        ]);
+        if (recordingResponse.error) throw new Error(recordingResponse.error.message);
+        if (feedbackResponse.error) throw new Error(feedbackResponse.error.message);
+        setRecordings(recordingResponse.data?.items ?? []);
+        setFeedback(feedbackResponse.data?.items[0] ?? null);
+    }, []);
 
     useEffect(() => {
         if (!callId) {
             setCall(null);
+            setRecordings([]);
+            setFeedback(null);
             return;
         }
 
         const fetchCallDetail = async () => {
             setLoading(true);
             setError(null);
+            setActiveTab('timeline');
             try {
                 const response = await api.getAdminCallDetail(callId);
-                if (response.data) {
-                    setCall(response.data);
-                }
+                if (response.error) throw new Error(response.error.message);
+                if (!response.data) throw new Error('Call details were empty');
+                setCall(response.data);
+                await loadMedia(callId);
             } catch (err) {
                 setError(err instanceof Error ? err.message : 'Failed to fetch call details');
             } finally {
@@ -113,8 +161,45 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
             }
         };
 
-        fetchCallDetail();
-    }, [callId]);
+        void fetchCallDetail();
+    }, [callId, loadMedia]);
+
+    const retryFeedback = async () => {
+        if (!feedback) return;
+        setRetryingFeedback(true);
+        setError(null);
+        const response = await api.retryAdminFeedbackTranscription(feedback.id);
+        if (response.error) setError(response.error.message);
+        if (response.data) setFeedback(response.data);
+        setRetryingFeedback(false);
+    };
+
+    const deleteMedia = async () => {
+        if (!deleteTarget || !callId) return;
+        setDeleting(true);
+        const response = deleteTarget.kind === 'recording'
+            ? await api.deleteAdminRecording(deleteTarget.item.id)
+            : await api.deleteAdminFeedback(deleteTarget.item.id);
+        if (response.error) {
+            setError(response.error.message);
+        } else {
+            setDeleteTarget(null);
+            try {
+                await loadMedia(callId);
+            } catch (caught) {
+                setError(caught instanceof Error ? caught.message : 'Failed to refresh call media');
+            }
+        }
+        setDeleting(false);
+    };
+
+    const qualification = call ? summaryString(call.summary_json, 'qualification_status') : null;
+    const qualificationDetails = call ? [
+        ['Need', summaryString(call.summary_json, 'identified_need')],
+        ['Decision role', summaryString(call.summary_json, 'decision_maker_status')],
+        ['Timeline', summaryString(call.summary_json, 'timeline')],
+        ['Budget', summaryString(call.summary_json, 'budget_information')],
+    ].filter((entry): entry is [string, string] => Boolean(entry[1])) : [];
 
     if (!callId) return null;
 
@@ -135,12 +220,19 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                             <div className="loading-spinner"></div>
                             <p>Loading call details...</p>
                         </div>
-                    ) : error ? (
+                    ) : !call && error ? (
                         <div className="error-banner">
                             <p>{error}</p>
                         </div>
                     ) : call ? (
                         <>
+                            {error && (
+                                <div className="error-banner call-action-error">
+                                    <AlertCircle size={16} />
+                                    <p>{error}</p>
+                                    <button onClick={() => setError(null)}>Dismiss</button>
+                                </div>
+                            )}
                             {/* Call Info Header */}
                             <div className="call-info-header">
                                 <div className="call-phone">
@@ -201,16 +293,26 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                                 </div>
                             )}
 
-                            {/* Recording */}
-                            {call.recording_url && (
-                                <div className="call-recording">
-                                    <h4>
-                                        <Play size={16} />
-                                        Recording
-                                    </h4>
-                                    <audio controls src={call.recording_url} className="audio-player">
-                                        Your browser does not support audio playback.
-                                    </audio>
+                            {(qualification || qualificationDetails.length > 0) && (
+                                <div className="qualification-panel">
+                                    <div className="qualification-panel-header">
+                                        <strong>Lead qualification</strong>
+                                        {qualification && (
+                                            <span className={`call-status-badge status-${qualification}`}>
+                                                {humanize(qualification)}
+                                            </span>
+                                        )}
+                                    </div>
+                                    {qualificationDetails.length > 0 && (
+                                        <dl>
+                                            {qualificationDetails.map(([label, value]) => (
+                                                <div key={label}>
+                                                    <dt>{label}</dt>
+                                                    <dd>{label === 'Decision role' ? humanize(value) : value}</dd>
+                                                </div>
+                                            ))}
+                                        </dl>
+                                    )}
                                 </div>
                             )}
 
@@ -230,23 +332,135 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                                     <MessageSquare size={14} />
                                     Transcript
                                 </button>
+                                <button
+                                    className={`tab-btn ${activeTab === 'recordings' ? 'active' : ''}`}
+                                    onClick={() => setActiveTab('recordings')}
+                                >
+                                    <AudioLines size={14} />
+                                    Recordings {recordings.length > 0 && `(${recordings.length})`}
+                                </button>
+                                <button
+                                    className={`tab-btn ${activeTab === 'feedback' ? 'active' : ''}`}
+                                    onClick={() => setActiveTab('feedback')}
+                                >
+                                    <Mic2 size={14} />
+                                    Feedback {feedback && '(1)'}
+                                </button>
                             </div>
 
                             {/* Tab Content */}
                             <div className="tab-content">
-                                {activeTab === 'timeline' ? (
+                                {activeTab === 'timeline' && (
                                     <TimelineSection timeline={call.timeline} />
-                                ) : (
+                                )}
+                                {activeTab === 'transcript' && (
                                     <TranscriptSection
                                         transcript={call.transcript}
                                         transcriptJson={call.transcript_json}
                                     />
+                                )}
+                                {activeTab === 'recordings' && (
+                                    recordings.length === 0 ? (
+                                        <p className="no-data">No recording is available for this call.</p>
+                                    ) : (
+                                        <div className="drawer-media-list">
+                                            {recordings.map((recording, index) => (
+                                                <div className="drawer-media-card" key={recording.id}>
+                                                    <div className="drawer-media-card-header">
+                                                        <div>
+                                                            <strong>Recording {index + 1}</strong>
+                                                            <span>{formatDate(recording.created_at)}</span>
+                                                        </div>
+                                                        <span className={`call-status-badge status-${recording.status}`}>
+                                                            {recording.status}
+                                                        </span>
+                                                    </div>
+                                                    <AdminMediaPlayer
+                                                        disabled={!recording.playable}
+                                                        filename={`call-${call.id}.wav`}
+                                                        load={() => api.getAdminRecordingAudio(recording.id)}
+                                                    />
+                                                    <div className="drawer-media-actions">
+                                                        <span>{formatDuration(recording.duration_seconds)} · {recording.storage}</span>
+                                                        <button
+                                                            className="btn btn-danger btn-sm"
+                                                            onClick={() => setDeleteTarget({ kind: 'recording', item: recording })}
+                                                        >
+                                                            <Trash2 size={14} /> Delete
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )
+                                )}
+                                {activeTab === 'feedback' && (
+                                    !feedback ? (
+                                        <p className="no-data">No reviewer feedback note has been submitted.</p>
+                                    ) : (
+                                        <div className="drawer-media-card feedback-detail-card">
+                                            <div className="drawer-media-card-header">
+                                                <div>
+                                                    <strong>{feedback.created_by_name || 'Reviewer feedback'}</strong>
+                                                    <span>{feedback.created_by_email || formatDate(feedback.created_at)}</span>
+                                                </div>
+                                                <span className={`call-status-badge status-${feedback.transcript_status}`}>
+                                                    {feedback.transcript_status}
+                                                </span>
+                                            </div>
+                                            <AdminMediaPlayer
+                                                filename={`feedback-${call.id}.webm`}
+                                                load={() => api.getAdminFeedbackAudio(feedback.id)}
+                                            />
+                                            <div className="feedback-detail-transcript">
+                                                <strong>Transcript</strong>
+                                                {feedback.transcript ? (
+                                                    <p>{feedback.transcript}</p>
+                                                ) : feedback.transcript_error ? (
+                                                    <p className="transcript-error">{feedback.transcript_error}</p>
+                                                ) : (
+                                                    <p className="no-data-inline">No transcript yet.</p>
+                                                )}
+                                            </div>
+                                            <div className="drawer-media-actions">
+                                                <span>Transcription attempts: {feedback.transcription_attempts}</span>
+                                                <div className="row-actions">
+                                                    {(feedback.retryable || feedback.transcript_status === 'pending') && (
+                                                        <button
+                                                            className="btn btn-secondary btn-sm"
+                                                            disabled={retryingFeedback}
+                                                            onClick={() => void retryFeedback()}
+                                                        >
+                                                            <RefreshCw size={14} className={retryingFeedback ? 'spinning' : ''} />
+                                                            Retry
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        className="btn btn-danger btn-sm"
+                                                        onClick={() => setDeleteTarget({ kind: 'feedback', item: feedback })}
+                                                    >
+                                                        <Trash2 size={14} /> Delete
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )
                                 )}
                             </div>
                         </>
                     ) : null}
                 </div>
             </div>
+            <ConfirmationModal
+                isOpen={Boolean(deleteTarget)}
+                title={`Permanently delete ${deleteTarget?.kind || 'media'}?`}
+                message="The audio and its metadata will be removed from storage. This cannot be undone."
+                confirmLabel="Delete permanently"
+                variant="danger"
+                loading={deleting}
+                onConfirm={() => void deleteMedia()}
+                onCancel={() => setDeleteTarget(null)}
+            />
         </>
     );
 }

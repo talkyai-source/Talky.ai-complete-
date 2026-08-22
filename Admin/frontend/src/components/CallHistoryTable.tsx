@@ -9,10 +9,14 @@ import {
     Building2,
     CheckCircle,
     XCircle,
-    PhoneOff
+    PhoneOff,
+    CalendarDays,
+    Mic2,
+    AudioLines,
+    RotateCcw,
 } from 'lucide-react';
 import { api } from '../lib/api';
-import type { CallHistoryItem, CallHistoryParams } from '../lib/api';
+import type { CallHistoryItem, CallHistoryParams, TenantListItem } from '../lib/api';
 
 interface CallHistoryTableProps {
     onCallSelect: (callId: string) => void;
@@ -51,6 +55,7 @@ function CallStatusBadge({ status, outcome }: { status: string; outcome: string 
             icon = <XCircle size={12} />;
             break;
         case 'terminated':
+        case 'ended':
             className += 'status-terminated';
             icon = <PhoneOff size={12} />;
             break;
@@ -75,6 +80,10 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
     const [total, setTotal] = useState(0);
     const [search, setSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState('');
+    const [tenantFilter, setTenantFilter] = useState('');
+    const [fromDate, setFromDate] = useState('');
+    const [toDate, setToDate] = useState('');
+    const [tenants, setTenants] = useState<TenantListItem[]>([]);
     const [debouncedSearch, setDebouncedSearch] = useState('');
 
     // Debounce search
@@ -95,8 +104,12 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
             };
             if (debouncedSearch) params.search = debouncedSearch;
             if (statusFilter) params.status = statusFilter;
+            if (tenantFilter) params.tenant_id = tenantFilter;
+            if (fromDate) params.from_date = fromDate;
+            if (toDate) params.to_date = toDate;
 
             const response = await api.getCallHistory(params);
+            if (response.error) throw new Error(response.error.message);
             if (response.data) {
                 setCalls(response.data.items);
                 setTotal(response.data.total);
@@ -107,11 +120,17 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
         } finally {
             setLoading(false);
         }
-    }, [page, pageSize, debouncedSearch, statusFilter]);
+    }, [page, pageSize, debouncedSearch, statusFilter, tenantFilter, fromDate, toDate]);
 
     useEffect(() => {
         fetchCalls();
     }, [fetchCalls]);
+
+    useEffect(() => {
+        api.getTenants().then((response) => {
+            if (response.data) setTenants(response.data);
+        });
+    }, []);
 
     const totalPages = Math.ceil(total / pageSize);
 
@@ -140,13 +159,72 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
                         className="filter-select"
                     >
                         <option value="">All Statuses</option>
+                        <option value="ended">Ended</option>
                         <option value="completed">Completed</option>
                         <option value="failed">Failed</option>
-                        <option value="no_answer">No Answer</option>
-                        <option value="busy">Busy</option>
-                        <option value="terminated">Terminated</option>
+                        <option value="queued">Queued</option>
+                        <option value="dialing">Dialing</option>
+                        <option value="ringing">Ringing</option>
+                        <option value="answered">Answered</option>
+                        <option value="in_call">In Call</option>
                     </select>
                 </div>
+                <select
+                    value={tenantFilter}
+                    onChange={(event) => {
+                        setTenantFilter(event.target.value);
+                        setPage(1);
+                    }}
+                    className="filter-select"
+                    aria-label="Filter by tenant"
+                >
+                    <option value="">All Tenants</option>
+                    {tenants.map((tenant) => (
+                        <option key={tenant.id} value={tenant.id}>{tenant.business_name}</option>
+                    ))}
+                </select>
+                <div className="date-filter-group">
+                    <CalendarDays size={16} />
+                    <input
+                        type="date"
+                        value={fromDate}
+                        max={toDate || undefined}
+                        onChange={(event) => {
+                            setFromDate(event.target.value);
+                            setPage(1);
+                        }}
+                        className="filter-select"
+                        aria-label="Calls from date"
+                    />
+                    <span>to</span>
+                    <input
+                        type="date"
+                        value={toDate}
+                        min={fromDate || undefined}
+                        onChange={(event) => {
+                            setToDate(event.target.value);
+                            setPage(1);
+                        }}
+                        className="filter-select"
+                        aria-label="Calls to date"
+                    />
+                </div>
+                {(statusFilter || tenantFilter || fromDate || toDate || search) && (
+                    <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => {
+                            setSearch('');
+                            setStatusFilter('');
+                            setTenantFilter('');
+                            setFromDate('');
+                            setToDate('');
+                            setPage(1);
+                        }}
+                    >
+                        <RotateCcw size={14} />
+                        Reset
+                    </button>
+                )}
             </div>
 
             {/* Table */}
@@ -176,6 +254,7 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
                                 <th>Phone Number</th>
                                 <th>Campaign</th>
                                 <th>Status</th>
+                                <th>Media &amp; Review</th>
                                 <th>Duration</th>
                             </tr>
                         </thead>
@@ -197,6 +276,24 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
                                     <td>{call.campaign_name || '-'}</td>
                                     <td>
                                         <CallStatusBadge status={call.status} outcome={call.outcome} />
+                                    </td>
+                                    <td>
+                                        <div className="media-indicators">
+                                            {call.has_recording && (
+                                                <span className="media-indicator" title="Call recording available">
+                                                    <AudioLines size={13} /> Recording
+                                                </span>
+                                            )}
+                                            {call.has_feedback && (
+                                                <span
+                                                    className={`media-indicator transcript-${call.feedback_transcript_status || 'pending'}`}
+                                                    title={`Feedback transcription: ${call.feedback_transcript_status || 'pending'}`}
+                                                >
+                                                    <Mic2 size={13} /> Feedback
+                                                </span>
+                                            )}
+                                            {!call.has_recording && !call.has_feedback && <span className="no-data-inline">—</span>}
+                                        </div>
                                     </td>
                                     <td>
                                         <div className="duration-cell">

@@ -258,6 +258,9 @@ async def test_evaluate_blocks_when_spend_check_raises_unexpectedly():
     async def _pass(check, **kwargs):
         return CheckResult(check=check, passed=True)
 
+    guard._check_platform_calls_enabled = lambda **kw: _pass(
+        GuardCheck.PLATFORM_CALLS_ENABLED, **kw
+    )
     guard._check_tenant_active = lambda **kw: _pass(GuardCheck.TENANT_ACTIVE, **kw)
     guard._check_partner_active = lambda **kw: _pass(GuardCheck.PARTNER_ACTIVE, **kw)
     guard._check_subscription = lambda **kw: _pass(GuardCheck.SUBSCRIPTION_VALID, **kw)

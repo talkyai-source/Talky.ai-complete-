@@ -18,7 +18,9 @@ function formatDuration(seconds: number): string {
 }
 
 function mapApiStatus(s: string): Call['status'] {
-    if (s === 'in_progress' || s === 'initiated' || s === 'ringing') return 'in-progress';
+    if (['in_progress', 'initiated', 'dialing', 'ringing', 'answered', 'in_call'].includes(s)) {
+        return 'in-progress';
+    }
     if (s === 'queued') return 'queued';
     return 'failed';
 }
@@ -45,14 +47,17 @@ export function LiveCalls() {
     const [isPaused, setIsPaused] = useState(false);
     const [pauseLoading, setPauseLoading] = useState(false);
     const [showConfirm, setShowConfirm] = useState(false);
+    const [pauseReason, setPauseReason] = useState('');
 
     // Fetch pause status on mount
     useEffect(() => {
         const fetchPauseStatus = async () => {
             try {
                 const response = await api.getPauseStatus();
+                if (response.error) throw new Error(response.error.message);
                 if (response.data) {
                     setIsPaused(response.data.paused);
+                    setPauseReason(response.data.reason || '');
                 }
             } catch (err) {
                 console.warn('Failed to fetch pause status:', err);
@@ -69,6 +74,7 @@ export function LiveCalls() {
         const fetchOnce = async () => {
             try {
                 const response = await api.getLiveCalls();
+                if (response.error) throw new Error(response.error.message);
                 if (cancelled) return;
                 const items = response.data ?? [];
                 setCalls(
@@ -101,9 +107,15 @@ export function LiveCalls() {
 
         setPauseLoading(true);
         try {
-            const response = await api.pauseAllCalls();
+            const shouldPause = !isPaused;
+            const response = await api.setPauseAllCalls(
+                shouldPause,
+                shouldPause ? (pauseReason || 'Paused from Admin Command Center') : undefined,
+            );
+            if (response.error) throw new Error(response.error.message);
             if (response.data) {
                 setIsPaused(response.data.paused);
+                setPauseReason(response.data.reason || '');
             }
         } catch (err) {
             console.error('Failed to toggle pause:', err);
@@ -111,7 +123,7 @@ export function LiveCalls() {
             setPauseLoading(false);
             setShowConfirm(false);
         }
-    }, [isPaused, showConfirm]);
+    }, [isPaused, showConfirm, pauseReason]);
 
     const handleCancelConfirm = useCallback(() => {
         setShowConfirm(false);
@@ -125,6 +137,14 @@ export function LiveCalls() {
                     {showConfirm ? (
                         <div className="confirm-dialog">
                             <span>Pause all calls?</span>
+                            <input
+                                className="pause-reason-input"
+                                value={pauseReason}
+                                onChange={(event) => setPauseReason(event.target.value)}
+                                placeholder="Reason (optional)"
+                                maxLength={500}
+                                aria-label="Reason for pausing outbound calls"
+                            />
                             <button
                                 className="btn btn-confirm-yes"
                                 onClick={handlePauseToggle}
@@ -165,7 +185,8 @@ export function LiveCalls() {
 
             {isPaused && (
                 <div className="pause-banner">
-                    System is paused. No new calls will be initiated.
+                    New outbound calls are paused across all workers.
+                    {pauseReason && <span> Reason: {pauseReason}</span>}
                 </div>
             )}
 

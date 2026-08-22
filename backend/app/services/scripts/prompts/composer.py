@@ -54,6 +54,7 @@ from app.services.scripts.prompts.personas import (
     REQUIRED_SLOTS_BY_PERSONA,
     format_common_issues,
     format_escalate_triggers,
+    format_lead_gen_campaign_controls,
     format_new_patient_info_needed,
     format_qualification_questions,
 )
@@ -471,6 +472,7 @@ def _prepare_slots(
     slots: dict[str, Any] = dict(campaign_slots)
 
     if persona_type == "lead_gen":
+        slots["campaign_controls"] = format_lead_gen_campaign_controls(slots)
         qq = slots.get("qualification_questions")
         if isinstance(qq, list):
             slots["qualification_questions"] = format_qualification_questions(qq)

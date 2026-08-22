@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link2, CheckCircle, XCircle, Clock, RefreshCw } from 'lucide-react';
 import { Sidebar } from '../components/Sidebar';
 import { Header } from '../components/Header';
@@ -18,11 +18,7 @@ export function ConnectorsPage() {
     });
     const [refreshKey, setRefreshKey] = useState(0);
 
-    useEffect(() => {
-        fetchStats();
-    }, [refreshKey]);
-
-    const fetchStats = async () => {
+    const fetchStats = useCallback(async () => {
         try {
             const response = await api.getConnectors({ page_size: 100 });
             if (response.data) {
@@ -37,7 +33,13 @@ export function ConnectorsPage() {
         } catch (error) {
             console.error('Failed to fetch connector stats:', error);
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        // Fetching external connector data is the synchronization performed here.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        void fetchStats();
+    }, [fetchStats, refreshKey]);
 
     const handleRefresh = () => {
         setRefreshKey(k => k + 1);

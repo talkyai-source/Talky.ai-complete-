@@ -29,6 +29,8 @@ Structure:
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 
 # ── Stage 1: the opener, by call direction ──────────────────────────────────
 # Prepended to LEAD_GEN_BODY by the composer based on the call's direction.
@@ -275,7 +277,7 @@ STAGE 4 — OFFER THE NEXT STEP (tie it to what they told you)
   the step, in one line: "Sounds like it's the missed calls — worth a quick
   look? I can set that up."
   - Only call something free / discounted / guaranteed / same-day if the
-    Company knowledge explicitly says so.
+    Company knowledge or CAMPAIGN-SPECIFIC APPROVALS explicitly says so.
   - Quote a price or specific ONLY from the Company knowledge; if it's not
     there, say you'll confirm the exact figure and follow up.
   - Booking: offer specific times only if real availability is in the Company
@@ -366,6 +368,7 @@ CAMPAIGN POSITIONING (your angle for {company_name})
 - Treat these as disqualifiers (close warmly if you hear them):
   {disqualifying_answers}
 - The next step you're offering (Stage 4): {calendar_booking_type}
+{campaign_controls}
 For any specific FACT or PRICE, use the Company knowledge — never this
 positioning or your own assumptions — and the Company knowledge wins if they
 ever disagree.
@@ -401,7 +404,11 @@ STAGE 1 — OPEN
 
 # Backward-compat alias (full outbound template) for callers that import
 # LEAD_GEN_PERSONA directly without going through the direction-aware composer.
-LEAD_GEN_PERSONA = LEAD_GEN_OPENINGS["outbound"] + "\n" + LEAD_GEN_BODY
+# Optional controls require the composer's formatter, so the legacy template
+# leaves that block empty rather than introducing a new required placeholder.
+LEAD_GEN_PERSONA = (
+    LEAD_GEN_OPENINGS["outbound"] + "\n" + LEAD_GEN_BODY
+).replace("{campaign_controls}", "")
 
 
 def format_qualification_questions(questions: list[str]) -> str:
@@ -411,6 +418,73 @@ def format_qualification_questions(questions: list[str]) -> str:
     if not questions:
         return "  (no specific qualification questions configured — qualify on need, fit, timing)"
     return "\n".join(f"  - {q}" for q in questions)
+
+
+def _plain_campaign_value(value: object) -> str:
+    """Render one optional campaign control without inventing a default."""
+    if isinstance(value, (list, tuple, set)):
+        return "; ".join(str(item).strip() for item in value if str(item).strip())
+    return str(value or "").strip()
+
+
+def format_lead_gen_campaign_controls(slots: Mapping[str, object]) -> str:
+    """Render optional, operator-approved facts only when they are configured.
+
+    These fields came from the generic lead-generation specification, but fit
+    Talk-Leee's existing ``campaign_slots`` contract without pretending that a
+    booking/transfer tool exists. Keeping them in one compact block avoids
+    duplicating the standing objection and fact-grounding rules.
+    """
+    lines: list[str] = []
+    for key, label in (
+        ("company_differentiator", "Approved differentiator"),
+        ("approved_offer", "Approved offer or incentive"),
+        (
+            "approved_data_source_explanation",
+            "If asked how the contact was obtained, answer",
+        ),
+        ("restricted_claims", "Restricted claims or topics"),
+    ):
+        rendered = _plain_campaign_value(slots.get(key))
+        if rendered:
+            lines.append(f"- {label}: {rendered}")
+
+    objection_lines: list[str] = []
+    raw_objections = slots.get("approved_objection_responses")
+    if isinstance(raw_objections, Mapping):
+        candidates = [
+            {"objection": objection, "response": response}
+            for objection, response in raw_objections.items()
+        ]
+    elif isinstance(raw_objections, (list, tuple)):
+        candidates = list(raw_objections)
+    else:
+        candidates = []
+
+    for item in candidates:
+        if not isinstance(item, Mapping):
+            continue
+        objection = _plain_campaign_value(
+            item.get("objection") or item.get("issue") or item.get("name")
+        )
+        response = _plain_campaign_value(
+            item.get("response") or item.get("answer") or item.get("solution")
+        )
+        if objection and response:
+            objection_lines.append(f"  - {objection} → {response}")
+
+    if objection_lines:
+        lines.append("- Approved objection replies (use only for a matching concern):")
+        lines.extend(objection_lines)
+
+    if not lines:
+        return ""
+    return (
+        "\nCAMPAIGN-SPECIFIC APPROVALS\n"
+        + "\n".join(lines)
+        + "\nUse these only as written. They never authorize a stronger claim, "
+        "and Company knowledge wins on any factual conflict."
+    )
 
 
 # Pricing / coverage specifics now come from the Company knowledge (RAG), so

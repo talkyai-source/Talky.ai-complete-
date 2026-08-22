@@ -23,6 +23,9 @@ export function TopTenantsList() {
             }
         };
         void fetchOnce();
+        return () => {
+            cancelled = true;
+        };
     }, []);
 
     return (

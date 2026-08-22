@@ -2,8 +2,9 @@
 
 Background
 ==========
-The five admin routers below (``admin/tenants.py``, ``admin/calls.py``,
-``admin/users.py``, ``admin/connectors.py``, ``admin/usage.py``) all query
+The six admin routers below (``admin/tenants.py``, ``admin/calls.py``,
+``admin/media.py``, ``admin/users.py``, ``admin/connectors.py``,
+``admin/usage.py``) all query
 **across every tenant** with no filter tied to the caller's own tenant
 (e.g. "List all tenants", "all active calls", "all connectors across all
 tenants", platform-wide usage). They were previously gated with
@@ -31,13 +32,14 @@ import pytest
 from fastapi import HTTPException
 
 from app.api.v1.dependencies import CurrentUser, require_admin, require_platform_admin
-from app.api.v1.endpoints.admin import calls, connectors, tenants, usage, users
+from app.api.v1.endpoints.admin import calls, connectors, media, tenants, usage, users
 
 # The routers this agent owns for P0-3. Every route on each must be
 # platform_admin-only.
 _ADMIN_ROUTERS = {
     "admin/tenants.py": tenants.router,
     "admin/calls.py": calls.router,
+    "admin/media.py": media.router,
     "admin/users.py": users.router,
     "admin/connectors.py": connectors.router,
     "admin/usage.py": usage.router,

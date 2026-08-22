@@ -49,7 +49,7 @@ export function WorkerStatusTable() {
             } else if (response.error) {
                 setError(response.error.message);
             }
-        } catch (err) {
+        } catch {
             setError('Failed to fetch worker data');
         } finally {
             setLoading(false);

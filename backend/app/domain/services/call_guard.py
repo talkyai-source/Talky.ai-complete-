@@ -47,6 +47,7 @@ import asyncpg
 
 from app.domain.services.telephony_rate_limiter import TelephonyRateLimiter, RateLimitAction
 from app.domain.services.telephony_concurrency_limiter import TelephonyConcurrencyLimiter, LeaseKind
+from app.domain.services.platform_runtime_controls import get_outbound_call_pause
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,7 @@ class GuardDecision(str, Enum):
 
 class GuardCheck(str, Enum):
     """Individual guard checks performed."""
+    PLATFORM_CALLS_ENABLED = "platform_calls_enabled"
     TENANT_ACTIVE = "tenant_active"
     PARTNER_ACTIVE = "partner_active"
     SUBSCRIPTION_VALID = "subscription_valid"
@@ -88,6 +90,7 @@ class GuardCheck(str, Enum):
 # original fail-open-on-infra-error behavior intentionally, so a DB blip in
 # e.g. the rate limiter or concurrency lookup never blocks legitimate calls.
 _FAIL_CLOSED_ON_ERROR_CHECKS = frozenset({
+    GuardCheck.PLATFORM_CALLS_ENABLED,
     GuardCheck.DNC_CHECK,
     GuardCheck.SPEND_LIMIT,
 })
@@ -289,6 +292,7 @@ class CallGuard:
 
         # Define checks in priority order
         checks: List[Tuple[GuardCheck, callable]] = [
+            (GuardCheck.PLATFORM_CALLS_ENABLED, self._check_platform_calls_enabled),
             (GuardCheck.TENANT_ACTIVE, self._check_tenant_active),
             (GuardCheck.PARTNER_ACTIVE, self._check_partner_active),
             (GuardCheck.SUBSCRIPTION_VALID, self._check_subscription),
@@ -314,6 +318,7 @@ class CallGuard:
                     partner_limits=partner_limits,
                     partner_id=partner_id,
                     campaign_id=campaign_id,
+                    call_type=call_type,
                     feature_required=feature_required,
                     estimated_duration_seconds=estimated_duration_seconds,
                 )
@@ -397,6 +402,36 @@ class CallGuard:
     # -------------------------------------------------------------------------
     # Guard Check Methods
     # -------------------------------------------------------------------------
+
+    async def _check_platform_calls_enabled(
+        self,
+        tenant_id: str,
+        call_type: str = "outbound",
+        **kwargs,
+    ) -> CheckResult:
+        """Enforce the platform operator's persisted emergency pause.
+
+        Inbound calls and transfers are deliberately unaffected: the control is
+        labelled "Pause outbound calls" and must not make an inbound support
+        number unreachable or break a call already in progress.
+        """
+        if call_type != "outbound":
+            return CheckResult(
+                check=GuardCheck.PLATFORM_CALLS_ENABLED,
+                passed=True,
+                reason="not_outbound",
+            )
+
+        state = await get_outbound_call_pause(self._db_pool)
+        return CheckResult(
+            check=GuardCheck.PLATFORM_CALLS_ENABLED,
+            passed=not state.paused,
+            reason="platform_outbound_calls_paused" if state.paused else None,
+            details={
+                "paused_at": state.paused_at.isoformat() if state.paused_at else None,
+                "reason": state.reason,
+            },
+        )
 
     async def _check_tenant_active(
         self,

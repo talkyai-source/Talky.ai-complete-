@@ -41,7 +41,7 @@ export function StatsGrid() {
             } else if (response.error) {
                 setError(response.error.message);
             }
-        } catch (err) {
+        } catch {
             setError('Failed to fetch stats');
         } finally {
             setLoading(false);

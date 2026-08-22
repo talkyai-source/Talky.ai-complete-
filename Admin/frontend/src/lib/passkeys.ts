@@ -73,7 +73,6 @@ export async function isConditionalUISupported(): Promise<boolean> {
   if (!isWebAuthnSupported()) return false;
 
   try {
-    // @ts-ignore - isConditionalMediationAvailable is newer
     return await PublicKeyCredential.isConditionalMediationAvailable();
   } catch {
     return false;
@@ -132,17 +131,14 @@ function base64urlToBuffer(base64url: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-/**
- * Decode base64url string to regular string
- */
-function base64urlToString(base64url: string): string {
-  const buffer = base64urlToBuffer(base64url);
-  const bytes = new Uint8Array(buffer);
-  let result = '';
-  for (let i = 0; i < bytes.length; i++) {
-    result += String.fromCharCode(bytes[i]);
-  }
-  return result;
+function credentialDescriptors(
+  credentials: Array<{ id: string; type: string; transports?: string[] }> | undefined
+): PublicKeyCredentialDescriptor[] | undefined {
+  return credentials?.map((credential) => ({
+    id: base64urlToBuffer(credential.id),
+    type: credential.type as PublicKeyCredentialType,
+    transports: credential.transports as AuthenticatorTransport[] | undefined,
+  }));
 }
 
 // =============================================================================
@@ -211,6 +207,9 @@ export async function completePasskeyRegistration(
 
   // Convert the credential to JSON-serializable format
   const response = credential.response as AuthenticatorAttestationResponse;
+  const authenticatorData = response.getAuthenticatorData?.();
+  const publicKey = response.getPublicKey?.();
+  const publicKeyAlgorithm = response.getPublicKeyAlgorithm?.();
 
   const credentialResponse = {
     id: credential.id,
@@ -220,14 +219,14 @@ export async function completePasskeyRegistration(
       clientDataJSON: bufferToBase64url(response.clientDataJSON),
       attestationObject: bufferToBase64url(response.attestationObject),
       // Optional fields that may be present
-      ...(response.authenticatorData && {
-        authenticatorData: bufferToBase64url(response.authenticatorData),
+      ...(authenticatorData && {
+        authenticatorData: bufferToBase64url(authenticatorData),
       }),
-      ...(response.publicKey && {
-        publicKey: bufferToBase64url(response.publicKey),
+      ...(publicKey && {
+        publicKey: bufferToBase64url(publicKey),
       }),
-      ...(response.publicKeyAlgorithm && {
-        publicKeyAlgorithm: response.publicKeyAlgorithm,
+      ...(publicKeyAlgorithm !== undefined && publicKeyAlgorithm !== null && {
+        publicKeyAlgorithm,
       }),
     },
     // Include transports if available
@@ -277,11 +276,8 @@ export async function registerPasskey(
       id: userId,
     },
     // Convert excludeCredentials if present
-    excludeCredentials: options.excludeCredentials?.map(cred => ({
-      ...cred,
-      id: base64urlToBuffer(cred.id as unknown as string),
-    })),
-  };
+    excludeCredentials: credentialDescriptors(options.excludeCredentials),
+  } as unknown as PublicKeyCredentialCreationOptions;
 
   const credential = await navigator.credentials.create({
     publicKey: credentialCreationOptions,
@@ -376,16 +372,13 @@ export async function loginWithPasskey(email?: string): Promise<AuthResponse> {
   const challenge = base64urlToBuffer(options.challenge as unknown as string);
 
   // Step 3: Convert allowCredentials if present
-  const allowCredentials = options.allowCredentials?.map(cred => ({
-    ...cred,
-    id: base64urlToBuffer(cred.id as unknown as string),
-  }));
+  const allowCredentials = credentialDescriptors(options.allowCredentials);
 
   const credentialRequestOptions: PublicKeyCredentialRequestOptions = {
     ...options,
     challenge,
     allowCredentials,
-  };
+  } as unknown as PublicKeyCredentialRequestOptions;
 
   // Step 4: Call WebAuthn API
   const credential = await navigator.credentials.get({
@@ -413,18 +406,14 @@ export async function loginWithConditionalMediation(): Promise<AuthResponse | nu
     const { ceremony_id, options } = await beginPasskeyLogin();
 
     const challenge = base64urlToBuffer(options.challenge as unknown as string);
-    const allowCredentials = options.allowCredentials?.map(cred => ({
-      ...cred,
-      id: base64urlToBuffer(cred.id as unknown as string),
-    }));
+    const allowCredentials = credentialDescriptors(options.allowCredentials);
 
     const credential = await navigator.credentials.get({
       publicKey: {
         ...options,
         challenge,
         allowCredentials,
-      },
-      // @ts-ignore - mediation is part of the spec but TypeScript types lag
+      } as unknown as PublicKeyCredentialRequestOptions,
       mediation: 'conditional',
     }) as PublicKeyCredential;
 
@@ -496,11 +485,14 @@ export async function deletePasskey(passkeyId: string): Promise<void> {
 // =============================================================================
 
 export class PasskeyError extends Error {
+  public code: 'NOT_SUPPORTED' | 'CANCELLED' | 'VERIFICATION_FAILED' | 'NETWORK_ERROR' | 'UNKNOWN';
+
   constructor(
     message: string,
-    public code: 'NOT_SUPPORTED' | 'CANCELLED' | 'VERIFICATION_FAILED' | 'NETWORK_ERROR' | 'UNKNOWN'
+    code: 'NOT_SUPPORTED' | 'CANCELLED' | 'VERIFICATION_FAILED' | 'NETWORK_ERROR' | 'UNKNOWN'
   ) {
     super(message);
+    this.code = code;
     this.name = 'PasskeyError';
   }
 }

@@ -41,6 +41,11 @@ The object MUST contain exactly these keys (and no others):
 {
   "headline": "<1-line outcome + gist, e.g. Qualified — wants a demo next week>",
   "outcome": "<short outcome label + one-line why, e.g. qualified | disqualified | callback | no_interest | voicemail | error>",
+  "qualification_status": "<qualified | nurture | unqualified | unknown>",
+  "decision_maker_status": "<decision_maker | influencer | not_decision_maker | unknown>",
+  "identified_need": "<the prospect's stated need or 'unknown'>",
+  "timeline": "<the prospect's stated timing or 'unknown'>",
+  "budget_information": "<only budget/commercial information actually stated, or 'unknown'>",
   "what_happened": "<2-4 sentence chronological gist of the call>",
   "key_points": ["<caller needs, questions, or context — one item per bullet>"],
   "objections": [{"objection": "<what they pushed back on>", "handled": "<how it was addressed or 'unresolved'>"}],
@@ -56,6 +61,8 @@ Rules:
 - Every key MUST be present. If a dimension has nothing (no objections, no commitments, etc.) use an empty list [] or "none" — NEVER omit the key.
 - Be comprehensive: capture every objection, commitment, action item, number, name, and date mentioned. Skip nothing material.
 - next_step is the ONE immediate action; follow_up_tips are 2-4 concrete, practical suggestions for how to actually win the follow-up (timing, what to send, which concern to lead with). Make them specific to THIS call, not generic.
+- qualification_status is qualified only when a relevant need/fit and a concrete next step are supported by the transcript; nurture means possible need but later timing, missing information, or another decision-maker; unqualified means a clearly unsuitable fit or no relevant need; otherwise use unknown.
+- Never infer authority, need, timing, or budget from tone, politeness, industry stereotypes, or the agent's pitch. Use unknown when the prospect did not reliably confirm it.
 - Keep each string tight (no waffle, no filler).
 - owner in action_items must be one of: agent, caller, user.
 - Respond ONLY with the JSON object. Any extra text will break parsing."""
@@ -67,6 +74,11 @@ Rules:
 EMPTY_SUMMARY: dict = {
     "headline": "",
     "outcome": "",
+    "qualification_status": "unknown",
+    "decision_maker_status": "unknown",
+    "identified_need": "unknown",
+    "timeline": "unknown",
+    "budget_information": "unknown",
     "what_happened": "",
     "key_points": [],
     "objections": [],
@@ -92,7 +104,18 @@ _SUMMARY_SCHEMA_PROPERTIES = {
 _LIST_KEYS = {"key_points", "objections", "commitments", "action_items", "follow_up_tips", "notable_quotes"}
 
 # Keys whose values must be strings
-_STR_KEYS = {"headline", "outcome", "what_happened", "sentiment", "next_step"}
+_STR_KEYS = {
+    "headline",
+    "outcome",
+    "qualification_status",
+    "decision_maker_status",
+    "identified_need",
+    "timeline",
+    "budget_information",
+    "what_happened",
+    "sentiment",
+    "next_step",
+}
 
 
 # ---------------------------------------------------------------------------

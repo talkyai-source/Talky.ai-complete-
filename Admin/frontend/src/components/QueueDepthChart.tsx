@@ -64,7 +64,7 @@ export function QueueDepthChart() {
             } else if (response.error) {
                 setError(response.error.message);
             }
-        } catch (err) {
+        } catch {
             setError('Failed to fetch queue data');
         } finally {
             setLoading(false);

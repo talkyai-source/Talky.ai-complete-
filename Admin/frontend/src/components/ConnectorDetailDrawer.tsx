@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
     X,
     Link2,
@@ -91,13 +91,7 @@ export function ConnectorDetailDrawer({ connector, onClose, onRefresh }: Connect
     const [actionLoading, setActionLoading] = useState<string | null>(null);
     const [showRevokeConfirm, setShowRevokeConfirm] = useState(false);
 
-    useEffect(() => {
-        if (connector) {
-            fetchDetail();
-        }
-    }, [connector]);
-
-    const fetchDetail = async () => {
+    const fetchDetail = useCallback(async () => {
         if (!connector) return;
         setLoading(true);
         try {
@@ -110,7 +104,13 @@ export function ConnectorDetailDrawer({ connector, onClose, onRefresh }: Connect
         } finally {
             setLoading(false);
         }
-    };
+    }, [connector]);
+
+    useEffect(() => {
+        if (connector) {
+            void fetchDetail();
+        }
+    }, [connector, fetchDetail]);
 
     const handleReconnect = async () => {
         if (!connector) return;
