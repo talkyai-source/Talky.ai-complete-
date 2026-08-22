@@ -30,6 +30,7 @@ from app.services.scripts.prompts import (
     pick_agent_name,
     pick_agent_name_for_voice,
 )
+from app.services.scripts.prompts.versions import identify as identify_prompt
 from app.services.scripts.prompts.prompt_safety import (
     MAX_COMPANY_NAME,
     sanitize_tenant_text,
@@ -1264,6 +1265,26 @@ def build_telephony_session_config(
         )
         system_prompt = _compose(True)
 
+    # ── Prompt identity (goals.md §6) ────────────────────────────────────────
+    # Computed HERE, after the try/except, rather than beside the compose call
+    # above. The PromptCompositionError path re-composes in knowledge-driven
+    # mode and produces genuinely different text, so identifying inside the
+    # `try` would leave every retried call attributed to a prompt it did not
+    # run — the exact mislabelling this whole mechanism exists to prevent.
+    #
+    # And it is before build_call_target_block prepends the callee's name, so
+    # the hash covers the stable instructions only. Including per-lead context
+    # would make it unique per call, which answers "same prompt?" with "no"
+    # forever.
+    prompt_identity = identify_prompt(persona_type, system_prompt)
+    logger.info(
+        "telephony_prompt_identity campaign=%s persona=%s template=%s "
+        "version=%s hash=%s kd=%s prompt_chars=%d",
+        _campaign_id(campaign), persona_type, prompt_identity.template,
+        prompt_identity.version, prompt_identity.hash, knowledge_driven,
+        len(system_prompt or ""),
+    )
+
     # (Brand-accuracy line is now part of the composed base prompt — see
     # prompts.composer.brand_correction_line, appended inside compose_prompt.)
 
@@ -1457,6 +1478,11 @@ def build_telephony_session_config(
         tenant_id=_tenant_id,
         agent_config=agent_config,
         system_prompt=system_prompt,
+        # Carried so the per-call log and the calls row can name the exact
+        # instructions this call ran on (goals.md §6).
+        prompt_template=prompt_identity.template,
+        prompt_version=prompt_identity.version,
+        prompt_hash=prompt_identity.hash,
         direction=direction,
         persona_type=persona_type,
         # Realtime pipeline mode (default "cascaded" = unchanged behaviour).

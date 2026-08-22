@@ -232,6 +232,20 @@ class VoiceSessionConfig:
     telephony_provider: str = "sip"  # "sip" | "vonage" | "twilio" | "browser"
     agent_config: Optional[AgentConfig] = None
     system_prompt: str = ""
+    # ── Prompt identity (goals.md §6) ────────────────────────────────────
+    # Which instructions this call actually ran on. `prompt_version` is the
+    # name a human rolls back to; `prompt_hash` is derived from the composed
+    # text and cannot go stale when someone edits a persona and forgets to
+    # bump the version. Both travel with the session so the per-call log and
+    # the calls row can carry them — a QA batch has to be able to prove all
+    # 30 calls used one prompt, and that it differed from the batch before.
+    #
+    # The hash covers the STABLE prompt only: it is taken before the callee's
+    # name is prepended, because per-lead context changes every call and would
+    # make the hash unique per call — varying for the wrong reason.
+    prompt_template: str = ""
+    prompt_version: str = ""
+    prompt_hash: str = ""
     # Call direction — set by the bridge when the per-call first_speaker
     # is known, used by build_telephony_session_config to pick the right
     # base prompt (inbound vs outbound) up front. Defaults to OUTBOUND so
@@ -491,6 +505,24 @@ class VoiceOrchestrator:
         )
         call_session.talklee_call_id = talklee_call_id
         call_session.barge_in_event = asyncio.Event()
+
+        # WHICH INSTRUCTIONS DID THIS CALL RUN ON? (goals.md §6)
+        # The identity is computed in build_telephony_session_config, which
+        # runs before a call exists — so `telephony_prompt_identity` can only
+        # name the campaign, and a QA batch would have to correlate by
+        # timestamp. This is the first point where the call id and the config
+        # are both in scope, so log them together and make the join trivial.
+        #
+        # Guarded on prompt_hash because non-telephony sessions (ask-AI, the
+        # browser assistant) build their config elsewhere and legitimately have
+        # no campaign prompt; an empty line there would be noise, not evidence.
+        if getattr(config, "prompt_hash", ""):
+            logger.info(
+                "call_prompt_identity call=%s campaign=%s template=%s "
+                "version=%s hash=%s",
+                str(call_id)[:12], config.campaign_id, config.prompt_template,
+                config.prompt_version, config.prompt_hash,
+            )
 
         # --- Event logging ---
         event_repo = None
