@@ -330,69 +330,114 @@ export function TestAgentButton({
             return;
         }
 
-        // REFRESH BEFORE THE HANDSHAKE (2026-08-23)
+        // THE PAGE AND THIS SOCKET DO NOT SHARE AN AUTH SURFACE (2026-08-23)
         //
-        // The talky_at cookie lives 15 minutes (ACCESS_TOKEN_MAX_AGE). Every
-        // REST call survives that because http-client retries on 401 and
-        // refreshes single-flight — but a WebSocket gets exactly one handshake
-        // and no retry, so it opens with whatever cookie happens to exist. Leave
-        // the campaigns page open past the quarter hour, click Test agent, and
-        // the server logs "no auth frame within 5s" and closes 1008, which the
-        // UI reports as "Authentication required".
+        // REST can send `Authorization: Bearer …` and, on a 401, transparently
+        // refreshes and retries. A browser cannot put a header on a WebSocket
+        // upgrade, so this socket has exactly ONE credential — the talky_at
+        // cookie — and exactly ONE attempt. talky_at lives 15 minutes
+        // (ACCESS_TOKEN_MAX_AGE).
         //
-        // One cheap authenticated call first. If the cookie is stale the client
-        // refreshes it and rotates talky_at, so the handshake below carries a
-        // live token. Failure is not fatal — the cookie may still be good, and
-        // the auth-frame fallback is behind this.
+        // So "I'm signed in" — the page renders, every other button works — does
+        // not imply the cookie is still alive at the moment you click. Measured
+        // in prod: a session connected fine at 21:57 and was refused at 22:01,
+        // four minutes later, with nothing changed but the clock.
+        //
+        // Two defences, because one is not enough:
+        //   1. a cheap authenticated call first, which rotates a stale cookie;
+        //   2. one refresh-and-retry if the server still refuses — because (1)
+        //      can be satisfied by the Bearer header WITHOUT ever touching the
+        //      cookie, so a passing pre-flight does not prove the cookie is live.
         try {
             await sharedHttpClient().request({ path: "/auth/me", method: "GET" });
         } catch {
             /* refresh happens inside the client; a failure here is not fatal */
         }
 
-        const wsUrl = `${resolveBackendWsBaseUrl()}/ws/campaign-test/${campaignId}?first_speaker=${fs}`;
-        const ws = new WebSocket(wsUrl);
-        ws.binaryType = "arraybuffer";
-        wsRef.current = ws;
+        const openSocket = (attempt: number) => {
+            const wsUrl = `${resolveBackendWsBaseUrl()}/ws/campaign-test/${campaignId}?first_speaker=${fs}`;
+            const ws = new WebSocket(wsUrl);
+            ws.binaryType = "arraybuffer";
+            wsRef.current = ws;
 
-        let accepted = false;
-        const fail = (message: string) => {
-            try { ws.onclose = null; ws.onerror = null; ws.close(); } catch { /* */ }
-            wsRef.current = null;
-            stopMicrophone();
-            cleanupPlayback();
-            setError(message);
-            setPhase("idle");
-        };
-        const timeout = window.setTimeout(() => {
-            if (!accepted) fail("Connection timeout. Is the backend running?");
-        }, 10000);
+            let accepted = false;
+            const fail = (message: string) => {
+                try { ws.onclose = null; ws.onerror = null; ws.close(); } catch { /* */ }
+                wsRef.current = null;
+                stopMicrophone();
+                cleanupPlayback();
+                setError(message);
+                setPhase("idle");
+            };
+            const timeout = window.setTimeout(() => {
+                if (!accepted) fail("Connection timeout. Is the backend running?");
+            }, 10000);
 
-        ws.onopen = () => {
-            // Cookie auth rides the handshake automatically. When a bearer token
-            // is available (cookie-less environments) send it as the first frame
-            // — the backend reads the cookie first and ignores this otherwise.
-            const token = getBrowserAuthToken();
-            if (token) {
-                try { ws.send(JSON.stringify({ type: "auth", token })); } catch { /* */ }
-            }
+            ws.onopen = () => {
+                // Cookie auth rides the handshake automatically. When a bearer
+                // token is available (cookie-less environments) send it as the
+                // first frame — the backend reads the cookie first and ignores
+                // this otherwise.
+                const token = getBrowserAuthToken();
+                if (token) {
+                    try { ws.send(JSON.stringify({ type: "auth", token })); } catch { /* */ }
+                }
+            };
+
+            ws.onmessage = (event) => {
+                // An auth refusal arrives as an error FRAME and only then a
+                // close(1008), so by the time onclose runs the socket already
+                // counts as accepted and a close-code check never fires. Catch
+                // it here, on the server's stable `code` slug rather than on
+                // message text that any reword would break.
+                if (attempt === 0 && typeof event.data === "string") {
+                    let parsed: { type?: unknown; code?: unknown } | null = null;
+                    try {
+                        parsed = JSON.parse(event.data) as { type?: unknown; code?: unknown };
+                    } catch {
+                        parsed = null;
+                    }
+                    if (parsed?.type === "error" && parsed?.code === "auth_required") {
+                        clearTimeout(timeout);
+                        try {
+                            ws.onclose = null; ws.onerror = null; ws.onmessage = null; ws.close();
+                        } catch { /* */ }
+                        wsRef.current = null;
+                        void (async () => {
+                            // Explicit rotation, not another /auth/me: this is
+                            // the case where the cookie specifically is stale.
+                            try {
+                                await sharedHttpClient().request({ path: "/auth/refresh", method: "POST" });
+                            } catch {
+                                /* the retry below reports the real outcome */
+                            }
+                            if (mountedRef.current) openSocket(1);
+                        })();
+                        return;
+                    }
+                }
+                clearTimeout(timeout);
+                accepted = true;
+                void handleMessage(event);
+            };
+
+            ws.onerror = () => { /* onclose decides the message */ };
+            ws.onclose = (ev) => {
+                if (!accepted) {
+                    // Without this the 10s timer still fires and overwrites a
+                    // precise message with "Connection timeout".
+                    clearTimeout(timeout);
+                    if (ev.code === 1008) { fail("You need to be signed in to test the agent."); return; }
+                    if (ev.code === 1013) { fail("The test service is busy — try again shortly."); return; }
+                    fail(`Could not start the test (code ${ev.code}).`);
+                    return;
+                }
+                clearTimeout(timeout);
+                endSession();
+            };
         };
-        ws.onmessage = (event) => {
-            clearTimeout(timeout);
-            accepted = true;
-            void handleMessage(event);
-        };
-        ws.onerror = () => { /* onclose decides the message */ };
-        ws.onclose = (ev) => {
-            if (!accepted) {
-                if (ev.code === 1008) { fail("You need to be signed in to test the agent."); return; }
-                if (ev.code === 1013) { fail("The test service is busy — try again shortly."); return; }
-                fail(`Could not start the test (code ${ev.code}).`);
-                return;
-            }
-            clearTimeout(timeout);
-            endSession();
-        };
+
+        openSocket(0);
     }, [campaignId, handleMessage, endSession, stopMicrophone, cleanupPlayback]);
 
     const handleStart = useCallback(() => {

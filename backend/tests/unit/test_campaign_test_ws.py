@@ -290,6 +290,29 @@ async def test_missing_auth_closes_1008_and_creates_no_session():
     h.orchestrator.create_voice_session.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_auth_refusal_carries_the_machine_readable_code():
+    """The browser retries on this slug. Reword the message, keep the code.
+
+    The client cannot key its refresh-and-retry off the 1008 close code: this
+    frame is sent BEFORE the close, so onmessage marks the socket accepted and
+    onclose never sees 1008. It cannot key off the message text either, because
+    the text is user-facing copy that will be reworded. `code` is the contract,
+    and deleting it silently turns an expired 15-minute cookie back into a
+    dead-end "Authentication required" — the exact bug this replaced.
+    """
+    tenant_cfg = AIProviderConfig(pipeline_mode="cascaded")
+    with _Harness(tenant_cfg=tenant_cfg, campaign_row=_CAMPAIGN):
+        ws = FakeWebSocket(recv_json=[])
+        await campaign_test_ws.campaign_test_websocket(ws, "camp-1", first_speaker="agent")
+
+    errors = [f for f in ws.sent if f.get("type") == "error"]
+    assert errors, f"no error frame was sent; frames={ws.sent}"
+    assert errors[0].get("code") == "auth_required", (
+        f"auth refusal must carry code='auth_required'; got {errors[0]!r}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # 4. campaign not owned by tenant (fetch miss) → IDOR guard
 # ---------------------------------------------------------------------------

@@ -70,12 +70,31 @@ async def _resolve_ws_token(websocket: WebSocket) -> Optional[str]:
     """
     cookie_token = _read_cookie_token(websocket)
     if cookie_token:
+        logger.info("campaign_test_ws auth surface=cookie")
         return cookie_token
+
+    # WHICH SURFACE FAILED, NOT JUST THAT ONE DID (2026-08-23)
+    #
+    # "no auth frame within 5s" was the only signal this function emitted, and
+    # it conflates two very different failures: the talky_at cookie never
+    # arrived, or it arrived and was rejected. Three separate incidents (MFA
+    # login not issuing talky_at, passkey login not issuing it, and the 15-min
+    # expiry) all surfaced as that one line, and each took a log-dive to tell
+    # apart. Cookie NAMES only — never a value, these are credentials.
+    logger.info(
+        "campaign_test_ws no talky_at on handshake; cookies_present=%s origin=%r "
+        "— falling back to first-frame bearer",
+        sorted(websocket.cookies.keys()) or "NONE",
+        websocket.headers.get("origin"),
+    )
 
     try:
         first_frame = await asyncio.wait_for(websocket.receive_json(), timeout=5.0)
     except asyncio.TimeoutError:
-        logger.info("campaign_test_ws: no auth frame within 5s")
+        logger.info(
+            "campaign_test_ws: no auth frame within 5s — neither cookie nor "
+            "bearer frame; the client had no credential to offer"
+        )
         return None
     except WebSocketDisconnect:
         return None
@@ -88,6 +107,7 @@ async def _resolve_ws_token(websocket: WebSocket) -> Optional[str]:
     token = first_frame.get("token")
     if not isinstance(token, str) or not token.strip():
         return None
+    logger.info("campaign_test_ws auth surface=bearer_frame")
     return token
 
 
@@ -230,7 +250,16 @@ async def campaign_test_websocket(
     # ── Auth: resolve token → user → tenant ─────────────────────────────
     resolved_token = await _resolve_ws_token(websocket)
     if not resolved_token:
-        await websocket.send_json({"type": "error", "message": "Authentication required."})
+        # ``code`` is what the client retries on. It cannot use the 1008 close
+        # code: this frame is sent BEFORE the close, so the browser's onmessage
+        # fires first and the socket is already "accepted" by the time onclose
+        # runs. Matching on the message TEXT would break the moment anyone
+        # rewords it, so the contract is this stable slug.
+        await websocket.send_json({
+            "type": "error",
+            "code": "auth_required",
+            "message": "Your session has expired. Reload the page and sign in again.",
+        })
         await websocket.close(code=1008, reason="Missing auth")
         return
 
@@ -240,7 +269,13 @@ async def campaign_test_websocket(
         payload = decode_and_validate_token(resolved_token)
     except JWTValidationError as jwt_err:
         logger.info("campaign_test_ws: token verification failed: %s", jwt_err.detail)
-        await websocket.send_json({"type": "error", "message": "Invalid or expired token."})
+        # Same slug: a token that arrived but is expired is the same problem
+        # from the user's side, and the same refresh-and-retry fixes it.
+        await websocket.send_json({
+            "type": "error",
+            "code": "auth_required",
+            "message": "Your session has expired. Reload the page and sign in again.",
+        })
         await websocket.close(code=1008, reason="Invalid token")
         return
 
