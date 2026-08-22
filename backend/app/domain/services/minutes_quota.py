@@ -76,6 +76,10 @@ async def compute_minutes_status(conn: Any, tenant_id: str) -> MinutesStatus:
         SELECT COALESCE(SUM(duration_seconds), 0) FROM calls
          WHERE tenant_id = $1
            AND created_at >= date_trunc('month', now())
+           -- Campaign test sessions are real rows so they can be played and
+           -- reviewed, but they are not the customer's traffic and must never
+           -- reach an invoice (Alembic 0017).
+           AND NOT is_test
         """,
         tenant_id,
     )

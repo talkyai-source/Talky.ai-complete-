@@ -344,6 +344,7 @@ async def _fetch_call_metrics(db_pool: asyncpg.Pool, window_minutes: int) -> Cal
                 SELECT created_at, answered_at, status
                 FROM calls
                 WHERE created_at >= NOW() - ($1::int * INTERVAL '1 minute')
+                  AND NOT is_test
             ),
             counts AS (
                 SELECT

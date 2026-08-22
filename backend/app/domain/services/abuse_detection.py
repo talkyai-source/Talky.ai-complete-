@@ -322,6 +322,7 @@ class AbuseDetectionService:
                 FROM calls
                 WHERE created_at > NOW() - INTERVAL '5 minutes'
                   AND status = 'completed'
+                  AND NOT is_test
                 GROUP BY tenant_id
                 HAVING COUNT(*) > 20  -- More than 20 calls in 5 min
                 """
@@ -488,6 +489,7 @@ class AbuseDetectionService:
                 WHERE tenant_id = $1
                   AND phone_number = $2
                   AND created_at > NOW() - INTERVAL '{window_minutes} minutes'
+                  AND NOT is_test
                 """,
                 tenant_id,
                 phone_number,
@@ -526,6 +528,7 @@ class AbuseDetectionService:
                 FROM calls
                 WHERE tenant_id = $1
                   AND created_at > NOW() - INTERVAL '10 minutes'
+                  AND NOT is_test
                 ORDER BY created_at DESC
                 LIMIT 5
                 """,
@@ -608,6 +611,7 @@ class AbuseDetectionService:
                   AND phone_number = $2
                   AND duration_seconds < 5
                   AND created_at > NOW() - INTERVAL '1 hour'
+                  AND NOT is_test
                 """,
                 tenant_id,
                 phone_number,
@@ -724,6 +728,7 @@ class AbuseDetectionService:
                     FROM calls
                     WHERE tenant_id = $1
                       AND created_at > NOW() - INTERVAL '7 days'
+                      AND NOT is_test
                     GROUP BY DATE_TRUNC('hour', created_at)
                 ) hourly_counts
                 """,

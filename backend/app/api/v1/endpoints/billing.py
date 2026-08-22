@@ -460,6 +460,7 @@ async def get_daily_usage(
                     FROM calls
                     WHERE tenant_id = $1
                       AND created_at >= $4
+                      AND NOT is_test          -- test sessions are not billable
                     GROUP BY day
                     """,
                     tenant_uuid,

@@ -1253,6 +1253,9 @@ class DialerWorker:
                            'dialing', 'ringing', 'answered', 'in_call', 'initiated'
                        )
                        AND created_at > now() - make_interval(secs => $2::int)
+                       -- A browser test session holds no telephony channel, so
+                       -- counting it would throttle real dialling.
+                       AND NOT is_test
                     """,
                     campaign_id,
                     max_age,
@@ -1351,7 +1354,9 @@ class DialerWorker:
             async with self._acquire_db() as conn:
                 val = await conn.fetchval(
                     "SELECT COUNT(*) FROM calls "
-                    "WHERE lead_id = $1 AND created_at >= date_trunc('day', now())",
+                    "WHERE lead_id = $1 AND created_at >= date_trunc('day', now()) "
+                    # Testing an agent must not burn a lead's daily attempt quota.
+                    "AND NOT is_test",
                     lead_id,
                 )
                 return int(val or 0)

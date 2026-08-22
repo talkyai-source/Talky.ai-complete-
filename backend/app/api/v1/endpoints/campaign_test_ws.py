@@ -25,6 +25,8 @@ session is NOT billed against plan minutes.
 import json
 import asyncio
 import logging
+import time
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
@@ -101,6 +103,93 @@ def _is_origin_allowed(websocket: WebSocket) -> bool:
 
 
 @router.websocket("/ws/campaign-test/{campaign_id}")
+async def _record_test_call(
+    container, tenant_id, campaign_id, voice_session, config
+) -> Optional[str]:
+    """Write a flagged ``calls`` row for a campaign test session.
+
+    Why a row at all: recordings, transcripts, the prompt version on the call,
+    feedback voice notes and conversation reviews all reference ``calls(id)``.
+    Without one, none of them can be exercised from the test button, which
+    defeats the purpose of having a test button.
+
+    Why it is safe: ``is_test`` is TRUE, and every query that counts money,
+    dial capacity or abuse excludes it explicitly (Alembic 0017 lists them).
+    A test session is billed nothing, consumes no dial slot, burns no lead
+    attempt and cannot trip abuse detection.
+
+    Never raises. A test call that cannot be recorded is still a test call.
+    """
+    pool = getattr(container, "db_pool", None)
+    if pool is None:
+        return None
+    try:
+        from app.core.db_utils import acquire_with_tenant
+
+        call_uuid = str(uuid.uuid4())
+        talklee_id = getattr(voice_session, "talklee_call_id", None) or call_uuid
+        async with acquire_with_tenant(pool, str(tenant_id)) as conn:
+            await conn.execute(
+                """
+                INSERT INTO calls (
+                    id, tenant_id, campaign_id, phone_number, status,
+                    talklee_call_id, is_test,
+                    prompt_template, prompt_version, prompt_hash, created_at
+                ) VALUES ($1,$2,$3,$4,'in_progress',$5,TRUE,$6,$7,$8,NOW())
+                """,
+                uuid.UUID(call_uuid),
+                uuid.UUID(str(tenant_id)),
+                uuid.UUID(str(campaign_id)),
+                "browser-test",
+                str(talklee_id),
+                getattr(config, "prompt_template", None),
+                getattr(config, "prompt_version", None),
+                getattr(config, "prompt_hash", None),
+            )
+        logger.info(
+            "campaign_test_call_recorded call=%s campaign=%s prompt=%s — flagged "
+            "is_test, excluded from billing, concurrency and abuse",
+            call_uuid[:8], str(campaign_id)[:8],
+            getattr(config, "prompt_version", None),
+        )
+        return call_uuid
+    except Exception:  # noqa: BLE001 — see docstring
+        logger.warning("campaign_test_call_record_failed campaign=%s",
+                       str(campaign_id)[:8], exc_info=True)
+        return None
+
+
+async def _finalise_test_call(container, tenant_id, call_id, started_at) -> None:
+    """Close the test row out so it looks like a finished call in the UI.
+
+    Duration is recorded because the call detail page shows it — it is NOT
+    billed, because minutes_quota sums only rows where NOT is_test.
+    """
+    if not call_id:
+        return
+    pool = getattr(container, "db_pool", None)
+    if pool is None:
+        return
+    try:
+        from app.core.db_utils import acquire_with_tenant
+
+        seconds = max(0, int(time.time() - started_at))
+        async with acquire_with_tenant(pool, str(tenant_id)) as conn:
+            await conn.execute(
+                """UPDATE calls
+                      SET status = 'completed',
+                          duration_seconds = $2,
+                          ended_at = NOW()
+                    WHERE id = $1""",
+                uuid.UUID(str(call_id)), seconds,
+            )
+        logger.info("campaign_test_call_finalised call=%s seconds=%s (not billed)",
+                    str(call_id)[:8], seconds)
+    except Exception:  # noqa: BLE001
+        logger.warning("campaign_test_call_finalise_failed call=%s",
+                       str(call_id)[:8], exc_info=True)
+
+
 async def campaign_test_websocket(
     websocket: WebSocket,
     campaign_id: str,
@@ -215,6 +304,8 @@ async def campaign_test_websocket(
 
     voice_session = None
     receiver_task: Optional[asyncio.Task] = None
+    test_call_id = None
+    test_started_at = time.time()
 
     async with sem:
         try:
@@ -235,6 +326,21 @@ async def campaign_test_websocket(
 
             orchestrator = container.voice_orchestrator
             voice_session = await orchestrator.create_voice_session(config)
+
+            # ── Give the test call a real row (Alembic 0017) ──────────────
+            # Without one, nothing that hangs off a call could be tested from
+            # here: recordings, transcripts, the prompt version on the row,
+            # feedback voice notes and conversation reviews all reference
+            # calls(id). The row is flagged is_test, and every query that
+            # counts money, dial capacity or abuse excludes it explicitly —
+            # minutes_quota, billing, dialer concurrency, the per-lead daily
+            # cap, all five abuse checks and telephony observability.
+            #
+            # Created AFTER the session exists and wrapped: failing to record a
+            # test call must never stop you testing the agent.
+            test_call_id = await _record_test_call(
+                container, tenant_id, campaign_id, voice_session, config
+            )
 
             # Per-call first-speaker on the session (phone path sets both).
             # Also opt this test call into the natural silence handling so it
@@ -385,4 +491,10 @@ async def campaign_test_websocket(
                     pass
             if voice_session:
                 await container.voice_orchestrator.end_session(voice_session)
+            # Close the flagged row out so the call detail page shows a finished
+            # call you can play, review and leave a voice note on. The duration
+            # is recorded for display only — minutes_quota sums NOT is_test.
+            await _finalise_test_call(
+                container, tenant_id, test_call_id, test_started_at
+            )
             logger.info("campaign_test_ws session ended campaign=%s", str(campaign_id)[:8])
