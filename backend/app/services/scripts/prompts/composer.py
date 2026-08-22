@@ -256,9 +256,20 @@ def _compose_knowledge_driven_body(
     # template only — composition continues normally, so a pinned campaign still
     # gets its own agent and company name.
     if body_override:
-        return body_override.format(
-            agent_name=agent_name, company_name=company_name
-        )
+        try:
+            return body_override.format(
+                agent_name=agent_name, company_name=company_name
+            )
+        except (KeyError, IndexError, ValueError) as exc:
+            # An archived body that references placeholders this path does not
+            # supply. Degrade to the current prompt rather than raise: the whole
+            # module's contract is that a rollback can cost you the rollback,
+            # never the call.
+            logger.warning(
+                "prompt_pin_body_unformattable err=%s — composing from the "
+                "current prompt instead",
+                exc,
+            )
     if persona_type == "lead_gen":
         from app.services.scripts.prompts.personas.lead_gen import LEAD_GEN_KD_BODY
         return LEAD_GEN_KD_BODY.format(
@@ -352,8 +363,19 @@ def compose_prompt(
         # selected opening with the body. Both pieces share {placeholders}
         # that are filled in a single str.format pass below — no recursive
         # substitution, no template-engine.
+        # ROLLBACK also applies here (goals.md §6). Without this, a slot-based
+        # campaign pinned to an older version got the pinned *label* and the
+        # current *text* — the exact mislabelling the identity mechanism exists
+        # to prevent, and invisible because the prompt still composes fine.
+        # Caught by scripts/verify_prompt_rollback: identical prompt_hash on a
+        # supposedly rolled-back call.
+        #
+        # The archived body is substituted; the direction opening is not, since
+        # openings are per-direction routing rather than part of the versioned
+        # persona body.
+        persona_body = body_override or PERSONA_BODIES[persona_type]
         persona_template = (
-            persona_openings[direction_key] + "\n" + PERSONA_BODIES[persona_type]
+            persona_openings[direction_key] + "\n" + persona_body
         )
         # The {direction_opening} marker on the body is a no-op placeholder
         # for the legacy / backward-compat alias path that pre-merged the
