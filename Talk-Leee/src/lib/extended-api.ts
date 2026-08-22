@@ -338,6 +338,45 @@ class ExtendedApi {
     // Distinct from the voice note above: a structured rating + tags + comment,
     // one per USER per call, so teammates can review the same call separately.
 
+    /**
+     * Every review in the tenant, filtered on the four axes goals.md §3 names:
+     * campaign, prompt version, rating and tag. Admin-only.
+     */
+    async listReviews(filters: {
+        campaign_id?: string;
+        prompt_version?: string;
+        rating_min?: number;
+        rating_max?: number;
+        tag?: string;
+        page?: number;
+        page_size?: number;
+    } = {}): Promise<{
+        items: ConversationReview[];
+        total: number;
+        page: number;
+        page_size: number;
+    }> {
+        const query: Record<string, string> = {};
+        for (const [k, v] of Object.entries(filters)) {
+            if (v !== undefined && v !== null && v !== "") query[k] = String(v);
+        }
+        return this.client.request({ path: "/reviews", method: "GET", query });
+    }
+
+    /**
+     * Aggregate by prompt version and failure category — the Safe Improvement
+     * Loop's query. `low_rated` counts 1s and 2s: the calls to go and listen to.
+     */
+    async getReviewSummary(filters: { campaign_id?: string; prompt_version?: string } = {}): Promise<{
+        totals: { reviews: number; avg_rating: number | null; low_rated: number; calls_reviewed: number };
+        by_prompt_version: Array<{ prompt_version: string; reviews: number; avg_rating: number | null; low_rated: number }>;
+        by_tag: Array<{ tag: string; reviews: number; avg_rating: number | null }>;
+    }> {
+        const query: Record<string, string> = {};
+        for (const [k, v] of Object.entries(filters)) if (v) query[k] = String(v);
+        return this.client.request({ path: "/reviews/summary", method: "GET", query });
+    }
+
     /** Tag vocabulary and reward rules. Fetch once, render the form from it. */
     async getReviewOptions(): Promise<ReviewOptions> {
         return this.client.request({ path: "/calls/reviews/options", method: "GET" });

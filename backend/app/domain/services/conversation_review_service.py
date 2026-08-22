@@ -345,6 +345,133 @@ class ConversationReviewService:
             )
             return 0
 
+    async def list_reviews(
+        self,
+        *,
+        tenant_id: str,
+        campaign_id: str | None = None,
+        prompt_version: str | None = None,
+        rating_min: int | None = None,
+        rating_max: int | None = None,
+        tag: str | None = None,
+        page: int = 1,
+        page_size: int = 25,
+    ) -> dict[str, Any]:
+        """Reviews across the tenant, filtered (goals.md §3 acceptance criteria).
+
+        Filters are composed as parameterised predicates rather than string
+        interpolation — the tag value in particular arrives from a query string,
+        and ``review_tags @> ARRAY[$n]`` keeps it a bound parameter that the GIN
+        index can still use.
+        """
+        if tag:
+            tag = tag.strip().lower()
+            if tag not in REVIEW_TAGS:
+                raise InvalidReviewError(f"Unknown review tag: {tag!r}")
+
+        page = max(1, int(page or 1))
+        page_size = min(200, max(1, int(page_size or 25)))
+
+        where = ["tenant_id = $1"]
+        args: list[Any] = [self._uuid(tenant_id)]
+
+        def add(clause: str, value: Any) -> None:
+            args.append(value)
+            where.append(clause.format(n=len(args)))
+
+        if campaign_id:
+            add("campaign_id = ${n}", self._uuid(campaign_id))
+        if prompt_version:
+            add("prompt_version = ${n}", prompt_version)
+        if rating_min is not None:
+            add("rating >= ${n}", int(rating_min))
+        if rating_max is not None:
+            add("rating <= ${n}", int(rating_max))
+        if tag:
+            add("review_tags @> ARRAY[${n}]::TEXT[]", tag)
+
+        clause = " AND ".join(where)
+        async with acquire_with_tenant(self._pool, tenant_id) as conn:
+            total = await conn.fetchval(
+                f"SELECT count(*) FROM conversation_reviews WHERE {clause}", *args
+            )
+            rows = await conn.fetch(
+                f"""SELECT {_COLUMNS} FROM conversation_reviews
+                     WHERE {clause}
+                     ORDER BY created_at DESC
+                     LIMIT ${len(args) + 1} OFFSET ${len(args) + 2}""",
+                *args, page_size, (page - 1) * page_size,
+            )
+        return {
+            "items": [dict(r) for r in rows],
+            "total": int(total or 0),
+            "page": page,
+            "page_size": page_size,
+        }
+
+    async def summarise(
+        self,
+        *,
+        tenant_id: str,
+        campaign_id: str | None = None,
+        prompt_version: str | None = None,
+    ) -> dict[str, Any]:
+        """Aggregate by prompt version and by failure category.
+
+        This is the query the Safe Improvement Loop is built on: "aggregate
+        reviews by prompt version and failure category", then "manually verify
+        low-rated calls". It answers *which prompt version is doing worse, and at
+        what* — which is the only reason to have collected structured tags rather
+        than free text.
+
+        ``low_rated`` counts 1s and 2s specifically, because those are the rows a
+        human is meant to go and listen to.
+        """
+        where = ["tenant_id = $1"]
+        args: list[Any] = [self._uuid(tenant_id)]
+        if campaign_id:
+            args.append(self._uuid(campaign_id))
+            where.append(f"campaign_id = ${len(args)}")
+        if prompt_version:
+            args.append(prompt_version)
+            where.append(f"prompt_version = ${len(args)}")
+        clause = " AND ".join(where)
+
+        async with acquire_with_tenant(self._pool, tenant_id) as conn:
+            by_version = await conn.fetch(
+                f"""SELECT COALESCE(prompt_version, 'unrecorded') AS prompt_version,
+                           count(*)::int AS reviews,
+                           round(avg(rating)::numeric, 2)::float AS avg_rating,
+                           count(*) FILTER (WHERE rating <= 2)::int AS low_rated
+                      FROM conversation_reviews WHERE {clause}
+                     GROUP BY 1 ORDER BY reviews DESC""",
+                *args,
+            )
+            # unnest so a review tagged three ways counts once per tag — the
+            # question is "how often does this failure appear", not "how many
+            # reviews mention only this".
+            by_tag = await conn.fetch(
+                f"""SELECT tag, count(*)::int AS reviews,
+                           round(avg(rating)::numeric, 2)::float AS avg_rating
+                      FROM conversation_reviews, unnest(review_tags) AS tag
+                     WHERE {clause}
+                     GROUP BY tag ORDER BY reviews DESC""",
+                *args,
+            )
+            totals = await conn.fetchrow(
+                f"""SELECT count(*)::int AS reviews,
+                           round(avg(rating)::numeric, 2)::float AS avg_rating,
+                           count(*) FILTER (WHERE rating <= 2)::int AS low_rated,
+                           count(DISTINCT call_id)::int AS calls_reviewed
+                      FROM conversation_reviews WHERE {clause}""",
+                *args,
+            )
+        return {
+            "totals": dict(totals) if totals else {},
+            "by_prompt_version": [dict(r) for r in by_version],
+            "by_tag": [dict(r) for r in by_tag],
+        }
+
     async def reward_balance(self, *, tenant_id: str, user_id: str) -> dict[str, Any]:
         """Derived from the ledger, never stored. A stored balance can drift
         from its transactions; a summed one cannot."""

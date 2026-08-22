@@ -27,6 +27,7 @@ import {
     Lock,
     ChevronDown,
     Plug,
+    MessageSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ViewportDrawer } from "@/components/ui/viewport-drawer";
@@ -60,6 +61,7 @@ const navigation: NavItem[] = [
     { name: "Contacts", href: "/contacts", icon: Users },
     { name: "Analytics", href: "/analytics", icon: BarChart2 },
     { name: "Recordings", href: "/recordings", icon: Volume2 },
+    { name: "Agent Reviews", href: "/reviews", icon: MessageSquare },
     { name: "Connectors", href: "/connectors", icon: Plug },
     // Assistant moved out of this group — it's queued for v2 and lives
     // in Settings as a "Coming soon" tile.

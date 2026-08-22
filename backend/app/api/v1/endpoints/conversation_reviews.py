@@ -6,10 +6,15 @@ import logging
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
+from app.api.v1.dependencies import (
+    CurrentUser,
+    get_current_user,
+    get_db_client,
+    require_admin_tenant,
+)
 from app.core.postgres_adapter import Client
 from app.core.security.rbac import Permission, require_permission
 from app.domain.services.conversation_review_service import (
@@ -219,4 +224,86 @@ async def get_reward_balance(
         )
     except Exception as exc:
         logger.exception("get_reward_balance failed user=%s", str(current_user.id)[:12])
+        raise _as_http(exc) from exc
+
+
+# ── the management view (goals.md §3) ───────────────────────────────────────
+#
+# A SEPARATE router with its own prefix, not more paths under /calls. A listing
+# at /calls/reviews is two segments, exactly like /calls/{call_id}, so it would
+# depend forever on this router being registered first. /reviews cannot collide
+# with anything.
+#
+# require_admin_tenant, not CALLS_READ: this reads every reviewer's assessment
+# across the tenant, which is a management view rather than "my own review". It
+# also guarantees a tenant_id is present, so the query cannot degrade into an
+# unfiltered read.
+admin_router = APIRouter(prefix="/reviews", tags=["conversation-reviews"])
+
+
+class ReviewListResponse(BaseModel):
+    items: List[ReviewResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+@admin_router.get("", response_model=ReviewListResponse)
+async def list_reviews(
+    campaign_id: Optional[str] = Query(None, description="Filter to one campaign"),
+    prompt_version: Optional[str] = Query(None, description="e.g. lead_gen@2"),
+    rating_min: Optional[int] = Query(None, ge=1, le=5),
+    rating_max: Optional[int] = Query(None, ge=1, le=5),
+    tag: Optional[str] = Query(None, description=f"One of: {', '.join(REVIEW_TAGS)}"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=200),
+    current_user: CurrentUser = Depends(require_admin_tenant),
+    service: ConversationReviewService = Depends(get_review_service),
+) -> ReviewListResponse:
+    """Every review in the tenant, filtered by campaign, prompt version, rating
+    and tag — the four axes goals.md §3 names."""
+    try:
+        result = await service.list_reviews(
+            tenant_id=str(current_user.tenant_id),
+            campaign_id=campaign_id,
+            prompt_version=prompt_version,
+            rating_min=rating_min,
+            rating_max=rating_max,
+            tag=tag,
+            page=page,
+            page_size=page_size,
+        )
+    except Exception as exc:
+        if not isinstance(exc, (InvalidReviewError, HTTPException)):
+            logger.exception("list_reviews failed tenant=%s", str(current_user.tenant_id)[:12])
+        raise _as_http(exc) from exc
+    return ReviewListResponse(
+        items=[_response(r) for r in result["items"]],
+        total=result["total"],
+        page=result["page"],
+        page_size=result["page_size"],
+    )
+
+
+@admin_router.get("/summary")
+async def summarise_reviews(
+    campaign_id: Optional[str] = Query(None),
+    prompt_version: Optional[str] = Query(None),
+    current_user: CurrentUser = Depends(require_admin_tenant),
+    service: ConversationReviewService = Depends(get_review_service),
+):
+    """Aggregate by prompt version and by failure category.
+
+    This is the query the Safe Improvement Loop runs on: which prompt version is
+    doing worse, and at what. `low_rated` counts 1s and 2s — the calls a human is
+    supposed to go and listen to before changing anything.
+    """
+    try:
+        return await service.summarise(
+            tenant_id=str(current_user.tenant_id),
+            campaign_id=campaign_id,
+            prompt_version=prompt_version,
+        )
+    except Exception as exc:
+        logger.exception("summarise_reviews failed tenant=%s", str(current_user.tenant_id)[:12])
         raise _as_http(exc) from exc
