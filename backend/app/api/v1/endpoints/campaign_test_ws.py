@@ -102,7 +102,6 @@ def _is_origin_allowed(websocket: WebSocket) -> bool:
     return origin in get_settings().allowed_origins
 
 
-@router.websocket("/ws/campaign-test/{campaign_id}")
 async def _record_test_call(
     container, tenant_id, campaign_id, voice_session, config
 ) -> Optional[str]:
@@ -190,6 +189,7 @@ async def _finalise_test_call(container, tenant_id, call_id, started_at) -> None
                        str(call_id)[:8], exc_info=True)
 
 
+@router.websocket("/ws/campaign-test/{campaign_id}")
 async def campaign_test_websocket(
     websocket: WebSocket,
     campaign_id: str,
