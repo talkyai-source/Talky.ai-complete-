@@ -5,6 +5,7 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { extendedApi, Recording } from "@/lib/extended-api";
 import { Play, Pause, Clock, Volume2, Download } from "lucide-react";
 import { motion } from "framer-motion";
+import { RecordingFeedbackBar } from "@/components/calls/recording-feedback-bar";
 
 function formatDuration(seconds?: number) {
     if (!seconds) return "--:--";
@@ -15,7 +16,7 @@ function formatDuration(seconds?: number) {
 
 const PLAYBACK_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 
-function AudioPlayer({ recordingId }: { recordingId: string }) {
+function AudioPlayer({ recordingId, callId }: { recordingId: string; callId: string }) {
     const audioRef = useRef<HTMLAudioElement>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
@@ -112,6 +113,7 @@ function AudioPlayer({ recordingId }: { recordingId: string }) {
     }
 
     return (
+        <div className="flex flex-col gap-2">
         <div className="flex items-center gap-3">
             <audio
                 ref={audioRef}
@@ -169,6 +171,12 @@ function AudioPlayer({ recordingId }: { recordingId: string }) {
             >
                 <Download className="w-4 h-4" />
             </button>
+        </div>
+            {/* Directly under the audio you just heard: thumbs, a 30-second
+                voice note, or typed text. The judgement about a call forms
+                while listening to it — asking people to navigate elsewhere to
+                record that judgement means it never gets recorded. */}
+            <RecordingFeedbackBar callId={callId} />
         </div>
     );
 }
@@ -256,7 +264,7 @@ export default function RecordingsPage() {
                                         {new Date(recording.created_at).toLocaleString()}
                                     </span>
                                 </div>
-                                <AudioPlayer recordingId={recording.id} />
+                                <AudioPlayer recordingId={recording.id} callId={recording.call_id} />
                             </motion.div>
                         ))}
                     </div>

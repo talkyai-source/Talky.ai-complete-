@@ -149,8 +149,11 @@ test("every microphone message tells the user what to do next", () => {
 
 // ── limits mirrored from the backend ────────────────────────────────────────
 
-test("the duration cap matches the API's Form(le=300)", () => {
-    assert.equal(FEEDBACK_MAX_SECONDS, 300);
+test("the duration cap is 30s and matches the API's Form(le=30)", () => {
+    // Both sides must move together. The recorder stops itself at this value,
+    // so if the constant drifts ABOVE the server's limit the user records a
+    // note, watches it upload, and only then gets a 422 — having lost the take.
+    assert.equal(FEEDBACK_MAX_SECONDS, 30);
 });
 
 test("the minimum length rejects a mis-click but not a short sentence", () => {

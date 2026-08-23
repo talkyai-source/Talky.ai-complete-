@@ -111,7 +111,14 @@ def _expected_error(exc: Exception) -> HTTPException:
 async def submit_call_feedback(
     call_id: str,
     audio: UploadFile = File(..., description="MediaRecorder audio blob"),
-    duration_seconds: float | None = Form(None, ge=0, le=300),
+    # 30s hard cap (was 300). A note about one call is a sentence or two, and
+    # every note gets transcribed, so length is a real cost. The recorder stops
+    # itself at 30s; this rejects anything that reports more.
+    #
+    # Honest about what this does NOT do: duration_seconds is client-reported,
+    # so a hostile client can under-report it. The enforceable limit is
+    # feedback_max_audio_bytes(), which is measured on the actual upload below.
+    duration_seconds: float | None = Form(None, ge=0, le=30),
     replace: bool = Form(
         False,
         description="Supersede this call's existing note instead of conflicting with it",

@@ -214,7 +214,21 @@ export function describeMicrophoneError(error: unknown): MicrophoneError {
 
 /** Backend limits, mirrored so the UI can refuse before spending an upload. */
 export const FEEDBACK_MAX_BYTES = 10 * 1024 * 1024; // CALL_FEEDBACK_MAX_AUDIO_BYTES
-export const FEEDBACK_MAX_SECONDS = 300; // POST /feedback: Form(..., le=300)
+
+/**
+ * Hard cap on a feedback voice note: 30 seconds (was 300).
+ *
+ * A note about one call is a sentence or two — "it talked over her", "it gave
+ * the wrong price". Five minutes invited a monologue nobody would listen back
+ * to, and every note has to be transcribed, so length is a real cost.
+ *
+ * `useVoiceRecorder` stops the recorder itself when this elapses, so it is a
+ * cutoff rather than a warning. The server validates it too
+ * (`Form(..., le=30)`), but note that `duration_seconds` is CLIENT-REPORTED —
+ * the honest backstop against a hostile client is FEEDBACK_MAX_BYTES, which is
+ * measured on the actual upload.
+ */
+export const FEEDBACK_MAX_SECONDS = 30; // POST /feedback: Form(..., le=30)
 
 /**
  * Below this, the "recording" is a mis-click rather than a note. Sending it

@@ -11,6 +11,7 @@ import { CallSummaryCard } from "@/components/calls/CallSummaryCard";
 import { statusPillClass } from "@/lib/status-colors";
 import { extendedApi } from "@/lib/extended-api";
 import { CallIssuesBanner } from "@/components/calls/call-issues-banner";
+import { QuickReviewButtons } from "@/components/calls/quick-review-buttons";
 
 function getStatusIcon(status: string) {
     switch (status) {
@@ -106,7 +107,10 @@ function CallRow({ call }: { call: Call }) {
 
     return (
         <div className="rounded-xl border border-border bg-background">
-            <div className="grid min-w-0 grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1.1fr)_auto_auto_auto_auto] items-center gap-3 px-4 py-3">
+            {/* Six `auto` columns for six action cells: summary, transcript,
+                play, rate, voice-note, open. The rate cell holds two buttons
+                but is ONE cell, so the row does not grow a column per icon. */}
+            <div className="grid min-w-0 grid-cols-[minmax(0,1.4fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,1.1fr)_auto_auto_auto_auto_auto_auto] items-center gap-3 px-4 py-3">
                 <div className="flex min-w-0 flex-col gap-0.5">
                     <div className="flex min-w-0 items-center gap-3">
                         {getStatusIcon(call.status)}
@@ -188,6 +192,12 @@ function CallRow({ call }: { call: Call }) {
                 ) : (
                     <span aria-hidden className="inline-block h-8 w-8" />
                 )}
+                {/* Rate it right here, next to the audio you just heard
+                    (goals.md §3). Navigating to the detail page to leave a
+                    rating meant, in practice, that nobody rated anything while
+                    working down a list. The full panel on the call page is
+                    still where tags and a comment go. */}
+                <QuickReviewButtons callId={call.id} />
                 {/* Agent-feedback voice note. Filled when this call already has
                     one. `has_feedback` is computed per row by an EXISTS in the
                     calls list query, so it reflects reality rather than being a
