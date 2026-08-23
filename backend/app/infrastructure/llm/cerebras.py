@@ -45,6 +45,46 @@ _LLM_RETRY_BASE_DELAY = 0.3  # match Groq — fast first retry inside the voice 
 DEFAULT_CEREBRAS_MODEL = CerebrasModel.GEMMA_4_31B.value
 
 
+def _log_cache_stats(usage_obj, model: str, cache_key: Optional[str]) -> None:
+    """Emit the prompt-cache hit rate for one call.
+
+    THIS IS THE PROOF, AND TTFT IS NOT. A fast reply can be fast for reasons
+    that have nothing to do with the cache, and a cache that silently stopped
+    working looks exactly like a provider having a slow afternoon. The only
+    honest signal is how many prompt tokens the provider says it served from
+    cache, so it is logged on every call rather than inferred later.
+
+    Expect a LOW ratio on the first call of a campaign and a high one after —
+    the static prefix has to be seen once before it can be reused. A ratio that
+    stays near zero across a busy campaign means something per-call has crept
+    back to the front of the prompt (a name, a timestamp, a call id), which is
+    the exact defect this logging exists to catch.
+
+    Never raises: observability must not be able to break a live call.
+    """
+    try:
+        details = getattr(usage_obj, "prompt_tokens_details", None)
+        cached = getattr(details, "cached_tokens", None) if details else None
+        if cached is None and isinstance(usage_obj, dict):
+            details = usage_obj.get("prompt_tokens_details") or {}
+            cached = details.get("cached_tokens")
+        cached = int(cached or 0)
+
+        prompt_tokens = getattr(usage_obj, "prompt_tokens", None)
+        if prompt_tokens is None and isinstance(usage_obj, dict):
+            prompt_tokens = usage_obj.get("prompt_tokens")
+        prompt_tokens = int(prompt_tokens or 0)
+
+        ratio = (cached / prompt_tokens) if prompt_tokens else 0.0
+        logger.info(
+            "cerebras_prompt_cache model=%s cache_key=%s prompt_tokens=%d "
+            "cached_tokens=%d hit_ratio=%.2f",
+            model, (cache_key or "-"), prompt_tokens, cached, ratio,
+        )
+    except Exception:  # noqa: BLE001 — see docstring
+        pass
+
+
 def _accumulate_tool_call_frags(sink: Dict[int, dict], frags) -> None:
     """Reassemble streamed tool-call fragments.
 
@@ -154,6 +194,7 @@ class CerebrasLLMProvider(LLMProvider):
         max_tokens: Optional[int],
         model: Optional[str],
         tools: Optional[list],
+        cache_key: Optional[str] = None,
     ) -> dict:
         model = model or self._model
         api_messages: List[dict] = []
@@ -182,6 +223,28 @@ class CerebrasLLMProvider(LLMProvider):
         effort = self._reasoning_effort(model)
         if effort is not None:
             request["reasoning_effort"] = effort
+
+        # ROUTING HINT FOR THE PROMPT CACHE (2026-08-24).
+        #
+        # Cerebras caches by exact prefix and documents prompt_cache_key as the
+        # way to tell the system "these requests share a prefix, keep them on
+        # the same cache". It is free: it does not affect billing or output.
+        #
+        # The right key is the CAMPAIGN, not the call. Every call in a campaign
+        # sends the same ~38k-char static prompt, so keying by campaign lets
+        # them all share one warm cache; keying by call would isolate each one
+        # and throw that sharing away.
+        #
+        # Worth knowing: Cerebras guarantees only a 5-minute TTL (up to an hour
+        # under light load), so a campaign that trickles calls slowly will go
+        # cold between them regardless of this hint.
+        if cache_key:
+            request["prompt_cache_key"] = str(cache_key)[:1024]
+
+        # Ask for the usage block on the final SSE frame. Without this a
+        # streamed response carries no usage at all, so cached_tokens — the only
+        # honest proof that the cache is working — is simply absent.
+        request["stream_options"] = {"include_usage": True}
 
         # clear_thinking is accepted by zai-glm-4.7 only. Without it the model
         # replays previous turns' thinking back into the prompt, so context — and
@@ -215,6 +278,9 @@ class CerebrasLLMProvider(LLMProvider):
         model = kwargs.get("model") or self._model
         tools = kwargs.get("tools")
         tool_calls_sink = kwargs.get("tool_calls_sink")
+        # Campaign id when the caller threads one — see _build_request for why
+        # the campaign, and not the call, is the right cache key.
+        cache_key = kwargs.get("prompt_cache_key") or kwargs.get("campaign_id")
 
         request = self._build_request(
             messages=messages,
@@ -223,6 +289,7 @@ class CerebrasLLMProvider(LLMProvider):
             max_tokens=max_tokens,
             model=model,
             tools=tools,
+            cache_key=cache_key,
         )
 
         last_err: Optional[Exception] = None
@@ -235,6 +302,13 @@ class CerebrasLLMProvider(LLMProvider):
                         stream = await self._client.chat.completions.create(**request)
                         tc_acc: Dict[int, dict] = {}
                         async for chunk in stream:
+                            # The usage block rides the FINAL frame, which has
+                            # an empty `choices` list — so it has to be read
+                            # before the skip below, or cache stats are silently
+                            # thrown away on every call.
+                            _usage = getattr(chunk, "usage", None)
+                            if _usage is not None:
+                                _log_cache_stats(_usage, model, cache_key)
                             choices = getattr(chunk, "choices", None)
                             if not choices:
                                 continue

@@ -64,10 +64,26 @@ def _cfg(**kw):
 
 
 def test_prompt_gets_call_target_block_when_named():
+    """The block is APPENDED now, not prepended (2026-08-24).
+
+    It used to open the prompt. Both providers cache by exact prefix, so a
+    different lead name in the first tokens voided the cache for the whole ~38k
+    prompt behind it — measured on Cerebras as 0.0% cached with the block at
+    the front versus 99.6% with it at the back.
+    """
     cfg = _cfg(lead_first_name="Jane", lead_last_name="Doe", lead_company="Acme Roofing")
-    assert cfg.system_prompt.startswith("PERSON YOU'RE CALLING: Jane Doe, from Acme Roofing.")
-    # The persona/guardrails still follow the block.
+
+    assert "PERSON YOU'RE CALLING: Jane Doe, from Acme Roofing." in cfg.system_prompt
+    assert not cfg.system_prompt.startswith("PERSON YOU'RE CALLING"), (
+        "the lead name must NOT open the prompt — that is the cache-voiding "
+        "layout this move fixed"
+    )
+    # The persona/guardrails now PRECEDE the block, and that ordering is the
+    # whole point: everything before the lead name is a shared, cacheable prefix.
     assert "HARD RULES" in cfg.system_prompt
+    assert cfg.system_prompt.index("HARD RULES") < cfg.system_prompt.index(
+        "PERSON YOU'RE CALLING"
+    ), "static instructions must come before the per-call block"
     # Callee identity is also carried on the config for the realtime path.
     assert cfg.callee_first_name == "Jane"
     assert cfg.callee_company == "Acme Roofing"
@@ -75,16 +91,27 @@ def test_prompt_gets_call_target_block_when_named():
 
 def test_prompt_is_byte_for_byte_identical_when_blind():
     """No lead threaded → the composed prompt must equal today's blind-dial
-    prompt exactly, and the named prompt must be the block + that same tail."""
+    prompt exactly, and the named prompt must be that same prompt with the
+    block appended.
+
+    The blind prompt being an exact PREFIX of the named one is what makes the
+    cache work: every call in a campaign shares those leading bytes regardless
+    of who is being dialled.
+    """
     blind = _cfg()
     named = _cfg(lead_first_name="Jane", lead_last_name="Doe")
 
     assert "PERSON YOU'RE CALLING" not in blind.system_prompt
     assert blind.callee_first_name is None
-    # The named prompt is exactly the block, a newline, then the blind prompt.
+
     from app.domain.services.telephony_session_config import build_call_target_block
     block = build_call_target_block("Jane", "Doe", None)
-    assert named.system_prompt == block + "\n" + blind.system_prompt
+    assert named.system_prompt == blind.system_prompt + "\n" + block
+
+    # Said explicitly, because this is the property the prompt cache depends on.
+    assert named.system_prompt.startswith(blind.system_prompt), (
+        "the blind prompt must be an exact leading prefix of the named prompt"
+    )
 
 
 def test_company_stored_none_when_blank_threaded():

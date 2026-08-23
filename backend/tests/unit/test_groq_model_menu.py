@@ -91,21 +91,43 @@ def test_at_least_one_caching_model_is_offered():
     )
 
 
-def test_the_current_production_default_is_still_offered():
-    """Every call placed today runs on this. Removing it from the menu would
-    strand the tenants using it."""
-    assert "qwen/qwen3.6-27b" in _menu_ids()
+def test_no_tenant_is_locked_out_by_the_narrowed_menu():
+    """Hidden means "cannot pick it any more", NOT "cannot save" (2026-08-24).
+
+    The menu narrowed to the MVP pair, but validation reads offered + hidden.
+    Dropping an id that tenants still store would 400 them on a value they
+    never chose to have — locking them out of their own settings page to
+    enforce a menu change. `llama-3.1-8b-instant` is deliberately in the hidden
+    list despite 404ing on the account: 5 tenants store it, and blocking their
+    save does not repair them, it only traps them.
+    """
+    from app.domain.models.ai_config import GROQ_MODELS_HIDDEN
+
+    accepted = set(_menu_ids()) | set(GROQ_MODELS_HIDDEN)
+    for stored in ("qwen/qwen3.6-27b", "llama-3.1-8b-instant", "openai/gpt-oss-120b"):
+        assert stored in accepted, (
+            f"{stored} is stored by real tenants and must still validate"
+        )
 
 
 @pytest.mark.parametrize("model", sorted(_CACHING & {"openai/gpt-oss-120b", "openai/gpt-oss-20b"}))
-def test_caching_models_are_flagged_preview(model):
-    """They were pulled in June for stacking questions and spelling things out
-    on voice calls. That finding has not been re-tested against the current
-    prompt, so a measured latency win must not present them as safe defaults."""
+def test_the_offered_caching_model_is_production_ready(model):
+    """The June "stacks questions / spells things out on voice" finding was
+    RE-TESTED on 2026-08-24 against the current prompt and did not reproduce —
+    gpt-oss scored 10/10 on the voice battery, including those two checks
+    specifically. So the offered entry is no longer flagged preview.
+
+    See docs/MODEL-SELECTION.md. Anything still hidden keeps whatever flag it
+    had; this only governs what we actively offer.
+    """
     entry = next((m for m in GROQ_MODELS if m.id == model), None)
     if entry is None:
         pytest.skip(f"{model} not offered")
-    assert entry.is_preview is True, f"{model} is offered as production-ready"
+    assert entry.is_preview is False, (
+        f"{model} is offered but flagged preview — the June objection was "
+        "re-tested and did not reproduce, so either un-flag it or stop "
+        "offering it"
+    )
 
 
 def test_descriptions_disclose_the_caching_difference():

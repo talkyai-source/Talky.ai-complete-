@@ -98,6 +98,11 @@ async def generate_llm_response(llm_provider, latency_tracker, session, user_inp
             # to the provider's configured default inside stream_chat.
             temperature=getattr(session, "llm_temperature", None),
             max_tokens=getattr(session, "llm_max_tokens", None),
+            # Prompt-cache routing hint. The CAMPAIGN, not the call: every call
+            # in a campaign sends the same static prompt prefix, so keying by
+            # campaign lets them share one warm cache. Providers that don't
+            # understand it ignore it — it is a hint, not a directive.
+            campaign_id=getattr(session, "campaign_id", None),
         ):
             if first_token:
                 latency_tracker.mark_llm_first_token(call_id)

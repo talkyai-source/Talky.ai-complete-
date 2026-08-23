@@ -207,11 +207,18 @@ class AIProviderConfig(BaseModel):
     Stored per-tenant in the database.
     """
     # LLM Configuration
-    llm_provider: LLMProvider = LLMProvider.GROQ
+    # MVP PAIR, 2026-08-24 — see docs/MODEL-SELECTION.md for the measurements.
+    #
     # Was llama-3.1-8b-instant until 2026-08-17, by which time that id 404'd on
-    # this account — so every tenant WITHOUT a saved config defaulted to a model
-    # that could not answer. Qwen 3.6 is what production actually runs today.
-    llm_model: str = GroqModel.QWEN_3_6_27B.value
+    # this account, then Qwen 3.6. Qwen was measured at 640ms p50 first-token
+    # against a production-sized prompt — 2.4x the pair below — and it is the
+    # reason 49 of 51 production turns on 2026-08-23 were tagged [SLOW].
+    #
+    # Cerebras gpt-oss-120b: p50 269ms, p95 566ms, 10/10 on the voice
+    # correctness battery. Groq serves the SAME model as the fallback, so a
+    # mid-call failover does not change how the agent sounds.
+    llm_provider: LLMProvider = LLMProvider.CEREBRAS
+    llm_model: str = CerebrasModel.GPT_OSS_120B.value
     llm_temperature: float = Field(default=0.6, ge=0.0, le=2.0)
     llm_max_tokens: int = Field(default=90, ge=1, le=5000)  # ceiling raised for consultative replies; per-turn length still governed by the persona + sentence cap
     
@@ -331,55 +338,54 @@ class TTSTestResponse(BaseModel):
 # GROQ MODELS - Production + Preview
 # =============================================================================
 
+# ── THE MVP MENU (2026-08-24) ────────────────────────────────────────────────
+# ONE model per provider, both the same weights on independent infrastructure.
+# Full measurements and the argument for that choice: docs/MODEL-SELECTION.md
+#
+# Removed here, with reasons, so nobody re-adds one from memory:
+#   qwen/qwen3.6-27b   640ms p50 first-token on a production-sized prompt —
+#                      2.4x the pair below, and no prompt caching on Groq at
+#                      all (it returns no cached_tokens field). It is the
+#                      measured cause of 49/51 prod turns being tagged [SLOW].
+#   openai/gpt-oss-20b 416ms p50. Correct (10/10) but strictly slower than the
+#                      120b on the same provider, so it earns no menu slot.
 GROQ_MODELS = [
-    # Both Llama entries removed 2026-08-17 — they 404 on this account. See the
-    # GroqModel docstring for the /v1/models output and the probe.
-    ModelInfo(
-        id=GroqModel.QWEN_3_6_27B.value,
-        name="Qwen 3.6 27B",
-        description=(
-            "Current default for voice. Toggleable reasoning — run with thinking "
-            "disabled for fast replies. No prompt caching on Groq, so a large "
-            "system prompt is re-read every turn (~630ms of the ~640ms "
-            "time-to-first-token measured in production)."
-        ),
-        speed="~400 tokens/s",
-        price="$0.29 input / $0.59 output per 1M tokens",
-        context_window=131072,
-        is_preview=True,
-        provider="groq",
-    ),
-    ModelInfo(
-        id=GroqModel.GPT_OSS_120B.value,
-        name="GPT-OSS 120B",
-        description=(
-            "Only Groq family with prompt caching: measured 102ms warm "
-            "time-to-first-token vs 672ms for Qwen on an identical 7.3k-token "
-            "prompt (98% of it cached). CAVEAT — removed from this menu in June "
-            "for stacking questions and spelling things out on voice calls; that "
-            "finding predates the current prompt and has not been re-tested. "
-            "Try it on internal calls before pointing a real campaign at it."
-        ),
-        speed="~500 tokens/s",
-        price="$0.15 input / $0.60 output per 1M tokens (50% off cached input)",
-        context_window=131072,
-        is_preview=True,
-        provider="groq",
-    ),
     ModelInfo(
         id=GroqModel.GPT_OSS_20B.value,
-        name="GPT-OSS 20B",
+        name="GPT-OSS 20B (Groq)",
         description=(
-            "Smaller sibling of GPT-OSS 120B; also caches (119ms warm "
-            "time-to-first-token measured). Cheaper and lighter, and the same "
-            "June conversational caveat applies."
+            "MVP fallback, and a DIFFERENT model from the Cerebras primary by "
+            "requirement — the two must never be the same weights. Tightest "
+            "tail measured on any candidate: p50 416ms, p95 449ms, worst turn "
+            "465ms, against a 37k-char prompt. Scored 10/10 on the voice "
+            "battery, including repeating a captured email back EXACTLY — the "
+            "check qwen fails in practice, since it acknowledges an address "
+            "without ever confirming it. Prompt-cached on Groq."
         ),
-        speed="~1000 tokens/s",
-        price="$0.075 input / $0.30 output per 1M tokens (50% off cached input)",
+        speed="416 ms p50 / 449 ms p95 (measured 2026-08-24)",
+        price="See console.groq.com billing",
         context_window=131072,
-        is_preview=True,
+        is_preview=False,
         provider="groq",
     ),
+]
+
+# HIDDEN, NOT FORBIDDEN.
+#
+# These are no longer offered in AI Options, but a tenant who already has one
+# stored must still be able to save their settings. Validation accepts this
+# list; the UI never shows it. Narrowing the OFFERED menu without this would
+# 400 a tenant on a value they never chose to have — locking them out of their
+# own settings page to enforce a menu change.
+#
+# `llama-3.1-8b-instant` is here despite 404ing on the account, for exactly
+# that reason: 5 tenants still store it, and blocking their save does not fix
+# them, it just traps them. Repairing those rows is a separate, deliberate job.
+GROQ_MODELS_HIDDEN = [
+    "qwen/qwen3.6-27b",       # 640ms p50, and never repeats a captured email back
+    "openai/gpt-oss-120b",    # fast, but the SAME weights as the Cerebras primary
+    "llama-3.1-8b-instant",   # DEAD on this account (404). Held for 5 tenants.
+    "llama-3.3-70b-versatile",  # DEAD on this account (404).
 ]
 
 # =============================================================================
@@ -537,52 +543,39 @@ GEMINI_MODELS = [
 # For comparison on the same harness: gemini-2.5-flash 186 ms, and Groq
 # llama-3.1-8b-instant ~90 ms TTFT.
 
+# Removed here, with reasons:
+#   gemma-4-31b   Best p50 of any Cerebras model (317ms) and DISQUALIFIED on
+#                 spread: p95 1133ms, worst turn 1671ms, stdev 368. Roughly one
+#                 turn in ten would feel broken. Judged on p50 alone we would
+#                 have shipped it — see docs/MODEL-SELECTION.md §4.
+#   zai-glm-4.7   NOT SERVED BY THIS ACCOUNT. A live /v1/models call on
+#                 2026-08-24 returned exactly two ids: gemma-4-31b and
+#                 gpt-oss-120b. Offering it was the same defect as the dead
+#                 Llama entries — selecting it fails at the first turn and
+#                 failover then silently runs a model the tenant did not pick.
 CEREBRAS_MODELS = [
-    ModelInfo(
-        id=CerebrasModel.GEMMA_4_31B.value,
-        name="Gemma 4 31B (Cerebras)",
-        description=(
-            "Google's Gemma 4 31B on wafer-scale hardware. Reasoning defaults "
-            "to OFF and we pin reasoning_effort='none' explicitly, so no "
-            "thinking tokens are spent before the first word — the behaviour "
-            "voice needs. 500K TPM / 300 RPM on pay-as-you-go."
-        ),
-        speed="402 ms median (measured) — high variance",
-        price="See console.cerebras.ai billing",
-        is_preview=False,
-        provider="cerebras",
-    ),
-    ModelInfo(
-        id=CerebrasModel.ZAI_GLM_4_7.value,
-        name="GLM 4.7 (Cerebras)",
-        description=(
-            "Z.ai GLM 4.7. Reasoning can be switched off outright "
-            "(reasoning_effort='none'), and we also set clear_thinking so "
-            "earlier turns' thinking is not replayed into the prompt — which "
-            "would otherwise grow every turn. 500K TPM / 500 RPM."
-        ),
-        speed="192 ms median (measured) — most consistent",
-        price="~$2.25 in / $2.75 out per 1M tokens",
-        is_preview=False,
-        provider="cerebras",
-    ),
     ModelInfo(
         id=CerebrasModel.GPT_OSS_120B.value,
         name="GPT-OSS 120B (Cerebras)",
         description=(
-            "Cerebras' flagship: highest limits (1M TPM / 1K RPM) and cheapest "
-            "(~$0.35 in / $0.75 out per 1M). ⚠ Thinking CANNOT be disabled on "
-            "this model — 'none' is rejected, so we floor it at 'low'. Also "
-            "note this codebase already found the gpt-oss family misbehaves on "
-            "conversational voice (see groq.py _is_gpt_oss_model); it is a "
-            "strong agentic/tool-calling model, so prefer it for the assistant "
-            "rather than for live calls."
+            "MVP primary. Fastest first token measured on either provider — "
+            "p50 269ms, p95 566ms against a 37k-char prompt — with the second "
+            "tightest spread (stdev 118). Scored 10/10 on the voice battery. "
+            "Highest limits (1M TPM / 1K RPM) and cheapest of the Cerebras "
+            "models. Thinking cannot be disabled on this model: 'none' is "
+            "rejected, so it is floored at reasoning_effort='low'."
         ),
-        speed="269 ms median (measured)",
+        speed="269 ms p50 / 566 ms p95 (measured 2026-08-24)",
         price="~$0.35 in / $0.75 out per 1M tokens",
         is_preview=False,
         provider="cerebras",
     ),
+]
+
+# Hidden, not forbidden — same reasoning as GROQ_MODELS_HIDDEN above.
+CEREBRAS_MODELS_HIDDEN = [
+    "gemma-4-31b",   # p95 1133ms, worst turn 1671ms — too erratic for voice
+    "zai-glm-4.7",   # NOT SERVED by this account (live /v1/models, 2026-08-24)
 ]
 
 

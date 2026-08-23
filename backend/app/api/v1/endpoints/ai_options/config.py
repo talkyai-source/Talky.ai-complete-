@@ -19,9 +19,11 @@ from app.domain.models.ai_config import (
     CARTESIA_MODELS,
     DEEPGRAM_TTS_MODELS,
     CEREBRAS_MODELS,
+    CEREBRAS_MODELS_HIDDEN,
     GEMINI_MODELS,
     GOOGLE_TTS_MODELS,
     GROQ_MODELS,
+    GROQ_MODELS_HIDDEN,
 )
 from app.infrastructure.tts.elevenlabs_catalog import (
     get_elevenlabs_tts_models_for_current_key,
@@ -167,10 +169,18 @@ async def save_config(
     # Validate LLM provider + model. Sourced from a single union so adding a
     # new provider only requires extending GEMINI_MODELS / GROQ_MODELS — never
     # editing this validator.
+    # OFFERED is not the same set as ACCEPTED, deliberately.
+    #
+    # The MVP menu shows one model per provider (docs/MODEL-SELECTION.md), but
+    # validation also accepts the ids we stopped offering. A tenant who already
+    # has an older model stored would otherwise be 400'd on a value they never
+    # chose to have — locked out of their own settings page to enforce a menu
+    # change. Hidden means "you cannot pick this any more", not "you cannot
+    # save".
     _llm_models_by_provider: dict[str, list[str]] = {
-        "groq": [m.id for m in GROQ_MODELS],
+        "groq": [m.id for m in GROQ_MODELS] + GROQ_MODELS_HIDDEN,
         "gemini": [m.id for m in GEMINI_MODELS],
-        "cerebras": [m.id for m in CEREBRAS_MODELS],
+        "cerebras": [m.id for m in CEREBRAS_MODELS] + CEREBRAS_MODELS_HIDDEN,
     }
 
     if config.llm_provider not in _llm_models_by_provider:

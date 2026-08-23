@@ -31,11 +31,12 @@ class TestAIConfig:
         """Test default configuration values"""
         config = AIProviderConfig()
         
-        assert config.llm_provider == "groq"
-        # Changed 2026-08-17 together with the id itself: llama-3.1-8b-instant
-        # 404s on this account, so the default handed every tenant without a
-        # saved config a model that could not answer a single turn.
-        assert config.llm_model == "qwen/qwen3.6-27b"
+        # MVP pair, 2026-08-24 — see docs/MODEL-SELECTION.md. Was
+        # groq/qwen3.6-27b, measured at 640ms p50 first-token against a
+        # production-sized prompt versus 269ms for this one, and the cause of
+        # 49 of 51 production turns being tagged [SLOW] on 2026-08-23.
+        assert config.llm_provider == "cerebras"
+        assert config.llm_model == "gpt-oss-120b"
         assert config.stt_provider == "deepgram"
         assert config.stt_model == "nova-3"
         assert config.tts_provider == "deepgram"
@@ -105,8 +106,11 @@ class TestModelInfo:
         # 404 on the account. Asserting their PRESENCE was actively harmful —
         # it would have blocked the fix. test_groq_model_menu.py now asserts
         # their absence, with the probe output that proved it.
-        assert GroqModel.QWEN_3_6_27B.value in model_ids
-        assert GroqModel.GPT_OSS_120B.value in model_ids
+        # Narrowed to ONE model per provider for the MVP (2026-08-24). Qwen and
+        # the 120b moved to GROQ_MODELS_HIDDEN — still valid if a tenant has one
+        # stored, just no longer offered. test_groq_model_menu.py asserts that
+        # nobody is locked out by the narrowing.
+        assert model_ids == [GroqModel.GPT_OSS_20B.value]
 
         # Verify each model has required fields
         for model in GROQ_MODELS:
@@ -211,7 +215,7 @@ class TestConfigSerialization:
         assert "tts_provider" in config_dict
         
         # Values should be strings (enum values)
-        assert config_dict["llm_provider"] == "groq"
+        assert config_dict["llm_provider"] == "cerebras"
         assert config_dict["stt_provider"] == "deepgram"
         assert config_dict["tts_provider"] == "deepgram"
     
