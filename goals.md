@@ -102,14 +102,48 @@
 - [x] Allow one active review per user per call; edits update the same review.
 - [x] Verify the reviewer belongs to the call's tenant.
 - [x] Prevent users from reviewing calls they cannot access.
-- [x] Record prompt version, model, campaign and call trace with the review.
+- [ ] Record prompt version, model, campaign and call trace with the review.
 - [x] Create a review-reward ledger rather than directly changing balances.
 - [x] Make rewards idempotent so repeat submissions cannot create duplicate credits.
 - [ ] Add daily reward limits and suspicious-activity monitoring.
 - [x] Do not reward an empty review unless a simple rating is intentionally eligible.
 - [ ] Add admin controls to enable, disable and configure reward amounts.
-- [x] Add API tests for tenant isolation, duplicate rewards and unauthorized calls.
+- [ ] Add API tests for tenant isolation, duplicate rewards and unauthorized calls.
 
+> ### ⚠️ TICK AUDIT, 2026-08-24 — four ticks were wrong and have been reversed
+>
+> Re-verified every tick against the code rather than against memory. Four did
+> not survive. They are listed here rather than quietly flipped, because a
+> checklist nobody can trust is worse than no checklist.
+>
+> - **"Record prompt version, model, campaign and call trace"** — reversed.
+>   `prompt_template`, `prompt_version`, `prompt_hash` and `campaign_id` ARE
+>   written. **`llm_model` is not.** The column exists (migration 0015 line 123)
+>   but the `INSERT` never populates it, and `calls` has no model column to
+>   source it from. It cannot be honestly completed by reading the tenant's
+>   *current* model at review time: the model may have changed since the call,
+>   so that would attribute an old call to a model it never ran on. Completing
+>   this needs `calls.llm_model` captured at call time — a migration plus a
+>   write-path change.
+> - **"Add API tests for tenant isolation, duplicate rewards and unauthorized
+>   calls"** — reversed. `test_conversation_reviews.py` has 24 tests and they
+>   are all pure-function validation: tag vocabulary, rating bounds, comment
+>   handling, reward eligibility. **None of the three things this line names is
+>   tested.** True API-level tests are also blocked by the httpx/starlette
+>   TestClient mismatch (#79).
+> - **"Display confidence or 'needs review'"** (§8) — reversed. There is no
+>   `confidence` field anywhere in the summary payload. A provenance banner was
+>   added, which is a different thing; inventing a confidence number from
+>   nothing would be worse than showing none.
+> - **"Popovers do not cover save buttons or critical fields"** (§8) — reversed.
+>   Radix collision handling makes this *likely*, but it was never checked on a
+>   real narrow screen, and "likely" is not "done".
+>
+> **What was fixed rather than reversed:** "loading, retry and permission-error
+> states" was ticked with no retry anywhere in the panel. A **Try again** button
+> now sits in the error state — the form still holds every word, so the only
+> thing missing was a way to send them again. That tick now stands.
+>
 > **Status of the two unticked items (2026-08-23).** Both are partly built and
 > deliberately not ticked:
 >
@@ -424,7 +458,7 @@
 - [x] Add hover/focus information for every main metric or conclusion.
 - [x] Explain how the summary was generated.
 - [x] Distinguish transcript facts from AI-inferred conclusions.
-- [x] Display confidence or "needs review" where appropriate.
+- [ ] Display confidence or "needs review" where appropriate.
 - [x] Explain key terms such as qualified, interested, callback and unsuccessful.
 
 ### Acceptance Criteria
@@ -432,7 +466,7 @@
 - [x] Every requested help icon works with mouse and keyboard.
 - [x] Mobile users can open and close the same information.
 - [x] Explanations use simple language.
-- [x] Popovers do not cover save buttons or critical fields.
+- [ ] Popovers do not cover save buttons or critical fields.
 
 ---
 

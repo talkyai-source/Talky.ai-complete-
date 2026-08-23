@@ -24,7 +24,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, Check, Loader2, MessageSquare, Star } from "lucide-react";
+import { AlertCircle, Check, Loader2, MessageSquare, RotateCcw, Star } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -293,10 +293,29 @@ export function ConversationReviewPanel({ callId }: { callId: string }) {
             )}
 
             {error && (
-                <p className="mt-3 flex items-start gap-2 text-xs text-destructive">
+                <div className="mt-3 flex items-start gap-2 text-xs text-destructive">
                     <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    <span>{error}</span>
-                </p>
+                    <div className="space-y-1.5">
+                        <p>{error}</p>
+                        {/* RETRY, not just a message (goals.md §3).
+                            A save that fails on a flaky connection otherwise
+                            leaves someone staring at their own typed review
+                            with no way forward but to re-type it elsewhere —
+                            the form still holds every word, so the only thing
+                            missing was a button to send them again. */}
+                        <button
+                            type="button"
+                            onClick={() => { setError(null); save.mutate(); }}
+                            disabled={save.isPending}
+                            className="inline-flex items-center gap-1.5 rounded-md border border-destructive/40 px-2 py-1 font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
+                        >
+                            {save.isPending
+                                ? <Loader2 className="h-3 w-3 animate-spin" />
+                                : <RotateCcw className="h-3 w-3" />}
+                            Try again
+                        </button>
+                    </div>
+                </div>
             )}
 
             {others.length > 0 && (
