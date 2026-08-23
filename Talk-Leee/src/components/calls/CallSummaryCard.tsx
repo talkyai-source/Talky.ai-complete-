@@ -1,7 +1,8 @@
 "use client";
 
-import { Loader2, AlertCircle, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Loader2, AlertCircle, TrendingUp, TrendingDown, Minus, Sparkles } from "lucide-react";
 import type { CallSummaryObj, CallSummaryEnvelope } from "@/lib/dashboard-api";
+import { InfoTip } from "@/components/ui/info-tip";
 
 // ---------------------------------------------------------------------------
 // Outcome chip
@@ -84,17 +85,54 @@ function SummaryBody({ summary }: { summary: CallSummaryObj }) {
 
     return (
         <div className="space-y-4">
+            {/* PROVENANCE, STATED ONCE AND IN THE PAGE (goals.md §8)
+                §8 asks the summary to distinguish transcript facts from AI
+                conclusions, and NOT to hide anything essential inside a
+                tooltip. "This was written by a model and can be wrong" is
+                essential, so it is a visible line — the tooltips below only
+                explain the individual terms. */}
+            <p className="flex items-start gap-1.5 rounded-lg border border-amber-500/25 bg-amber-500/5 px-2.5 py-2 text-xs text-muted-foreground">
+                <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+                <span>
+                    Written by a model from this call&apos;s transcript. Quotes are
+                    taken from what was said; everything else — outcome, sentiment,
+                    qualification — is the model&apos;s <strong>interpretation</strong> and
+                    should be checked against the recording before it is acted on.
+                </span>
+            </p>
+
             {/* Header row: outcome chip + sentiment */}
             <div className="flex flex-wrap items-center gap-2">
                 {summary.outcome && (
-                    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${outcomeColor(summary.outcome)}`}>
-                        {summary.outcome.replace(/_/g, " ")}
+                    <span className="inline-flex items-center gap-1">
+                        <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${outcomeColor(summary.outcome)}`}>
+                            {summary.outcome.replace(/_/g, " ")}
+                        </span>
+                        <InfoTip label="About the call outcome">
+                            <strong>Outcome</strong> — the model&apos;s verdict on how the call ended.
+                            <br />
+                            <strong>Qualified</strong>: the person matches what the campaign is
+                            looking for. <strong>Interested</strong>: willing to hear more, not yet
+                            qualified. <strong>Callback</strong>: asked to be reached at another
+                            time. <strong>Unsuccessful</strong>: no answer, wrong person, or a clear
+                            no.
+                            <br />
+                            An inference, not a fact from the transcript — confirm before treating
+                            it as a lead.
+                        </InfoTip>
                     </span>
                 )}
                 {summary.sentiment && (
-                    <span className="inline-flex items-center gap-1 rounded-full border border-muted-foreground/20 bg-muted px-2.5 py-0.5 text-xs text-muted-foreground">
-                        <SentimentIcon sentiment={summary.sentiment} />
-                        {summary.sentiment}
+                    <span className="inline-flex items-center gap-1">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-muted-foreground/20 bg-muted px-2.5 py-0.5 text-xs text-muted-foreground">
+                            <SentimentIcon sentiment={summary.sentiment} />
+                            {summary.sentiment}
+                        </span>
+                        <InfoTip label="About sentiment">
+                            How the caller sounded overall, judged from their words rather than
+                            their tone of voice — so sarcasm and irritation are easy to miss.
+                            Treat it as a hint about which calls to listen to, not a measurement.
+                        </InfoTip>
                     </span>
                 )}
             </div>
@@ -108,7 +146,17 @@ function SummaryBody({ summary }: { summary: CallSummaryObj }) {
             {hasQualification && (
                 <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5">
                     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                        <SectionHeading>Qualification</SectionHeading>
+                        <span className="inline-flex items-center gap-1.5">
+                            <SectionHeading>Qualification</SectionHeading>
+                            <InfoTip label="About qualification">
+                                Need, decision role, timeline and budget, as the model understood
+                                them from the conversation.
+                                <br />
+                                A blank field means it was <strong>not established on the call</strong> —
+                                not that the answer is no. Anything here is worth confirming
+                                against the recording before it reaches a CRM.
+                            </InfoTip>
+                        </span>
                         {qualificationStatus && (
                             <span
                                 className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${outcomeColor(qualificationStatus)}`}

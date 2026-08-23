@@ -8,6 +8,7 @@
  */
 import { useCallback, useId, useRef } from "react";
 import { motion } from "framer-motion";
+import { InfoTip } from "@/components/ui/info-tip";
 
 export const ACCENT = "#10b981"; // single theme accent (emerald)
 
@@ -27,11 +28,18 @@ function arcPath(cx: number, cy: number, r: number, from: number, to: number) {
 
 export function RadialKnob({
     label, value, min, max, step, onChange,
-    color = ACCENT, format, hint, size = 112,
+    color = ACCENT, format, hint, size = 112, tip,
 }: {
     label: string; value: number; min: number; max: number; step: number;
     onChange: (v: number) => void; color?: string;
     format?: (v: number) => string; hint?: string; size?: number;
+    /**
+     * goals.md §8 — an explanation of what this dial does, shown next to the
+     * hint. A knob labelled "Temp" with a range of 0-2 is meaningless to
+     * anyone who has not used an LLM API before, and guessing is expensive
+     * here: it changes what every future call sounds like.
+     */
+    tip?: React.ReactNode;
 }) {
     const ref = useRef<SVGSVGElement | null>(null);
     const cx = 50, cy = 50, r = 38, START = -135, END = 135;
@@ -92,7 +100,12 @@ export function RadialKnob({
                 <text x={cx} y={cy} textAnchor="middle" fill="currentColor" style={{ fontSize: 15, fontWeight: 700 }}>{display}</text>
                 <text x={cx} y={cy + 11} textAnchor="middle" fill="currentColor" fillOpacity={0.5} style={{ fontSize: 6.5, letterSpacing: 0.5 }}>{label.toUpperCase()}</text>
             </svg>
-            {hint && <span className="text-[11px] text-muted-foreground">{hint}</span>}
+            {(hint || tip) && (
+                <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                    {hint}
+                    {tip && <InfoTip label={`About ${label}`}>{tip}</InfoTip>}
+                </span>
+            )}
         </div>
     );
 }

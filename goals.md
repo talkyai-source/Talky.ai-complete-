@@ -51,14 +51,14 @@
 
 ### P0 — Must be ready by September 10
 
-- [ ] Generic lead-generation prompt connected to live campaign runtime
-- [ ] Prompt version and hash visible in call logs
+- [x] Generic lead-generation prompt connected to live campaign runtime
+- [x] Prompt version and hash visible in call logs
 - [ ] Expanded contact fields available to the agent
 - [ ] Structured interested-lead information capture
-- [ ] Per-conversation review and feedback storage
-- [ ] Security moved from Settings to the main sidebar
+- [x] Per-conversation review and feedback storage
+- [x] Security moved from Settings to the main sidebar
 - [ ] Inbound campaign MVP
-- [ ] AI Options and AI Summary information tooltips
+- [x] AI Options and AI Summary information tooltips
 - [ ] Billing minute top-up MVP
 - [ ] Client-management and multi-tenant validation with 200 test clients
 - [ ] End-to-end test and controlled release
@@ -85,62 +85,117 @@
 
 ### Backend
 
-- [ ] Create a `conversation_reviews` table.
-- [ ] Store `review_id`, `tenant_id`, `user_id`, `call_id`, `campaign_id`, `rating`, `review_tags`, `comment`, `created_at` and `updated_at`.
-- [ ] Add structured tags:
-  - [ ] Agent did not understand
-  - [ ] Agent interrupted caller
-  - [ ] Agent did not answer the question
-  - [ ] Response was too long
-  - [ ] Response was too slow
-  - [ ] Agent repeated itself
-  - [ ] Wrong qualification question
-  - [ ] Wrong call outcome
-  - [ ] Poor objection handling
-  - [ ] Incorrect information
-  - [ ] Good conversation
-- [ ] Allow one active review per user per call; edits update the same review.
-- [ ] Verify the reviewer belongs to the call's tenant.
-- [ ] Prevent users from reviewing calls they cannot access.
-- [ ] Record prompt version, model, campaign and call trace with the review.
-- [ ] Create a review-reward ledger rather than directly changing balances.
-- [ ] Make rewards idempotent so repeat submissions cannot create duplicate credits.
+- [x] Create a `conversation_reviews` table.
+- [x] Store `review_id`, `tenant_id`, `user_id`, `call_id`, `campaign_id`, `rating`, `review_tags`, `comment`, `created_at` and `updated_at`.
+- [x] Add structured tags:
+  - [x] Agent did not understand
+  - [x] Agent interrupted caller
+  - [x] Agent did not answer the question
+  - [x] Response was too long
+  - [x] Response was too slow
+  - [x] Agent repeated itself
+  - [x] Wrong qualification question
+  - [x] Wrong call outcome
+  - [x] Poor objection handling
+  - [x] Incorrect information
+  - [x] Good conversation
+- [x] Allow one active review per user per call; edits update the same review.
+- [x] Verify the reviewer belongs to the call's tenant.
+- [x] Prevent users from reviewing calls they cannot access.
+- [x] Record prompt version, model, campaign and call trace with the review.
+- [x] Create a review-reward ledger rather than directly changing balances.
+- [x] Make rewards idempotent so repeat submissions cannot create duplicate credits.
 - [ ] Add daily reward limits and suspicious-activity monitoring.
-- [ ] Do not reward an empty review unless a simple rating is intentionally eligible.
+- [x] Do not reward an empty review unless a simple rating is intentionally eligible.
 - [ ] Add admin controls to enable, disable and configure reward amounts.
-- [ ] Add API tests for tenant isolation, duplicate rewards and unauthorized calls.
+- [x] Add API tests for tenant isolation, duplicate rewards and unauthorized calls.
+
+> **Status of the two unticked items (2026-08-23).** Both are partly built and
+> deliberately not ticked:
+>
+> - *Daily limits and suspicious-activity monitoring* — the daily cap is
+>   enforced (`reward_daily_cap()`, per user per UTC day, logged as
+>   `review_reward_daily_cap_reached`). There is no separate monitoring or
+>   alerting beyond that log line.
+> - *Admin controls for reward amounts* — configurable, but through environment
+>   variables (`REVIEW_REWARDS_ENABLED`, `REVIEW_REWARD_POINTS`,
+>   `REVIEW_REWARD_DAILY_MAX`), not a UI. Rewards are OFF by default. Both are
+>   P1 concerns and neither blocks review capture, which works with rewards
+>   disabled.
 
 ### Frontend
 
-- [ ] Add a **Review conversation** section to every completed call page/drawer.
-- [ ] Show recording and transcript beside the review form when available.
-- [ ] Add 1–5 rating or thumbs-up/thumbs-down control.
-- [ ] Add multi-select problem tags.
-- [ ] Add an optional written comment.
-- [ ] Show reward eligibility before submission.
-- [ ] Show a clear confirmation after successful submission.
-- [ ] Allow review editing without issuing a second reward.
-- [ ] Add loading, retry and permission-error states.
-- [ ] Add accessibility labels and keyboard navigation.
+- [x] Add a **Review conversation** section to every completed call page/drawer.
+- [x] Show recording and transcript beside the review form when available.
+- [x] Add 1–5 rating or thumbs-up/thumbs-down control.
+- [x] Add multi-select problem tags.
+- [x] Add an optional written comment.
+- [x] Show reward eligibility before submission.
+- [x] Show a clear confirmation after successful submission.
+- [x] Allow review editing without issuing a second reward.
+- [x] Add loading, retry and permission-error states.
+- [x] Add accessibility labels and keyboard navigation.
+- [x] Put the feedback controls **beside the recording's play button**, not only
+      on the call page.
+- [x] Offer all three response types on every recording: **thumbs up/down, a
+      voice note, and typed text**.
+- [x] Hard-cap a feedback voice note at **30 seconds**.
+- [x] Surface submitted reviews in the **admin panel** (`/admin/reviews`).
+
+> **Where reviewing actually happens (2026-08-24).** Three ways to answer a
+> recording, sitting on the recording itself, because they cost different
+> amounts and carry different amounts of information — force one shape and
+> people use none:
+>
+> - **Thumbs up / down** — one click, says only better/worse, but it is the one
+>   people will actually give while working down a list. Thumbs-down writes
+>   rating 2, which puts the call in the "needs listening" queue (1s and 2s);
+>   1 stays available to mean something worse, chosen deliberately in the panel.
+> - **A voice note, capped at 30 seconds** — the fastest way to say something
+>   nuanced ("she'd already said no twice and it kept pitching"), which is
+>   exactly the feedback nobody types. The recorder stops itself at 30s, so it
+>   is a cutoff rather than a warning, and the server validates it too.
+> - **Typed text** — the only option when you are somewhere you cannot talk.
+>
+> Thumb and text write `conversation_reviews` (rating + comment, one review per
+> user per call). The voice note writes `call_feedback` — one note per call,
+> stored durably then transcribed. Kept separate because a voice note has a
+> lifecycle (upload, transcribe, retry) and a review is a structured judgement.
+>
+> **None of them overwrites another.** `submitReview` is a PUT of the whole
+> review, so a thumb resends the existing comment and tags untouched, and saving
+> a comment resends the existing rating. Without that, whichever control you
+> used last would silently erase the other.
+>
+> Live on the **Recordings** page (full bar under each player) and the **calls
+> list** (thumbs only — the row is a fixed grid, and an expanding panel in an
+> `auto` column would squash the other columns; the full panel is one click away
+> on the call page).
+>
+> Reading everyone's reviews is a different job from leaving one, so the
+> management view moved from a top-level `/reviews` route to `/admin/reviews`.
+> Its endpoint was always `require_admin_tenant`; only the navigation disagreed,
+> which meant a non-admin who clicked it got a bare 403. `/reviews` now
+> redirects, preserving existing links.
 
 ### Safe Improvement Loop
 
-- [ ] Do not let a single review automatically rewrite the production prompt.
-- [ ] Aggregate reviews by prompt version and failure category.
-- [ ] Manually verify low-rated calls against recordings/transcripts.
+- [x] Do not let a single review automatically rewrite the production prompt.
+- [x] Aggregate reviews by prompt version and failure category.
+- [x] Manually verify low-rated calls against recordings/transcripts.
 - [ ] Convert verified problems into evaluation cases.
 - [ ] Test candidate prompts against the evaluation set.
 - [ ] Deploy a prompt only after human approval and canary testing.
-- [ ] Retain rollback access to the previous prompt version.
+- [x] Retain rollback access to the previous prompt version.
 
 ### Acceptance Criteria
 
-- [ ] A valid user can review an accessible completed call.
-- [ ] Unauthorized users receive no call or review data.
-- [ ] A call cannot generate duplicate rewards for the same reviewer.
-- [ ] Review edits preserve the original reward transaction.
-- [ ] Admin can filter results by campaign, prompt version, rating and tag.
-- [ ] Review submission does not change production prompts automatically.
+- [x] A valid user can review an accessible completed call.
+- [x] Unauthorized users receive no call or review data.
+- [x] A call cannot generate duplicate rewards for the same reviewer.
+- [x] Review edits preserve the original reward transaction.
+- [x] Admin can filter results by campaign, prompt version, rating and tag.
+- [x] Review submission does not change production prompts automatically.
 
 ---
 
@@ -148,18 +203,36 @@
 
 ### Frontend
 
-- [ ] Add **Security** to the main left navigation.
-- [ ] Remove or redirect the old Security entry inside Settings.
-- [ ] Preserve deep links and bookmarks with a route redirect.
-- [ ] Display only security controls the current role can manage.
-- [ ] Include sections for:
-  - [ ] Password/account security
-  - [ ] Multi-factor authentication status
-  - [ ] Active sessions
-  - [ ] API keys/tokens
-  - [ ] Audit activity
+- [x] Add **Security** to the main left navigation.
+- [x] Remove or redirect the old Security entry inside Settings.
+- [x] Preserve deep links and bookmarks with a route redirect.
+- [x] Display only security controls the current role can manage.
+- [x] Include sections for:
+  - [x] Password/account security
+  - [x] Multi-factor authentication status
+  - [x] Active sessions
+  - [x] API keys/tokens
+  - [x] Audit activity
   - [ ] Allowed IPs, if supported
-  - [ ] Data retention and recording controls, if supported
+  - [x] Data retention and recording controls, if supported
+
+> **Built 2026-08-24 — `/security`, reachable from the sidebar.**
+>
+> Password change (which signs out every other session), passkeys, 2FA status
+> with turn-off and recovery-code rotation, and active sessions. API keys and
+> audit activity appear only for admins — and the backend enforces that
+> independently, so hiding them is convenience, not the boundary.
+>
+> **"Allowed IPs" is left unticked because it is not supported.** There is no IP
+> allow-list anywhere in the backend. The page says so in as many words rather
+> than showing an empty panel that implies a control exists — a security page
+> that overstates what it enforces is worse than one that admits a gap.
+>
+> The Settings → Security tab is now a pointer to `/security`. The controls were
+> *moved*, not copied: MFA disable and recovery-code regeneration went with
+> them, so the same panel cannot exist in two files and drift apart.
+>
+> Retention is shown read-only, because it is set by plan rather than per user.
 
 ### Backend/Security
 
@@ -172,9 +245,9 @@
 
 ### Acceptance Criteria
 
-- [ ] Security is directly accessible from the left sidebar.
-- [ ] Old URLs redirect correctly.
-- [ ] Unauthorized controls are hidden and rejected by the backend.
+- [x] Security is directly accessible from the left sidebar.
+- [x] Old URLs redirect correctly.
+- [x] Unauthorized controls are hidden and rejected by the backend.
 - [ ] Sensitive mutations appear in the audit log.
 
 ---
@@ -329,37 +402,37 @@
 
 ### Component
 
-- [ ] Build one reusable tooltip/popover component.
-- [ ] Support mouse hover, keyboard focus and mobile tap.
-- [ ] Add a short label plus optional "Learn more" content.
-- [ ] Avoid hiding essential warnings only inside tooltips.
-- [ ] Ensure the popup stays inside the viewport.
+- [x] Build one reusable tooltip/popover component.
+- [x] Support mouse hover, keyboard focus and mobile tap.
+- [x] Add a short label plus optional "Learn more" content.
+- [x] Avoid hiding essential warnings only inside tooltips.
+- [x] Ensure the popup stays inside the viewport.
 
 ### AI Options
 
-- [ ] Add information help for **Tokens** explaining:
-  - [ ] Tokens are pieces of input/output text.
-  - [ ] Higher limits allow longer replies but may increase latency and cost.
-  - [ ] Voice-agent replies should normally remain short.
-- [ ] Add information help for **Creativity/Temperature** explaining:
-  - [ ] Lower values are more consistent and predictable.
-  - [ ] Higher values are more varied but may increase mistakes.
-  - [ ] Recommended lead-generation range is shown without silently changing it.
+- [x] Add information help for **Tokens** explaining:
+  - [x] Tokens are pieces of input/output text.
+  - [x] Higher limits allow longer replies but may increase latency and cost.
+  - [x] Voice-agent replies should normally remain short.
+- [x] Add information help for **Creativity/Temperature** explaining:
+  - [x] Lower values are more consistent and predictable.
+  - [x] Higher values are more varied but may increase mistakes.
+  - [x] Recommended lead-generation range is shown without silently changing it.
 
 ### AI Summary
 
-- [ ] Add hover/focus information for every main metric or conclusion.
-- [ ] Explain how the summary was generated.
-- [ ] Distinguish transcript facts from AI-inferred conclusions.
-- [ ] Display confidence or "needs review" where appropriate.
-- [ ] Explain key terms such as qualified, interested, callback and unsuccessful.
+- [x] Add hover/focus information for every main metric or conclusion.
+- [x] Explain how the summary was generated.
+- [x] Distinguish transcript facts from AI-inferred conclusions.
+- [x] Display confidence or "needs review" where appropriate.
+- [x] Explain key terms such as qualified, interested, callback and unsuccessful.
 
 ### Acceptance Criteria
 
-- [ ] Every requested help icon works with mouse and keyboard.
-- [ ] Mobile users can open and close the same information.
-- [ ] Explanations use simple language.
-- [ ] Popovers do not cover save buttons or critical fields.
+- [x] Every requested help icon works with mouse and keyboard.
+- [x] Mobile users can open and close the same information.
+- [x] Explanations use simple language.
+- [x] Popovers do not cover save buttons or critical fields.
 
 ---
 

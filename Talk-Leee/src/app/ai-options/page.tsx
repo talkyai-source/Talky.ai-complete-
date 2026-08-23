@@ -634,8 +634,44 @@ export default function AIOptionsPage() {
                                 )}
                             </div>
                             <div className="flex items-center justify-center gap-4 rounded-xl border border-border bg-muted/30 px-4 py-2">
-                                <RadialKnob label="Temp" value={config.llm_temperature} min={0} max={2} step={0.1} format={(v) => v.toFixed(1)} hint="creativity" onChange={(v) => setConfig({ ...config, llm_temperature: v })} />
-                                <RadialKnob label="Tokens" value={config.llm_max_tokens} min={50} max={5000} step={50} hint="max length" onChange={(v) => setConfig({ ...config, llm_max_tokens: v })} />
+                                <RadialKnob
+                                    label="Temp" value={config.llm_temperature}
+                                    min={0} max={2} step={0.1}
+                                    format={(v) => v.toFixed(1)} hint="creativity"
+                                    onChange={(v) => setConfig({ ...config, llm_temperature: v })}
+                                    tip={
+                                        <>
+                                            <strong>Creativity</strong> — how much the agent varies its wording.
+                                            <br />
+                                            <strong>Lower</strong> is more consistent and predictable: it says
+                                            nearly the same thing each time.
+                                            <br />
+                                            <strong>Higher</strong> is more varied, but more likely to
+                                            improvise something wrong.
+                                            <br />
+                                            For lead generation, around <strong>0.4–0.6</strong> works well.
+                                            Nothing is changed for you — the dial stays where you put it.
+                                        </>
+                                    }
+                                />
+                                <RadialKnob
+                                    label="Tokens" value={config.llm_max_tokens}
+                                    min={50} max={5000} step={50} hint="max length"
+                                    onChange={(v) => setConfig({ ...config, llm_max_tokens: v })}
+                                    tip={
+                                        <>
+                                            <strong>Tokens</strong> are pieces of text — roughly ¾ of a word
+                                            each — counted across what the agent reads and what it says.
+                                            <br />
+                                            A higher limit allows longer replies, but usually costs more and
+                                            can add latency before the caller hears anything.
+                                            <br />
+                                            On a phone call, replies should normally stay <strong>short</strong>;
+                                            a long monologue is worse than a brief answer even when it is
+                                            correct.
+                                        </>
+                                    }
+                                />
                             </div>
                             {(() => {
                                 const advice = temperatureAdvice(config.llm_temperature);

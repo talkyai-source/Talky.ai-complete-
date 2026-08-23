@@ -61,11 +61,18 @@ const navigation: NavItem[] = [
     { name: "Contacts", href: "/contacts", icon: Users },
     { name: "Analytics", href: "/analytics", icon: BarChart2 },
     { name: "Recordings", href: "/recordings", icon: Volume2 },
-    { name: "Agent Reviews", href: "/reviews", icon: MessageSquare },
+    // Agent Reviews moved to the admin panel (/admin/reviews). Rating a call
+    // happens inline next to its play button; READING everyone's reviews is an
+    // admin activity, and its endpoint was already require_admin_tenant — so
+    // offering it to every user only produced a 403 that looked like a bug.
     { name: "Connectors", href: "/connectors", icon: Plug },
     // Assistant moved out of this group — it's queued for v2 and lives
     // in Settings as a "Coming soon" tile.
     { name: "AI Options", href: "/ai-options", icon: Cpu },
+    // goals.md §4: Security is a main destination, not a tab three levels down
+    // inside Settings. Everything on it — is 2FA on, what is still signed in,
+    // who changed that — is looked for in a hurry.
+    { name: "Security", href: "/security", icon: ShieldCheck },
     {
         name: "Billing & Logs", href: "/billing", icon: CreditCard,
         children: [
@@ -79,6 +86,12 @@ const navigation: NavItem[] = [
             { name: "Audit & Access", href: "/admin", icon: Shield },
             { name: "Voice Security", href: "/admin/voice-security", icon: ShieldCheck },
             { name: "Abuse Detection", href: "/admin/abuse-detection", icon: ShieldAlert },
+        ],
+    },
+    {
+        name: "Agent Quality", href: "/admin/reviews", icon: MessageSquare, adminOnly: true,
+        children: [
+            { name: "Agent Reviews", href: "/admin/reviews", icon: MessageSquare },
         ],
     },
     {
