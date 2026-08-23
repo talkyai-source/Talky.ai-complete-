@@ -314,6 +314,129 @@ async def test_auth_refusal_carries_the_machine_readable_code():
 
 
 # ---------------------------------------------------------------------------
+# 3b. transcripts — the row id, the persist, and the order of the two
+# ---------------------------------------------------------------------------
+
+class _FakeAcquire:
+    """Stand-in for acquire_with_tenant's async context manager."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    async def __aenter__(self):
+        return self._conn
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+@pytest.mark.asyncio
+async def test_the_test_call_row_id_is_the_voice_session_id():
+    """A random uuid4 here silently destroys the transcript.
+
+    turn_ender flushes every turn with `UPDATE calls ... WHERE id = <target>`,
+    and for a browser session `_resolve_transcript_target_call_id` returns None
+    on purpose, so the target falls back to `session.call_id`. If the row was
+    inserted under any OTHER id, that UPDATE matches zero rows on every single
+    turn and raises nothing — the call detail page just stays empty forever.
+    """
+    import uuid as _uuid
+
+    session_uuid = str(_uuid.uuid4())
+    voice_session = SimpleNamespace(call_id=session_uuid, talklee_call_id=None)
+    conn = SimpleNamespace(execute=AsyncMock())
+    container = SimpleNamespace(db_pool=object())
+    config = SimpleNamespace(
+        prompt_template="tpl", prompt_version="lead_gen@3", prompt_hash="deadbeef"
+    )
+
+    with patch(
+        "app.core.db_utils.acquire_with_tenant",
+        lambda pool, tid: _FakeAcquire(conn),
+    ):
+        returned = await campaign_test_ws._record_test_call(
+            container, str(_uuid.uuid4()), str(_uuid.uuid4()), voice_session, config
+        )
+
+    assert returned == session_uuid, "the helper must report the session id back"
+    inserted_id = conn.execute.await_args.args[1]
+    assert inserted_id == _uuid.UUID(session_uuid), (
+        f"calls.id was {inserted_id}, not the voice-session id {session_uuid}. "
+        "The per-turn transcript flush targets the session id and will match "
+        "zero rows."
+    )
+
+
+@pytest.mark.asyncio
+async def test_transcript_is_persisted_and_bound_to_the_test_row():
+    """save_call_transcript_on_hangup returns early without _dialer_call_id.
+
+    That binding normally comes from a PBX external_call_uuid lookup, which a
+    browser session has no equivalent of, so it has to be set explicitly or the
+    `transcripts` row is never written — and GET /calls/{id}/transcript reads
+    that table FIRST.
+    """
+    import uuid as _uuid
+
+    call_id = str(_uuid.uuid4())
+    sentinel_service = object()
+    voice_session = SimpleNamespace(
+        pipeline=SimpleNamespace(transcript_service=sentinel_service)
+    )
+    container = SimpleNamespace(is_initialized=True, db_pool=object())
+    saver = AsyncMock()
+
+    with patch(
+        "app.services.scripts.call_transcript_persister.save_call_transcript_on_hangup",
+        saver,
+    ):
+        await campaign_test_ws._persist_test_transcript(
+            voice_session, "tenant-A", call_id, container
+        )
+
+    saver.assert_awaited_once()
+    assert voice_session._dialer_call_id == call_id
+    assert voice_session._dialer_tenant_id == "tenant-A"
+    assert saver.await_args.kwargs["transcript_service"] is sentinel_service
+
+
+@pytest.mark.asyncio
+async def test_transcript_persists_before_the_session_is_torn_down():
+    """Order is load-bearing, and getting it wrong fails SILENTLY.
+
+    end_session cancels the pipeline task, and the transcript buffer lives on
+    that pipeline's transcript_service. Persist after teardown and the row is
+    written empty — which looks identical to "the caller said nothing".
+    """
+    order: list[str] = []
+    tenant_cfg = AIProviderConfig(pipeline_mode="cascaded")
+
+    async def _fake_persist(*a, **k):
+        order.append("persist")
+
+    async def _fake_end(*a, **k):
+        order.append("end_session")
+
+    with _Harness(tenant_cfg=tenant_cfg, campaign_row=_CAMPAIGN) as h:
+        h.orchestrator.end_session = AsyncMock(side_effect=_fake_end)
+        with (
+            patch.object(campaign_test_ws, "_record_test_call",
+                         AsyncMock(return_value="row-1")),
+            patch.object(campaign_test_ws, "_persist_test_transcript", _fake_persist),
+            patch.object(campaign_test_ws, "_finalise_test_call", AsyncMock()),
+        ):
+            ws = FakeWebSocket(cookies={"talky_at": "tok"},
+                               recv_frames=[_end_call_frame()])
+            await campaign_test_ws.campaign_test_websocket(
+                ws, "camp-1", first_speaker="agent"
+            )
+
+    assert order == ["persist", "end_session"], (
+        f"expected the transcript to be saved before teardown; got {order}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # 4. campaign not owned by tenant (fetch miss) → IDOR guard
 # ---------------------------------------------------------------------------
 

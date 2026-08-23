@@ -18,8 +18,14 @@ The only per-call knob is first-speaker (``?first_speaker=agent|user``), the
 same choice a real Start offers: agent-first greets immediately (realtime:
 greet_on_start; cascaded: streamed greeting), caller-first waits for the user.
 
-No ``calls`` row is created and ``event_logging_enabled`` stays False, so a test
-session is NOT billed against plan minutes.
+A test session DOES get a ``calls`` row, flagged ``is_test`` (Alembic 0017), so
+that everything hanging off a call — recording, transcript, prompt version,
+feedback voice note, conversation review — can actually be exercised from the
+test button. Nothing bills it: every query that counts money, dial capacity or
+abuse says ``AND NOT is_test`` explicitly, and ``billable_calls`` excludes it.
+
+The row's id is deliberately ``voice_session.call_id``; see ``_record_test_call``
+for why anything else silently loses the transcript.
 """
 
 import json
@@ -145,7 +151,18 @@ async def _record_test_call(
     try:
         from app.core.db_utils import acquire_with_tenant
 
-        call_uuid = str(uuid.uuid4())
+        # THE ROW ID MUST BE THE VOICE-SESSION ID (2026-08-23)
+        #
+        # Minting a fresh uuid4 here is what stopped transcripts appearing.
+        # turn_ender flushes each turn with
+        # `UPDATE calls ... WHERE id = <target>`, and for a browser session
+        # `_resolve_transcript_target_call_id` deliberately returns None (this
+        # session is not in the telephony map), so the target falls back to
+        # `session.call_id`. Against an unrelated random row id that matched
+        # ZERO rows, every turn, with no error raised — precisely the defect
+        # call_transcript_persister.py was written to fix for outbound calls,
+        # reintroduced here from the other direction.
+        call_uuid = str(getattr(voice_session, "call_id", "") or uuid.uuid4())
         talklee_id = getattr(voice_session, "talklee_call_id", None) or call_uuid
         async with acquire_with_tenant(pool, str(tenant_id)) as conn:
             await conn.execute(
@@ -207,6 +224,59 @@ async def _finalise_test_call(container, tenant_id, call_id, started_at) -> None
     except Exception:  # noqa: BLE001
         logger.warning("campaign_test_call_finalise_failed call=%s",
                        str(call_id)[:8], exc_info=True)
+
+
+async def _persist_test_transcript(voice_session, tenant_id, call_id, container) -> None:
+    """Write the test session's transcript to ``calls`` + ``transcripts``.
+
+    A phone call gets this from lifecycle's teardown. A browser test session
+    calls ``orchestrator.end_session()`` directly and never passes through that
+    path, so nothing was ever written and the call detail page showed an empty
+    transcript no matter how long you talked.
+
+    ``save_call_transcript_on_hangup`` returns early unless ``_dialer_call_id``
+    is set. That binding normally comes from ``bind_telephony_call``'s
+    ``external_call_uuid`` lookup, which has no meaning for a browser session —
+    there is no PBX channel. Setting it explicitly is how you aim the persist at
+    a row you already know the id of.
+
+    This writes the ``transcripts`` row specifically: ``GET
+    /calls/{id}/transcript`` reads that table FIRST and only falls back to
+    ``calls.transcript``, so without it the richer view (turns, word counts)
+    stays empty even once the incremental flush starts landing.
+
+    Never raises — a missing transcript must not break teardown.
+    """
+    try:
+        from app.services.scripts.call_transcript_persister import (
+            save_call_transcript_on_hangup,
+        )
+
+        pipeline = getattr(voice_session, "pipeline", None)
+        transcript_service = getattr(pipeline, "transcript_service", None)
+        if transcript_service is None:
+            # Realtime sessions have no cascaded pipeline; the bridge stashes
+            # its TranscriptService on the session itself.
+            transcript_service = getattr(voice_session, "transcript_service", None)
+        if transcript_service is None:
+            logger.info(
+                "campaign_test_transcript_skipped call=%s — no transcript service",
+                str(call_id)[:8],
+            )
+            return
+
+        voice_session._dialer_call_id = str(call_id)
+        voice_session._dialer_tenant_id = str(tenant_id)
+        await save_call_transcript_on_hangup(
+            voice_session=voice_session,
+            transcript_service=transcript_service,
+            db_pool=container.db_pool if container.is_initialized else None,
+        )
+        logger.info("campaign_test_transcript_persisted call=%s", str(call_id)[:8])
+    except Exception:  # noqa: BLE001 — see docstring
+        logger.warning(
+            "campaign_test_transcript_failed call=%s", str(call_id)[:8], exc_info=True
+        )
 
 
 @router.websocket("/ws/campaign-test/{campaign_id}")
@@ -534,6 +604,13 @@ async def campaign_test_websocket(
                     await receiver_task
                 except asyncio.CancelledError:
                     pass
+            # BEFORE teardown, like the phone path: end_session cancels the
+            # pipeline, and the transcript buffer lives on that pipeline's
+            # transcript_service. Persist first or there is nothing left to read.
+            if voice_session and test_call_id:
+                await _persist_test_transcript(
+                    voice_session, tenant_id, test_call_id, container
+                )
             if voice_session:
                 await container.voice_orchestrator.end_session(voice_session)
             # Close the flagged row out so the call detail page shows a finished
