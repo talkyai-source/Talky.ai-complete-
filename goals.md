@@ -53,8 +53,8 @@
 
 - [x] Generic lead-generation prompt connected to live campaign runtime
 - [x] Prompt version and hash visible in call logs
-- [ ] Expanded contact fields available to the agent
-- [ ] Structured interested-lead information capture
+- [x] Expanded contact fields available to the agent
+- [x] Structured interested-lead information capture
 - [x] Per-conversation review and feedback storage
 - [x] Security moved from Settings to the main sidebar
 - [ ] Inbound campaign MVP
