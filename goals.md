@@ -59,7 +59,7 @@
 - [x] Security moved from Settings to the main sidebar
 - [ ] Inbound campaign MVP
 - [x] AI Options and AI Summary information tooltips
-- [ ] Billing minute top-up MVP
+- [x] Billing minute top-up MVP
 - [ ] Client-management and multi-tenant validation with 200 test clients
 - [ ] End-to-end test and controlled release
 
@@ -474,33 +474,37 @@
 
 ### Backend
 
-- [ ] Define approved top-up packages and currency.
-- [ ] Create a top-up order before payment.
-- [ ] Use the payment provider's hosted checkout or secure payment flow.
-- [ ] Verify signed payment webhooks.
-- [ ] Make webhook processing idempotent.
-- [ ] Credit minutes only after verified successful payment.
-- [ ] Record money and minutes in an immutable billing ledger.
-- [ ] Handle failed, cancelled, duplicate, refunded and disputed payments.
-- [ ] Send receipt/confirmation according to configured channel.
-- [ ] Add admin reconciliation view or export.
+- [x] Define approved top-up packages and currency.
+- [x] Create a top-up order before payment.
+- [x] Use the payment provider's hosted checkout or secure payment flow.
+- [x] Verify signed payment webhooks.
+- [x] Make webhook processing idempotent.
+- [x] Credit minutes only after verified successful payment.
+- [x] Record money and minutes in an immutable billing ledger.
+- [x] Handle failed, cancelled, duplicate, refunded and disputed payments.
+- [x] Send receipt/confirmation according to configured channel.
+- [x] Add admin reconciliation view or export.
 
 ### Frontend
 
-- [ ] Add **Top up minutes** to Billing.
-- [ ] Show current minute balance.
-- [ ] Show package minutes, price, currency and expiry rules.
-- [ ] Show payment status and top-up history.
-- [ ] Prevent double submission while checkout is starting.
-- [ ] Show clear failure and retry guidance.
+- [x] Add **Top up minutes** to Billing.
+- [x] Show current minute balance.
+- [x] Show package minutes, price, currency and expiry rules.
+- [x] Show payment status and top-up history.
+- [x] Prevent double submission while checkout is starting.
+- [x] Show clear failure and retry guidance.
 
 ### Acceptance Criteria
 
-- [ ] Successful verified payment credits minutes once.
-- [ ] Duplicate webhook does not duplicate minutes.
-- [ ] Failed/cancelled payment adds no minutes.
-- [ ] Tenant billing records remain isolated.
-- [ ] New balance is reflected in call quota enforcement.
+- [x] Successful verified payment credits minutes once.
+- [x] Duplicate webhook does not duplicate minutes.
+- [x] Failed/cancelled payment adds no minutes.
+- [ ] Tenant billing records remain isolated. — RLS policies written and every
+      query is tenant-scoped, but this stays OPEN until #80: the production DB
+      role is a superuser with BYPASSRLS, so no policy on any table is actually
+      enforced. Ticking this would be claiming an isolation the database is not
+      currently providing.
+- [x] New balance is reflected in call quota enforcement.
 
 ---
 

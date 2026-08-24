@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Suspense } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ import {
   useOverageAlerts,
   useBillingAdjustments,
 } from "@/lib/billing-api";
+import { TopupCard } from "@/components/billing/topup-card";
 
 type Subscription = {
   status: string;
@@ -149,6 +151,11 @@ export default function BillingPage() {
           <>
             <PlanDisplay subscription={subscription} />
             <OverageAlertsCard alerts={overage} usage={usage} />
+            {/* Suspense: TopupCard reads the ?topup= return param via
+                useSearchParams, which Next requires a boundary for. */}
+            <Suspense fallback={null}>
+              <TopupCard />
+            </Suspense>
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
               <MinutesTracker subscription={subscription} usage={usage} />
               <CallStats daily={daily} />
