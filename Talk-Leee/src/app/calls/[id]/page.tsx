@@ -11,6 +11,7 @@ import { extendedApi } from "@/lib/extended-api";
 import { statusPillClass } from "@/lib/status-colors";
 import { VoiceFeedbackRecorder } from "@/components/calls/voice-feedback-recorder";
 import { ConversationReviewPanel } from "@/components/calls/conversation-review-panel";
+import { LeadDetailsPanel } from "@/components/calls/lead-details-panel";
 
 // Shared util so call detail agrees with call history + contacts on green/red.
 const getStatusStyle = statusPillClass;
@@ -262,6 +263,22 @@ export default function CallDetailPage() {
                             transition={{ delay: 0.3 }}
                         >
                             <ConversationReviewPanel callId={callId} />
+                        </motion.div>
+
+                        {/* What the agent got OUT of the call, and how much to
+                            trust each piece (goals.md §7). Sits beside the
+                            review for the same reason the review sits beside
+                            the recording: you check a captured value against
+                            what was actually said. */}
+                        <motion.div
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.35 }}
+                        >
+                            <LeadDetailsPanel
+                                callId={callId}
+                                campaignId={call?.campaign_id ?? undefined}
+                            />
                         </motion.div>
                     </div>
 

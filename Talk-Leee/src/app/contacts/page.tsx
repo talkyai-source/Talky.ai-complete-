@@ -10,6 +10,7 @@ import { dashboardApi, Campaign, Contact } from "@/lib/dashboard-api";
 import { extendedApi, BulkImportResponse } from "@/lib/extended-api";
 import { parseContactsCsv } from "@/lib/contact-csv";
 import { ContactLists } from "@/components/campaigns/contact-lists";
+import { CsvImportMapper } from "@/components/contacts/csv-import-mapper";
 import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Download, X, Search, Plus, Pencil, Trash2 } from "lucide-react";
 import { motion } from "framer-motion";
 import Link from "next/link";
@@ -98,7 +99,16 @@ function parseCsvText(text: string): ParseSummary {
     return { headers, rows, valid, invalid };
 }
 
-const TEMPLATE_CSV = "phone_number,first_name,last_name,email\n+15551234567,Jane,Doe,jane@example.com\n+15557654321,John,Smith,\n";
+// The canonical contact model (goals.md §11). Widened 2026-08-25 from four
+// columns to the full set the agent and the dialler can actually use — a
+// template that omits job title and calling notes trains people to upload
+// files that cannot carry them.
+const TEMPLATE_CSV =
+    "phone_number,first_name,last_name,email,company_name,job_title," +
+    "business_number,best_time_to_call,timezone,calling_notes," +
+    "preferred_contact_method,do_not_call\n" +
+    "+15551234567,Jane,Doe,jane@example.com,Acme Roofing,Quantity Surveyor," +
+    "+15550001111,mornings before 10,Europe/London,call back after the tender closes,phone,no\n";
 
 export default function ContactsPage() {
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -658,7 +668,26 @@ export default function ContactsPage() {
                     </motion.div>
 
                     {/* Collapsible upload panel + last import result */}
-                    {showUploadPanel && uploadCard}
+                    {showUploadPanel && (
+                        <>
+                            {/* Look at the file BEFORE it becomes live dials
+                                (goals.md §11): how we read each column, which
+                                rows have problems, and who appears twice.
+                                Writes nothing — the existing upload below is
+                                still what commits. */}
+                            <div className="content-card mb-4">
+                                <h3 className="mb-1 text-sm font-semibold text-foreground">
+                                    Check the file first
+                                </h3>
+                                <p className="mb-3 text-xs text-muted-foreground">
+                                    See how your columns will be read and what needs
+                                    attention. Nothing is saved at this step.
+                                </p>
+                                <CsvImportMapper />
+                            </div>
+                            {uploadCard}
+                        </>
+                    )}
                     {resultCard}
 
                     {/* Contact lists — one card per uploaded list */}
