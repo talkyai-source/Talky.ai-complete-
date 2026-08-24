@@ -203,9 +203,105 @@ class BillingService:
         }
     
     # =========================================================================
+    # Minute Top-Ups (one-time payments, goals.md §9)
+    # =========================================================================
+
+    async def create_topup_checkout_session(
+        self,
+        *,
+        tenant_id: str,
+        email: str,
+        order_id: str,
+        minutes: int,
+        price_cents: int,
+        currency: str,
+        product_name: str,
+        success_url: str,
+        cancel_url: str,
+        business_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """One-time checkout for a minute bundle.
+
+        Three things here differ from the subscription flow and each one
+        matters:
+
+        ``mode="payment"``   A top-up is bought once. Opening it in
+                             subscription mode would silently enrol the
+                             customer in a recurring charge.
+
+        ``metadata.purpose`` The webhook receives ONE ``checkout.session.completed``
+                             stream for both flows. Without this marker the
+                             subscription handler would run on a top-up and
+                             overwrite ``plan_id`` and ``stripe_subscription_id``
+                             with the nulls a one-time session carries —
+                             a top-up purchase would break the customer's plan.
+
+        inline ``price_data`` The amount comes from the package row we already
+                             snapshotted onto the order, so no Stripe Price
+                             object has to exist first and the customer is
+                             charged exactly what the order says.
+        """
+        customer_result = await self.create_or_get_customer(
+            tenant_id, email, business_name
+        )
+        customer_id = customer_result["customer_id"]
+
+        # Shared by the session and the resulting PaymentIntent. The charge and
+        # refund events carry no checkout session, so the payment intent has to
+        # carry enough to identify the order on its own.
+        meta = {
+            "purpose": "minute_topup",
+            "tenant_id": tenant_id,
+            "order_id": str(order_id),
+            "minutes": str(minutes),
+        }
+
+        if self.mock_mode:
+            session_id = f"cs_mock_topup_{str(order_id)[:8]}"
+            return {
+                "session_id": session_id,
+                "checkout_url": (
+                    f"{success_url}?session_id={session_id}&mock=true"
+                ),
+                "mock_mode": True,
+                "message": (
+                    "Mock checkout session created. Configure STRIPE_SECRET_KEY "
+                    "for real payments."
+                ),
+            }
+
+        session = stripe.checkout.Session.create(
+            customer=customer_id,
+            mode="payment",
+            line_items=[{
+                "price_data": {
+                    "currency": currency.lower(),
+                    "product_data": {"name": product_name},
+                    "unit_amount": price_cents,
+                },
+                "quantity": 1,
+            }],
+            success_url=success_url + "?session_id={CHECKOUT_SESSION_ID}",
+            cancel_url=cancel_url,
+            client_reference_id=str(order_id),
+            metadata=meta,
+            payment_intent_data={"metadata": meta},
+        )
+
+        logger.info(
+            "topup_checkout_created session=%s order=%s tenant=%s minutes=%d",
+            session.id, str(order_id)[:8], str(tenant_id)[:8], minutes,
+        )
+        return {
+            "session_id": session.id,
+            "checkout_url": session.url,
+            "mock_mode": False,
+        }
+
+    # =========================================================================
     # Customer Portal
     # =========================================================================
-    
+
     async def create_portal_session(
         self,
         tenant_id: str,
@@ -355,6 +451,24 @@ class BillingService:
 
         logger.info(f"Processing webhook event: {event_type} (id={event_id})")
 
+        # ── minute top-ups branch off FIRST ─────────────────────────────────
+        # Stripe delivers subscription checkouts and top-up checkouts down the
+        # same `checkout.session.completed` stream. Routing on the purpose we
+        # stamped at creation time is what keeps a top-up from reaching
+        # _handle_checkout_completed, which would null out the tenant's
+        # plan_id and stripe_subscription_id from a one-time session's empty
+        # fields — breaking the plan of a customer who just gave us money.
+        if await self._is_topup_event(event_type, data):
+            try:
+                return await self._handle_topup_event(event_type, data, event_id)
+            except Exception:
+                # The claim was taken before the handler ran, so a redelivery
+                # would be discarded as a duplicate and the minutes would never
+                # be credited. Release it and let Stripe retry.
+                if event_id:
+                    await self._release_webhook_claim(event_id)
+                raise
+
         handlers = {
             "checkout.session.completed": self._handle_checkout_completed,
             "customer.subscription.created": self._handle_subscription_created,
@@ -398,6 +512,199 @@ class BillingService:
         except Exception as e:  # noqa: BLE001
             logger.warning("webhook idempotency claim failed (processing anyway): %s", e)
             return True
+
+    async def _release_webhook_claim(self, event_id: str) -> None:
+        """Undo a claim whose handler then failed.
+
+        Without this, a transient database error while crediting a top-up is
+        permanent: the claim is committed before the handler runs, so Stripe's
+        redelivery is discarded as a duplicate and the customer never receives
+        the minutes they paid for. Releasing turns that into a retry.
+        """
+        try:
+            async with self.db_client.pool.acquire() as conn:
+                await conn.execute("SET app.bypass_rls = 'on'")
+                await conn.execute(
+                    "SET app.current_tenant_id = '00000000-0000-0000-0000-000000000000'"
+                )
+                await conn.execute(
+                    "DELETE FROM processed_webhook_events WHERE event_id = $1",
+                    event_id,
+                )
+            logger.warning(
+                "webhook claim released after handler failure event_id=%s — "
+                "Stripe's redelivery will retry", event_id,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.error(
+                "could not release webhook claim %s: %s — this event will NOT be "
+                "retried, reconcile it by hand", event_id, e,
+            )
+
+    # -- top-up routing -------------------------------------------------------
+
+    _TOPUP_SESSION_EVENTS = {
+        "checkout.session.completed",
+        "checkout.session.expired",
+        "checkout.session.async_payment_failed",
+    }
+    # Reversals arrive on the charge, which carries no checkout session. Neither
+    # of these has a handler in the subscription table, so claiming them for the
+    # top-up path costs nothing when the charge turns out to be a subscription:
+    # the order lookup finds nothing and the handler no-ops.
+    _TOPUP_CHARGE_EVENTS = {"charge.refunded", "charge.dispute.created"}
+
+    async def _is_topup_event(self, event_type: str, data: Dict) -> bool:
+        if event_type in self._TOPUP_SESSION_EVENTS:
+            return (data.get("metadata") or {}).get("purpose") == "minute_topup"
+        return event_type in self._TOPUP_CHARGE_EVENTS
+
+    async def _handle_topup_event(
+        self, event_type: str, data: Dict, event_id: Optional[str]
+    ) -> Dict[str, Any]:
+        from app.domain.services.topup_service import TopupService
+
+        topups = TopupService(self.db_client.pool)
+        # A missing event id would defeat the ledger's uniqueness guard, so fall
+        # back to something equally unique per payment rather than NULL (which
+        # a partial unique index does not dedupe).
+        eid = event_id or f"no_event_id:{event_type}:{data.get('id')}"
+
+        if event_type == "checkout.session.completed":
+            # payment_status is the field that actually says money arrived.
+            # A session can complete with payment still processing, and
+            # crediting there hands out minutes for a payment that may fail.
+            if data.get("payment_status") != "paid":
+                logger.info(
+                    "topup_checkout_completed_unpaid session=%s payment_status=%s "
+                    "— waiting for the payment to settle",
+                    str(data.get("id"))[:24], data.get("payment_status"),
+                )
+                return {"status": "deferred", "event_type": event_type}
+            credited = await topups.credit_paid_order(
+                session_id=str(data.get("id")),
+                event_id=eid,
+                payment_id=data.get("payment_intent"),
+            )
+            if credited:
+                # Only on a real credit, so a redelivery does not send a second
+                # receipt for one payment.
+                await self._send_topup_receipt(data)
+            return {
+                "status": "handled" if credited else "duplicate",
+                "event_type": event_type,
+            }
+
+        if event_type in ("checkout.session.expired",
+                          "checkout.session.async_payment_failed"):
+            await topups.mark_failed(
+                session_id=str(data.get("id")),
+                status="cancelled" if event_type.endswith("expired") else "failed",
+            )
+            return {"status": "handled", "event_type": event_type}
+
+        if event_type == "charge.refunded":
+            # A PARTIAL refund must not claw back the whole bundle. Only a fully
+            # refunded charge reverses the minutes; anything else is flagged for
+            # a human because splitting a bundle is a judgement call.
+            if not data.get("refunded"):
+                logger.warning(
+                    "topup_partial_refund charge=%s refunded=%s of %s — minutes "
+                    "left in place, reconcile by hand",
+                    str(data.get("id"))[:24], data.get("amount_refunded"),
+                    data.get("amount"),
+                )
+                return {"status": "ignored", "event_type": event_type}
+            await topups.reverse(
+                event_id=eid, kind="refund",
+                payment_id=data.get("payment_intent"),
+            )
+            return {"status": "handled", "event_type": event_type}
+
+        if event_type == "charge.dispute.created":
+            await topups.reverse(
+                event_id=eid, kind="dispute",
+                payment_id=data.get("payment_intent"),
+            )
+            return {"status": "handled", "event_type": event_type}
+
+        return {"status": "ignored", "event_type": event_type}
+
+    async def _send_topup_receipt(self, session: Dict) -> None:
+        """Confirm the purchase to the customer (goals.md §9).
+
+        NEVER RAISES. The minutes are already credited and committed by the
+        time this runs. Letting a mail-provider outage propagate would fail the
+        webhook, release the claim, and have Stripe retry an event whose credit
+        has already happened — a loop of 500s over an email that could simply
+        be sent later. A failed receipt is logged and dropped.
+        """
+        try:
+            tenant_id = (session.get("metadata") or {}).get("tenant_id")
+            minutes = (session.get("metadata") or {}).get("minutes")
+            if not tenant_id:
+                return
+
+            to_email = (session.get("customer_details") or {}).get("email")
+            if not to_email:
+                # Fall back to the account owner. A receipt with nowhere to go
+                # is not worth failing over, but it is worth trying twice.
+                users = self.db_client.table("user_profiles").select("email").eq(
+                    "tenant_id", tenant_id
+                ).eq("role", "owner").limit(1).execute()
+                if users.data:
+                    to_email = users.data[0].get("email", "")
+            if not to_email:
+                logger.warning(
+                    "topup_receipt_no_recipient tenant=%s — minutes credited, "
+                    "no address to confirm to", str(tenant_id)[:8],
+                )
+                return
+
+            amount = (session.get("amount_total") or 0) / 100
+            currency = (session.get("currency") or "gbp").upper()
+            notification_service = get_notification_service()
+            await notification_service.send_email(
+                to_email=to_email,
+                subject=f"{minutes} minutes added to your Talky.ai account",
+                html_body=f"""
+                <html>
+                    <body style="font-family: Arial, sans-serif; color: #333;">
+                        <h1 style="color: #34C759;">Minutes added</h1>
+                        <p><strong>{minutes}</strong> call minutes have been added
+                           to your account and are ready to use.</p>
+                        <p><strong>Amount charged:</strong> {amount:.2f} {currency}</p>
+                        <p>You can see this purchase and your remaining balance on
+                           the Billing page.</p>
+                    </body>
+                </html>
+                """,
+                text_body=(
+                    f"{minutes} call minutes have been added to your Talky.ai "
+                    f"account. Amount charged: {amount:.2f} {currency}."
+                ),
+            )
+            logger.info("topup_receipt_sent tenant=%s minutes=%s",
+                        str(tenant_id)[:8], minutes)
+
+            if self.audit_logger:
+                await self.audit_logger.log(
+                    event_type=AuditEvent.BILLING_UPDATED,
+                    tenant_id=tenant_id,
+                    action="topup_credited",
+                    description=f"{minutes} minutes credited via top-up",
+                    metadata={
+                        "minutes": minutes,
+                        "amount_total": session.get("amount_total"),
+                        "currency": currency,
+                        "session_id": session.get("id"),
+                    },
+                    actor_type="system",
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.error(
+                "topup receipt failed (minutes ARE credited, this is cosmetic): %s", e,
+            )
 
     async def _handle_checkout_completed(self, session: Dict):
         """Handle checkout.session.completed event"""
