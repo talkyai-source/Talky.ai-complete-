@@ -24,6 +24,7 @@ from app.api.v1.endpoints.auth import router as auth_router
 from app.api.v1.endpoints.billing import router as billing_router
 from app.api.v1.endpoints.calls import router as calls_router
 from app.api.v1.endpoints.call_feedback import router as call_feedback_router
+from app.api.v1.endpoints.lead_details import router as lead_details_router
 from app.api.v1.endpoints.conversation_reviews import (
     admin_router as conversation_reviews_admin_router,
     router as conversation_reviews_router,
@@ -82,6 +83,7 @@ api_router.include_router(call_feedback_router)
 # Before calls_router: this one owns literal paths under /calls (e.g.
 # /calls/reviews/options) and FastAPI matches in registration order, so a
 # later /calls/{call_id} must not get first refusal on them.
+api_router.include_router(lead_details_router)
 api_router.include_router(conversation_reviews_router)
 # Own prefix (/reviews), so it cannot collide with /calls/{call_id} whatever
 # the registration order turns out to be.
