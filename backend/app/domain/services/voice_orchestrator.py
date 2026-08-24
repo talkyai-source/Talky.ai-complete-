@@ -1304,8 +1304,24 @@ class VoiceOrchestrator:
             ResilientLLMProvider,
         )
         deadline_ms = float(os.getenv("LLM_FIRST_TOKEN_DEADLINE_MS", "2500"))
+
+        # Controlled fault injection, off unless a campaign is named AND the
+        # window is open. Applied to the PRIMARY here, inside the wrapper, so
+        # the failover path under test is the real one — no special-casing
+        # anywhere in resilient_llm. See llm_fault_injection for the four
+        # safety properties; it declines when there is no secondary, which
+        # cannot happen on this line because we returned above if so.
+        from app.domain.services.llm_fault_injection import maybe_break_primary
+
+        primary_for_wrapper = maybe_break_primary(
+            provider,
+            getattr(config, "campaign_id", None),
+            getattr(config, "call_id", None) or getattr(config, "campaign_id", None),
+            failover_enabled=True,
+        )
+
         wrapper = ResilientLLMProvider(
-            primary=provider,
+            primary=primary_for_wrapper,
             secondary=secondary,
             policy=LLMFailoverPolicy(
                 first_token_deadline_seconds=max(0.3, deadline_ms / 1000.0),
