@@ -105,12 +105,29 @@ export function TopupCard() {
 
   const pending = start.isPending;
   const [chosen, setChosen] = useState<string | null>(null);
+  const [mockNotice, setMockNotice] = useState<string | null>(null);
 
   async function buy(pkg: TopupPackage) {
     if (pending) return; // the double-click guard — a second order is a second charge
+    setMockNotice(null);
     setChosen(pkg.code);
     try {
       const result = await start.mutateAsync(pkg.code);
+
+      // Mock mode means no payment provider is configured on this
+      // environment. Following the fake checkout URL would land the customer
+      // on a success page for a payment that never happened and then spin
+      // forever waiting for a webhook that will never arrive. Say so instead.
+      if (result?.mock_mode) {
+        setMockNotice(
+          result.message ??
+            "Card payments are not configured on this environment yet, so this " +
+              "purchase cannot be completed. Nothing has been charged.",
+        );
+        setChosen(null);
+        return;
+      }
+
       if (result?.checkout_url) {
         // Leaves the app entirely. The button stays disabled behind us because
         // `pending` never clears before navigation.
@@ -212,6 +229,16 @@ export function TopupCard() {
             className="flex items-center gap-3 rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground"
           >
             <span>Checkout cancelled. You have not been charged.</span>
+          </div>
+        ) : null}
+
+        {mockNotice ? (
+          <div
+            role="alert"
+            className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm"
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+            <span>{mockNotice}</span>
           </div>
         ) : null}
 
