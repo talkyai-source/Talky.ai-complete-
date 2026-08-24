@@ -390,6 +390,61 @@ class MakeCallRequest(BaseModel):
     lead_first_name: Optional[str] = None
     lead_last_name: Optional[str] = None
     lead_company: Optional[str] = None
+    # The richer contact context (job title, best time to call, calling notes)
+    # is loaded HERE from the lead row rather than forwarded in the body.
+    # Sending eight more attacker-controlled strings over the wire for the
+    # prompt to interpolate is a worse trade than one id and a scoped read —
+    # and it keeps the dialer from having to know which fields the agent is
+    # allowed to see. See contact_fields.agent_usable.
+    lead_id: Optional[str] = None
+
+
+async def _load_agent_lead_context(lead_id, tenant_id) -> Optional[dict]:
+    """The contact fields the agent is allowed to know, for one lead.
+
+    Filtered through ``agent_context_fields`` so do_not_call, timezone and
+    contact preference can never reach the prompt regardless of what is in the
+    row — the filter lives with the field definitions rather than being
+    re-stated in this query, so adding a field cannot accidentally leak it.
+
+    Never raises. A call must not fail because the extra context could not be
+    loaded; it degrades to today's name-and-company behaviour.
+    """
+    if not lead_id or not tenant_id:
+        return None
+    try:
+        from app.core.container import get_container
+        from app.core.db_utils import acquire_with_tenant
+        from app.domain.services.contact_fields import agent_context_fields
+
+        container = get_container()
+        if not container.is_initialized:
+            return None
+        async with acquire_with_tenant(container.db_pool, str(tenant_id)) as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT first_name, last_name, company_name, job_title,
+                       best_time_to_call, calling_notes, email
+                  FROM leads
+                 WHERE id = $1::uuid
+                """,
+                str(lead_id),
+            )
+        if not row:
+            return None
+        ctx = agent_context_fields(dict(row))
+        if ctx:
+            logger.info(
+                "lead_context_loaded lead=%s fields=%s",
+                str(lead_id)[:8], sorted(ctx.keys()),
+            )
+        return ctx or None
+    except Exception:  # noqa: BLE001 — see docstring
+        logger.warning(
+            "lead_context_load_failed lead=%s — dialling with name only",
+            str(lead_id)[:8], exc_info=True,
+        )
+        return None
 
 
 @router.post("/call")
@@ -434,6 +489,7 @@ async def make_call(request: Request, body: MakeCallRequest):
     lead_first_name = body.lead_first_name
     lead_last_name = body.lead_last_name
     lead_company = body.lead_company
+    lead_context = await _load_agent_lead_context(body.lead_id, effective_tenant_id)
 
     # Single-owner guard. Only the process holding the ARI owner lock may
     # originate — its the only one with a live Asterisk connection and the
@@ -674,6 +730,7 @@ async def make_call(request: Request, body: MakeCallRequest):
         lead_first_name=lead_first_name,
         lead_last_name=lead_last_name,
         lead_company=lead_company,
+        lead_context=lead_context,
     )
     effective_first_speaker = prewarm.effective_first_speaker
     pre_warm_session = prewarm.session

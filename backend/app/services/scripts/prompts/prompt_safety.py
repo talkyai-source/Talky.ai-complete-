@@ -95,7 +95,27 @@ _INJECTION_PATTERNS: tuple[re.Pattern[str], ...] = (
                r"(system\s+prompt|your\s+prompt|your\s+instructions|the\s+prompt)\b", re.IGNORECASE),
     re.compile(r"\b(developer\s+mode|do\s+anything\s+now|jailbreak|DAN\s+mode)\b", re.IGNORECASE),
     re.compile(r"<\|[^|>]*\|>|\[/?INST\]|<</?SYS>>", re.IGNORECASE),  # role-marker injection
-    re.compile(r"^\s*(system|assistant|developer)\s*:", re.IGNORECASE | re.MULTILINE),  # fake turn
+    # Fake turn. Two widenings on 2026-08-25, both found by a test rather than
+    # in the wild:
+    #
+    #   [\s>#*\-=_`~]{0,8}  decorative prefixes. "### developer message:" was
+    #                       passing because the anchor allowed only whitespace
+    #                       before the role, and markdown headings are the most
+    #                       natural way to write a fake turn in a CSV cell.
+    #   (message|prompt|turn|note)?  the noun people actually type between the
+    #                       role and the colon.
+    #
+    # This matters more since the MVP model pair moved to GPT-OSS, which is
+    # TRAINED on the harmony format where system > developer > user. On that
+    # family the literal word "developer" in a role position is a live attack
+    # surface in a way it was not for qwen. "user" is deliberately NOT in the
+    # role list: "User: John" is ordinary text in a calling note, and the
+    # false-positive cost of dropping real notes outweighs it.
+    re.compile(
+        r"^[\s>#*\-=_`~]{0,8}(system|assistant|developer)\s*"
+        r"(message|prompt|turn|note)?\s*:",
+        re.IGNORECASE | re.MULTILINE,
+    ),
 )
 
 

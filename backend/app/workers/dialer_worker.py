@@ -899,6 +899,13 @@ class DialerWorker:
             payload["lead_last_name"] = job.lead_last_name
         if getattr(job, "lead_company", None):
             payload["lead_company"] = job.lead_company
+        # The lead id, so the bridge can load the richer contact context
+        # (job title, best time to call, calling notes) itself. Sending the id
+        # rather than the values keeps this worker from having to know which
+        # fields the agent is allowed to see — that rule lives in one place,
+        # contact_fields.agent_usable, and cannot drift out of step here.
+        if getattr(job, "lead_id", None):
+            payload["lead_id"] = str(job.lead_id)
 
         # Authenticate as an internal service with the shared-secret
         # X-Internal-Service-Token header (CSRF-exempt + accepted by the

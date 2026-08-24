@@ -315,6 +315,7 @@ async def prepare_prewarmed_session(
     lead_first_name: Optional[str] = None,
     lead_last_name: Optional[str] = None,
     lead_company: Optional[str] = None,
+    lead_context: Optional[dict] = None,
 ) -> PrewarmResult:
     """Build + fully warm a VoiceSession before the SIP call is originated.
 
@@ -377,6 +378,7 @@ async def prepare_prewarmed_session(
             lead_first_name=lead_first_name,
             lead_last_name=lead_last_name,
             lead_company=lead_company,
+            lead_context=lead_context,
         )
         # User-first only: relax the Flux end-of-turn timeout from 500ms
         # to 1000ms. The 500ms default is aggressive and was the cause of
