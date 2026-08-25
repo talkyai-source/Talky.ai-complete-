@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
@@ -267,9 +268,11 @@ export default function AIAssistPage() {
               Guide agents live. Capture insights instantly. Follow up automatically.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
-              <Button size="lg" className="rounded-full px-8 bg-blue-600 hover:bg-blue-700 text-white">
-                Get started with Talk-Lee AI Assist today.
-              </Button>
+              <Link href="/auth/register">
+                <Button size="lg" className="rounded-full px-8 bg-blue-600 hover:bg-blue-700 text-white">
+                  Get started with Talk-Lee AI Assist today.
+                </Button>
+              </Link>
             </div>
           </div>
         </section>
