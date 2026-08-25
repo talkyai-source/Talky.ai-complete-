@@ -3,12 +3,11 @@ import Link from "next/link";
 import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
-import { Video } from "lucide-react";
-import Image from "next/image";
 
 export const metadata: Metadata = {
-  title: "AI for Retail & E-commerce",
-  description: "Smarter Conversations. Faster Sales. Better Customer Experience.",
+  title: "AI for Retail & E-commerce | AI Customer Support",
+  description:
+    "Talk-Lee AI for retail and e-commerce that handles customer calls, product inquiries, order support, and follow-ups 24/7. Improve customer service with Talk-Lee AI.",
 };
 
 export default function RetailEcommerceIndustryPage() {
@@ -20,55 +19,320 @@ export default function RetailEcommerceIndustryPage() {
     backgroundRepeat: "no-repeat",
   } as const;
 
-  const keyCapabilities = [
+  const eyebrowClassName =
+    "text-xs sm:text-sm font-semibold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400";
+  const headingClassName = "text-2xl md:text-3xl font-semibold text-primary dark:text-foreground";
+  const cardTitleClassName = "text-lg md:text-xl font-semibold text-primary dark:text-foreground";
+  const bodyClassName =
+    "mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed";
+  const cardBodyClassName = "mt-3 text-sm sm:text-base text-gray-700 dark:text-muted-foreground leading-relaxed";
+  const listClassName = "mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground";
+  const pillClassName =
+    "rounded-full border border-border/70 bg-background/60 dark:bg-white/5 backdrop-blur-sm px-4 py-2 text-xs sm:text-sm font-medium text-gray-700 dark:text-muted-foreground";
+  const buttonSizeClassName = "rounded-full h-12 sm:h-14 px-8 sm:px-10 text-sm sm:text-base font-semibold";
+  const primaryButtonClassName = `${buttonSizeClassName} bg-blue-600 hover:bg-blue-700 text-white`;
+  const outlineButtonClassName = `${buttonSizeClassName} bg-blue-950 hover:bg-blue-950 text-white hover:text-white border-blue-950 hover:border-blue-950 dark:bg-blue-900 dark:hover:bg-blue-900 dark:text-white dark:hover:text-white dark:border-blue-900 dark:hover:border-blue-900`;
+  const centeredCtaClassName = "mt-10 flex justify-center";
+  const centeredCtaPairClassName = "mt-10 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4";
+
+  const instantSupportCapabilities = [
+    "Handle product questions",
+    "Provide order information",
+    "Support returns and common requests",
+    "Capture customer details",
+    "Schedule appointments",
+    "Route complex conversations",
+    "Follow up with customers",
+  ];
+
+  const instantSupportStats = ["24/7 Availability", "Instant Support", "1000+ Happier Customers"];
+
+  const completedActions = [
+    {
+      title: "AI Retail Customer Support",
+      description:
+        "Handle common customer questions automatically and provide fast, conversational support without forcing customers through complicated phone menus.",
+    },
     {
       title: "AI Order Inquiry Automation",
       description:
-        "Customers frequently call to check order status, delivery timelines, or returns. Talk-Lee AI automates these conversations using AI order inquiry automation, providing accurate updates without human intervention.",
+        "Help customers with order-related questions, including order status, delivery updates, shipping information, and other supported requests.",
     },
     {
       title: "AI Product Inquiry Handling",
       description:
-        "From pricing to availability and features, Talk-Lee AI manages AI product inquiry handling with speed and accuracy, helping customers make faster buying decisions.",
+        "Answer questions about products, features, availability, sizing, pricing, and other information based on your approved business and product data.",
     },
     {
       title: "AI Voice Agents for Retail",
       description:
-        "Our AI voice agents for retail handle inbound calls naturally, understand customer intent, and route conversations intelligently when human support is needed.",
-      strongTitle: true,
+        "Give customers a natural voice experience that feels conversational rather than scripted, while handling high volumes of inbound and outbound calls.",
     },
     {
-      title: "AI Inbound Retail Calls Management",
+      title: "AI Appointment Booking for Retail",
       description:
-        "Talk-Lee AI efficiently handles AI inbound retail calls, reducing missed calls and improving first-call resolution during busy hours.",
-      strongTitle: true,
+        "Allow customers to schedule consultations, store appointments, services, pickups, or other available bookings based on your business workflow.",
     },
-  ] as const;
+  ];
 
-  const featuresThatConnect = [
+  const readyToBuy = [
     {
-      title: "Advanced Calling Tools",
-      description:
-        "Handle high call volumes with ease using AI voice agents for retail. Automate common questions, route calls intelligently, and empower your team to focus on complex customer needs.",
+      title: "Respond Instantly",
+      description: "Give customers immediate answers instead of sending them to voicemail or making them wait.",
     },
     {
-      title: "Call Routing and IVR",
-      description:
-        "Set up smart call routing rules and IVR systems to ensure every customer reaches the right team the first time. With AI inbound retail calls, reduce wait times and improve first-call resolution.",
+      title: "Know Their Needs",
+      description: "Understand whether they’re asking about a product, order, delivery, availability, or support.",
     },
     {
-      title: "E-Commerce Integrations",
-      description:
-        "Connect Talk-Lee AI to your favorite e-commerce platforms to get a 360-degree view of customer activity. Sync orders, product details, and customer history to provide faster, more accurate responses.",
-      strongTitle: true,
+      title: "Build Confidence",
+      description: "Provide relevant information that helps customers make faster, more informed decisions.",
     },
     {
-      title: "Advanced Analytics",
-      description:
-        "Track every conversation, measure KPIs, and gain actionable insights to improve AI customer engagement retail. Use analytics to identify trends, monitor team performance, and deliver five-star customer experiences.",
-      strongTitle: true,
+      title: "Drive the Next Step",
+      description: "Guide customers toward a purchase, appointment, follow-up, or connection with your team.",
     },
-  ] as const;
+  ];
+
+  const fewerCalls = [
+    {
+      title: "Cut the Repetition",
+      description: "Automate common questions and routine requests that take up valuable team time.",
+    },
+    {
+      title: "Respond Faster",
+      description: "Give customers instant answers instead of making them wait for an available representative.",
+    },
+    {
+      title: "Smarter Handoffs",
+      description: "Pass relevant conversation context to your team when human support is needed.",
+    },
+    {
+      title: "Handle Peak Demand",
+      description: "Stay responsive during promotions, product launches, holidays, and high-volume periods.",
+    },
+  ];
+
+  const customerJourney = [
+    {
+      title: "Find Products",
+      description:
+        "Help customers discover the right products with answers about features, options, pricing, and availability.",
+    },
+    {
+      title: "Track Orders",
+      description: "Handle common questions about order status, shipping, delivery, and post-purchase updates.",
+    },
+    {
+      title: "Handle Returns",
+      description: "Guide customers through return and exchange questions based on your business policies.",
+    },
+    {
+      title: "Share Store Info",
+      description: "Instantly answer questions about locations, hours, services, and store availability.",
+    },
+    {
+      title: "Stay Connected",
+      description: "Follow up after inquiries, purchases, appointments, or support conversations.",
+    },
+    {
+      title: "Bring in Experts",
+      description: "Route complex requests to the right team member with useful context already captured.",
+    },
+  ];
+
+  const keepEngaged = [
+    {
+      title: "Recover Missed Calls",
+      description:
+        "Reconnect with customers who called when your team was unavailable or couldn’t complete the conversation.",
+    },
+    {
+      title: "Follow Up Orders",
+      description:
+        "Keep customers informed through supported follow-up workflows when an order requires additional communication.",
+    },
+    {
+      title: "Re-Engage Leads",
+      description: "Follow up with prospects who asked questions but didn’t complete the next step.",
+    },
+    {
+      title: "Support After Purchase",
+      description:
+        "Continue communication after purchases, appointments, or service interactions to create a smoother customer experience.",
+    },
+  ];
+
+  const callingExperience = [
+    {
+      title: "Speak Naturally",
+      description: "Customers explain what they need without navigating confusing menus or repeating information.",
+    },
+    {
+      title: "Understand Instantly",
+      description: "Talk-Lee AI identifies the purpose of the call and captures the details needed to help.",
+    },
+    {
+      title: "Answer Clearly",
+      description: "Provide relevant responses using your approved product, order, and business information.",
+    },
+    {
+      title: "Guide the Customer",
+      description: "Move conversations toward order updates, appointments, follow-ups, or other supported actions.",
+    },
+    {
+      title: "Connect When Needed",
+      description: "Route complex conversations to the right team member with useful context already captured.",
+    },
+  ];
+
+  const aroundTheClock = ["Morning Orders", "Peak Shopping Hours", "Evening Questions", "Weekend Support"];
+
+  const conversationInsights = [
+    "Customer Information",
+    "Order Details",
+    "Product Interests",
+    "Support Requests",
+    "Appointment Details",
+    "Follow-Up Actions",
+    "Lead Routing",
+  ];
+
+  const whyRetailTeams = [
+    "Retail-Focused AI",
+    "Natural Conversations",
+    "Faster Customer Journeys",
+    "Actionable Call Insights",
+    "Flexible Workflows",
+    "Easy Team Escalation",
+    "Peak-Time Ready",
+    "Consistent Brand Experience",
+  ];
+
+  const conversationsIntoAction = [
+    { title: "Customer Data", description: "Capture useful information from every conversation." },
+    {
+      title: "Order Workflows",
+      description: "Connect supported order-related conversations to your existing processes.",
+    },
+    { title: "Product Information", description: "Give AI access to approved product and business information." },
+    {
+      title: "Calendar Coordination",
+      description: "Support appointment and booking workflows based on available schedules.",
+    },
+    { title: "Lead Routing", description: "Send important conversations to the right team or representative." },
+    { title: "Follow-Up", description: "Trigger supported follow-up actions after customer interactions." },
+  ];
+
+  const howItWorks = [
+    {
+      title: "Answer",
+      description: "The AI picks up instantly and gives the customer a professional, conversational first response.",
+    },
+    {
+      title: "Understand",
+      description: "It identifies the customer's reason for calling and gathers the relevant information.",
+    },
+    {
+      title: "Assist",
+      description:
+        "Talk-Lee AI answers supported questions, provides information, and helps complete the appropriate next action.",
+    },
+    {
+      title: "Resolve",
+      description:
+        "Routine conversations can be handled automatically while more complex requests can move to your team.",
+    },
+    {
+      title: "Follow Up",
+      description: "Supported workflows can continue the conversation after the initial interaction.",
+    },
+  ];
+
+  const everythingYouNeed = [
+    "AI Retail Customer Support",
+    "AI Order Inquiry Automation",
+    "AI Voice Agents for Retail",
+    "AI Customer Engagement",
+    "AI Product Inquiry Handling",
+    "AI Retail Workflow Automation",
+    "AI Omnichannel Customer Support",
+    "AI Virtual Assistant for E-commerce",
+    "AI Inbound Retail Calls",
+    "AI Retail Call Center",
+  ];
+
+  const retailModels = [
+    {
+      title: "E-commerce Stores",
+      description:
+        "Handle product questions, order inquiries, customer support, and follow-up without relying entirely on manual phone support.",
+    },
+    {
+      title: "DTC Brands",
+      description: "Give customers a direct, conversational support channel while maintaining your brand experience.",
+    },
+    {
+      title: "Retail Stores",
+      description:
+        "Answer store-related questions, product inquiries, appointments, and customer requests even outside regular hours.",
+    },
+    {
+      title: "Multi-Location Retailers",
+      description: "Route customers to the right location, team, or department based on their needs.",
+    },
+    {
+      title: "High-Volume Retailers",
+      description: "Handle increased call demand during promotions, launches, holidays, and seasonal peaks.",
+    },
+    {
+      title: "Service-Based Retail",
+      description: "Support bookings, consultations, appointments, customer questions, and follow-up conversations.",
+    },
+  ];
+
+  const faqs = [
+    {
+      question: "What can AI do for retail customer support?",
+      answer:
+        "AI can answer calls, handle product inquiries, support order-related questions, schedule appointments, route conversations, and assist with follow-up workflows.",
+    },
+    {
+      question: "Can AI handle e-commerce order inquiries?",
+      answer:
+        "Yes. When connected to the appropriate order information and workflows, AI can assist customers with supported questions about orders, shipping, delivery, and related requests.",
+    },
+    {
+      question: "Can AI answer product questions?",
+      answer:
+        "Yes. AI can provide answers based on your approved product catalog and business information, including supported questions about features, availability, pricing, sizing, and products.",
+    },
+    {
+      question: "Can AI make outbound retail calls?",
+      answer:
+        "Yes. Depending on your workflow, AI can support outbound conversations such as customer follow-ups, order-related communication, appointment reminders, and other approved use cases.",
+    },
+    {
+      question: "Can AI schedule retail appointments?",
+      answer:
+        "Yes. Talk-Lee AI can support appointment booking for consultations, services, store appointments, pickups, and other scheduled activities based on your setup.",
+    },
+    {
+      question: "Can AI transfer customers to human agents?",
+      answer:
+        "Yes. When a conversation requires human expertise, the AI can route the customer to the appropriate team member with relevant conversation context.",
+    },
+    {
+      question: "Does AI work after business hours?",
+      answer:
+        "Yes. Our AI agent can remain available 24/7, allowing customers to reach your business outside normal operating hours.",
+    },
+    {
+      question: "Can we support multiple channels?",
+      answer:
+        "Talk-Lee AI can fit into broader customer workflows involving voice, customer records, calendars, and follow-up processes, depending on your business setup and integrations.",
+    },
+  ];
 
   return (
     <main className="home-navbar-offset bg-cyan-100 dark:bg-background">
@@ -79,164 +343,312 @@ export default function RetailEcommerceIndustryPage() {
             AI for Retail &amp; E-commerce
           </h1>
           <h2 className="mt-6 text-xl md:text-2xl font-semibold text-primary dark:text-foreground">
-            Smarter Conversations. Faster Sales. Better Customer Experience.
+            Turn Customer Calls Into Sales, Support, and Loyalty
           </h2>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Retail and e-commerce customers expect instant answers whether they are calling about an order, a product, or availability. Talk-Lee AI
-            delivers intelligent automation through AI for retail &amp; e-commerce, helping retail brands handle high call volumes, reduce wait
-            times, and improve customer engagement across every channel.
+            Give every customer a faster way to get answers with Talk-Lee AI. Handle calls, product questions, order
+            inquiries, and support conversations 24/7.
           </p>
-          <div className="mt-14 text-center">
-            <p className="text-xl md:text-2xl font-semibold text-primary dark:text-foreground">
-              Ready to revolutionize your customer support?
-            </p>
-            <div className="mt-8 flex justify-center">
-              <Button
-                asChild
-                size="lg"
-                className="rounded-xl px-10 bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400"
-              >
-                <Link href="/#contact" className="inline-flex items-center gap-2">
-                  <Video className="h-5 w-5" aria-hidden />
-                  Request a Free Demo Today
-                </Link>
+          <div className={centeredCtaPairClassName}>
+            <Link href="/auth/register">
+              <Button size="lg" className={primaryButtonClassName}>
+                See AI Handle a Retail Call
               </Button>
-            </div>
+            </Link>
+            <Link href="/#contact">
+              <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                Book a Demo
+              </Button>
+            </Link>
           </div>
+          <p className="mt-8 text-base sm:text-lg font-semibold text-primary dark:text-foreground">
+            Give every customer a faster way to get answers and take action.
+          </p>
         </header>
 
         <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Why Talk-Lee AI for Retail &amp; E-commerce Businesses?
-          </h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talk-Lee AI is built to manage real retail challenges— from peak shopping seasons to daily order inquiries— so no customer call goes
-            unanswered. Using AI retail customer support, Talk-Lee AI helps businesses respond faster, stay available 24/7, and maintain a consistent
-            brand voice across all interactions.
+          <p className={eyebrowClassName}>Built for Modern Retail</p>
+          <h2 className={`mt-3 ${headingClassName}`}>Customers Expect Instant Support</h2>
+          <p className={bodyClassName}>
+            Retail customers don&rsquo;t wait for business hours. Whether they&rsquo;re checking an order, asking about a
+            product, or looking for help, they expect quick, convenient answers.
           </p>
-        </section>
-
-        <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Key Capabilities Designed for Retail Operations
-          </h2>
-          <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
-            {keyCapabilities.map((item) => (
-              <div key={item.title} className={accentCardClassName} style={accentCardStyle}>
-                <h3 className="text-lg md:text-xl font-semibold text-primary dark:text-foreground">
-                  {"strongTitle" in item && item.strongTitle ? <strong>{item.title}</strong> : item.title}
-                </h3>
-                <p className="mt-3 text-sm sm:text-base text-gray-700 dark:text-muted-foreground leading-relaxed">{item.description}</p>
-              </div>
+          <p className={bodyClassName}>
+            Missed calls and slow responses can mean frustrated customers, abandoned purchases, and lost loyalty. Talk-Lee
+            AI keeps your business available 24/7, handling routine conversations instantly and bringing your team in when
+            human support matters.
+          </p>
+          <ul className={listClassName}>
+            {instantSupportCapabilities.map((item) => (
+              <li key={item}>&bull; {item}</li>
             ))}
-          </div>
-        </section>
-
-        <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            AI-Powered Retail Workflow Automation
-          </h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Retail teams deal with repetitive tasks daily. AI retail workflow automation helps streamline internal processes by:
-          </p>
-          <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
-            <li>• Routing calls to the right department</li>
-            <li>• Logging conversations automatically</li>
-            <li>• Triggering follow-ups and callbacks</li>
-            <li>• Syncing customer data across systems</li>
           </ul>
-          <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            This reduces manual work and improves operational efficiency.
-          </p>
-        </section>
-
-        <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            AI Retail Call Center That Scales With You
-          </h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Whether you manage a small online store or a large retail chain, Talk-Lee AI functions as a modern AI retail call center that scales
-            effortlessly during sales, promotions, and seasonal spikes.
-          </p>
-        </section>
-
-        <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Features That Connect You With Shoppers
-          </h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Deliver seamless shopping experiences and personalized support with <strong>Talk-Lee AI</strong>.
-          </p>
-          <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
-            {featuresThatConnect.map((item) => (
-              <div key={item.title} className={accentCardClassName} style={accentCardStyle}>
-                <h3 className="text-lg md:text-xl font-semibold text-primary dark:text-foreground">
-                  {"strongTitle" in item && item.strongTitle ? <strong>{item.title}</strong> : item.title}
-                </h3>
-                <p className="mt-3 text-sm sm:text-base text-gray-700 dark:text-muted-foreground leading-relaxed">{item.description}</p>
+          <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+            {instantSupportStats.map((stat) => (
+              <div key={stat} className={`${accentCardClassName} text-center`} style={accentCardStyle}>
+                <p className="text-base sm:text-lg font-semibold text-primary dark:text-foreground">{stat}</p>
               </div>
             ))}
           </div>
-          <div className="mt-10 flex justify-center">
-            <div className="group w-full max-w-5xl overflow-hidden rounded-3xl border border-border/70 shadow-sm transition-[transform,box-shadow,filter] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md hover:brightness-[1.02]">
-              <div className="relative aspect-[1024/576] w-full">
-                <Image
-                  src="/images/industries/retail-ecommerce/features.png"
-                  alt=""
-                  fill
-                  sizes="(max-width: 768px) 100vw, (max-width: 1024px) 900px, 1024px"
-                  quality={100}
-                  className="object-cover transition-transform duration-300 ease-out group-hover:scale-[1.02]"
-                />
+        </section>
+
+        <section className="mt-14">
+          <p className={eyebrowClassName}>Built for Retail &amp; E-commerce</p>
+          <h2 className={`mt-3 ${headingClassName}`}>From Customer Question to Completed Action</h2>
+          <p className={bodyClassName}>
+            Talk-Lee AI does more than answer the phone. It understands what customers need and helps move each
+            conversation toward the right outcome.
+          </p>
+          <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {completedActions.map((item) => (
+              <div key={item.title} className={accentCardClassName} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{item.title}</h3>
+                <p className={cardBodyClassName}>{item.description}</p>
               </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <p className={eyebrowClassName}>Turn Customer Interest Into Action</p>
+          <h2 className={`mt-3 ${headingClassName}`}>Respond While They&rsquo;re Ready to Buy</h2>
+          <p className={bodyClassName}>
+            Customers often reach out when they&rsquo;re already considering a purchase. A slow response can give them a
+            reason to leave and shop elsewhere. Talk-Lee AI responds instantly, answers questions, and keeps the buying
+            journey moving.
+          </p>
+          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {readyToBuy.map((item) => (
+              <div key={item.title} className={accentCardClassName} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{item.title}</h3>
+                <p className={cardBodyClassName}>{item.description}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <h2 className={headingClassName}>Give Your Team Fewer Calls to Handle</h2>
+          <p className={bodyClassName}>
+            Free your support team from repetitive calls and routine questions so they can focus on complex issues,
+            customer relationships, and revenue-driving conversations.
+          </p>
+          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {fewerCalls.map((item) => (
+              <div key={item.title} className={accentCardClassName} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{item.title}</h3>
+                <p className={cardBodyClassName}>{item.description}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <h2 className={headingClassName}>One AI Assistant Across Your Customer Journey</h2>
+          <p className={bodyClassName}>
+            Talk-Lee AI stays with your customers throughout the buying journey, helping them discover products, get
+            support, complete orders, and stay connected after the sale.
+          </p>
+          <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {customerJourney.map((item) => (
+              <div key={item.title} className={accentCardClassName} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{item.title}</h3>
+                <p className={cardBodyClassName}>{item.description}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <h2 className={headingClassName}>Keep Customers Engaged After the First Call</h2>
+          <p className={bodyClassName}>
+            Customers may need another interaction before they purchase, complete an order, attend an appointment, or
+            resolve an issue. Talk-Lee AI helps businesses maintain that connection.
+          </p>
+          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {keepEngaged.map((item) => (
+              <div key={item.title} className={accentCardClassName} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{item.title}</h3>
+                <p className={cardBodyClassName}>{item.description}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <p className={eyebrowClassName}>Retail Calling Experience</p>
+          <h2 className={`mt-3 ${headingClassName}`}>Conversations That Move Customers Forward</h2>
+          <p className={bodyClassName}>
+            Give customers a simpler way to get help. Talk-Lee AI listens naturally, understands their needs, provides
+            relevant answers, and guides each conversation toward the right outcome.
+          </p>
+          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+            {callingExperience.map((item) => (
+              <div key={item.title} className={accentCardClassName} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{item.title}</h3>
+                <p className={cardBodyClassName}>{item.description}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <p className={eyebrowClassName}>Never Out of Reach</p>
+          <h2 className={`mt-3 ${headingClassName}`}>Keep Serving Customers Around the Clock</h2>
+          <p className={bodyClassName}>
+            Customers shop and seek support at all hours. An after-hours question shouldn&rsquo;t automatically become a
+            lost sale or frustrated customer.
+          </p>
+          <p className={bodyClassName}>
+            Talk-Lee AI keeps your voice channel available when your team is busy, offline, or handling other customers.
+          </p>
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
+            {aroundTheClock.map((item) => (
+              <span key={item} className={pillClassName}>
+                {item}
+              </span>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <h2 className={headingClassName}>Every Conversation Can Improve the Next One</h2>
+          <p className={bodyClassName}>
+            Every customer conversation reveals what people need, what they&rsquo;re asking for, and where your business
+            can improve. Talk-Lee AI captures valuable details and connects them with your existing workflows.
+          </p>
+          <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
+            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
+              {conversationInsights.map((item) => (
+                <li key={item}>&bull; {item}</li>
+              ))}
+            </ul>
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <h2 className={headingClassName}>Why Retail Teams Choose Talk-Lee AI</h2>
+          <p className={bodyClassName}>
+            Talk-Lee AI combines intelligent voice conversations with practical retail workflows to help businesses
+            respond faster, serve customers better, and handle more conversations with less manual effort.
+          </p>
+          <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
+            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
+              {whyRetailTeams.map((item) => (
+                <li key={item}>&bull; {item}</li>
+              ))}
+            </ul>
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <h2 className={headingClassName}>Turn Customer Conversations Into Action</h2>
+          <p className={bodyClassName}>
+            Talk-Lee AI can fit into workflows involving customer records, calendars, order information, product data, and
+            follow-up processes, depending on your setup.
+          </p>
+          <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {conversationsIntoAction.map((item) => (
+              <div key={item.title} className={accentCardClassName} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{item.title}</h3>
+                <p className={cardBodyClassName}>{item.description}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <p className={eyebrowClassName}>How It Works</p>
+          <h2 className={`mt-3 ${headingClassName}`}>From Incoming Call to Customer Action</h2>
+          <p className={bodyClassName}>
+            Talk-Lee AI turns a customer call into a structured conversation that can lead to an answer, action, or human
+            handoff.
+          </p>
+          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+            {howItWorks.map((item) => (
+              <div key={item.title} className={accentCardClassName} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{item.title}</h3>
+                <p className={cardBodyClassName}>{item.description}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <h2 className={headingClassName}>Everything Your Retail Team Needs</h2>
+          <p className={bodyClassName}>
+            Give your business an AI voice layer designed to handle customer conversations, support operations, and sales
+            opportunities.
+          </p>
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
+            {everythingYouNeed.map((item) => (
+              <span key={item} className={pillClassName}>
+                {item}
+              </span>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <p className={eyebrowClassName}>Built for Modern Retail Businesses</p>
+          <h2 className={`mt-3 ${headingClassName}`}>One AI Layer for Different Retail Models</h2>
+          <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {retailModels.map((item) => (
+              <div key={item.title} className={accentCardClassName} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{item.title}</h3>
+                <p className={cardBodyClassName}>{item.description}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <h2 className={headingClassName}>The AI Advantage for Retail &amp; E-commerce</h2>
+          <p className={bodyClassName}>
+            Talk-Lee AI helps retail and e-commerce businesses respond faster, automate routine conversations, support
+            customers around the clock, and keep more opportunities moving toward action.
+          </p>
+          <div className={centeredCtaClassName}>
+            <Link href="/auth/register">
+              <Button size="lg" className={primaryButtonClassName}>
+                Start Automating Customer Calls
+              </Button>
+            </Link>
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <h2 className={headingClassName}>Frequently Asked Questions</h2>
+          <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
+            {faqs.map((faq) => (
+              <div key={faq.question} className={accentCardClassName} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{faq.question}</h3>
+                <p className={cardBodyClassName}>{faq.answer}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <div className="rounded-3xl border border-border/70 bg-background/70 dark:bg-white/5 backdrop-blur-sm p-8 md:p-12 text-center shadow-sm transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md hover:border-border">
+            <h2 className={headingClassName}>Your Next Customer Could Be Calling</h2>
+            <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-3xl mx-auto">
+              Don&rsquo;t let unanswered calls become lost sales or frustrated customers. Let Talk-Lee AI answer, assist,
+              qualify, schedule, and keep customer conversations moving.
+            </p>
+            <div className={centeredCtaPairClassName}>
+              <Link href="/auth/register">
+                <Button size="lg" className={primaryButtonClassName}>
+                  Book a Demo
+                </Button>
+              </Link>
+              <Link href="/#contact">
+                <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                  See AI in Action
+                </Button>
+              </Link>
             </div>
           </div>
-        </section>
-
-        <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Put Customers at the Heart of Every Conversation
-          </h2>
-          <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
-            <li>• Communicate Across Channels</li>
-            <li>• Always Know What to Do Next</li>
-            <li>• Collaborate Seamlessly</li>
-            <li>• Personalize Conversations</li>
-            <li>• Threaded Conversations</li>
-          </ul>
-        </section>
-
-        <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Conversational Analytics for Retail &amp; E-commerce
-          </h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talk-Lee AI’s conversational analytics reduce pre- and post-call admin, freeing your team to focus on high-value tasks. Gain insights into
-            call trends, customer behavior, and team performance.
-          </p>
-        </section>
-
-        <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Why Retailers Choose Talk-Lee AI
-          </h2>
-          <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
-            <li>• AI retail customer support that scales with demand</li>
-            <li>• Faster order and product inquiry handling</li>
-            <li>• Unified omnichannel communication</li>
-            <li>• Personalized customer interactions</li>
-            <li>• Reduced support costs and missed calls</li>
-          </ul>
-        </section>
-
-        <section className="mt-14 flex justify-center">
-          <Button
-            asChild
-            size="lg"
-            className="rounded-xl px-10 bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400"
-          >
-            <Link href="/#contact">Get Started Today</Link>
-          </Button>
         </section>
       </div>
       <Footer />

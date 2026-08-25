@@ -3,110 +3,177 @@ import Link from "next/link";
 import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
-import { BadgeCheck, Building2, ClipboardList, Clock, Headphones, HeartPulse, Home, Landmark, ShieldCheck, ShoppingCart, Sparkles, UserCheck } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "Talk-Lee AI | 24/7 Automated Lead Qualification",
+  title: "Need Automated Lead Qualification Services? | AI Solutions",
   description:
-    "Never miss a lead. Automate engagement, scoring, and follow-ups with Talk-Lee AI to increase quality conversions and sales productivity.",
+    "Never miss a qualified lead. Automate engagement, qualification, scoring, and routing with AI-powered lead qualification services. Book a Demo.",
 };
 
 export default function AutomatedLeadQualificationUseCasePage() {
-  const steps = [
-    {
-      title: "Instant AI Engagement",
-      description:
-        "As soon as a lead enters your system, Talk-Lee AI initiates contact through Voice AI customer service or automated conversations; no waiting, no manual follow-ups.",
-      icon: Sparkles,
-    },
-    {
-      title: "Intelligent Data Capture",
-      description:
-        "Using AI customer service solutions, Talk-Lee AI asks structured qualification questions and captures intent, urgency, and key buyer signals during the conversation.",
-      icon: ClipboardList,
-    },
-    {
-      title: "Automated Lead Scoring",
-      description:
-        "Talk-Lee AI evaluates responses in real time and applies AI customer support automation to score leads based on your predefined criteria and ideal customer profile.",
-      icon: BadgeCheck,
-    },
-    {
-      title: "Smart Routing or Scheduling",
-      description:
-        "High-quality leads are automatically routed to sales teams, while Talk-Lee AI can schedule callbacks, demos, or appointments without human intervention.",
-      icon: UserCheck,
-    },
-  ] as const;
+  const accentCardClassName =
+    "group rounded-2xl border border-border/70 bg-transparent backdrop-blur-sm p-6 shadow-sm transition-[transform,filter,border-color,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:brightness-[1.02] hover:border-border hover:shadow-md";
+  const accentCardStyle = {
+    backgroundImage: "var(--home-card-gradient)",
+    backgroundSize: "cover",
+    backgroundRepeat: "no-repeat",
+  } as const;
 
-  const reasons = [
-    {
-      title: "Scale Lead Handling Without Hiring",
-      description:
-        "Handle thousands of leads simultaneously using AI call center automation, without expanding your sales or support teams.",
-      icon: Building2,
-    },
-    {
-      title: "Improve Conversion Quality",
-      description:
-        "By filtering out low-intent inquiries, automated customer service AI ensures your reps engage only with sales-ready prospects.",
-      icon: BadgeCheck,
-    },
-    {
-      title: "Increase Sales Team Productivity",
-      description:
-        "Reduce manual qualification work and allow teams to spend more time closing deals instead of chasing unqualified leads.",
-      icon: ClipboardList,
-    },
-    {
-      title: "Personalized Conversations at Scale",
-      description:
-        "Talk-Lee AI adapts conversations in real time, delivering tailored responses that improve engagement and trust.",
-      icon: Sparkles,
-    },
-    {
-      title: "Always-On Lead Qualification",
-      description: "With 24/7 AI customer support, no lead goes unanswered even outside business hours.",
-      icon: Clock,
-    },
-  ] as const;
+  const eyebrowClassName =
+    "text-xs sm:text-sm font-semibold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400";
+  const headingClassName = "text-2xl md:text-3xl font-semibold text-primary dark:text-foreground";
+  const subHeadingClassName = "text-xl md:text-2xl font-semibold text-primary dark:text-foreground";
+  const cardTitleClassName = "text-lg md:text-xl font-semibold text-primary dark:text-foreground";
+  const bodyClassName =
+    "mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed";
+  const cardBodyClassName = "mt-3 text-sm sm:text-base text-gray-700 dark:text-muted-foreground leading-relaxed";
+  const buttonSizeClassName = "rounded-full h-12 sm:h-14 px-8 sm:px-10 text-sm sm:text-base font-semibold";
+  const primaryButtonClassName = `${buttonSizeClassName} bg-blue-600 hover:bg-blue-700 text-white`;
+  const outlineButtonClassName = `${buttonSizeClassName} bg-blue-950 hover:bg-blue-950 text-white hover:text-white border-blue-950 hover:border-blue-950 dark:bg-blue-900 dark:hover:bg-blue-900 dark:text-white dark:hover:text-white dark:border-blue-900 dark:hover:border-blue-900`;
+  const ctaPairClassName = "mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4";
 
-  const industries = [
+  const automationPillars = [
     {
-      title: "Healthcare",
+      title: "Instant engagement",
       description:
-        "AI agents qualify patient inquiries, verify eligibility, and route cases while maintaining compliance standards.",
-      icon: HeartPulse,
+        "The moment a lead fills out a form or calls in, our AI lead qualification agent reaches out by voice or chat within seconds, not hours.",
     },
     {
-      title: "Insurance",
+      title: "Structured qualification",
       description:
-        "Instantly assess policy interest, coverage needs, and eligibility before connecting leads to licensed agents.",
-      icon: ShieldCheck,
+        "The agent works through your qualification framework — budget, authority, need, timeline — the same way a trained SDR would, every single time.",
     },
     {
-      title: "Banking & Lending",
+      title: "Real-time scoring & routing",
       description:
-        "Pre-qualify loan and mortgage leads by intent, income range, and urgency using voice AI customer service.",
-      icon: Landmark,
+        "Each conversation is scored and routed automatically, so reps open their day with a prioritized list instead of a raw lead dump.",
     },
+  ];
+
+  const agentSteps = [
     {
-      title: "Education",
-      description: "Identify enrollment-ready prospects based on program interest, location, and start timelines.",
-      icon: Building2,
-    },
-    {
-      title: "Home Services",
+      title: "Trained on your playbook",
       description:
-        "Automatically sort service requests by urgency, location, and job size and book appointments instantly.",
-      icon: Home,
+        "We configure the agent with your qualifying questions, objection handling, and ideal customer profile.",
     },
     {
-      title: "Retail & E-commerce",
-      description: "Engage abandoned or post-click leads, qualify purchase intent, and escalate high-value prospects.",
-      icon: ShoppingCart,
+      title: "Engages the lead naturally",
+      description:
+        "Runs a live, conversational call or chat — not a static form — so leads answer honestly instead of clicking through a survey.",
     },
-  ] as const;
+    {
+      title: "Qualifies against your criteria",
+      description:
+        "Confirms budget, authority, need, and timeline, and flags anything that disqualifies the lead early.",
+    },
+    {
+      title: "Books or routes the outcome",
+      description:
+        "Qualified leads are booked straight onto a rep’s calendar; unqualified leads are logged and nurtured automatically.",
+    },
+  ];
+
+  const b2bStats = [
+    { value: "100%", label: "of inbound leads engaged, no exceptions" },
+    { value: "<2 min", label: "average time to first qualification contact" },
+    { value: "24/7", label: "coverage, including evenings and weekends" },
+    { value: "1", label: "prioritized queue your reps actually work from" },
+  ];
+
+  const withoutAutomation = [
+    "Reps manually screen every inbound lead",
+    "Slow follow-up loses warm prospects",
+    "No consistent qualification criteria",
+    "Evenings and weekends go uncovered",
+    "Pipeline visibility lags by days",
+  ];
+
+  const withTalkLee = [
+    "Every lead engaged automatically, instantly",
+    "Consistent BANT-style qualification, every time",
+    "Reps only see sales-ready conversations",
+    "Full 24/7 coverage, no added headcount",
+    "Live scoring and routing in one queue",
+  ];
+
+  const platformCapabilities = [
+    {
+      number: "01",
+      title: "Voice & chat agent",
+      description: "One agent, deployed across phone and web chat, trained on the same qualification logic.",
+    },
+    {
+      number: "02",
+      title: "Lead scoring engine",
+      description: "Configurable scoring model that ranks every lead the moment qualification finishes.",
+    },
+    {
+      number: "03",
+      title: "CRM & calendar sync",
+      description: "Qualified leads and call notes sync directly into your CRM and land on a rep’s calendar.",
+    },
+    {
+      number: "04",
+      title: "Custom qualification criteria",
+      description: "Define your own BANT, MEDDIC, or custom framework — the agent follows it exactly.",
+    },
+    {
+      number: "05",
+      title: "Real-time dashboard",
+      description: "See every conversation, score, and outcome as it happens, with full call transcripts.",
+    },
+    {
+      number: "06",
+      title: "Human handoff",
+      description: "Perfect leads can be routed to a live rep mid-conversation when it matters most.",
+    },
+  ];
+
+  const benefits = [
+    {
+      title: "Faster response times",
+      description: "Engage leads within minutes instead of hours, when interest is highest.",
+    },
+    {
+      title: "Higher rep productivity",
+      description: "Reps spend their time closing sales-ready leads, not screening cold ones.",
+    },
+    {
+      title: "Consistent qualification",
+      description: "Every lead is qualified against the same criteria — no rep-to-rep variance.",
+    },
+    {
+      title: "Full pipeline coverage",
+      description: "No lead falls through the cracks, regardless of when it arrives.",
+    },
+  ];
+
+  const faqs = [
+    {
+      question: "What are lead qualification services?",
+      answer:
+        "Lead qualification services engage inbound leads, ask qualifying questions about budget, authority, need, and timeline, and determine which leads are ready for your sales team to pursue.",
+    },
+    {
+      question: "How is AI lead qualification different from a chatbot?",
+      answer:
+        "An AI lead qualification agent runs a structured, conversational qualification process built around your specific criteria — it’s designed to qualify and score leads, not just answer FAQs.",
+    },
+    {
+      question: "Can this work alongside our existing sales team?",
+      answer:
+        "Yes. The agent handles qualification and routes sales-ready leads directly to your reps, with the option to hand off live calls when a lead is hot.",
+    },
+    {
+      question: "Does this integrate with our CRM?",
+      answer: "Qualified leads, scores, and call transcripts sync automatically to your CRM and calendar tools.",
+    },
+    {
+      question: "Is this suited for B2B lead qualification specifically?",
+      answer:
+        "Yes — the platform is built around longer B2B sales cycles and multi-stakeholder buying processes, not simple consumer intake forms.",
+    },
+  ];
 
   return (
     <main className="home-navbar-offset bg-cyan-100 dark:bg-background">
@@ -114,200 +181,187 @@ export default function AutomatedLeadQualificationUseCasePage() {
       <div className="mx-auto w-full max-w-6xl px-4 md:px-6 lg:px-8 py-16 md:py-20">
         <header className="text-center">
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-primary dark:text-foreground">
-            Automated Lead Qualification with Talk-Lee AI
+            Lead Qualification Services
           </h1>
+          <h2 className={`mt-4 ${subHeadingClassName}`}>AI-Powered Lead Qualification Services</h2>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Talk-Lee AI helps businesses qualify leads instantly using AI-powered voice and conversational automation. Our AI agents engage, assess,
-            and route leads in real time, ensuring your sales teams only focus on high-intent prospects.
+            Talk-Lee AI provides AI-powered lead qualification services that call, score, and qualify every inbound lead
+            within minutes &mdash; day or night.
           </p>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Our AI agents enable companies to manage high lead volumes without delays, missed opportunities, or added operational costs.
+            Our AI lead qualification agent asks the questions your SDRs would ask, then hands your sales team only the
+            conversations worth having.
           </p>
+          <div className={ctaPairClassName}>
+            <Link href="/auth/register">
+              <Button size="lg" className={primaryButtonClassName}>
+                Book a Demo
+              </Button>
+            </Link>
+            <Link href="/#contact">
+              <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                See How It Works
+              </Button>
+            </Link>
+          </div>
         </header>
 
         <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            How Talk-Lee AI Automates Lead Qualification
-          </h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talk-Lee AI works seamlessly within your existing customer engagement workflows, delivering fast and accurate lead qualification at scale.
+          <h2 className={headingClassName}>Automate Lead Qualification With AI</h2>
+          <p className={bodyClassName}>
+            Manual lead qualification doesn&rsquo;t scale. Reps skip low-priority leads, follow-up slips, and by the time
+            someone calls back the prospect has already talked to a competitor. AI lead qualification closes that gap by
+            engaging every lead the moment they arrive.
           </p>
+          <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+            {automationPillars.map((pillar) => (
+              <div key={pillar.title} className={accentCardClassName} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{pillar.title}</h3>
+                <p className={cardBodyClassName}>{pillar.description}</p>
+              </div>
+            ))}
+          </div>
+        </section>
 
+        <section className="mt-14">
+          <p className={eyebrowClassName}>The Agent</p>
+          <h2 className={`mt-3 ${headingClassName}`}>How Talk-Lee AI&rsquo;s Lead Qualification Agent Works</h2>
+          <p className={bodyClassName}>
+            Built specifically for lead qualification services &mdash; not a generic chatbot. The agent is trained on your
+            offer, your ICP, and your disqualifying criteria before it ever talks to a lead.
+          </p>
+          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {agentSteps.map((step) => (
+              <div key={step.title} className={accentCardClassName} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{step.title}</h3>
+                <p className={cardBodyClassName}>{step.description}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <h2 className={headingClassName}>B2B Lead Qualification Services</h2>
+          <p className={bodyClassName}>
+            B2B pipelines involve longer cycles and more stakeholders than B2C. Our B2B lead qualification services are
+            built around multi-touch, multi-stakeholder buying processes &mdash; not simple one-and-done consumer forms.
+          </p>
+          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {b2bStats.map((stat) => (
+              <div key={stat.value} className={`${accentCardClassName} text-center`} style={accentCardStyle}>
+                <p className="text-3xl md:text-4xl font-bold tracking-tight text-primary dark:text-foreground">
+                  {stat.value}
+                </p>
+                <p className="mt-3 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">{stat.label}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <h2 className={headingClassName}>Automated Lead Qualification That Saves Your Sales Team Time</h2>
+          <p className={bodyClassName}>
+            Every hour an AE spends chasing unqualified leads is an hour not spent closing. Automated lead qualification
+            moves that work off your team&rsquo;s plate entirely.
+          </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
-            {steps.map((item) => (
-              <div
-                key={item.title}
-                className="group rounded-2xl border border-border/70 bg-transparent backdrop-blur-sm p-6 shadow-sm transition-[transform,box-shadow,filter,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:brightness-[1.02] hover:shadow-md hover:border-border"
-                style={{
-                  backgroundImage: "var(--home-card-gradient)",
-                  backgroundSize: "cover",
-                  backgroundRepeat: "no-repeat",
-                }}
-              >
-                <div className="flex items-start gap-4">
-                  <div className="mt-0.5 flex h-11 w-11 items-center justify-center rounded-full border border-border/70 bg-white shadow-sm">
-                    <item.icon className="h-5 w-5 text-black" aria-hidden />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-base font-semibold text-primary dark:text-foreground">{item.title}</div>
-                    <div className="mt-3 text-sm sm:text-base text-gray-700 dark:text-muted-foreground leading-relaxed">
-                      {item.description}
-                    </div>
-                  </div>
-                </div>
+            <div className={accentCardClassName} style={accentCardStyle}>
+              <h3 className={`${cardTitleClassName} text-center`}>Without automation</h3>
+              <ul className="mt-4 divide-y divide-border/70 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
+                {withoutAutomation.map((item) => (
+                  <li key={item} className="py-3 text-center">
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className={accentCardClassName} style={accentCardStyle}>
+              <h3 className={`${cardTitleClassName} text-center`}>With Talk-Lee AI</h3>
+              <ul className="mt-4 divide-y divide-border/70 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
+                {withTalkLee.map((item) => (
+                  <li key={item} className="py-3 text-center font-medium text-primary dark:text-foreground">
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <h2 className={headingClassName}>Lead Qualification Software &amp; Solutions</h2>
+          <p className={bodyClassName}>
+            A complete lead qualification solution &mdash; not just a script. Everything below is included as part of the
+            platform.
+          </p>
+          <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {platformCapabilities.map((capability) => (
+              <div key={capability.number} className={accentCardClassName} style={accentCardStyle}>
+                <p className={eyebrowClassName}>{capability.number}</p>
+                <h3 className={`mt-3 ${cardTitleClassName}`}>{capability.title}</h3>
+                <p className={cardBodyClassName}>{capability.description}</p>
               </div>
             ))}
           </div>
         </section>
 
         <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Why Businesses Choose Talk-Lee AI for Lead Qualification
-          </h2>
+          <h2 className={headingClassName}>Benefits of AI-Powered Lead Qualification</h2>
+          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {benefits.map((benefit) => (
+              <div key={benefit.title} className={`${accentCardClassName} text-center`} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{benefit.title}</h3>
+                <p className={cardBodyClassName}>{benefit.description}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <h2 className={headingClassName}>Why Use Lead Qualification Automation?</h2>
+          <p className={bodyClassName}>
+            Buyers expect an immediate response. Lead qualification automation is what makes that possible without
+            expanding your SDR headcount.
+          </p>
+          <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
+            <blockquote className="text-base sm:text-lg md:text-xl font-medium text-primary dark:text-foreground leading-relaxed">
+              &ldquo;The team that responds first and asks the right questions first wins the deal. Automation is how you
+              guarantee that happens on every single lead.&rdquo;
+            </blockquote>
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <h2 className={headingClassName}>Frequently Asked Questions</h2>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
-            {reasons.map((item) => (
-              <div
-                key={item.title}
-                className="group rounded-2xl border border-border/70 bg-transparent backdrop-blur-sm p-6 shadow-sm transition-[transform,box-shadow,filter,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:brightness-[1.02] hover:shadow-md hover:border-border"
-                style={{
-                  backgroundImage: "var(--home-card-gradient)",
-                  backgroundSize: "cover",
-                  backgroundRepeat: "no-repeat",
-                }}
-              >
-                <div className="flex items-start gap-4">
-                  <div className="mt-0.5 flex h-11 w-11 items-center justify-center rounded-full border border-border/70 bg-white shadow-sm">
-                    <item.icon className="h-5 w-5 text-black" aria-hidden />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-base font-semibold text-primary dark:text-foreground">{item.title}</div>
-                    <div className="mt-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground leading-relaxed">
-                      {item.description}
-                    </div>
-                  </div>
-                </div>
+            {faqs.map((faq) => (
+              <div key={faq.question} className={accentCardClassName} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{faq.question}</h3>
+                <p className={cardBodyClassName}>{faq.answer}</p>
               </div>
             ))}
           </div>
         </section>
 
         <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Industries That Benefit from Talk-Lee AI Lead Qualification
-          </h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talk-Lee AI supports lead qualification across high-volume, high-intent industries:
-          </p>
-
-          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {industries.map((item) => (
-              <div
-                key={item.title}
-                className="group rounded-2xl border border-border/70 bg-transparent backdrop-blur-sm p-6 shadow-sm transition-[transform,box-shadow,filter,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:brightness-[1.02] hover:shadow-md hover:border-border"
-                style={{
-                  backgroundImage: "var(--home-card-gradient)",
-                  backgroundSize: "cover",
-                  backgroundRepeat: "no-repeat",
-                }}
-              >
-                <div className="flex items-start gap-4">
-                  <div className="mt-0.5 flex h-11 w-11 items-center justify-center rounded-full border border-border/70 bg-white shadow-sm">
-                    <item.icon className="h-5 w-5 text-black" aria-hidden />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-base font-semibold text-primary dark:text-foreground">{item.title}</div>
-                    <div className="mt-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground leading-relaxed">
-                      {item.description}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Seamless Integration with Your Existing Systems
-          </h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talk-Lee AI integrates easily with CRMs, contact center platforms, and customer databases. Our AI customer service automation fits into your
-            current stack without disrupting operations.
-          </p>
-        </section>
-
-        <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Security, Privacy, and Compliance
-          </h2>
-          <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
-            <li>• Enterprise-grade data security and privacy controls</li>
-            <li>• No training on customer data without consent</li>
-            <li>• Designed to meet global compliance and data protection standards</li>
-          </ul>
-        </section>
-
-        <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Key Benefits of Talk-Lee AI Lead Qualification
-          </h2>
-          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-3">
-            {[
-              { label: "Faster response times and reduced lead drop-off", icon: Clock },
-              { label: "Lower operational and staffing costs", icon: Building2 },
-              { label: "Higher lead quality and improved conversions", icon: BadgeCheck },
-              { label: "Consistent qualification across all channels", icon: ClipboardList },
-              { label: "Scalable AI call center automation", icon: Landmark },
-              { label: "Reliable 24/7 AI customer support", icon: Headphones },
-            ].map((item) => (
-              <div
-                key={item.label}
-                className="group flex items-start gap-3 rounded-2xl border border-border/70 bg-transparent backdrop-blur-sm p-4 shadow-sm transition-[transform,filter,border-color,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:brightness-[1.02] hover:border-border hover:shadow-md"
-                style={{
-                  backgroundImage: "var(--home-card-gradient)",
-                  backgroundSize: "cover",
-                  backgroundRepeat: "no-repeat",
-                }}
-              >
-                <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-full border border-border/70 bg-white shadow-sm">
-                  <item.icon className="h-4 w-4 text-black" aria-hidden />
-                </div>
-                <div className="text-sm sm:text-base text-gray-700 dark:text-muted-foreground leading-relaxed">{item.label}</div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Overcoming Common Lead Qualification Challenges
-          </h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talk-Lee AI helps businesses address:
-          </p>
-          <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
-            <li>• Slow response times</li>
-            <li>• Inconsistent lead scoring</li>
-            <li>• Manual workload on sales teams</li>
-            <li>• Missed after-hours opportunities</li>
-            <li>• Poor data capture during early conversations</li>
-          </ul>
-        </section>
-
-        <section className="mt-14 rounded-3xl border border-border/70 bg-background/70 dark:bg-white/5 backdrop-blur-sm p-8 md:p-12 text-center">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Start qualifying better leads automatically.
-          </h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-3xl mx-auto">
-            Book a demo with Talk-Lee AI today and see how AI-powered lead qualification can improve conversions while reducing costs.
-          </p>
-          <div className="mt-7 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
-            <Button asChild size="lg" className="rounded-full px-8 bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400">
-              <Link href="/#contact">Book a demo</Link>
-            </Button>
-            <Button asChild size="lg" variant="outline" className="rounded-full px-8 bg-blue-950 hover:bg-blue-950 text-white hover:text-white border-blue-950 hover:border-blue-950 dark:bg-blue-900 dark:hover:bg-blue-900 dark:text-white dark:hover:text-white dark:border-blue-900 dark:hover:border-blue-900">
-              <Link href="/ai-voice-agent">Explore AI Voice Agent</Link>
-            </Button>
+          <div className="rounded-3xl border border-border/70 bg-background/70 dark:bg-white/5 backdrop-blur-sm p-8 md:p-12 text-center shadow-sm transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md hover:border-border">
+            <p className={eyebrowClassName}>Get Started</p>
+            <h2 className={`mt-3 ${headingClassName}`}>See Your Lead Qualification Agent In Action</h2>
+            <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-3xl mx-auto">
+              Book a demo and we&rsquo;ll show you how it qualifies leads against your own criteria.
+            </p>
+            <div className={ctaPairClassName}>
+              <Link href="/auth/register">
+                <Button size="lg" className={primaryButtonClassName}>
+                  Book a Demo
+                </Button>
+              </Link>
+              <Link href="/#contact">
+                <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                  Talk to Sales
+                </Button>
+              </Link>
+            </div>
           </div>
         </section>
       </div>
