@@ -5,9 +5,9 @@ import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
 
 export const metadata: Metadata = {
-  title: "Talk-Lee AI Assist | Real-Time AI for Teams",
+  title: "AI Assist | Smart AI Assistant for Business Automation",
   description:
-    "Enhance agent performance and call quality with live guidance, automated CRM updates, and AI-generated insights for smarter conversations.",
+    "Want to automate routine business tasks? AI Assist handles leads, support, sales, and workflows. Ready to simplify work? Get started!",
 };
 
 export default function AIAssistPage() {
@@ -19,258 +19,350 @@ export default function AIAssistPage() {
     backgroundRepeat: "no-repeat",
   } as const;
 
+  const eyebrowClassName =
+    "text-xs sm:text-sm font-semibold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400";
+  const headingClassName = "text-2xl md:text-3xl font-semibold text-primary dark:text-foreground";
+  const subHeadingClassName = "text-xl md:text-2xl font-semibold text-primary dark:text-foreground";
+  const cardTitleClassName = "text-lg md:text-xl font-semibold text-primary dark:text-foreground";
+  const bodyClassName =
+    "mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed";
+  const cardBodyClassName = "mt-3 text-sm sm:text-base text-gray-700 dark:text-muted-foreground leading-relaxed";
+  const listClassName = "mt-4 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground";
+  const buttonSizeClassName = "rounded-full h-12 sm:h-14 px-8 sm:px-10 text-sm sm:text-base font-semibold";
+  const primaryButtonClassName = `${buttonSizeClassName} bg-blue-600 hover:bg-blue-700 text-white`;
+  const outlineButtonClassName = `${buttonSizeClassName} bg-blue-950 hover:bg-blue-950 text-white hover:text-white border-blue-950 hover:border-blue-950 dark:bg-blue-900 dark:hover:bg-blue-900 dark:text-white dark:hover:text-white dark:border-blue-900 dark:hover:border-blue-900`;
+  const centeredCtaClassName = "mt-10 flex justify-center";
+
+  const capabilityPills = [
+    "24/7 Assistance",
+    "Sales & Support",
+    "Workflow Automation",
+    "Built for Your Business",
+  ];
+
+  const traditionalAssistants = [
+    "Available during business hours only",
+    "Handles one conversation at a time",
+    "Manual data entry and follow-up",
+    "Limited by headcount and hours",
+  ];
+
+  const assistantRoles = [
+    {
+      title: "AI Sales Assistant",
+      description:
+        "Engages and qualifies leads, follows up automatically, and helps move prospects toward a booked appointment.",
+      items: ["Lead engagement", "Lead qualification", "Follow-ups", "Appointment scheduling"],
+    },
+    {
+      title: "AI Customer Support Assistant",
+      description: "Answers common questions and resolves routine requests instantly, any time of day.",
+      items: [
+        "Answer customer questions",
+        "Handle common requests",
+        "Provide instant responses",
+        "Support customers 24/7",
+      ],
+    },
+    {
+      title: "AI Business Assistant",
+      description: "Takes repetitive tasks off your team’s plate and keeps internal workflows moving.",
+      items: ["Automate repetitive tasks", "Manage workflows", "Assist employees", "Improve efficiency"],
+    },
+    {
+      title: "AI Virtual Assistant",
+      description: "Handles the routine, everyday requests that would otherwise sit in someone’s inbox.",
+      items: [
+        "Handle routine requests",
+        "Manage conversations",
+        "Assist with daily tasks",
+        "Reduce manual workload",
+      ],
+    },
+  ];
+
+  const howItWorks = [
+    { title: "Connect", description: "Connect AI Assist with your existing business systems." },
+    { title: "Configure", description: "Set your workflows, rules, knowledge, and business goals." },
+    { title: "Automate", description: "Let AI handle repetitive conversations and tasks." },
+    { title: "Optimize", description: "Monitor performance and improve workflows over time." },
+  ];
+
+  const automationCoverage = [
+    "Lead Qualification",
+    "Customer Inquiries",
+    "Follow-Ups",
+    "Appointment Booking",
+    "Data Collection",
+    "FAQ Responses",
+    "Customer Onboarding",
+    "Sales Support",
+    "Workflow Automation",
+    "Internal Assistance",
+    "CRM Updates",
+    "Lead Routing",
+  ];
+
+  const features = [
+    {
+      label: "Availability",
+      title: "24/7 AI Assistance",
+      description: "Provide support and engagement beyond business hours.",
+    },
+    {
+      label: "Conversation",
+      title: "Intelligent Conversations",
+      description: "Understand customer questions and respond naturally.",
+    },
+    {
+      label: "Sales",
+      title: "Lead Qualification",
+      description: "Identify and prioritize promising prospects.",
+    },
+    {
+      label: "Consistency",
+      title: "Automated Follow-Ups",
+      description: "Keep leads and customers engaged without manual chasing.",
+    },
+    {
+      label: "Operations",
+      title: "Workflow Automation",
+      description: "Automate repetitive processes and reduce admin work.",
+    },
+    {
+      label: "Connected",
+      title: "CRM & Business Integrations",
+      description: "Connect AI Assist with the tools your team already uses.",
+    },
+    {
+      label: "Visibility",
+      title: "Analytics & Insights",
+      description: "Track conversations, activities, and outcomes.",
+    },
+    {
+      label: "Flexibility",
+      title: "Custom AI Workflows",
+      description: "Configure AI Assist around your business processes.",
+    },
+  ];
+
+  const faqs = [
+    {
+      question: "What is AI Assist?",
+      answer:
+        "AI Assist is AI assistant software that automates conversations and tasks across sales, support, and business operations.",
+    },
+    {
+      question: "How does an AI virtual assistant work?",
+      answer:
+        "It connects to your business systems, follows the workflows and knowledge you configure, and handles conversations or tasks automatically based on that setup.",
+    },
+    {
+      question: "What can an AI assistant do for a business?",
+      answer:
+        "It can qualify leads, answer customer questions, schedule appointments, follow up automatically, and handle repetitive internal tasks.",
+    },
+    {
+      question: "Can AI Assist automate customer support?",
+      answer: "Yes. It can answer common questions and handle routine support requests around the clock.",
+    },
+    {
+      question: "Can AI Assist help with sales and lead qualification?",
+      answer:
+        "Yes — it engages prospects, asks qualifying questions, and passes ready leads to your sales team.",
+    },
+    {
+      question: "Is AI Assist software customizable?",
+      answer:
+        "Yes — workflows, knowledge, and conversation flow are all configured around your specific business.",
+    },
+  ];
+
   return (
     <main className="home-navbar-offset bg-cyan-100 dark:bg-background">
       <Navbar />
       <div className="mx-auto w-full max-w-6xl px-4 md:px-6 lg:px-8 py-16 md:py-20">
         <header className="text-center">
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-primary dark:text-foreground">
-            Talk-Lee AI Assist
+            AI Assist for smarter business automation
           </h1>
-          <p className="mt-4 text-base sm:text-lg md:text-xl text-gray-700 dark:text-muted-foreground">
-            Real-Time Conversation Intelligence That Elevates Every Interaction
-          </p>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Talk-Lee AI Assist is a powerful conversation intelligence layer built to support teams before, during, and after every call.
-            It delivers live guidance, automates follow-ups, and turns conversations into actionable insights, helping every agent perform
-            at their best.
+            Automate routine tasks, engage customers, support your sales team, and streamline business workflows with an
+            AI-powered assistant built for your business.
           </p>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            From call preparation to post-call actions, Talk-Lee AI Assist ensures conversations are consistent, effective, and measurable.
-          </p>
+          <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
+            <Link href="/auth/register">
+              <Button size="lg" className={primaryButtonClassName}>
+                Get Started
+              </Button>
+            </Link>
+            <Link href="/#contact">
+              <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                Book a Demo
+              </Button>
+            </Link>
+          </div>
+          <div className="mt-10 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
+            {capabilityPills.map((pill) => (
+              <span
+                key={pill}
+                className="rounded-full border border-border/70 bg-background/60 dark:bg-white/5 backdrop-blur-sm px-4 py-2 text-xs sm:text-sm font-medium text-gray-700 dark:text-muted-foreground"
+              >
+                {pill}
+              </span>
+            ))}
+          </div>
         </header>
 
         <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Win Every Conversation From Start to End
-          </h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talk-Lee AI Assist helps teams prepare smarter, speak with confidence, and follow up faster. It works in real time to guide
-            agents on calls and automatically handles documentation and insights once the call ends.
-          </p>
-        </section>
-
-        <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Live Guidance That Supports Agents in the Moment
-          </h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talk-Lee AI Assist provides real-time assistance during active calls, helping agents stay aligned with best practices.
+          <h2 className={headingClassName}>What is AI Assist?</h2>
+          <p className={bodyClassName}>
+            AI Assist is AI software that engages customers, qualifies leads, and automates the repetitive work your team
+            handles every day across sales, support, and operations, in one place.
           </p>
           <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
-            <p className="text-sm sm:text-base md:text-lg font-semibold text-primary dark:text-foreground">
-              Live assistance includes:
-            </p>
-            <ul className="mt-4 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
-              <li>• Real-time call transcription</li>
-              <li>• On-screen prompts and guidance</li>
-              <li>• Suggested follow-up questions</li>
-              <li>• Qualification framework support</li>
-              <li>• Objection-handling cues</li>
+            <h3 className={subHeadingClassName}>Traditional Assistants</h3>
+            <ul className={listClassName}>
+              {traditionalAssistants.map((item) => (
+                <li key={item}>&bull; {item}</li>
+              ))}
             </ul>
           </div>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            This enables new and experienced agents to deliver consistent, high-quality conversations.
+          <p className={bodyClassName}>
+            AI Assist works differently. It&rsquo;s designed to hold real conversations, understand what a customer or lead
+            needs, and act on it &mdash; updating records, scheduling, following up, or answering questions, without waiting
+            on a person to be free.
+          </p>
+          <p className={bodyClassName}>
+            It&rsquo;s built for businesses that want one AI assistant covering multiple functions, rather than a separate
+            tool for every task. Sales, support, and internal operations can all run through the same AI Assist software.
           </p>
         </section>
 
         <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Faster Agent Ramp-Up and Better Call Quality
-          </h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talk-Lee AI Assist helps teams improve performance without long training cycles.
+          <h2 className={headingClassName}>One Assistant, Every Function</h2>
+          <h3 className={`mt-3 ${subHeadingClassName}`}>Your AI assistant for sales, support &amp; operations</h3>
+          <p className={bodyClassName}>
+            AI Assist isn&rsquo;t limited to a single job. It adapts to whichever part of your business needs it most.
           </p>
-          <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
-            <p className="text-sm sm:text-base md:text-lg font-semibold text-primary dark:text-foreground">It enables teams to:</p>
-            <ul className="mt-4 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
-              <li>• Apply structured qualification methods during calls</li>
-              <li>• Maintain consistency across conversations</li>
-              <li>• Reduce reliance on manual coaching</li>
-              <li>• Improve confidence on live calls</li>
-            </ul>
-          </div>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Agents learn and perform simultaneously without disruption.
-          </p>
-        </section>
-
-        <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Automated Insights After Every Call
-          </h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Once a call ends, Talk-Lee AI Assist automatically analyzes the conversation and extracts what matters most.
-          </p>
-          <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
-            <p className="text-sm sm:text-base md:text-lg font-semibold text-primary dark:text-foreground">
-              Post-call intelligence includes:
-            </p>
-            <ul className="mt-4 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
-              <li>• AI-generated call summaries</li>
-              <li>• Key discussion points</li>
-              <li>• Clearly defined next steps</li>
-              <li>• Talk-to-listen ratio analysis</li>
-              <li>• Sentiment detection</li>
-            </ul>
-          </div>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            This removes the need for manual notes and ensures clarity for follow-ups.
-          </p>
-        </section>
-
-        <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Built-In Call Scoring and Quality Review
-          </h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talk-Lee AI Assist evaluates conversations against your internal quality standards.
-          </p>
-          <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
-            <p className="text-sm sm:text-base md:text-lg font-semibold text-primary dark:text-foreground">
-              Quality features include:
-            </p>
-            <ul className="mt-4 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
-              <li>• Automated call scoring</li>
-              <li>• Custom evaluation criteria</li>
-              <li>• Performance trend analysis</li>
-              <li>• Coaching opportunity identification</li>
-            </ul>
-          </div>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Managers gain visibility into call quality without reviewing recordings manually.
-          </p>
-        </section>
-
-        <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Automated Follow-Ups and CRM Updates
-          </h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talk-Lee AI Assist connects call outcomes directly to workflows and systems.
-          </p>
-          <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
-            <p className="text-sm sm:text-base md:text-lg font-semibold text-primary dark:text-foreground">Automation includes:</p>
-            <ul className="mt-4 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
-              <li>• Auto-generated follow-up emails</li>
-              <li>• CRM record updates</li>
-              <li>• Task and reminder creation</li>
-              <li>• Structured post-call workflows</li>
-            </ul>
-          </div>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            This keeps momentum high and ensures nothing slips through the cracks.
-          </p>
-        </section>
-
-        <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Conversation Trends and Team Insights
-          </h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talk-Lee AI Assist aggregates call data to reveal patterns across teams.
-          </p>
-          <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
-            <p className="text-sm sm:text-base md:text-lg font-semibold text-primary dark:text-foreground">Insights include:</p>
-            <ul className="mt-4 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
-              <li>• Common customer concerns</li>
-              <li>• Trending conversation topics</li>
-              <li>• Sentiment patterns</li>
-              <li>• Agent performance metrics</li>
-            </ul>
-          </div>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            These insights help leadership refine messaging, training, and strategy.
-          </p>
-        </section>
-
-        <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Talk-Lee AI Assist Plans</h2>
-          <div className="mt-8 overflow-x-auto rounded-2xl border border-border/70 bg-background/70 dark:bg-white/5 backdrop-blur-sm">
-            <table className="w-full min-w-[860px] border-collapse text-sm sm:text-base">
-              <thead>
-                <tr className="border-b border-border/70">
-                  <th className="p-4 text-left font-semibold text-primary dark:text-foreground">Talk-Lee AI Assist (Core)</th>
-                  <th className="p-4 text-left font-semibold text-primary dark:text-foreground">Talk-Lee AI Assist Pro</th>
-                </tr>
-              </thead>
-              <tbody className="text-gray-700 dark:text-muted-foreground">
-                <tr>
-                  <td className="p-4 align-top">
-                    <p className="font-semibold text-primary dark:text-foreground">Includes:</p>
-                    <ul className="mt-3 space-y-2">
-                      <li>• Call summaries</li>
-                      <li>• Key topic detection</li>
-                      <li>• Talk-to-listen metrics</li>
-                      <li>• Action items</li>
-                      <li>• Sentiment analysis</li>
-                      <li>• Conversation trends</li>
-                      <li>• Automated call scoring</li>
-                      <li>• CRM autofill</li>
-                      <li>• Email follow-up automation</li>
-                    </ul>
-                  </td>
-                  <td className="p-4 align-top border-l border-border/70">
-                    <p className="font-semibold text-primary dark:text-foreground">Includes everything in Talk-Lee AI Assist, plus:</p>
-                    <ul className="mt-3 space-y-2">
-                      <li>• Live call transcription</li>
-                      <li>• Real-time prompts and guidance</li>
-                      <li>• Structured playbooks and workflows</li>
-                      <li>• Automated CRM updates from playbooks</li>
-                      <li>• Advanced post-call automation</li>
-                      <li>• Custom call scoring</li>
-                      <li>• Contact-level insights</li>
-                    </ul>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {assistantRoles.map((role) => (
+              <div key={role.title} className={accentCardClassName} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{role.title}</h3>
+                <p className={cardBodyClassName}>{role.description}</p>
+                <ul className={listClassName}>
+                  {role.items.map((item) => (
+                    <li key={item}>&bull; {item}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
           </div>
         </section>
 
         <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Secure, Reliable, and Team-Ready</h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talk-Lee AI Assist is built with data protection in mind. Conversations, transcripts, and insights remain secure and are never
-            used for external model training.
+          <h2 className={headingClassName}>How It Works</h2>
+          <p className={bodyClassName}>
+            Four steps to a fully configured assistant, built around how your business actually operates.
           </p>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            AI-generated insights are accessible directly within your call logs and dashboards for easy review and collaboration.
-          </p>
+          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {howItWorks.map((step) => (
+              <div key={step.title} className={accentCardClassName} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{step.title}</h3>
+                <p className={cardBodyClassName}>{step.description}</p>
+              </div>
+            ))}
+          </div>
+          <div className={centeredCtaClassName}>
+            <Link href="/auth/register">
+              <Button size="lg" className={primaryButtonClassName}>
+                See How Setup Works &rarr;
+              </Button>
+            </Link>
+          </div>
         </section>
 
         <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            Designed for Sales, Support, and Growth Teams
-          </h2>
-          <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
-            <ul className="space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
-              <li>• Improve call quality without extra training</li>
-              <li>• Reduce admin time after every call</li>
-              <li>• Gain clarity across all conversations</li>
-              <li>• Scale team performance consistently</li>
-            </ul>
-          </div>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talk-Lee AI Assist helps teams focus on conversations—not paperwork.
+          <p className={eyebrowClassName}>Automation Coverage</p>
+          <h2 className={`mt-3 ${headingClassName}`}>Automate more with AI Assist</h2>
+          <p className={bodyClassName}>
+            An AI automation assistant that covers the tasks eating up your team&rsquo;s time &mdash; not just one narrow use
+            case.
           </p>
+          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {automationCoverage.map((item) => (
+              <div key={item} className={`${accentCardClassName} text-center`} style={accentCardStyle}>
+                <p className="text-base sm:text-lg font-semibold text-primary dark:text-foreground">{item}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <p className={eyebrowClassName}>What It Does</p>
+          <h2 className={`mt-3 ${headingClassName}`}>Powerful AI assistant software built for business</h2>
+          <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {features.map((feature) => (
+              <div key={feature.title} className={accentCardClassName} style={accentCardStyle}>
+                <p className="text-xs sm:text-sm font-semibold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">
+                  {feature.label}
+                </p>
+                <h3 className={`mt-3 ${cardTitleClassName}`}>{feature.title}</h3>
+                <p className={cardBodyClassName}>{feature.description}</p>
+              </div>
+            ))}
+          </div>
+          <div className={centeredCtaClassName}>
+            <Link href="/#contact">
+              <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                Explore Every Feature &rarr;
+              </Button>
+            </Link>
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <h2 className={headingClassName}>AI Assist pricing</h2>
+          <p className={bodyClassName}>
+            Every business automates differently &mdash; pricing reflects your usage, workflows and integrations rather than
+            a flat, one-size-fits-all plan.
+          </p>
+          <p className={bodyClassName}>
+            Get a customized AI Assist plan based on your business needs and workflow requirements.
+          </p>
+          <div className={centeredCtaClassName}>
+            <Link href="/auth/register">
+              <Button size="lg" className={primaryButtonClassName}>
+                Get Your Custom Quote
+              </Button>
+            </Link>
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <h2 className={headingClassName}>Frequently Asked Questions</h2>
+          <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
+            {faqs.map((faq) => (
+              <div key={faq.question} className={accentCardClassName} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{faq.question}</h3>
+                <p className={cardBodyClassName}>{faq.answer}</p>
+              </div>
+            ))}
+          </div>
         </section>
 
         <section className="mt-14">
           <div className="rounded-3xl border border-border/70 bg-background/70 dark:bg-white/5 backdrop-blur-sm p-8 md:p-12 text-center shadow-sm transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md hover:border-border">
-            <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-              Make Every Conversation Count with Talk-Lee AI Assist
-            </h2>
-            <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-              Talk-Lee AI Assist transforms everyday calls into structured insights, automated actions, and better outcomes.
+            <p className={eyebrowClassName}>Get Started</p>
+            <h2 className={`mt-3 ${headingClassName}`}>Ready to put AI to work?</h2>
+            <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-3xl mx-auto">
+              Give your team an AI assistant that can handle repetitive work, engage customers, support sales, and automate
+              everyday workflows.
             </p>
-            <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-              Guide agents live. Capture insights instantly. Follow up automatically.
-            </p>
-            <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
-              <Link href="/auth/register">
-                <Button size="lg" className="rounded-full px-8 bg-blue-600 hover:bg-blue-700 text-white">
-                  Get started with Talk-Lee AI Assist today.
+            <div className="mt-8 flex justify-center">
+              <Link href="/#contact">
+                <Button size="lg" variant="outline" className={outlineButtonClassName}>
+                  Book an AI Assist Demo
                 </Button>
               </Link>
             </div>
