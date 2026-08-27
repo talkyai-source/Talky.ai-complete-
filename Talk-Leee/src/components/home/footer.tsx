@@ -18,7 +18,7 @@ export function Footer() {
   ];
 
   return (
-    <footer className="bg-cyan-100 dark:bg-background pt-16 pb-8 px-4 md:px-6 lg:px-8 border-t border-border/60">
+    <footer className="bg-card pt-16 pb-8 px-4 md:px-6 lg:px-8 border-t border-border/60">
       <div className="max-w-7xl mx-auto">
         {/* Top Section */}
         <div className="flex flex-col md:flex-row items-center justify-between gap-8 mb-12">

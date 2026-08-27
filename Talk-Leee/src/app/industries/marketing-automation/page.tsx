@@ -273,7 +273,7 @@ export default function MarketingAutomationIndustryPage() {
   ];
 
   return (
-    <main className="home-navbar-offset bg-cyan-100 dark:bg-background">
+    <main className="home-navbar-offset bg-cyan-50 dark:bg-black">
       <Navbar />
       <div className="mx-auto w-full max-w-6xl px-4 md:px-6 lg:px-8 py-16 md:py-20">
         <header className="text-center">

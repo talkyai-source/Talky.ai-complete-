@@ -8,7 +8,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
-export function ContactSection() {
+type ContactSectionProps = {
+  /**
+   * Extra classes for the outer <section>. Used by the dedicated /contact page to
+   * tighten the vertical rhythm; omitted on the homepage so its spacing is unchanged.
+   */
+  sectionClassName?: string;
+};
+
+export function ContactSection({ sectionClassName }: ContactSectionProps = {}) {
   const [formData, setFormData] = useState({ name: "", email: "", message: "", company: "" });
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -41,7 +49,10 @@ export function ContactSection() {
   };
 
   return (
-    <section id="contact" className="bg-cyan-100 dark:bg-background py-24 px-4 md:px-6 lg:px-8 overflow-x-hidden">
+    <section
+      id="contact"
+      className={cn("bg-cyan-50 dark:bg-black py-24 px-4 md:px-6 lg:px-8 overflow-x-hidden", sectionClassName)}
+    >
        <div className="max-w-6xl mx-auto">
           {/* Header */}
           <div 
