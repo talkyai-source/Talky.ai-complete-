@@ -9,6 +9,11 @@ export const metadata: Metadata = {
   title: "Talk-Lee",
   description: "Intelligent voice communication platform powered by advanced AI agents",
   manifest: "/site.webmanifest",
+  // Google Search Console ownership proof for https://talkleeai.com/.
+  // Must stay in place permanently - removing it revokes verification.
+  verification: {
+    google: "J9pxYqrFOcxJsYsdazFfu5AAiqE4T-Y66OPLLlaBC9c",
+  },
   icons: {
     icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
   },
