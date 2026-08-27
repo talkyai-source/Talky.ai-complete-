@@ -45,7 +45,7 @@ const services = [
 
 export function FeaturesSection() {
   return (
-    <section id="services" className="bg-cyan-100 dark:bg-background py-24 px-4 md:px-6 lg:px-8">
+    <section id="services" className="bg-cyan-50 dark:bg-black py-24 px-4 md:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
         <div className="text-center max-w-3xl mx-auto mb-16 space-y-4">
           <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-gray-950 dark:text-foreground">

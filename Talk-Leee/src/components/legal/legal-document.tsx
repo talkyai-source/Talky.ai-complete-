@@ -93,7 +93,7 @@ function renderBlock(block: LegalBlock, index: number) {
 
 export function LegalDocument({ title, effectiveDate, lastUpdated, summary, intro, blocks }: LegalDocumentProps) {
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col bg-cyan-50 dark:bg-black">
       <Navbar />
       <main className="flex-1 px-4 md:px-6 lg:px-8 py-16">
         <article className="max-w-3xl mx-auto">

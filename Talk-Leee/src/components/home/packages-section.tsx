@@ -44,7 +44,7 @@ export function PackagesSection() {
 
   return (
     <>
-      <section className="bg-cyan-100 dark:bg-background py-16 lg:py-20 px-4 md:px-6 lg:px-8">
+      <section className="bg-cyan-50 dark:bg-black py-16 lg:py-20 px-4 md:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto">
           <div className="text-center max-w-3xl mx-auto mb-10 lg:mb-12 space-y-3">
             <motion.h2
@@ -113,7 +113,7 @@ export function PackagesSection() {
         </div>
       </section>
 
-      <section id="how-it-works" className="bg-cyan-100 dark:bg-background py-16 lg:py-20 px-4 md:px-6 lg:px-8">
+      <section id="how-it-works" className="bg-cyan-50 dark:bg-black py-16 lg:py-20 px-4 md:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto">
           <div className="text-center max-w-3xl mx-auto mb-10 lg:mb-12 space-y-3">
             <motion.h2
@@ -223,7 +223,7 @@ export function PackagesSection() {
         </div>
       </section>
 
-      <section id="use-cases" className="bg-cyan-100 dark:bg-background py-16 lg:py-20 px-4 md:px-6 lg:px-8">
+      <section id="use-cases" className="bg-cyan-50 dark:bg-black py-16 lg:py-20 px-4 md:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto">
           <div className="text-center max-w-3xl mx-auto mb-10 lg:mb-12 space-y-3">
             <motion.h2

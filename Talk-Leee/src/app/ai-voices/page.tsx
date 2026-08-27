@@ -65,7 +65,7 @@ export default function AiVoicesPage() {
   };
 
   return (
-    <main className="min-h-screen bg-transparent home-navbar-offset">
+    <main className="min-h-screen bg-cyan-50 dark:bg-black home-navbar-offset">
       <Navbar />
       
       <div className="pt-10 md:pt-6 pb-24 px-4 md:px-6 lg:px-8 max-w-7xl mx-auto">

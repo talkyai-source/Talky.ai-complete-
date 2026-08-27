@@ -22,6 +22,15 @@ export function Navbar() {
     pathname.startsWith("/ai-assist/") ||
     pathname === "/ai-voice-agent" ||
     pathname.startsWith("/ai-voice-agent/");
+  const isContactPage = pathname === "/contact" || pathname.startsWith("/contact/");
+  const isLegalPage =
+    pathname === "/terms" ||
+    pathname.startsWith("/terms/") ||
+    pathname === "/privacy" ||
+    pathname.startsWith("/privacy/");
+  // Every standalone marketing page shares one navbar treatment.
+  const isStandalonePage =
+    isAiVoices || isUseCasesPage || isIndustriesPage || isProductsPage || isContactPage || isLegalPage;
   const mobileMenuRef = useRef<HTMLDetailsElement | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
@@ -74,10 +83,9 @@ export function Navbar() {
         ],
       },
       { label: "Industries", items: [...industryNavItems] },
-      { label: "FAQ", href: isHome ? "#faq" : "/#faq" },
-      { label: "Contact", href: isHome ? "#contact" : "/#contact" },
+      { label: "Contact", href: "/contact" },
     ];
-  }, [isHome]);
+  }, []);
 
   type MenuItem = (typeof menuItems)[number];
   type DropdownWithChildrenItem = Extract<MenuItem, { items: unknown[] }>;
@@ -198,14 +206,16 @@ export function Navbar() {
         aria-label="Primary"
         className={[
           "home-navbar-fixed dark px-3 sm:px-4 md:px-5 flex items-center h-[var(--home-navbar-height)]",
-          isAiVoices || isUseCasesPage || isIndustriesPage || isProductsPage || (isHome && !isInHeroZone) ? "home-navbar-scrolled" : "",
-          isAiVoices || isUseCasesPage || isIndustriesPage || isProductsPage ? "home-navbar-page" : "",
+          isStandalonePage || (isHome && !isInHeroZone) ? "home-navbar-scrolled" : "",
+          isStandalonePage ? "home-navbar-page" : "",
           mobileMenuOpen ? "home-navbar-menu-open" : "",
         ].join(" ")}
         data-theme={theme}
         style={{
           fontFamily: "var(--font-manrope)",
-          ...(isAiVoices
+          // Light mode keeps the bespoke dark panel this page has always had; in dark
+          // mode it must fall through to the shared translucent treatment.
+          ...(isAiVoices && theme === "light"
             ? {
                 background: "rgba(0, 16, 34, 0.78)",
               }
@@ -225,7 +235,9 @@ export function Navbar() {
               <summary
                 className="home-menu-toggle list-none cursor-pointer"
                 style={{
-                  color: isAiVoices ? "#7dd3fc" : "rgba(226, 232, 240, 0.95)",
+                  // Light mode restyles this via .home-navbar-page; dark mode shares the
+                  // one slate tone so every page matches the /contact navbar.
+                  color: isAiVoices && theme === "light" ? "#7dd3fc" : "rgba(226, 232, 240, 0.95)",
                 }}
                 aria-label="Open navigation menu"
                 aria-haspopup="menu"

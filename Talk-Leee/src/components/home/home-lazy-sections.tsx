@@ -41,7 +41,7 @@ const Footer = dynamic(() => import("@/components/home/footer").then((m) => m.Fo
 
 function SectionPlaceholder({ minHeightClassName }: { minHeightClassName: string }) {
   return (
-    <section className={`bg-cyan-100 dark:bg-background ${minHeightClassName}`}>
+    <section className={`bg-cyan-50 dark:bg-black ${minHeightClassName}`}>
       <div className="mx-auto h-full max-w-7xl px-4 md:px-6 lg:px-8" />
     </section>
   );
@@ -85,7 +85,7 @@ function FAQSection() {
   ];
 
   return (
-    <section id="faq" className="bg-cyan-100 dark:bg-background py-20 px-4 md:px-6 lg:px-8 overflow-hidden">
+    <section id="faq" className="bg-cyan-50 dark:bg-black py-20 px-4 md:px-6 lg:px-8 overflow-hidden">
       <div className="max-w-5xl mx-auto">
         <h2 className="text-center text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
           Frequently Asked Questions - Talk-Lee AI

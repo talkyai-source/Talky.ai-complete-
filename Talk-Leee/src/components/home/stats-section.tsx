@@ -38,7 +38,7 @@ export function StatsSection() {
   };
 
   return (
-    <section className="py-12 px-4 md:px-6 lg:px-8 bg-cyan-100 dark:bg-background">
+    <section className="py-12 px-4 md:px-6 lg:px-8 bg-cyan-50 dark:bg-black">
       <div className="max-w-6xl mx-auto">
         <h2 className="text-center text-2xl md:text-3xl font-semibold text-primary dark:text-foreground mb-8">
           Why 5,000+ Businesses Worldwide Choose Us

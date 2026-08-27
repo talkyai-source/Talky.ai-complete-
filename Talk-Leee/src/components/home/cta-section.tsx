@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 
 export function CTASection() {
   return (
-    <section className="bg-cyan-100 dark:bg-background py-24 px-4 md:px-6 lg:px-8 overflow-hidden">
+    <section className="bg-cyan-50 dark:bg-black py-24 px-4 md:px-6 lg:px-8 overflow-hidden">
       <div className="max-w-5xl mx-auto">
         <motion.div
           initial={{ opacity: 0, y: 20 }}

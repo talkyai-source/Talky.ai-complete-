@@ -39,13 +39,32 @@ function DescriptionSlideshow({ paragraphs }: { paragraphs: string[]; intervalMs
         for (const el of measureRefs.current) {
             if (el) max = Math.max(max, el.getBoundingClientRect().height);
         }
-        if (max > 0) setContainerHeight(max);
+        if (max <= 0) return;
+        // Whole pixels only: sub-pixel differences between zoom levels would
+        // otherwise nudge the stat cards and industry buttons by ~1px.
+        const next = Math.ceil(max);
+        setContainerHeight((prev) => (prev === next ? prev : next));
     }, []);
 
-    useEffect(() => {
+    // Measured before the first paint so the shortest paragraph never renders
+    // at its own height and then pushes everything below it down.
+    useLayoutEffect(() => {
+        let cancelled = false;
         measureHeight();
         window.addEventListener("resize", measureHeight);
-        return () => window.removeEventListener("resize", measureHeight);
+        // Web fonts settle after hydration; re-measure once they do.
+        const fontSet = typeof document !== "undefined" ? document.fonts : undefined;
+        if (fontSet) {
+            fontSet.ready
+                .then(() => {
+                    if (!cancelled) measureHeight();
+                })
+                .catch(() => {});
+        }
+        return () => {
+            cancelled = true;
+            window.removeEventListener("resize", measureHeight);
+        };
     }, [measureHeight]);
 
     // Enter → typing
@@ -230,10 +249,14 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
     }, [headlineA, headlineB]);
 
     const heroHeightClass = adjustForNavbar ? "h-[calc(100vh-var(--home-navbar-height))]" : "h-screen";
+    // Fluid vertical rhythm is opt-in and reaches only the homepage hero — the
+    // sole caller that passes adjustForNavbar. See the ".heroFluidSpacing"
+    // block in globals.css.
+    const heroFluidClass = adjustForNavbar ? "heroFluidSpacing" : "";
 
     return (
         <section
-            className={`relative ${heroHeightClass} w-full font-sans tracking-tight text-foreground bg-transparent overflow-hidden select-none dark`}
+            className={`heroSectionRoot ${heroFluidClass} relative ${heroHeightClass} w-full font-sans tracking-tight text-foreground bg-transparent overflow-hidden select-none dark`}
         >
             <VoiceAgentPopup />
 
