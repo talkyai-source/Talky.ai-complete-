@@ -29,11 +29,6 @@ const CTASection = dynamic(() => import("@/components/home/cta-section").then((m
   loading: () => <SectionPlaceholder minHeightClassName="min-h-[320px]" />,
 });
 
-const ContactSection = dynamic(() => import("@/components/home/contact-section").then((m) => m.ContactSection), {
-  ssr: true,
-  loading: () => <SectionPlaceholder minHeightClassName="min-h-[420px]" />,
-});
-
 const Footer = dynamic(() => import("@/components/home/footer").then((m) => m.Footer), {
   ssr: true,
   loading: () => <SectionPlaceholder minHeightClassName="min-h-[240px]" />,
@@ -287,7 +282,6 @@ export function HomeLazySections() {
         <FeaturesSection />
         <CTASection />
         <FAQSection />
-        <ContactSection />
         <Footer />
       </div>
     </>

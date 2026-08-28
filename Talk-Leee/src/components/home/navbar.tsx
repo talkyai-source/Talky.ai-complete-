@@ -83,7 +83,7 @@ export function Navbar() {
         ],
       },
       { label: "Industries", items: [...industryNavItems] },
-      { label: "Contact", href: "/contact" },
+      { label: "Contact Us", href: "/contact" },
     ];
   }, []);
 

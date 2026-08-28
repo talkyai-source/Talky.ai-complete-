@@ -102,6 +102,30 @@ function isApiPath(pathname: string) {
     return pathname === "/api" || pathname.startsWith("/api/");
 }
 
+/**
+ * Canonical form of a page URL is trailing-slashed. Returns the path to
+ * redirect to, or null when the request is already canonical or must be left
+ * alone.
+ *
+ * Exclusions, in order:
+ *  - /api/*   route handlers. next.config.ts sets skipTrailingSlashRedirect so
+ *             Next never issues its own 308 here; external callers that treat a
+ *             3xx as a failed delivery (Stripe webhooks) must reach the handler
+ *             directly, at either spelling.
+ *  - /_next/* build assets.
+ *  - any path whose last segment has a dot (/favicon.ico, /openapi.json,
+ *    /site.webmanifest) - files, not pages.
+ */
+export function trailingSlashRedirectPath(pathname: string): string | null {
+    if (!pathname.startsWith("/")) return null;
+    if (pathname.endsWith("/")) return null;
+    if (isApiPath(pathname)) return null;
+    if (pathname.startsWith("/_next/")) return null;
+    const lastSegment = pathname.slice(pathname.lastIndexOf("/") + 1);
+    if (lastSegment.includes(".")) return null;
+    return pathname + "/";
+}
+
 function isConnectorCallbackPath(pathname: string) {
     return pathname.startsWith("/connectors/callback");
 }
@@ -199,6 +223,21 @@ export async function middleware(req: NextRequest) {
         return res;
     }
 
+    const slashedPath = trailingSlashRedirectPath(pathname);
+    if (slashedPath) {
+        // Build a plain URL, NOT req.nextUrl.clone(). NextURL re-normalizes its
+        // pathname against the trailingSlash config on serialization and strips
+        // the slash straight back off, which turns this into a redirect to
+        // itself and an infinite loop.
+        const url = new URL(req.url);
+        url.pathname = slashedPath;
+        const host = req.headers.get("host");
+        if (host) url.host = host;
+        const res = NextResponse.redirect(url, 308);
+        setSecurityHeaders(res, { csp: "default-src 'self'", inProd, https });
+        return res;
+    }
+
     const nonce = base64Nonce();
     const isDev = !inProd;
 
@@ -281,7 +320,7 @@ export async function middleware(req: NextRequest) {
 
                 if (!isAllowed) {
                     const url = req.nextUrl.clone();
-                    url.pathname = WHITE_LABEL_DASHBOARD_PATH;
+                    url.pathname = WHITE_LABEL_DASHBOARD_PATH + "/";
                     url.search = "";
                     const res = NextResponse.redirect(url);
                     setSecurityHeaders(res, { csp, inProd, https });
@@ -290,7 +329,7 @@ export async function middleware(req: NextRequest) {
             } else if (role && role !== WHITE_LABEL_ADMIN_ROLE) {
                 if (isWhiteLabelAdminPath(pathname)) {
                     const url = req.nextUrl.clone();
-                    url.pathname = "/403";
+                    url.pathname = "/403/";
                     url.search = "";
                     const res = NextResponse.redirect(url);
                     setSecurityHeaders(res, { csp, inProd, https });
@@ -300,7 +339,7 @@ export async function middleware(req: NextRequest) {
                 if (role === PARTNER_ADMIN_ROLE && partnerId && isWhiteLabelPath(pathname)) {
                     if (pathname === "/white-label" || pathname === "/white-label/") {
                         const url = req.nextUrl.clone();
-                        url.pathname = `/white-label/${encodeURIComponent(partnerId)}/dashboard`;
+                        url.pathname = `/white-label/${encodeURIComponent(partnerId)}/dashboard/`;
                         url.search = "";
                         const res = NextResponse.redirect(url);
                         setSecurityHeaders(res, { csp, inProd, https });
@@ -310,7 +349,7 @@ export async function middleware(req: NextRequest) {
                     const wlPartner = whiteLabelPartnerFromPath(pathname);
                     if (wlPartner && wlPartner.toLowerCase() !== partnerId.toLowerCase()) {
                         const url = req.nextUrl.clone();
-                        url.pathname = "/403";
+                        url.pathname = "/403/";
                         url.search = "";
                         const res = NextResponse.redirect(url);
                         setSecurityHeaders(res, { csp, inProd, https });
@@ -320,7 +359,7 @@ export async function middleware(req: NextRequest) {
             } else {
                 if (isWhiteLabelAdminPath(pathname) || isAdminOrInfrastructurePath(pathname)) {
                     const url = req.nextUrl.clone();
-                    url.pathname = "/403";
+                    url.pathname = "/403/";
                     url.search = "";
                     const res = NextResponse.redirect(url);
                     setSecurityHeaders(res, { csp, inProd, https });

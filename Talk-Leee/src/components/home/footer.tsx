@@ -13,8 +13,7 @@ export function Footer() {
     { label: "Home", href: "/" },
     { label: "Products", href: "/ai-voice-dialer" },
     { label: "Use Cases", href: isHome ? "#use-cases" : "/#use-cases" },
-    { label: "FAQ", href: isHome ? "#faq" : "/#faq" },
-    { label: "Contact", href: isHome ? "#contact" : "/#contact" },
+    { label: "Contact Us", href: "/contact" },
   ];
 
   return (

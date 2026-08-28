@@ -8,6 +8,14 @@ const configDir = path.dirname(configFilePath);
 
 const nextConfig: NextConfig = {
     outputFileTracingRoot: configDir,
+    // Canonical URLs carry a trailing slash (/ai-voice-dialer/).
+    // `skipTrailingSlashRedirect` disables Next's built-in non-slash -> slash
+    // 308 so it cannot fire on /api/*: external callers that do not follow
+    // redirects (the Stripe webhook posts to /api/v1/billing/webhooks/stripe)
+    // would see a 308 as a failed delivery. The redirect is re-implemented for
+    // page routes only, in src/middleware.ts (trailingSlashRedirectPath).
+    trailingSlash: true,
+    skipTrailingSlashRedirect: true,
     compress: true,
     poweredByHeader: false,
     images: {
