@@ -91,3 +91,84 @@ def test_invalid_country_code_falls_back_to_legacy():
     normalised (perhaps imperfectly) rather than blowing up."""
     out = normalize_phone_number("4155551234", default_country="XX")
     assert out.startswith("+")  # some sane E.164 shape
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# The campaign country must reach BOTH import paths, not just manual add.
+#
+# `campaigns.add_contact_to_campaign` has always resolved the campaign's
+# default country and passed it to the normalizer. `contacts._normalize_for_user`
+# — the CSV upload and the pasted-numbers import — dropped the parameter, so the
+# same UK number became +447700900123 when typed in and the un-dialable
+# +07700900123 when uploaded in a spreadsheet.
+# ──────────────────────────────────────────────────────────────────────────
+
+class _PlainUser:
+    """A user with no relaxed-validation override."""
+    id = "user-1"
+    email = "someone@example.com"
+    tenant_id = "tenant-1"
+
+
+@pytest.mark.parametrize(
+    "raw,country,expected",
+    [
+        ("07700 900123", "GB", "+447700900123"),
+        ("02079460958", "GB", "+442079460958"),
+        ("03001234567", "PK", "+923001234567"),
+        ("4155551234", "US", "+14155551234"),
+    ],
+)
+def test_csv_import_honours_the_campaign_country(raw, country, expected):
+    from app.api.v1.endpoints.contacts import _normalize_for_user
+
+    assert _normalize_for_user(raw, _PlainUser(), country) == expected
+
+
+def test_csv_import_defaults_to_us_when_no_country_given():
+    from app.api.v1.endpoints.contacts import _normalize_for_user
+
+    assert _normalize_for_user("4155551234", _PlainUser()) == "+14155551234"
+
+
+@pytest.mark.parametrize(
+    "raw,country",
+    [
+        ("07700 900123", "GB"),
+        ("02079460958", "GB"),
+        ("03001234567", "PK"),
+        ("4155551234", "US"),
+    ],
+)
+def test_csv_import_and_manual_add_agree(raw, country):
+    """The two paths must produce byte-identical phone_number values."""
+    from app.api.v1.endpoints.contacts import _normalize_for_user
+
+    assert _normalize_for_user(raw, _PlainUser(), country) == normalize_phone_number(
+        raw, default_country=country,
+    )
+
+
+@pytest.mark.parametrize(
+    "campaign,expected",
+    [
+        ({"script_config": {"default_country_code": "gb"}}, "GB"),
+        ({"script_config": {"campaign_slots": {"default_country_code": "PK"}}}, "PK"),
+        ({"script_config": {}}, "US"),
+        ({"script_config": None}, "US"),
+        ({}, "US"),
+        (None, "US"),
+    ],
+)
+def test_campaign_default_country_resolution(campaign, expected):
+    from app.api.v1.endpoints.campaigns import campaign_default_country
+
+    assert campaign_default_country(campaign) == expected
+
+
+def test_contacts_resolves_the_country_the_same_way_campaigns_does():
+    from app.api.v1.endpoints.campaigns import campaign_default_country
+    from app.api.v1.endpoints.contacts import _campaign_default_country
+
+    campaign = {"script_config": {"default_country_code": "GB"}}
+    assert _campaign_default_country(campaign) == campaign_default_country(campaign) == "GB"

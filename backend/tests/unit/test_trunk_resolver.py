@@ -12,11 +12,16 @@ no DB, no Asterisk. The guarantees under test:
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
+
+import pytest
 
 from app.domain.services.telephony.trunk_resolver import (
     DidRow,
     TrunkRow,
+    _resolve_campaign_trunk,
+    _resolve_pool_assignment,
     _select_caller_id,
     choose_outbound_route,
 )
@@ -235,3 +240,101 @@ def test_flag_on_no_own_trunk_unchanged_default_fallback():
     assert route.refused is False
     assert route.is_default is True
     assert route.endpoint == ENV_ENDPOINT
+
+
+def test_unhealthy_own_trunk_is_never_selected():
+    trunks = [
+        TrunkRow(
+            id="broken",
+            trunk_name="byo",
+            is_active=True,
+            runtime_ready=False,
+        )
+    ]
+    route = _route(trunks, shared_default_enabled=False)
+    assert route.refused is True
+    assert route.endpoint is None
+    assert route.reason == "no_own_trunk"
+
+
+class _AssignedConn:
+    def __init__(self, snapshot, row):
+        self.snapshot = snapshot
+        self.row = row
+
+    async def fetchval(self, *_args):
+        return self.snapshot
+
+    async def execute(self, *_args):
+        return "SELECT 1"
+
+    async def fetchrow(self, *_args):
+        return self.row
+
+
+def _runtime_row(**overrides):
+    row = {
+        "id": "11111111-1111-1111-1111-111111111111",
+        "tenant_id": "22222222-2222-2222-2222-222222222222",
+        "trunk_name": "tenant-byo",
+        "is_active": True,
+        "direction": "both",
+        "metadata": {"register": True, "pool": True},
+        "live_registration_status": "registered",
+        "live_status_detail": None,
+        "live_status_checked_at": datetime.now(timezone.utc),
+    }
+    row.update(overrides)
+    return row
+
+
+@pytest.mark.asyncio
+async def test_explicit_campaign_assignment_refuses_unhealthy_trunk(monkeypatch):
+    from app.core import db_utils
+
+    conn = _AssignedConn(
+        {"id": "11111111-1111-1111-1111-111111111111", "endpoint": "stale"},
+        _runtime_row(live_registration_status="rejected"),
+    )
+
+    @asynccontextmanager
+    async def acquire(*_args, **_kwargs):
+        yield conn
+
+    monkeypatch.setattr(db_utils, "acquire_with_tenant", acquire)
+    route = await _resolve_campaign_trunk(
+        object(),
+        campaign_id="33333333-3333-3333-3333-333333333333",
+        tenant_id="22222222-2222-2222-2222-222222222222",
+    )
+    assert route is not None
+    assert route.refused is True
+    assert route.reason == "campaign_assigned_trunk_not_ready"
+
+
+@pytest.mark.asyncio
+async def test_pool_assignment_uses_current_health_not_stale_snapshot(monkeypatch):
+    from app.core import db_utils
+
+    conn = _AssignedConn(
+        {
+            "id": "11111111-1111-1111-1111-111111111111",
+            "endpoint": "trunk-stale",
+            "caller_id": "+15551234567",
+        },
+        _runtime_row(),
+    )
+
+    @asynccontextmanager
+    async def acquire(*_args, **_kwargs):
+        yield conn
+
+    monkeypatch.setattr(db_utils, "acquire_with_tenant", acquire)
+    route = await _resolve_pool_assignment(
+        object(),
+        tenant_id="22222222-2222-2222-2222-222222222222",
+        is_production=True,
+    )
+    assert route is not None
+    assert route.refused is False
+    assert route.endpoint == "trunk-11111111-1111-1111-1111-111111111111"

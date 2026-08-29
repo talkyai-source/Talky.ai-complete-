@@ -32,8 +32,8 @@ hiredis==2.3.2
 
 # --- HTTP Clients ---
 httpx==0.28.1
-# CVE-forced ahead of the prod venv: aiohttp<3.14.1 carries known advisories.
-aiohttp==3.14.1
+# Security floor (2026-08-28): 3.14.1 has three published PYSEC advisories.
+aiohttp==3.14.3
 aiofiles==23.2.1
 
 # --- Email (SMTP) ---
@@ -75,8 +75,10 @@ PyJWT>=2.8.0
 email-validator>=2.0.0
 passlib[bcrypt]==1.7.4
 bcrypt==5.0.0
-# CVE-forced ahead of the prod venv: <48.0.1 carries GHSA-537c-gmf6-5ccf.
-cryptography==48.0.1
+# Security floor (2026-08-28): 50.0.0 closes the remaining 48.0.1 advisories.
+cryptography==50.0.0
+# webauthn pulls this transitively; 26.2.0 capped cryptography below 49.
+pyOpenSSL==26.4.0
 argon2-cffi==23.1.0
 pyotp==2.9.0
 qrcode==8.0

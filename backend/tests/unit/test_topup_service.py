@@ -69,6 +69,17 @@ class FakeConn:
             if self.store["allocated"] > 0:
                 self.store["allocated"] = max(0, self.store["allocated"] - args[1])
             return "UPDATE 1"
+        if "UPDATE tenant_call_limits" in sql:
+            # The row the call guard actually enforces. Both statements are
+            # written to touch it ONLY when a ceiling is already configured
+            # (> 0), so a top-up never invents a cap for a tenant who has none.
+            if (self.store.get("enforced") or 0) <= 0:
+                return "UPDATE 0"
+            if "GREATEST(0" in sql:
+                self.store["enforced"] = max(0, self.store["enforced"] - args[1])
+            else:
+                self.store["enforced"] += args[1]
+            return "UPDATE 1"
         if "UPDATE topup_orders" in sql and "status='paid'" in sql:
             self.store["order"]["status"] = "paid"
             return "UPDATE 1"
@@ -140,9 +151,13 @@ class FakePool:
         return _CM()
 
 
-def make_store(*, allocated=1000, order=None, package=None):
+def make_store(*, allocated=1000, order=None, package=None, enforced=0):
     return {
         "allocated": allocated,
+        # `tenant_call_limits.monthly_minutes_allocated` — a DIFFERENT column in
+        # a DIFFERENT table from `tenants.minutes_allocated`, and the one the
+        # call guard blocks on. 0 = no ceiling configured (the guard passes).
+        "enforced": enforced,
         "order": order,
         "package": package,
         "seen_events": set(),
@@ -413,3 +428,92 @@ def test_trust_that_a_topup_is_positive_and_a_reversal_is_negative():
     reverse = inspect.getsource(TopupService.reverse)
     assert "-order[\"minutes\"]" in reverse or "-order['minutes']" in reverse
     assert "'topup'" in credit
+
+
+# ── the ceiling that is actually enforced ───────────────────────────────────
+#
+# `tenants.minutes_allocated` is what the dialer gate reads. `call_guard`'s
+# minutes check reads `tenant_call_limits.monthly_minutes_allocated` — a
+# different column in a different table, with nothing syncing the two. A
+# tenant with an admin-set ceiling could top up 500 minutes, see the balance
+# rise everywhere, and still be blocked at origination by the old ceiling.
+
+@pytest.mark.asyncio
+async def test_a_credit_raises_the_ceiling_the_call_guard_enforces():
+    store = make_store(allocated=1000, enforced=1000, order=paid_order())
+    svc = TopupService(FakePool(store))
+
+    assert await svc.credit_paid_order(session_id="cs_1", event_id="evt_1") is True
+
+    assert store["allocated"] == 1250
+    assert store["enforced"] == 1250, (
+        "the customer paid for 250 minutes and the guard that actually blocks "
+        "origination still enforces the old ceiling"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_credit_does_not_invent_a_ceiling_where_none_is_configured():
+    """0 means 'no quota configured' and the guard passes. Writing 250 there
+    would CREATE a cap for a tenant who had none — the top-up would leave them
+    worse off, the same trap as the unlimited sentinel above."""
+    store = make_store(allocated=1000, enforced=0, order=paid_order())
+    svc = TopupService(FakePool(store))
+
+    await svc.credit_paid_order(session_id="cs_1", event_id="evt_1")
+
+    assert store["enforced"] == 0
+    assert store["allocated"] == 1250
+
+
+@pytest.mark.asyncio
+async def test_a_reversal_lowers_the_enforced_ceiling_too():
+    """Otherwise a refund hands back the money and leaves the raised ceiling —
+    free minutes, and the two tables drift apart again."""
+    store = make_store(allocated=1250, enforced=1250, order=paid_order(status="paid"))
+    svc = TopupService(FakePool(store))
+
+    await svc.reverse(event_id="evt_r", kind="refund", payment_id="pi_1")
+
+    assert store["allocated"] == 1000
+    assert store["enforced"] == 1000
+
+
+def test_the_ceiling_moves_inside_the_credit_transaction():
+    """Structural: a second connection would let the process die between the
+    credit and the ceiling, leaving minutes bought that cannot be dialled."""
+    src = inspect.getsource(TopupService.credit_paid_order)
+    assert "tenant_call_limits" in src
+    assert src.count("acquire_with_tenant") == 1, (
+        "the enforced ceiling is updated outside the credit's transaction"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_duplicate_event_does_not_raise_the_ceiling_either():
+    store = make_store(allocated=1000, enforced=1000, order=paid_order())
+    store["seen_events"].add("evt_dup")
+    svc = TopupService(FakePool(store))
+
+    await svc.credit_paid_order(session_id="cs_1", event_id="evt_dup")
+
+    assert store["enforced"] == 1000
+    assert store["allocated"] == 1000
+
+
+# ── two Stripe events, one delayed payment ──────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_completed_and_async_succeeded_credit_one_session_once():
+    """A delayed payment (Bacs/SEPA/Klarna) produces
+    ``checkout.session.completed`` and then ``async_payment_succeeded`` — two
+    DIFFERENT event ids for one payment, so the ledger's uniqueness guard does
+    not separate them. The order's paid state has to."""
+    store = make_store(allocated=1000, order=paid_order())
+    svc = TopupService(FakePool(store))
+
+    assert await svc.credit_paid_order(session_id="cs_1", event_id="evt_completed") is True
+    assert await svc.credit_paid_order(session_id="cs_1", event_id="evt_async") is False
+
+    assert store["allocated"] == 1250, "one payment credited twice"
+    assert len(store["ledger"]) == 1

@@ -17,12 +17,14 @@ gate passes and the handler fails downstream on the un-connected adapter
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
 from app.core.security.internal_auth import (
+    is_internal_service_request,
     require_internal_or_tenant,
     resolve_call_tenant,
 )
@@ -106,6 +108,122 @@ def test_wrong_token_falls_back_to_user_path(monkeypatch):
     ctx = require_internal_or_tenant(req)
     assert ctx.is_internal is False
     assert ctx.tenant_id == "tenant-A"
+
+
+def _call_control_gate(req: Request, user=None):
+    from app.api.v1.endpoints.telephony_bridge import _require_telephony_control
+
+    return asyncio.run(_require_telephony_control(req, user))
+
+
+def test_telephony_start_stop_gate_rejects_unauthenticated(monkeypatch):
+    monkeypatch.delenv("INTERNAL_SERVICE_TOKEN", raising=False)
+    with pytest.raises(HTTPException) as exc:
+        _call_control_gate(_request(), None)
+    assert exc.value.status_code == 401
+
+
+def test_telephony_start_stop_gate_rejects_tenant_admin(monkeypatch):
+    from app.api.v1.dependencies import CurrentUser
+
+    monkeypatch.delenv("INTERNAL_SERVICE_TOKEN", raising=False)
+    user = CurrentUser(id="user-1", email="admin@example.com", role="tenant_admin")
+    with pytest.raises(HTTPException) as exc:
+        _call_control_gate(_request(), user)
+    assert exc.value.status_code == 403
+
+
+def test_telephony_start_stop_gate_allows_internal_token(monkeypatch):
+    monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", _TOKEN)
+    req = _request(headers={"x-internal-service-token": _TOKEN})
+    assert is_internal_service_request(req) is True
+    assert _call_control_gate(req, None) is None
+
+
+def test_telephony_start_stop_gate_allows_platform_admin(monkeypatch):
+    from app.api.v1.dependencies import CurrentUser
+
+    monkeypatch.delenv("INTERNAL_SERVICE_TOKEN", raising=False)
+    user = CurrentUser(id="platform-1", email="root@example.com", role="platform_admin")
+    assert _call_control_gate(_request(), user) is None
+
+
+@pytest.mark.asyncio
+async def test_telephony_stop_remains_running_when_any_call_is_unconfirmed(monkeypatch):
+    from app import main
+    from app.api.v1.endpoints import telephony_bridge
+
+    class Adapter:
+        connected = True
+        disconnect_called = False
+
+        async def disconnect(self, **_kwargs):
+            self.disconnect_called = True
+
+    adapter = Adapter()
+
+    async def drain(*_args, **_kwargs):
+        return {
+            "total": 1,
+            "attempted": 1,
+            "confirmed": 0,
+            "deferred": 1,
+            "deferred_call_ids": ["still-live"],
+        }
+
+    monkeypatch.setattr(main, "_terminate_active_telephony_sessions_for_shutdown", drain)
+    monkeypatch.setattr(telephony_bridge, "_adapter", adapter)
+    monkeypatch.setattr(telephony_bridge, "_watchdog_task", None)
+
+    response = await telephony_bridge.stop_telephony(None)
+    body = json.loads(response.body)
+
+    assert response.status_code == 503
+    assert body["status"] == "termination_deferred"
+    assert body["deferred_call_ids"] == ["still-live"]
+    assert adapter.disconnect_called is False
+    assert telephony_bridge._adapter is adapter
+
+
+@pytest.mark.asyncio
+async def test_telephony_stop_disconnects_only_after_complete_drain(monkeypatch):
+    from app import main
+    from app.api.v1.endpoints import telephony_bridge
+
+    class Adapter:
+        connected = True
+        disconnect_kwargs = None
+
+        async def disconnect(self, **kwargs):
+            self.disconnect_kwargs = kwargs
+            return {"status": "disconnected", "deferred": 0, "deferred_call_ids": []}
+
+    adapter = Adapter()
+
+    async def drain(*_args, **_kwargs):
+        return {
+            "total": 2,
+            "attempted": 2,
+            "confirmed": 2,
+            "deferred": 0,
+            "deferred_call_ids": [],
+        }
+
+    monkeypatch.setattr(main, "_terminate_active_telephony_sessions_for_shutdown", drain)
+    monkeypatch.setattr(telephony_bridge, "_adapter", adapter)
+    monkeypatch.setattr(telephony_bridge, "_watchdog_task", None)
+
+    response = await telephony_bridge.stop_telephony(None)
+    body = json.loads(response.body)
+
+    assert response.status_code == 200
+    assert body["status"] == "stopped"
+    assert body["confirmed"] == 2
+    assert adapter.disconnect_kwargs == {
+        "drain_timeout_s": 5.5,
+        "force_handoff": False,
+    }
+    assert telephony_bridge._adapter is None
 
 
 # ── Wiring: the make_call endpoint enforces the gate ─────────────────────
@@ -299,3 +417,289 @@ def test_ownership_lookup_runs_the_bypass_inside_a_transaction(monkeypatch):
     assert lookup is not None, f"no ownership lookup was issued; statements={stmts}"
     assert bypass[1] is True, "SET LOCAL app.bypass_rls must run inside a transaction"
     assert lookup[1] is True, "the ownership SELECT must run in the same transaction"
+
+
+# ── POST /audio/{session_id} — the C++ gateway audio callback ────────────
+#
+# This route ingests caller audio for a live call and had NO auth gate at all,
+# while its siblings /start and /stop go through `_require_telephony_control`
+# (internal service token OR platform admin). Anyone who could reach
+# /api/v1/sip/telephony/audio/<session_id> could inject audio into a live
+# call's STT stream and recording.
+#
+# The C++ gateway sends X-Internal-Service-Token. There is deliberately no
+# unauthenticated compatibility mode: old gateway and new backend artifacts
+# must never be mixed by the deploy path.
+
+
+def _audio_request(*, headers: dict[str, str] | None = None) -> Request:
+    headers = headers or {}
+    raw_headers = [(k.lower().encode(), v.encode()) for k, v in headers.items()]
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "https",
+        "server": ("api.talkleeai.com", 443),
+        "path": "/api/v1/sip/telephony/audio/asterisk-abc-10000",
+        "raw_path": b"/api/v1/sip/telephony/audio/asterisk-abc-10000",
+        "query_string": b"",
+        "headers": raw_headers,
+        "client": ("203.0.113.9", 51234),
+        "state": {},
+    }
+    return Request(scope)
+
+
+def _receive_gateway_audio():
+    from app.api.v1.endpoints.telephony_bridge import receive_gateway_audio
+
+    return receive_gateway_audio
+
+
+def test_gateway_audio_rejects_unauthenticated(monkeypatch):
+    monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", _TOKEN)
+    req = _audio_request()
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(_receive_gateway_audio()("asterisk-abc-10000", req))
+
+    assert exc.value.status_code in (401, 403)
+
+
+def test_gateway_audio_allows_internal_token(monkeypatch):
+    monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", _TOKEN)
+    req = _audio_request(headers={"x-internal-service-token": _TOKEN})
+
+    # Gate passes; the handler then no-ops on an unreadable body.
+    response = asyncio.run(_receive_gateway_audio()("asterisk-abc-10000", req))
+    assert response.status_code == 200
+
+
+def test_gateway_audio_legacy_disable_flag_cannot_bypass_auth(monkeypatch):
+    monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", _TOKEN)
+    monkeypatch.setenv("TELEPHONY_GATEWAY_AUDIO_REQUIRE_INTERNAL_TOKEN", "false")
+    req = _audio_request()
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(_receive_gateway_audio()("asterisk-abc-10000", req))
+
+    assert exc.value.status_code in (401, 403)
+
+
+# -- _require_call_control / _require_call_read: unseeded deployment ------
+#
+# Production has 0 rows in `role_permissions` and 0 in `tenant_users`, so the
+# DB-only resolver returns an empty set for every non-platform-admin user and
+# both gates 403 every tenant caller: nobody can hang up a live call and nobody
+# can read a transfer attempt. "This deployment has no RBAC data" and "this
+# user was denied" are different states and must behave differently -- the same
+# three-state contract require_permission uses
+# (tests/security/test_rbac.py::TestUnseededDeploymentFallback).
+
+
+def _control_request(*, tenant_id="tenant-A", user_id="user-1", role="tenant_admin"):
+    req = _request()
+    req.state.tenant_id = tenant_id
+    req.state.user_id = user_id
+    req.state.user_role = role
+    return req
+
+
+class _BridgeResolver:
+    """Stands in for get_effective_permissions + rbac_data_is_seeded."""
+
+    def __init__(self, granted, seeded: bool):
+        self.granted = set(granted)
+        self.seeded = seeded
+        self.probe_calls = 0
+
+    async def resolve(self, *_args, **_kwargs):
+        return set(self.granted)
+
+    async def probe(self, *_args, **_kwargs):
+        self.probe_calls += 1
+        return self.seeded
+
+
+def _install_bridge_resolver(monkeypatch, resolver):
+    from app.api.v1.endpoints import telephony_bridge as tb
+
+    monkeypatch.setattr(tb, "get_effective_permissions", resolver.resolve)
+    monkeypatch.setattr(tb, "rbac_data_is_seeded", resolver.probe)
+
+
+def _call_control(req, db_pool=object()):
+    from app.api.v1.endpoints.telephony_bridge import _require_call_control
+
+    return asyncio.run(_require_call_control(req, db_pool=db_pool))
+
+
+def _call_read(req, db_pool=object()):
+    from app.api.v1.endpoints.telephony_bridge import _require_call_read
+
+    return asyncio.run(_require_call_read(req, db_pool=db_pool))
+
+
+@pytest.fixture()
+def _clean_probe_cache():
+    # app.core.security.rbac imports app.api.v1.dependencies at module scope and
+    # dependencies imports back from rbac, so rbac must never be the FIRST of the
+    # pair to be imported in a process. Importing the endpoint module first pulls
+    # dependencies in and makes the cycle resolvable.
+    from app.api.v1.endpoints import telephony_bridge  # noqa: F401
+    from app.core.security.rbac import reset_rbac_seeding_probe_cache
+
+    reset_rbac_seeding_probe_cache()
+    yield
+    reset_rbac_seeding_probe_cache()
+
+
+class TestCallControlUnseededDeploymentFallback:
+    def test_unseeded_deployment_falls_back_to_role_defaults(
+        self, monkeypatch, _clean_probe_cache
+    ):
+        monkeypatch.delenv("INTERNAL_SERVICE_TOKEN", raising=False)
+        _install_bridge_resolver(monkeypatch, _BridgeResolver([], seeded=False))
+
+        ctx = _call_control(_control_request())
+        assert ctx.tenant_id == "tenant-A"
+        assert ctx.is_internal is False
+
+    def test_unseeded_fallback_is_role_scoped_not_blanket_allow(
+        self, monkeypatch, _clean_probe_cache
+    ):
+        """Hanging up a live call stays with tenant_admin+: the plain user role
+        has no calls:delete default, so the unseeded path is never wider than
+        the seeded one."""
+        monkeypatch.delenv("INTERNAL_SERVICE_TOKEN", raising=False)
+        _install_bridge_resolver(monkeypatch, _BridgeResolver([], seeded=False))
+
+        with pytest.raises(HTTPException) as exc:
+            _call_control(_control_request(role="user"))
+        assert exc.value.status_code == 403
+        assert exc.value.detail["required"] == "calls:delete"
+
+    def test_seeded_deployment_denies_user_with_no_grant(
+        self, monkeypatch, _clean_probe_cache
+    ):
+        monkeypatch.delenv("INTERNAL_SERVICE_TOKEN", raising=False)
+        _install_bridge_resolver(monkeypatch, _BridgeResolver([], seeded=True))
+
+        with pytest.raises(HTTPException) as exc:
+            _call_control(_control_request())
+        assert exc.value.status_code == 403
+
+    def test_seeded_deployment_revoking_one_permission_denies(
+        self, monkeypatch, _clean_probe_cache
+    ):
+        """Non-empty grants prove the deployment is seeded -- no probe needed."""
+        from app.core.security.rbac import Permission
+
+        monkeypatch.delenv("INTERNAL_SERVICE_TOKEN", raising=False)
+        resolver = _BridgeResolver([Permission.CALLS_READ], seeded=True)
+        _install_bridge_resolver(monkeypatch, resolver)
+
+        with pytest.raises(HTTPException) as exc:
+            _call_control(_control_request())
+        assert exc.value.status_code == 403
+        assert resolver.probe_calls == 0, "probe must not run when grants resolve"
+
+    def test_seeded_and_granted_allows(self, monkeypatch, _clean_probe_cache):
+        from app.core.security.rbac import Permission
+
+        monkeypatch.delenv("INTERNAL_SERVICE_TOKEN", raising=False)
+        _install_bridge_resolver(
+            monkeypatch, _BridgeResolver([Permission.CALLS_DELETE], seeded=True)
+        )
+
+        ctx = _call_control(_control_request())
+        assert ctx.tenant_id == "tenant-A"
+
+    def test_probe_query_error_fails_closed_with_503(
+        self, monkeypatch, _clean_probe_cache
+    ):
+        from app.api.v1.endpoints import telephony_bridge as tb
+
+        monkeypatch.delenv("INTERNAL_SERVICE_TOKEN", raising=False)
+
+        async def empty(*_a, **_k):
+            return set()
+
+        async def broken(*_a, **_k):
+            raise RuntimeError("relation role_permissions does not exist")
+
+        monkeypatch.setattr(tb, "get_effective_permissions", empty)
+        monkeypatch.setattr(tb, "rbac_data_is_seeded", broken)
+
+        with pytest.raises(HTTPException) as exc:
+            _call_control(_control_request())
+        assert exc.value.status_code == 503
+        assert exc.value.detail == {"error": "authorization_unavailable"}
+
+    def test_internal_service_token_never_reaches_the_probe(
+        self, monkeypatch, _clean_probe_cache
+    ):
+        """The dialer path is trusted and must not depend on RBAC seeding."""
+        monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", _TOKEN)
+        resolver = _BridgeResolver([], seeded=False)
+        _install_bridge_resolver(monkeypatch, resolver)
+
+        req = _request(headers={"x-internal-service-token": _TOKEN})
+        ctx = _call_control(req)
+        assert ctx.is_internal is True
+        assert resolver.probe_calls == 0
+
+
+class TestCallReadUnseededDeploymentFallback:
+    def test_unseeded_deployment_falls_back_to_role_defaults(
+        self, monkeypatch, _clean_probe_cache
+    ):
+        monkeypatch.delenv("INTERNAL_SERVICE_TOKEN", raising=False)
+        _install_bridge_resolver(monkeypatch, _BridgeResolver([], seeded=False))
+
+        # Even the narrowest role reads calls, so a plain user keeps working.
+        ctx = _call_read(_control_request(role="user"))
+        assert ctx.tenant_id == "tenant-A"
+
+    def test_seeded_deployment_denies_user_with_no_grant(
+        self, monkeypatch, _clean_probe_cache
+    ):
+        monkeypatch.delenv("INTERNAL_SERVICE_TOKEN", raising=False)
+        _install_bridge_resolver(monkeypatch, _BridgeResolver([], seeded=True))
+
+        with pytest.raises(HTTPException) as exc:
+            _call_read(_control_request())
+        assert exc.value.status_code == 403
+
+    def test_seeded_and_granted_allows(self, monkeypatch, _clean_probe_cache):
+        from app.core.security.rbac import Permission
+
+        monkeypatch.delenv("INTERNAL_SERVICE_TOKEN", raising=False)
+        resolver = _BridgeResolver([Permission.CALLS_READ], seeded=True)
+        _install_bridge_resolver(monkeypatch, resolver)
+
+        ctx = _call_read(_control_request())
+        assert ctx.tenant_id == "tenant-A"
+        assert resolver.probe_calls == 0, "probe must not run when grants resolve"
+
+    def test_probe_query_error_fails_closed_with_503(
+        self, monkeypatch, _clean_probe_cache
+    ):
+        from app.api.v1.endpoints import telephony_bridge as tb
+
+        monkeypatch.delenv("INTERNAL_SERVICE_TOKEN", raising=False)
+
+        async def empty(*_a, **_k):
+            return set()
+
+        async def broken(*_a, **_k):
+            raise RuntimeError("relation tenant_users does not exist")
+
+        monkeypatch.setattr(tb, "get_effective_permissions", empty)
+        monkeypatch.setattr(tb, "rbac_data_is_seeded", broken)
+
+        with pytest.raises(HTTPException) as exc:
+            _call_read(_control_request())
+        assert exc.value.status_code == 503
+        assert exc.value.detail == {"error": "authorization_unavailable"}

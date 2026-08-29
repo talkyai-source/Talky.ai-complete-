@@ -317,3 +317,187 @@ async def test_production_never_acknowledges_ephemeral_local_storage(
         )
 
     assert list(tmp_path.iterdir()) == []
+
+
+async def test_feedback_cleanup_uses_the_bucket_persisted_with_the_audio(tmp_path):
+    class AvailableS3:
+        bucket = "current-default-bucket"
+
+        def __init__(self) -> None:
+            self.deletions: list[tuple[str, str | None]] = []
+
+        def is_available(self) -> bool:
+            return True
+
+        def delete_permanently(self, key: str, bucket: str | None = None) -> None:
+            self.deletions.append((key, bucket))
+
+    s3 = AvailableS3()
+    storage = FeedbackAudioStorage(s3_client=s3, local_dir=str(tmp_path))  # type: ignore[arg-type]
+    stored = StoredFeedbackAudio(
+        "s3",
+        "persisted-feedback-bucket",
+        "feedback/tenant/call/note.webm",
+    )
+
+    await storage.delete(stored)
+
+    assert s3.deletions == [
+        ("feedback/tenant/call/note.webm", "persisted-feedback-bucket")
+    ]
+
+
+async def test_feedback_cleanup_rejects_realpath_escape_through_symlink(tmp_path):
+    class UnavailableS3:
+        def is_available(self) -> bool:
+            return False
+
+    feedback_root = tmp_path / "feedback"
+    outside_root = tmp_path / "outside"
+    feedback_root.mkdir()
+    outside_root.mkdir()
+    outside_audio = outside_root / "note.webm"
+    outside_audio.write_bytes(AUDIO)
+    link = feedback_root / "linked-outside"
+    try:
+        link.symlink_to(outside_root, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"OS cannot create directory symlinks: {exc}")
+
+    storage = FeedbackAudioStorage(
+        s3_client=UnavailableS3(),  # type: ignore[arg-type]
+        local_dir=str(feedback_root),
+    )
+
+    with pytest.raises(FeedbackStorageError, match="path is invalid"):
+        await storage.delete(
+            StoredFeedbackAudio("local", "local", str(link / "note.webm"))
+        )
+
+    assert outside_audio.read_bytes() == AUDIO
+
+
+async def test_feedback_cleanup_rejects_unknown_storage_provider(tmp_path):
+    class UnavailableS3:
+        def is_available(self) -> bool:
+            return False
+
+    storage = FeedbackAudioStorage(
+        s3_client=UnavailableS3(),  # type: ignore[arg-type]
+        local_dir=str(tmp_path),
+    )
+
+    with pytest.raises(FeedbackStorageError, match="Unknown feedback storage provider"):
+        await storage.delete(
+            StoredFeedbackAudio("unconfigured-provider", "bucket", "audio-key")
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tenant scoping of the read path
+# ---------------------------------------------------------------------------
+#
+# `get_for_call` / `get_by_id` used to select from `call_feedback` with only
+# the call/feedback id in the WHERE clause, leaning entirely on RLS for tenant
+# isolation. RLS has been decorative in this deployment before (the app role
+# was BYPASSRLS, so every policy was inert), which turns "lean on RLS" into
+# "no isolation at all". Both queries now carry an explicit tenant predicate,
+# so a mismatched tenant reads nothing even with the policies switched off.
+
+OTHER_TENANT_ID = "55555555-5555-5555-5555-555555555555"
+
+
+class _FakeConn:
+    """Just enough asyncpg to run the repository's real SQL."""
+
+    def __init__(self, rows: list[dict]) -> None:
+        self._rows = rows
+        self.queries: list[tuple[str, tuple]] = []
+
+    def transaction(self):
+        return _FakeCM(self)
+
+    async def execute(self, sql, *args):  # SET LOCAL … from acquire_with_tenant
+        return "SET"
+
+    async def fetchrow(self, sql, *args):
+        import re
+
+        self.queries.append((sql, args))
+        where = sql.split("WHERE", 1)[1]
+        # Emulate Postgres: apply exactly the equality predicates the SQL asks
+        # for. A column the query never mentions cannot filter anything — which
+        # is the whole point of the assertions below.
+        predicates = []
+        for column in ("id", "call_id", "tenant_id"):
+            match = re.search(rf"(?<![\w.]){column} = \$(\d+)", where)
+            if match:
+                predicates.append((column, int(match.group(1))))
+        for row in self._rows:
+            if all(str(row[col]) == str(args[i - 1]) for col, i in predicates):
+                return row
+        return None
+
+
+class _FakeCM:
+    def __init__(self, value=None) -> None:
+        self._value = value
+
+    async def __aenter__(self):
+        return self._value
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _FakePool:
+    def __init__(self, conn: _FakeConn) -> None:
+        self._conn = conn
+
+    def acquire(self, *args, **kwargs):
+        return _FakeCM(self._conn)
+
+
+def _repository_with_one_row():
+    from app.domain.services.call_feedback_service import CallFeedbackRepository
+
+    conn = _FakeConn([_row()])
+    return CallFeedbackRepository(_FakePool(conn)), conn
+
+
+async def test_get_for_call_filters_on_tenant_id():
+    repo, conn = _repository_with_one_row()
+
+    found = await repo.get_for_call(TENANT_ID, CALL_ID)
+
+    assert found is not None and str(found["id"]) == FEEDBACK_ID
+    sql, args = conn.queries[-1]
+    assert "tenant_id = $" in sql, (
+        "get_for_call must not rely on RLS alone for tenant isolation: " + sql
+    )
+    assert str(TENANT_ID) in {str(a) for a in args}
+
+
+async def test_get_for_call_returns_none_for_another_tenant():
+    repo, _conn = _repository_with_one_row()
+
+    assert await repo.get_for_call(OTHER_TENANT_ID, CALL_ID) is None
+
+
+async def test_get_by_id_filters_on_tenant_id():
+    repo, conn = _repository_with_one_row()
+
+    found = await repo.get_by_id(TENANT_ID, FEEDBACK_ID)
+
+    assert found is not None and str(found["id"]) == FEEDBACK_ID
+    sql, args = conn.queries[-1]
+    assert "tenant_id = $" in sql, (
+        "get_by_id must not rely on RLS alone for tenant isolation: " + sql
+    )
+    assert str(TENANT_ID) in {str(a) for a in args}
+
+
+async def test_get_by_id_returns_none_for_another_tenant():
+    repo, _conn = _repository_with_one_row()
+
+    assert await repo.get_by_id(OTHER_TENANT_ID, FEEDBACK_ID) is None

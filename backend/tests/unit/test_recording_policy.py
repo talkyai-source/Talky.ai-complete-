@@ -1,8 +1,8 @@
 """T0.4 — per-tenant recording consent policy.
 
-Covers the four behaviours the policy service promises:
+Covers the policy service's fail-closed behaviours:
 
-1. Missing tenant row → safe default (two-party consent, announce).
+1. Missing tenant row → recording off until explicitly configured.
 2. Explicit `disabled` → no recording, no announcement.
 3. `one_party` → record, no announcement.
 4. `two_party` + destination in two-party list → announce.
@@ -57,10 +57,10 @@ _BASE_ROW = {
 async def test_missing_row_safe_default():
     svc = RecordingPolicyService(_FakePool(None))
     decision = await svc.decide(tenant_id="t1")
-    assert decision.should_record is True
-    assert decision.announcement_required is True
-    assert decision.announcement_text is not None
-    assert decision.reason == "tenant_default_two_party"
+    assert decision.should_record is False
+    assert decision.announcement_required is False
+    assert decision.announcement_text is None
+    assert decision.reason == "tenant_policy_absent_recording_off"
 
 
 @pytest.mark.asyncio
@@ -136,6 +136,31 @@ async def test_db_failure_falls_back_to_safe_default():
             raise RuntimeError("db down")
     svc = RecordingPolicyService(BrokenPool())
     decision = await svc.decide(tenant_id="t1")
-    assert decision.should_record is True
+    assert decision.should_record is False
+    assert decision.announcement_required is False
+    assert decision.reason == "recording_policy_lookup_failed_recording_off"
+
+
+@pytest.mark.asyncio
+async def test_bare_country_against_subdivision_policy_announces():
+    """Known location is the bare country "US" while the policy is keyed to
+    the subdivision "US-CA".
+
+    We cannot prove the callee is OUTSIDE California, so the coarser known
+    country must fail CLOSED and announce. Returning False here silently
+    recorded two-party-consent calls with no notice.
+    """
+    row = {**_BASE_ROW, "two_party_country_codes": ["US-CA"]}
+    svc = RecordingPolicyService(_FakePool(row))
+    decision = await svc.decide(tenant_id="t1", destination_country_code="US")
     assert decision.announcement_required is True
-    assert decision.reason == "tenant_default_two_party"
+
+
+@pytest.mark.asyncio
+async def test_unrelated_bare_country_against_subdivision_policy_unchanged():
+    """"GB" shares no country with "US-CA" → still no announcement."""
+    row = {**_BASE_ROW, "two_party_country_codes": ["US-CA"]}
+    svc = RecordingPolicyService(_FakePool(row))
+    decision = await svc.decide(tenant_id="t1", destination_country_code="GB")
+    assert decision.announcement_required is False
+    assert decision.should_record is True

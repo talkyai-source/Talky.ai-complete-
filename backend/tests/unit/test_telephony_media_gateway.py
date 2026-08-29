@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from unittest.mock import AsyncMock, patch
 
@@ -31,6 +32,74 @@ async def test_hangup_call_returns_false_for_missing_session():
     result = await gateway.hangup_call("missing-call-id", "user_goodbye")
 
     assert result is False
+
+
+@pytest.mark.asyncio
+async def test_recording_gate_blocks_both_sides_but_keeps_live_media_flowing():
+    gateway = TelephonyMediaGateway()
+    await gateway.initialize({"sample_rate": 8000, "tts_source_format": "s16le"})
+    adapter = AsyncMock()
+    await gateway.on_call_started(
+        "inbound-call",
+        {
+            "adapter": adapter,
+            "pbx_call_id": "pbx-inbound-call",
+            "recording_enabled": False,
+        },
+    )
+    session = gateway._sessions["inbound-call"]
+
+    await gateway.on_audio_received("inbound-call", b"\xff" * 160)
+    with patch("asyncio.sleep", new=AsyncMock(return_value=None)):
+        # One complete 20 ms PCMU packet after s16le -> ulaw conversion.
+        await gateway.send_audio("inbound-call", b"\x00\x00" * 160)
+
+    # STT and TTS delivery continue, but neither side is retained before the
+    # disclosure/policy gate opens.
+    assert session.input_queue.qsize() == 1
+    adapter.send_tts_audio.assert_awaited()
+    assert session.recording_buffer == []
+    assert session.recording_buffer_bytes == 0
+    assert session.tts_recording_buffer == []
+    assert session.tts_recording_buffer_bytes == 0
+    assert session.caller_sample_count == 0
+
+    assert gateway.set_recording_enabled("inbound-call", True) is True
+    await gateway.on_audio_received("inbound-call", b"\xff" * 160)
+    with patch("asyncio.sleep", new=AsyncMock(return_value=None)):
+        await gateway.send_audio("inbound-call", b"\x00\x00" * 160)
+
+    assert session.recording_buffer_bytes > 0
+    assert session.tts_recording_buffer_bytes > 0
+    assert session.caller_sample_count > 0
+
+
+@pytest.mark.asyncio
+async def test_closing_recording_gate_purges_already_buffered_audio():
+    gateway = TelephonyMediaGateway()
+    await gateway.initialize({"sample_rate": 8000, "tts_source_format": "s16le"})
+    adapter = AsyncMock()
+    await gateway.on_call_started(
+        "call-policy-change",
+        {"adapter": adapter, "pbx_call_id": "pbx-policy-change"},
+    )
+
+    await gateway.on_audio_received("call-policy-change", b"\xff" * 160)
+    with patch("asyncio.sleep", new=AsyncMock(return_value=None)):
+        await gateway.send_audio("call-policy-change", b"\x00\x00" * 80)
+    session = gateway._sessions["call-policy-change"]
+    assert session.recording_buffer_bytes > 0
+    assert session.tts_recording_buffer_bytes > 0
+
+    assert gateway.set_recording_enabled("call-policy-change", False) is True
+
+    assert session.recording_enabled is False
+    assert session.recording_buffer == []
+    assert session.tts_recording_buffer == []
+    assert session.recording_buffer_bytes == 0
+    assert session.tts_recording_buffer_bytes == 0
+    assert session.caller_sample_count == 0
+    assert session.agent_rec_cursor == 0
 
 
 # ---------------------------------------------------------------------------
@@ -259,3 +328,94 @@ async def test_flush_tts_buffer_discards_orphan_pending_bytes():
     await gateway.flush_tts_buffer("call-flush-pending")
 
     assert session._tts_pending_bytes == b""
+
+
+@pytest.mark.asyncio
+async def test_flush_tts_buffer_clears_buffer_even_when_send_fails():
+    """A failed final send must not leave the padded packet in tts_buffer:
+    the next utterance would be prepended with those stale bytes and the
+    whole stream byte-shifted."""
+    gateway = TelephonyMediaGateway()
+    await gateway.initialize({"sample_rate": 8000, "tts_source_format": "s16le"})
+    adapter = AsyncMock()
+    await gateway.on_call_started(
+        "call-flush-fail", {"adapter": adapter, "pbx_call_id": "pbx-flush-fail"},
+    )
+    session = gateway._sessions["call-flush-fail"]
+
+    # A partial (< 160 byte) packet left in the packetisation buffer.
+    session.tts_buffer = b"\x01" * 40
+    adapter.send_tts_audio.side_effect = RuntimeError("pbx write failed")
+
+    await gateway.flush_tts_buffer("call-flush-fail")
+
+    assert session.tts_buffer == b""
+
+
+def _force_audio_route_failures(gateway, call_id, count):
+    """Drive on_audio_received down its decode-failure branch `count` times."""
+    session = gateway._sessions[call_id]
+    session.consecutive_audio_route_failures = count - 1
+    return session
+
+
+@pytest.mark.asyncio
+async def test_force_hangup_failure_is_logged_and_deactivates_session():
+    """The audio-route force-end used to fire-and-forget hangup_call and zero
+    the failure counter immediately: a raising hangup vanished silently and
+    the call stayed 'active' with a dead audio route until the 300s watchdog."""
+    gateway = TelephonyMediaGateway()
+    await gateway.initialize({"sample_rate": 8000, "tts_source_format": "s16le"})
+    adapter = AsyncMock()
+    await gateway.on_call_started(
+        "call-hangup-fail", {"adapter": adapter, "pbx_call_id": "pbx-hangup-fail"},
+    )
+    session = _force_audio_route_failures(
+        gateway, "call-hangup-fail", gateway._AUDIO_ROUTE_FORCE_END_THRESHOLD
+    )
+    adapter.hangup.side_effect = RuntimeError("ARI down")
+
+    # Force the decode/resample branch to fail on this chunk.
+    with patch(
+        "app.utils.audio_utils.ulaw_to_pcm", side_effect=RuntimeError("bad packet")
+    ):
+        await gateway.on_audio_received("call-hangup-fail", b"\xff" * 160)
+
+    task = session.force_hangup_task
+    assert task is not None
+    await asyncio.gather(task, return_exceptions=True)
+    await asyncio.sleep(0)  # let the done-callback run
+
+    # Counter is NOT zeroed (the hangup never succeeded) and the session is
+    # marked inactive so the normal teardown path takes over.
+    assert session.consecutive_audio_route_failures >= (
+        gateway._AUDIO_ROUTE_FORCE_END_THRESHOLD
+    )
+    assert session.is_active is False
+
+
+@pytest.mark.asyncio
+async def test_force_hangup_success_clears_failure_counter():
+    gateway = TelephonyMediaGateway()
+    await gateway.initialize({"sample_rate": 8000, "tts_source_format": "s16le"})
+    adapter = AsyncMock()
+    await gateway.on_call_started(
+        "call-hangup-ok", {"adapter": adapter, "pbx_call_id": "pbx-hangup-ok"},
+    )
+    session = _force_audio_route_failures(
+        gateway, "call-hangup-ok", gateway._AUDIO_ROUTE_FORCE_END_THRESHOLD
+    )
+
+    with patch(
+        "app.utils.audio_utils.ulaw_to_pcm", side_effect=RuntimeError("bad packet")
+    ):
+        await gateway.on_audio_received("call-hangup-ok", b"\xff" * 160)
+
+    task = session.force_hangup_task
+    assert task is not None
+    await task
+    await asyncio.sleep(0)
+
+    adapter.hangup.assert_awaited_once_with("pbx-hangup-ok")
+    assert session.consecutive_audio_route_failures == 0
+    assert session.is_active is True

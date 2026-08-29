@@ -155,3 +155,50 @@ def test_does_not_clobber_existing_tenant(monkeypatch):
     cs = _session(tenant_id="already-set")
     _run(session_inject.apply_campaign_knowledge(cs, _row("inline"), pool=object()))
     assert cs.tenant_id == "already-set"
+
+
+def test_pinned_retrieve_uses_snapshot_even_if_live_flag_changes(monkeypatch):
+    monkeypatch.delenv("CAMPAIGN_KNOWLEDGE_ENABLED", raising=False)
+    cs = _session()
+    snapshot = {
+        "enabled": True,
+        "mode": "retrieve",
+        "tenant_id": "t1",
+        "campaign_id": "c1",
+        "checksum": "abc",
+        "nodes": [
+            {
+                "heading": "Warranty",
+                "content": "The warranty lasts five years.",
+                "search_text": "warranty lasts five years",
+                "priority": 5,
+            }
+        ],
+    }
+    session_inject.apply_pinned_campaign_knowledge(cs, snapshot)
+    assert cs.knowledge_mode == "retrieve"
+    assert cs._knowledge_snapshot_nodes[0]["content"].endswith("five years.")
+    assert cs._knowledge_snapshot_checksum == "abc"
+
+
+def test_pinned_inline_bakes_only_captured_nodes():
+    cs = _session()
+    session_inject.apply_pinned_campaign_knowledge(
+        cs,
+        {
+            "enabled": True,
+            "mode": "inline",
+            "tenant_id": "t1",
+            "campaign_id": "c1",
+            "checksum": "abc",
+            "nodes": [
+                {
+                    "depth": 0,
+                    "heading": "Old policy",
+                    "content": "Captured before answer.",
+                }
+            ],
+        },
+    )
+    assert cs.knowledge_mode == "inline"
+    assert "Captured before answer." in cs.system_prompt

@@ -10,6 +10,8 @@
 pytest==7.4.4
 pytest-asyncio==0.23.3
 pytest-cov==4.1.0
+# In-process Redis for tests that import `fakeredis.aioredis`.
+fakeredis==2.37.1
 
 # --- Lint / Format / Type-check ---
 ruff==0.6.9

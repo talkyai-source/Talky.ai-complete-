@@ -13,6 +13,7 @@ from app.domain.services.dialer.stuck_job_reaper import (
 from app.domain.services.dialer.job_lifecycle import (
     cancel_active_jobs_for_campaign,
     cancel_active_jobs_for_lead,
+    NOT_ORIGINATED_JOB_STATUSES,
     REASON_CAMPAIGN_STOPPED,
 )
 
@@ -64,18 +65,19 @@ async def test_reaper_noop_returns_zero():
 
 
 @pytest.mark.asyncio
-async def test_stuck_call_reaper_closes_zombie_calls():
-    # A stale non-terminal call must be closed so it frees its batch slot and
-    # leaves the live-calls panel.
+async def test_stuck_call_reaper_queues_proof_aware_termination():
+    # Age alone must never manufacture PBX proof. The stale call leaves the
+    # dialer batch vocabulary but stays nonterminal/operator-visible until the
+    # telephony owner confirms every leg absent.
     conn = _FakeConn(returned_ids=["c1", "c2"])
     n = await reap_stuck_calls(conn, timeout_seconds=600)
     assert n == 2
     sql, args = conn.calls[0]
     assert args[0] == list(_INFLIGHT_CALL_STATUSES)
     assert args[1] == 600
-    assert "UPDATE calls" in sql and "'ended'" in sql
-    # Preserves any real outcome already written; only fills a missing one.
-    assert "COALESCE(outcome" in sql
+    assert "UPDATE calls" in sql and "'termination_pending'" in sql
+    assert "ended_at" not in sql
+    assert "outcome" not in sql
 
 
 @pytest.mark.asyncio
@@ -167,6 +169,23 @@ async def test_reaper_does_not_reap_job_with_live_answered_call():
 
 
 @pytest.mark.asyncio
+async def test_reaper_does_not_reap_job_awaiting_pbx_termination_proof():
+    """``termination_pending`` is stale, not terminal PBX evidence.
+
+    The call owner must retain its job/lead slot until confirmation-aware
+    recovery proves every provider leg absent and commits logical settlement.
+    """
+    jobs = [{"id": "job-proof", "status": "processing", "age_seconds": 900}]
+    calls_by_job_id = {"job-proof": "termination_pending"}
+    conn = _SemanticFakeConn(jobs, calls_by_job_id)
+
+    reaped = await reap_stuck_jobs(conn, timeout_seconds=120)
+
+    assert reaped == 0
+    assert "termination_pending" in _LIVE_CALL_STATUSES
+
+
+@pytest.mark.asyncio
 async def test_reaper_still_reaps_hung_job_with_no_call_at_all():
     """A job that never even reached origination (no `calls` row) is a
     genuine zombie and must still be reaped — the fix must only narrow, not
@@ -254,7 +273,15 @@ def test_cancel_active_jobs_for_campaign_builds_correct_query():
     assert cap["update"]["status"] == "cancelled"
     assert cap["update"]["failure_reason"] == REASON_CAMPAIGN_STOPPED
     assert ("campaign_id", "camp-1") in cap["eq"]
-    assert cap["in"] == ("status", list(st.ACTIVE_STATUSES))
+    assert cap["in"] == ("status", list(NOT_ORIGINATED_JOB_STATUSES))
+    assert set(NOT_ORIGINATED_JOB_STATUSES) == {
+        "pending",
+        "queued",
+        "retry_scheduled",
+    }
+    assert set(NOT_ORIGINATED_JOB_STATUSES).isdisjoint(
+        {"processing", "calling"}
+    )
 
 
 def test_cancel_active_jobs_for_lead_builds_correct_query():

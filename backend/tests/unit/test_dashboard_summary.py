@@ -216,3 +216,44 @@ async def test_summary_swallows_dialer_jobs_table_missing():
     db.table = routed_table  # type: ignore[method-assign]
     result = await get_dashboard_summary(current_user=_user(), db_client=db)
     assert result.queued_jobs == 0
+
+
+@pytest.mark.asyncio
+async def test_summary_adds_only_finalized_transfer_leg_actual_seconds():
+    leg_builder = _FakeBuilder(
+        data=[
+            {"duration_seconds": 25},
+            {"duration_seconds": 30},
+        ]
+    )
+    builders = {
+        "calls": [
+            _FakeBuilder(count=1, data=[]),
+            _FakeBuilder(
+                data=[
+                    {
+                        "id": "11111111-1111-1111-1111-111111111111",
+                        "outcome": "answered",
+                        "duration_seconds": 70,
+                    }
+                ]
+            ),
+            _FakeBuilder(count=0, data=[]),
+        ],
+        "call_legs": [leg_builder],
+        "campaigns": [_FakeBuilder(count=0, data=[])],
+        "tenants": [_FakeBuilder(data=[{"minutes_allocated": 5}])],
+        "dialer_jobs": [_FakeBuilder(count=0, data=[])],
+    }
+
+    result = await get_dashboard_summary(
+        current_user=_user(),
+        db_client=_FakeClient(builders),
+    )
+
+    # Parent 70s + finalized children 55s = 125s = 2 whole minutes.
+    assert result.minutes_used == 2
+    assert result.minutes_remaining == 3
+    assert ("in_", ("call_id", ["11111111-1111-1111-1111-111111111111"]), {}) in leg_builder.calls
+    assert ("eq", ("leg_type", "transfer"), {}) in leg_builder.calls
+    assert ("eq", ("billing_status", "finalized"), {}) in leg_builder.calls

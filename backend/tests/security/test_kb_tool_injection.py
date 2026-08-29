@@ -162,6 +162,10 @@ class _FakeBridge:
     _campaign_id = "c1"
     _tenant_id = "t1"
     _call_id = "call-rt-1"
+    # 2026-08-27: the bridge now reads a pinned per-call KB snapshot first
+    # (realtime_bridge.py:522). None = no snapshot, i.e. the live-retrieval
+    # branch these tests exercise.
+    _knowledge_snapshot_nodes = None
 
 
 def _run_realtime(query="how much is it"):

@@ -20,7 +20,10 @@ import asyncio
 
 import pytest
 
-from app.domain.services.voice_pipeline.realtime_bridge import RealtimeBridge
+from app.domain.services.voice_pipeline.realtime_bridge import (
+    _NO_KB_INFO,
+    RealtimeBridge,
+)
 from app.infrastructure.realtime.openai_realtime import (
     OpenAIRealtimeSession,
     RealtimeEvent,
@@ -163,7 +166,10 @@ async def test_lookup_knowledge_no_pool_returns_graceful():
         campaign_id="camp-1",
     )
     out = await bridge._lookup_knowledge("hours")
-    assert "No company information" in out
+    # No pool and no pinned snapshot => the no-info sentinel: graceful, and
+    # crucially nothing for the model to invent from. Compared against the
+    # constant so a reworded sentinel can never silently drift this test.
+    assert out == _NO_KB_INFO
 
 
 # ---------------------------------------------------------------------------

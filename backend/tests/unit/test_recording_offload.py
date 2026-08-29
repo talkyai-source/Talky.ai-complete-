@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -87,6 +88,29 @@ def _uninitialized_container():
     container = AsyncMock()
     container.is_initialized = False
     return container
+
+
+@pytest.mark.asyncio
+async def test_inbound_emergency_switch_is_rechecked_before_any_mix_or_write():
+    gateway = FakeGateway([b"\x01\x00" * 20_000], [(0, b"\x02\x00" * 20_000)])
+    vs = FakeVoiceSession(gateway)
+    vs._inbound_admission = {"call_id": "11111111-1111-1111-1111-111111111111"}
+    vs._recording_allowed = True
+    container = SimpleNamespace(is_initialized=True, db_pool=object())
+
+    with patch(
+        "app.core.container.get_container", return_value=container
+    ), patch(
+        "app.domain.services.telephony.modes.caller_first._live_inbound_recording_enabled",
+        new=AsyncMock(return_value=False),
+    ), patch(
+        "app.domain.services.recording_service.mix_stereo_recording"
+    ) as mix:
+        await _save_call_recording(vs, "pbx-call-id")
+
+    assert gateway.cleared is True
+    assert vs._recording_allowed is False
+    mix.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

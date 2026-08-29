@@ -19,9 +19,11 @@ class FakeConn:
         self._allocated = allocated
         self._used = used_seconds
         self._calls = 0
+        self.queries = []
 
     async def fetchval(self, query, *args):
         self._calls += 1
+        self.queries.append((query, args))
         # First call = allocation lookup; second = used-seconds sum.
         return self._allocated if self._calls == 1 else self._used
 
@@ -73,3 +75,19 @@ async def test_seconds_floor_to_whole_minutes():
     s = await compute_minutes_status(FakeConn(10, 119), "t1")
     assert s.used_minutes == 1
     assert s.exhausted is False
+
+
+@pytest.mark.asyncio
+async def test_used_total_includes_only_finalized_transfer_actual_seconds():
+    conn = FakeConn(10, 179)
+
+    status = await compute_minutes_status(conn, "t1")
+
+    assert status.used_minutes == 2
+    usage_sql = " ".join(conn.queries[1][0].split()).lower()
+    assert "from call_legs leg" in usage_sql
+    assert "join calls parent on parent.id=leg.call_id" in usage_sql
+    assert "leg.leg_type='transfer'" in usage_sql
+    assert "leg.billing_status='finalized'" in usage_sql
+    assert "leg.billing_status='reserved'" not in usage_sql
+    assert "leg.billing_status='held'" not in usage_sql

@@ -40,6 +40,21 @@ def test_valid_full_metadata_passes_through():
     assert out["srtp"] is True
 
 
+def test_outbound_proxy_is_canonical_and_rejects_uri_injection():
+    assert normalize_trunk_metadata(
+        {"outbound_proxy": " SIP:Proxy.Example.com:5061 "}
+    )["outbound_proxy"] == "proxy.example.com:5061"
+    for value in (
+        "proxy.example.com:0",
+        "proxy.example.com:70000",
+        "user@proxy.example.com",
+        "proxy.example.com;transport=tcp",
+        "127.0.0.1:5060",
+    ):
+        with pytest.raises(ValueError):
+            normalize_trunk_metadata({"outbound_proxy": value})
+
+
 def test_unknown_keys_are_preserved():
     out = normalize_trunk_metadata({"caller_id": "+15551230000", "some_other_feature": {"x": 1}})
     assert out["some_other_feature"] == {"x": 1}
@@ -78,11 +93,26 @@ def test_invalid_values_raise(meta):
 
 @pytest.mark.parametrize(
     "value",
-    ["203.0.113.9", "sip.acme-carrier.com", "2001:db8::1", "pbx.example.com:5061"],
+    ["8.8.8.8", "sip.acme-carrier.com", "2606:4700:4700::1111"],
 )
 def test_source_host_accepts_hostname_or_ip(value):
     out = normalize_trunk_metadata({"source_host": f"  {value}  "})
     assert out["source_host"] == value  # stripped, preserved
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["127.0.0.1", "10.0.0.5", "169.254.169.254", "::1", "pbx.local", "localhost"],
+)
+def test_sip_targets_reject_private_and_local_networks_by_default(value):
+    with pytest.raises(ValueError):
+        SIPTrunkCreateRequest(trunk_name="private-pbx", sip_domain=value)
+
+
+def test_private_sip_target_requires_explicit_platform_override(monkeypatch):
+    monkeypatch.setenv("TELEPHONY_ALLOW_PRIVATE_SIP_TARGETS", "on")
+    request = SIPTrunkCreateRequest(trunk_name="private-pbx", sip_domain="10.0.0.5")
+    assert request.sip_domain == "10.0.0.5"
 
 
 def test_source_host_blank_is_dropped():

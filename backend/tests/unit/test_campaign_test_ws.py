@@ -166,7 +166,7 @@ class _Harness:
             patch("app.api.v1.dependencies.get_db_client", return_value=db_client),
             patch("app.core.container.get_container", return_value=self.container),
             patch(
-                "app.domain.services.telephony.lifecycle._fetch_campaign_row",
+                "app.api.v1.endpoints.campaign_test_ws._fetch_campaign_row",
                 AsyncMock(return_value=campaign_row),
             ),
             patch(

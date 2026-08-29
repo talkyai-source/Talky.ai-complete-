@@ -9,6 +9,232 @@ from unittest.mock import patch
 
 
 class TestOutboundFirstSpeaker:
+    def test_ai_message_intake_fallback_never_promises_a_tone(self):
+        from app.domain.services.telephony.lifecycle import (
+            _AI_MESSAGE_INTAKE_FALLBACK_GREETING,
+        )
+
+        greeting = _AI_MESSAGE_INTAKE_FALLBACK_GREETING.lower()
+        assert "tone" not in greeting
+        assert "beep" not in greeting
+        assert "name" in greeting and "number" in greeting and "message" in greeting
+
+    def test_inbound_duration_must_match_the_pinned_reservation(self):
+        from app.domain.services.telephony.lifecycle import (
+            _pinned_inbound_max_duration,
+        )
+
+        payload = {
+            "config_snapshot": {
+                "route": {
+                    "max_call_duration_seconds": 600,
+                    "reservation_seconds": 600,
+                }
+            }
+        }
+        assert _pinned_inbound_max_duration(payload) == 600
+        payload["config_snapshot"]["route"]["reservation_seconds"] = 60
+        with pytest.raises(RuntimeError, match="quota-backed duration"):
+            _pinned_inbound_max_duration(payload)
+
+    @pytest.mark.asyncio
+    async def test_inbound_deadline_marks_reason_and_schedules_forced_hangup(
+        self,
+        monkeypatch,
+    ):
+        from app.domain.services.telephony import lifecycle
+
+        session = SimpleNamespace()
+        forced = []
+        tasks = []
+
+        monkeypatch.setattr(
+            lifecycle,
+            "_state",
+            lambda: SimpleNamespace(get_voice_session=lambda _call_id: session),
+        )
+
+        async def force(call_id):
+            forced.append(call_id)
+
+        def track(coro):
+            task = asyncio.create_task(coro)
+            tasks.append(task)
+            return task
+
+        monkeypatch.setattr(lifecycle, "_force_end_and_hangup", force)
+        monkeypatch.setattr(lifecycle, "_track_task", track)
+        loop = asyncio.get_running_loop()
+        await lifecycle._enforce_inbound_deadline(
+            "inbound-1",
+            60,
+            loop.time() - 61,
+        )
+        await asyncio.gather(*tasks)
+
+        assert session._hangup_reason == "inbound_max_duration_reached"
+        assert forced == ["inbound-1"]
+
+    def test_pinned_inbound_prompt_and_voice_reach_live_session_builder(self, monkeypatch):
+        from app.domain.services.telephony import lifecycle
+
+        captured = {}
+
+        def build(**kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(system_prompt="Composed base prompt")
+
+        monkeypatch.setattr(lifecycle, "_build_telephony_session_config", build)
+        monkeypatch.setattr(
+            lifecycle,
+            "_pinned_inbound_ai_config",
+            lambda _payload: ("pinned-ai", "pinned-tuning"),
+        )
+        config, pinned = lifecycle._build_pinned_inbound_config(
+            {
+                "opening_mode": "caller_first",
+                "config_snapshot": {
+                    "campaign": {
+                        "id": "campaign-1",
+                        "voice_id": "base-voice",
+                        "script_config": {"persona_type": "lead_gen"},
+                    },
+                    "inbound_config": {
+                        "opening_mode": "caller_first",
+                        "greeting": "Thanks for calling.",
+                        "qualification_config": {
+                            "system_prompt": "Answer only approved support questions.",
+                            "voice_id": "inbound-voice",
+                        }
+                    },
+                }
+            },
+            gateway_type="telephony",
+            selected_action="agent",
+        )
+
+        assert captured["campaign"] is pinned
+        assert pinned["voice_id"] == "inbound-voice"
+        assert pinned["script_config"]["persona_type"] == "lead_gen"
+        assert (
+            pinned["script_config"]["additional_instructions"]
+            == "INBOUND-SPECIFIC INSTRUCTIONS\n"
+            "Answer only approved support questions."
+        )
+        assert captured["ai_config_override"] == "pinned-ai"
+        assert captured["voice_tuning_override"] == "pinned-tuning"
+        assert config.system_prompt.startswith(lifecycle._TRUE_INBOUND_DIRECTIVE)
+
+    @pytest.mark.parametrize(
+        ("opening_mode", "expected"),
+        [("caller_first", "user"), ("agent_first", "agent")],
+    )
+    def test_true_inbound_uses_pinned_opening_mode(self, opening_mode, expected):
+        from app.domain.services.telephony.lifecycle import _pinned_inbound_opening
+
+        first_speaker, greeting = _pinned_inbound_opening(
+            {
+                "opening_mode": opening_mode,
+                "config_snapshot": {
+                    "inbound_config": {
+                        "opening_mode": opening_mode,
+                        "greeting": "Thanks for calling Acme.",
+                    }
+                },
+            }
+        )
+        assert first_speaker == expected
+        assert greeting == "Thanks for calling Acme."
+
+    def test_true_inbound_rejects_opening_mode_snapshot_mismatch(self):
+        from app.domain.services.telephony.lifecycle import _pinned_inbound_opening
+
+        with pytest.raises(RuntimeError, match="inconsistent opening_mode"):
+            _pinned_inbound_opening(
+                {
+                    "opening_mode": "agent_first",
+                    "config_snapshot": {
+                        "inbound_config": {"opening_mode": "caller_first"}
+                    },
+                }
+            )
+
+    def test_inbound_greeting_uses_pinned_custom_text_and_outbound_is_unchanged(self):
+        from app.domain.services.telephony.config import _build_call_greeting
+        from app.domain.services.voice_orchestrator import Direction
+
+        agent = SimpleNamespace(agent_name="Maya", company_name="Acme")
+        inbound_call_session = SimpleNamespace(
+            agent_config=agent,
+            _call_direction="inbound",
+            _inbound_greeting="Welcome to Acme support.",
+            _llm_opener_text="outbound-only opener",
+        )
+        outbound_call_session = SimpleNamespace(
+            agent_config=agent,
+            config=SimpleNamespace(direction=Direction.OUTBOUND),
+            _llm_opener_text="outbound-only opener",
+        )
+        assert _build_call_greeting(
+            inbound_call_session, first_speaker="agent"
+        ) == "Welcome to Acme support."
+        assert _build_call_greeting(
+            outbound_call_session, first_speaker="agent"
+        ) == "outbound-only opener"
+
+    @pytest.mark.parametrize(
+        ("opening_mode", "expected"),
+        [("caller_first", "user"), ("agent_first", "agent")],
+    )
+    def test_true_inbound_uses_pinned_opening_mode(self, opening_mode, expected):
+        from app.domain.services.telephony.lifecycle import _pinned_inbound_opening
+
+        first_speaker, greeting = _pinned_inbound_opening(
+            {
+                "opening_mode": opening_mode,
+                "config_snapshot": {
+                    "inbound_config": {
+                        "opening_mode": opening_mode,
+                        "greeting": "Thanks for calling Acme.",
+                    }
+                },
+            }
+        )
+        assert first_speaker == expected
+        assert greeting == "Thanks for calling Acme."
+
+    def test_true_inbound_rejects_opening_mode_snapshot_mismatch(self):
+        from app.domain.services.telephony.lifecycle import _pinned_inbound_opening
+
+        with pytest.raises(RuntimeError, match="inconsistent opening_mode"):
+            _pinned_inbound_opening(
+                {
+                    "opening_mode": "agent_first",
+                    "config_snapshot": {
+                        "inbound_config": {"opening_mode": "caller_first"}
+                    },
+                }
+            )
+
+    def test_inbound_greeting_uses_pinned_custom_text_and_outbound_is_unchanged(self):
+        from app.domain.services.telephony.config import _build_call_greeting
+        from app.domain.services.voice_orchestrator import Direction
+
+        agent = SimpleNamespace(agent_name="Maya", company_name="Acme")
+        inbound = SimpleNamespace(
+            agent_config=agent,
+            config=SimpleNamespace(direction=Direction.INBOUND),
+            _inbound_greeting="Welcome to Acme support.",
+            _llm_opener_text="outbound-only opener",
+        )
+        outbound = SimpleNamespace(
+            agent_config=agent,
+            config=SimpleNamespace(direction=Direction.OUTBOUND),
+            _llm_opener_text="outbound-only opener",
+        )
+        assert _build_call_greeting(inbound, first_speaker="agent") == "Welcome to Acme support."
+        assert _build_call_greeting(outbound, first_speaker="agent") == "outbound-only opener"
+
     def test_default_is_agent(self):
         """TELEPHONY_FIRST_SPEAKER not set → default must be 'agent'."""
         from app.api.v1.endpoints.telephony_bridge import _outbound_first_speaker
@@ -174,8 +400,8 @@ class TestOutboundFirstSpeaker:
         await lifecycle._on_ringing(call_id)
 
     @pytest.mark.asyncio
-    async def test_asterisk_trunk_aliases_oldest_originated_channel(self):
-        """Concurrent trunk calls should not depend on unordered set iteration."""
+    async def test_asterisk_trunk_aliases_linked_origination_not_fifo(self):
+        """Concurrent trunk calls are paired by linkedid, never FIFO order."""
         from app.infrastructure.telephony.asterisk_adapter import AsteriskAdapter
 
         adapter = AsteriskAdapter()
@@ -189,6 +415,12 @@ class TestOutboundFirstSpeaker:
         async def fake_outbound_start(channel_id):
             started.append(channel_id)
 
+        async def fake_ari(method, path, **kwargs):
+            assert method == "GET"
+            assert path == "/channels/actual-a/variable"
+            return {"value": "planned-b"}
+
+        adapter._ari = fake_ari
         adapter._on_outbound_stasis_start = fake_outbound_start
         adapter._track_originated_channel("planned-a")
         adapter._track_originated_channel("planned-b")
@@ -203,7 +435,7 @@ class TestOutboundFirstSpeaker:
         })
         await asyncio.sleep(0)
 
-        assert aliases == [("planned-a", "actual-a")]
+        assert aliases == [("planned-b", "actual-a")]
         assert started == ["actual-a"]
-        assert "planned-a" not in adapter._originated_channels
-        assert "planned-b" in adapter._originated_channels
+        assert "planned-b" not in adapter._originated_channels
+        assert "planned-a" in adapter._originated_channels

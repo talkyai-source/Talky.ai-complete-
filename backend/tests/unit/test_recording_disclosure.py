@@ -33,8 +33,6 @@ import pytest
 from app.domain.models.conversation import MessageRole
 from app.domain.services import recording_policy_service as rps
 from app.domain.services.recording_policy_service import (
-    CONSENT_ONE_PARTY,
-    CONSENT_TWO_PARTY,
     DISCLOSURE_FAILED,
     DISCLOSURE_SPOKEN,
     RecordingDecision,
@@ -45,6 +43,7 @@ from app.domain.services.recording_policy_service import (
 )
 from app.domain.services.recording_service import RecordingBuffer, RecordingService
 from app.domain.services.telephony.modes.agent_first import _send_outbound_greeting
+from app.domain.services.telephony.modes.caller_first import prepare_inbound_recording
 
 TENANT = "22222222-2222-2222-2222-222222222222"
 CALL_UUID = "11111111-1111-1111-1111-111111111111"
@@ -77,7 +76,14 @@ _NO_ANNOUNCE = RecordingDecision(
 def _clean_ledger():
     """The ledger is module-global; keep tests independent."""
     rps._DISCLOSURE_LEDGER.clear()
-    yield
+    with patch(
+        "app.domain.services.telephony.modes.caller_first._live_inbound_recording_enabled",
+        new=AsyncMock(return_value=True),
+    ), patch(
+        "app.domain.services.telephony.modes.caller_first._set_inbound_consent_status",
+        new=AsyncMock(return_value=None),
+    ):
+        yield
     rps._DISCLOSURE_LEDGER.clear()
 
 
@@ -132,6 +138,15 @@ def _make_voice_session(log, **pipeline_kwargs):
         call_session=session,
         pipeline=_FakePipeline(log, **pipeline_kwargs),
         media_gateway=_FakeMediaGateway(log),
+        _inbound_admission={
+            "config_snapshot": {
+                "inbound_config": {
+                    "recording_enabled": True,
+                    "consent_message": _ANNOUNCE.announcement_text,
+                },
+                "controls": {"recording_enabled": True},
+            }
+        },
         _presynth_greeting_audio=[b"\x00\x01" * 10],
         _presynth_greeting_text=GREETING,
     )
@@ -160,6 +175,119 @@ async def _run_greeting(decision, initialized=True, **pipeline_kwargs):
     with p_container, p_policy:
         await _send_outbound_greeting(voice_session)
     return log, session
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first_speaker", ["user", "agent"])
+async def test_pinned_inbound_consent_is_exact_first_audio_for_both_modes(first_speaker):
+    log = []
+    voice_session, session = _make_voice_session(log)
+    voice_session._first_speaker = first_speaker
+    voice_session._inbound_admission["config_snapshot"]["inbound_config"][
+        "consent_message"
+    ] = "This exact inbound call is recorded."
+    gateway = _GatedInboundMediaGateway(log)
+    voice_session.media_gateway = gateway
+    p_container, p_policy = _patched_policy(_ANNOUNCE)
+
+    with p_container, p_policy:
+        assert await prepare_inbound_recording(voice_session) is True
+
+    heard = [value for kind, value in log if kind == "tts"]
+    assert heard[0] == "This exact inbound call is recorded."
+
+
+@pytest.mark.asyncio
+async def test_agent_first_slow_path_consumes_pinned_custom_inbound_greeting():
+    log = []
+    voice_session, session = _make_voice_session(log)
+    voice_session._presynth_greeting_audio = None
+    voice_session._presynth_greeting_text = None
+    voice_session._first_speaker = "agent"
+    voice_session._recording_disclosure_text_override = "This call is recorded."
+    voice_session.config = types.SimpleNamespace(voice_id="voice-1")
+    session.agent_config = types.SimpleNamespace(agent_name="Maya", company_name="Acme")
+    session._call_direction = "inbound"
+    session._inbound_greeting = "Welcome to Acme support."
+    p_container, p_policy = _patched_policy(_ANNOUNCE)
+
+    with p_container, p_policy:
+        await _send_outbound_greeting(voice_session)
+
+    heard = [value for kind, value in log if kind == "tts"]
+    assert heard[:2] == ["This call is recorded.", "Welcome to Acme support."]
+
+
+class _GatedInboundMediaGateway(_FakeMediaGateway):
+    def __init__(self, log):
+        super().__init__(log)
+        self.enabled = True
+
+    def set_recording_enabled(self, call_id, enabled):
+        self.enabled = bool(enabled)
+        self._log.append(("recording_gate", self.enabled))
+        return True
+
+
+@pytest.mark.asyncio
+async def test_inbound_recording_gate_opens_only_after_shared_disclosure():
+    log = []
+    voice_session, _ = _make_voice_session(log)
+    gateway = _GatedInboundMediaGateway(log)
+    voice_session.media_gateway = gateway
+    p_container, p_policy = _patched_policy(_ANNOUNCE)
+
+    with p_container, p_policy:
+        allowed = await prepare_inbound_recording(voice_session)
+
+    assert allowed is True
+    assert gateway.enabled is True
+    kinds = [kind for kind, _ in log]
+    assert kinds[0] == "recording_gate"
+    assert log[0] == ("recording_gate", False)
+    assert kinds.index("tts") < len(kinds) - 1
+    assert log[-1] == ("recording_gate", True)
+
+
+@pytest.mark.asyncio
+async def test_inbound_recording_gate_stays_closed_when_disclosure_fails():
+    log = []
+    voice_session, _ = _make_voice_session(log, raises=True)
+    gateway = _GatedInboundMediaGateway(log)
+    voice_session.media_gateway = gateway
+    p_container, p_policy = _patched_policy(_ANNOUNCE)
+
+    with p_container, p_policy:
+        allowed = await prepare_inbound_recording(voice_session)
+
+    assert allowed is False
+    assert gateway.enabled is False
+    assert ("recording_gate", True) not in log
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("disabled_layer", ["campaign", "platform"])
+async def test_inbound_recording_gate_requires_campaign_and_platform_switches(
+    disabled_layer,
+):
+    log = []
+    voice_session, _ = _make_voice_session(log)
+    gateway = _GatedInboundMediaGateway(log)
+    voice_session.media_gateway = gateway
+    snapshot = voice_session._inbound_admission["config_snapshot"]
+    if disabled_layer == "campaign":
+        snapshot["inbound_config"]["recording_enabled"] = False
+    else:
+        snapshot["controls"]["recording_enabled"] = False
+    p_container, p_policy = _patched_policy(_ANNOUNCE)
+
+    with p_container, p_policy:
+        allowed = await prepare_inbound_recording(voice_session)
+
+    assert allowed is False
+    assert gateway.enabled is False
+    assert ("recording_gate", True) not in log
+    assert not any(kind == "tts" for kind, _ in log)
 
 
 # ---------------------------------------------------------------------------
@@ -567,9 +695,8 @@ def test_ordinary_notice_text_is_left_alone():
 
 
 @pytest.mark.asyncio
-async def test_safe_default_tenant_requires_a_notice():
-    """End-to-end guard on the premise of this whole fix: a tenant with
-    no policy row (the common case) is two-party and MUST be announced."""
+async def test_absent_policy_keeps_recording_off():
+    """A missing row is not legal consent and must never enable capture."""
 
     class _NoRowConn:
         async def __aenter__(self):
@@ -586,8 +713,18 @@ async def test_safe_default_tenant_requires_a_notice():
             return _NoRowConn()
 
     decision = await rps.RecordingPolicyService(_NoRowPool()).decide(tenant_id="t1")
-    assert decision.should_record is True
-    assert decision.announcement_required is True
-    assert consent_satisfied(decision, "fresh-call") is False
-    assert CONSENT_TWO_PARTY in decision.reason or "two_party" in decision.reason
-    assert CONSENT_ONE_PARTY not in decision.reason
+    assert decision.should_record is False
+    assert decision.announcement_required is False
+    assert spoken_disclosure_text(decision) is None
+    assert decision.reason == "tenant_policy_absent_recording_off"
+
+
+def test_dtmf_opt_out_detector_rejects_only_unsupported_promises():
+    assert rps.contains_unsupported_dtmf_opt_out("Press 9 to opt out.") is True
+    assert rps.contains_unsupported_dtmf_opt_out("Dial # to stop recording.") is True
+    assert (
+        rps.contains_unsupported_dtmf_opt_out(
+            "This call is being recorded for quality and training."
+        )
+        is False
+    )

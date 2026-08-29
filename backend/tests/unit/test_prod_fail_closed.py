@@ -38,6 +38,12 @@ def _prod_env_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     # No dev bypass flags
     monkeypatch.delenv("TELEPHONY_DEV_BYPASS_GUARD_ERRORS", raising=False)
     monkeypatch.delenv("TELEPHONY_LOCAL_DEV", raising=False)
+    monkeypatch.delenv("INBOUND_TRANSFER_STAGING_PROOF_ENABLED", raising=False)
+    monkeypatch.delenv("INBOUND_TRANSFER_STAGING_PROOF_TENANT_ID", raising=False)
+    monkeypatch.delenv("INBOUND_TRANSFER_STAGING_PROOF_CONFIG_ID", raising=False)
+    monkeypatch.delenv("TELEPHONY_INBOUND_REQUIRE_TENANT", raising=False)
+    monkeypatch.delenv("INBOUND_STRICT_ROUTING", raising=False)
+    monkeypatch.delenv("TELEPHONY_STRICT_INBOUND_ROUTING", raising=False)
     # Non-default PBX creds for whichever adapter
     monkeypatch.setenv("TELEPHONY_ADAPTER", "asterisk")
     monkeypatch.setenv("ASTERISK_ARI_PASSWORD", _STRONG_PBX_PW)
@@ -48,6 +54,10 @@ def _prod_env_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     # correctly refuses to boot, so this happy-path baseline must supply it.
     monkeypatch.setenv("SECRETS_MASTER_KEY", "a" * 64)
     monkeypatch.setenv("TELEPHONY_METRICS_TOKEN", "tok_" + "a" * 32)
+    monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", "internal_" + "a" * 32)
+    monkeypatch.setenv("VOICE_GATEWAY_AUTH_TOKEN", "gateway_" + "b" * 32)
+    monkeypatch.setenv("VOICE_GATEWAY_CALLBACK_HOST", "127.0.0.1")
+    monkeypatch.setenv("BACKEND_INTERNAL_URL", "http://127.0.0.1:8000")
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_" + "a" * 32)
 
 
@@ -81,6 +91,40 @@ def test_gate_refuses_telephony_local_dev_flag_in_prod(monkeypatch: pytest.Monke
     _prod_env_happy_path(monkeypatch)
     monkeypatch.setenv("TELEPHONY_LOCAL_DEV", "1")
     with pytest.raises(ProductionGateError, match="dev_bypass_in_prod"):
+        enforce_production_gate()
+
+
+@pytest.mark.parametrize("value", ["1", "true", "yes", "on", "enabled", "unexpected"])
+def test_gate_refuses_staging_transfer_proof_flag_in_prod(
+    monkeypatch: pytest.MonkeyPatch, value: str
+):
+    _prod_env_happy_path(monkeypatch)
+    monkeypatch.setenv("INBOUND_TRANSFER_STAGING_PROOF_ENABLED", value)
+    with pytest.raises(ProductionGateError, match="staging_proof_flag_in_prod"):
+        enforce_production_gate()
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "INBOUND_TRANSFER_STAGING_PROOF_TENANT_ID",
+        "INBOUND_TRANSFER_STAGING_PROOF_CONFIG_ID",
+    ],
+)
+def test_gate_refuses_staging_transfer_scope_in_prod(
+    monkeypatch: pytest.MonkeyPatch, name: str
+):
+    _prod_env_happy_path(monkeypatch)
+    monkeypatch.setenv(name, "11111111-1111-1111-1111-111111111111")
+    with pytest.raises(ProductionGateError, match="staging_proof_scope_in_prod"):
+        enforce_production_gate()
+
+
+@pytest.mark.parametrize("value", ["0", "false", "no", "off", "disabled"])
+def test_gate_refuses_disabled_strict_inbound_routing(monkeypatch: pytest.MonkeyPatch, value: str):
+    _prod_env_happy_path(monkeypatch)
+    monkeypatch.setenv("TELEPHONY_INBOUND_REQUIRE_TENANT", value)
+    with pytest.raises(ProductionGateError, match="inbound_strict_routing_disabled"):
         enforce_production_gate()
 
 
@@ -128,6 +172,61 @@ def test_gate_refuses_missing_metrics_token(monkeypatch: pytest.MonkeyPatch):
     _prod_env_happy_path(monkeypatch)
     monkeypatch.delenv("TELEPHONY_METRICS_TOKEN", raising=False)
     with pytest.raises(ProductionGateError, match="TELEPHONY_METRICS_TOKEN"):
+        enforce_production_gate()
+
+
+def test_gate_refuses_missing_internal_service_token(monkeypatch: pytest.MonkeyPatch):
+    _prod_env_happy_path(monkeypatch)
+    monkeypatch.delenv("INTERNAL_SERVICE_TOKEN", raising=False)
+    with pytest.raises(ProductionGateError, match="INTERNAL_SERVICE_TOKEN"):
+        enforce_production_gate()
+
+
+def test_gate_refuses_unpinned_gateway_callback_or_missing_control_token(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _prod_env_happy_path(monkeypatch)
+    monkeypatch.delenv("VOICE_GATEWAY_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("VOICE_GATEWAY_CALLBACK_HOST", raising=False)
+    with pytest.raises(ProductionGateError) as exc:
+        enforce_production_gate()
+    message = str(exc.value)
+    assert "VOICE_GATEWAY_AUTH_TOKEN" in message
+    assert "gateway_callback_host_unpinned" in message
+
+
+def test_gate_refuses_gateway_callback_host_url_mismatch(monkeypatch: pytest.MonkeyPatch):
+    _prod_env_happy_path(monkeypatch)
+    monkeypatch.setenv("VOICE_GATEWAY_CALLBACK_HOST", "127.0.0.1")
+    monkeypatch.setenv("BACKEND_INTERNAL_URL", "http://203.0.113.9:8000")
+    with pytest.raises(ProductionGateError, match="gateway_callback_url_mismatch"):
+        enforce_production_gate()
+
+
+def test_gate_refuses_non_loopback_gateway_callback_even_when_url_matches(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _prod_env_happy_path(monkeypatch)
+    monkeypatch.setenv("VOICE_GATEWAY_CALLBACK_HOST", "203.0.113.9")
+    monkeypatch.setenv("BACKEND_INTERNAL_URL", "http://203.0.113.9:8000")
+    with pytest.raises(ProductionGateError, match="gateway_callback_host_unpinned"):
+        enforce_production_gate()
+
+
+def test_gate_refuses_reused_gateway_and_internal_secret(monkeypatch: pytest.MonkeyPatch):
+    _prod_env_happy_path(monkeypatch)
+    token = "shared_" + "c" * 32
+    monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", token)
+    monkeypatch.setenv("VOICE_GATEWAY_AUTH_TOKEN", token)
+    with pytest.raises(ProductionGateError, match="secret_reuse"):
+        enforce_production_gate()
+
+
+@pytest.mark.parametrize("name", ["INTERNAL_SERVICE_TOKEN", "VOICE_GATEWAY_AUTH_TOKEN"])
+def test_gate_refuses_short_internal_tokens(monkeypatch: pytest.MonkeyPatch, name: str):
+    _prod_env_happy_path(monkeypatch)
+    monkeypatch.setenv(name, "too-short")
+    with pytest.raises(ProductionGateError, match="weak_secret"):
         enforce_production_gate()
 
 

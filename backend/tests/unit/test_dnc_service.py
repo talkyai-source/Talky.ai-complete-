@@ -278,3 +278,60 @@ async def test_list_for_tenant_excludes_global_by_default():
 
     with_global = await svc.list_for_tenant("t1", include_global=True)
     assert len(with_global) == 2
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Canonical form + strict E.164 gate on the write path
+# ──────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("4155551234", "+14155551234"),      # bare 10-digit US -> +1
+        ("(415) 555-1234", "+14155551234"),
+        ("415-555-1234", "+14155551234"),
+        ("415.555.1234", "+14155551234"),
+    ],
+)
+def test_normalize_e164_bare_us_ten_digits_gets_country_code(raw: str, expected: str):
+    """The DNC stored form must be what CallGuard looks the row up with."""
+    assert normalize_e164(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "junk",
+    ["+", "abc", "phone", "   ", "-", "()", "0", "00", "1234", "12345"],
+)
+@pytest.mark.asyncio
+async def test_add_rejects_non_e164(junk: str):
+    """Truthy junk like '+' or '+00' must never land on the DNC list."""
+    svc = DNCService(_FakePool())
+    with pytest.raises(ValueError, match="E.164"):
+        await svc.add(tenant_id="t1", e164=junk, source=SOURCE_MANUAL_ADMIN)
+
+
+@pytest.mark.asyncio
+async def test_bulk_import_counts_non_e164_as_invalid():
+    svc = DNCService(_FakePool())
+    result = await svc.bulk_import(
+        tenant_id="t1",
+        numbers=["+14155551234", "+", "abc", "0", "4155551235"],
+        source="bulk_import",
+    )
+    assert result["invalid_count"] == 3
+    assert set(result["invalid"]) == {"+", "abc", "0"}
+    assert sorted(result["accepted"]) == ["+14155551234", "+14155551235"]
+
+
+@pytest.mark.asyncio
+async def test_dnc_row_written_matches_call_guard_lookup_key():
+    """End-to-end: what add() stores is what the guard's query would find."""
+    from app.domain.services.call_guard import CallGuard
+
+    pool = _FakePool()
+    svc = DNCService(pool)
+    entry = await svc.add(
+        tenant_id="t1", e164="(415) 555-1234", source=SOURCE_MANUAL_ADMIN,
+    )
+    guard_key = CallGuard._normalize_phone_number(None, "4155551234")
+    assert entry.normalized_number == guard_key

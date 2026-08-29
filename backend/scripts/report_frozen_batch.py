@@ -41,6 +41,20 @@ Every row carries prompt_version and prompt_hash. If they are not identical
 across the batch, it was not one experiment and the numbers should not be
 pooled -- the script says so rather than averaging regardless.
 
+A MISSING VALUE IS NOT AGREEMENT (2026-08-28)
+---------------------------------------------
+This check used to run on the display strings, where a NULL prompt identity
+had already been rendered as "-". A batch in which EVERY call was missing its
+identity therefore collapsed to one distinct pair, ("-", "-"), and the script
+printed its strongest possible result -- "FROZEN: every call ran prompt - hash
+-" -- at precisely the moment it had no evidence at all. Any row without a
+real (version, hash) now fails the gate as NO EVIDENCE.
+
+EXIT CODE
+---------
+0 only when the batch is proven frozen. Non-zero otherwise (no calls found,
+identities missing, or more than one identity), so this can gate CI.
+
 Read-only. Never prints an API key.
 """
 from __future__ import annotations
@@ -119,6 +133,82 @@ def parse_journal(text: str) -> dict:
     return per
 
 
+# ── freeze gate ─────────────────────────────────────────────────────────────
+# The placeholder main() substitutes for a NULL column when rendering the
+# table. It must never be treated as a prompt identity.
+MISSING = "-"
+
+
+def _identity_missing(version, prompt_hash) -> bool:
+    """True when this row carries no real prompt identity.
+
+    Covers the rendered placeholder, NULL, and whitespace-only values — the
+    row may reach here either pre- or post-render depending on the caller.
+    """
+    for value in (version, prompt_hash):
+        if value is None:
+            return True
+        text = str(value).strip()
+        if not text or text == MISSING:
+            return True
+    return False
+
+
+def freeze_verdict(rows: list) -> tuple[bool, list]:
+    """Decide whether this batch is one frozen experiment.
+
+    Returns ``(frozen, lines)`` — ``lines`` are printed verbatim.
+
+    Three ways to fail, and a missing identity is reported FIRST because it is
+    the weakest evidence, not the strongest: "NOT FROZEN" is the existing
+    vocabulary a reader acts on, so the missing case keeps that headline and
+    adds "NO EVIDENCE" to say *why* it failed. A separate quieter state would
+    let the batch that proves nothing read as less alarming than the batch
+    that merely mixed two known prompts.
+    """
+    if not rows:
+        return False, [
+            "NOT FROZEN — NO EVIDENCE: the batch is empty; nothing was proven."
+        ]
+
+    missing = [r for r in rows if _identity_missing(r.get("version"), r.get("hash"))]
+    identities = sorted(
+        {
+            (r["version"], r["hash"])
+            for r in rows
+            if not _identity_missing(r.get("version"), r.get("hash"))
+        }
+    )
+
+    if missing:
+        lines = [
+            f"NOT FROZEN — NO EVIDENCE: {len(missing)}/{len(rows)} calls carry no "
+            "prompt identity",
+            "  (calls.prompt_version / calls.prompt_hash are NULL on those rows).",
+            "  A missing value is not agreement. Do NOT pool these numbers.",
+        ]
+        if identities:
+            lines.append(
+                f"  {len(identities)} identity(ies) recorded on the remaining calls:"
+            )
+            lines += [f"    {v}/{h}" for v, h in identities]
+        return False, lines
+
+    if len(identities) == 1:
+        v, h = identities[0]
+        return True, [f"FROZEN: every call ran prompt {v} hash {h}"]
+
+    lines = [f"NOT FROZEN — {len(identities)} distinct prompt identities in this batch:"]
+    lines += [f"    {v}/{h}" for v, h in identities]
+    lines.append("  Do NOT pool these numbers; they are not one experiment.")
+    return False, lines
+
+
+def exit_code(frozen: bool) -> int:
+    """0 only on a proven freeze, so CI can gate on this script."""
+    return 0 if frozen else 2
+
+
 def dsn() -> str:
     raw = os.environ.get("DATABASE_URL")
     if not raw:
@@ -189,9 +279,13 @@ async def main() -> int:
             "score": float(r["score"]) if r["score"] is not None else None,
         })
 
+    frozen, verdict_lines = freeze_verdict(out)
+
     if args.json:
         print(json.dumps(out, indent=2, default=str))
-        return 0
+        # Shape of the JSON payload is unchanged (a list of call rows); the
+        # verdict rides the exit code so `--json` gates CI identically.
+        return exit_code(frozen)
 
     print(f"\ncampaign {args.campaign} — {len(out)} calls\n")
     hdr = (f"{'call':9}{'st':11}{'s':>4}{'turn':>5}{'ttft':>6}{'s2a':>6}"
@@ -209,16 +303,9 @@ async def main() -> int:
               f"{str(o['score'] or '-'):>6}  {o['version']}/{o['hash']}")
 
     # ── freeze check ────────────────────────────────────────────────────────
-    ids = {(o["version"], o["hash"]) for o in out}
     print()
-    if len(ids) == 1:
-        v, h = next(iter(ids))
-        print(f"FROZEN: every call ran prompt {v} hash {h}")
-    else:
-        print(f"NOT FROZEN — {len(ids)} distinct prompt identities in this batch:")
-        for v, h in sorted(ids):
-            print(f"    {v}/{h}")
-        print("  Do NOT pool these numbers; they are not one experiment.")
+    for line in verdict_lines:
+        print(line)
 
     ttfts = [o["ttft_p50"] for o in out if o["ttft_p50"]]
     s2as = [o["s2a_p50"] for o in out if o["s2a_p50"]]
@@ -242,7 +329,7 @@ async def main() -> int:
     scored = [o["score"] for o in out if o["score"] is not None]
     print(f"scored        {len(scored)}/{len(out)} calls"
           + (f", mean {statistics.mean(scored):.1f}" if scored else ""))
-    return 0
+    return exit_code(frozen)
 
 
 if __name__ == "__main__":

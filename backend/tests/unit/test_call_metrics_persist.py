@@ -165,7 +165,9 @@ async def test_compute_minutes_floors_seconds_to_minutes():
     assert "calls" in sums[0]
     # No disposition filter: billable time is every second recorded, matching
     # the quota gate. See test_billing_minutes_agree_with_gate.
-    assert "status" not in sums[0]
+    assert "c.status" not in sums[0]
+    assert " status IN " not in sums[0]
+    assert "leg.billing_status='finalized'" in sums[0]
     assert any("minutes_allocated" in q for q in fetchval_queries), (
         "delegation should also read the tenant's allocation"
     )

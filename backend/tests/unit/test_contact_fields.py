@@ -31,11 +31,13 @@ def test_the_canonical_field_exists(key):
     assert key in BY_KEY, f"goals.md §11 lists {key} and it is missing"
 
 
-def test_full_name_is_not_a_stored_field():
+def test_full_name_is_never_a_stored_column():
     """§11 wants it "as display/derived field where possible" — it is a
-    GENERATED column in migration 0020. Adding it here would invite something
-    to try to write it."""
-    assert "full_name" not in BY_KEY
+    GENERATED column in migration 0020. full_name may exist in the registry so
+    imports/forms can accept it, but it must have no leads column: write paths
+    split it into first_name/last_name (campaigns._split_contact_full_name,
+    contacts CSV import)."""
+    assert BY_KEY["full_name"].column is None
 
 
 # ── alias mapping, the part that meets real spreadsheets ────────────────────
@@ -183,3 +185,77 @@ def test_the_csv_template_maps_cleanly_onto_itself():
 def test_coerce_bool_understands_how_people_write_dnc():
     assert coerce_bool("yes") and coerce_bool("TRUE") and coerce_bool("DNC")
     assert not coerce_bool("no") and not coerce_bool("") and not coerce_bool("0")
+
+
+# ── the downloadable import template (goals.md §11 "Update CSV import
+#    template") ───────────────────────────────────────────────────────────────
+#
+# The template MUST be generated from the registry, never hand-written. A
+# hand-written column list drifts the moment a field is added, and the symptom
+# is a customer filling in a column the importer no longer reads.
+
+def test_the_template_header_row_is_exactly_the_registry():
+    from app.domain.services.contact_fields import csv_template_csv
+
+    header = csv_template_csv().splitlines()[0]
+    assert header.split(",") == [f.key for f in CONTACT_FIELDS]
+
+
+def test_a_field_added_to_the_registry_appears_in_the_template(monkeypatch):
+    """The anti-drift proof. Add a field in memory; the template must grow it
+    without anyone editing a column list."""
+    import app.domain.services.contact_fields as cf
+
+    extra = cf.ContactField("shoe_size", "Shoe size", "shoe_size", example="9")
+    monkeypatch.setattr(cf, "CONTACT_FIELDS", (*cf.CONTACT_FIELDS, extra))
+
+    lines = cf.csv_template_csv().splitlines()
+    assert lines[0].split(",")[-1] == "shoe_size"
+    assert lines[1].split(",")[-1] == "9"
+
+
+def test_the_template_carries_one_example_row():
+    from app.domain.services.contact_fields import csv_template_csv
+
+    lines = csv_template_csv().splitlines()
+    assert len(lines) == 2, "header row + exactly one example row"
+
+
+def test_the_example_row_passes_our_own_validation():
+    """A template that fails our importer is worse than no template."""
+    import csv as _csv
+    import io as _io
+
+    from app.domain.services.contact_fields import csv_template_csv
+
+    row = next(_csv.DictReader(_io.StringIO(csv_template_csv())))
+    values = {k: v for k, v in row.items() if v}
+    assert validate_row(values, 2) == []
+    assert values.get("phone_number"), "the example must show a dialable number"
+
+
+def test_the_example_row_leaves_full_name_blank():
+    """full_name is derived from first/last on every write path, so a filled-in
+    example would teach people to supply a value we then ignore."""
+    import csv as _csv
+    import io as _io
+
+    from app.domain.services.contact_fields import csv_template_csv
+
+    row = next(_csv.DictReader(_io.StringIO(csv_template_csv())))
+    assert row["full_name"] == ""
+    assert row["first_name"] and row["last_name"]
+
+
+def test_the_mapper_and_the_validator_enumerate_the_SAME_registry():
+    """The anti-drift proof for the other two derived structures.
+
+    The template, the alias index and the per-field validators are all built
+    from CONTACT_FIELDS, so a field added there is importable, mappable and
+    validated in one move. If any of these fell out of step you would get a
+    column the template offers but the importer cannot read.
+    """
+    for f in CONTACT_FIELDS:
+        assert BY_KEY[f.key] is f
+        assert map_column(f.key) == f.key
+    assert len(BY_KEY) == len(CONTACT_FIELDS)

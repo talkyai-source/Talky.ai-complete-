@@ -13,8 +13,11 @@ import stat
 
 import pytest
 
+import app.infrastructure.telephony.pjsip_config_generator as pjsip_module
+
 from app.infrastructure.telephony.pjsip_config_generator import (
     TrunkConfigInput,
+    PJSIPReloadError,
     apply_trunk_config,
     build_trunk_config_input,
     remove_trunk_config,
@@ -135,6 +138,19 @@ def test_render_endpoint_has_nat_traversal_settings():
     assert "rewrite_contact=yes" in conf
 
 
+def test_render_applies_validated_outbound_proxy_to_endpoint_and_registration():
+    conf = render_trunk_conf(
+        _input(register=True, outbound_proxy="proxy.example.com:5061")
+    )
+    assert conf.count(r"outbound_proxy=sip:proxy.example.com:5061\;lr") == 2
+
+
+def test_render_srtp_enables_sdes_without_optimistic_plaintext_fallback():
+    conf = render_trunk_conf(_input(srtp=True))
+    assert "media_encryption=sdes" in conf
+    assert "media_encryption_optimistic=no" in conf
+
+
 def test_render_registers_the_login_not_caller_id_did():
     # A REGISTER whose From/Contact identity != the authenticated user is 403'd by
     # the carrier (proven live against Blaze: login->200, DID->403). Register as
@@ -190,6 +206,8 @@ def test_build_input_pulls_metadata_fields():
             "register_interval": 900,
             "dtmf_mode": "rfc2833",
             "source_host": "198.51.100.5",
+            "outbound_proxy": "proxy.example.com:5061",
+            "srtp": True,
         },
     }
     inp = build_trunk_config_input(row, decrypted_password="pw")
@@ -198,6 +216,8 @@ def test_build_input_pulls_metadata_fields():
     assert inp.register_interval == 900
     assert inp.dtmf_mode == "rfc2833"
     assert inp.source_host == "198.51.100.5"
+    assert inp.outbound_proxy == "proxy.example.com:5061"
+    assert inp.srtp is True
     assert inp.auth_password == "pw"
 
 
@@ -291,3 +311,28 @@ async def test_apply_decrypts_via_mock_and_writes(tmp_path):
         row, decrypted_password=plaintext, base_dir=tmp_path, reload=False,
     )
     assert "password=decrypted-pw-abc" in path.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_required_live_reload_rejects_disabled_hook(tmp_path, monkeypatch):
+    monkeypatch.delenv("TELEPHONY_PJSIP_AUTO_RELOAD", raising=False)
+    row = {
+        "id": TRUNK_ID, "tenant_id": TENANT_ID, "trunk_name": "acme-byo",
+        "sip_domain": "sip.acme.example", "port": 5060, "transport": "udp",
+        "auth_username": "acmeuser", "metadata": {"register": True},
+    }
+    with pytest.raises(PJSIPReloadError, match="not applied live"):
+        await apply_trunk_config(
+            row,
+            decrypted_password="pw",
+            base_dir=tmp_path,
+            require_reload=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_pending_reload_coalesces_as_confirmed_coverage(monkeypatch):
+    monkeypatch.setattr(pjsip_module, "_reload_pending", True)
+    result = await pjsip_module.request_pjsip_reload(execute=True)
+    assert result.status == "coalesced"
+    assert result.accepted is True

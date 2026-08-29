@@ -13,6 +13,7 @@ let two concurrent calls whose ids collide in the first 12 chars cross audio.
 from __future__ import annotations
 
 import base64
+import logging
 
 import pytest
 
@@ -42,9 +43,18 @@ async def test_on_stasis_end_hangs_up_parent_channel():
 
     deletes = []
 
-    async def fake_ari(method, path, params=None, json_body=None, ok=(200, 201, 204)):
+    async def fake_ari(
+        method,
+        path,
+        params=None,
+        json_body=None,
+        ok=(200, 201, 204),
+        **kwargs,
+    ):
         if method == "DELETE":
             deletes.append(path)
+            if kwargs.get("return_status"):
+                return 404, {}
         return {}
 
     async def fake_gateway(method, path, payload=None, ok=(200,)):
@@ -167,21 +177,33 @@ async def test_linkedid_match_does_not_depend_on_arrival_order():
     assert ad._originated_channels == set()
 
 
-async def test_falls_back_to_fifo_when_linkedid_unavailable():
-    """No linkedid (old Asterisk / id not honoured) → legacy oldest-pending."""
+async def test_no_linkedid_fails_closed_instead_of_guessing(caplog):
+    """No linkedid (old Asterisk / id not honoured) → REFUSE to correlate.
+
+    The FIFO fallback this test used to assert was removed deliberately: a
+    genuine inbound PJSIP leg can enter Stasis while outbound originations are
+    pending, and handing it the oldest pending id attaches one caller to
+    another tenant's outbound call. Fail closed instead — return None, leave
+    every pending origination intact, and say so loudly in the log.
+    """
     A_pre = "talky-out-aaaa1111"
     B_pre = "talky-out-bbbb2222"
     ad = _adapter_with_linkedids({})  # every read returns empty
     ad._track_originated_channel(A_pre)
     ad._track_originated_channel(B_pre)
 
-    # First unmatched leg consumes the OLDEST (A), second consumes B.
-    assert await ad._correlate_trunk_leg("legX") == A_pre
-    assert await ad._correlate_trunk_leg("legY") == B_pre
-    assert ad._originated_channels == set()
+    with caplog.at_level(logging.ERROR):
+        assert await ad._correlate_trunk_leg("legX") is None
+        assert await ad._correlate_trunk_leg("legY") is None
+
+    # Nothing was consumed — both originations are still pending for their own
+    # legs, and neither caller was cross-wired.
+    assert ad._originated_channels == {A_pre, B_pre}
+    assert "refusing to guess" in caplog.text
 
 
-async def test_falls_back_to_fifo_when_linkedid_read_raises():
+async def test_linkedid_read_error_fails_closed(caplog):
+    """An ARI failure must not degrade into a guess either."""
     A_pre = "talky-out-aaaa1111"
     ad = AsteriskAdapter()
 
@@ -191,8 +213,10 @@ async def test_falls_back_to_fifo_when_linkedid_read_raises():
     ad._ari = boom  # type: ignore[assignment]
     ad._track_originated_channel(A_pre)
 
-    assert await ad._correlate_trunk_leg("leg") == A_pre  # FIFO fallback, no crash
-    assert ad._originated_channels == set()
+    with caplog.at_level(logging.ERROR):
+        assert await ad._correlate_trunk_leg("leg") is None  # no crash, no guess
+    assert ad._originated_channels == {A_pre}
+    assert "refusing to guess" in caplog.text
 
 
 async def test_no_pending_originations_returns_none():
@@ -246,8 +270,9 @@ class _FakeStateBackend:
 
 
 class _FakeRequest:
-    def __init__(self, body):
+    def __init__(self, body, *, internal_token: str):
         self._body = body
+        self.headers = {"x-internal-service-token": internal_token}
 
     async def json(self):
         return self._body
@@ -278,11 +303,15 @@ async def test_colliding_prefix_ids_do_not_cross_audio(monkeypatch):
 
     monkeypatch.setattr(tb, "get_state_backend", lambda: fake_sb)
     monkeypatch.setattr(tb, "_on_audio_received", fake_on_audio)
+    internal_token = "concurrency-race-test-token"
+    monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", internal_token)
 
     audio_bytes = b"\x7f" * 160
     body = {"session_id": session_b, "pcmu_base64": base64.b64encode(audio_bytes).decode()}
 
-    resp = await tb.receive_gateway_audio(session_b, _FakeRequest(body))
+    resp = await tb.receive_gateway_audio(
+        session_b, _FakeRequest(body, internal_token=internal_token)
+    )
 
     # No cross-route into call A.
     assert routed == [], "early audio for B must not enter call A's pipeline"
@@ -307,10 +336,14 @@ async def test_exact_session_audio_routes_normally(monkeypatch):
 
     monkeypatch.setattr(tb, "get_state_backend", lambda: fake_sb)
     monkeypatch.setattr(tb, "_on_audio_received", fake_on_audio)
+    internal_token = "concurrency-race-test-token"
+    monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", internal_token)
 
     audio_bytes = b"\x01" * 160
     body = {"session_id": session_a, "pcmu_base64": base64.b64encode(audio_bytes).decode()}
-    await tb.receive_gateway_audio(session_a, _FakeRequest(body))
+    await tb.receive_gateway_audio(
+        session_a, _FakeRequest(body, internal_token=internal_token)
+    )
 
     assert routed == [(call_a, audio_bytes)]
     assert fake_sb.early == {}

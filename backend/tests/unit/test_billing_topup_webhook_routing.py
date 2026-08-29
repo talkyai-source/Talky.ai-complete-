@@ -401,3 +401,136 @@ async def test_a_subscription_checkout_still_reaches_its_own_handler(monkeypatch
 
     assert result["status"] == "handled"
     assert len(ran) == 1
+
+
+# ── delayed payment methods: the pair, not just the failure half ────────────
+#
+# Stripe's delayed-payment pair is async_payment_succeeded / async_payment_failed.
+# Only the FAILURE half was routed, so a top-up paid by Bacs/SEPA/Klarna charged
+# the customer and never credited them: the success event fell through to the
+# subscription handler table (which has no entry for it), the order sat 'pending'
+# forever, and nothing reaps it.
+
+
+def _async_succeeded_session():
+    """The same Checkout Session object, redelivered as the settled event."""
+    return _topup_session(id="cs_test_1", payment_status="paid")
+
+
+@pytest.mark.asyncio
+async def test_a_delayed_payment_success_is_claimed_for_the_topup_path():
+    assert await _svc()._is_topup_event(
+        "checkout.session.async_payment_succeeded", _async_succeeded_session()
+    ) is True
+
+
+@pytest.mark.asyncio
+async def test_a_delayed_payment_success_credits_the_minutes(monkeypatch):
+    """THE MONEY BUG. Without this the customer is charged and never credited."""
+    svc = _svc()
+    seen = {}
+
+    class _Topups:
+        def __init__(self, pool): pass
+        async def credit_paid_order(self, **kw):
+            seen.update(kw)
+            return True
+        async def mark_failed(self, **kw):
+            raise AssertionError(
+                "a SUCCESSFUL delayed payment was marked failed — the customer "
+                "paid and the order was closed as a failure"
+            )
+
+    monkeypatch.setattr("app.domain.services.topup_service.TopupService", _Topups)
+
+    result = await svc._handle_topup_event(
+        "checkout.session.async_payment_succeeded",
+        _async_succeeded_session(),
+        "evt_async",
+    )
+
+    assert result["status"] == "handled"
+    assert seen["session_id"] == "cs_test_1"
+    assert seen["event_id"] == "evt_async"
+    assert seen["payment_id"] == "pi_test_1"
+
+
+@pytest.mark.asyncio
+async def test_completed_then_async_succeeded_credit_the_same_session_once(monkeypatch):
+    """Stripe can deliver BOTH for one delayed payment.
+
+    They are different event ids, so the ledger's uniqueness guard does not
+    separate them — the order's own paid state does. This asserts the routing
+    calls the one credit path for both, which is what makes that guard apply.
+    """
+    svc = _svc()
+    calls = []
+
+    class _Topups:
+        def __init__(self, pool): pass
+        async def credit_paid_order(self, **kw):
+            calls.append(kw)
+            # models the real service: the order is 'paid' after the first
+            return len(calls) == 1
+
+    monkeypatch.setattr("app.domain.services.topup_service.TopupService", _Topups)
+
+    first = await svc._handle_topup_event(
+        "checkout.session.completed", _topup_session(), "evt_1")
+    second = await svc._handle_topup_event(
+        "checkout.session.async_payment_succeeded",
+        _async_succeeded_session(), "evt_2")
+
+    assert first["status"] == "handled"
+    assert second["status"] == "duplicate"
+    assert [c["session_id"] for c in calls] == ["cs_test_1", "cs_test_1"]
+
+
+@pytest.mark.asyncio
+async def test_a_topup_checkout_only_offers_immediate_payment_methods(monkeypatch):
+    """Nothing in this product handles a payment that settles days later —
+    there is no order reaper and no pending-payment UI. Stripe defaults to
+    every method enabled on the account, which on a GBP account includes
+    Bacs. Constrain the session to methods that settle at checkout.
+    """
+    svc = _svc()
+    monkeypatch.setattr(svc, "mock_mode", False)
+
+    async def _customer(tenant_id, email, business_name=None):
+        return {"customer_id": "cus_1", "created": False}
+
+    monkeypatch.setattr(svc, "create_or_get_customer", _customer)
+
+    import app.domain.services.billing_service as bs
+
+    captured = {}
+
+    class _Created:
+        id = "cs_new"
+        url = "https://pay.example/cs_new"
+
+    class _Session:
+        @staticmethod
+        def create(**kw):
+            captured.update(kw)
+            return _Created()
+
+    monkeypatch.setattr(bs.stripe.checkout, "Session", _Session)
+
+    await svc.create_topup_checkout_session(
+        tenant_id="11111111-1111-1111-1111-111111111111",
+        email="a@b.co",
+        order_id="order-1",
+        minutes=250,
+        price_cents=2500,
+        currency="GBP",
+        product_name="250 minutes",
+        success_url="https://app/ok",
+        cancel_url="https://app/no",
+    )
+
+    assert captured.get("payment_method_types") == ["card"], (
+        "the checkout can offer a delayed method (Bacs/SEPA/Klarna), which "
+        "charges the customer days after the session and leaves the order "
+        "pending in the meantime"
+    )

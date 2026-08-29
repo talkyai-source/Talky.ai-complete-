@@ -72,6 +72,12 @@ RETRYABLE_CAPS = [
 class _FakeConn:
     def __init__(self, calls_row: dict, leads_row: dict, dialer_jobs_row: dict) -> None:
         self.calls_row = calls_row
+        self.calls_row.setdefault("outcome", None)
+        self.calls_row.setdefault("ended_at", None)
+        self.calls_row.setdefault("duration_seconds", None)
+        self.calls_row.setdefault("terminal_settled_at", None)
+        self.calls_row.setdefault("terminal_retry_payload", None)
+        self.calls_row.setdefault("terminal_retry_enqueued_at", None)
         self.leads_row = leads_row
         self.dialer_jobs_row = dialer_jobs_row
         self.campaigns_row = {"calls_completed": 0, "calls_failed": 0}
@@ -111,6 +117,26 @@ class _FakeConn:
 
     async def fetchrow(self, query: str, *args: Any):
         q = " ".join(query.split())
+        if q.startswith("UPDATE calls"):
+            if self.calls_row["id"] != args[0]:
+                return None
+            if "terminal_settled_at = COALESCE" in q:
+                self.calls_row["terminal_settled_at"] = "NOW"
+                self.calls_row["terminal_retry_payload"] = args[1]
+                self.calls_row["terminal_retry_enqueued_at"] = None
+                return dict(self.calls_row)
+            if "status = 'completed'" in q:
+                self.calls_row["status"] = "completed"
+                self.calls_row["outcome"] = args[1]
+                if args[2] is not None:
+                    self.calls_row["duration_seconds"] = args[2]
+                self.calls_row["ended_at"] = self.calls_row["ended_at"] or "NOW"
+                return dict(self.calls_row)
+            self.calls_row["outcome"] = self.calls_row["outcome"] or args[1]
+            if self.calls_row["duration_seconds"] is None and args[2] is not None:
+                self.calls_row["duration_seconds"] = args[2]
+            self.calls_row["ended_at"] = self.calls_row["ended_at"] or "NOW"
+            return dict(self.calls_row)
         if "FROM calls WHERE id" in q:
             return dict(self.calls_row) if self.calls_row["id"] == args[0] else None
         if q.startswith("SELECT * FROM dialer_jobs WHERE id"):
@@ -123,9 +149,12 @@ class _FakeConn:
         if "SELECT call_attempts FROM leads" in q:
             return self.leads_row.get("call_attempts", 0)
         if q.startswith("UPDATE dialer_jobs") and "RETURNING id" in q:
-            job_id, status_val, outcome_val, reason = args
+            job_id, status_val, outcome_val, reason, allowed_statuses = args
             row = self.dialer_jobs_row
-            if row["id"] != job_id or row.get("status") != "processing":
+            if (
+                row["id"] != job_id
+                or row.get("status") not in set(allowed_statuses)
+            ):
                 return None  # idempotency guard
             row["status"] = status_val
             row["last_outcome"] = outcome_val
@@ -233,6 +262,11 @@ async def _dial_until_exhausted(
     while dials < limit:
         # The dialer worker re-arms the row for each attempt.
         conn.calls_row["status"] = "initiated"
+        conn.calls_row["outcome"] = None
+        conn.calls_row["ended_at"] = None
+        conn.calls_row["terminal_settled_at"] = None
+        conn.calls_row["terminal_retry_payload"] = None
+        conn.calls_row["terminal_retry_enqueued_at"] = None
         conn.dialer_jobs_row["status"] = "processing"
         dials += 1
 
@@ -425,7 +459,9 @@ async def test_duplicate_teardown_does_not_advance_the_counter():
     _, _, retry_args = await service._handle_call_status_pooled(
         "call-1", CallOutcome.BUSY, "busy", duration=0,
     )
-    assert retry_args is None
+    # DB settlement is already once-only, but its unacknowledged Redis outbox
+    # intentionally replays the same payload until schedule_retry_once commits.
+    assert retry_args is not None
     assert conn.dialer_jobs_row["attempt_number"] == 2
 
 

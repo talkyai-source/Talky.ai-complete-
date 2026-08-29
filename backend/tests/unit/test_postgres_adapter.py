@@ -15,7 +15,7 @@ import jwt
 import pytest
 
 from app.core import postgres_adapter
-from app.core.postgres_adapter import Client, QueryBuilder
+from app.core.postgres_adapter import Client, QueryBuilder, RpcBuilder
 from app.api.v1.dependencies import get_db_client
 
 
@@ -86,6 +86,26 @@ class FakeConn:
 
     async def close(self) -> None:
         self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_update_call_status_adapter_rpc_fails_closed_without_writes():
+    """The compatibility RPC cannot certify multi-table settlement."""
+
+    conn = FakeConn()
+    response = await RpcBuilder(
+        pool=None,
+        name="update_call_status",
+        params={
+            "p_call_uuid": "11111111-1111-1111-1111-111111111111",
+            "p_outcome": "answered",
+        },
+    )._rpc_update_call_status(conn)
+
+    assert response.data is None
+    assert response.error == "atomic_pool_required"
+    assert conn.fetchrow_calls == []
+    assert conn.execute_calls == []
 
 
 @pytest.fixture

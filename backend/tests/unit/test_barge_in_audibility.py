@@ -76,16 +76,30 @@ def test_one_continuous_utterance_reports_one_onset():
 
 def test_a_pause_starts_a_new_utterance(monkeypatch):
     """Conversely, a barge-in must not inherit the onset of the caller's
-    previous turn — that would report a latency of many seconds."""
+    previous turn — that would report a latency of many seconds.
+
+    The clock is driven explicitly rather than by ageing the stored stamp:
+    ``time.monotonic()`` on Windows only ticks about every 15ms, so two
+    back-to-back frames read the SAME instant, and the re-armed onset compared
+    equal to the first one even though the code had re-armed it correctly.
+    """
+    import app.domain.services.voice_pipeline.audio_ingest as audio_ingest
+
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(
+        audio_ingest, "time", types.SimpleNamespace(monotonic=lambda: clock["t"])
+    )
+
     s = _blank()
     note_voice_activity(s, _sum_sq(3000), 640)
     first = s._caller_voice_onset_at
 
-    # Simulate the gap by ageing the last-voiced stamp past the threshold.
-    s._caller_voice_last_at = s._caller_voice_last_at - (_VOICE_ONSET_GAP_S + 0.1)
+    # The caller stops talking for longer than the gap, then starts again.
+    clock["t"] += _VOICE_ONSET_GAP_S + 0.1
     note_voice_activity(s, _sum_sq(3000), 640)
 
     assert s._caller_voice_onset_at != first
+    assert s._caller_voice_onset_at == pytest.approx(clock["t"])
 
 
 def test_an_unmeasured_onset_is_none_not_zero():
