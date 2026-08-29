@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { trailingSlashRedirectPath } from "@/middleware";
+import { trailingSlashRedirectPath } from "@/proxy";
 
 /**
  * Every page route in src/app. These must all redirect to the trailing-slashed
  * form. Dynamic segments are spelled with a concrete value, which is what the
- * middleware actually sees at runtime.
+ * proxy actually sees at runtime.
  */
 const PAGE_ROUTES = [
     "/403",

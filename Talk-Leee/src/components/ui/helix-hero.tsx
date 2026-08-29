@@ -50,9 +50,9 @@ function DescriptionSlideshow({ paragraphs }: { paragraphs: string[]; intervalMs
     // at its own height and then pushes everything below it down. The
     // measurement reads getBoundingClientRect, so it needs the mounted DOM and
     // cannot run during render.
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- measures DOM layout (getBoundingClientRect) which requires the mounted DOM
     useLayoutEffect(() => {
         let cancelled = false;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- measures DOM layout (getBoundingClientRect) which requires the mounted DOM
         measureHeight();
         window.addEventListener("resize", measureHeight);
         // Web fonts settle after hydration; re-measure once they do.
