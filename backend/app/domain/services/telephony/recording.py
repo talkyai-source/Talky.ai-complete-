@@ -15,6 +15,52 @@ from uuid import UUID
 logger = logging.getLogger(__name__)
 
 
+def _is_true_inbound_session(voice_session) -> bool:
+    """Identify a carrier inbound session without trusting one optional field."""
+
+    if bool(getattr(voice_session, "_inbound_admission", None)):
+        return True
+    direction = getattr(voice_session, "_call_direction", None)
+    if direction is None:
+        config = getattr(voice_session, "config", None)
+        direction = getattr(config, "direction", None) if config is not None else None
+    direction = getattr(direction, "value", direction)
+    return str(direction or "").strip().lower() == "inbound"
+
+
+def _discard_recording(voice_session) -> None:
+    """Close retention and destroy both live buffers synchronously."""
+
+    gateway = getattr(voice_session, "media_gateway", None)
+    if gateway is None:
+        return
+    call_id = str(getattr(voice_session, "call_id", "") or "")
+    set_gate = getattr(gateway, "set_recording_enabled", None)
+    if callable(set_gate):
+        set_gate(call_id, False)
+    else:
+        clear = getattr(gateway, "clear_recording_buffer", None)
+        if callable(clear):
+            clear(call_id)
+    voice_session._recording_allowed = False
+
+
+async def _inbound_recording_persist_allowed(voice_session, db_pool) -> bool:
+    """Fail closed against the live emergency switch at persistence time."""
+
+    if not _is_true_inbound_session(voice_session):
+        return True
+    if getattr(voice_session, "_recording_allowed", False) is not True:
+        return False
+    if db_pool is None:
+        return False
+    from app.domain.services.telephony.modes.caller_first import (
+        _live_inbound_recording_enabled,
+    )
+
+    return await _live_inbound_recording_enabled(db_pool)
+
+
 def _session_tenant_uuid(voice_session) -> UUID | None:
     """Best-effort authoritative tenant id for a live call, as a ``UUID``.
 
@@ -68,6 +114,21 @@ async def _save_call_recording(voice_session, call_id: str) -> None:
 
     gateway = voice_session.media_gateway
     if not gateway:
+        return
+
+    container = get_container()
+    db_pool = (
+        getattr(container, "db_pool", None)
+        if getattr(container, "is_initialized", False)
+        else None
+    )
+    if not await _inbound_recording_persist_allowed(voice_session, db_pool):
+        _discard_recording(voice_session)
+        logger.info(
+            "Inbound recording discarded before persistence: live retention "
+            "permission is absent call=%s",
+            call_id[:12],
+        )
         return
 
     caller_chunks = gateway.get_recording_buffer(voice_session.call_id)
@@ -169,7 +230,6 @@ async def _save_call_recording(voice_session, call_id: str) -> None:
     buf._wav_bytes_override = wav_bytes  # pre-mixed WAV, skip re-encoding
     buf.total_bytes = len(wav_bytes)
 
-    container = get_container()
     if not container.is_initialized:
         logger.warning("Cannot save recording: container not initialized")
         return
@@ -327,6 +387,16 @@ async def _save_call_recording(voice_session, call_id: str) -> None:
             # Disk-only fallback path (no DB row, won't show in UI but
             # WAV is recoverable from ./recordings/<voice_uuid>.wav).
             try:
+                if not await _inbound_recording_persist_allowed(
+                    voice_session, db_pool
+                ):
+                    _discard_recording(voice_session)
+                    logger.info(
+                        "Inbound recording discarded before local fallback: "
+                        "live retention permission was revoked call=%s",
+                        call_id[:12],
+                    )
+                    return
                 storage_path = await recording_svc._save_local(
                     call_id=str(voice_session.call_id),
                     buffer=buf,
@@ -341,6 +411,17 @@ async def _save_call_recording(voice_session, call_id: str) -> None:
             return
 
     # --- Full save: file + DB record + call update ----------------------
+    # A call can end between cluster heartbeats. Re-read immediately before
+    # the first irreversible storage operation so an emergency switch flipped
+    # during mixing/metadata resolution still wins.
+    if not await _inbound_recording_persist_allowed(voice_session, db_pool):
+        _discard_recording(voice_session)
+        logger.info(
+            "Inbound recording discarded at final persistence gate call=%s",
+            call_id[:12],
+        )
+        return
+
     recording_id = await recording_svc.save_and_link(
         call_id=internal_call_id,
         buffer=buf,

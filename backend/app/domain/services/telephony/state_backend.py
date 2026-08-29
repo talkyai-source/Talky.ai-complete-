@@ -51,6 +51,7 @@ internals (one is dict-only, one wraps Redis pipelines). A
 or forcing the local backend to subclass a Redis-aware base. Mirrors
 the pattern in ``app/domain/interfaces/call_control_adapter.py``.
 """
+
 from __future__ import annotations
 
 import logging
@@ -206,19 +207,91 @@ class TelephonyStateBackend(Protocol):
 
     def touch_call(self, call_id: str) -> None: ...
 
-    async def recover_orphans(self) -> list[dict[str, Any]]:
+    async def recover_orphans(
+        self,
+        *,
+        limit: Optional[int] = None,
+    ) -> list[dict[str, Any]]:
         """Called once at process startup. Returns metadata for calls
         that the previous incarnation of this pod owned but didn't
-        unregister cleanly. Caller is responsible for hanging them up.
+        unregister cleanly. Caller is responsible for hanging them up
+        and explicitly acknowledging each confirmed recovery.
 
         ``LocalOnlyStateBackend`` always returns ``[]`` (there's no
         persistence so there are no orphans by definition)."""
+        ...
+
+    async def acknowledge_orphan_recovery(self, call_id: str) -> None:
+        """Remove one recovered call from the durable retry ledger.
+
+        Callers must invoke this only after the PBX has proved that every
+        owned call leg is gone and logical teardown has completed. Keeping
+        discovery and acknowledgement separate makes an unconfirmed recovery
+        visible to the next watchdog pass or successor process.
+        """
+        ...
+
+    async def register_cleanup_obligation(
+        self,
+        call_id: str,
+        tenant_id: Optional[str] = None,
+        campaign_id: Optional[str] = None,
+        state: str = "termination_pending",
+        durable_call_id: Optional[str] = None,
+        provider: Optional[str] = None,
+        provider_call_id: Optional[str] = None,
+    ) -> None:
+        """Persist a PBX cleanup obligation before a one-shot hangup."""
+        ...
+
+    async def has_durable_call(self, call_id: str) -> bool:
+        """Prove whether a provider channel already has a Redis ledger."""
+        ...
+
+    async def claim_cleanup_obligation_if_absent(
+        self,
+        call_id: str,
+        *,
+        state: str = "termination_pending",
+        provider: Optional[str] = None,
+        provider_call_id: Optional[str] = None,
+    ) -> bool:
+        """Atomically create an inverse cleanup record only when absent."""
+        ...
+
+    async def promote_answered_cleanup_obligation(
+        self,
+        call_id: str,
+        *,
+        answered_at: str,
+        tenant_id: Optional[str] = None,
+        campaign_id: Optional[str] = None,
+    ) -> None:
+        """Durably mark a cleanup obligation as an answered active call."""
+        ...
+
+    async def register_answer_intent_cleanup_obligation(
+        self,
+        call_id: str,
+        *,
+        answer_requested_at: str,
+        tenant_id: Optional[str] = None,
+        campaign_id: Optional[str] = None,
+        durable_call_id: Optional[str] = None,
+        provider: Optional[str] = None,
+        provider_call_id: Optional[str] = None,
+    ) -> None:
+        """Persist the ambiguous pre-provider-Answer boundary."""
         ...
 
     async def start_heartbeat(self) -> None:
         """Start a background task that renews this pod's liveness
         marker in Redis. ``LocalOnlyStateBackend`` makes this a
         no-op."""
+        ...
+
+    async def start_heartbeat_strict(self) -> None:
+        """Start production liveness checks that fail closed on Redis loss."""
         ...
 
     async def shutdown(self) -> None:
@@ -239,6 +312,10 @@ class TelephonyStateBackend(Protocol):
     async def acquire_telephony_ownership(self) -> bool:
         """Claim the single telephony-owner slot for this process.
         Returns True iff this process should connect ARI / serve calls."""
+        ...
+
+    async def acquire_telephony_ownership_strict(self) -> bool:
+        """Claim the owner slot without treating Redis failure as success."""
         ...
 
     def is_telephony_owner(self) -> bool:
@@ -262,6 +339,7 @@ class TelephonyStateBackend(Protocol):
 # module dicts can later be moved inside this class without breaking
 # anyone.
 
+
 class LocalOnlyStateBackend:
     """Pure-memory backend matching today's behaviour exactly.
 
@@ -284,6 +362,7 @@ class LocalOnlyStateBackend:
         # time (the bridge module imports the lifecycle helpers, which
         # may eventually import this module).
         from app.api.v1.endpoints import telephony_bridge as _tb
+
         self._tb = _tb
         # Per-call first-speaker ("agent"/"user"), stored independently of the
         # ringing-warmup so the answer path can read it even when the warmup was
@@ -329,10 +408,7 @@ class LocalOnlyStateBackend:
 
     def remove_gateway_sessions_for_call(self, call_id: str) -> None:
         # Mirrors the existing _on_call_ended cleanup pattern.
-        stale = [
-            gw for gw, cid in self._tb._gateway_session_to_call_id.items()
-            if cid == call_id
-        ]
+        stale = [gw for gw, cid in self._tb._gateway_session_to_call_id.items() if cid == call_id]
         for gw in stale:
             self._tb._gateway_session_to_call_id.pop(gw, None)
             self._tb._early_audio_buffers.pop(gw, None)
@@ -398,6 +474,7 @@ class LocalOnlyStateBackend:
 
     def alias_ringing_call(self, original_call_id: str, actual_call_id: str) -> bool:
         from app.domain.services.telephony.ringing_alias import alias_ringing_call_id
+
         return alias_ringing_call_id(
             original_call_id=original_call_id,
             actual_call_id=actual_call_id,
@@ -451,9 +528,93 @@ class LocalOnlyStateBackend:
         # No-op — local memory doesn't expire.
         del call_id
 
-    async def recover_orphans(self) -> list[dict[str, Any]]:
+    async def recover_orphans(
+        self,
+        *,
+        limit: Optional[int] = None,
+    ) -> list[dict[str, Any]]:
         # Local memory doesn't persist; nothing to recover.
+        del limit
         return []
+
+    async def acknowledge_orphan_recovery(self, call_id: str) -> None:
+        # There is no durable ledger in local-only mode.
+        del call_id
+        return None
+
+    async def register_cleanup_obligation(
+        self,
+        call_id: str,
+        tenant_id: Optional[str] = None,
+        campaign_id: Optional[str] = None,
+        state: str = "termination_pending",
+        durable_call_id: Optional[str] = None,
+        provider: Optional[str] = None,
+        provider_call_id: Optional[str] = None,
+    ) -> None:
+        # Local-only development has no restart durability. The caller still
+        # performs its immediate confirmation-aware PBX cleanup.
+        del (
+            call_id,
+            tenant_id,
+            campaign_id,
+            state,
+            durable_call_id,
+            provider,
+            provider_call_id,
+        )
+        return None
+
+    async def has_durable_call(self, call_id: str) -> bool:
+        del call_id
+        return False
+
+    async def claim_cleanup_obligation_if_absent(
+        self,
+        call_id: str,
+        *,
+        state: str = "termination_pending",
+        provider: Optional[str] = None,
+        provider_call_id: Optional[str] = None,
+    ) -> bool:
+        del call_id, state, provider, provider_call_id
+        return False
+
+    async def promote_answered_cleanup_obligation(
+        self,
+        call_id: str,
+        *,
+        answered_at: str,
+        tenant_id: Optional[str] = None,
+        campaign_id: Optional[str] = None,
+    ) -> None:
+        # Local-only development has no restart-safe Redis ledger. PostgreSQL
+        # answer persistence remains authoritative; production inbound is
+        # validated to use the Redis-backed implementation.
+        del call_id, answered_at, tenant_id, campaign_id
+        return None
+
+    async def register_answer_intent_cleanup_obligation(
+        self,
+        call_id: str,
+        *,
+        answer_requested_at: str,
+        tenant_id: Optional[str] = None,
+        campaign_id: Optional[str] = None,
+        durable_call_id: Optional[str] = None,
+        provider: Optional[str] = None,
+        provider_call_id: Optional[str] = None,
+    ) -> None:
+        del (
+            call_id,
+            answer_requested_at,
+            tenant_id,
+            campaign_id,
+            durable_call_id,
+            provider,
+            provider_call_id,
+        )
+        return None
 
     async def start_heartbeat(self) -> None:
         # No shared liveness state to heartbeat against.
@@ -495,11 +656,63 @@ class SessionRegistryProto(Protocol):
         tenant_id: Optional[str] = None,
         campaign_id: Optional[str] = None,
         first_speaker: Optional[str] = None,
+        durable_call_id: Optional[str] = None,
+        provider: Optional[str] = None,
+        provider_call_id: Optional[str] = None,
     ) -> None: ...
 
     async def unregister_call(self, call_id: str) -> None: ...
 
+    async def unregister_call_strict(self, call_id: str) -> None: ...
+
+    async def register_call_strict(
+        self,
+        call_id: str,
+        *,
+        state: str,
+        tenant_id: Optional[str] = None,
+        campaign_id: Optional[str] = None,
+        first_speaker: Optional[str] = None,
+        durable_call_id: Optional[str] = None,
+        provider: Optional[str] = None,
+        provider_call_id: Optional[str] = None,
+    ) -> None: ...
+
+    async def promote_call_answered_strict(
+        self,
+        call_id: str,
+        *,
+        answered_at: str,
+        tenant_id: Optional[str] = None,
+        campaign_id: Optional[str] = None,
+    ) -> None: ...
+
+    async def register_call_answer_intent_strict(
+        self,
+        call_id: str,
+        *,
+        answer_requested_at: str,
+        tenant_id: Optional[str] = None,
+        campaign_id: Optional[str] = None,
+        durable_call_id: Optional[str] = None,
+        provider: Optional[str] = None,
+        provider_call_id: Optional[str] = None,
+    ) -> None: ...
+
     async def touch_call(self, call_id: str) -> None: ...
+
+    async def touch_call_strict(self, call_id: str) -> None: ...
+
+    async def session_exists_strict(self, call_id: str) -> bool: ...
+
+    async def claim_cleanup_call_if_absent_strict(
+        self,
+        call_id: str,
+        *,
+        state: str = "termination_pending",
+        provider: Optional[str] = None,
+        provider_call_id: Optional[str] = None,
+    ) -> bool: ...
 
     async def scan_sessions(self) -> list[dict[str, Any]]: ...
 
@@ -509,11 +722,15 @@ class SessionRegistryProto(Protocol):
 
     async def write_heartbeat(self, ttl_seconds: int) -> None: ...
 
+    async def write_heartbeat_strict(self, ttl_seconds: int) -> None: ...
+
     async def clear_heartbeat(self) -> None: ...
 
     async def try_acquire_ari_ownership(self, ttl_seconds: int) -> bool: ...
 
     async def renew_ari_ownership(self, ttl_seconds: int) -> bool: ...
+
+    async def renew_ari_ownership_strict(self, ttl_seconds: int) -> bool: ...
 
     async def release_ari_ownership(self) -> None: ...
 
@@ -561,6 +778,8 @@ class RedisBackedStateBackend:
     # dead. 20s interval / 60s TTL gives 3 missed beats of slack.
     _HEARTBEAT_INTERVAL_S = 20
     _HEARTBEAT_TTL_S = 60
+    _OWNERSHIP_LOSS_CLEANUP_TIMEOUT_S = 5.0
+    _OWNERSHIP_LOSS_SESSION_TIMEOUT_S = 2.0
 
     # Min seconds between real Redis TTL refreshes for a given call on the
     # audio hot path. Must be comfortably below the active-session TTL
@@ -575,6 +794,7 @@ class RedisBackedStateBackend:
         # mid-flight (asyncio only holds weak refs to tasks).
         self._tasks: set[Any] = set()
         self._heartbeat_task: Optional[Any] = None
+        self._strict_ownership: bool = False
         # call_id -> last monotonic time we actually hit Redis for a touch.
         self._last_touch: dict[str, float] = {}
         # Single-owner telephony flag. Default True (fail-safe toward
@@ -582,12 +802,14 @@ class RedisBackedStateBackend:
         # at startup, which every process runs before any call arrives. A
         # loser of the startup race flips this False and 503s telephony.
         self._is_owner: bool = True
+        self._ownership_loss_drained: bool = False
 
     # ── Fire-and-forget helper ──────────────────────────────────────
 
     def _spawn(self, coro) -> None:
         try:
             import asyncio
+
             loop = asyncio.get_running_loop()
         except RuntimeError:
             # No running loop — skip the mirror (local store still updated).
@@ -616,22 +838,33 @@ class RedisBackedStateBackend:
         first_speaker: Optional[str] = None,
     ) -> None:
         self._local.set_voice_session(
-            call_id, voice_session,
-            tenant_id=tenant_id, campaign_id=campaign_id, first_speaker=first_speaker,
+            call_id,
+            voice_session,
+            tenant_id=tenant_id,
+            campaign_id=campaign_id,
+            first_speaker=first_speaker,
         )
-        self._spawn(self._registry.register_call(
-            call_id, state="active",
-            tenant_id=tenant_id, campaign_id=campaign_id, first_speaker=first_speaker,
-        ))
+        self._spawn(
+            self._registry.register_call(
+                call_id,
+                state="active",
+                tenant_id=tenant_id,
+                campaign_id=campaign_id,
+                first_speaker=first_speaker,
+            )
+        )
 
     def get_voice_session(self, call_id: str) -> Optional[object]:
         return self._local.get_voice_session(call_id)
 
     def pop_voice_session(self, call_id: str) -> Optional[object]:
         vs = self._local.pop_voice_session(call_id)
-        # Unregister regardless of whether the local pop found anything —
-        # idempotent and guards against a local/Redis drift.
-        self._spawn(self._registry.unregister_call(call_id))
+        # Local object removal is NOT durable recovery acknowledgement.
+        # In particular, a successor processing an orphan has no local
+        # VoiceSession; the old unconditional unregister here deleted the only
+        # retry record before billing/admission settlement ran.  The lifecycle
+        # owner now calls ``acknowledge_orphan_recovery`` explicitly, after
+        # logical teardown succeeds.
         # Drop the touch-debounce bookkeeping so the map can't grow
         # unbounded across the process lifetime.
         self._last_touch.pop(call_id, None)
@@ -687,13 +920,22 @@ class RedisBackedStateBackend:
         first_speaker: Optional[str] = None,
     ) -> None:
         self._local.set_ringing_warmup(
-            call_id, voice_session, connect_task,
-            tenant_id=tenant_id, campaign_id=campaign_id, first_speaker=first_speaker,
+            call_id,
+            voice_session,
+            connect_task,
+            tenant_id=tenant_id,
+            campaign_id=campaign_id,
+            first_speaker=first_speaker,
         )
-        self._spawn(self._registry.register_call(
-            call_id, state="ringing",
-            tenant_id=tenant_id, campaign_id=campaign_id, first_speaker=first_speaker,
-        ))
+        self._spawn(
+            self._registry.register_call(
+                call_id,
+                state="ringing",
+                tenant_id=tenant_id,
+                campaign_id=campaign_id,
+                first_speaker=first_speaker,
+            )
+        )
 
     def get_ringing_warmup(self, call_id: str) -> Optional[tuple[object, Optional[object]]]:
         return self._local.get_ringing_warmup(call_id)
@@ -775,6 +1017,7 @@ class RedisBackedStateBackend:
         lookup + float compare — microseconds, no Redis, no task spawn.
         """
         import time as _time
+
         now = _time.monotonic()
         last = self._last_touch.get(call_id)
         if last is not None and (now - last) < self._TOUCH_DEBOUNCE_S:
@@ -782,47 +1025,229 @@ class RedisBackedStateBackend:
         self._last_touch[call_id] = now
         self._spawn(self._registry.touch_call(call_id))
 
-    async def recover_orphans(self) -> list[dict[str, Any]]:
-        """Return — and claim — the ledger entries whose owning process
+    async def recover_orphans(
+        self,
+        *,
+        limit: Optional[int] = None,
+    ) -> list[dict[str, Any]]:
+        """Return the ledger entries whose owning process
         is confirmed dead (its heartbeat key is gone).
 
-        Safety: an entry is only an orphan if (a) it was NOT written by
-        THIS incarnation, and (b) the owning incarnation's heartbeat is
-        absent. A live sibling worker's heartbeat is present, so its
-        calls are skipped — no cross-worker clobbering. ``is_incarnation_
-        alive`` returns True on a Redis error, so a transient blip never
-        causes a false 'dead' verdict.
+        Safety: an ordinary active/ringing entry is only an orphan if (a) it
+        was NOT written by THIS incarnation, and (b) its owner's heartbeat is
+        absent. A live sibling worker's call is skipped, so there is no
+        cross-worker clobbering. Explicit ``termination_pending`` and
+        ``answer_pending`` entries are different: their owner has declared a
+        cleanup need or entered the ambiguous provider-Answer boundary, so the
+        current telephony owner retries them even while the registering
+        incarnation is alive. ``is_incarnation_alive`` returns True on Redis
+        errors, making ordinary-call recovery fail safe.
 
-        Claimed orphans are unregistered from the ledger here so a
-        concurrent caller (startup + watchdog) can't recover the same
-        call twice. The caller is responsible for the ARI hangup and the
-        recovery stream-event.
+        Discovery deliberately leaves each orphan in Redis. The lifecycle
+        recovery loop acknowledges it only after PBX termination is proven;
+        a failed or unconfirmed attempt therefore remains retryable on the
+        next watchdog pass and after another process restart. The lifecycle
+        layer suppresses concurrent attempts within this process.
         """
-        sessions = await self._registry.scan_sessions()
+        sessions = sorted(
+            await self._registry.scan_sessions(),
+            key=lambda entry: str(entry.get("updated_at") or ""),
+        )
+        batch_limit = (
+            None
+            if limit is None
+            else max(1, min(int(limit), 100))
+        )
         my_id = self._registry.pod_id
         orphans: list[dict[str, Any]] = []
+        owner_liveness: dict[str, bool] = {}
         for entry in sessions:
             owner = entry.get("pod_id")
-            if not owner or owner == my_id:
+            cleanup_obligation = str(entry.get("state") or "").strip().lower() in {
+                "termination_pending",
+                "answer_pending",
+            }
+            if not owner:
                 continue
-            if await self._registry.is_incarnation_alive(owner):
-                continue
-            orphans.append(entry)
-        # Claim them (delete the hash) so they're recovered exactly once.
-        for entry in orphans:
+            if not cleanup_obligation:
+                if owner == my_id:
+                    continue
+                if owner not in owner_liveness:
+                    owner_liveness[owner] = await self._registry.is_incarnation_alive(owner)
+                if owner_liveness[owner]:
+                    continue
             call_id = entry.get("call_id")
             if call_id:
-                await self._registry.unregister_call(call_id)
+                # Adopt the retry obligation without replacing ``pod_id``.
+                # Keeping the confirmed-dead owner means every watchdog pass
+                # still selects the row; renewing its TTL prevents a long PBX
+                # outage from silently expiring the only durable retry record.
+                strict_touch = getattr(
+                    self._registry,
+                    "touch_call_strict",
+                    None,
+                )
+                if callable(strict_touch):
+                    await strict_touch(call_id)
+                else:
+                    # Compatibility for test/third-party registry adapters.
+                    # The production SessionRegistry always supplies the
+                    # strict method above.
+                    await self._registry.touch_call(call_id)
+            orphans.append(entry)
+            if batch_limit is not None and len(orphans) >= batch_limit:
+                break
         if orphans:
             logger.info(
-                "telephony recover_orphans: %d dead-process call(s) reclaimed",
+                "telephony recover_orphans: %d dead-process call(s) pending recovery",
                 len(orphans),
             )
         return orphans
 
+    async def acknowledge_orphan_recovery(self, call_id: str) -> None:
+        """Acknowledge one orphan only after confirmed PBX teardown.
+
+        This is intentionally awaited instead of scheduled through ``_spawn``:
+        the acknowledgement is the recovery commit point. If Redis deletion
+        fails, ``SessionRegistry`` leaves the key in place and a later pass
+        safely retries the already-idempotent termination path.
+        """
+        strict_unregister = getattr(
+            self._registry,
+            "unregister_call_strict",
+            None,
+        )
+        if callable(strict_unregister):
+            await strict_unregister(call_id)
+        else:
+            # Compatibility for small test registries. Production never takes
+            # this branch.
+            await self._registry.unregister_call(call_id)
+
+    async def register_cleanup_obligation(
+        self,
+        call_id: str,
+        tenant_id: Optional[str] = None,
+        campaign_id: Optional[str] = None,
+        state: str = "termination_pending",
+        durable_call_id: Optional[str] = None,
+        provider: Optional[str] = None,
+        provider_call_id: Optional[str] = None,
+    ) -> None:
+        """Await a durable pre-hangup record for an unclaimed PBX channel."""
+
+        strict_register = getattr(
+            self._registry,
+            "register_call_strict",
+            None,
+        )
+        if callable(strict_register):
+            await strict_register(
+                call_id,
+                state=state,
+                tenant_id=tenant_id,
+                campaign_id=campaign_id,
+                durable_call_id=durable_call_id,
+                provider=provider,
+                provider_call_id=provider_call_id,
+            )
+            return
+        # Compatibility only; production SessionRegistry always has the
+        # strict API. Small injected registries can still exercise the shape.
+        await self._registry.register_call(
+            call_id,
+            state=state,
+            tenant_id=tenant_id,
+            campaign_id=campaign_id,
+            durable_call_id=durable_call_id,
+            provider=provider,
+            provider_call_id=provider_call_id,
+        )
+
+    async def has_durable_call(self, call_id: str) -> bool:
+        exists = getattr(self._registry, "session_exists_strict", None)
+        if not callable(exists):
+            raise RuntimeError("Redis registry lacks strict session lookup")
+        return bool(await exists(call_id))
+
+    async def claim_cleanup_obligation_if_absent(
+        self,
+        call_id: str,
+        *,
+        state: str = "termination_pending",
+        provider: Optional[str] = None,
+        provider_call_id: Optional[str] = None,
+    ) -> bool:
+        claim = getattr(
+            self._registry,
+            "claim_cleanup_call_if_absent_strict",
+            None,
+        )
+        if not callable(claim):
+            raise RuntimeError("Redis registry lacks atomic cleanup claim")
+        return bool(
+            await claim(
+                call_id,
+                state=state,
+                provider=provider,
+                provider_call_id=provider_call_id,
+            )
+        )
+
+    async def promote_answered_cleanup_obligation(
+        self,
+        call_id: str,
+        *,
+        answered_at: str,
+        tenant_id: Optional[str] = None,
+        campaign_id: Optional[str] = None,
+    ) -> None:
+        """Await the strict Answer promotion; never use a fail-soft mirror."""
+
+        promote = getattr(self._registry, "promote_call_answered_strict", None)
+        if not callable(promote):
+            raise RuntimeError("Redis registry lacks strict answered-call promotion")
+        await promote(
+            call_id,
+            answered_at=answered_at,
+            tenant_id=tenant_id,
+            campaign_id=campaign_id,
+        )
+
+    async def register_answer_intent_cleanup_obligation(
+        self,
+        call_id: str,
+        *,
+        answer_requested_at: str,
+        tenant_id: Optional[str] = None,
+        campaign_id: Optional[str] = None,
+        durable_call_id: Optional[str] = None,
+        provider: Optional[str] = None,
+        provider_call_id: Optional[str] = None,
+    ) -> None:
+        """Await a strict pre-Answer intent record with recovery identity."""
+
+        register = getattr(
+            self._registry,
+            "register_call_answer_intent_strict",
+            None,
+        )
+        if not callable(register):
+            raise RuntimeError("Redis registry lacks strict Answer-intent support")
+        await register(
+            call_id,
+            answer_requested_at=answer_requested_at,
+            tenant_id=tenant_id,
+            campaign_id=campaign_id,
+            durable_call_id=durable_call_id,
+            provider=provider,
+            provider_call_id=provider_call_id,
+        )
+
     async def start_heartbeat(self) -> None:
         """Begin renewing this incarnation's heartbeat. Idempotent."""
         import asyncio
+
         if self._heartbeat_task is not None and not self._heartbeat_task.done():
             return
         # Write one immediately so recovery on a fast-restarting peer
@@ -831,15 +1256,36 @@ class RedisBackedStateBackend:
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
         logger.info(
             "telephony heartbeat started pod=%s interval=%ds ttl=%ds",
-            self._registry.pod_id, self._HEARTBEAT_INTERVAL_S, self._HEARTBEAT_TTL_S,
+            self._registry.pod_id,
+            self._HEARTBEAT_INTERVAL_S,
+            self._HEARTBEAT_TTL_S,
         )
+
+    async def start_heartbeat_strict(self) -> None:
+        """Production startup heartbeat whose first write is fail-closed."""
+        import asyncio
+
+        self._strict_ownership = True
+        strict_write = getattr(self._registry, "write_heartbeat_strict", None)
+        if not callable(strict_write):
+            raise RuntimeError("Redis registry lacks strict heartbeat support")
+        await strict_write(self._HEARTBEAT_TTL_S)
+        if self._heartbeat_task is not None and not self._heartbeat_task.done():
+            return
+        self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
     async def _heartbeat_loop(self) -> None:
         import asyncio
+
         try:
             while True:
                 await asyncio.sleep(self._HEARTBEAT_INTERVAL_S)
-                await self._registry.write_heartbeat(self._HEARTBEAT_TTL_S)
+                if self._strict_ownership:
+                    await self._registry.write_heartbeat_strict(
+                        self._HEARTBEAT_TTL_S,
+                    )
+                else:
+                    await self._registry.write_heartbeat(self._HEARTBEAT_TTL_S)
                 # Renew the owner lock on the same cadence so it never
                 # lapses under a live owner. If renew reports we no longer
                 # hold it (another process took over after our heartbeat
@@ -847,25 +1293,183 @@ class RedisBackedStateBackend:
                 # non-owner so new originates 503 instead of two processes
                 # both driving ARI. In-flight calls are left alone.
                 if self._is_owner:
-                    still_ours = await self._registry.renew_ari_ownership(self._HEARTBEAT_TTL_S)
-                    if not still_ours:
-                        self._is_owner = False
-                        logger.critical(
-                            "telephony ownership LOST pod=%s — another process "
-                            "holds the ARI lock; refusing new originates on this "
-                            "process. Investigate duplicate telephony workers.",
-                            self._registry.pod_id,
+                    if self._strict_ownership:
+                        still_ours = await self._registry.renew_ari_ownership_strict(
+                            self._HEARTBEAT_TTL_S,
                         )
+                    else:
+                        still_ours = await self._registry.renew_ari_ownership(
+                            self._HEARTBEAT_TTL_S,
+                        )
+                    if not still_ours:
+                        await self._handle_ownership_loss(
+                            "the ARI ownership lock was replaced or expired"
+                        )
+                        return
         except asyncio.CancelledError:
             return
         except Exception as exc:  # never let the loop die silently
+            if self._strict_ownership:
+                await self._handle_ownership_loss(f"Redis ownership could not be verified: {exc}")
+                return
             logger.warning("telephony heartbeat loop error: %s", exc)
 
-    async def shutdown(self) -> None:
-        """Graceful shutdown: stop the heartbeat, clear it so the
-        successor process recovers our calls immediately, and drain any
-        in-flight mirror writes."""
+    async def _handle_ownership_loss(self, reason: str) -> None:
+        """Fence and quiesce this process when ownership becomes uncertain.
+
+        The owner flag flips synchronously before any await so admission and
+        origination stop immediately. Adapter disconnect and local AI/media
+        shutdown then run concurrently under one hard timeout. We deliberately
+        do not hang up PBX channels, finalize billing, or delete the durable
+        Redis session ledger here: once ownership is uncertain those actions
+        belong to the confirmed owner/reconciler, and issuing them from this
+        process would itself be split-brain control.
+        """
         import asyncio
+
+        self._is_owner = False
+        if self._ownership_loss_drained:
+            return
+        self._ownership_loss_drained = True
+        logger.critical(
+            "telephony ownership LOST pod=%s — %s; refusing new calls and "
+            "quiescing local media and disconnecting the call-control adapter",
+            self._registry.pod_id,
+            reason,
+        )
+
+        async def _quiesce_session(call_id: str, session: object) -> None:
+            for attr in (
+                "_greeting_task",
+                "_inbound_heartbeat_task",
+                "_inbound_deadline_task",
+                "pipeline_task",
+            ):
+                task = getattr(session, attr, None)
+                if task is not None and not task.done():
+                    task.cancel()
+            try:
+                from app.domain.services.telephony.lifecycle import _get_orchestrator
+
+                await asyncio.wait_for(
+                    _get_orchestrator().end_session(session),
+                    timeout=self._OWNERSHIP_LOSS_SESSION_TIMEOUT_S,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "telephony ownership fence session quiesce failed " "call=%s err=%s",
+                    call_id[:12],
+                    exc,
+                )
+
+        async def _drain_local_media() -> None:
+            work = []
+            # Pop from LOCAL storage only. Keeping the Redis mirror lets the
+            # confirmed owner/reconciler observe the real PBX call and settle
+            # it; deleting it here would hide a possibly-live channel.
+            for call_id, _ in self._local.iter_voice_session_items():
+                session = self._local.pop_voice_session(call_id)
+                if session is not None:
+                    work.append(_quiesce_session(call_id, session))
+                self._local.remove_gateway_sessions_for_call(call_id)
+                self._local.clear_first_speaker(call_id)
+                self._last_touch.pop(call_id, None)
+                try:
+                    from app.domain.services.telephony import lifecycle
+
+                    work.append(lifecycle._cancel_inbound_runtime_guards(call_id))
+                    lifecycle._inbound_admissions_in_flight.pop(call_id, None)
+                except Exception:
+                    pass
+            for call_id in self._local.iter_ringing_warmup_keys():
+                warmup = self._local.pop_ringing_warmup(call_id)
+                if warmup is None:
+                    continue
+                session, connect_task = warmup
+                if connect_task is not None and not connect_task.done():
+                    connect_task.cancel()
+                work.append(_quiesce_session(call_id, session))
+                self._local.clear_ringing_started_at(call_id)
+                self._local.pop_ringing_event(call_id)
+                self._local.clear_first_speaker(call_id)
+            if work:
+                await asyncio.gather(*work, return_exceptions=True)
+
+        operations = [asyncio.create_task(_drain_local_media())]
+        try:
+            from app.domain.services.telephony.adapter_registry import get_adapter
+
+            adapter = get_adapter()
+            if adapter is not None and getattr(adapter, "connected", False):
+                # This is intentionally synchronous. A newly-created cleanup
+                # task can be cancelled by a very short outer deadline before
+                # its coroutine receives its first timeslice; the old owner
+                # must still stop consuming PBX events immediately.
+                fence = getattr(adapter, "fence_ownership_loss", None)
+                if not callable(fence):
+                    raise RuntimeError("active telephony adapter lacks ownership-loss fence")
+                fence()
+
+                async def _disconnect_and_redrain() -> None:
+                    try:
+                        # Disconnect cancels the adapter's tracked post-answer
+                        # lifecycle handoffs before closing ARI. A handoff may
+                        # have registered a local VoiceSession immediately
+                        # before cancellation, after the first drain snapshot.
+                        # Redis has already proved that this process is no
+                        # longer the exclusive PBX owner. An ordinary
+                        # disconnect is allowed to reconnect when a channel is
+                        # still unconfirmed; that behavior is correct for an
+                        # operator stop but would leave a stale process
+                        # consuming ARI events after ownership loss.
+                        await adapter.disconnect(force_handoff=True)
+                    finally:
+                        # Re-scan LOCAL state only. Never unregister the Redis
+                        # ledger from a process whose ownership is uncertain.
+                        await _drain_local_media()
+
+                operations.append(asyncio.create_task(_disconnect_and_redrain()))
+        except Exception as exc:
+            logger.critical(
+                "telephony ownership fence could not resolve adapter: %s",
+                exc,
+            )
+
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*operations, return_exceptions=True),
+                timeout=self._OWNERSHIP_LOSS_CLEANUP_TIMEOUT_S,
+            )
+            for result in results:
+                if isinstance(result, BaseException):
+                    logger.critical(
+                        "telephony ownership fence cleanup failed: %s",
+                        result,
+                    )
+        except asyncio.TimeoutError:
+            logger.critical(
+                "telephony ownership fence cleanup timed out after %.1fs; "
+                "local ownership remains disabled",
+                self._OWNERSHIP_LOSS_CLEANUP_TIMEOUT_S,
+            )
+            for task in operations:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*operations, return_exceptions=True)
+
+    async def shutdown(self) -> None:
+        """Graceful shutdown with an ordered durable-ledger handoff.
+
+        Stop heartbeat renewal, then drain all already-scheduled mirror writes
+        *before* clearing the heartbeat and releasing ARI ownership. This makes
+        confirmed teardown acknowledgements visible before a successor can
+        scan the ledger, while unconfirmed calls (which scheduled no removal)
+        remain present and become recoverable as soon as the heartbeat clears.
+        """
+        import asyncio
+
         if self._heartbeat_task is not None:
             self._heartbeat_task.cancel()
             try:
@@ -873,15 +1477,15 @@ class RedisBackedStateBackend:
             except (asyncio.CancelledError, Exception):
                 pass
             self._heartbeat_task = None
+        pending = list(self._tasks)
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
         await self._registry.clear_heartbeat()
         # Release the owner lock (only if it's ours) so the successor
         # process can serve telephony immediately instead of waiting out
         # the TTL. Pairs with the heartbeat clear above.
         if self._is_owner:
             await self._registry.release_ari_ownership()
-        pending = list(self._tasks)
-        if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
 
     # ── Single-owner telephony lock ─────────────────────────────────
 
@@ -893,6 +1497,18 @@ class RedisBackedStateBackend:
             self._HEARTBEAT_TTL_S,
         )
         return self._is_owner
+
+    async def acquire_telephony_ownership_strict(self) -> bool:
+        """Claim ownership without the registry's development fail-open path."""
+        acquire = getattr(self._registry, "try_acquire_ari_ownership_strict", None)
+        if not callable(acquire):
+            raise RuntimeError("Redis registry lacks strict ownership support")
+        self._is_owner = await acquire(self._HEARTBEAT_TTL_S)
+        return self._is_owner
+
+    @property
+    def strict_ownership_active(self) -> bool:
+        return self._strict_ownership
 
     def is_telephony_owner(self) -> bool:
         return self._is_owner
@@ -920,12 +1536,14 @@ def _resolve_incarnation_id() -> str:
     in ``redis-cli`` (``telephony:pod:host:ab12cd34:heartbeat``)."""
     import os as _os
     import uuid as _uuid
+
     host = _os.getenv("POD_ID") or _safe_hostname()
     return f"{host}:{_uuid.uuid4().hex[:8]}"
 
 
 def _safe_hostname() -> str:
     import os as _os
+
     try:
         return _os.uname().nodename
     except Exception:
@@ -954,6 +1572,7 @@ def _build_backend() -> TelephonyStateBackend:
             )
             return LocalOnlyStateBackend()
         from app.domain.services.telephony.session_registry import SessionRegistry
+
         registry = SessionRegistry(redis_client, _resolve_incarnation_id())
         logger.info(
             "telephony_state_backend=redis pod_id=%s — restart recovery enabled",
@@ -978,6 +1597,7 @@ def _resolve_redis_client() -> Optional[Any]:
     gracefully."""
     try:
         from app.core.container import get_container
+
         container = get_container()
         if not getattr(container, "is_initialized", False):
             return None

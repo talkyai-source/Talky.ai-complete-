@@ -82,6 +82,11 @@ class TelephonySession:
     # recording_buffer_bytes above. Needed because tts_recording_buffer
     # holds (offset, pcm_bytes) tuples rather than bare bytes.
     tts_recording_buffer_bytes: int = 0
+    # Inbound sessions start with retention disabled.  The shared recording
+    # policy/disclosure flow enables it explicitly once keeping audio is lawful.
+    # Transport and STT continue while this is false; only the recording copies
+    # are suppressed.
+    recording_enabled: bool = True
     is_active: bool = True
 
     # Monotonic start time (seconds) — set in on_call_started()
@@ -163,6 +168,10 @@ class TelephonySession:
     # invisible at DEBUG until the 300s watchdog noticed dead air.
     consecutive_audio_route_failures: int = 0
     last_audio_route_error_warn_at: float = 0.0
+    # The in-flight forced-hangup task (audio-route force-end). Held so its
+    # result is observed instead of being fire-and-forgotten, and so a
+    # still-running attempt is not re-spawned on every subsequent bad packet.
+    force_hangup_task: Optional[asyncio.Task] = None
 
 
 class TelephonyMediaGateway(MediaGateway):
@@ -264,6 +273,7 @@ class TelephonyMediaGateway(MediaGateway):
             pbx_call_id=pbx_call_id,
             adapter=adapter,
             input_queue=asyncio.Queue(maxsize=200),
+            recording_enabled=bool(metadata.get("recording_enabled", True)),
             recording_start_time=now,
             last_audio_received_at=now,
         )
@@ -314,6 +324,31 @@ class TelephonyMediaGateway(MediaGateway):
             reason,
         )
         return True
+
+    def _on_force_hangup_done(
+        self, task: "asyncio.Task", session: TelephonySession, call_id: str
+    ) -> None:
+        """Observe the audio-route forced hangup instead of dropping it.
+
+        Success is the ONLY case that clears the failure streak. Anything else
+        (raise, or an adapter that refused/could not hang up) is logged at
+        error and the session is marked inactive so the normal teardown path
+        reclaims it rather than leaving a live channel with a dead audio route.
+        """
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is None and task.result():
+            session.consecutive_audio_route_failures = 0
+            return
+        logger.error(
+            "TelephonyMediaGateway: forced hangup after audio-route failure did "
+            "not complete call_id=%s err=%s — marking session inactive so "
+            "teardown reclaims it",
+            call_id[:12], exc,
+            extra={"call_id": call_id},
+        )
+        session.is_active = False
 
     async def cleanup(self) -> None:
         """End all active sessions."""
@@ -448,9 +483,19 @@ class TelephonyMediaGateway(MediaGateway):
                     "failures — forcing end instead of waiting for the 300s watchdog",
                     call_id[:12], count,
                 )
-                session.consecutive_audio_route_failures = 0
-                # Must not block/crash the audio hot path — fire-and-forget.
-                asyncio.create_task(self.hangup_call(call_id, reason="audio_route_failure"))
+                # Must not block the audio hot path, but the result MUST be
+                # observed: a raising hangup used to vanish silently while the
+                # counter had already been zeroed, leaving a live call with a
+                # dead audio route until the 300s watchdog. The counter is
+                # cleared only in the done-callback, and only on success.
+                if session.force_hangup_task is None or session.force_hangup_task.done():
+                    task = asyncio.create_task(
+                        self.hangup_call(call_id, reason="audio_route_failure")
+                    )
+                    session.force_hangup_task = task
+                    task.add_done_callback(
+                        lambda t, s=session, c=call_id: self._on_force_hangup_done(t, s, c)
+                    )
             return
 
         # Decode succeeded — clear the failure streak.
@@ -459,17 +504,19 @@ class TelephonyMediaGateway(MediaGateway):
         session.chunks_received += 1
         session.total_bytes_received += len(audio_chunk)
 
-        # Recording buffer at internal rate with memory cap.
-        # 16 kHz / 16-bit mono: 60 min ≈ 115.2 MB. 8 kHz path stays at 57.6 MB.
-        _MAX_RECORDING_BYTES = (self._sample_rate * 2) * 60 * 60  # 60 min
-        session.recording_buffer.append(pcm_chunk)
-        session.recording_buffer_bytes += len(pcm_chunk)
-        while session.recording_buffer_bytes > _MAX_RECORDING_BYTES and session.recording_buffer:
-            evicted = session.recording_buffer.pop(0)
-            session.recording_buffer_bytes -= len(evicted)
+        if session.recording_enabled:
+            # Recording buffer at internal rate with memory cap.
+            # 16 kHz / 16-bit mono: 60 min ≈ 115.2 MB. 8 kHz path stays at 57.6 MB.
+            _MAX_RECORDING_BYTES = (self._sample_rate * 2) * 60 * 60  # 60 min
+            session.recording_buffer.append(pcm_chunk)
+            session.recording_buffer_bytes += len(pcm_chunk)
+            while session.recording_buffer_bytes > _MAX_RECORDING_BYTES and session.recording_buffer:
+                evicted = session.recording_buffer.pop(0)
+                session.recording_buffer_bytes -= len(evicted)
 
-        # Track how many PCM16 samples the caller side has produced (at internal rate)
-        session.caller_sample_count += len(pcm_chunk) // 2
+            # This is the retained-audio timeline cursor, not a transport
+            # counter.  Pre-disclosure caller audio must not advance it.
+            session.caller_sample_count += len(pcm_chunk) // 2
 
         # Forward straight to STT — no re-batching.
         # Post bug #4 the C++ gateway batches at 40ms, which after upsample is
@@ -609,32 +656,33 @@ class TelephonyMediaGateway(MediaGateway):
             #   3. Write the chunk at the cursor position.
             #   4. Advance the cursor by the chunk's sample count so the NEXT
             #      chunk of the same burst is placed contiguously after this one.
-            chunk_samples = len(pcm16) // 2
-            wall_pos = int(
-                (loop.time() - session.recording_start_time)
-                * self._sample_rate
-            )
-            if wall_pos > session.agent_rec_cursor:
-                session.agent_rec_cursor = wall_pos
+            if session.recording_enabled:
+                chunk_samples = len(pcm16) // 2
+                wall_pos = int(
+                    (loop.time() - session.recording_start_time)
+                    * self._sample_rate
+                )
+                if wall_pos > session.agent_rec_cursor:
+                    session.agent_rec_cursor = wall_pos
 
-            session.tts_recording_buffer.append(
-                (session.agent_rec_cursor, pcm16)
-            )
-            session.tts_recording_buffer_bytes += len(pcm16)
-            session.agent_rec_cursor += chunk_samples
+                session.tts_recording_buffer.append(
+                    (session.agent_rec_cursor, pcm16)
+                )
+                session.tts_recording_buffer_bytes += len(pcm16)
+                session.agent_rec_cursor += chunk_samples
 
-            # FIX #13 — cap tts_recording_buffer the same way on_audio_received
-            # caps the caller-side recording_buffer (drop-oldest, ~60 min at
-            # the internal sample rate). Previously unbounded: a long
-            # agent-heavy call (worsened by FIX #11's runaway-duration
-            # sessions before that fix) grew this list without limit.
-            _MAX_RECORDING_BYTES = (self._sample_rate * 2) * 60 * 60  # 60 min
-            while (
-                session.tts_recording_buffer_bytes > _MAX_RECORDING_BYTES
-                and session.tts_recording_buffer
-            ):
-                _, _evicted = session.tts_recording_buffer.pop(0)
-                session.tts_recording_buffer_bytes -= len(_evicted)
+                # FIX #13 — cap tts_recording_buffer the same way on_audio_received
+                # caps the caller-side recording_buffer (drop-oldest, ~60 min at
+                # the internal sample rate). Previously unbounded: a long
+                # agent-heavy call (worsened by FIX #11's runaway-duration
+                # sessions before that fix) grew this list without limit.
+                _MAX_RECORDING_BYTES = (self._sample_rate * 2) * 60 * 60  # 60 min
+                while (
+                    session.tts_recording_buffer_bytes > _MAX_RECORDING_BYTES
+                    and session.tts_recording_buffer
+                ):
+                    _, _evicted = session.tts_recording_buffer.pop(0)
+                    session.tts_recording_buffer_bytes -= len(_evicted)
 
         except Exception as exc:
             logger.warning(f"[TelephonyGW] TTS encode failed for {call_id[:12]}: {exc}", exc_info=True)
@@ -840,9 +888,13 @@ class TelephonyMediaGateway(MediaGateway):
                 await session.adapter.send_tts_audio(session.pbx_call_id, final_packet)
                 session.chunks_sent += 1
                 session.total_bytes_sent += len(final_packet)
-                session.tts_buffer = b""
             except Exception as exc:
                 logger.warning(f"[TelephonyGW] flush_tts_buffer failed for {call_id[:12]}: {exc}")
+            finally:
+                # Clear unconditionally: a FAILED flush must not leave the
+                # padded final packet in the buffer, or the next utterance is
+                # prepended with those stale bytes and byte-shifted.
+                session.tts_buffer = b""
 
         # This is a NORMAL (non-barge-in) end of utterance — the TTS provider
         # stream is exhausted, so any orphan partial-sample fragment left in
@@ -986,6 +1038,37 @@ class TelephonyMediaGateway(MediaGateway):
         """Return the TTS (agent side) recording buffer."""
         session = self._sessions.get(call_id)
         return session.tts_recording_buffer if session else None
+
+    def set_recording_enabled(self, call_id: str, enabled: bool) -> bool:
+        """Set the retention gate for one live call.
+
+        Enabling starts a fresh recording timeline at this instant. Disabling
+        clears both sides immediately. Therefore a late policy failure cannot
+        leave pre-disclosure audio available to the teardown uploader.
+        """
+        session = self._sessions.get(call_id)
+        if session is None:
+            return False
+
+        enabled = bool(enabled)
+        if not enabled:
+            session.recording_enabled = False
+            self.clear_recording_buffer(call_id)
+            session.caller_sample_count = 0
+            session.agent_rec_cursor = 0
+            return True
+
+        if not session.recording_enabled:
+            self.clear_recording_buffer(call_id)
+            session.recording_start_time = asyncio.get_running_loop().time()
+            session.caller_sample_count = 0
+            session.agent_rec_cursor = 0
+        session.recording_enabled = True
+        return True
+
+    def is_recording_enabled(self, call_id: str) -> bool:
+        session = self._sessions.get(call_id)
+        return bool(session and session.recording_enabled)
 
     def clear_recording_buffer(self, call_id: str) -> None:
         session = self._sessions.get(call_id)

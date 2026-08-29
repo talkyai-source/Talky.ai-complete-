@@ -209,6 +209,13 @@ async def _speak_recording_disclosure(voice_session) -> None:
     call_id = voice_session.call_id
     session = voice_session.call_session
 
+    # The inbound gate may deliver the disclosure before the pipeline starts;
+    # agent-first greeting code reaches this same shared helper later. Keep the
+    # notice strictly once-per-call so the caller never hears it twice.
+    if getattr(voice_session, "_recording_disclosure_attempted", False):
+        return
+    voice_session._recording_disclosure_attempted = True
+
     try:
         from app.core.container import get_container
 
@@ -253,7 +260,15 @@ async def _speak_recording_disclosure(voice_session) -> None:
         decision = await RecordingPolicyService(db_pool).decide(
             tenant_id=tenant_id,
         )
-        text = spoken_disclosure_text(decision)
+        pinned_override = getattr(
+            voice_session, "_recording_disclosure_text_override", None
+        )
+        if pinned_override is not None:
+            text = str(pinned_override).strip()
+            if not text:
+                raise RuntimeError("pinned recording disclosure is empty")
+        else:
+            text = spoken_disclosure_text(decision)
         if not text:
             record_disclosure_state(DISCLOSURE_NOT_REQUIRED, *call_ids)
             logger.info(
@@ -489,7 +504,12 @@ async def _send_outbound_greeting(voice_session) -> None:
             first_speaker = (
                 getattr(voice_session, "_first_speaker", None) or "agent"
             )
-            greeting = _build_call_greeting(session, first_speaker=first_speaker)
+            pinned_inbound_greeting = str(
+                getattr(voice_session, "_pinned_inbound_greeting", "") or ""
+            ).strip()
+            greeting = pinned_inbound_greeting or _build_call_greeting(
+                session, first_speaker=first_speaker
+            )
 
             # 2026-07-08: last-resort opener-content guard. If even the
             # real-time greeting builder produced empty/filler-only text
@@ -499,7 +519,7 @@ async def _send_outbound_greeting(voice_session) -> None:
             # session. Wrapped so any failure here falls through to the
             # original (possibly degraded) greeting rather than crashing.
             try:
-                if not _has_real_opener_content(greeting):
+                if not pinned_inbound_greeting and not _has_real_opener_content(greeting):
                     from app.domain.services.telephony.config import (
                         _resolve_greeting_context,
                     )

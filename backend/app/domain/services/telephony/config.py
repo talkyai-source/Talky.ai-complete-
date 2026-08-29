@@ -12,6 +12,8 @@ import os
 from typing import Optional
 
 from app.domain.services.telephony_session_config import (
+    TELEPHONY_COMPANY_NAME,
+    _warn_company_name_fallback,
     build_persona_greeting,
     build_telephony_session_config,
     build_telephony_greeting,
@@ -123,27 +125,53 @@ def _resolve_greeting_context(session) -> tuple[str, str]:
     """Pull (agent_name, company_name) off the session's agent_config with
     sensible fallbacks. The fallbacks read naturally on the wire — a
     misconfigured campaign without an agent_name still produces a
-    grammatical greeting rather than crashing the call."""
+    grammatical greeting rather than crashing the call.
+
+    The company fallback used to be a real company's name hardcoded here, a
+    second copy of the one in telephony_session_config. On a multi-tenant
+    platform that made an unconfigured tenant's agent announce ANOTHER
+    tenant's brand on a live call. It now uses the single neutral placeholder
+    (TELEPHONY_COMPANY_NAME) and says so in the log, once per call — this
+    function runs on both the pre-synth and realtime greeting paths, so the
+    warning is de-duplicated on the session rather than emitted per call site.
+    """
     agent_config = getattr(session, "agent_config", None)
     agent_name = (
         getattr(agent_config, "agent_name", None) if agent_config else None
     ) or "your assistant"
-    company = (
-        getattr(agent_config, "company_name", None) if agent_config else None
-    ) or "All States Estimation"
-    return agent_name, company
+    company = getattr(agent_config, "company_name", None) if agent_config else None
+    if isinstance(company, str):
+        company = company.strip()
+    if company:
+        return agent_name, company
+
+    if not getattr(session, "_company_name_fallback_logged", False):
+        try:
+            session._company_name_fallback_logged = True
+        except Exception:  # noqa: BLE001 — a log guard must never break a call
+            pass
+        config = getattr(session, "config", None)
+        _tenant = getattr(session, "tenant_id", None) or (
+            getattr(config, "tenant_id", None) if config else None
+        )
+        _campaign = getattr(session, "campaign_id", None) or (
+            getattr(config, "campaign_id", None) if config else None
+        )
+        _warn_company_name_fallback(
+            tenant_id=str(_tenant) if _tenant else None,
+            campaign_id=str(_campaign) if _campaign else None,
+            source="agent_config.company_name",
+        )
+    return agent_name, TELEPHONY_COMPANY_NAME
 
 
 def _build_call_greeting(session, *, first_speaker: str) -> str:
     """Build the spoken greeting for the call's persona.
 
-    The telephony bridge endpoint only originates OUTBOUND calls — we
-    dialed them. So the greeting is ALWAYS the outbound persona greeting
-    (the AI introduces itself as a caller), regardless of whether
-    ``first_speaker`` is "agent" (speak immediately) or "user" (speak
-    after a 2-second pause). The previous direction = inbound mapping
-    on caller-first was wrong: it made the AI sound like a receptionist
-    asking "How can I help?" on a call WE initiated, which is jarring.
+    Direction comes from the pinned session config, never from first-speaker
+    timing. Genuine inbound agent-first calls consume the configured inbound
+    greeting when present, otherwise an inbound persona greeting. Outbound
+    calls preserve their historical pickup opener.
 
     Falls back to the generic outbound opener when ``persona_type`` is
     None (legacy estimation campaign) or missing from the dispatch
@@ -155,11 +183,24 @@ def _build_call_greeting(session, *, first_speaker: str) -> str:
     :func:`build_telephony_session_config`, so the spoken greeting and
     the system prompt always refer to the same identity.
     """
-    # `first_speaker` is intentionally accepted but unused for direction
-    # selection — it controls TIMING (immediate vs 2s pause) in the
-    # lifecycle layer, not greeting content.
+    # first_speaker controls timing in lifecycle; it must never be used to
+    # infer direction (caller-first outbound is still outbound).
     del first_speaker
     agent_name, company = _resolve_greeting_context(session)
+
+    config = getattr(session, "config", None)
+    raw_direction = getattr(session, "_call_direction", None)
+    if raw_direction is None:
+        raw_direction = getattr(config, "direction", Direction.OUTBOUND) if config else Direction.OUTBOUND
+    direction = (
+        raw_direction.value
+        if isinstance(raw_direction, Direction)
+        else str(raw_direction or "outbound").strip().lower()
+    )
+    if direction == "inbound":
+        custom = getattr(session, "_inbound_greeting", None)
+        if isinstance(custom, str) and custom.strip():
+            return custom.strip()
 
     # ── LLM-authored opener (flag-gated, default OFF) ────────────────────
     # `prewarm._attach_llm_opener` may have stashed a per-lead opener on the
@@ -176,7 +217,7 @@ def _build_call_greeting(session, *, first_speaker: str) -> str:
     # slow-path fallback in modes.agent_first._send_outbound_greeting both
     # arrive at this one function for their text.
     generated = getattr(session, "_llm_opener_text", None)
-    if isinstance(generated, str) and generated.strip():
+    if direction != "inbound" and isinstance(generated, str) and generated.strip():
         return generated.strip()
 
     # Persona drives which greeting template is used. It is mirrored straight
@@ -204,7 +245,7 @@ def _build_call_greeting(session, *, first_speaker: str) -> str:
         persona_type=persona_type,
         agent_name=agent_name,
         company_name=company,
-        direction="outbound",
+        direction="inbound" if direction == "inbound" else "outbound",
         call_reason=call_reason,
     )
 

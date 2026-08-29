@@ -54,13 +54,28 @@ import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PJSIP_D_DIR = "/etc/asterisk/pjsip.d"
 _DEFAULT_REGISTER_INTERVAL = 3600
 _ALLOWED_TRANSPORTS = {"udp", "tcp", "tls"}
+
+
+@dataclass(frozen=True)
+class PJSIPReloadResult:
+    status: Literal["executed", "coalesced", "disabled", "failed"]
+    detail: str
+
+    @property
+    def accepted(self) -> bool:
+        """Whether this file change is covered by a live reload."""
+        return self.status in {"executed", "coalesced"}
+
+
+class PJSIPReloadError(RuntimeError):
+    """Raised when a caller requires live application but reload is unproven."""
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +100,8 @@ class TrunkConfigInput:
     dtmf_mode: Optional[str] = None
     source_host: Optional[str] = None     # identify match; defaults to sip_domain
     auth_realm: Optional[str] = None      # digest realm; defaults to "asterisk" to mirror the working primary
+    outbound_proxy: Optional[str] = None  # validated host[:port], rendered as loose-route SIP URI
+    srtp: bool = False                    # SDES SRTP media encryption
 
 
 def _reject_newlines(field: str, value: str) -> str:
@@ -172,6 +189,13 @@ def render_trunk_conf(inp: TrunkConfigInput) -> str:
         }.get(_dm_raw, _dm_raw)
         if _dm in {"rfc4733", "inband", "info", "auto", "auto_info"}:
             lines.append(f"dtmf_mode={_reject_newlines('dtmf_mode', _dm)}")
+    if inp.outbound_proxy:
+        proxy = _reject_newlines("outbound_proxy", inp.outbound_proxy.strip())
+        # Asterisk's pjsip.conf parser needs the URI semicolon escaped.
+        lines.append(f"outbound_proxy=sip:{proxy}\\;lr")
+    if inp.srtp:
+        lines.append("media_encryption=sdes")
+        lines.append("media_encryption_optimistic=no")
     lines.append("direct_media=no")
     # NAT / symmetric-RTP — mirror the working primary so audio flows through the
     # carrier's NAT and the Contact is rewritten to the public address.
@@ -212,6 +236,9 @@ def render_trunk_conf(inp: TrunkConfigInput) -> str:
         lines.append(f"transport={transport_obj}")
         lines.append(f"outbound_auth={ep}-auth")
         lines.append(f"server_uri=sip:{domain}:{port}")
+        if inp.outbound_proxy:
+            proxy = _reject_newlines("outbound_proxy", inp.outbound_proxy.strip())
+            lines.append(f"outbound_proxy=sip:{proxy}\\;lr")
         # Register the NUMBER as the identity (client_uri + contact_user), auth
         # with the SIP login — exactly how the working primary registers.
         lines.append(f"client_uri=sip:{reg_identity}@{domain}")
@@ -277,6 +304,8 @@ def build_trunk_config_input(row: Any, *, decrypted_password: Optional[str]) -> 
         dtmf_mode=(md.get("dtmf_mode") or None),
         source_host=(md.get("source_host") or None),
         auth_realm=(md.get("auth_realm") or None),
+        outbound_proxy=(md.get("outbound_proxy") or None),
+        srtp=bool(md.get("srtp", False)),
     )
 
 
@@ -352,7 +381,7 @@ def remove_trunk_file(trunk_id: str, *, base_dir: Optional[Path] = None) -> bool
         return False
 
 
-# --- reload hook (debounced; does NOT execute asterisk unless opted in) ----
+# --- reload hook (debounced; executes Asterisk only when configured) --------
 
 _reload_lock = asyncio.Lock()
 _reload_pending = False
@@ -370,13 +399,14 @@ def _auto_reload_enabled() -> bool:
     }
 
 
-async def request_pjsip_reload(*, execute: Optional[bool] = None) -> bool:
+async def request_pjsip_reload(*, execute: Optional[bool] = None) -> PJSIPReloadResult:
     """Hook invoked after any config file change.
 
-    Default (``execute`` unset and ``TELEPHONY_PJSIP_AUTO_RELOAD`` off): logs
-    the command for an operator to run and returns False — this module never
-    touches live Asterisk on its own. When enabled, coalesces rapid changes
-    within a debounce window and runs ``asterisk -rx 'pjsip reload'`` once.
+    With ``TELEPHONY_PJSIP_AUTO_RELOAD`` disabled, returns a structured
+    ``disabled`` result after logging the operator command. When enabled,
+    coalesces rapid changes within a debounce window and returns structured
+    ``executed``, ``coalesced`` or ``failed`` evidence. Production Asterisk
+    lifecycle endpoints require an accepted result before committing.
     """
     if execute is None:
         execute = _auto_reload_enabled()
@@ -386,12 +416,18 @@ async def request_pjsip_reload(*, execute: Optional[bool] = None) -> bool:
             "pjsip_reload_needed — run on the Asterisk host: %s",
             pjsip_reload_command(),
         )
-        return False
+        return PJSIPReloadResult(
+            "disabled",
+            "Automatic PJSIP reload is disabled; configuration was not applied live.",
+        )
 
     global _reload_pending
     async with _reload_lock:
         if _reload_pending:
-            return False
+            return PJSIPReloadResult(
+                "coalesced",
+                "A pending PJSIP reload will include this atomic file change.",
+            )
         _reload_pending = True
     try:
         await asyncio.sleep(_RELOAD_DEBOUNCE_S)  # debounce: coalesce a burst
@@ -411,18 +447,21 @@ async def request_pjsip_reload(*, execute: Optional[bool] = None) -> bool:
                 "pjsip_reload_failed rc=%s err=%s", proc.returncode,
                 (err or b"").decode(errors="replace")[:300],
             )
-            return False
+            return PJSIPReloadResult(
+                "failed",
+                f"Asterisk rejected pjsip reload with exit code {proc.returncode}.",
+            )
         logger.info("pjsip_reload_ok out=%s", (out or b"").decode(errors="replace")[:200])
-        return True
+        return PJSIPReloadResult("executed", "Asterisk accepted pjsip reload.")
     except FileNotFoundError:
         logger.warning(
             "pjsip_reload_skipped: asterisk binary not found — run manually: %s",
             pjsip_reload_command(),
         )
-        return False
+        return PJSIPReloadResult("failed", "Asterisk binary was not found.")
     except Exception as exc:  # noqa: BLE001
         logger.error("pjsip_reload_error err=%s", exc)
-        return False
+        return PJSIPReloadResult("failed", f"PJSIP reload failed: {type(exc).__name__}.")
 
 
 # ---------------------------------------------------------------------------
@@ -435,18 +474,23 @@ async def apply_trunk_config(
     decrypted_password: Optional[str],
     base_dir: Optional[Path] = None,
     reload: bool = True,
+    require_reload: bool = False,
 ) -> Path:
     """Render + atomically write the trunk file, then request a reload.
 
     ``decrypted_password`` is the plaintext (decrypted by the caller via the
     encryption service). Raises on a render/write error so the caller can
-    log + swallow (fail-soft) without persisting a broken file.
+    compensate safely or fail the database transaction.
     """
     inp = build_trunk_config_input(row, decrypted_password=decrypted_password)
     content = render_trunk_conf(inp)
     path = write_trunk_file(inp.trunk_id, content, base_dir=base_dir)
     if reload:
-        await request_pjsip_reload()
+        result = await request_pjsip_reload()
+        if require_reload and not result.accepted:
+            raise PJSIPReloadError(result.detail)
+    elif require_reload:
+        raise PJSIPReloadError("Live PJSIP reload was required but not requested.")
     return path
 
 
@@ -455,9 +499,14 @@ async def remove_trunk_config(
     *,
     base_dir: Optional[Path] = None,
     reload: bool = True,
+    require_reload: bool = False,
 ) -> bool:
     """Remove the trunk file (deactivate/delete) then request a reload."""
     removed = remove_trunk_file(trunk_id, base_dir=base_dir)
     if reload:
-        await request_pjsip_reload()
+        result = await request_pjsip_reload()
+        if require_reload and not result.accepted:
+            raise PJSIPReloadError(result.detail)
+    elif require_reload:
+        raise PJSIPReloadError("Live PJSIP reload was required but not requested.")
     return removed

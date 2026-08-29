@@ -41,6 +41,7 @@ from datetime import datetime
 from typing import Optional, Sequence
 
 from app.domain.models.tenant_phone_number import PhoneNumberStatus
+from app.domain.services.telephony.trunk_runtime import evaluate_trunk_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,7 @@ class TrunkRow:
     is_active: bool
     updated_at: Optional[datetime] = None
     caller_id: Optional[str] = None
+    runtime_ready: bool = True
 
 
 @dataclass(frozen=True)
@@ -188,7 +190,7 @@ def choose_outbound_route(
     refused (prefer verified DID, else the trunk's configured caller-ID,
     else refuse).
     """
-    actives = [t for t in active_trunks if t.is_active]
+    actives = [t for t in active_trunks if t.is_active and t.runtime_ready]
 
     own_trunks = [
         t for t in actives
@@ -321,24 +323,66 @@ async def _resolve_campaign_trunk(
         if not raw:
             return None
         ct = raw if isinstance(raw, dict) else json.loads(raw)
-        endpoint = (ct.get("endpoint") or "").strip()
-        if not endpoint:
-            return None
+        trunk_id = str(ct.get("id") or "").strip()
+        if not trunk_id:
+            return OutboundTrunkRoute(
+                endpoint=None, caller_id=None, trunk_id=None, is_default=False,
+                reason="campaign_assigned_trunk_invalid", refused=True,
+            )
+        async with acquire_with_tenant(db_pool, str(tenant_id)) as conn:
+            await conn.execute("SET LOCAL app.bypass_rls = 'on'")
+            row = await conn.fetchrow(
+                """
+                SELECT id, tenant_id, trunk_name, is_active, direction, metadata,
+                       live_registration_status, live_status_detail,
+                       live_status_checked_at
+                FROM tenant_sip_trunks
+                WHERE id = $1::uuid
+                  AND (tenant_id = $2::uuid OR metadata->>'pool' = 'true')
+                """,
+                trunk_id,
+                str(tenant_id),
+            )
+        runtime = (
+            evaluate_trunk_runtime(dict(row), require_inbound=False) if row else None
+        )
+        if (
+            not row
+            or not runtime
+            or not runtime.ready
+            or row["direction"] not in {"outbound", "both"}
+        ):
+            return OutboundTrunkRoute(
+                endpoint=None, caller_id=None, trunk_id=trunk_id, is_default=False,
+                reason="campaign_assigned_trunk_not_ready", refused=True,
+            )
+        is_platform_default = _is_platform_default(
+            TrunkRow(
+                id=str(row["id"]),
+                trunk_name=row["trunk_name"],
+                is_active=bool(row["is_active"]),
+            ),
+            platform_default_trunk_name(),
+        )
+        endpoint = env_default_endpoint() if is_platform_default else f"trunk-{row['id']}"
         caller_id = (ct.get("caller_id") or "").strip() or None
         return OutboundTrunkRoute(
             endpoint=endpoint,
             caller_id=caller_id,
-            trunk_id=(ct.get("id") or None),
+            trunk_id=trunk_id,
             is_default=False,
             reason="campaign_assigned",
             refused=False,
         )
-    except Exception as exc:  # noqa: BLE001 — fail-safe, never block a call
+    except Exception as exc:  # noqa: BLE001 — explicit assignment fails closed
         logger.error(
             "campaign_trunk_resolve_failed campaign=%s err=%s",
             str(campaign_id)[:8], exc,
         )
-        return None
+        return OutboundTrunkRoute(
+            endpoint=None, caller_id=None, trunk_id=None, is_default=False,
+            reason="campaign_assigned_trunk_lookup_failed", refused=True,
+        )
 
 
 async def _resolve_pool_assignment(
@@ -364,23 +408,55 @@ async def _resolve_pool_assignment(
         if not raw:
             return None
         pt = raw if isinstance(raw, dict) else json.loads(raw)
-        endpoint = (pt.get("endpoint") or "").strip()
-        if not endpoint:
-            return None
+        trunk_id = str(pt.get("id") or "").strip()
+        if not trunk_id:
+            return OutboundTrunkRoute(
+                endpoint=None, caller_id=None, trunk_id=None, is_default=False,
+                reason="pool_assigned_trunk_invalid", refused=True,
+            )
+        async with acquire_with_tenant(db_pool, str(tenant_id)) as conn:
+            await conn.execute("SET LOCAL app.bypass_rls = 'on'")
+            row = await conn.fetchrow(
+                """
+                SELECT id, is_active, direction, metadata,
+                       live_registration_status, live_status_detail,
+                       live_status_checked_at
+                FROM tenant_sip_trunks
+                WHERE id = $1::uuid AND metadata->>'pool' = 'true'
+                """,
+                trunk_id,
+            )
+        runtime = (
+            evaluate_trunk_runtime(dict(row), require_inbound=False) if row else None
+        )
+        if (
+            not row
+            or not runtime
+            or not runtime.ready
+            or row["direction"] not in {"outbound", "both"}
+        ):
+            return OutboundTrunkRoute(
+                endpoint=None, caller_id=None, trunk_id=trunk_id, is_default=False,
+                reason="pool_assigned_trunk_not_ready", refused=True,
+            )
+        endpoint = f"trunk-{row['id']}"
         caller_id = (pt.get("caller_id") or "").strip() or None
         return OutboundTrunkRoute(
             endpoint=endpoint,
             caller_id=caller_id,
-            trunk_id=(pt.get("id") or None),
+            trunk_id=trunk_id,
             is_default=False,
             reason="pool_assigned",
             refused=False,
         )
-    except Exception as exc:  # noqa: BLE001 — fail-safe, never block a call
+    except Exception as exc:  # noqa: BLE001 — explicit assignment fails closed
         logger.error(
             "pool_assignment_resolve_failed tenant=%s err=%s", str(tenant_id)[:8], exc
         )
-        return None
+        return OutboundTrunkRoute(
+            endpoint=None, caller_id=None, trunk_id=None, is_default=False,
+            reason="pool_assigned_trunk_lookup_failed", refused=True,
+        )
 
 
 async def resolve_outbound_trunk(
@@ -436,7 +512,9 @@ async def resolve_outbound_trunk(
         async with acquire_with_tenant(db_pool, str(tenant_id)) as conn:
             trunk_rows = await conn.fetch(
                 """
-                SELECT id, trunk_name, is_active, updated_at, metadata
+                SELECT id, trunk_name, is_active, updated_at, direction, metadata,
+                       live_registration_status, live_status_detail,
+                       live_status_checked_at
                 FROM tenant_sip_trunks
                 WHERE tenant_id = $1 AND is_active = TRUE
                 """,
@@ -467,6 +545,10 @@ async def resolve_outbound_trunk(
             is_active=bool(r["is_active"]),
             updated_at=r["updated_at"],
             caller_id=_extract_trunk_caller_id(r["metadata"]),
+            runtime_ready=(
+                evaluate_trunk_runtime(dict(r), require_inbound=False).ready
+                and r["direction"] in {"outbound", "both"}
+            ),
         )
         for r in trunk_rows
     ]

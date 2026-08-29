@@ -21,10 +21,11 @@ calls are never touched — no cross-worker clobbering.
 Only call identity + ownership, never the live objects:
 
   * ``telephony:session:{call_id}`` — HASH {pod_id (= owning
-    incarnation), state (active|ringing), tenant_id, campaign_id,
-    first_speaker, created_at, updated_at}. TTL 600s active / 180s
-    ringing, so a crashed process's entries self-expire even if
-    recovery never runs.
+    incarnation), state (active|ringing|termination_pending|answer_pending),
+    tenant_id, campaign_id, first_speaker, durable/provider identity,
+    Answer timestamps, created_at, updated_at}. TTL 600s active/cleanup / 180s
+    ringing, so a crashed process's entries self-expire even if recovery never
+    runs.
   * ``telephony:pod:{incarnation}:heartbeat`` — liveness marker with a
     short TTL, renewed by the heartbeat task. Absence ⇒ that process is
     dead and its sessions are eligible for recovery.
@@ -46,6 +47,7 @@ atomic-ish writes, bytes-decode on reads, best-effort error handling
 (missing client / Redis error ⇒ benign default, never raises into the
 call path).
 """
+
 from __future__ import annotations
 
 import logging
@@ -57,7 +59,7 @@ logger = logging.getLogger(__name__)
 
 _SESSION_KEY_PREFIX = "telephony:session:"
 _SESSION_SCAN_MATCH = "telephony:session:*"
-_HEARTBEAT_PREFIX = "telephony:pod:"          # + {incarnation}:heartbeat
+_HEARTBEAT_PREFIX = "telephony:pod:"  # + {incarnation}:heartbeat
 
 # Single-owner lock: exactly one process may hold the ARI event
 # connection to Asterisk and serve telephony. The value is the owning
@@ -97,7 +99,7 @@ def _heartbeat_key(incarnation_id: str) -> str:
 
 
 def _call_id_from_session_key(key: str) -> str:
-    return key[len(_SESSION_KEY_PREFIX):] if key.startswith(_SESSION_KEY_PREFIX) else key
+    return key[len(_SESSION_KEY_PREFIX) :] if key.startswith(_SESSION_KEY_PREFIX) else key
 
 
 def _decode(value: Any) -> Any:
@@ -133,6 +135,9 @@ class SessionRegistry:
         tenant_id: Optional[str] = None,
         campaign_id: Optional[str] = None,
         first_speaker: Optional[str] = None,
+        durable_call_id: Optional[str] = None,
+        provider: Optional[str] = None,
+        provider_call_id: Optional[str] = None,
     ) -> None:
         """Record (or update) a call in the ledger.
 
@@ -152,6 +157,12 @@ class SessionRegistry:
             "first_speaker": first_speaker or "",
             "updated_at": now,
         }
+        if durable_call_id is not None:
+            mapping["durable_call_id"] = durable_call_id
+        if provider is not None:
+            mapping["provider"] = provider
+        if provider_call_id is not None:
+            mapping["provider_call_id"] = provider_call_id
         try:
             async with self._redis.pipeline(transaction=True) as pipe:
                 pipe.hset(_session_key(call_id), mapping=mapping)
@@ -161,8 +172,158 @@ class SessionRegistry:
         except Exception as exc:
             logger.warning(
                 "session_registry.register_failed call=%s state=%s err=%s",
-                call_id[:12] if call_id else "-", state, exc,
+                call_id[:12] if call_id else "-",
+                state,
+                exc,
             )
+
+    async def register_call_strict(
+        self,
+        call_id: str,
+        *,
+        state: str,
+        tenant_id: Optional[str] = None,
+        campaign_id: Optional[str] = None,
+        first_speaker: Optional[str] = None,
+        durable_call_id: Optional[str] = None,
+        provider: Optional[str] = None,
+        provider_call_id: Optional[str] = None,
+    ) -> None:
+        """Durably register a teardown obligation without fail-soft writes.
+
+        Admission denial/timeout paths can own a real PBX channel without ever
+        creating a VoiceSession (and, for dependency failures, without a calls
+        row). Their pre-hangup ledger write is a safety boundary, so Redis
+        failure must abort the one-shot flow rather than leave an invisible
+        billable channel. ``termination_pending`` uses the active TTL and is
+        renewed by the recovery watchdog until explicit acknowledgement.
+        """
+        if self._redis is None:
+            raise RuntimeError("Redis client is unavailable")
+        ttl = _RINGING_TTL_SECONDS if state == "ringing" else _ACTIVE_TTL_SECONDS
+        now = _now_iso()
+        key = _session_key(call_id)
+        mapping = {
+            "pod_id": self._pod_id,
+            "state": state,
+            "tenant_id": tenant_id or "",
+            "campaign_id": campaign_id or "",
+            "first_speaker": first_speaker or "",
+            "updated_at": now,
+        }
+        if durable_call_id is not None:
+            mapping["durable_call_id"] = durable_call_id
+        if provider is not None:
+            mapping["provider"] = provider
+        if provider_call_id is not None:
+            mapping["provider_call_id"] = provider_call_id
+        async with self._redis.pipeline(transaction=True) as pipe:
+            pipe.hset(key, mapping=mapping)
+            pipe.hsetnx(key, "created_at", now)
+            pipe.expire(key, ttl)
+            await pipe.execute()
+        if not await self._redis.exists(key):
+            raise RuntimeError(f"telephony cleanup obligation was not durable for {call_id}")
+
+    async def promote_call_answered_strict(
+        self,
+        call_id: str,
+        *,
+        answered_at: str,
+        tenant_id: Optional[str] = None,
+        campaign_id: Optional[str] = None,
+    ) -> None:
+        """Durably promote a pre-answer cleanup record to answered/active.
+
+        Asterisk Answer is an externally committed, billable side effect.  A
+        process that dies immediately afterwards must therefore leave more
+        than a best-effort ``active`` mirror: recovery needs the first answer
+        timestamp as well as an entry whose TTL is long enough for a live
+        call.  ``HSETNX`` preserves the first timestamp across idempotent
+        retries, and the read-back makes Redis write loss a hard failure.
+        """
+
+        if self._redis is None:
+            raise RuntimeError("Redis client is unavailable")
+        timestamp = str(answered_at or "").strip()
+        if not timestamp:
+            raise ValueError("answered_at is required for answered-call promotion")
+
+        now = _now_iso()
+        key = _session_key(call_id)
+        mapping = {
+            "pod_id": self._pod_id,
+            "state": "active",
+            "tenant_id": tenant_id or "",
+            "campaign_id": campaign_id or "",
+            "updated_at": now,
+        }
+        async with self._redis.pipeline(transaction=True) as pipe:
+            pipe.hset(key, mapping=mapping)
+            pipe.hsetnx(key, "created_at", now)
+            pipe.hsetnx(key, "answered_at", timestamp)
+            pipe.expire(key, _ACTIVE_TTL_SECONDS)
+            await pipe.execute()
+
+        stored_raw = await self._redis.hgetall(key)
+        stored = {_decode(k): _decode(v) for k, v in (stored_raw or {}).items()}
+        if stored.get("state") != "active" or not stored.get("answered_at"):
+            raise RuntimeError(f"telephony answered-call promotion was not durable for {call_id}")
+
+    async def register_call_answer_intent_strict(
+        self,
+        call_id: str,
+        *,
+        answer_requested_at: str,
+        tenant_id: Optional[str] = None,
+        campaign_id: Optional[str] = None,
+        durable_call_id: Optional[str] = None,
+        provider: Optional[str] = None,
+        provider_call_id: Optional[str] = None,
+    ) -> None:
+        """Persist the ambiguous boundary immediately before provider Answer.
+
+        There is no atomic transaction spanning Redis/PostgreSQL and ARI. This
+        intent closes the only remaining kill window: if the process dies after
+        Asterisk accepts Answer but before the confirmation hook runs, recovery
+        sees ``answer_pending`` plus the durable identities and accounts for a
+        possibly answered call instead of issuing a zero-second release.
+        """
+
+        if self._redis is None:
+            raise RuntimeError("Redis client is unavailable")
+        timestamp = str(answer_requested_at or "").strip()
+        if not timestamp:
+            raise ValueError("answer_requested_at is required for Answer intent")
+
+        now = _now_iso()
+        key = _session_key(call_id)
+        mapping = {
+            "pod_id": self._pod_id,
+            "state": "answer_pending",
+            "tenant_id": tenant_id or "",
+            "campaign_id": campaign_id or "",
+            "durable_call_id": durable_call_id or "",
+            "provider": provider or "",
+            "provider_call_id": provider_call_id or call_id,
+            "direction": "inbound",
+            "updated_at": now,
+        }
+        async with self._redis.pipeline(transaction=True) as pipe:
+            pipe.hset(key, mapping=mapping)
+            pipe.hsetnx(key, "created_at", now)
+            pipe.hsetnx(key, "answer_requested_at", timestamp)
+            pipe.expire(key, _ACTIVE_TTL_SECONDS)
+            await pipe.execute()
+
+        stored_raw = await self._redis.hgetall(key)
+        stored = {_decode(k): _decode(v) for k, v in (stored_raw or {}).items()}
+        if (
+            stored.get("state") != "answer_pending"
+            or not stored.get("answer_requested_at")
+            or stored.get("durable_call_id") != (durable_call_id or "")
+        ):
+            raise RuntimeError(f"telephony Answer intent was not durable for {call_id}")
 
     async def unregister_call(self, call_id: str) -> None:
         """Remove a call from the ledger (on hangup / teardown / recovery)."""
@@ -173,8 +334,23 @@ class SessionRegistry:
         except Exception as exc:
             logger.warning(
                 "session_registry.unregister_failed call=%s err=%s",
-                call_id[:12] if call_id else "-", exc,
+                call_id[:12] if call_id else "-",
+                exc,
             )
+
+    async def unregister_call_strict(self, call_id: str) -> None:
+        """Remove a recovery obligation without swallowing Redis failures.
+
+        Normal call-path mirror writes are deliberately best-effort, but an
+        orphan acknowledgement is a commit point: reporting recovery complete
+        while the delete failed would make the caller believe a retry record
+        was consumed when it was not.  Recovery therefore uses this strict
+        variant and only increments its completed count after it returns.
+        Deleting an already-absent key remains idempotently successful.
+        """
+        if self._redis is None:
+            raise RuntimeError("Redis client is unavailable")
+        await self._redis.delete(_session_key(call_id))
 
     async def touch_call(self, call_id: str) -> None:
         """Renew the active-call TTL. Called from the audio path
@@ -187,8 +363,96 @@ class SessionRegistry:
         except Exception as exc:
             logger.debug(
                 "session_registry.touch_failed call=%s err=%s",
-                call_id[:12] if call_id else "-", exc,
+                call_id[:12] if call_id else "-",
+                exc,
             )
+
+    async def touch_call_strict(self, call_id: str) -> None:
+        """Renew and rotate an orphan retry record that must still exist.
+
+        Recovery can span a PBX outage.  Refreshing the TTL before each
+        attempt prevents the only durable retry obligation from expiring
+        between watchdog passes. Updating ``updated_at`` also moves a failed
+        bounded attempt behind older untouched work. The Lua operation is
+        atomic, so a missing/concurrently deleted hash is never recreated with
+        partial ownership metadata.
+        """
+        if self._redis is None:
+            raise RuntimeError("Redis client is unavailable")
+        refreshed = await self._redis.eval(
+            """
+            if redis.call('EXISTS', KEYS[1]) == 0 then
+                return 0
+            end
+            redis.call('HSET', KEYS[1], 'updated_at', ARGV[1])
+            redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2]))
+            return 1
+            """,
+            1,
+            _session_key(call_id),
+            _now_iso(),
+            _ACTIVE_TTL_SECONDS,
+        )
+        if not refreshed:
+            raise RuntimeError(f"telephony recovery ledger entry disappeared for {call_id}")
+
+    async def session_exists_strict(self, call_id: str) -> bool:
+        """Return durable ledger presence; Redis ambiguity must propagate."""
+
+        if self._redis is None:
+            raise RuntimeError("Redis client is unavailable")
+        return bool(await self._redis.exists(_session_key(call_id)))
+
+    async def claim_cleanup_call_if_absent_strict(
+        self,
+        call_id: str,
+        *,
+        state: str = "termination_pending",
+        provider: Optional[str] = None,
+        provider_call_id: Optional[str] = None,
+    ) -> bool:
+        """Atomically create an inverse-recovery record only when absent.
+
+        A normal admission/Answer write always wins this race.  In particular,
+        this operation must never replace ``answer_pending`` timestamps or
+        durable provider identity that appeared after an ARI inventory read.
+        """
+
+        if self._redis is None:
+            raise RuntimeError("Redis client is unavailable")
+        now = _now_iso()
+        claimed = await self._redis.eval(
+            """
+            -- claim-cleanup-if-absent
+            if redis.call('EXISTS', KEYS[1]) == 1 then
+                return 0
+            end
+            redis.call(
+                'HSET', KEYS[1],
+                'pod_id', ARGV[1],
+                'state', ARGV[2],
+                'tenant_id', '',
+                'campaign_id', '',
+                'first_speaker', '',
+                'provider', ARGV[3],
+                'provider_call_id', ARGV[4],
+                'recovery_source', 'inverse_ari_inventory',
+                'created_at', ARGV[5],
+                'updated_at', ARGV[5]
+            )
+            redis.call('EXPIRE', KEYS[1], tonumber(ARGV[6]))
+            return 1
+            """,
+            1,
+            _session_key(call_id),
+            self._pod_id,
+            state,
+            provider or "",
+            provider_call_id or call_id,
+            now,
+            _ACTIVE_TTL_SECONDS,
+        )
+        return bool(claimed)
 
     # ── Heartbeat ───────────────────────────────────────────────────
 
@@ -199,10 +463,21 @@ class SessionRegistry:
             return
         try:
             await self._redis.set(
-                _heartbeat_key(self._pod_id), _now_iso(), ex=ttl_seconds,
+                _heartbeat_key(self._pod_id),
+                _now_iso(),
+                ex=ttl_seconds,
             )
         except Exception as exc:
             logger.debug("session_registry.heartbeat_failed pod=%s err=%s", self._pod_id, exc)
+
+    async def write_heartbeat_strict(self, ttl_seconds: int) -> None:
+        """Write and verify the startup heartbeat without swallowing errors."""
+        if self._redis is None:
+            raise RuntimeError("Redis client is unavailable")
+        key = _heartbeat_key(self._pod_id)
+        await self._redis.set(key, _now_iso(), ex=ttl_seconds)
+        if not await self._redis.exists(key):
+            raise RuntimeError("Redis heartbeat write was not durable")
 
     async def clear_heartbeat(self) -> None:
         """Drop this incarnation's heartbeat on graceful shutdown so the
@@ -249,7 +524,10 @@ class SessionRegistry:
             return True
         try:
             won = await self._redis.set(
-                _ARI_OWNER_KEY, self._pod_id, nx=True, ex=ttl_seconds,
+                _ARI_OWNER_KEY,
+                self._pod_id,
+                nx=True,
+                ex=ttl_seconds,
             )
             if won:
                 return True
@@ -259,9 +537,25 @@ class SessionRegistry:
         except Exception as exc:
             logger.warning(
                 "session_registry.ari_acquire_failed pod=%s err=%s — failing open",
-                self._pod_id, exc,
+                self._pod_id,
+                exc,
             )
             return True
+
+    async def try_acquire_ari_ownership_strict(self, ttl_seconds: int) -> bool:
+        """Production variant: Redis errors are startup failures, never ownership."""
+        if self._redis is None:
+            raise RuntimeError("Redis client is unavailable")
+        won = await self._redis.set(
+            _ARI_OWNER_KEY,
+            self._pod_id,
+            nx=True,
+            ex=ttl_seconds,
+        )
+        if won:
+            return True
+        current = _decode(await self._redis.get(_ARI_OWNER_KEY))
+        return current == self._pod_id
 
     async def renew_ari_ownership(self, ttl_seconds: int) -> bool:
         """Extend the owner-lock TTL, but only while we still own it.
@@ -272,12 +566,33 @@ class SessionRegistry:
             return True
         try:
             res = await self._redis.eval(
-                _RENEW_OWNER_LUA, 1, _ARI_OWNER_KEY, self._pod_id, str(ttl_seconds),
+                _RENEW_OWNER_LUA,
+                1,
+                _ARI_OWNER_KEY,
+                self._pod_id,
+                str(ttl_seconds),
             )
             return bool(res)
         except Exception as exc:
             logger.debug("session_registry.ari_renew_failed pod=%s err=%s", self._pod_id, exc)
             return True
+
+    async def renew_ari_ownership_strict(self, ttl_seconds: int) -> bool:
+        """Production variant: an unverifiable lock is not ownership.
+
+        Unlike :meth:`renew_ari_ownership`, this method deliberately lets
+        Redis errors propagate so the caller can stop serving telephony.
+        """
+        if self._redis is None:
+            raise RuntimeError("Redis client is unavailable")
+        result = await self._redis.eval(
+            _RENEW_OWNER_LUA,
+            1,
+            _ARI_OWNER_KEY,
+            self._pod_id,
+            str(ttl_seconds),
+        )
+        return bool(result)
 
     async def release_ari_ownership(self) -> None:
         """Drop the owner lock on graceful shutdown — but only if it's
@@ -287,7 +602,10 @@ class SessionRegistry:
             return
         try:
             await self._redis.eval(
-                _RELEASE_OWNER_LUA, 1, _ARI_OWNER_KEY, self._pod_id,
+                _RELEASE_OWNER_LUA,
+                1,
+                _ARI_OWNER_KEY,
+                self._pod_id,
             )
         except Exception as exc:
             logger.debug("session_registry.ari_release_failed pod=%s err=%s", self._pod_id, exc)

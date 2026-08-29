@@ -23,13 +23,17 @@ connection object — is reached through
 the API layer to read it (that used to be done via a lazy-imported
 ``_bridge()`` helper — an API→domain dependency pointing the wrong way).
 """
+
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import math
 import os
 import time
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, Mapping, Optional
 
 # Imports from already-extracted telephony submodules
 from app.domain.services.telephony.config import (
@@ -38,6 +42,7 @@ from app.domain.services.telephony.config import (
     _MAX_TELEPHONY_SESSIONS,
     _RINGING_MAX_AGE_S,
 )
+from app.domain.services.telephony.inbound_overrides import apply_qualification_overrides
 from app.domain.services.telephony.adapter_registry import get_adapter
 from app.domain.services.telephony.modes import resolve_first_speaker
 from app.domain.services.telephony.modes.agent_first import _send_outbound_greeting
@@ -61,6 +66,7 @@ def _state():
     via ``adapter_registry.get_adapter()`` instead (see module docstring).
     """
     from app.domain.services.telephony.state_backend import get_state_backend
+
     return get_state_backend()
 
 
@@ -114,7 +120,10 @@ def _realtime_fallback_enabled() -> bool:
     behaviour (the bridge ends and the inactivity watchdog eventually reaps
     the call). Read per-call so an operator can flip it without a restart."""
     return os.getenv("REALTIME_FALLBACK_ENABLED", "true").strip().lower() not in (
-        "false", "0", "no", "off",
+        "false",
+        "0",
+        "no",
+        "off",
     )
 
 
@@ -143,7 +152,8 @@ async def _on_realtime_connection_lost(call_id: str, voice_session) -> None:
         return
     if getattr(voice_session, "_realtime_fallback_attempted", False):
         logger.debug(
-            "realtime_fallback_skip call=%s — already attempted once", call_id[:12],
+            "realtime_fallback_skip call=%s — already attempted once",
+            call_id[:12],
         )
         return
     voice_session._realtime_fallback_attempted = True
@@ -152,7 +162,8 @@ async def _on_realtime_connection_lost(call_id: str, voice_session) -> None:
     # drop already removed the session (and is tearing down) — nothing to do.
     if _state().get_voice_session(call_id) is None:
         logger.info(
-            "realtime_fallback_skip call=%s — session already gone", call_id[:12],
+            "realtime_fallback_skip call=%s — session already gone",
+            call_id[:12],
         )
         return
 
@@ -161,14 +172,16 @@ async def _on_realtime_connection_lost(call_id: str, voice_session) -> None:
     except Exception as exc:  # noqa: BLE001 — defensive; builder already fail-soft
         logger.error(
             "realtime_fallback_build_raised call=%s: %s — ending call",
-            call_id[:12], exc,
+            call_id[:12],
+            exc,
         )
         new_task = None
 
     if new_task is None:
         logger.error(
             "realtime_fallback_failed call=%s — cascaded rebuild produced no "
-            "pipeline; ending call (same as today)", call_id[:12],
+            "pipeline; ending call (same as today)",
+            call_id[:12],
         )
         _track_task(_force_end_and_hangup(call_id))
         return
@@ -179,7 +192,8 @@ async def _on_realtime_connection_lost(call_id: str, voice_session) -> None:
     new_task.add_done_callback(lambda t: _pipeline_done_cb(t, call_id))
     logger.warning(
         "realtime_fallback_active call=%s — cascaded pipeline swapped in after "
-        "realtime socket drop", call_id[:12],
+        "realtime socket drop",
+        call_id[:12],
     )
 
 
@@ -199,8 +213,10 @@ def _pop_ringing_warmup(call_id: str):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_orchestrator():
     from app.core.container import get_container
+
     return get_container().voice_orchestrator
 
 
@@ -333,45 +349,354 @@ def _collect_expired_sessions(
         call_session = getattr(vs, "call_session", None)
         if call_session is None:
             continue
-        if call_session.is_stale(inactivity_timeout_s):
+        transfer_connected = bool(getattr(vs, "_transfer_connected", False))
+        # Once a supervised human target answers, the AI/media session is
+        # intentionally quiesced and therefore looks inactive. The pinned
+        # absolute deadline remains authoritative for the human bridge.
+        if not transfer_connected and call_session.is_stale(inactivity_timeout_s):
             stale.append(call_id)
             continue
         duration = call_session.get_duration_seconds()
+        session_max_duration = getattr(vs, "_max_call_duration_seconds", max_duration_s)
+        if not isinstance(session_max_duration, (int, float)) or session_max_duration <= 0:
+            session_max_duration = max_duration_s
+        session_soft_cap = getattr(vs, "_soft_call_cap_seconds", soft_cap_s)
+        if not isinstance(session_soft_cap, (int, float)) or session_soft_cap < 0:
+            session_soft_cap = soft_cap_s
         # Absolute hard ceiling — end no matter what.
-        if duration > max_duration_s:
+        if duration > session_max_duration:
             overlong.append(call_id)
             continue
         # Soft cap (5 min): wrap up unless the agent is actively closing.
-        if soft_cap_s and duration > soft_cap_s and not _session_is_closing(vs):
+        if (
+            not transfer_connected
+            and session_soft_cap
+            and duration > session_soft_cap
+            and not _session_is_closing(vs)
+        ):
             overlong.append(call_id)
     return stale, overlong
 
 
-async def _force_end_and_hangup(call_id: str) -> None:
-    """Force-end a session (teardown + persistence) AND best-effort hang up
-    the live PBX channel.
+# ---------------------------------------------------------------------------
+# Pre-hangup wrap-up nudge
+# ---------------------------------------------------------------------------
+# `_collect_expired_sessions` + `_force_end_and_hangup` enforce the duration
+# caps by silently tearing the call down — the caller is cut off mid-sentence
+# with no warning at all. This gives the agent ONE short heads-up shortly
+# before its effective deadline so it can land the call gracefully.
+#
+# It is a *system-level instruction*, not a spoken line: the agent decides how
+# to close in its own voice on its next turn. Delivery reuses the injection
+# channel each pipeline mode already has — no new channel is built:
+#
+#   cascaded  — a MessageRole.SYSTEM entry appended to
+#               ``call_session.conversation_history``. That's the same list the
+#               pipeline already appends mid-call steering entries to
+#               (turn_ender, instant_opener, agent_first's disclosure), and
+#               turn_streamer hands it to the LLM with roles intact, so a
+#               system-role entry arrives as a real system message.
+#   realtime  — ``realtime_session.send_text(..., create_response=False)``, the
+#               ``conversation.item.create`` path openai_realtime.py documents
+#               for "any future system-initiated prompt". create_response is
+#               False on purpose: the model must fold this into its NEXT turn,
+#               not immediately talk over a caller who is mid-sentence.
+_WRAP_UP_LEAD_DEFAULT_S = 20
+_WRAP_UP_LEAD_MIN_S = 5
+_WRAP_UP_LEAD_MAX_S = 60
 
-    FIX #1 — ``_on_call_ended`` alone does NOT hang up the Asterisk channel;
-    it's designed to run AFTER StasisEnd has already fired (channel already
-    gone). But every *forced* teardown path (watchdog stale/zombie/max-
-    duration sweeps, and a crashed pipeline task via ``_pipeline_done_cb``)
-    invokes it proactively while the channel is often still live. Without an
-    explicit hangup here the caller is left on dead air until the gateway's
-    hard timeout (~2h) or they give up. ``adapter.hangup`` is guarded so a
-    failure (e.g. channel already gone) can never abort the rest of
-    teardown — StasisEnd re-delivers to ``_on_call_ended`` idempotently if
-    the channel actually was still up.
+_WRAP_UP_INSTRUCTION_TEMPLATE = (
+    "The call must end in about {seconds} seconds. Finish your current point "
+    "in one short sentence, thank the caller, and say goodbye. Do not start a "
+    "new topic."
+)
+
+
+def _wrap_up_lead_seconds() -> int:
+    """How many seconds before the effective deadline the nudge fires.
+
+    ``CALL_WRAP_UP_LEAD_SECONDS``, clamped to [5, 60]. Read per call (not at
+    import) so an operator can retune it without a restart; anything
+    unparseable falls back to the 20s default rather than disabling the nudge.
     """
-    await _on_call_ended(call_id)
+    raw = os.getenv("CALL_WRAP_UP_LEAD_SECONDS")
+    if raw is None or not str(raw).strip():
+        value = _WRAP_UP_LEAD_DEFAULT_S
+    else:
+        try:
+            value = int(float(str(raw).strip()))
+        except (TypeError, ValueError):
+            logger.warning(
+                "wrap_up_nudge: CALL_WRAP_UP_LEAD_SECONDS=%r is not a number — " "using %ds",
+                str(raw)[:32],
+                _WRAP_UP_LEAD_DEFAULT_S,
+            )
+            value = _WRAP_UP_LEAD_DEFAULT_S
+    return max(_WRAP_UP_LEAD_MIN_S, min(_WRAP_UP_LEAD_MAX_S, value))
+
+
+def _effective_deadline_seconds(vs, *, max_duration_s: int, soft_cap_s: int) -> float:
+    """The duration at which ``_collect_expired_sessions`` would end this call.
+
+    Mirrors that classifier exactly so the nudge lands relative to the deadline
+    the call will ACTUALLY hit: the soft cap when it applies, otherwise the
+    hard ceiling. Per-session overrides win over the module defaults, same as
+    there.
+    """
+    session_max_duration = getattr(vs, "_max_call_duration_seconds", max_duration_s)
+    if not isinstance(session_max_duration, (int, float)) or session_max_duration <= 0:
+        session_max_duration = max_duration_s
+    session_soft_cap = getattr(vs, "_soft_call_cap_seconds", soft_cap_s)
+    if not isinstance(session_soft_cap, (int, float)) or session_soft_cap < 0:
+        session_soft_cap = soft_cap_s
+    transfer_connected = bool(getattr(vs, "_transfer_connected", False))
+    if not transfer_connected and session_soft_cap:
+        return float(min(session_soft_cap, session_max_duration))
+    return float(session_max_duration)
+
+
+def _collect_wrap_up_candidates(
+    session_items,
+    *,
+    max_duration_s: int,
+    soft_cap_s: int,
+    lead_s: int,
+) -> list:
+    """Pure classifier: live sessions inside the wrap-up window.
+
+    Returns ``(call_id, voice_session, seconds_remaining)`` for every session
+    that is within ``lead_s`` of its effective deadline and has not been
+    nudged yet. Same "pure function, plain objects" shape as
+    ``_collect_expired_sessions`` / ``_detect_zombie_sessions`` so it is
+    unit-testable without the watchdog's state-backend/adapter dependencies.
+
+    Never raises: a session whose attributes blow up is skipped, because a
+    nudge must never be able to stop the watchdog's teardown sweeps.
+    """
+    candidates: list = []
+    for call_id, vs in session_items:
+        try:
+            if getattr(vs, "_wrap_up_nudged", False):
+                continue
+            call_session = getattr(vs, "call_session", None)
+            if call_session is None:
+                continue
+            # A call the agent is actively closing is already heading for a
+            # natural ending, and the soft cap has been waived for it —
+            # telling it to wrap up would step on the close it is landing.
+            if _session_is_closing(vs):
+                continue
+            deadline = _effective_deadline_seconds(
+                vs,
+                max_duration_s=max_duration_s,
+                soft_cap_s=soft_cap_s,
+            )
+            remaining = deadline - float(call_session.get_duration_seconds())
+            # remaining <= 0 is already overlong: `_collect_expired_sessions`
+            # is ending it on this same tick, so a nudge would only arrive
+            # after the hangup.
+            if 0 < remaining <= lead_s:
+                candidates.append((call_id, vs, remaining))
+        except Exception as exc:  # noqa: BLE001 — best-effort, never fatal
+            logger.debug(
+                "wrap_up_nudge_classify_skipped call=%s err=%s",
+                str(call_id)[:12],
+                exc,
+            )
+    return candidates
+
+
+async def _inject_wrap_up_nudge(
+    call_id: str,
+    vs,
+    seconds_remaining: float,
+    instruction: str,
+) -> bool:
+    """Deliver the wrap-up instruction on whichever channel this session has.
+
+    Returns True when it landed. Never raises — this runs fire-and-forget off
+    the watchdog, and a dead socket or a half-built session must degrade to a
+    log line, never to a lost teardown sweep.
+    """
+    short_id = str(call_id)[:12]
+    try:
+        # Realtime speech-to-speech bridge.
+        if getattr(vs, "realtime_bridge", None) is not None:
+            rt = getattr(vs, "realtime_session", None)
+            send_text = getattr(rt, "send_text", None)
+            if not callable(send_text):
+                logger.warning(
+                    "wrap_up_nudge_no_channel call=%s mode=realtime — session "
+                    "exposes no send_text; skipping (call will still be ended "
+                    "on time)",
+                    short_id,
+                )
+                return False
+            await send_text(instruction, create_response=False)
+            logger.info(
+                "wrap_up_nudge call=%s mode=realtime seconds_remaining=%d",
+                short_id,
+                int(seconds_remaining),
+            )
+            return True
+
+        # Cascaded STT→LLM→TTS pipeline.
+        call_session = getattr(vs, "call_session", None)
+        history = getattr(call_session, "conversation_history", None)
+        if not isinstance(history, list):
+            logger.warning(
+                "wrap_up_nudge_no_channel call=%s mode=cascaded — no "
+                "conversation_history to inject into; skipping (call will "
+                "still be ended on time)",
+                short_id,
+            )
+            return False
+        from app.domain.models.conversation import Message, MessageRole
+
+        history.append(Message(role=MessageRole.SYSTEM, content=instruction))
+        logger.info(
+            "wrap_up_nudge call=%s mode=cascaded seconds_remaining=%d",
+            short_id,
+            int(seconds_remaining),
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001 — fail-soft by contract
+        logger.warning(
+            "wrap_up_nudge_failed call=%s seconds_remaining=%d err=%s",
+            short_id,
+            int(seconds_remaining),
+            exc,
+        )
+        return False
+
+
+def _dispatch_wrap_up_nudges(
+    session_items,
+    *,
+    max_duration_s: int,
+    soft_cap_s: int,
+    lead_s: Optional[int] = None,
+) -> list:
+    """Nudge every session inside the wrap-up window; return the ids nudged.
+
+    Synchronous and non-blocking: the classification is pure, and each
+    injection is fire-and-forget via ``_track_task`` so a wedged realtime
+    socket can never stall the watchdog's inactivity/zombie/orphan sweeps.
+
+    The ``_wrap_up_nudged`` flag is set HERE, before the task is spawned — not
+    inside the task — so the next 30s tick cannot fire a second nudge while
+    the first injection is still in flight.
+    """
+    if lead_s is None:
+        lead_s = _wrap_up_lead_seconds()
+    nudged: list = []
+    instruction = _WRAP_UP_INSTRUCTION_TEMPLATE.format(seconds=int(lead_s))
+    for call_id, vs, remaining in _collect_wrap_up_candidates(
+        session_items,
+        max_duration_s=max_duration_s,
+        soft_cap_s=soft_cap_s,
+        lead_s=lead_s,
+    ):
+        try:
+            vs._wrap_up_nudged = True
+        except Exception as exc:  # noqa: BLE001 — can't mark it, don't fire it
+            logger.debug(
+                "wrap_up_nudge_unmarkable call=%s err=%s",
+                str(call_id)[:12],
+                exc,
+            )
+            continue
+        _track_task(_inject_wrap_up_nudge(call_id, vs, remaining, instruction))
+        nudged.append(call_id)
+    return nudged
+
+
+async def _force_end_and_hangup(
+    call_id: str,
+    *,
+    require_confirmation: bool = True,
+    provider_leg_ids: Optional[list[str]] = None,
+    recovery_context: Optional[Dict[str, Any]] = None,
+    acknowledge_ledger: bool = True,
+) -> bool:
+    """Prove PBX teardown, then force-end and persist the logical session.
+
+    Forced teardown asks the PBX to remove every owned human leg first, then
+    persists/settles the logical call. Asterisk exposes a confirmation-aware
+    method so an ARI outage cannot release reservations while PSTN channels
+    may still be billable. Ordinary terminal events race safely through the
+    idempotent ``_on_call_ended`` path. Returns ``True`` only when logical
+    teardown was allowed to run; ``False`` means termination was unconfirmed
+    and all settlement must remain deferred.
+    """
+    if recovery_context is not None:
+        # Asterisk DELETE can synchronously emit ChannelDestroyed/StasisEnd
+        # before the bounded all-leg inventory proof has completed. Fence the
+        # ordinary callback until this coordinator has proved every durable
+        # linked provider leg absent.
+        recovery_context["_awaiting_all_leg_absence_proof"] = True
+        recovery_context.pop("_pbx_all_leg_absence_confirmed", None)
     adapter = get_adapter()
+    hangup_confirmed = not require_confirmation
     if adapter is not None:
         try:
-            await adapter.hangup(call_id)
+            confirm_many = getattr(adapter, "hangup_many_confirmed", None)
+            confirm = getattr(adapter, "hangup_confirmed", None)
+            explicit_legs = list(dict.fromkeys([call_id, *(provider_leg_ids or [])]))
+            if len(explicit_legs) > 1:
+                if callable(confirm_many):
+                    hangup_confirmed = bool(await confirm_many(explicit_legs))
+                else:
+                    # Proving only the parent would release linked-leg billing
+                    # and leases while a persisted human target may remain
+                    # live. Adapters that own multiple legs must expose one
+                    # bounded all-leg proof operation.
+                    hangup_confirmed = False
+                    logger.error(
+                        "force_end_and_hangup: adapter lacks all-leg proof "
+                        "call=%s linked_legs=%d",
+                        call_id[:12],
+                        len(explicit_legs) - 1,
+                    )
+            elif callable(confirm):
+                hangup_confirmed = bool(await confirm(call_id))
+            else:
+                # Legacy/non-Asterisk adapters have no separate proof query.
+                # Preserve their existing semantics for ordinary callers, but
+                # never promote request acceptance into PBX proof when the
+                # recovery/shutdown caller explicitly requires confirmation.
+                await adapter.hangup(call_id)
+                hangup_confirmed = not require_confirmation
         except Exception as exc:
-            logger.debug(
-                "force_end_and_hangup: adapter.hangup failed (non-fatal) call=%s err=%s",
-                call_id[:12], exc,
+            hangup_confirmed = False
+            logger.warning(
+                "force_end_and_hangup: adapter.hangup unconfirmed call=%s err=%s",
+                call_id[:12],
+                exc,
             )
+    if not hangup_confirmed:
+        logger.critical(
+            "force_end_and_hangup: settlement deferred until PBX termination proof call=%s",
+            call_id[:12],
+        )
+        return False
+    if recovery_context is not None:
+        recovery_context["_awaiting_all_leg_absence_proof"] = False
+        recovery_context["_pbx_all_leg_absence_confirmed"] = True
+    # Settle only after the PBX accepted deletion (or proved the channel was
+    # already absent). Terminal callbacks may race this call; teardown is
+    # idempotent and the in-flight marker chooses one finalizer.
+    if recovery_context is None and acknowledge_ledger:
+        # Keep the legacy one-argument call shape for tests and adapters that
+        # replace the callback. Recovery passes explicit context below.
+        logical_result = await _on_call_ended(call_id)
+    else:
+        logical_result = await _on_call_ended(
+            call_id,
+            recovery_context=recovery_context,
+            acknowledge_ledger=acknowledge_ledger,
+        )
+    return logical_result is not False
 
 
 async def _session_watchdog() -> None:
@@ -411,6 +736,18 @@ async def _session_watchdog() -> None:
             # / _SESSION_MAX_DURATION_S as a second, independent trip wire
             # (see _collect_expired_sessions docstring for why the inactivity
             # check alone isn't enough).
+            # Give the agent a heads-up BEFORE the caps below cut the call
+            # off mid-sentence. Fire-and-forget, exception-logged, at most
+            # once per session — see _dispatch_wrap_up_nudges.
+            try:
+                _dispatch_wrap_up_nudges(
+                    _session_pairs,
+                    max_duration_s=_SESSION_MAX_DURATION_S,
+                    soft_cap_s=_SESSION_SOFT_CAP_S,
+                )
+            except Exception as exc:  # noqa: BLE001 — never block the sweeps
+                logger.warning("wrap_up_nudge_dispatch_failed err=%s", exc)
+
             stale, overlong = _collect_expired_sessions(
                 _session_pairs,
                 inactivity_timeout_s=_SESSION_INACTIVITY_TIMEOUT_S,
@@ -420,14 +757,16 @@ async def _session_watchdog() -> None:
             for call_id in stale:
                 logger.warning(
                     "telephony_watchdog: stale session %s (inactive >%ds) — forcing end",
-                    call_id[:12], _SESSION_INACTIVITY_TIMEOUT_S,
+                    call_id[:12],
+                    _SESSION_INACTIVITY_TIMEOUT_S,
                 )
                 await _force_end_and_hangup(call_id)
             for call_id in overlong:
                 logger.warning(
                     "telephony_watchdog: session %s exceeded max call duration "
                     "(>%ds) — forcing end",
-                    call_id[:12], _SESSION_MAX_DURATION_S,
+                    call_id[:12],
+                    _SESSION_MAX_DURATION_S,
                 )
                 await _force_end_and_hangup(call_id)
 
@@ -456,7 +795,8 @@ async def _session_watchdog() -> None:
                             "telephony_watchdog: zombie session %s — no Asterisk "
                             "channel for %d ticks, forcing end to release its "
                             "concurrency slot",
-                            cid[:12], _ZOMBIE_TICK_THRESHOLD,
+                            cid[:12],
+                            _ZOMBIE_TICK_THRESHOLD,
                         )
                         # adapter.hangup() here is a best-effort no-op in the
                         # common case (the channel is already gone — that's
@@ -490,7 +830,8 @@ async def _session_watchdog() -> None:
 
             # ----- Orphaned ringing-warmup sweep (bug #3 / #7) -----
             stale_ringing = [
-                cid for cid, created_at in _sb.iter_ringing_started_at_items()
+                cid
+                for cid, created_at in _sb.iter_ringing_started_at_items()
                 if (now - created_at) > _RINGING_MAX_AGE_S
             ]
             for cid in stale_ringing:
@@ -499,7 +840,8 @@ async def _session_watchdog() -> None:
                 logger.warning(
                     "telephony_watchdog: orphaned ringing_warmup %s "
                     "(age >%ds) — releasing STT/TTS sockets",
-                    cid[:12], _RINGING_MAX_AGE_S,
+                    cid[:12],
+                    _RINGING_MAX_AGE_S,
                     extra={"call_id": cid, "alert": "ringing_warmup_orphan"},
                 )
                 if ringing is not None:
@@ -510,7 +852,9 @@ async def _session_watchdog() -> None:
                         await _get_orchestrator().end_session(ringing_session)
                     except Exception as exc:
                         logger.debug(
-                            "Watchdog end_session failed for %s: %s", cid[:12], exc,
+                            "Watchdog end_session failed for %s: %s",
+                            cid[:12],
+                            exc,
                         )
 
             # ----- Orphaned ringing_events sweep -----
@@ -520,7 +864,8 @@ async def _session_watchdog() -> None:
             _warmup_keys = {cid for cid, _ in _sb.iter_ringing_started_at_items()}
             _session_keys = {cid for cid, _ in _sb.iter_voice_session_items()}
             stale_events = [
-                cid for cid in _sb.iter_ringing_event_keys()
+                cid
+                for cid in _sb.iter_ringing_event_keys()
                 if cid not in _warmup_keys and cid not in _session_keys
             ]
             for cid in stale_events:
@@ -533,7 +878,8 @@ async def _session_watchdog() -> None:
             # policy as ringing warmups.
             active_call_ids = _session_keys | _warmup_keys
             orphan_gw = [
-                gw_id for gw_id, cid in _sb.iter_gateway_session_items()
+                gw_id
+                for gw_id, cid in _sb.iter_gateway_session_items()
                 if cid not in active_call_ids
             ]
             for gw_id in orphan_gw:
@@ -543,7 +889,8 @@ async def _session_watchdog() -> None:
                     logger.warning(
                         "telephony_watchdog: dropping orphan early_audio_buffer "
                         "gateway_session_id=%s chunks=%d",
-                        gw_id, len(buf),
+                        gw_id,
+                        len(buf),
                     )
 
             # Buffers that exist without any gateway-session mapping at all are
@@ -561,6 +908,7 @@ async def _session_watchdog() -> None:
             # active session list every cycle.
             try:
                 from app.core.container import get_container as _gc
+
                 _c = _gc()
                 if _c.is_initialized:
                     # The Cartesia provider is held inside live VoiceSessions, so
@@ -574,23 +922,21 @@ async def _session_watchdog() -> None:
                         if tts is None or getattr(tts, "name", None) != "cartesia":
                             continue
                         cartesia_singletons.add(id(tts))
-                        live_ids = {
-                            getattr(v, "call_id", None)
-                            for v in _live_sessions
-                        }
+                        live_ids = {getattr(v, "call_id", None) for v in _live_sessions}
                         live_ids.discard(None)
                         for cid in list(getattr(tts, "_call_ws", {}).keys()):
                             if cid not in live_ids:
                                 logger.warning(
-                                    "telephony_watchdog: evicting orphan cartesia WS "
-                                    "call_id=%s", str(cid)[:12],
+                                    "telephony_watchdog: evicting orphan cartesia WS " "call_id=%s",
+                                    str(cid)[:12],
                                 )
                                 try:
                                     await tts.disconnect_for_call(cid)
                                 except Exception as exc:
                                     logger.debug(
                                         "cartesia evict failed call_id=%s: %s",
-                                        str(cid)[:12], exc,
+                                        str(cid)[:12],
+                                        exc,
                                     )
             except Exception as exc:
                 logger.debug("cartesia_orphan_sweep_failed err=%s", exc)
@@ -606,6 +952,7 @@ async def _session_watchdog() -> None:
                     refresh_lease,
                 )
                 from app.core.container import get_container as _gc
+
                 _c = _gc()
                 _redis = getattr(_c, "redis", None) if _c.is_initialized else None
                 if _redis is not None:
@@ -632,71 +979,942 @@ async def _session_watchdog() -> None:
             logger.warning("telephony_watchdog error: %s", exc)
 
 
+_RECOVERY_TERMINAL_STATUSES = frozenset(
+    {
+        "completed",
+        "ended",
+        "failed",
+        "cancelled",
+        "canceled",
+        "rejected",
+        "busy",
+        "no_answer",
+    }
+)
+_RECOVERY_SETTLED_BILLING_STATUSES = frozenset({"finalized", "released", "reversed", "held"})
+
+
+def _is_recovery_row_logically_settled(row: Mapping[str, Any]) -> bool:
+    """Whether a durable call row no longer needs restart settlement."""
+
+    status = str(row.get("status") or "").strip().lower()
+    direction = str(row.get("direction") or "outbound").strip().lower()
+    if direction == "inbound":
+        return (
+            row.get("ended_at") is not None
+            and str(row.get("billing_status") or "").strip().lower()
+            in _RECOVERY_SETTLED_BILLING_STATUSES
+            and status in _RECOVERY_TERMINAL_STATUSES
+        )
+    return (
+        row.get("ended_at") is not None
+        and row.get("outcome") is not None
+        and row.get("terminal_settled_at") is not None
+        and (
+            row.get("terminal_retry_payload") is None
+            or row.get("terminal_retry_enqueued_at") is not None
+        )
+        and status in _RECOVERY_TERMINAL_STATUSES
+    )
+
+
+def _ledger_answer_elapsed_seconds(
+    ledger_entry: Mapping[str, Any],
+    *,
+    ended_at: Any = None,
+) -> int:
+    """Conservative elapsed time from confirmed or ambiguous Answer evidence."""
+
+    raw_timestamp = ledger_entry.get("answered_at") or ledger_entry.get("answer_requested_at")
+    if not raw_timestamp:
+        return 0
+    try:
+        started = datetime.fromisoformat(str(raw_timestamp).replace("Z", "+00:00"))
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        ended = ended_at or datetime.now(timezone.utc)
+        if isinstance(ended, str):
+            ended = datetime.fromisoformat(ended.replace("Z", "+00:00"))
+        if ended.tzinfo is None:
+            ended = ended.replace(tzinfo=timezone.utc)
+        return max(
+            1,
+            math.ceil(max(0.0, (ended - started).total_seconds())),
+        )
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return 0
+
+
+async def _hydrate_orphan_recovery_context(
+    provider_session_id: str,
+    ledger_entry: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Load the authoritative durable context for restart teardown.
+
+    Redis intentionally mirrors only ownership metadata. Direction, provider
+    identity, admission/billing state, elapsed duration, and connected
+    transfer targets come from PostgreSQL so a successor never guesses an
+    inbound call is outbound or proves only the parent while a connected human
+    transfer leg remains live.
+
+    A successful query with no row is authoritative too: the process may have
+    crashed after registering a PBX session but before creating its durable
+    call record. Such a channel still needs termination, but has no database
+    settlement to perform. Dependency/query failures raise and leave both the
+    PBX call and Redis obligation retryable.
+    """
+
+    from app.core.container import get_container
+    from app.core.db_utils import acquire_with_tenant
+    from app.domain.services.telephony.termination import (
+        fetch_active_provider_leg_ids,
+    )
+
+    container = get_container()
+    db_pool = getattr(container, "db_pool", None)
+    if not getattr(container, "is_initialized", False) or db_pool is None:
+        raise RuntimeError("database unavailable for orphan recovery hydration")
+
+    durable_call_id = str(ledger_entry.get("durable_call_id") or "").strip() or None
+    ledger_provider = str(ledger_entry.get("provider") or "").strip().lower()
+    ledger_tenant_id = str(ledger_entry.get("tenant_id") or "").strip() or None
+
+    async with acquire_with_tenant(db_pool, None, timeout=5.0) as conn:
+        raw_row = await conn.fetchrow(
+            """
+            SELECT c.id, c.tenant_id, c.campaign_id, c.direction, c.provider,
+                   c.provider_call_id, c.external_call_uuid, c.status,
+                   c.outcome, c.started_at, c.answered_at, c.ended_at,
+                   c.duration_seconds, c.admission_status,
+                   c.admission_reason, c.processing_status,
+                   c.billing_status, c.reserved_seconds,
+                   c.concurrency_lease_id, c.route_snapshot,
+                   c.terminal_settled_at, c.terminal_retry_payload,
+                   c.terminal_retry_enqueued_at,
+                   COUNT(*) OVER() AS recovery_match_count,
+                   CASE
+                     WHEN c.answered_at IS NOT NULL
+                       THEN GREATEST(
+                         0,
+                         COALESCE(c.duration_seconds,0),
+                         CEIL(EXTRACT(EPOCH FROM (
+                           COALESCE(c.ended_at,NOW()) - c.answered_at
+                         )))::int
+                       )
+                     WHEN c.status IN ('answered','in_call')
+                       AND c.started_at IS NOT NULL
+                       THEN GREATEST(
+                         0,
+                         COALESCE(c.duration_seconds,0),
+                         CEIL(EXTRACT(EPOCH FROM (
+                           COALESCE(c.ended_at,NOW()) - c.started_at
+                         )))::int
+                       )
+                     WHEN c.duration_seconds IS NOT NULL
+                       THEN GREATEST(0,c.duration_seconds)
+                     ELSE 0
+                   END AS recovery_duration_seconds
+            FROM calls c
+            WHERE (c.provider_call_id=$1 OR c.external_call_uuid=$1)
+              AND ($2::uuid IS NULL OR c.id=$2::uuid)
+              AND (
+                    NULLIF($3::text,'') IS NULL
+                    OR LOWER(BTRIM(c.provider))=$3::text
+                  )
+              AND ($4::uuid IS NULL OR c.tenant_id=$4::uuid)
+            ORDER BY CASE WHEN c.provider_call_id=$1 THEN 0 ELSE 1 END,
+                     c.created_at DESC
+            """,
+            provider_session_id,
+            durable_call_id,
+            ledger_provider,
+            ledger_tenant_id,
+        )
+        if raw_row is None:
+            ledger_state = str(ledger_entry.get("state") or "").strip().lower()
+            return {
+                "provider_session_id": provider_session_id,
+                "provider_leg_ids": [],
+                "durable_call_id": durable_call_id,
+                "direction": str(ledger_entry.get("direction") or "unknown"),
+                "provider": str(ledger_entry.get("provider") or "unknown"),
+                "provider_call_id": str(
+                    ledger_entry.get("provider_call_id") or provider_session_id
+                ),
+                "duration_seconds": _ledger_answer_elapsed_seconds(ledger_entry),
+                "was_answered": ledger_state in {"active", "answer_pending"},
+                "answer_ambiguous": ledger_state == "answer_pending",
+                "logical_settled": True,
+                "ledger_entry": dict(ledger_entry),
+            }
+
+        row = dict(raw_row)
+        match_count = int(row.pop("recovery_match_count", 0) or 0)
+        if match_count != 1:
+            raise RuntimeError(
+                "orphan recovery identity is ambiguous for provider session "
+                f"{provider_session_id}"
+            )
+        # The strict Answer hook writes PostgreSQL before Redis, so the normal
+        # path already has ``c.answered_at``. Keep the ledger timestamp as a
+        # second conservative clock for rolling upgrades and a crash between
+        # the two durable writes: recovery must never turn an answered call
+        # into a zero-second release merely because an older row projection
+        # missed the timestamp.
+        ledger_elapsed = _ledger_answer_elapsed_seconds(
+            ledger_entry,
+            ended_at=row.get("ended_at"),
+        )
+        if ledger_elapsed:
+            row["recovery_duration_seconds"] = max(
+                int(row.get("recovery_duration_seconds") or 0),
+                ledger_elapsed,
+            )
+        # Use the same durable all-leg query as tenant/admin termination.
+        # Adapter transfer maps are process-local and empty after a restart.
+        provider_leg_ids = list(
+            await fetch_active_provider_leg_ids(
+                conn,
+                call_reference=str(row["id"]),
+            )
+        )
+
+    status = str(row.get("status") or "").strip().lower()
+    ledger_state = str(ledger_entry.get("state") or "").strip().lower()
+    answer_ambiguous = ledger_state == "answer_pending"
+    was_answered = bool(
+        row.get("answered_at") is not None
+        or status in {"answered", "in_call"}
+        or ledger_state in {"active", "answer_pending"}
+    )
+    provider_call_id = str(
+        row.get("provider_call_id") or row.get("external_call_uuid") or provider_session_id
+    )
+    admission = {
+        # Direction is the durable routing authority. An admitted call may
+        # already carry a terminal/released admission_status on an idempotent
+        # replay, but it is still inbound and must never enter CallService's
+        # outbound lead/campaign path.
+        "allowed": (str(row.get("direction") or "").strip().lower() == "inbound"),
+        "admission_status": row.get("admission_status"),
+        "billing_status": row.get("billing_status"),
+        "call_id": str(row["id"]),
+        "tenant_id": str(row["tenant_id"]),
+        "campaign_id": (str(row["campaign_id"]) if row.get("campaign_id") else None),
+        "provider": str(row.get("provider") or "asterisk"),
+        "provider_call_id": provider_call_id,
+        "_terminal_reason": (
+            "process_restart_answer_ambiguous" if answer_ambiguous else "process_restart_recovery"
+        ),
+        "_recovery_was_answered": was_answered,
+        "_recovery_duration_seconds": max(0, int(row.get("recovery_duration_seconds") or 0)),
+    }
+    return {
+        **row,
+        "provider_session_id": provider_session_id,
+        "provider_leg_ids": provider_leg_ids,
+        "durable_call_id": str(row["id"]),
+        "direction": str(row.get("direction") or "outbound").strip().lower(),
+        "provider": str(row.get("provider") or "asterisk").strip().lower(),
+        "provider_call_id": provider_call_id,
+        "duration_seconds": max(0, int(row.get("recovery_duration_seconds") or 0)),
+        "was_answered": was_answered,
+        "answer_ambiguous": answer_ambiguous,
+        "logical_settled": _is_recovery_row_logically_settled(row),
+        "admission": admission,
+        "ledger_entry": dict(ledger_entry),
+    }
+
+
+async def _settle_recovered_outbound_call(
+    recovery_context: Dict[str, Any],
+) -> None:
+    """Persist a no-longer-in-memory outbound orphan and verify the write.
+
+    ``CallService.handle_call_status`` is intentionally fail-soft for live
+    callbacks, so recovery cannot treat its return as proof. After invoking
+    the normal atomic call/lead/job/campaign chain, hydrate the row again and
+    require terminal status, outcome and end timestamp before allowing Redis
+    acknowledgement.
+    """
+
+    if recovery_context.get("logical_settled"):
+        return
+    durable_call_id = recovery_context.get("durable_call_id")
+    if not durable_call_id:
+        # A successful authoritative lookup proved there is no DB row.
+        return
+
+    from app.core.container import get_container
+    from app.core.security.tenant_isolation import (
+        set_bypass_rls,
+        set_current_tenant_id,
+    )
+    from app.domain.models.dialer_job import CallOutcome
+
+    container = get_container()
+    if not getattr(container, "is_initialized", False):
+        raise RuntimeError("service container unavailable for orphan settlement")
+
+    hangup_reason = None
+    adapter = get_adapter()
+    get_cause = getattr(adapter, "get_hangup_cause", None)
+    if callable(get_cause):
+        try:
+            hangup_reason = get_cause(str(recovery_context.get("provider_session_id") or ""))
+        except Exception:
+            hangup_reason = None
+    outcome = (
+        CallOutcome.ANSWERED
+        if recovery_context.get("was_answered")
+        else resolve_call_outcome(None, hangup_reason=hangup_reason)
+    )
+
+    set_bypass_rls(True)
+    tenant_id = recovery_context.get("tenant_id")
+    if tenant_id:
+        set_current_tenant_id(str(tenant_id))
+    call_service = CallService(
+        db_client=container.db_client,
+        queue_service=getattr(container, "_queue_service", None),
+        db_pool=container.db_pool,
+    )
+    result = await call_service.handle_call_status(
+        call_uuid=str(durable_call_id),
+        outcome=outcome,
+        duration=max(0, int(recovery_context.get("duration_seconds") or 0)),
+    )
+    if not result.durable:
+        raise RuntimeError(
+            "outbound orphan settlement was not durably committed: "
+            f"{result.error or 'unverified'}"
+        )
+
+    verified = await _hydrate_orphan_recovery_context(
+        str(recovery_context["provider_session_id"]),
+        recovery_context.get("ledger_entry") or {},
+    )
+    if not verified.get("logical_settled"):
+        raise RuntimeError("outbound orphan settlement did not reach durable terminal state")
+    recovery_context.update(verified)
+
+
+async def _load_termination_pending_candidates() -> list[dict[str, Any]]:
+    """Return durable calls needing confirmed teardown or inbound settlement.
+
+    ``termination_pending`` is deliberately nonterminal: it frees the dialer
+    job from a wedged batch without claiming the carrier call ended. The
+    telephony owner consumes these rows on startup and every 30-second watchdog
+    tick, runs the same confirmation/settlement path as Redis orphans, and
+    leaves the status untouched on any dependency or PBX proof failure.
+
+    The second predicate closes a shorter recovery gap: a terminal provider
+    callback can prove the PBX leg gone and persist ``ended_at``/terminal
+    status, then crash before ``InboundAdmissionService.finalize`` commits.
+    Those rows still carry ``billing_status='reserved'`` and must settle on the
+    next <=30s tick, not wait for the generic multi-hour reservation reaper.
+    The third covers operator-confirmed outbound endings or interrupted Redis
+    retry dispatch: terminal PBX truth is not lead/job/campaign settlement.
+    """
+
+    from app.core.container import get_container
+    from app.core.db_utils import acquire_with_tenant
+
+    container = get_container()
+    db_pool = getattr(container, "db_pool", None)
+    if not getattr(container, "is_initialized", False) or db_pool is None:
+        raise RuntimeError("database unavailable for pending termination scan")
+    adapter = get_adapter()
+    adapter_provider = str(getattr(adapter, "name", "") or "asterisk").strip().lower()
+    # This release has proof-aware restart control only for the active
+    # Asterisk adapter. A row owned by another carrier/PBX must remain
+    # quarantined rather than treating an Asterisk 404 as carrier absence.
+    if adapter_provider != "asterisk":
+        logger.error(
+            "termination_pending_scan_unsupported_adapter provider=%s",
+            adapter_provider or "unknown",
+        )
+        return []
+    async with acquire_with_tenant(db_pool, None, timeout=5.0) as conn:
+        rows = list(
+            await conn.fetch(
+                """
+                SELECT id, tenant_id, provider, provider_call_id,
+                       external_call_uuid, direction, status,
+                       processing_status, billing_status, ended_at, updated_at,
+                       terminal_settled_at, terminal_retry_payload,
+                       terminal_retry_enqueued_at
+                FROM calls
+                WHERE (
+                      status='termination_pending'
+                   OR (
+                        direction='inbound'
+                    AND billing_status='reserved'
+                    AND (
+                         ended_at IS NOT NULL
+                         OR status IN (
+                           'ended','completed','failed','cancelled','canceled',
+                           'rejected','busy','no_answer'
+                         )
+                    )
+                   )
+                   OR (
+                        direction='outbound'
+                    AND status IN (
+                       'ended','completed','failed','cancelled','canceled',
+                       'rejected','busy','no_answer'
+                    )
+                    AND (
+                         terminal_settled_at IS NULL
+                         OR (
+                              terminal_retry_payload IS NOT NULL
+                          AND terminal_retry_enqueued_at IS NULL
+                         )
+                    )
+                   )
+                   OR (
+                        direction='inbound'
+                    AND status IN (
+                       'ended','completed','failed','cancelled','canceled',
+                       'rejected','busy','no_answer'
+                    )
+                    AND EXISTS (
+                        SELECT 1
+                        FROM call_legs pending_leg
+                        WHERE pending_leg.call_id=calls.id
+                          AND pending_leg.leg_type='transfer'
+                          AND pending_leg.status IN (
+                              'initiated','ringing','answered',
+                              'in_progress','in_call','active'
+                          )
+                    )
+                   )
+                )
+                  AND LOWER(BTRIM(provider))=$1::text
+                  AND COALESCE(
+                        NULLIF(BTRIM(provider_call_id),''),
+                        NULLIF(BTRIM(external_call_uuid),'')
+                ) IS NOT NULL
+                ORDER BY updated_at
+                LIMIT 4
+                """,
+                adapter_provider,
+            )
+        )
+
+    candidates: list[dict[str, Any]] = []
+    for raw in rows:
+        row = dict(raw)
+        provider_session_id = str(
+            row.get("provider_call_id") or row.get("external_call_uuid") or ""
+        ).strip()
+        if not provider_session_id:
+            logger.error(
+                "termination_pending_missing_provider_identity durable_call=%s",
+                str(row.get("id") or "-")[:12],
+            )
+            continue
+        candidates.append(
+            {
+                "call_id": provider_session_id,
+                "pod_id": "database:termination_pending",
+                "tenant_id": str(row.get("tenant_id") or ""),
+                "provider": str(row.get("provider") or ""),
+                "durable_call_id": str(row.get("id") or ""),
+                "_termination_pending": (str(row.get("status") or "") == "termination_pending"),
+                "_inbound_settlement_pending": (
+                    str(row.get("direction") or "") == "inbound"
+                    and str(row.get("billing_status") or "") == "reserved"
+                ),
+                "_has_redis_ledger": False,
+            }
+        )
+    return candidates
+
+
+async def _rotate_deferred_termination_candidate(durable_call_id: str) -> None:
+    """Move one still-unresolved durable retry behind newer queue entries."""
+
+    if not durable_call_id:
+        return
+    from app.core.container import get_container
+    from app.core.db_utils import acquire_with_tenant
+
+    container = get_container()
+    db_pool = getattr(container, "db_pool", None)
+    if not getattr(container, "is_initialized", False) or db_pool is None:
+        return
+    async with acquire_with_tenant(db_pool, None, timeout=5.0) as conn:
+        await conn.execute(
+            """
+            UPDATE calls
+            SET updated_at=NOW()
+            WHERE id=$1::uuid
+              AND (
+                   status='termination_pending'
+                   OR billing_status='reserved'
+                   OR (
+                        direction='outbound'
+                    AND status IN (
+                       'ended','completed','failed','cancelled','canceled',
+                       'rejected','busy','no_answer'
+                    )
+                    AND (
+                         terminal_settled_at IS NULL
+                         OR (
+                              terminal_retry_payload IS NOT NULL
+                          AND terminal_retry_enqueued_at IS NULL
+                         )
+                    )
+                   )
+              )
+            """,
+            durable_call_id,
+        )
+
+
+_orphan_recovery_in_flight: set[str] = set()
+_ORPHAN_RECOVERY_SOURCE_BATCH = 4
+_UNKNOWN_ASTERISK_CHANNEL_CONFIRMATIONS = 2
+_unknown_asterisk_channel_ticks: dict[str, int] = {}
+# A confirmed-delete request can synchronously trigger the adapter's ordinary
+# terminal callback before ``recover_orphaned_calls`` reaches its explicit
+# contextual `_on_call_ended` invocation. Keep the hydrated database truth
+# visible to that callback so it cannot guess that a restarted inbound call is
+# outbound or acknowledge Redis on its own. Entries survive failed attempts
+# and are removed only at recovery's explicit commit boundary.
+_orphan_recovery_contexts_by_call: dict[str, Dict[str, Any]] = {}
+
+
+def _current_recovery_exclusions(
+    state_backend: Any,
+    adapter: Any,
+    *,
+    ignore_recovery_call_id: Optional[str] = None,
+) -> Optional[set[str]]:
+    """Return a fail-closed snapshot of locally managed provider channels."""
+
+    exclusions_snapshot = getattr(adapter, "recovery_excluded_channel_ids", None)
+    if not callable(exclusions_snapshot):
+        return None
+    try:
+        exclusions = {str(value) for value in exclusions_snapshot() if value}
+        for iterator_name in (
+            "iter_voice_session_items",
+            "iter_ringing_warmup_keys",
+            "iter_ringing_event_keys",
+        ):
+            iterator = getattr(state_backend, iterator_name, None)
+            if not callable(iterator):
+                continue
+            values = iterator()
+            if iterator_name == "iter_voice_session_items":
+                exclusions.update(str(call_id) for call_id, _ in values if call_id)
+            else:
+                exclusions.update(str(call_id) for call_id in values if call_id)
+        exclusions.update(str(value) for value in _inbound_admissions_in_flight if value)
+        exclusions.update(str(value) for value in _inbound_admissions_pending if value)
+        exclusions.update(
+            str(value)
+            for value in _orphan_recovery_in_flight
+            if value and str(value) != str(ignore_recovery_call_id or "")
+        )
+        return exclusions
+    except Exception as exc:  # noqa: BLE001 - uncertain local state is not absence proof
+        logger.warning("recovery_local_exclusion_snapshot_failed err=%s", exc)
+        return None
+
+
+async def _register_unknown_asterisk_cleanup_candidates(
+    state_backend: Any,
+    adapter: Any,
+    *,
+    owner_already_confirmed: bool = False,
+) -> int:
+    """Mirror previously invisible live ARI channels into the retry ledger.
+
+    This is the inverse of ordinary orphan recovery.  It handles a hard crash
+    after Asterisk emits inbound ``StasisStart`` but before admission's first
+    awaited Redis registration.  Only the exclusive telephony owner may scan,
+    two successful inventories must observe the same unknown channel, and the
+    state backend must prove no ledger exists before a strict write.  PBX work
+    is intentionally left to the normal hydrate/confirm/settle recovery path.
+    """
+
+    if str(getattr(adapter, "name", "") or "").strip().lower() != "asterisk":
+        return 0
+    inventory = getattr(adapter, "list_recoverable_application_channel_ids", None)
+    if not callable(inventory):
+        return 0
+    ownership_check = getattr(state_backend, "is_telephony_owner", None)
+    if not callable(ownership_check) or (
+        not owner_already_confirmed and not ownership_check()
+    ):
+        return 0
+
+    live_channels = await inventory()
+    if live_channels is None:
+        return 0
+    exclusions = _current_recovery_exclusions(state_backend, adapter)
+    if exclusions is None:
+        return 0
+    unknown = {
+        str(channel_id)
+        for channel_id in live_channels
+        if channel_id and str(channel_id) not in exclusions
+    }
+
+    # A channel must appear in two successful owner-scoped inventories.  Drop
+    # counters as soon as a successful inventory no longer classifies it as
+    # unknown, so short setup races cannot become delayed teardown requests.
+    for channel_id in list(_unknown_asterisk_channel_ticks):
+        if channel_id not in unknown:
+            _unknown_asterisk_channel_ticks.pop(channel_id, None)
+    for channel_id in unknown:
+        _unknown_asterisk_channel_ticks[channel_id] = min(
+            _UNKNOWN_ASTERISK_CHANNEL_CONFIRMATIONS,
+            _unknown_asterisk_channel_ticks.get(channel_id, 0) + 1,
+        )
+
+    claim = getattr(state_backend, "claim_cleanup_obligation_if_absent", None)
+    if not callable(claim):
+        return 0
+
+    registered = 0
+    ready = sorted(
+        channel_id
+        for channel_id, observations in _unknown_asterisk_channel_ticks.items()
+        if observations >= _UNKNOWN_ASTERISK_CHANNEL_CONFIRMATIONS
+    )
+    for channel_id in ready[:_ORPHAN_RECOVERY_SOURCE_BATCH]:
+        # Inventory and Redis reads are awaited. Re-prove exclusive authority
+        # at the final durable-write boundary; normal recovery checks it again
+        # after database hydration and immediately before PBX control.
+        if not ownership_check():
+            logger.warning("inverse_ari_recovery_stopped_after_ownership_loss")
+            break
+        final_exclusions = _current_recovery_exclusions(state_backend, adapter)
+        if final_exclusions is None:
+            break
+        if channel_id in final_exclusions:
+            _unknown_asterisk_channel_ticks.pop(channel_id, None)
+            continue
+        claimed = await claim(
+            channel_id,
+            state="termination_pending",
+            provider="asterisk",
+            provider_call_id=channel_id,
+        )
+        _unknown_asterisk_channel_ticks.pop(channel_id, None)
+        if not claimed:
+            continue
+        registered += 1
+        logger.critical(
+            "inverse_ari_recovery_registered channel=%s",
+            channel_id[:12],
+        )
+    return registered
+
+
 async def recover_orphaned_calls() -> int:
     """Hang up and record calls abandoned by a dead process incarnation.
 
-    ``state_backend.recover_orphans()`` returns ledger entries whose
-    owning incarnation's heartbeat is gone (and atomically claims them so
-    they're processed once). For each, we:
+    Candidates come from both Redis entries whose owning incarnation is dead
+    and durable ``calls.status='termination_pending'`` rows emitted by the
+    stuck-call safety reaper. Discovery removes neither source. For each, we:
 
-      1. Best-effort hang up the PBX channel — a no-op if Asterisk
-         already tore it down when the owning process died, but it
-         releases the channel if Asterisk parked it.
-      2. Emit a Track-B call-ended stream event (via the provider call
-         id → ``calls`` row resolver) so the dashboard shows the call as
-         ended-on-restart instead of stuck "in call" forever.
+      1. Ask the adapter for confirmation-aware PBX teardown.
+      2. Run normal logical teardown only after that proof.
+      3. Acknowledge (delete) a Redis orphan entry only after both steps. A
+         database-only candidate converges when settlement transitions its
+         calls row out of ``termination_pending``.
 
-    Returns the number of calls recovered. No-op (returns 0) on the
-    in-memory backend, which has no cross-process ledger.
+    An unconfirmed attempt does not emit an ended event, release a lease, or
+    settle billing. The untouched ledger entry is retried by the next watchdog
+    pass or successor process. A local in-flight set prevents startup recovery
+    and the watchdog from acting on the same call concurrently.
+
+    Returns the number of calls recovered.
     """
     sb = _state()
+    active_adapter = get_adapter()
+    adapter_provider = str(getattr(active_adapter, "name", "") or "asterisk").strip().lower()
+    ownership_check = getattr(sb, "is_telephony_owner", None)
+    if callable(ownership_check) and not ownership_check():
+        logger.warning("orphan_recovery_skipped_nonowner")
+        return 0
     try:
-        orphans = await sb.recover_orphans()
+        await _register_unknown_asterisk_cleanup_candidates(
+            sb,
+            active_adapter,
+            owner_already_confirmed=True,
+        )
+    except Exception as exc:
+        # Inventory/Redis ambiguity is fail-closed: no PBX work is derived from
+        # this inverse source. Existing durable Redis/DB recovery still runs.
+        logger.warning("inverse_ari_recovery_scan_failed err=%s", exc)
+    try:
+        redis_orphans = await sb.recover_orphans(
+            limit=_ORPHAN_RECOVERY_SOURCE_BATCH,
+        )
     except Exception as exc:
         logger.warning("recover_orphaned_calls: recover_orphans failed: %s", exc)
-        return 0
-    if not orphans:
-        return 0
+        redis_orphans = []
 
-    from app.core.container import get_container as _gc
-    from app.domain.services.call_status import (
-        CallState, record_call_state_by_provider_id,
-    )
-    container = _gc()
-    db_pool = getattr(container, "db_pool", None) if container.is_initialized else None
-    adapter = get_adapter()
+    # PostgreSQL fallback for the exact case Redis cannot represent after its
+    # session TTL/data is lost: a live-looking inbound parent with a durable,
+    # reserved transfer child. Only the process holding exclusive telephony
+    # ownership may claim these rows, and every locally-owned initialization,
+    # VoiceSession, and ringing warmup is excluded before the parent is fenced.
+    takeover_count = 0
+    try:
+        ownership_check = getattr(sb, "is_telephony_owner", None)
+        exclusive_owner = bool(callable(ownership_check) and ownership_check())
+        if exclusive_owner:
+            from app.core.container import get_container
+            from app.domain.services.telephony.transfer_restart_recovery import (
+                claim_inbound_transfer_takeovers,
+            )
 
-    recovered = 0
-    for entry in orphans:
-        call_id = entry.get("call_id")
+            container = get_container()
+            db_pool = getattr(container, "db_pool", None)
+            if getattr(container, "is_initialized", False) and db_pool is not None:
+                exclusions = set(_inbound_admissions_in_flight)
+                iter_voice = getattr(sb, "iter_voice_session_items", None)
+                if callable(iter_voice):
+                    exclusions.update(str(call_id) for call_id, _ in iter_voice())
+                iter_warmups = getattr(sb, "iter_ringing_warmup_keys", None)
+                if callable(iter_warmups):
+                    exclusions.update(str(call_id) for call_id in iter_warmups())
+                claims = await claim_inbound_transfer_takeovers(
+                    db_pool,
+                    exclusive_owner_confirmed=True,
+                    excluded_provider_call_ids=exclusions,
+                )
+                takeover_count = len(claims)
+                if takeover_count:
+                    logger.critical(
+                        "transfer_restart_takeover_claimed count=%d",
+                        takeover_count,
+                    )
+    except Exception as exc:
+        # No PBX work happened unless the database claim committed its durable
+        # termination_pending marker. The next watchdog/startup pass retries.
+        logger.warning(
+            "recover_orphaned_calls: transfer takeover scan failed: %s",
+            exc,
+        )
+    try:
+        pending_rows = await _load_termination_pending_candidates()
+    except Exception as exc:
+        logger.warning(
+            "recover_orphaned_calls: termination_pending scan failed: %s",
+            exc,
+        )
+        pending_rows = []
+
+    # Bound both sources independently, then alternate durable DB and Redis
+    # work with DB first. A large/stuck Redis backlog can no longer delay the
+    # database-only row that proves a committed reservation needs recovery.
+    redis_batch = list(redis_orphans)[:_ORPHAN_RECOVERY_SOURCE_BATCH]
+    pending_batch = list(pending_rows)[:_ORPHAN_RECOVERY_SOURCE_BATCH]
+    interleaved: list[tuple[str, Mapping[str, Any]]] = []
+    for index in range(max(len(redis_batch), len(pending_batch))):
+        if index < len(pending_batch):
+            interleaved.append(("database", pending_batch[index]))
+        if index < len(redis_batch):
+            interleaved.append(("redis", redis_batch[index]))
+
+    candidates_by_call: dict[tuple[str, str], dict[str, Any]] = {}
+    for source, raw in interleaved:
+        entry = dict(raw)
+        call_id = str(entry.get("call_id") or "").strip()
         if not call_id:
             continue
-        # 1. Best-effort PBX hangup.
-        if adapter is not None:
-            try:
-                await adapter.hangup(call_id)
-            except Exception as exc:
-                logger.debug("orphan_recovery hangup_noop call=%s err=%s", call_id[:12], exc)
-        # 2. Record the terminal state so the UI/outcome is accurate.
-        if db_pool is not None:
-            try:
-                await record_call_state_by_provider_id(
-                    db_pool,
-                    provider_call_id=call_id,
-                    new_state=CallState.ENDED,
-                    metadata={
-                        "description": "Call ended — recovered after a process restart",
-                        "reason": "process_restart_recovery",
-                        "prior_owner": entry.get("pod_id"),
-                    },
-                )
-            except Exception as exc:
-                logger.debug("orphan_recovery state_emit_failed call=%s err=%s", call_id[:12], exc)
-        recovered += 1
-        logger.info(
-            "orphan_recovery reclaimed call=%s prior_owner=%s tenant=%s",
-            call_id[:12], entry.get("pod_id"), entry.get("tenant_id") or "-",
+        provider = str(entry.get("provider") or adapter_provider).strip().lower()
+        entry["call_id"] = call_id
+        entry["provider"] = provider
+        candidate_key = (provider, call_id)
+        existing = candidates_by_call.get(candidate_key)
+        if existing is None:
+            entry["_has_redis_ledger"] = source == "redis"
+            candidates_by_call[candidate_key] = entry
+            continue
+
+        if source == "redis":
+            existing["_has_redis_ledger"] = True
+            existing["pod_id"] = entry.get("pod_id") or existing.get("pod_id")
+            continue
+
+        existing["_termination_pending"] = bool(
+            existing.get("_termination_pending") or entry.get("_termination_pending")
         )
+        existing["_inbound_settlement_pending"] = bool(
+            existing.get("_inbound_settlement_pending") or entry.get("_inbound_settlement_pending")
+        )
+        # The DB candidate is the exact durable authority. Keep the Redis ack
+        # flag while replacing stale mirror identity with the selected row.
+        existing["durable_call_id"] = entry.get("durable_call_id")
+        existing["tenant_id"] = entry.get("tenant_id")
+
+    candidates = list(candidates_by_call.values())
+    if not candidates:
+        return 0
+
+    recovered = 0
+    for entry in candidates:
+        # A bounded scan can still outlive the ownership lease. Once authority
+        # is lost, do not start another PBX operation; already-completed proof
+        # and logical settlement above remain idempotent.
+        if callable(ownership_check) and not ownership_check():
+            logger.warning("orphan_recovery_stopped_after_ownership_loss")
+            break
+        call_id = entry.get("call_id")
+        if not call_id or call_id in _orphan_recovery_in_flight:
+            continue
+        # The application inventory and Redis scan can overlap a legitimate
+        # local StasisStart/Answer. Never let recovery control a channel the
+        # live adapter or lifecycle currently manages. A successor has empty
+        # local maps and will still recover a true crash orphan.
+        if callable(getattr(active_adapter, "recovery_excluded_channel_ids", None)):
+            live_exclusions = _current_recovery_exclusions(sb, active_adapter)
+            if live_exclusions is None:
+                logger.warning("orphan_recovery_deferred_unverifiable_local_state")
+                break
+            if str(call_id) in live_exclusions:
+                logger.info(
+                    "orphan_recovery_deferred_locally_managed call=%s",
+                    str(call_id)[:12],
+                )
+                continue
+        _orphan_recovery_in_flight.add(call_id)
+        recovery_context: Optional[Dict[str, Any]] = None
+        logical_teardown_succeeded = False
+        deferred_for_retry = False
+        try:
+            # Database truth is loaded before touching the PBX. In particular,
+            # this distinguishes inbound reservation settlement from outbound
+            # dialer completion and supplies connected transfer targets that
+            # vanished from adapter memory with the dead process.
+            recovery_context = await _hydrate_orphan_recovery_context(
+                call_id,
+                entry,
+            )
+            recovered_provider = str(recovery_context.get("provider") or "").strip().lower()
+            if recovered_provider not in {adapter_provider, "unknown"}:
+                raise RuntimeError(
+                    "orphan provider cannot be proved by the active adapter: "
+                    f"row={recovered_provider or 'missing'} "
+                    f"adapter={adapter_provider or 'missing'}"
+                )
+            if recovery_context.get("direction") == "inbound":
+                # A dead process cannot prove whether provider Answer raced
+                # the durable Answer write. Preserve any pre-Answer child
+                # reservation until authoritative carrier reconciliation.
+                recovery_context["hold_ambiguous_transfer_legs"] = True
+            if callable(
+                getattr(active_adapter, "recovery_excluded_channel_ids", None)
+            ):
+                final_live_exclusions = _current_recovery_exclusions(
+                    sb,
+                    active_adapter,
+                    ignore_recovery_call_id=str(call_id),
+                )
+                if final_live_exclusions is None:
+                    deferred_for_retry = True
+                    logger.warning(
+                        "orphan_recovery_deferred_unverifiable_final_local_state"
+                    )
+                    continue
+                if str(call_id) in final_live_exclusions:
+                    deferred_for_retry = True
+                    logger.info(
+                        "orphan_recovery_deferred_new_local_owner call=%s",
+                        str(call_id)[:12],
+                    )
+                    continue
+            # Hydration is an awaited database operation. Ownership may expire
+            # between the loop-top check and this PBX boundary, so prove it
+            # again immediately before issuing any hangup request.
+            if callable(ownership_check) and not ownership_check():
+                logger.warning("orphan_recovery_stopped_before_pbx_after_owner_loss")
+                break
+            _orphan_recovery_contexts_by_call[call_id] = recovery_context
+            confirmed = await _force_end_and_hangup(
+                call_id,
+                require_confirmation=True,
+                provider_leg_ids=recovery_context.get("provider_leg_ids") or [],
+                recovery_context=recovery_context,
+                acknowledge_ledger=False,
+            )
+            if not confirmed:
+                deferred_for_retry = True
+                logger.warning(
+                    "orphan_recovery deferred call=%s prior_owner=%s; "
+                    "durable ledger retained for retry",
+                    call_id[:12],
+                    entry.get("pod_id") or "-",
+                )
+                continue
+            logical_teardown_succeeded = True
+
+            if entry.get("_has_redis_ledger"):
+                # This awaited acknowledgement is the recovery commit point.
+                # Local session removal never unregisters Redis, so a process
+                # crash or cancellation anywhere before this exact await leaves
+                # the obligation discoverable by the next successor.
+                await sb.acknowledge_orphan_recovery(call_id)
+            _orphan_recovery_contexts_by_call.pop(call_id, None)
+            recovered += 1
+            logger.info(
+                "orphan_recovery confirmed call=%s prior_owner=%s tenant=%s",
+                call_id[:12],
+                entry.get("pod_id"),
+                entry.get("tenant_id") or "-",
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            deferred_for_retry = True
+            # Keep the durable ledger entry. The adapter and logical teardown
+            # paths are idempotent, so a later pass can safely converge.
+            logger.warning(
+                "orphan_recovery attempt_failed call=%s prior_owner=%s err=%s; "
+                "durable ledger retained for retry",
+                call_id[:12],
+                entry.get("pod_id") or "-",
+                exc,
+            )
+        finally:
+            if deferred_for_retry:
+                durable_call_id = str(
+                    (recovery_context or {}).get("durable_call_id")
+                    or entry.get("durable_call_id")
+                    or ""
+                )
+                try:
+                    await _rotate_deferred_termination_candidate(durable_call_id)
+                except Exception as exc:
+                    logger.warning(
+                        "termination_retry_rotation_failed call=%s err=%s",
+                        call_id[:12],
+                        exc,
+                    )
+            if (
+                not logical_teardown_succeeded
+                and recovery_context is not None
+                and recovery_context.get("_logical_marker_acquired")
+                and recovery_context.get("_logical_marker_owner_task") is asyncio.current_task()
+                and call_id not in _ended_calls_logically_completed
+            ):
+                # `_on_call_ended` normally suppresses duplicate terminal ARI
+                # bursts for ten minutes. A failed recovery settlement is not
+                # a completed terminal event; release the local marker now so
+                # the next watchdog tick can retry while the durable ledger is
+                # still present.
+                _ended_calls_in_flight.discard(call_id)
+                _ended_calls_logically_completed.discard(call_id)
+            _orphan_recovery_in_flight.discard(call_id)
     return recovered
 
 
@@ -733,15 +1951,16 @@ def _pipeline_done_cb(task: asyncio.Task, call_id: str) -> None:
         _vs = None
     if _vs is not None and getattr(_vs, "pipeline_task", None) not in (None, task):
         logger.debug(
-            "pipeline_done_cb: superseded task for %s (fallback took over) — "
-            "no teardown", call_id[:12],
+            "pipeline_done_cb: superseded task for %s (fallback took over) — " "no teardown",
+            call_id[:12],
         )
         return
     exc = task.exception()
     if exc:
         logger.error(
             "pipeline_task crashed for %s — triggering session teardown: %s",
-            call_id[:12], exc,
+            call_id[:12],
+            exc,
         )
         # Flag the session so the outcome resolver classifies this as
         # CallOutcome.FAILED (rather than the default ANSWERED) when
@@ -764,9 +1983,11 @@ async def _on_early_ringing(call_id: str) -> None:
     raises — a status emit must not touch call setup."""
     try:
         from app.domain.services.call_status import (
-            CallState, record_call_state_by_provider_id,
+            CallState,
+            record_call_state_by_provider_id,
         )
         from app.core.container import get_container as _gc_er
+
         _c = _gc_er()
         if _c.is_initialized:
             await record_call_state_by_provider_id(
@@ -778,7 +1999,8 @@ async def _on_early_ringing(call_id: str) -> None:
     except Exception as _er_exc:  # noqa: BLE001 — best-effort
         logger.debug(
             "call_status.early_ringing_emit_raised call=%s err=%s",
-            call_id[:12], _er_exc,
+            call_id[:12],
+            _er_exc,
         )
 
 
@@ -815,9 +2037,11 @@ async def _on_ringing(call_id: str) -> None:
     # same calls row. Best-effort — a status emit must never block warmup.
     try:
         from app.domain.services.call_status import (
-            CallState, record_call_state_by_provider_id,
+            CallState,
+            record_call_state_by_provider_id,
         )
         from app.core.container import get_container as _gc_ring
+
         _cr = _gc_ring()
         if _cr.is_initialized:
             await record_call_state_by_provider_id(
@@ -828,12 +2052,15 @@ async def _on_ringing(call_id: str) -> None:
             )
     except Exception as _ring_exc:
         logger.debug(
-            "call_status.ringing_emit_raised call=%s err=%s", call_id[:12], _ring_exc,
+            "call_status.ringing_emit_raised call=%s err=%s",
+            call_id[:12],
+            _ring_exc,
         )
 
     if _sb.voice_session_count() + _sb.ringing_warmup_count() >= _MAX_TELEPHONY_SESSIONS:
         logger.warning(
-            "ringing_warmup_skipped_at_capacity call_id=%s", call_id[:12],
+            "ringing_warmup_skipped_at_capacity call_id=%s",
+            call_id[:12],
         )
         return
 
@@ -860,9 +2087,7 @@ async def _on_ringing(call_id: str) -> None:
             warmup_coros.append(_tts_connect(voice_session.call_id))
         if hasattr(voice_session.stt_provider, "pre_connect"):
             warmup_coros.append(
-                voice_session.stt_provider.pre_connect(
-                    voice_session.call_session.call_id
-                )
+                voice_session.stt_provider.pre_connect(voice_session.call_session.call_id)
             )
         connect_task: Optional[asyncio.Task] = None
         if warmup_coros:
@@ -898,13 +2123,13 @@ async def _on_ringing(call_id: str) -> None:
                     for i, r in enumerate(results):
                         if isinstance(r, Exception):
                             logger.warning(
-                                "ringing_warmup_coro[%d] failed: %s", i, r,
+                                "ringing_warmup_coro[%d] failed: %s",
+                                i,
+                                r,
                             )
 
             # Step 2: Build greeting text from session config
-            greeting_text = _build_outbound_greeting(
-                voice_session.call_session
-            )
+            greeting_text = _build_outbound_greeting(voice_session.call_session)
 
             # Step 3: Synthesize greeting and buffer all audio chunks
             chunks: list[bytes] = []
@@ -914,16 +2139,10 @@ async def _on_ringing(call_id: str) -> None:
                 async for audio_chunk in voice_session.tts_provider.stream_synthesize(
                     text=greeting_text,
                     voice_id=tts_config.voice_id if tts_config else "default",
-                    sample_rate=(
-                        tts_config.tts_sample_rate if tts_config else 16000
-                    ),
+                    sample_rate=(tts_config.tts_sample_rate if tts_config else 16000),
                     call_id=voice_session.call_id,
                 ):
-                    raw = (
-                        audio_chunk.data
-                        if hasattr(audio_chunk, "data")
-                        else audio_chunk
-                    )
+                    raw = audio_chunk.data if hasattr(audio_chunk, "data") else audio_chunk
                     if raw:
                         # Ensure Int16 alignment (2 bytes per sample)
                         if len(raw) % 2 != 0:
@@ -934,9 +2153,11 @@ async def _on_ringing(call_id: str) -> None:
                 _synth_ms = (asyncio.get_event_loop().time() - _synth_t0) * 1000.0
                 total_bytes = sum(len(c) for c in chunks)
                 logger.info(
-                    "WARMUP greeting_presynth_done call_id=%s "
-                    "chunks=%d bytes=%d synth_ms=%.0f",
-                    call_id[:12], len(chunks), total_bytes, _synth_ms,
+                    "WARMUP greeting_presynth_done call_id=%s " "chunks=%d bytes=%d synth_ms=%.0f",
+                    call_id[:12],
+                    len(chunks),
+                    total_bytes,
+                    _synth_ms,
                 )
 
                 # Store on the voice_session so _send_outbound_greeting can
@@ -947,7 +2168,8 @@ async def _on_ringing(call_id: str) -> None:
             except Exception as synth_exc:
                 logger.warning(
                     "WARMUP greeting_presynth_failed call_id=%s: %s",
-                    call_id[:12], synth_exc,
+                    call_id[:12],
+                    synth_exc,
                 )
                 # Pre-synth failure is non-fatal — _send_outbound_greeting
                 # will fall back to real-time TTS.
@@ -960,12 +2182,12 @@ async def _on_ringing(call_id: str) -> None:
         elapsed_ms = (asyncio.get_event_loop().time() - _t0) * 1000.0
         logger.info(
             "WARMUP ringing_warmup_ready call_id=%s warmups=%d setup_ms=%.0f",
-            call_id[:12], len(warmup_coros), elapsed_ms,
+            call_id[:12],
+            len(warmup_coros),
+            elapsed_ms,
         )
     except Exception as exc:
-        logger.error(
-            f"Ringing warmup failed for {call_id[:12]}: {exc}", exc_info=True
-        )
+        logger.error(f"Ringing warmup failed for {call_id[:12]}: {exc}", exc_info=True)
         # Clean up partial state so `_on_new_call` takes the slow path.
         _pop_ringing_warmup(call_id)
     finally:
@@ -996,99 +2218,1096 @@ async def _reject_overcap_call(call_id: str) -> None:
             pass
 
 
-async def _fetch_campaign_row(db_pool, tenant_id: str, campaign_id: str):
-    """Fetch a campaign row as a dict for the inbound session config
-    (RLS-bypass single-row read scoped by tenant_id + id). Returns None on
-    miss/error — the caller then binds tenant-only with the default agent."""
+_inbound_admissions_in_flight: Dict[str, Dict[str, Any]] = {}
+_inbound_admissions_finalized: set[tuple[str, str]] = set()
+_inbound_admissions_pending: set[str] = set()
+_inbound_heartbeat_tasks: Dict[str, asyncio.Task] = {}
+_inbound_deadline_tasks: Dict[str, asyncio.Task] = {}
+
+
+def _admission_dict(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    to_dict = getattr(value, "to_dict", None)
+    return dict(to_dict()) if callable(to_dict) else {}
+
+
+async def _release_global_inbound_slot(
+    release_callback: Any,
+    redis_client: Any,
+    pbx_call_id: str,
+) -> None:
+    """Bound strict slot cleanup and propagate ambiguity to the retry owner."""
+
     try:
-        from app.core.db_utils import acquire_with_tenant
-        async with acquire_with_tenant(db_pool, None) as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM campaigns WHERE id = $1 AND tenant_id = $2",
-                campaign_id, tenant_id,
-            )
-        return dict(row) if row else None
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "inbound_campaign_fetch_failed tenant=%s campaign=%s err=%s",
-            str(tenant_id)[:8], str(campaign_id)[:8], exc,
+        await asyncio.wait_for(
+            release_callback(redis_client, call_id=pbx_call_id),
+            timeout=1.0,
         )
-        return None
+    except asyncio.TimeoutError:
+        logger.error(
+            "inbound_global_lease_release_timed_out call=%s; cleanup ledger retained",
+            pbx_call_id[:12],
+        )
+        raise RuntimeError(f"global inbound lease release timed out for {pbx_call_id}")
 
 
-def _inbound_caller_number(call_id: str) -> Optional[str]:
-    """Best-effort caller ANI captured from the inbound StasisStart event."""
+async def _admit_inbound_call(
+    pbx_call_id: str,
+    metadata: Dict[str, Any],
+) -> Any:
+    """Adapter callback: commit admission while the channel is unanswered."""
+    from app.core.container import get_container
+    from app.domain.services.telephony.inbound_admission import (
+        InboundAdmissionRequest,
+        InboundAdmissionService,
+    )
+
+    container = get_container()
+    if not getattr(container, "is_initialized", False) or container.db_pool is None:
+        raise RuntimeError("database unavailable for inbound admission")
+
+    # A production Redis partition or stolen owner lock fences the adapter's
+    # process immediately. Check again on the pre-answer path so a channel
+    # that arrived during the fencing window is rejected, never answered.
+    state_backend = _state()
+    if not state_backend.is_telephony_owner():
+        raise RuntimeError("this process is not the active telephony owner")
+
+    # The unanswered PBX channel already exists. Make its cleanup identity the
+    # first awaited side effect, before even local/global capacity rejection,
+    # so every fail-closed admission outcome has a successor-visible owner.
+    await state_backend.register_cleanup_obligation(
+        pbx_call_id,
+        state="termination_pending",
+    )
+
+    # Capacity is evaluated while the Asterisk channel is still unanswered.
+    # Count already-admitted/pre-media calls as well as live sessions so a
+    # burst cannot queue beyond this pod's memory budget.
+    get_voice_session = getattr(state_backend, "get_voice_session", None)
+    pre_session_admissions = sum(
+        1
+        for live_id in _inbound_admissions_in_flight
+        if not callable(get_voice_session) or get_voice_session(live_id) is None
+    )
+    local_load = (
+        state_backend.voice_session_count()
+        + pre_session_admissions
+        + len(_inbound_admissions_pending)
+    )
+    if local_load >= _MAX_TELEPHONY_SESSIONS:
+        raise RuntimeError("pod capacity reached before inbound answer")
+    _inbound_admissions_pending.add(pbx_call_id)
+
+    from app.domain.services.global_concurrency import (
+        acquire_lease as acquire_global_lease,
+        resolve_global_cap,
+    )
+
     try:
-        adapter = get_adapter()
-        get_meta = getattr(adapter, "get_inbound_call_meta", None)
-        meta = get_meta(call_id) if callable(get_meta) else None
-        if meta:
-            return meta.get("caller_number")
+        global_lease = await acquire_global_lease(
+            getattr(container, "redis", None),
+            call_id=pbx_call_id,
+            pod_id=os.getenv("POD_ID") or os.getenv("HOSTNAME") or "talky-pod",
+            cap=resolve_global_cap(),
+            # Unlike outbound origination, true inbound has not been answered
+            # yet.  Redis is the cluster-cap authority, so an unavailable or
+            # unverifiable lease must reject the channel pre-answer.
+            fail_closed=True,
+        )
+        if not global_lease:
+            raise RuntimeError(
+                "global capacity unavailable before inbound answer: " f"{global_lease.reason}"
+            )
+        request = InboundAdmissionRequest(
+            provider="asterisk",
+            provider_call_id=pbx_call_id,
+            called_did=metadata.get("called_did"),
+            caller_ani=metadata.get("caller_number"),
+            ingress=metadata.get("ingress") or "asterisk",
+            context=metadata.get("context"),
+            request_id=pbx_call_id,
+            # The admission service intersects this absolute ceiling with the
+            # campaign's pinned maximum and the tenant's exact remaining
+            # quota, then reserves that full enforceable window pre-answer.
+            reservation_seconds=14_400,
+            metadata={
+                "ingress_endpoint": metadata.get("ingress_endpoint"),
+                "linked_id": metadata.get("linked_id"),
+            },
+        )
+        decision = await InboundAdmissionService(container.db_pool).admit(request)
+        payload = _admission_dict(decision)
+        # Enrich the already-durable ledger with DB authority before the
+        # adapter can Answer. If this strict write fails, the original generic
+        # entry remains retryable and the adapter takes the pre-answer cleanup
+        # path; the global slot is deliberately retained until absence proof.
+        await state_backend.register_cleanup_obligation(
+            pbx_call_id,
+            tenant_id=(str(payload.get("tenant_id")) if payload.get("tenant_id") else None),
+            campaign_id=(str(payload.get("campaign_id")) if payload.get("campaign_id") else None),
+            state="termination_pending",
+            durable_call_id=(str(payload.get("call_id")) if payload.get("call_id") else None),
+            provider=(str(payload.get("provider")) if payload.get("provider") else "asterisk"),
+            provider_call_id=(
+                str(payload.get("provider_call_id"))
+                if payload.get("provider_call_id")
+                else pbx_call_id
+            ),
+        )
+        if bool(payload.get("allowed")):
+            _inbound_admissions_in_flight[pbx_call_id] = payload
+        return decision
+    except asyncio.CancelledError:
+        # The adapter still owns the unanswered PBX leg. Releasing capacity
+        # here would permit a replacement admission while that channel may be
+        # live/billable. Its proof task (or restart recovery) owns both durable
+        # settlement and global-slot release.
+        raise
     except Exception:
-        pass
-    return None
+        # Same ownership transfer as cancellation: never release before PBX
+        # absence proof, including dependency errors after lease acquisition.
+        raise
+    finally:
+        _inbound_admissions_pending.discard(pbx_call_id)
 
 
-async def _resolve_inbound_route_for_call(call_id: str):
-    """Resolve an inbound Asterisk call to (route, campaign_row).
+_INBOUND_ANSWER_DURABILITY_TIMEOUT_S = 5.0
 
-    Returns ``(None, None)`` when this isn't an inbound Asterisk call, when no
-    DID/context was captured, or on any error — so the caller falls through to
-    today's exact default-agent path (rollout-safe). A returned
-    ``route.rejected`` means the caller must hang up (conflict / strict).
+
+def _normalise_answered_at(value: Any) -> str:
+    """Return a timezone-aware ISO timestamp suitable for DB and Redis."""
+
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value or "").strip()
+        if not text:
+            parsed = datetime.now(timezone.utc)
+        else:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
+async def _find_inbound_admission_by_provider_identity(
+    container: Any,
+    *,
+    provider: str,
+    provider_call_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Resolve an admission whose callback result was lost after DB commit.
+
+    An adapter timeout can cancel the caller after ``admit`` committed but
+    before its payload reached the in-memory cache. PBX absence proof must
+    therefore consult PostgreSQL before treating the cleanup as capacity-only.
     """
-    try:
-        adapter = get_adapter()
-        if not adapter or getattr(adapter, "name", "") != "asterisk":
-            return None, None
-        get_meta = getattr(adapter, "get_inbound_call_meta", None)
-        meta = get_meta(call_id) if callable(get_meta) else None
-        if not meta:
-            return None, None
 
-        from app.domain.services.telephony.inbound_router import (
-            resolve_inbound_route,
+    from app.core.db_utils import acquire_with_tenant
+
+    db_pool = getattr(container, "db_pool", None)
+    if not getattr(container, "is_initialized", False) or db_pool is None:
+        raise RuntimeError("database unavailable for inbound identity recovery")
+    async with acquire_with_tenant(db_pool, None, timeout=5.0) as conn:
+        raw = await conn.fetchrow(
+            """
+            SELECT id, tenant_id, campaign_id, provider, provider_call_id,
+                   billing_status, COUNT(*) OVER() AS identity_match_count
+            FROM calls
+            WHERE direction='inbound'
+              AND LOWER(BTRIM(provider))=$1::text
+              AND provider_call_id=$2::text
+            """,
+            provider.strip().lower(),
+            provider_call_id,
         )
-        from app.core.container import get_container as _gc
-        _c = _gc()
-        route = await resolve_inbound_route(
-            _c.db_pool,
-            called_did=meta.get("called_did"),
-            context=meta.get("context"),
-            environment=os.getenv("ENVIRONMENT", "development"),
-        )
-        campaign_row = None
-        if route.resolved and route.campaign_id:
-            campaign_row = await _fetch_campaign_row(
-                _c.db_pool, route.tenant_id, route.campaign_id,
+    if raw is None:
+        return None
+    row = dict(raw)
+    if int(row.pop("identity_match_count", 0) or 0) != 1:
+        raise RuntimeError(f"ambiguous inbound provider identity {provider}:{provider_call_id}")
+    return {
+        "allowed": True,
+        "call_id": str(row["id"]),
+        "tenant_id": str(row["tenant_id"]),
+        "campaign_id": (str(row["campaign_id"]) if row.get("campaign_id") else None),
+        "provider": str(row.get("provider") or provider).strip().lower(),
+        "provider_call_id": str(row.get("provider_call_id") or provider_call_id),
+        "billing_status": row.get("billing_status"),
+    }
+
+
+async def _persist_inbound_answered(
+    pbx_call_id: str,
+    admission: Mapping[str, Any],
+    *,
+    answered_at: Any,
+) -> str:
+    """Commit provider Answer truth before Asterisk may create media.
+
+    ``POST /answer`` is already an externally committed, billable action when
+    this hook runs. PostgreSQL is updated first so any later terminal path
+    finalizes rather than releases the reservation. The Redis cleanup ledger
+    is then strictly promoted to ``active`` with the same first-answer
+    timestamp, making a crash before bridge/session creation recoverable.
+
+    Either dependency failing raises into the adapter. Its provisional
+    handoff owner then performs confirmation-aware PBX cleanup and retains the
+    durable obligation until settlement succeeds.
+    """
+
+    from app.core.container import get_container
+    from app.core.db_utils import acquire_with_tenant
+
+    payload = dict(admission or {})
+    durable_call_id = str(payload.get("call_id") or "").strip()
+    tenant_id = str(payload.get("tenant_id") or "").strip()
+    provider_call_id = str(payload.get("provider_call_id") or pbx_call_id).strip()
+    if not durable_call_id or not tenant_id or not provider_call_id:
+        raise RuntimeError("inbound Answer lacks durable call authority")
+
+    answer_timestamp = _normalise_answered_at(answered_at)
+    container = get_container()
+    db_pool = getattr(container, "db_pool", None)
+    if not getattr(container, "is_initialized", False) or db_pool is None:
+        raise RuntimeError("database unavailable for durable inbound Answer")
+
+    async def _commit_answer() -> Mapping[str, Any]:
+        async with acquire_with_tenant(
+            db_pool,
+            tenant_id,
+            timeout=_INBOUND_ANSWER_DURABILITY_TIMEOUT_S,
+        ) as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE calls
+                   SET answered_at=COALESCE(answered_at,$4::timestamptz),
+                       status=CASE
+                         WHEN status IS NULL OR status IN (
+                           'queued','initiated','dialing','ringing'
+                         ) THEN 'answered'
+                         ELSE status
+                       END,
+                       updated_at=NOW()
+                 WHERE id=$1::uuid
+                   AND tenant_id=$2::uuid
+                   AND direction='inbound'
+                   AND (provider_call_id=$3 OR external_call_uuid=$3)
+                RETURNING status, answered_at
+                """,
+                durable_call_id,
+                tenant_id,
+                provider_call_id,
+                answer_timestamp,
             )
-        return route, campaign_row
-    except Exception as exc:  # noqa: BLE001 — never break call setup on this
-        logger.warning(
-            "inbound_route_resolve_wrapper_failed call=%s err=%s",
-            call_id[:12], exc,
+            if row is None:
+                raise RuntimeError("durable inbound call row was not found for Answer")
+            return dict(row)
+
+    row = await asyncio.wait_for(
+        _commit_answer(),
+        timeout=_INBOUND_ANSWER_DURABILITY_TIMEOUT_S,
+    )
+    persisted_answered_at = row.get("answered_at")
+    if persisted_answered_at is None:
+        raise RuntimeError("inbound Answer timestamp was not persisted")
+    persisted_timestamp = _normalise_answered_at(persisted_answered_at)
+
+    state_backend = _state()
+    promote = getattr(
+        state_backend,
+        "promote_answered_cleanup_obligation",
+        None,
+    )
+    if not callable(promote):
+        raise RuntimeError("telephony state backend lacks durable Answer promotion")
+    await asyncio.wait_for(
+        promote(
+            pbx_call_id,
+            answered_at=persisted_timestamp,
+            tenant_id=tenant_id,
+            campaign_id=(str(payload.get("campaign_id")) if payload.get("campaign_id") else None),
+        ),
+        timeout=_INBOUND_ANSWER_DURABILITY_TIMEOUT_S,
+    )
+    return persisted_timestamp
+
+
+async def _finalize_inbound_admission(
+    pbx_call_id: str,
+    admission: Optional[Dict[str, Any]] = None,
+    *,
+    terminal_status: str,
+    duration_seconds: int,
+    outcome: Optional[str] = None,
+    reason: Optional[str] = None,
+    release_only: bool = False,
+) -> None:
+    """Release/settle one admitted inbound call, idempotently."""
+    payload = dict(admission or _inbound_admissions_in_flight.get(pbx_call_id) or {})
+    if not payload:
+        adapter = get_adapter()
+        getter = getattr(adapter, "get_inbound_admission", None)
+        if callable(getter):
+            payload = dict(getter(pbx_call_id) or {})
+    provider = str(payload.get("provider") or "asterisk")
+    provider_call_id = str(payload.get("provider_call_id") or pbx_call_id)
+
+    from app.core.container import get_container
+    from app.domain.services.telephony.inbound_admission import (
+        InboundAdmissionService,
+        InboundFinalizationRequest,
+    )
+
+    container = get_container()
+    durable_call_id = payload.get("call_id")
+    if not durable_call_id:
+        recovered_payload = await _find_inbound_admission_by_provider_identity(
+            container,
+            provider=provider,
+            provider_call_id=provider_call_id,
         )
-        return None, None
+        if recovered_payload is not None:
+            payload.update(recovered_payload)
+            provider = str(payload["provider"])
+            provider_call_id = str(payload["provider_call_id"])
+            durable_call_id = payload["call_id"]
+
+    dedupe_key = (provider, provider_call_id)
+    if dedupe_key in _inbound_admissions_finalized:
+        return
+
+    if durable_call_id:
+        service = InboundAdmissionService(container.db_pool)
+        if release_only:
+            # Adapter-owned pre-lifecycle cleanup can cancel `_on_new_call`
+            # after its guards were armed but before VoiceSession ownership.
+            await _cancel_inbound_runtime_guards(pbx_call_id)
+            await service.release(
+                call_id=str(durable_call_id),
+                provider=provider,
+                provider_call_id=provider_call_id,
+                reason=reason or "pre_media_release",
+                request_id=pbx_call_id,
+            )
+        else:
+            await service.finalize(
+                InboundFinalizationRequest(
+                    call_id=str(durable_call_id),
+                    provider=provider,
+                    provider_call_id=provider_call_id,
+                    terminal_status=terminal_status,
+                    duration_seconds=max(0, int(duration_seconds or 0)),
+                    outcome=outcome,
+                    reason=reason,
+                    request_id=pbx_call_id,
+                )
+            )
+
+    # The database settlement/release above is the durable authority.  Only
+    # after it succeeds may this call stop counting against the cluster-wide
+    # Redis cap; releasing first creates a brief under-count (and permits an
+    # over-cap admission) whenever the durable write subsequently fails.
+    # ``release_lease`` is idempotent, so this also safely covers paths whose
+    # terminal callback already attempted cleanup.
+    from app.domain.services.global_concurrency import (
+        release_lease_strict as release_global_lease,
+    )
+
+    await _release_global_inbound_slot(
+        release_global_lease,
+        getattr(container, "redis", None),
+        pbx_call_id,
+    )
+
+    if not durable_call_id:
+        # PostgreSQL authoritatively had no row at the proof boundary. This is
+        # capacity-only cleanup, not durable settlement. Do not poison the
+        # provider dedupe: a late/ambiguous admission commit must remain
+        # discoverable by a later recovery pass.
+        _inbound_admissions_in_flight.pop(pbx_call_id, None)
+        adapter = get_adapter()
+        pop_cached = getattr(adapter, "pop_inbound_admission", None)
+        if callable(pop_cached):
+            pop_cached(pbx_call_id)
+        return
+
+    _inbound_admissions_finalized.add(dedupe_key)
+    if len(_inbound_admissions_finalized) > 10_000:
+        _inbound_admissions_finalized.pop()
+    _inbound_admissions_in_flight.pop(pbx_call_id, None)
+    adapter = get_adapter()
+    pop_cached = getattr(adapter, "pop_inbound_admission", None)
+    if callable(pop_cached):
+        pop_cached(pbx_call_id)
 
 
-async def _on_new_call(call_id: str) -> None:
+_INBOUND_LEASE_LOSS_RETRY_S = 5.0
+_INBOUND_HEARTBEAT_INTERVAL_S = 30.0
+_INBOUND_HEARTBEAT_ERROR_RETRY_S = 10.0
+_INBOUND_HEARTBEAT_FAILURE_BUDGET_S = 45.0
+
+
+def _monotonic_time() -> float:
+    return asyncio.get_running_loop().time()
+
+
+async def _fence_inbound_call_after_lease_loss(
+    container: Any,
+    *,
+    pbx_call_id: str,
+    durable_call_id: str,
+    admission: Mapping[str, Any],
+) -> bool:
+    """Persist termination ownership and require all-leg PBX absence proof.
+
+    Once a live admission lease is lost, that call may never resume. The retry
+    ledger and ``termination_pending`` row let the watchdog or successor keep
+    proving termination if this process exits between attempts.
+    """
+
+    tenant_id = str(admission.get("tenant_id") or "").strip() or None
+    campaign_id = str(admission.get("campaign_id") or "").strip() or None
+    provider_call_id = str(admission.get("provider_call_id") or pbx_call_id)
+    provider_leg_ids: tuple[str, ...] = ()
+
+    try:
+        await _state().register_cleanup_obligation(
+            pbx_call_id,
+            tenant_id=tenant_id,
+            campaign_id=campaign_id,
+            state="termination_pending",
+        )
+    except Exception as exc:
+        # Losing Redis must not suppress the immediate PBX termination request;
+        # the database fence below remains the second durable recovery owner.
+        logger.critical(
+            "inbound_lease_loss_retry_ledger_failed call=%s err=%s",
+            pbx_call_id[:12],
+            exc,
+        )
+
+    try:
+        from app.domain.services.telephony.termination import (
+            mark_termination_pending_and_load_context,
+        )
+
+        context = await mark_termination_pending_and_load_context(
+            container.db_pool,
+            call_reference=durable_call_id,
+            tenant_id=tenant_id,
+        )
+        provider_call_id = context.provider_call_id or provider_call_id
+        provider_leg_ids = context.provider_leg_ids
+    except Exception as exc:
+        # A database outage is exactly when the provider-side fence is most
+        # important. Keep retrying it and let the durable admission/Redis state
+        # drive reconciliation when storage recovers.
+        logger.critical(
+            "inbound_lease_loss_db_fence_failed call=%s durable_call=%s err=%s",
+            pbx_call_id[:12],
+            durable_call_id[:12],
+            exc,
+        )
+
+    # Confirmation alone is insufficient: ARI may prove a channel was already
+    # absent without delivering a terminal callback. Run the normal idempotent
+    # logical finalizer after all-leg proof so local media, billing, tenant and
+    # global concurrency state converge in this same ownership path.
+    completed = await _force_end_and_hangup(
+        provider_call_id,
+        require_confirmation=True,
+        provider_leg_ids=list(provider_leg_ids),
+    )
+    if not completed:
+        logger.critical(
+            "inbound_lease_loss_termination_unconfirmed call=%s",
+            pbx_call_id[:12],
+        )
+    return completed
+
+
+async def _heartbeat_active_inbound_admission(
+    pbx_call_id: str,
+    admission: Dict[str, Any],
+) -> None:
+    """Keep one live inbound lease owned for as long as media is active.
+
+    A missing lease is an authoritative state mismatch, so continuing the call
+    would bypass the atomic concurrency and usage reservation. Transient
+    database errors are retried only inside a bounded authority budget. Once
+    that budget expires, the call is fenced exactly like an explicit lease
+    loss; the schema guarantees this budget expires before the shortest legal
+    TTL-plus-grace window.
+    """
+
+    durable_call_id = admission.get("call_id")
+    if not durable_call_id:
+        return
+    provider = str(admission.get("provider") or "asterisk")
+    provider_call_id = str(admission.get("provider_call_id") or pbx_call_id)
+    last_success_at = _monotonic_time()
+    container: Any = None
+
+    async def _terminate(reason: str) -> None:
+        admission["_terminal_reason"] = reason
+        session = _state().get_voice_session(pbx_call_id)
+        if session is not None:
+            session._hangup_reason = reason
+        while not await _fence_inbound_call_after_lease_loss(
+            container,
+            pbx_call_id=pbx_call_id,
+            durable_call_id=str(durable_call_id),
+            admission=admission,
+        ):
+            await asyncio.sleep(_INBOUND_LEASE_LOSS_RETRY_S)
+
+    while True:
+        try:
+            from app.core.container import get_container
+            from app.domain.services.telephony.inbound_admission import (
+                heartbeat_inbound_call,
+            )
+
+            container = get_container()
+            refreshed = await heartbeat_inbound_call(
+                container.db_pool,
+                call_id=str(durable_call_id),
+                provider=provider,
+                provider_call_id=provider_call_id,
+                request_id=f"{pbx_call_id}:heartbeat",
+            )
+            if refreshed:
+                last_success_at = _monotonic_time()
+                # The cluster-wide pre-answer lease is keyed by the PBX call
+                # id. Refresh it here as well as the durable tenant lease so
+                # after-hours transfers (which intentionally have no AI
+                # VoiceSession) cannot fall out of the global count.
+                from app.domain.services.global_concurrency import refresh_lease
+
+                await refresh_lease(
+                    getattr(container, "redis", None),
+                    call_id=pbx_call_id,
+                )
+                # The recording emergency switch is deliberately live, not a
+                # call-start snapshot. Each media owner rechecks it on this
+                # cluster heartbeat and immediately destroys any buffered
+                # caller/agent audio when it is closed.
+                from app.domain.services.telephony.modes.caller_first import (
+                    _live_inbound_recording_enabled,
+                )
+
+                if not await _live_inbound_recording_enabled(container.db_pool):
+                    disable_live_inbound_recordings(pbx_call_id)
+                # Refresh immediately when the post-answer callback starts,
+                # then at a fixed cadence.  Sleeping first left the call with
+                # no runtime proof of its durable lease during the slowest
+                # provider-initialisation window.
+                await asyncio.sleep(_INBOUND_HEARTBEAT_INTERVAL_S)
+                continue
+            logger.error(
+                "inbound_admission_heartbeat_lost call=%s durable_call=%s",
+                pbx_call_id[:12],
+                str(durable_call_id)[:12],
+            )
+            # Never return on a request acknowledgement. A false result means
+            # one or more PSTN legs may still be live without concurrency or
+            # billing authority, so this task becomes a finite-cadence hard
+            # termination owner until PBX absence is proven.
+            await _terminate("inbound_admission_lease_lost")
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "inbound_admission_heartbeat_failed call=%s err=%s",
+                pbx_call_id[:12],
+                exc,
+            )
+            if _monotonic_time() - last_success_at >= _INBOUND_HEARTBEAT_FAILURE_BUDGET_S:
+                logger.error(
+                    "inbound_admission_authority_unverifiable call=%s; "
+                    "forcing confirmed termination",
+                    pbx_call_id[:12],
+                )
+                await _terminate("inbound_admission_authority_unverifiable")
+                return
+            await asyncio.sleep(_INBOUND_HEARTBEAT_ERROR_RETRY_S)
+
+
+def disable_live_inbound_recordings(pbx_call_id: Optional[str] = None) -> int:
+    """Close and clear live inbound recording buffers owned by this process.
+
+    The admin control endpoint invokes this immediately on its worker. Other
+    media-owner workers converge through the 30-second admission heartbeat;
+    the persistence path independently rechecks the switch before storage.
+    """
+
+    call_ids = (
+        [pbx_call_id] if pbx_call_id is not None else list(_inbound_admissions_in_flight.keys())
+    )
+    disabled = 0
+    state = _state()
+    for call_id in call_ids:
+        if call_id not in _inbound_admissions_in_flight:
+            continue
+        session = state.get_voice_session(call_id)
+        if session is None:
+            continue
+        gateway = getattr(session, "media_gateway", None)
+        session_call_id = str(getattr(session, "call_id", "") or call_id)
+        set_gate = getattr(gateway, "set_recording_enabled", None)
+        if callable(set_gate):
+            if set_gate(session_call_id, False):
+                disabled += 1
+        else:
+            clear = getattr(gateway, "clear_recording_buffer", None)
+            if callable(clear):
+                clear(session_call_id)
+                disabled += 1
+        session._recording_allowed = False
+    if disabled:
+        logger.warning(
+            "inbound_recording_emergency_stop_applied active_calls=%d",
+            disabled,
+        )
+    return disabled
+
+
+def _pinned_inbound_max_duration(admission: Mapping[str, Any]) -> int:
+    """Read the one quota-backed duration shared by admission and runtime."""
+
+    snapshot = admission.get("config_snapshot")
+    route = snapshot.get("route") if isinstance(snapshot, Mapping) else None
+    if not isinstance(route, Mapping):
+        raise RuntimeError("admitted inbound call has no pinned route")
+    duration = route.get("max_call_duration_seconds")
+    reservation = route.get("reservation_seconds")
+    if (
+        isinstance(duration, bool)
+        or not isinstance(duration, int)
+        or not 60 <= duration <= 14_400
+        or reservation != duration
+    ):
+        raise RuntimeError("admitted inbound call has an invalid quota-backed duration")
+    return duration
+
+
+async def _enforce_inbound_deadline(
+    call_id: str,
+    max_duration_seconds: int,
+    answered_at_monotonic: float,
+) -> None:
+    """End one admitted call at its reserved deadline, independent of scans."""
+
+    loop = asyncio.get_running_loop()
+    delay = max(
+        0.0,
+        float(max_duration_seconds) - (loop.time() - answered_at_monotonic),
+    )
+    await asyncio.sleep(delay)
+    session = _state().get_voice_session(call_id)
+    admission = _inbound_admissions_in_flight.get(call_id)
+    if session is None and admission is None:
+        return
+    if session is not None:
+        session._hangup_reason = "inbound_max_duration_reached"
+    if admission is not None:
+        admission["_terminal_reason"] = "inbound_max_duration_reached"
+    logger.warning(
+        "inbound_deadline_reached call=%s max_duration_seconds=%d",
+        call_id[:12],
+        max_duration_seconds,
+    )
+    # Do not await teardown from the timer stored on the session: teardown
+    # cancels all per-call tasks, including this one. Scheduling it separately
+    # avoids a task ever trying to cancel/await itself.
+    _track_task(_force_end_and_hangup(call_id))
+
+
+def _start_inbound_runtime_guards(
+    call_id: str,
+    admission: Dict[str, Any],
+    *,
+    answered_at_monotonic: float,
+    max_duration_seconds: int,
+) -> None:
+    """Start lease/deadline guards before any after-hours transfer await."""
+    admission["_answered_at_monotonic"] = float(answered_at_monotonic)
+    _inbound_admissions_in_flight[call_id] = admission
+    if call_id not in _inbound_heartbeat_tasks:
+        _inbound_heartbeat_tasks[call_id] = asyncio.create_task(
+            _heartbeat_active_inbound_admission(call_id, admission),
+            name=f"inbound-lease-heartbeat:{call_id}",
+        )
+    if call_id not in _inbound_deadline_tasks:
+        _inbound_deadline_tasks[call_id] = asyncio.create_task(
+            _enforce_inbound_deadline(
+                call_id,
+                max_duration_seconds,
+                answered_at_monotonic,
+            ),
+            name=f"inbound-deadline:{call_id}",
+        )
+
+
+async def _cancel_inbound_runtime_guards(call_id: str) -> None:
+    current = asyncio.current_task()
+    pending = []
+    for registry in (_inbound_heartbeat_tasks, _inbound_deadline_tasks):
+        task = registry.pop(call_id, None)
+        if task is None or task.done() or task is current:
+            continue
+        task.cancel()
+        pending.append(task)
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+
+def _pinned_inbound_opening(
+    admission_payload: Mapping[str, Any],
+) -> tuple[str, Optional[str]]:
+    """Return (first_speaker, custom_greeting) from one admitted snapshot."""
+
+    snapshot = admission_payload.get("config_snapshot")
+    inbound_cfg = snapshot.get("inbound_config") if isinstance(snapshot, dict) else None
+    pinned_mode = admission_payload.get("opening_mode")
+    snapshot_mode = inbound_cfg.get("opening_mode") if isinstance(inbound_cfg, dict) else None
+    if pinned_mode not in {"caller_first", "agent_first"} or snapshot_mode != pinned_mode:
+        raise RuntimeError("admitted inbound call has inconsistent opening_mode")
+    greeting = inbound_cfg.get("greeting") if isinstance(inbound_cfg, dict) else None
+    return (
+        "agent" if pinned_mode == "agent_first" else "user",
+        str(greeting).strip() if isinstance(greeting, str) and greeting.strip() else None,
+    )
+
+
+def _pinned_inbound_action(
+    admission_payload: Mapping[str, Any],
+) -> tuple[str, Optional[str], Optional[str], str]:
+    """Return the admitted after-hours action without consulting mutable state.
+
+    The same values are intentionally carried in ``inbound_config`` and
+    ``schedule_decision``.  Requiring them to agree detects a partial/corrupt
+    snapshot before the runtime answers as the wrong agent or sends a call to
+    an unapproved destination.
+    """
+
+    snapshot = admission_payload.get("config_snapshot")
+    if not isinstance(snapshot, Mapping):
+        raise RuntimeError("admitted inbound call is missing its config snapshot")
+    inbound_cfg = snapshot.get("inbound_config")
+    schedule = snapshot.get("schedule_decision")
+    if not isinstance(inbound_cfg, Mapping) or not isinstance(schedule, Mapping):
+        raise RuntimeError("admitted inbound call is missing its schedule decision")
+
+    action = inbound_cfg.get("selected_action")
+    if action not in {"agent", "hangup", "voicemail", "transfer"}:
+        raise RuntimeError("admitted inbound call has an invalid selected_action")
+    if schedule.get("selected_action") != action:
+        raise RuntimeError("admitted inbound call has inconsistent selected_action")
+
+    destination = inbound_cfg.get("selected_destination")
+    schedule_destination = schedule.get("selected_destination")
+    if destination != schedule_destination:
+        raise RuntimeError("admitted inbound call has inconsistent transfer destination")
+    if action == "transfer" and not (isinstance(destination, str) and destination.strip()):
+        raise RuntimeError("admitted inbound transfer has no destination")
+    if action != "transfer" and destination not in {None, ""}:
+        raise RuntimeError("non-transfer inbound action carries a destination")
+
+    message = inbound_cfg.get("after_hours_message")
+    if message is not None and not isinstance(message, str):
+        raise RuntimeError("admitted inbound call has an invalid after-hours message")
+
+    transfer_policy = inbound_cfg.get("transfer_policy")
+    failure_action = "hangup"
+    if isinstance(transfer_policy, Mapping):
+        candidate = transfer_policy.get("failure_action")
+        if candidate in {"voicemail", "return_to_agent", "hangup"}:
+            failure_action = str(candidate)
+    return (
+        str(action),
+        str(destination).strip() if isinstance(destination, str) and destination.strip() else None,
+        message.strip() if isinstance(message, str) and message.strip() else None,
+        failure_action,
+    )
+
+
+def _pinned_inbound_ai_config(
+    admission_payload: Mapping[str, Any],
+):
+    """Rehydrate provider and tuning objects solely from the admitted row."""
+
+    snapshot = admission_payload.get("config_snapshot")
+    raw = snapshot.get("tenant_ai_config") if isinstance(snapshot, Mapping) else None
+    if not isinstance(raw, Mapping) or not raw.get("id"):
+        raise RuntimeError("admitted inbound call has no pinned tenant AI configuration")
+
+    required = (
+        "llm_provider",
+        "llm_model",
+        "llm_temperature",
+        "llm_max_tokens",
+        "stt_provider",
+        "stt_model",
+        "stt_language",
+        "stt_engine",
+        "tts_provider",
+        "tts_model",
+        "tts_voice_id",
+        "tts_sample_rate",
+        "pipeline_mode",
+    )
+    missing = [key for key in required if raw.get(key) is None or raw.get(key) == ""]
+    if missing:
+        raise RuntimeError(
+            "admitted inbound call has incomplete pinned AI configuration: " + ",".join(missing)
+        )
+
+    from app.domain.models.ai_config import AIProviderConfig
+    from app.domain.services.voice_tuning import VoiceTuning, get_voice_tuning_resolver
+
+    ai_fields = {
+        key: raw.get(key)
+        for key in (
+            "llm_provider",
+            "llm_model",
+            "llm_temperature",
+            "llm_max_tokens",
+            "stt_provider",
+            "stt_model",
+            "stt_language",
+            "stt_engine",
+            "tts_provider",
+            "tts_model",
+            "tts_voice_id",
+            "tts_sample_rate",
+            "pipeline_mode",
+            "realtime_model",
+            "realtime_voice",
+            "realtime_settings",
+        )
+        if raw.get(key) is not None
+    }
+    try:
+        ai_config = AIProviderConfig(**ai_fields)
+    except Exception as exc:
+        raise RuntimeError("admitted inbound call has invalid pinned AI configuration") from exc
+
+    raw_tuning = raw.get("voice_tuning") or {}
+    if not isinstance(raw_tuning, Mapping):
+        raise RuntimeError("admitted inbound call has invalid pinned voice tuning")
+    tuning_values = get_voice_tuning_resolver().coerce_user_partial(dict(raw_tuning))
+    voice_tuning = VoiceTuning(**tuning_values)
+    return ai_config, voice_tuning
+
+
+_TRUE_INBOUND_DIRECTIVE = """\
+TRUE INBOUND CALL — THE CALLER CONTACTED THE COMPANY (this overrides any
+outbound/cold-call framing below):
+- The caller dialed this number. Never say or imply that you called them.
+- Answer their direct question first. Then ask at most one relevant question.
+- Be a concise, warm inbound representative: understand why they called,
+  collect only what is needed, and move to the appropriate approved next step.
+- Never claim that booking, transfer, callback, opt-out, or another external
+  action succeeded unless the corresponding runtime action confirms it.
+- Respect opt-out, safety, wrong-number, privacy, and human-transfer requests
+  before qualification or sales goals.
+"""
+
+_AFTER_HOURS_VOICEMAIL_DIRECTIVE = """\
+AFTER-HOURS AI MESSAGE INTAKE (this overrides sales and qualification stages):
+- Tell the caller the team is unavailable and invite one concise message.
+- Collect only their name, callback details if they volunteer them, and the
+  reason for the call. Ask one question at a time and do not sell or qualify.
+- Briefly confirm the message. Never promise when somebody will respond unless
+  an approved schedule explicitly says so. Then close the call politely.
+"""
+
+_AI_MESSAGE_INTAKE_FALLBACK_GREETING = (
+    "We are currently unavailable. Please tell me your name, number, " "and a short message."
+)
+
+
+def _build_pinned_inbound_config(
+    admission_payload: Mapping[str, Any],
+    *,
+    gateway_type: str,
+    selected_action: str,
+):
+    """Build one voice-session config from the immutable admission snapshot."""
+
+    snapshot = admission_payload.get("config_snapshot")
+    campaign = snapshot.get("campaign") if isinstance(snapshot, Mapping) else None
+    inbound_cfg = snapshot.get("inbound_config") if isinstance(snapshot, Mapping) else None
+    if not isinstance(campaign, Mapping) or not isinstance(inbound_cfg, Mapping):
+        raise RuntimeError("admitted inbound call has incomplete pinned campaign data")
+
+    from app.domain.services.voice_orchestrator import Direction
+
+    pinned_campaign = apply_qualification_overrides(
+        dict(campaign),
+        inbound_cfg.get("qualification_config") or {},
+    )
+    ai_config, voice_tuning = _pinned_inbound_ai_config(admission_payload)
+    config = _build_telephony_session_config(
+        gateway_type=gateway_type,
+        campaign=pinned_campaign,
+        direction=Direction.INBOUND,
+        voice_tuning_override=voice_tuning,
+        ai_config_override=ai_config,
+    )
+    base_prompt = str(getattr(config, "system_prompt", "") or "").strip()
+    directive = _TRUE_INBOUND_DIRECTIVE
+    if selected_action == "voicemail":
+        directive += "\n" + _AFTER_HOURS_VOICEMAIL_DIRECTIVE
+    config.system_prompt = f"{directive}\n\n{base_prompt}" if base_prompt else directive
+
+    # Realtime builds its session instructions before ``VoiceSession`` exists,
+    # so its opening policy must travel on the config now.  Deriving this from
+    # ``Direction.INBOUND`` inside the orchestrator used to force every inbound
+    # realtime call to caller-first, leaving configured agent-first calls and
+    # after-hours message intake silent.  Only the immutable admission snapshot
+    # is consulted here.
+    first_speaker, pinned_greeting = _pinned_inbound_opening(admission_payload)
+    if selected_action == "voicemail":
+        first_speaker = "agent"
+        raw_message = inbound_cfg.get("after_hours_message")
+        pinned_greeting = (
+            str(raw_message).strip()
+            if isinstance(raw_message, str) and raw_message.strip()
+            else _AI_MESSAGE_INTAKE_FALLBACK_GREETING
+        )
+    config.realtime_greet_on_start = first_speaker == "agent"
+    config.realtime_opening_greeting = pinned_greeting if config.realtime_greet_on_start else None
+    config.realtime_message_intake = selected_action == "voicemail"
+    return config, pinned_campaign
+
+
+async def _on_new_call(call_id: str, inbound_admission: Any = None) -> None:
     """Initialize AI pipeline when a new SIP call arrives."""
+    # This callback is dispatched immediately after Asterisk answers. Anchor
+    # the hard deadline before any status/database/provider await below.
+    _new_call_t0 = asyncio.get_running_loop().time()
+    state_backend = _state()
+    if (
+        getattr(state_backend, "strict_ownership_active", False)
+        and not state_backend.is_telephony_owner()
+    ):
+        # This callback can start after Asterisk has answered and created local
+        # media but before a VoiceSession is registered.  Hand the exact
+        # adapter-owned channel/resources to its cleanup owner; never scan or
+        # control channels belonging to another process.
+        logger.critical(
+            "telephony_new_call_fenced_after_ownership_loss call=%s",
+            call_id[:12],
+        )
+        adapter = get_adapter()
+        reject_handoff = getattr(adapter, "reject_pending_inbound_handoff", None)
+        if callable(reject_handoff):
+            reject_handoff(call_id, reason="ownership_lost_before_registration")
+        return
+    admission_payload = _admission_dict(inbound_admission)
+    if admission_payload and bool(admission_payload.get("allowed")):
+        _inbound_admissions_in_flight[call_id] = admission_payload
+    is_true_inbound = bool(admission_payload and admission_payload.get("allowed"))
+
+    # The callback runs only after Answer. Arm both safety guards before the
+    # first DB/provider await so a slow optional status write cannot create an
+    # unbounded, non-heartbeating inbound call. Snapshot validation is purely
+    # synchronous and therefore also happens before that first await.
+    inbound_selected_action = "agent"
+    inbound_selected_destination: Optional[str] = None
+    inbound_after_hours_message: Optional[str] = None
+    inbound_transfer_failure_action = "hangup"
+    effective_max_duration: Optional[int] = None
+    if is_true_inbound:
+        try:
+            (
+                inbound_selected_action,
+                inbound_selected_destination,
+                inbound_after_hours_message,
+                inbound_transfer_failure_action,
+            ) = _pinned_inbound_action(admission_payload)
+            effective_max_duration = _pinned_inbound_max_duration(admission_payload)
+            _start_inbound_runtime_guards(
+                call_id,
+                admission_payload,
+                answered_at_monotonic=_new_call_t0,
+                max_duration_seconds=effective_max_duration,
+            )
+        except Exception as exc:
+            admission_payload["_terminal_reason"] = "invalid_admission_snapshot"
+            logger.error(
+                "inbound_runtime_guard_start_failed call=%s err=%s",
+                call_id[:12],
+                exc,
+            )
+            await _cancel_inbound_runtime_guards(call_id)
+            adapter = get_adapter()
+            reject_handoff = getattr(
+                adapter,
+                "reject_pending_inbound_handoff",
+                None,
+            )
+            if callable(reject_handoff):
+                reject_handoff(call_id, reason="invalid_admission_snapshot")
+            return
+
+        # Admission's strict pre-answer entry remains termination-pending until
+        # this post-Answer callback has installed its runtime guards. Promote
+        # it before any optional status/provider await (notably the bounded
+        # after-hours transfer) so a healthy owner's watchdog does not race a
+        # legitimate initialization, while a process restart still exposes
+        # the now-stale active entry immediately.
+        await state_backend.register_cleanup_obligation(
+            call_id,
+            tenant_id=(
+                str(admission_payload.get("tenant_id"))
+                if admission_payload.get("tenant_id")
+                else None
+            ),
+            campaign_id=(
+                str(admission_payload.get("campaign_id"))
+                if admission_payload.get("campaign_id")
+                else None
+            ),
+            state="active",
+        )
+
     # Track B (live call transparency): the remote side just picked up.
     # Emit ANSWERED so the live-calls panel flips from "ringing" to a
     # green "in-call" pill. Pre-pipeline start so the UI updates fast.
     # Best-effort — never block call setup on a status emit.
     try:
         from app.domain.services.call_status import (
-            CallState, record_call_state_by_provider_id,
+            CallState,
+            record_call_state_by_provider_id,
         )
         from app.core.container import get_container as _gc
+
         _c = _gc()
-        await record_call_state_by_provider_id(
-            _c.db_pool,
-            provider_call_id=call_id,
-            new_state=CallState.ANSWERED,
-            metadata={"description": "Call answered"},
+        await asyncio.wait_for(
+            record_call_state_by_provider_id(
+                _c.db_pool,
+                provider_call_id=call_id,
+                new_state=CallState.ANSWERED,
+                metadata={"description": "Call answered"},
+            ),
+            timeout=1.0,
         )
+    except asyncio.CancelledError:
+        if is_true_inbound:
+            # Before the adapter's explicit acceptance callback, it still owns
+            # PBX/media cleanup and durable release. Lifecycle cancellation may
+            # only unwind the heartbeat/deadline tasks it created; finalizing
+            # here would pop the admission before adapter cleanup can claim its
+            # bridge/external-media/RTP resources.
+            await asyncio.shield(_cancel_inbound_runtime_guards(call_id))
+        raise
     except Exception as exc:
         logger.debug("call_status.answered_emit_raised call=%s err=%s", call_id[:12], exc)
 
@@ -1099,8 +3318,20 @@ async def _on_new_call(call_id: str) -> None:
     if _pod_session_count >= _MAX_TELEPHONY_SESSIONS:
         logger.error(
             "telephony_at_pod_capacity sessions=%d call_id=%s — rejecting",
-            _pod_session_count, call_id[:12],
+            _pod_session_count,
+            call_id[:12],
         )
+        if is_true_inbound:
+            await _cancel_inbound_runtime_guards(call_id)
+            adapter = get_adapter()
+            reject_handoff = getattr(
+                adapter,
+                "reject_pending_inbound_handoff",
+                None,
+            )
+            if callable(reject_handoff):
+                reject_handoff(call_id, reason="pod_capacity")
+            return
         await _reject_overcap_call(call_id)
         return
 
@@ -1115,27 +3346,246 @@ async def _on_new_call(call_id: str) -> None:
         resolve_global_cap,
     )
     from app.core.container import get_container
+
     container = get_container()
     redis_client = getattr(container, "redis", None)
-    lease = await acquire_lease(
-        redis_client,
-        call_id=call_id,
-        pod_id=os.getenv("POD_ID") or os.uname().nodename,
-        cap=resolve_global_cap(),
-    )
+    lease = True
+    if not is_true_inbound:
+        lease = await acquire_lease(
+            redis_client,
+            call_id=call_id,
+            pod_id=os.getenv("POD_ID") or os.uname().nodename,
+            cap=resolve_global_cap(),
+        )
     if not lease:
         logger.error(
             "telephony_at_global_capacity call_id=%s current=%s — rejecting",
-            call_id[:12], lease.current,
+            call_id[:12],
+            lease.current,
         )
         await _reject_overcap_call(call_id)
         return
 
-    _new_call_t0 = asyncio.get_event_loop().time()
     _sb = _state()
-    logger.info(f"BRIDGE new_call {call_id[:12]} (ringing_warmup_available={_sb.has_ringing_warmup(call_id)})")
+    voice_session = None
+    logger.info(
+        "BRIDGE new_call %s (ringing_warmup_available=%s)",
+        call_id[:12],
+        _sb.has_ringing_warmup(call_id),
+    )
     try:
         orchestrator = _get_orchestrator()
+
+        if is_true_inbound:
+            # ``hangup`` is normally consumed by the Asterisk adapter before
+            # Answer. Reaching lifecycle means an adapter/race path escaped
+            # that gate; preserve the policy by ending immediately.
+            if inbound_selected_action == "hangup":
+                adapter = get_adapter()
+                reject_handoff = getattr(
+                    adapter,
+                    "reject_pending_inbound_handoff",
+                    None,
+                )
+                if callable(reject_handoff):
+                    reject_handoff(call_id, reason="pinned_hangup_action")
+                return
+
+            if inbound_selected_action == "transfer":
+                from app.core.container import get_container as _transfer_container
+                from app.domain.services.telephony.inbound_transfer import (
+                    InboundTransferError,
+                    authorize_inbound_transfer,
+                    complete_inbound_transfer,
+                )
+
+                transfer_result: Dict[str, Any] = {"status": "failed"}
+                transfer_attempt = None
+                transfer_exception: Optional[BaseException] = None
+                provider_transfer_started = False
+                container_for_transfer = _transfer_container()
+                operation_key = (
+                    "after-hours-"
+                    + hashlib.sha256(
+                        (f"{call_id}\x00{str(inbound_selected_destination)}").encode("utf-8")
+                    ).hexdigest()
+                )
+                try:
+                    transfer_attempt = await authorize_inbound_transfer(
+                        container_for_transfer.db_pool,
+                        call_reference=call_id,
+                        destination=str(inbound_selected_destination),
+                        mode="blind",
+                        source="after_hours",
+                        redis_client=getattr(container_for_transfer, "redis", None),
+                        idempotency_key=operation_key,
+                        actor_role="system",
+                        actor_type="service",
+                    )
+                    if getattr(transfer_attempt, "is_replay", False):
+                        replay_result = getattr(transfer_attempt, "replay_result", None)
+                        transfer_result = (
+                            dict(replay_result)
+                            if isinstance(replay_result, dict)
+                            else {
+                                "status": "cleanup_pending",
+                                "reason": "idempotent_transfer_in_progress",
+                            }
+                        )
+                    else:
+                        adapter = get_adapter()
+                        if adapter is None or not adapter.connected:
+                            transfer_result = {
+                                "status": "failed",
+                                "error": "adapter_unavailable",
+                                "target_termination_confirmed": True,
+                                "caller_media_retained": True,
+                            }
+                        else:
+                            provider_transfer_started = True
+                            transfer_result = await adapter.transfer(
+                                call_id,
+                                str(transfer_attempt.destination),
+                                "blind",
+                                provider_leg_id=str(
+                                    getattr(
+                                        transfer_attempt,
+                                        "provider_leg_id",
+                                        "",
+                                    )
+                                    or ""
+                                ),
+                            )
+                except InboundTransferError as exc:
+                    transfer_result = {
+                        "status": "failed",
+                        "error": exc.code,
+                        "message": exc.message,
+                        # Authorization failed before any PBX target could be
+                        # created; returning to the still-owned caller is safe.
+                        "target_termination_confirmed": True,
+                        "caller_media_retained": True,
+                    }
+                except BaseException as exc:  # cancellation/provider uncertainty
+                    transfer_exception = exc
+                    transfer_result = (
+                        {
+                            "status": "cleanup_pending",
+                            "reason": "adapter_exception",
+                            "error": type(exc).__name__,
+                            "provider_leg_id": getattr(
+                                transfer_attempt,
+                                "provider_leg_id",
+                                None,
+                            ),
+                        }
+                        if provider_transfer_started
+                        else {
+                            "status": "failed",
+                            "error": type(exc).__name__,
+                            "target_termination_confirmed": True,
+                            "caller_media_retained": True,
+                        }
+                    )
+
+                transfer_result = dict(transfer_result or {})
+                if transfer_attempt is not None:
+                    transfer_result.setdefault(
+                        "attempt_id", getattr(transfer_attempt, "leg_id", None)
+                    )
+                    transfer_result.setdefault("idempotency_key", operation_key)
+
+                transfer_succeeded = str(transfer_result.get("status") or "").lower() in {
+                    "success",
+                    "completed",
+                    "transferred",
+                    "ok",
+                }
+                if transfer_attempt is not None:
+                    try:
+                        await complete_inbound_transfer(
+                            container_for_transfer.db_pool,
+                            attempt=transfer_attempt,
+                            succeeded=transfer_succeeded,
+                            result=transfer_result,
+                            redis_client=getattr(container_for_transfer, "redis", None),
+                        )
+                    except Exception as exc:
+                        logger.error(
+                            "inbound_transfer_outcome_persist_failed call=%s success=%s err=%s",
+                            call_id[:12],
+                            transfer_succeeded,
+                            exc,
+                        )
+                        # Never expose/accept a provider handoff whose durable
+                        # child state and idempotency response did not commit.
+                        raise RuntimeError("after-hours transfer outcome was not durable") from exc
+                if transfer_exception is not None:
+                    raise transfer_exception
+
+                result_status = str(transfer_result.get("status") or "").strip().lower()
+                if result_status in {
+                    "cleanup_pending",
+                    "unconfirmed",
+                    "termination_unconfirmed",
+                    "in_progress",
+                }:
+                    # The adapter/lifecycle exception owner will fence the
+                    # provisional inbound parent. Continuing into AI/message
+                    # intake could overlap an unproved PSTN target.
+                    raise RuntimeError("after-hours transfer cleanup remains unconfirmed")
+                if transfer_succeeded:
+                    admission_payload["_transfer_connected"] = True
+                    _inbound_admissions_in_flight[call_id] = admission_payload
+                    # The strict active ledger was already promoted before the
+                    # transfer await, covering a crash anywhere in its bounded
+                    # answer/proof window. Do not rely on a post-success write.
+                    accept_handoff = getattr(
+                        adapter,
+                        "accept_inbound_handoff",
+                        None,
+                    )
+                    if not callable(accept_handoff) or not accept_handoff(call_id):
+                        raise RuntimeError(
+                            "after-hours transfer lifecycle ownership was not accepted"
+                        )
+                    logger.info(
+                        "inbound_after_hours_transfer_connected call=%s destination=approved",
+                        call_id[:12],
+                    )
+                    return
+
+                logger.warning(
+                    "inbound_after_hours_transfer_failed call=%s failure_action=%s error=%s",
+                    call_id[:12],
+                    inbound_transfer_failure_action,
+                    transfer_result.get("error") or transfer_result.get("status"),
+                )
+                if inbound_transfer_failure_action == "hangup":
+                    adapter = get_adapter()
+                    reject_handoff = getattr(
+                        adapter,
+                        "reject_pending_inbound_handoff",
+                        None,
+                    )
+                    rejected = bool(
+                        callable(reject_handoff)
+                        and reject_handoff(
+                            call_id,
+                            reason="after_hours_transfer_failed",
+                        )
+                    )
+                    if not rejected:
+                        raise RuntimeError("after-hours failed transfer could not be fenced")
+                    return
+                if not (
+                    transfer_result.get("target_termination_confirmed")
+                    and transfer_result.get("caller_media_retained")
+                ):
+                    raise RuntimeError("after-hours transfer fallback lacks provider proof")
+                inbound_selected_action = (
+                    "voicemail" if inbound_transfer_failure_action == "voicemail" else "agent"
+                )
 
         # Select the correct media gateway based on the active PBX adapter:
         #   - Asterisk path: TelephonyMediaGateway (HTTP callbacks, no WebSocket)
@@ -1177,77 +3627,94 @@ async def _on_new_call(call_id: str) -> None:
                     _wait_ms = (asyncio.get_event_loop().time() - _new_call_t0) * 1000.0
                     logger.info(
                         "BRIDGE ringing_warmup_consumed call_id=%s wait_ms=%.0f",
-                        call_id[:12], _wait_ms,
+                        call_id[:12],
+                        _wait_ms,
                     )
             _sb.pop_ringing_event(call_id)  # clean up event
         connect_task: Optional[asyncio.Task] = None
-        inbound_route = None
         inbound_campaign_row = None
         if pre is not None:
             voice_session, connect_task = pre  # type: ignore[assignment]
+        elif is_true_inbound:
+            # The adapter already admitted this channel before answering. Use
+            # only that pinned snapshot; never re-query a "latest" campaign or
+            # fall through to the process-default agent for true inbound.
+            tenant_id = admission_payload.get("tenant_id")
+            campaign_id = admission_payload.get("campaign_id")
+            snapshot = admission_payload.get("config_snapshot")
+            inbound_campaign_row = snapshot.get("campaign") if isinstance(snapshot, dict) else None
+            if not tenant_id or not campaign_id or not isinstance(inbound_campaign_row, dict):
+                raise RuntimeError("admitted inbound call is missing its pinned campaign snapshot")
+            config, inbound_campaign_row = _build_pinned_inbound_config(
+                admission_payload,
+                gateway_type=gateway_type,
+                selected_action=inbound_selected_action,
+            )
+            voice_session = await orchestrator.create_voice_session(config)
+            logger.info(
+                "inbound_session_from_admission call=%s tenant=%s campaign=%s "
+                "route_version=%s config_version=%s replay=%s",
+                call_id[:12],
+                str(tenant_id)[:8],
+                str(campaign_id)[:8],
+                admission_payload.get("route_version"),
+                admission_payload.get("config_version"),
+                bool(admission_payload.get("is_replay")),
+            )
         else:
-            # ── Phase C: per-tenant INBOUND routing ─────────────────────────
-            # For a fresh (inbound / non-prewarmed) call, resolve the dialed
-            # DID + trunk context to a tenant/campaign so the CORRECT agent /
-            # prompt / knowledge loads. Additive + fail-soft: an unresolved
-            # DID falls back to today's exact default-agent config; a
-            # conflict / strict-unknown is rejected (fail-closed isolation).
-            inbound_route, inbound_campaign_row = await _resolve_inbound_route_for_call(call_id)
-            if inbound_route is not None and inbound_route.rejected:
-                logger.warning(
-                    "inbound_rejected call=%s reason=%s — hanging up",
-                    call_id[:12], inbound_route.reason,
-                )
-                await _reject_overcap_call(call_id)
-                return
-            if inbound_route is not None and inbound_route.resolved:
-                from app.domain.services.voice_orchestrator import Direction
-                from app.domain.services.voice_tuning import (
-                    get_voice_tuning_resolver,
-                )
-                _vt = await get_voice_tuning_resolver().for_tenant_async(
-                    str(inbound_route.tenant_id) if inbound_route.tenant_id else None,
-                )
-                # Source the inbound call's provider selection from the resolved
-                # tenant's own persisted AI config (not the process-global) —
-                # the per-tenant isolation fix, mirroring the voice-tuning path.
-                from app.domain.services.tenant_ai_config_resolver import (
-                    get_tenant_ai_config_resolver,
-                )
-                _ai_cfg = await get_tenant_ai_config_resolver().for_tenant_async(
-                    str(inbound_route.tenant_id) if inbound_route.tenant_id else None,
-                )
-                config = _build_telephony_session_config(
-                    gateway_type=gateway_type,
-                    campaign=inbound_campaign_row,
-                    direction=Direction.INBOUND,
-                    voice_tuning_override=_vt,
-                    ai_config_override=_ai_cfg,
-                )
-                logger.info(
-                    "inbound_session_routed call=%s tenant=%s campaign=%s reason=%s",
-                    call_id[:12], str(inbound_route.tenant_id)[:8],
-                    str(inbound_route.campaign_id)[:8] if inbound_route.campaign_id else "-",
-                    inbound_route.reason,
-                )
-            else:
-                config = _build_telephony_session_config(gateway_type=gateway_type)
+            # Non-inbound slow path (outbound warmup unavailable). Preserve its
+            # historical process-default configuration.
+            config = _build_telephony_session_config(gateway_type=gateway_type)
             voice_session = await orchestrator.create_voice_session(config)
 
         _sb.set_voice_session(call_id, voice_session)
 
-        # Inbound is caller-speaks-first: the caller opened the channel, so
-        # default to user-first timing (no outbound-style auto greeting) when
-        # we resolved the call to a tenant. Only touches the resolved-inbound
-        # path — the fallback path keeps its historical default.
-        if inbound_route is not None and inbound_route.resolved:
-            try:
-                voice_session._first_speaker = "user"
-                _cs0 = getattr(voice_session, "call_session", None)
-                if _cs0 is not None:
-                    _cs0._first_speaker = "user"
-            except Exception:
-                pass
+        # True inbound first-speaker comes only from the admitted, pinned
+        # configuration.  Do not infer it from channel context or global
+        # outbound defaults.
+        if is_true_inbound:
+            if effective_max_duration is None:
+                raise RuntimeError("admitted inbound call has no runtime duration")
+            voice_session._max_call_duration_seconds = effective_max_duration
+            voice_session._soft_call_cap_seconds = 0
+            voice_session._inbound_deadline_task = _inbound_deadline_tasks.get(call_id)
+            voice_session._inbound_heartbeat_task = _inbound_heartbeat_tasks.get(call_id)
+            inbound_first_speaker, inbound_greeting = _pinned_inbound_opening(admission_payload)
+            snapshot = admission_payload.get("config_snapshot")
+            inbound_cfg = snapshot.get("inbound_config") if isinstance(snapshot, dict) else {}
+            consent_message = (
+                inbound_cfg.get("consent_message") if isinstance(inbound_cfg, dict) else None
+            )
+            if inbound_selected_action == "voicemail":
+                inbound_first_speaker = "agent"
+                inbound_greeting = (
+                    inbound_after_hours_message or _AI_MESSAGE_INTAKE_FALLBACK_GREETING
+                )
+            voice_session._first_speaker = inbound_first_speaker
+            voice_session._pinned_inbound_greeting = inbound_greeting
+            voice_session._inbound_greeting = inbound_greeting
+            voice_session._call_direction = "inbound"
+            voice_session._inbound_selected_action = inbound_selected_action
+            voice_session._inbound_selected_destination = inbound_selected_destination
+            voice_session._inbound_transfer_failure_action = inbound_transfer_failure_action
+            if isinstance(consent_message, str) and consent_message.strip():
+                voice_session._recording_disclosure_text_override = consent_message.strip()
+            qualification = (
+                inbound_cfg.get("qualification_config") if isinstance(inbound_cfg, dict) else {}
+            )
+            if isinstance(qualification, Mapping):
+                silence_timeout = qualification.get("silence_timeout_seconds")
+                if isinstance(silence_timeout, (int, float)) and 3 <= silence_timeout <= 60:
+                    voice_session._silence_timeout_seconds = float(silence_timeout)
+            _cs0 = getattr(voice_session, "call_session", None)
+            if _cs0 is not None:
+                _cs0._first_speaker = inbound_first_speaker
+                _cs0._pinned_inbound_greeting = inbound_greeting
+                _cs0._inbound_greeting = inbound_greeting
+                _cs0._call_direction = "inbound"
+                _cs0._enable_silence_monitor = True
+                if hasattr(voice_session, "_silence_timeout_seconds"):
+                    _cs0._silence_timeout_seconds = voice_session._silence_timeout_seconds
 
         # Ensure the per-call first-speaker is on the session for the greeting
         # decision below. The pre-warm-consumed path already carries it; the
@@ -1256,7 +3723,7 @@ async def _on_new_call(call_id: str) -> None:
         # greeting. Apply the value stashed at make_call (idempotent — same
         # value on the pre-warm path).
         try:
-            _fs = _sb.get_first_speaker(call_id)
+            _fs = None if is_true_inbound else _sb.get_first_speaker(call_id)
             if _fs:
                 voice_session._first_speaker = _fs
                 _cs = getattr(voice_session, "call_session", None)
@@ -1266,61 +3733,62 @@ async def _on_new_call(call_id: str) -> None:
             pass
 
         # ── Bind dialer calls.id for campaign transcript persist ────────
-        # Non-destructive: stashes _dialer_call_id on voice_session without
-        # touching voice_session.call_id (STT/TTS connection maps are keyed
-        # on that). Logs and returns None for non-campaign/test calls.
+        # Admission created the inbound calls row before Asterisk answered, so
+        # true inbound consumes that exact identity and pinned snapshot. Never
+        # create a second, best-effort inbound row after answer.
         try:
             from app.core.container import get_container as _gc
+
             _c = _gc()
-            if _c.is_initialized:
-                binding = await bind_telephony_call(
+            if is_true_inbound:
+                durable_call_id = str(admission_payload["call_id"])
+                voice_session._dialer_call_id = durable_call_id
+                voice_session._dialer_tenant_id = str(admission_payload["tenant_id"])
+                voice_session._dialer_campaign_id = str(admission_payload["campaign_id"])
+                voice_session._dialer_phone = admission_payload.get("caller_ani")
+                voice_session._is_true_inbound = True
+                voice_session._inbound_admission = dict(admission_payload)
+                _call_session = getattr(voice_session, "call_session", None)
+                if _call_session is not None:
+                    _call_session._dialer_call_id = durable_call_id
+                    _call_session._dialer_tenant_id = voice_session._dialer_tenant_id
+                    _call_session._dialer_campaign_id = voice_session._dialer_campaign_id
+
+                # Knowledge content itself is captured during pre-answer
+                # admission.  Never re-read campaign nodes here: a mid-call KB
+                # edit must affect only the next admitted call.
+                try:
+                    from app.services.scripts.knowledge.session_inject import (
+                        apply_pinned_campaign_knowledge,
+                    )
+
+                    _knowledge_snapshot = (
+                        snapshot.get("knowledge_snapshot") if isinstance(snapshot, dict) else None
+                    )
+                    if _call_session is not None:
+                        apply_pinned_campaign_knowledge(
+                            _call_session,
+                            _knowledge_snapshot,
+                        )
+                        _realtime_bridge = getattr(voice_session, "realtime_bridge", None)
+                        if _realtime_bridge is not None:
+                            _realtime_bridge._knowledge_snapshot_nodes = getattr(
+                                _call_session,
+                                "_knowledge_snapshot_nodes",
+                                None,
+                            )
+                except Exception as _kb_exc:
+                    raise RuntimeError("failed to apply pinned inbound knowledge") from _kb_exc
+            elif _c.is_initialized:
+                # Preserve the existing outbound association path.
+                await bind_telephony_call(
                     voice_session=voice_session,
                     pbx_channel_id=call_id,
                     db_client=_c.db_client,
                 )
-                # Phase C — inbound calls have NO pre-existing calls row (only
-                # the dialer pre-creates one for outbound), so bind_telephony_
-                # call returns None. When we resolved the inbound call to a
-                # tenant/campaign, bind that here: stamps tenant/campaign on the
-                # session (so tenant-scoped downstream works) + best-effort
-                # creates an inbound calls row keyed to the channel. Fail-soft.
-                if (
-                    binding is None
-                    and inbound_route is not None
-                    and inbound_route.resolved
-                    and inbound_route.tenant_id
-                ):
-                    from app.services.scripts.call_transcript_persister import (
-                        bind_inbound_call,
-                    )
-                    await bind_inbound_call(
-                        voice_session=voice_session,
-                        pbx_channel_id=call_id,
-                        db_client=_c.db_client,
-                        tenant_id=str(inbound_route.tenant_id),
-                        campaign_id=(
-                            str(inbound_route.campaign_id)
-                            if inbound_route.campaign_id else None
-                        ),
-                        caller_number=_inbound_caller_number(call_id),
-                    )
-                    # Load the campaign's knowledge into the session prompt,
-                    # mirroring the outbound prewarm path.
-                    try:
-                        from app.services.scripts.knowledge.session_inject import (
-                            apply_campaign_knowledge,
-                        )
-                        _kb_pool = getattr(
-                            getattr(_c, "db_client", None), "pool", None,
-                        )
-                        _cs_kb = getattr(voice_session, "call_session", None)
-                        if _cs_kb is not None and inbound_campaign_row is not None:
-                            await apply_campaign_knowledge(
-                                _cs_kb, inbound_campaign_row, pool=_kb_pool,
-                            )
-                    except Exception as _kb_exc:
-                        logger.debug("inbound_campaign_knowledge_skipped: %s", _kb_exc)
         except Exception as _bind_exc:
+            if is_true_inbound:
+                raise RuntimeError("failed to bind admitted inbound call") from _bind_exc
             logger.debug(f"bind_telephony_call wrapper: {_bind_exc}")
 
         # ── Register media gateway BEFORE any further awaiting ──────────
@@ -1340,9 +3808,14 @@ async def _on_new_call(call_id: str) -> None:
 
             await voice_session.media_gateway.on_call_started(
                 voice_session.call_id,
-                {"adapter": get_adapter(), "pbx_call_id": call_id},
+                {
+                    "adapter": get_adapter(),
+                    "pbx_call_id": call_id,
+                    # True inbound starts with both recording buffers closed.
+                    # Only the shared disclosure/policy helper may open them.
+                    "recording_enabled": not is_true_inbound,
+                },
             )
-
             # ── Caller-first 2-second greeting timer (parallel with setup) ──
             # The pre-synthesized greeting audio was prepared during the
             # ringing phase (prepare_pre_originate_greeting). The media
@@ -1381,7 +3854,8 @@ async def _on_new_call(call_id: str) -> None:
                     logger.info(
                         "early_audio_drain call_id=%s chunks=%d — "
                         "replaying callee audio that arrived before session registration",
-                        call_id[:12], len(early_chunks),
+                        call_id[:12],
+                        len(early_chunks),
                     )
                     for chunk in early_chunks:
                         try:
@@ -1417,17 +3891,20 @@ async def _on_new_call(call_id: str) -> None:
                         if isinstance(r, Exception):
                             logger.warning(
                                 "telephony_ringing_warmup[%d] failed (non-fatal): %s",
-                                i, r,
+                                i,
+                                r,
                             )
                 _warmup_ms = (asyncio.get_event_loop().time() - _new_call_t0) * 1000.0
                 logger.info(
                     "BRIDGE telephony_warmup_done call_id=%s source=ringing await_ms=%.0f",
-                    call_id[:12], _warmup_ms,
+                    call_id[:12],
+                    _warmup_ms,
                 )
             except asyncio.TimeoutError:
                 logger.warning(
                     "telephony_ringing_warmup_slow call_id=%s — providers will "
-                    "complete handshake on first use", call_id[:12],
+                    "complete handshake on first use",
+                    call_id[:12],
                 )
         else:
             warmup_coros = []
@@ -1436,9 +3913,7 @@ async def _on_new_call(call_id: str) -> None:
                 warmup_coros.append(_tts_connect(voice_session.call_id))
             if hasattr(voice_session.stt_provider, "pre_connect"):
                 warmup_coros.append(
-                    voice_session.stt_provider.pre_connect(
-                        voice_session.call_session.call_id
-                    )
+                    voice_session.stt_provider.pre_connect(voice_session.call_session.call_id)
                 )
             # LLM pool prewarm: ringing skipped this branch, so without it
             # the first user turn pays the cold-pool cost (~100-200ms TLS +
@@ -1447,6 +3922,7 @@ async def _on_new_call(call_id: str) -> None:
             from app.domain.services.telephony.modes.user_first import (
                 prewarm_llm_pool,
             )
+
             warmup_coros.append(prewarm_llm_pool(voice_session))
 
             if warmup_coros:
@@ -1456,9 +3932,24 @@ async def _on_new_call(call_id: str) -> None:
                         logger.warning("telephony_warmup[%d] failed (non-fatal): %s", i, r)
                 _warmup_ms = (asyncio.get_event_loop().time() - _new_call_t0) * 1000.0
                 logger.info(
-                    "BRIDGE telephony_warmup_done call_id=%s source=answer warmups=%d warmup_ms=%.0f",
-                    call_id[:12], len(warmup_coros), _warmup_ms,
+                    "BRIDGE telephony_warmup_done call_id=%s source=answer "
+                    "warmups=%d warmup_ms=%.0f",
+                    call_id[:12],
+                    len(warmup_coros),
+                    _warmup_ms,
                 )
+
+        if is_true_inbound:
+            # Compliance ordering: caller RTP may already be feeding STT, but
+            # the media gateway's recording buffers remain closed until the
+            # shared disclosure completes and tenant policy is re-checked.
+            # This is intentionally before the pipeline starts, so the agent
+            # cannot answer queued caller speech ahead of the notice.
+            from app.domain.services.telephony.modes.caller_first import (
+                prepare_inbound_recording,
+            )
+
+            await prepare_inbound_recording(voice_session)
 
         if is_asterisk:
             # Start the voice pipeline. Two modes:
@@ -1482,16 +3973,13 @@ async def _on_new_call(call_id: str) -> None:
                     _rt_call_id = call_id
                     _set_hook = getattr(_rt_bridge, "set_on_connection_lost", None)
                     if callable(_set_hook):
-                        _set_hook(
-                            lambda: _on_realtime_connection_lost(
-                                _rt_call_id, _rt_session
-                            )
-                        )
+                        _set_hook(lambda: _on_realtime_connection_lost(_rt_call_id, _rt_session))
                 voice_session.pipeline_task = asyncio.create_task(
                     voice_session.realtime_bridge.run()
                 )
                 logger.info(
-                    "BRIDGE realtime_pipeline_started call_id=%s", call_id[:12],
+                    "BRIDGE realtime_pipeline_started call_id=%s",
+                    call_id[:12],
                 )
             else:
                 voice_session.pipeline_task = asyncio.create_task(
@@ -1499,13 +3987,12 @@ async def _on_new_call(call_id: str) -> None:
                 )
             # FIX 3 — attach done-callback so a crash inside start_pipeline triggers
             # _on_call_ended rather than leaving a silent dead session.
-            voice_session.pipeline_task.add_done_callback(
-                lambda t: _pipeline_done_cb(t, call_id)
-            )
+            voice_session.pipeline_task.add_done_callback(lambda t: _pipeline_done_cb(t, call_id))
             _pipeline_start_ms = (asyncio.get_event_loop().time() - _new_call_t0) * 1000.0
             logger.info(
                 "BRIDGE pipeline_started call_id=%s total_setup_ms=%.0f source=%s",
-                call_id[:12], _pipeline_start_ms,
+                call_id[:12],
+                _pipeline_start_ms,
                 "ringing" if pre is not None else "answer",
             )
 
@@ -1555,8 +4042,36 @@ async def _on_new_call(call_id: str) -> None:
         _total_init_ms = (asyncio.get_event_loop().time() - _new_call_t0) * 1000.0
         logger.info(
             "BRIDGE ai_pipeline_initialized call_id=%s total_init_ms=%.0f",
-            call_id[:12], _total_init_ms,
+            call_id[:12],
+            _total_init_ms,
         )
+
+        if is_true_inbound:
+            # Registration above is provisional while providers, media and the
+            # pipeline still have cancellable work.  Acceptance is literally
+            # the final operation in this callback: once the adapter observes
+            # it, no later statement can fail or create another resource.
+            handoff_adapter = get_adapter()
+            accept_handoff = getattr(
+                handoff_adapter,
+                "accept_inbound_handoff",
+                None,
+            )
+            if callable(accept_handoff) and not accept_handoff(call_id):
+                raise RuntimeError("inbound adapter refused lifecycle ownership acceptance")
+    except asyncio.CancelledError:
+        if is_true_inbound:
+            await asyncio.shield(_cancel_inbound_runtime_guards(call_id))
+            cancellation_state = _state()
+            registered = cancellation_state.pop_voice_session(call_id)
+            cancellation_state.remove_gateway_sessions_for_call(call_id)
+            orphan = registered or voice_session
+            if orphan is not None:
+                try:
+                    await asyncio.shield(_get_orchestrator().end_session(orphan))
+                except Exception:
+                    pass
+        raise
     except Exception as exc:
         logger.error(f"Failed to initialize AI pipeline for {call_id[:12]}: {exc}", exc_info=True)
         # GAP 3 — Error-path hangup: tell the PBX to release the channel so
@@ -1565,12 +4080,65 @@ async def _on_new_call(call_id: str) -> None:
         # PBX hangup will fire _on_call_ended, but end_session() is idempotent
         # and running it here guards against cases where the hangup path
         # silently drops the StasisEnd event.
-        orphan = _state().pop_voice_session(call_id)
+        failure_state = _state()
+        orphan = failure_state.pop_voice_session(call_id)
+        failure_state.remove_gateway_sessions_for_call(call_id)
         if orphan is not None:
+            for _task_attr in (
+                "_inbound_heartbeat_task",
+                "_inbound_deadline_task",
+            ):
+                _orphan_task = getattr(orphan, _task_attr, None)
+                if _orphan_task is not None and not _orphan_task.done():
+                    _orphan_task.cancel()
+                    await asyncio.gather(_orphan_task, return_exceptions=True)
             try:
                 await _get_orchestrator().end_session(orphan)
             except Exception:
                 pass
+        if is_true_inbound:
+            await _cancel_inbound_runtime_guards(call_id)
+            failure_adapter = get_adapter()
+            reject_handoff = getattr(
+                failure_adapter,
+                "reject_pending_inbound_handoff",
+                None,
+            )
+            if callable(reject_handoff):
+                # Before explicit acceptance the adapter still owns the PBX,
+                # gateway, bridge and admission payload.  Do not finalize (and
+                # therefore pop) that admission here: StasisEnd may beat the
+                # hangup response and needs the cached payload to prove every
+                # deterministic media resource absent before releasing it.
+                # The adapter's fenced cleanup invokes the release-only
+                # finalizer after that proof, so there is still one durable
+                # settlement owner and no recording/media leak window.
+                if not reject_handoff(
+                    call_id,
+                    reason="pipeline_initialization_failed",
+                ):
+                    logger.critical(
+                        "inbound_initialization_cleanup_unclaimed call=%s",
+                        call_id[:12],
+                    )
+                return
+
+            # Adapters without the explicit provisional-handoff contract keep
+            # the legacy lifecycle-owned settlement path.
+            try:
+                await _finalize_inbound_admission(
+                    call_id,
+                    admission_payload,
+                    terminal_status="failed",
+                    duration_seconds=0,
+                    reason="pipeline_initialization_failed",
+                )
+            except Exception as finalize_exc:
+                logger.error(
+                    "inbound_initialization_finalize_failed call=%s err=%s",
+                    call_id[:12],
+                    finalize_exc,
+                )
         if get_adapter():
             try:
                 await get_adapter().hangup(call_id)
@@ -1578,11 +4146,157 @@ async def _on_new_call(call_id: str) -> None:
                 pass
 
 
+async def _on_transfer_provider_identity_persisted(
+    parent_provider_call_id: str,
+    planned_provider_leg_id: str,
+    actual_provider_leg_id: str,
+    tenant_id: str,
+    durable_call_id: str,
+) -> str:
+    """Bind an ARI returned channel ID before the adapter may dial it."""
+
+    from app.core.container import get_container
+    from app.domain.services.telephony.transfer_provider_identity import (
+        persist_asterisk_transfer_provider_identity,
+    )
+
+    container = get_container()
+    if not getattr(container, "is_initialized", False) or container.db_pool is None:
+        raise RuntimeError("database unavailable for transfer identity persistence")
+    identity = await persist_asterisk_transfer_provider_identity(
+        container.db_pool,
+        tenant_id=tenant_id,
+        durable_call_id=durable_call_id,
+        parent_provider_call_id=parent_provider_call_id,
+        planned_provider_leg_id=planned_provider_leg_id,
+        actual_provider_leg_id=actual_provider_leg_id,
+    )
+    return identity.provider_leg_id
+
+
+async def _on_transfer_answered_persisted(
+    call_id: str,
+    target_call_id: str,
+) -> int:
+    """Commit exact child Answer before Asterisk publishes transfer success."""
+
+    from app.core.container import get_container
+    from app.domain.services.telephony.inbound_transfer import (
+        mark_inbound_transfer_answered,
+    )
+
+    container = get_container()
+    if not getattr(container, "is_initialized", False) or container.db_pool is None:
+        raise RuntimeError("database unavailable for transfer answer persistence")
+    return await mark_inbound_transfer_answered(
+        container.db_pool,
+        parent_call_id=call_id,
+        provider_leg_id=target_call_id,
+    )
+
+
+async def _on_transfer_connected(call_id: str, target_call_id: str) -> None:
+    """Quiesce AI media only after a supervised target really answers.
+
+    The adapter owns the caller/target bridge until either human leg hangs up.
+    We deliberately keep the VoiceSession registered so the ordinary terminal
+    event can measure the full call, settle the inbound reservation, and update
+    the durable call exactly once.
+    """
+    admission = _inbound_admissions_in_flight.get(call_id)
+    if admission is not None:
+        admission["_transfer_connected"] = True
+        admission["_transfer_target_call_id"] = target_call_id
+
+    voice_session = _state().get_voice_session(call_id)
+    if voice_session is None:
+        # After-hours transfer happens before an AI VoiceSession is created.
+        # Its heartbeat/deadline guards already run from _on_new_call.
+        return
+    if getattr(voice_session, "_transfer_media_quiesced", False):
+        return
+
+    voice_session._transfer_connected = True
+    voice_session._transfer_target_call_id = target_call_id
+    voice_session._hangup_reason = "transferred"
+    pipeline = getattr(voice_session, "pipeline", None)
+    if pipeline is not None:
+        try:
+            await pipeline.cancel_active_turn(call_id)
+        except Exception as exc:
+            logger.debug("transfer cancel_active_turn failed call=%s err=%s", call_id[:12], exc)
+
+    # Persist both artifacts before end_session clears the media gateway's
+    # recording buffers and closes provider connections.
+    try:
+        transcript_service = getattr(pipeline, "transcript_service", None)
+        if transcript_service is None:
+            transcript_service = getattr(voice_session, "transcript_service", None)
+        if transcript_service is not None:
+            from app.core.container import get_container
+
+            container = get_container()
+            await save_call_transcript_on_hangup(
+                voice_session=voice_session,
+                transcript_service=transcript_service,
+                db_pool=container.db_pool if container.is_initialized else None,
+            )
+            voice_session._transcript_saved_at_transfer = True
+    except Exception as exc:
+        logger.warning("Transfer transcript persist failed for %s: %s", call_id[:12], exc)
+
+    try:
+        await _save_call_recording(voice_session, call_id)
+        voice_session._recording_saved_at_transfer = True
+    except Exception as exc:
+        logger.warning("Transfer recording save failed for %s: %s", call_id[:12], exc)
+
+    try:
+        await _get_orchestrator().end_session(voice_session)
+        voice_session._transfer_media_quiesced = True
+    except Exception as exc:
+        logger.warning("Transfer media teardown failed for %s: %s", call_id[:12], exc)
+
+
+async def _on_transfer_cleanup_confirmed(
+    parent_call_id: str,
+    provider_leg_id: str,
+    reason: str,
+) -> int:
+    """Persist late target-only absence proof while the parent stays live.
+
+    The adapter must await this callback before dropping its cleanup indexes
+    and retry it if an exception escapes. That makes the durable child-leg and
+    transfer-lease transition part of the same proof-owned cleanup contract.
+    """
+
+    from app.core.container import get_container
+    from app.domain.services.telephony.inbound_transfer import (
+        finalize_proven_inbound_transfer_cleanup,
+    )
+
+    container = get_container()
+    if not getattr(container, "is_initialized", False) or container.db_pool is None:
+        raise RuntimeError("database unavailable for transfer cleanup settlement")
+    return await finalize_proven_inbound_transfer_cleanup(
+        container.db_pool,
+        parent_call_id=parent_call_id,
+        provider_leg_id=provider_leg_id,
+        reason=reason,
+        redis_client=getattr(container, "redis", None),
+    )
+
+
 async def _on_audio_received(call_id: str, audio_bytes: bytes) -> None:
     """Route incoming audio from the PBX into the media gateway (STT input)."""
     # Hot path (per RTP packet). get_voice_session is a process-local dict
     # read in both backends — Redis is never touched here.
     sb = _state()
+    if getattr(sb, "strict_ownership_active", False) and not sb.is_telephony_owner():
+        # A stale ARI callback can race adapter.disconnect(). Dropping it is
+        # the only safe response: forwarding audio would keep a second AI
+        # controller alive after its ownership proof was lost.
+        return
     voice_session = sb.get_voice_session(call_id)
     if not voice_session:
         return
@@ -1591,9 +4305,7 @@ async def _on_audio_received(call_id: str, audio_bytes: bytes) -> None:
     # on every audio frame is cheap — a dict lookup, no Redis per packet.
     sb.touch_call(call_id)
     try:
-        await voice_session.media_gateway.on_audio_received(
-            voice_session.call_id, audio_bytes
-        )
+        await voice_session.media_gateway.on_audio_received(voice_session.call_id, audio_bytes)
         # Clear the streak on the next successful packet.
         if call_id in _audio_route_failure_counts:
             _audio_route_failure_counts.pop(call_id, None)
@@ -1608,7 +4320,9 @@ async def _on_audio_received(call_id: str, audio_bytes: bytes) -> None:
             _audio_route_last_logged_at[call_id] = now
             logger.warning(
                 "audio_route_error call_id=%s consecutive_failures=%d err=%s",
-                call_id[:12], count, exc,
+                call_id[:12],
+                count,
+                exc,
                 extra={"call_id": call_id, "consecutive_failures": count},
             )
 
@@ -1616,7 +4330,8 @@ async def _on_audio_received(call_id: str, audio_bytes: bytes) -> None:
             logger.warning(
                 "audio_route_error call_id=%s hit %d consecutive failures — "
                 "forcing end instead of waiting for the 300s watchdog",
-                call_id[:12], count,
+                call_id[:12],
+                count,
             )
             _audio_route_failure_counts.pop(call_id, None)
             _audio_route_last_logged_at.pop(call_id, None)
@@ -1635,6 +4350,12 @@ async def _on_audio_received(call_id: str, audio_bytes: bytes) -> None:
 # waiting on that same row — A could never resume to commit. One teardown
 # per call, ever. Entries are dropped after a delay purely to bound memory.
 _ended_calls_in_flight: set[str] = set()
+# Separate proof that the owner of the in-flight marker reached the end of
+# critical logical settlement. A duplicate callback must never infer this from
+# a partially-updated calls row: inbound settlement can commit before linked
+# transfer lease finalization completes. Recovery may skip directly to Redis
+# acknowledgement only when BOTH this marker and durable terminal state agree.
+_ended_calls_logically_completed: set[str] = set()
 
 
 def _release_ended_marker_later(call_id: str, delay_s: float = 600.0) -> None:
@@ -1643,61 +4364,226 @@ def _release_ended_marker_later(call_id: str, delay_s: float = 600.0) -> None:
             await asyncio.sleep(delay_s)
         finally:
             _ended_calls_in_flight.discard(call_id)
+            _ended_calls_logically_completed.discard(call_id)
+
     try:
         _track_task(_drop())
     except Exception:
         _ended_calls_in_flight.discard(call_id)
+        _ended_calls_logically_completed.discard(call_id)
 
 
-async def _on_call_ended(call_id: str) -> None:
-    """Clean up voice session when the call hangs up."""
-    if call_id in _ended_calls_in_flight:
-        logger.info(
-            "Telephony bridge: duplicate call-end ignored %s", call_id[:12]
+def _resolve_inbound_terminal_outcome(
+    voice_session: Any,
+    inbound_admission: Mapping[str, Any],
+    *,
+    recovery_context: Optional[Mapping[str, Any]] = None,
+    hangup_reason: Optional[str] = None,
+) -> str:
+    """Return the stable outcome projected onto one durable inbound row.
+
+    True inbound deliberately bypasses ``CallService`` because that service
+    also mutates outbound lead, dialer-job, and campaign state. The admission
+    finalizer therefore owns the small calls-row outcome projection too.
+
+    Product ``selected_action='voicemail'`` means a live conversational AI
+    message-intake session, not an outbound answering machine. Never run that
+    path through the outbound voicemail-text heuristic: a successful message
+    intake is an answered inbound call.
+    """
+
+    if voice_session is not None:
+        selected_action = (
+            str(getattr(voice_session, "_inbound_selected_action", "") or "").strip().lower()
         )
-        return
+        if not selected_action:
+            snapshot = inbound_admission.get("config_snapshot")
+            inbound_config = (
+                snapshot.get("inbound_config") if isinstance(snapshot, Mapping) else None
+            )
+            if isinstance(inbound_config, Mapping):
+                selected_action = str(inbound_config.get("selected_action") or "").strip().lower()
+
+        if selected_action == "voicemail":
+            return (
+                "failed" if bool(getattr(voice_session, "_pipeline_failed", False)) else "answered"
+            )
+        return resolve_call_outcome(
+            voice_session,
+            hangup_reason=hangup_reason,
+        ).value
+
+    # Restart recovery may already have an outcome from a prior partial
+    # projection. Preserve known canonical values; the finalizer uses COALESCE
+    # and will never overwrite a non-null durable outcome in any case.
+    persisted = str((recovery_context or {}).get("outcome") or "").strip().lower()
+    if persisted:
+        from app.domain.models.dialer_job import CallOutcome
+
+        try:
+            return CallOutcome(persisted).value
+        except ValueError:
+            pass
+
+    was_answered = bool(
+        inbound_admission.get("_transfer_connected")
+        or inbound_admission.get("_recovery_was_answered")
+        or (recovery_context or {}).get("was_answered")
+    )
+    return "answered" if was_answered else "failed"
+
+
+async def _on_call_ended(
+    call_id: str,
+    *,
+    recovery_context: Optional[Dict[str, Any]] = None,
+    acknowledge_ledger: bool = True,
+) -> bool:
+    """Clean up voice session when the call hangs up.
+
+    Restart recovery supplies durable database context because the live
+    ``VoiceSession`` and adapter admission cache died with the prior process.
+    ``False`` means logical teardown did not run (normally a duplicate already
+    in flight); recovery must retain its Redis obligation. ``True`` means the
+    logical path converged. Durable ledger deletion is separately controllable
+    so recovery can make it its final, awaited commit point.
+    """
+    if recovery_context is None:
+        managed_context = _orphan_recovery_contexts_by_call.get(call_id)
+        if managed_context is not None:
+            # PBX confirmation can emit this ordinary adapter callback while
+            # the recovery coroutine is still awaiting channel inventory.
+            # Adopt its already-hydrated authoritative direction/admission and
+            # leave Redis acknowledgement to the recovery coordinator.
+            recovery_context = managed_context
+            acknowledge_ledger = False
+    if (
+        recovery_context is not None
+        and recovery_context.get("_awaiting_all_leg_absence_proof") is True
+        and recovery_context.get("_pbx_all_leg_absence_confirmed") is not True
+    ):
+        logger.warning(
+            "orphan_terminal_callback_fenced_until_all_leg_proof call=%s",
+            call_id[:12],
+        )
+        return False
+    if call_id in _ended_calls_in_flight:
+        logger.info("Telephony bridge: duplicate call-end ignored %s", call_id[:12])
+        # If a prior attempt completed settlement but crashed before Redis
+        # acknowledgement, database hydration proves there is no logical work
+        # left and the caller may proceed directly to the idempotent ack.
+        return bool(
+            recovery_context
+            and recovery_context.get("logical_settled")
+            and call_id in _ended_calls_logically_completed
+        )
     _ended_calls_in_flight.add(call_id)
+    if recovery_context is not None:
+        recovery_context["_logical_marker_acquired"] = True
+        recovery_context["_logical_marker_owner_task"] = asyncio.current_task()
     _release_ended_marker_later(call_id)
 
     logger.info(f"Telephony bridge: call ended {call_id[:12]}")
+
+    # Capture admission ownership before the adapter clears its hand-off
+    # cache. The service finalizer below owns inbound terminal persistence,
+    # reservations, and billing; the outbound CallService chain must never be
+    # run against an inbound row.
+    inbound_admission = dict(
+        (recovery_context or {}).get("admission")
+        or _inbound_admissions_in_flight.get(call_id)
+        or {}
+    )
+    if not inbound_admission:
+        adapter = get_adapter()
+        get_admission = getattr(adapter, "get_inbound_admission", None)
+        if callable(get_admission):
+            inbound_admission = dict(get_admission(call_id) or {})
+    is_true_inbound = bool(
+        (recovery_context or {}).get("direction") == "inbound" or inbound_admission.get("allowed")
+    )
+    # Normal outbound callbacks may remove volatile session objects during
+    # teardown, but they may not publish logical completion or acknowledge the
+    # durable Redis ledger until CallService proves its DB transaction (and any
+    # retry outbox dispatch) committed.
+    outbound_settlement_required = False
+    outbound_settlement_verified = bool(is_true_inbound or recovery_context)
+    inbound_transfer_settlement_verified = True
+    inbound_duration_s = 0
+    inbound_terminal_reason: Optional[str] = (
+        str(inbound_admission.get("_terminal_reason"))
+        if inbound_admission.get("_terminal_reason")
+        else None
+    )
+    answered_at_monotonic = inbound_admission.get("_answered_at_monotonic")
+    if isinstance(answered_at_monotonic, (int, float)):
+        inbound_duration_s = max(
+            1,
+            math.ceil(
+                max(
+                    0.0,
+                    asyncio.get_running_loop().time() - float(answered_at_monotonic),
+                )
+            ),
+        )
+    if recovery_context is not None:
+        inbound_duration_s = max(0, int(recovery_context.get("duration_seconds") or 0))
+    if is_true_inbound:
+        await _cancel_inbound_runtime_guards(call_id)
 
     # Avoid leaking the audio-route failure trackers across calls.
     _audio_route_failure_counts.pop(call_id, None)
     _audio_route_last_logged_at.pop(call_id, None)
 
+    # Outbound has no canonical durable admission finalizer, so retain its
+    # early, fail-soft slot release. True inbound is intentionally different:
+    # `_finalize_inbound_admission` releases the Redis slot only *after* the
+    # durable usage/tenant-lease settlement succeeds. Releasing it here first
+    # would under-count a still-reserved call if that later write failed.
+    if not is_true_inbound and recovery_context is None:
+        try:
+            from app.domain.services.global_concurrency import release_lease
+            from app.core.container import get_container as _gc
+
+            _c = _gc()
+            await asyncio.wait_for(
+                release_lease(
+                    getattr(_c, "redis", None) if _c.is_initialized else None,
+                    call_id=call_id,
+                ),
+                timeout=1.0,
+            )
+        except Exception as exc:
+            logger.debug("global_concurrency_release_raised call=%s err=%s", call_id[:12], exc)
+
     # Track B (live call transparency): mark the call ENDED in calls.status
     # and emit a stream_events row so the live-calls panel removes it from
-    # the in-flight list and shows the final outcome. Best-effort — never
-    # block teardown on a status emit.
-    try:
-        from app.domain.services.call_status import (
-            CallState, record_call_state_by_provider_id,
-        )
-        from app.core.container import get_container as _gc
-        _c = _gc()
-        await record_call_state_by_provider_id(
-            _c.db_pool,
-            provider_call_id=call_id,
-            new_state=CallState.ENDED,
-            metadata={"description": "Call ended"},
-        )
-    except Exception as exc:
-        logger.debug("call_status.ended_emit_raised call=%s err=%s", call_id[:12], exc)
+    # the in-flight list. This projection is optional and explicitly bounded;
+    # it can never delay the authoritative lease/session teardown.
+    if recovery_context is None:
+        try:
+            from app.domain.services.call_status import (
+                CallState,
+                record_call_state_by_provider_id,
+            )
+            from app.core.container import get_container as _gc
 
-    # T1.2 — release the global concurrency lease FIRST, even if the
-    # rest of the teardown fails. The lease TTL would reap it in 10
-    # minutes regardless, but releasing eagerly keeps the cluster count
-    # accurate so the next caller isn't falsely rejected.
-    try:
-        from app.domain.services.global_concurrency import release_lease
-        from app.core.container import get_container as _gc
-        _c = _gc()
-        await release_lease(
-            getattr(_c, "redis", None) if _c.is_initialized else None,
-            call_id=call_id,
-        )
-    except Exception as exc:
-        logger.debug("global_concurrency_release_raised call=%s err=%s", call_id[:12], exc)
+            _c = _gc()
+            await asyncio.wait_for(
+                record_call_state_by_provider_id(
+                    _c.db_pool,
+                    provider_call_id=call_id,
+                    new_state=CallState.ENDED,
+                    metadata={"description": "Call ended"},
+                ),
+                timeout=1.0,
+            )
+        except Exception as exc:
+            logger.debug(
+                "call_status.ended_emit_raised call=%s err=%s",
+                call_id[:12],
+                exc,
+            )
 
     # Abandoned-ring path: if the callee never answered, the session was
     # pre-warmed during the ring but never promoted into _telephony_sessions.
@@ -1718,6 +4604,20 @@ async def _on_call_ended(call_id: str) -> None:
     _state().clear_first_speaker(call_id)  # per-call first-speaker stash cleanup
     voice_session = _state().pop_voice_session(call_id)
     if voice_session:
+        if not inbound_admission:
+            inbound_admission = dict(getattr(voice_session, "_inbound_admission", None) or {})
+            is_true_inbound = bool(inbound_admission.get("allowed"))
+        try:
+            inbound_duration_s = int(
+                getattr(
+                    getattr(voice_session, "call_session", None),
+                    "get_duration_seconds",
+                    lambda: 0,
+                )()
+            )
+        except Exception:
+            inbound_duration_s = 0
+        inbound_terminal_reason = getattr(voice_session, "_hangup_reason", None)
         # Cancel any per-call task that's still running. Without this,
         # tasks spawned during the call (silence handler, greeting,
         # presynth warm-ups) keep firing into a torn-down gateway and
@@ -1756,6 +4656,8 @@ async def _on_call_ended(call_id: str) -> None:
 
         for _attr in (
             "_greeting_task",
+            "_inbound_heartbeat_task",
+            "_inbound_deadline_task",
         ):
             _t = getattr(voice_session, _attr, None)
             if _t is not None and not _t.done():
@@ -1790,13 +4692,14 @@ async def _on_call_ended(call_id: str) -> None:
             # Realtime sessions have no cascaded pipeline; the bridge accumulated
             # transcripts into a TranscriptService stashed on the voice_session.
             if transcript_service is None:
-                transcript_service = getattr(
-                    voice_session, "transcript_service", None
-                )
+                transcript_service = getattr(voice_session, "transcript_service", None)
             from app.core.container import get_container as _gc
+
             _c = _gc()
             _pool = _c.db_pool if _c.is_initialized else None
-            if transcript_service is not None:
+            if transcript_service is not None and not getattr(
+                voice_session, "_transcript_saved_at_transfer", False
+            ):
                 await save_call_transcript_on_hangup(
                     voice_session=voice_session,
                     transcript_service=transcript_service,
@@ -1819,8 +4722,11 @@ async def _on_call_ended(call_id: str) -> None:
         # adapter cause code; handle_call_status owns the rest.
         try:
             dialer_call_id = getattr(voice_session, "_dialer_call_id", None)
-            if dialer_call_id:
+            if dialer_call_id and not is_true_inbound:
+                outbound_settlement_required = True
+                outbound_settlement_verified = False
                 from app.core.container import get_container as _gc2
+
                 _c2 = _gc2()
                 if _c2.is_initialized:
                     # Pull the real PBX hangup cause off the adapter (captured
@@ -1837,7 +4743,8 @@ async def _on_call_ended(call_id: str) -> None:
                         except Exception as _cause_exc:
                             logger.debug(
                                 "hangup_cause_lookup_failed call=%s err=%s",
-                                call_id[:12], _cause_exc,
+                                call_id[:12],
+                                _cause_exc,
                             )
                     outcome = resolve_call_outcome(
                         voice_session,
@@ -1863,9 +4770,12 @@ async def _on_call_ended(call_id: str) -> None:
                         set_bypass_rls,
                         set_current_tenant_id,
                     )
+
                     set_bypass_rls(True)
                     tenant_for_call = getattr(
-                        voice_session, "_dialer_tenant_id", None,
+                        voice_session,
+                        "_dialer_tenant_id",
+                        None,
                     )
                     if tenant_for_call:
                         set_current_tenant_id(tenant_for_call)
@@ -1877,18 +4787,28 @@ async def _on_call_ended(call_id: str) -> None:
                         # see CallService._handle_call_status_pooled.
                         db_pool=_c2.db_pool,
                     )
-                    await call_service.handle_call_status(
+                    settlement_result = await call_service.handle_call_status(
                         call_uuid=dialer_call_id,
                         outcome=outcome,
                         duration=duration,
                     )
+                    if not settlement_result.durable:
+                        raise RuntimeError(
+                            "call terminal settlement unverified: "
+                            f"{settlement_result.error or 'unknown'}"
+                        )
+                    outbound_settlement_verified = True
                     logger.info(
                         "call_outcome_persisted call_id=%s outcome=%s duration_s=%d",
-                        call_id[:12], outcome.value, duration,
+                        call_id[:12],
+                        settlement_result.terminal_outcome or outcome.value,
+                        duration,
                     )
         except Exception as m_err:
             logger.warning(
-                "call_outcome_persist_failed call_id=%s err=%s", call_id[:12], m_err,
+                "call_outcome_persist_failed call_id=%s err=%s",
+                call_id[:12],
+                m_err,
             )
 
         # --- Compliance: honor an in-call opt-out (Phase 3d) ---------------
@@ -1903,9 +4823,11 @@ async def _on_call_ended(call_id: str) -> None:
             )
             if opted_out:
                 from app.core.container import get_container as _gc3
+
                 _c3 = _gc3()
                 if _c3.is_initialized:
                     from app.domain.services.dialer.opt_out import purge_lead_on_opt_out
+
                     await purge_lead_on_opt_out(
                         db_pool=_c3.db_pool,
                         db_client=_c3.db_client,
@@ -1916,19 +4838,23 @@ async def _on_call_ended(call_id: str) -> None:
                     )
         except Exception as oo_err:
             logger.warning(
-                "opt_out_purge_failed call_id=%s err=%s", call_id[:12], oo_err,
+                "opt_out_purge_failed call_id=%s err=%s",
+                call_id[:12],
+                oo_err,
             )
 
         # --- Save recording BEFORE session teardown ---
-        try:
-            await _save_call_recording(voice_session, call_id)
-        except Exception as rec_err:
-            logger.warning(f"Recording save failed for {call_id[:12]}: {rec_err}")
+        if not getattr(voice_session, "_recording_saved_at_transfer", False):
+            try:
+                await _save_call_recording(voice_session, call_id)
+            except Exception as rec_err:
+                logger.warning(f"Recording save failed for {call_id[:12]}: {rec_err}")
 
-        try:
-            await _get_orchestrator().end_session(voice_session)
-        except Exception:
-            pass
+        if not getattr(voice_session, "_transfer_media_quiesced", False):
+            try:
+                await _get_orchestrator().end_session(voice_session)
+            except Exception:
+                pass
     else:
         # ----- No voice session: the call was NEVER answered ---------------
         # (busy / no-answer / rejected / carrier failure — the adapter's
@@ -1940,10 +4866,14 @@ async def _on_call_ended(call_id: str) -> None:
         # drive the SAME call_service chain (calls row + lead + campaign
         # counters + dialer job) so "not available" lands in real time.
         # Idempotent: only calls still without an outcome are touched.
+        if not is_true_inbound and recovery_context is None:
+            outbound_settlement_required = True
+            outbound_settlement_verified = False
         try:
             from app.core.container import get_container as _gc4
+
             _c4 = _gc4()
-            if _c4.is_initialized:
+            if _c4.is_initialized and not is_true_inbound and recovery_context is None:
                 _cause = None
                 try:
                     _adp = get_adapter()
@@ -1954,8 +4884,16 @@ async def _on_call_ended(call_id: str) -> None:
                     _row = await _conn.fetchrow(
                         """
                         SELECT id, tenant_id FROM calls
-                        WHERE external_call_uuid = $1 AND outcome IS NULL
-                          AND status NOT IN ('completed', 'failed')
+                        WHERE (provider_call_id = $1 OR external_call_uuid = $1)
+                          AND COALESCE(direction, 'outbound') <> 'inbound'
+                          AND (
+                               terminal_settled_at IS NULL
+                               OR (
+                                    terminal_retry_payload IS NOT NULL
+                                AND terminal_retry_enqueued_at IS NULL
+                               )
+                          )
+                        ORDER BY created_at DESC
                         LIMIT 1
                         """,
                         call_id,
@@ -1966,6 +4904,7 @@ async def _on_call_ended(call_id: str) -> None:
                         set_bypass_rls,
                         set_current_tenant_id,
                     )
+
                     set_bypass_rls(True)
                     set_current_tenant_id(str(_row["tenant_id"]))
                     call_service = CallService(
@@ -1975,22 +4914,211 @@ async def _on_call_ended(call_id: str) -> None:
                         # see CallService._handle_call_status_pooled.
                         db_pool=_c4.db_pool,
                     )
-                    await call_service.handle_call_status(
+                    settlement_result = await call_service.handle_call_status(
                         call_uuid=str(_row["id"]),
                         outcome=outcome,
                         duration=0,
                     )
+                    if not settlement_result.durable:
+                        raise RuntimeError(
+                            "preanswer terminal settlement unverified: "
+                            f"{settlement_result.error or 'unknown'}"
+                        )
+                    outbound_settlement_verified = True
                     logger.info(
                         "call_outcome_persisted_preanswer call_id=%s outcome=%s cause=%s",
-                        call_id[:12], outcome.value, _cause,
+                        call_id[:12],
+                        settlement_result.terminal_outcome or outcome.value,
+                        _cause,
                     )
+                else:
+                    # A successful authoritative lookup found no unsettled
+                    # durable outbound row for this provider session.
+                    outbound_settlement_verified = True
         except Exception as pa_err:
             logger.warning(
                 "preanswer_outcome_persist_failed call_id=%s err=%s",
-                call_id[:12], pa_err,
+                call_id[:12],
+                pa_err,
             )
+        if recovery_context is not None and not is_true_inbound:
+            await _settle_recovered_outbound_call(recovery_context)
     # Clean up gateway session mapping and early audio buffer for this call.
     _state().remove_gateway_sessions_for_call(call_id)
+
+    if is_true_inbound:
+        # Settle every child leg before the parent for both live teardown and
+        # restart recovery. The parent usage transaction is the final durable
+        # acknowledgement; committing it first could hide an active/unbilled
+        # PSTN target from the retry scan.
+        try:
+            from app.core.container import get_container as _transfer_gc
+            from app.domain.services.telephony.inbound_transfer import (
+                finalize_connected_inbound_transfers,
+            )
+
+            _transfer_container = _transfer_gc()
+            await finalize_connected_inbound_transfers(
+                _transfer_container.db_pool,
+                call_id=str(inbound_admission["call_id"]),
+                terminal_reason=inbound_terminal_reason,
+                redis_client=getattr(_transfer_container, "redis", None),
+                hold_ambiguous_transfer_legs=bool(
+                    recovery_context is not None
+                    and recovery_context.get("hold_ambiguous_transfer_legs")
+                    and recovery_context.get("_pbx_all_leg_absence_confirmed") is True
+                ),
+            )
+        except Exception as exc:
+            inbound_transfer_settlement_verified = False
+            logger.error(
+                "inbound_transfer_terminal_finalize_failed call=%s err=%s",
+                call_id[:12],
+                exc,
+            )
+            if recovery_context is not None:
+                # Leave the durable termination-pending candidate selectable
+                # for the next watchdog pass.
+                raise
+
+    if is_true_inbound and inbound_transfer_settlement_verified:
+        inbound_outcome = _resolve_inbound_terminal_outcome(
+            voice_session,
+            inbound_admission,
+            recovery_context=recovery_context,
+            hangup_reason=inbound_terminal_reason,
+        )
+        recovery_release_only = bool(
+            recovery_context is not None
+            and str(inbound_admission.get("admission_status") or "").strip().lower()
+            in {"pending", "denied"}
+            and not bool(recovery_context.get("was_answered"))
+        )
+        finalize_attempt = 0
+        finalize_delay_s = max(
+            0.01,
+            float(os.getenv("INBOUND_FINALIZE_RETRY_INITIAL_S", "0.25")),
+        )
+        finalize_max_delay_s = max(
+            finalize_delay_s,
+            float(os.getenv("INBOUND_FINALIZE_RETRY_MAX_S", "5.0")),
+        )
+        while True:
+            try:
+                await _finalize_inbound_admission(
+                    call_id,
+                    inbound_admission,
+                    terminal_status=(
+                        "completed"
+                        if voice_session is not None
+                        or bool(inbound_admission.get("_transfer_connected"))
+                        or bool((recovery_context or {}).get("was_answered"))
+                        else "failed"
+                    ),
+                    duration_seconds=inbound_duration_s,
+                    outcome=inbound_outcome,
+                    reason=inbound_terminal_reason,
+                    release_only=recovery_release_only,
+                )
+                break
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                finalize_attempt += 1
+                logger.error(
+                    "inbound_terminal_finalize_failed call=%s attempt=%d " "retry_in=%.2fs err=%s",
+                    call_id[:12],
+                    finalize_attempt,
+                    finalize_delay_s,
+                    exc,
+                )
+                if recovery_context is not None:
+                    # Recovery must return control to the watchdog while the
+                    # durable Redis obligation is still present. An unbounded
+                    # retry loop here prevents later passes and cannot expose
+                    # its failure to the acknowledgement boundary.
+                    raise
+                await asyncio.sleep(finalize_delay_s)
+                finalize_delay_s = min(
+                    finalize_max_delay_s,
+                    finalize_delay_s * 2.0,
+                )
+    settlement_failed = bool(
+        (outbound_settlement_required and not outbound_settlement_verified)
+        or not inbound_transfer_settlement_verified
+    )
+    if settlement_failed:
+        # Promote the current-pod ledger entry to an explicit cleanup
+        # obligation. Ordinary active entries owned by this live incarnation
+        # are intentionally excluded from orphan scans; termination_pending
+        # entries are retried by the <=30s watchdog even when this pod remains
+        # healthy. Never leave the ten-minute in-process duplicate marker in
+        # front of that retry.
+        try:
+            tenant_for_retry = inbound_admission.get("tenant_id") or getattr(
+                voice_session, "_dialer_tenant_id", None
+            )
+            campaign_for_retry = inbound_admission.get("campaign_id") or getattr(
+                voice_session, "_dialer_campaign_id", None
+            )
+            await _state().register_cleanup_obligation(
+                call_id,
+                tenant_id=(str(tenant_for_retry) if tenant_for_retry else None),
+                campaign_id=(str(campaign_for_retry) if campaign_for_retry else None),
+                state="termination_pending",
+            )
+        except Exception as exc:
+            logger.error(
+                "terminal_settlement_retry_registration_failed call=%s err=%s",
+                call_id[:12],
+                exc,
+            )
+        _ended_calls_in_flight.discard(call_id)
+        _ended_calls_logically_completed.discard(call_id)
+        logger.error(
+            "terminal_logical_completion_deferred call=%s outbound_verified=%s "
+            "inbound_transfer_verified=%s; ledger retained",
+            call_id[:12],
+            outbound_settlement_verified,
+            inbound_transfer_settlement_verified,
+        )
+        return False
+
+    if recovery_context is not None and not is_true_inbound:
+        # The normal live callback releases outbound capacity near the start
+        # of teardown. Recovery defers it until after the durable call/lead/job
+        # transaction has been verified, so a failed settlement remains fully
+        # represented for the next attempt.
+        from app.core.container import get_container as _recovery_gc
+        from app.domain.services.global_concurrency import release_lease_strict
+
+        recovery_container = _recovery_gc()
+        await asyncio.wait_for(
+            release_lease_strict(
+                getattr(recovery_container, "redis", None),
+                call_id=call_id,
+            ),
+            timeout=1.0,
+        )
+
+    _ended_calls_logically_completed.add(call_id)
+
+    if acknowledge_ledger:
+        # Local object removal above is intentionally not a durable commit.
+        # Normal terminal callbacks acknowledge here, after all critical
+        # settlement. Restart recovery passes False and performs the same
+        # awaited operation itself so it can count/report the exact commit.
+        try:
+            await _state().acknowledge_orphan_recovery(call_id)
+        except Exception as exc:
+            logger.warning(
+                "telephony_terminal_ledger_ack_failed call=%s err=%s; "
+                "durable entry retained for retry",
+                call_id[:12],
+                exc,
+            )
+
+    return True
 
 
 async def _on_ws_session_start(call_id: str) -> None:
@@ -2036,11 +5164,10 @@ async def _on_ws_session_start(call_id: str) -> None:
         )
 
         if voice_session.pipeline:
+
             async def _run():
                 try:
-                    await voice_session.pipeline.start_pipeline(
-                        voice_session.call_session, None
-                    )
+                    await voice_session.pipeline.start_pipeline(voice_session.call_session, None)
                 except Exception as exc:
                     logger.error(f"Pipeline error {call_id[:12]}: {exc}", exc_info=True)
                     # FIX 3 / FIX #1b — trigger session teardown so the session

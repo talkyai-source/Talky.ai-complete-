@@ -8,6 +8,7 @@ platform-agnostic CallControlAdapter contract.
 The AI pipeline only talks to CallControlAdapter; it never imports
 any FreeSWITCH-specific class directly.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -91,10 +92,18 @@ class FreeSwitchAdapter(CallControlAdapter):
         self._connected_flag = True
         logger.info("FreeSwitchAdapter connected to FreeSWITCH ESL")
 
-    async def disconnect(self) -> None:
+    async def disconnect(self, *, force_handoff: bool = False) -> None:
+        # FreeSWITCH ESL has no local channel-ownership refusal path, but it
+        # accepts the common handoff flag so ownership fencing can use the
+        # adapter contract without provider-specific type checks.
+        del force_handoff
         self._connected_flag = False
         await self._esl.disconnect()
         logger.info("FreeSwitchAdapter disconnected")
+
+    def fence_ownership_loss(self) -> None:
+        self._connected_flag = False
+        self._esl.fence_ownership_loss()
 
     async def health_check(self) -> bool:
         """Probe FreeSWITCH ESL with a status command."""
@@ -205,17 +214,23 @@ class FreeSwitchAdapter(CallControlAdapter):
             TransferRequest,
             TransferMode,
         )
+
         mode_map = {
             "blind": TransferMode.BLIND,
             "attended": TransferMode.ATTENDED,
             "deflect": TransferMode.DEFLECT,
         }
-        transfer_mode = mode_map.get(mode, TransferMode.BLIND)
+        if mode not in mode_map:
+            raise ValueError("unsupported transfer mode")
+        transfer_mode = mode_map[mode]
         request = TransferRequest(
             uuid=call_id,
             destination=destination,
             mode=transfer_mode,
         )
+        # Keep the provider adapter safe even when it is called directly and
+        # the ESL client is replaced by a mock or alternate implementation.
+        request.validate()
         result = await self._esl.request_transfer(request)
         return result.to_dict()
 
