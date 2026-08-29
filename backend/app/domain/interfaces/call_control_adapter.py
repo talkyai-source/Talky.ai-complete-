@@ -35,8 +35,23 @@ class CallControlAdapter(ABC):
         """
 
     @abstractmethod
-    async def disconnect(self) -> None:
-        """Cleanly close the PBX control connection."""
+    async def disconnect(self, *, force_handoff: bool = False) -> Any:
+        """Cleanly close the PBX control connection.
+
+        ``force_handoff`` fences a process that has lost exclusive PBX
+        ownership. Implementations must close their event connection even when
+        local channel cleanup is incomplete, while preserving durable recovery
+        obligations for the successor. Ordinary operator stops leave it false.
+        """
+
+    @abstractmethod
+    def fence_ownership_loss(self) -> None:
+        """Synchronously stop accepting PBX events after owner-lock loss.
+
+        This must take effect before the event loop can schedule another
+        callback. The subsequent asynchronous ``disconnect(force_handoff=True)``
+        closes transports and drains provider-specific resources.
+        """
 
     @abstractmethod
     async def health_check(self) -> bool:

@@ -3,18 +3,161 @@ Call History Endpoints
 Provides paginated call list and individual call details
 """
 import logging
+import json
+from datetime import datetime, timezone
+from uuid import UUID
 from fastapi import APIRouter, HTTPException, Depends, Query
-from pydantic import BaseModel
-from typing import List, Optional
+from pydantic import BaseModel, Field
+from typing import Any, List, Literal, Optional
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
 from app.core.security.rbac import require_permission, Permission
-from app.utils.tenant_filter import apply_tenant_filter, verify_tenant_access
+from app.domain.services.telephony.termination import (
+    finalize_proven_inbound_termination,
+    mark_termination_pending_and_load_context,
+    request_confirmed_hangup,
+)
+from app.utils.tenant_filter import verify_tenant_access
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/calls", tags=["calls"])
+
+
+def _json_object(value: Any) -> dict:
+    """Normalize JSONB values returned by asyncpg or the REST adapter."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+            return decoded if isinstance(decoded, dict) else {}
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return {}
+    return {}
+
+
+def _display_caller_ani(call: Any) -> Optional[str]:
+    """Expose inbound ANI only when the carrier did not mark it private."""
+    if (call.get("direction") or "outbound") != "inbound":
+        return None
+    if bool(call.get("caller_ani_private")):
+        return None
+    value = call.get("caller_ani") or call.get("phone_number")
+    return str(value) if value and str(value).lower() != "anonymous" else None
+
+
+def _route_metadata(call: Any) -> tuple[dict, Optional[str], Optional[str]]:
+    snapshot = _json_object(call.get("route_snapshot"))
+    inbound_config = _json_object(snapshot.get("inbound_config"))
+    route = _json_object(snapshot.get("route"))
+    checksum = inbound_config.get("checksum")
+    route_id = route.get("assignment_id") or call.get("assignment_id")
+    return (
+        snapshot,
+        str(checksum) if checksum else None,
+        str(route_id) if route_id else None,
+    )
+
+
+def _inbound_config_id(call: Any) -> Optional[str]:
+    """Return the immutable inbound-config identity pinned at admission.
+
+    ``calls.campaign_id`` always identifies the base campaign.  The inbound
+    dashboard route, however, is keyed by ``inbound_campaign_configs.id``.
+    Keeping these identities separate avoids broken detail links and prevents
+    a mutable assignment lookup from rewriting historical call ownership.
+    """
+    if (call.get("direction") or "outbound") != "inbound":
+        return None
+    snapshot = _json_object(call.get("route_snapshot"))
+    inbound_config = _json_object(snapshot.get("inbound_config"))
+    route = _json_object(snapshot.get("route"))
+    value = inbound_config.get("id") or route.get("config_id")
+    return str(value) if value else None
+
+
+def _display_from_number(call: Any) -> Optional[str]:
+    """Project a direction-correct, durable source number."""
+    if (call.get("direction") or "outbound") == "inbound":
+        return _display_caller_ani(call)
+    value = call.get("outbound_from_number")
+    return str(value) if value else None
+
+
+def _media_state(call: Any) -> Optional[str]:
+    """Give the UI one stable media state without conflating sub-states."""
+    if (call.get("direction") or "outbound") != "inbound":
+        return None
+    admission = call.get("admission_status")
+    processing = call.get("processing_status")
+    status = str(call.get("status") or "").lower()
+    if admission == "denied":
+        return "not_started"
+    if processing == "failed":
+        return "failed"
+    if processing in {"completed", "released"} or status in {
+        "ended", "completed", "failed", "cancelled",
+    }:
+        return "completed"
+    if processing == "active" or status in {
+        "answered", "in_call", "ringing", "initiated",
+    }:
+        return "active"
+    return "pending"
+
+
+def _transcript_state(call: Any) -> Optional[str]:
+    if (call.get("direction") or "outbound") != "inbound":
+        return None
+    if bool(call.get("has_transcript")) or bool(call.get("transcript")):
+        return "done"
+    if call.get("processing_status") == "failed":
+        return "failed"
+    if call.get("admission_status") == "denied":
+        return "not_started"
+    return "pending"
+
+
+def _recording_state(call: Any, snapshot: dict) -> Optional[str]:
+    if (call.get("direction") or "outbound") != "inbound":
+        return call.get("recording_status")
+    current = call.get("recording_status")
+    if current:
+        return str(current)
+    inbound_config = _json_object(snapshot.get("inbound_config"))
+    controls = _json_object(snapshot.get("controls"))
+    if inbound_config.get("recording_enabled") is False:
+        return "disabled"
+    if controls.get("recording_enabled") is False:
+        return "disabled"
+    if call.get("consent_status") == "declined":
+        return "declined"
+    if call.get("admission_status") == "denied":
+        return "not_started"
+    return "pending"
+
+
+def _duration_between(start: Any, end: Any) -> Optional[int]:
+    if not start:
+        return None
+    try:
+        start_dt = start if isinstance(start, datetime) else datetime.fromisoformat(
+            str(start).replace("Z", "+00:00")
+        )
+        end_dt = end if isinstance(end, datetime) else (
+            datetime.fromisoformat(str(end).replace("Z", "+00:00"))
+            if end
+            else datetime.now(timezone.utc)
+        )
+        if start_dt.tzinfo is None and end_dt.tzinfo is not None:
+            end_dt = end_dt.replace(tzinfo=None)
+        if start_dt.tzinfo is not None and end_dt.tzinfo is None:
+            end_dt = end_dt.replace(tzinfo=start_dt.tzinfo)
+        return max(0, int((end_dt - start_dt).total_seconds()))
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 class CallListItem(BaseModel):
@@ -22,11 +165,13 @@ class CallListItem(BaseModel):
     id: str
     talklee_call_id: Optional[str] = None
     timestamp: str
+    from_number: Optional[str] = None
     to_number: str
     status: str
     duration_seconds: Optional[int] = None
     outcome: Optional[str] = None
     campaign_name: Optional[str] = None
+    campaign_id: Optional[str] = None
     summary: Optional[str] = None
     recording_id: Optional[str] = None
     # AI per-call verdict from the post-call summary (e.g. "qualified | …",
@@ -37,6 +182,24 @@ class CallListItem(BaseModel):
     # defaulting to False forever — a list flag wired to nothing looks identical
     # to a list where nobody has left feedback yet.
     has_feedback: bool = False
+    direction: Literal["inbound", "outbound"] = "outbound"
+    caller_ani: Optional[str] = None
+    called_did: Optional[str] = None
+    inbound_campaign_id: Optional[str] = None
+    assignment_id: Optional[str] = None
+    route_id: Optional[str] = None
+    route_version: Optional[int] = None
+    config_version: Optional[int] = None
+    config_checksum: Optional[str] = None
+    admission_status: Optional[str] = None
+    admission_reason: Optional[str] = None
+    consent_status: Optional[str] = None
+    processing_status: Optional[str] = None
+    billing_status: Optional[str] = None
+    billing_hold_reason: Optional[str] = None
+    recording_status: Optional[str] = None
+    transcript_status: Optional[str] = None
+    media_state: Optional[str] = None
 
 
 class CallDetail(BaseModel):
@@ -44,6 +207,7 @@ class CallDetail(BaseModel):
     id: str
     talklee_call_id: Optional[str] = None
     timestamp: str
+    from_number: Optional[str] = None
     to_number: str
     status: str
     duration_seconds: Optional[int] = None
@@ -54,6 +218,35 @@ class CallDetail(BaseModel):
     lead_id: Optional[str] = None
     summary: Optional[str] = None
     summary_json: Optional[dict] = None
+    campaign_name: Optional[str] = None
+    direction: Literal["inbound", "outbound"] = "outbound"
+    provider: Optional[str] = None
+    provider_call_id: Optional[str] = None
+    caller_ani: Optional[str] = None
+    called_did: Optional[str] = None
+    inbound_campaign_id: Optional[str] = None
+    assignment_id: Optional[str] = None
+    route_id: Optional[str] = None
+    route_version: Optional[int] = None
+    config_version: Optional[int] = None
+    config_checksum: Optional[str] = None
+    ingress: Optional[str] = None
+    route_snapshot: Optional[dict] = None
+    admission_status: Optional[str] = None
+    admission_reason: Optional[str] = None
+    consent_status: Optional[str] = None
+    processing_status: Optional[str] = None
+    billing_status: Optional[str] = None
+    billing_hold_reason: Optional[str] = None
+    reserved_seconds: Optional[int] = None
+    recording_status: Optional[str] = None
+    transcript_status: Optional[str] = None
+    media_state: Optional[str] = None
+    answer_delay_seconds: Optional[int] = None
+    conversation_duration_seconds: Optional[int] = None
+    billed_duration_seconds: Optional[int] = None
+    cost: Optional[float] = None
+    transfer_legs: List[dict] = Field(default_factory=list)
 
 
 class CallListResponse(BaseModel):
@@ -120,6 +313,17 @@ class LiveCallItem(BaseModel):
     campaign_name: Optional[str] = None
     lead_id: Optional[str] = None
     caller_id: Optional[str] = None      # the FROM number used
+    direction: Literal["inbound", "outbound"] = "outbound"
+    caller_ani: Optional[str] = None
+    called_did: Optional[str] = None
+    admission_status: Optional[str] = None
+    consent_status: Optional[str] = None
+    processing_status: Optional[str] = None
+    termination_status: Literal["none", "requested", "confirmed", "failed"] = "none"
+    termination_requested_at: Optional[str] = None
+    termination_error: Optional[str] = None
+    provider_hangup_requested: Optional[bool] = None
+    provider_hangup_confirmed: bool = False
 
 
 class LiveCallsResponse(BaseModel):
@@ -131,7 +335,15 @@ class LiveCallsResponse(BaseModel):
 # Statuses that count as "in flight" for the live panel. Old finalised
 # rows (ended/completed/failed) only show up if they ended very recently
 # (see `recent_window_seconds` below).
-_LIVE_STATUSES = ("queued", "dialing", "ringing", "answered", "in_call", "initiated")
+_LIVE_STATUSES = (
+    "queued",
+    "dialing",
+    "ringing",
+    "answered",
+    "in_call",
+    "initiated",
+    "termination_pending",
+)
 
 # Upper bound on how old a still-"live"-status call may be before we treat it as
 # a phantom (crashed worker / missed hangup / stopped campaign) and stop showing
@@ -147,12 +359,12 @@ async def hangup_live_call(
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
-    """Hang up a single in-flight call from the live panel (operator action).
+    """Terminate one tenant call only after authoritative provider/PBX proof.
 
-    Tenant-scoped. Best-effort drops the telephony channel, then marks the row
-    ended so the panel reflects it immediately (this also clears phantom stuck
-    rows whose channel is already gone). Never overwrites an outcome the ARI
-    callback already recorded.
+    A successful control request is not itself a terminal event.  Billing,
+    leases, and the call row remain live when the adapter cannot prove every
+    owned channel absent within five seconds; the operator can retry while the
+    normal provider callback/watchdog continues to reconcile it.
 
     THE OUTCOME IS NOT A CONSTANT (fixed 2026-08-03)
     ------------------------------------------------
@@ -180,27 +392,161 @@ async def hangup_live_call(
     if not current_user.tenant_id:
         raise HTTPException(status_code=403, detail="No tenant context")
     try:
+        tenant_uuid = UUID(str(current_user.tenant_id))
         async with db_client.pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT external_call_uuid, status FROM calls "
+                "SELECT external_call_uuid, provider_call_id, provider, direction, "
+                "status, started_at, answered_at, campaign_id FROM calls "
                 "WHERE id = $1 AND tenant_id = $2",
-                call_id, current_user.tenant_id,
+                UUID(call_id), tenant_uuid,
             )
         if not row:
             raise HTTPException(status_code=404, detail="Call not found")
 
-        ext = row["external_call_uuid"]
-        if ext:
-            try:
-                from app.api.v1.endpoints import telephony_bridge as tb
-                if tb._adapter is not None:
-                    await tb._adapter.hangup(ext)
-            except Exception as exc:
-                # Channel may already be gone — fall through to mark it ended.
-                logger.warning("hangup_live_call adapter hangup failed call=%s: %s", call_id, exc)
+        current_status = str(row["status"] or "")
+        from app.domain.services.call_status import TERMINAL_CALL_STATUSES
 
+        terminal_statuses = TERMINAL_CALL_STATUSES
+        ext = row["provider_call_id"] or row["external_call_uuid"]
+        from app.api.v1.endpoints import telephony_bridge as tb
+
+        try:
+            termination_context = await mark_termination_pending_and_load_context(
+                db_client.pool,
+                call_reference=call_id,
+                tenant_id=str(current_user.tenant_id),
+            )
+        except Exception as exc:  # noqa: BLE001 - fail closed at DB boundary
+            logger.error(
+                "tenant_call_termination_leg_lookup_failed call=%s err_type=%s",
+                call_id,
+                type(exc).__name__,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "termination_context_unavailable",
+                    "call_id": call_id,
+                    "call_status": current_status,
+                    "termination_status": "failed",
+                    "provider_hangup_requested": False,
+                    "provider_hangup_confirmed": False,
+                    "provider_hangup_error": "linked_leg_lookup_failed",
+                },
+            ) from exc
+
+        proof = await request_confirmed_hangup(
+            tb._adapter,
+            str(termination_context.provider_call_id or ext or ""),
+            provider_leg_ids=termination_context.provider_leg_ids,
+        )
+        if not proof.confirmed:
+            error_code = proof.code
+            retry_is_durable = current_status not in terminal_statuses
+            logger.warning(
+                "tenant_call_termination_unconfirmed call=%s code=%s",
+                call_id,
+                error_code,
+            )
+            raise HTTPException(
+                status_code=(
+                    504
+                    if error_code in {"confirmation_timeout", "hangup_unconfirmed"}
+                    else 503
+                ),
+                detail={
+                    "error": "termination_unconfirmed",
+                    "reason": error_code,
+                    "call_id": call_id,
+                    "call_status": (
+                        "termination_pending" if retry_is_durable else current_status
+                    ),
+                    "termination_status": (
+                        "requested" if retry_is_durable else "failed"
+                    ),
+                    "provider_hangup_requested": proof.requested,
+                    "provider_hangup_confirmed": False,
+                    "provider_hangup_error": proof.error or error_code,
+                },
+            )
+
+        # Only a proved-absent channel may release inbound parent/transfer
+        # leases, billing reservations, the cluster slot, and cleanup ledger.
+        # Terminal replay still runs this idempotent finalizer: a stale terminal
+        # parent can coexist with an active persisted transfer child after a
+        # crash, and the database label is not settlement proof.
+        settlement_deferred = False
+        if row["direction"] == "inbound" and termination_context.provider_call_id:
+            try:
+                from app.core.container import get_container
+
+                try:
+                    redis_client = getattr(get_container(), "redis", None)
+                except Exception:  # local tests/minimal deployments
+                    redis_client = None
+                duration = (
+                    _duration_between(row["answered_at"], None) or 0
+                    if row["answered_at"]
+                    else 0
+                )
+                await finalize_proven_inbound_termination(
+                    db_client.pool,
+                    provider_call_id=termination_context.provider_call_id,
+                    durable_call_id=call_id,
+                    tenant_id=str(current_user.tenant_id),
+                    provider=str(row["provider"] or "asterisk"),
+                    terminal_status="ended",
+                    duration_seconds=duration,
+                    reason=(
+                        "tenant_operator_hangup"
+                        if row["answered_at"]
+                        else "tenant_operator_hangup_before_answer"
+                    ),
+                    release_only=not bool(row["answered_at"]),
+                    redis_client=redis_client,
+                    campaign_id=(
+                        str(row["campaign_id"]) if row.get("campaign_id") else None
+                    ),
+                )
+            except Exception as exc:
+                settlement_deferred = True
+                logger.error(
+                    "hangup_live_call inbound settlement failed call=%s: %s",
+                    call_id,
+                    exc,
+                )
+
+        # A database terminal state is not provider/PBX evidence. Replays are
+        # successful only after the same all-leg proof and shared settlement.
+        if current_status in terminal_statuses:
+            return {
+                "status": "already_terminal",
+                "call_id": call_id,
+                "call_status": current_status,
+                "termination_status": "confirmed",
+                "provider_hangup_requested": proof.requested,
+                "provider_hangup_confirmed": True,
+                "provider_hangup_error": None,
+                "settlement_deferred": settlement_deferred,
+            }
+
+        if settlement_deferred:
+            # PBX truth is confirmed, but logical settlement must remain
+            # visibly non-terminal until the durable recovery owner succeeds.
+            return {
+                "status": "confirmed",
+                "call_id": call_id,
+                "call_status": "termination_pending",
+                "termination_status": "confirmed",
+                "provider_hangup_requested": proof.requested,
+                "provider_hangup_confirmed": True,
+                "provider_hangup_error": None,
+                "settlement_deferred": True,
+            }
+
+        latest_status = None
         async with db_client.pool.acquire() as conn:
-            await conn.execute(
+            updated = await conn.fetchrow(
                 """
                 UPDATE calls
                    SET status   = 'ended',
@@ -224,11 +570,36 @@ async def hangup_live_call(
                            END
                        ),
                        updated_at = NOW()
-                 WHERE id = $1 AND tenant_id = $2
+                 WHERE id = $1
+                   AND tenant_id = $2
+                   AND status <> ALL($3::text[])
+                 RETURNING status
                 """,
-                call_id, current_user.tenant_id,
+                UUID(call_id), tenant_uuid, list(terminal_statuses),
             )
-        return {"status": "ok", "call_id": call_id}
+        if not updated:
+            async with db_client.pool.acquire() as conn:
+                latest_status = await conn.fetchval(
+                    "SELECT status FROM calls WHERE id = $1 AND tenant_id = $2",
+                    UUID(call_id),
+                    tenant_uuid,
+                )
+            if str(latest_status or "") not in terminal_statuses:
+                raise HTTPException(
+                    status_code=409,
+                    detail={"error": "termination_state_conflict", "call_id": call_id},
+                )
+        final_status = str(updated["status"] if updated else latest_status or "ended")
+        return {
+            "status": "confirmed",
+            "call_id": call_id,
+            "call_status": final_status,
+            "termination_status": "confirmed",
+            "provider_hangup_requested": proof.requested,
+            "provider_hangup_confirmed": True,
+            "provider_hangup_error": None,
+            "settlement_deferred": settlement_deferred,
+        }
     except HTTPException:
         raise
     except Exception as exc:
@@ -238,9 +609,12 @@ async def hangup_live_call(
 
 @router.get("/live", response_model=LiveCallsResponse)
 async def list_live_calls(
-    campaign_id: Optional[str] = Query(
+    campaign_id: Optional[UUID] = Query(
         None,
         description="If set, restrict to this campaign. Otherwise all of the user's calls in flight.",
+    ),
+    direction: Optional[Literal["inbound", "outbound"]] = Query(
+        None, description="If set, restrict the live feed by call direction."
     ),
     recent_window_seconds: int = Query(
         60, ge=0, le=600,
@@ -257,11 +631,10 @@ async def list_live_calls(
       * calls whose status is one of `_LIVE_STATUSES`, and
       * calls that ended within `recent_window_seconds` seconds.
 
-    Tenant scope is enforced via `apply_tenant_filter` AND the
-    SELECT runs through the RLS-protected pool — same defence-in-depth
-    pattern the list endpoint uses.
+    Tenant scope is enforced in SQL and the SELECT runs through the
+    RLS-protected pool — the same defence-in-depth pattern the list endpoint
+    uses.
     """
-    from datetime import datetime, timezone
     if not current_user.tenant_id:
         return LiveCallsResponse(items=[], server_time=datetime.now(timezone.utc).isoformat())
 
@@ -271,17 +644,24 @@ async def list_live_calls(
     args: list = list(_LIVE_STATUSES)
     args.append(current_user.tenant_id)
     args.append(recent_window_seconds)
-    where_campaign = ""
+    extra_filters: list[str] = []
     if campaign_id:
-        where_campaign = f" AND c.campaign_id = ${len(args) + 1}"
+        extra_filters.append(f"c.campaign_id = ${len(args) + 1}")
         args.append(campaign_id)
+    if direction:
+        extra_filters.append(f"c.direction = ${len(args) + 1}")
+        args.append(direction)
+    where_extra = "".join(f" AND {condition}" for condition in extra_filters)
 
     sql = f"""
         SELECT c.id, c.talklee_call_id, c.phone_number AS to_number,
                c.status, c.started_at, c.answered_at, c.ended_at,
                c.duration_seconds, c.outcome, c.campaign_id, c.lead_id,
                camp.name AS campaign_name,
-               t.calling_rules->>'caller_id' AS caller_id
+               t.calling_rules->>'caller_id' AS caller_id,
+               c.direction, c.caller_ani, c.caller_ani_private,
+               c.called_did, c.admission_status, c.consent_status,
+               c.processing_status, c.updated_at
         FROM   calls c
         LEFT   JOIN campaigns camp ON camp.id = c.campaign_id
         LEFT   JOIN tenants   t    ON t.id    = c.tenant_id
@@ -293,7 +673,7 @@ async def list_live_calls(
                   OR (c.ended_at IS NOT NULL
                       AND c.ended_at >= NOW() - make_interval(secs => ${len(_LIVE_STATUSES) + 2}))
                 )
-          {where_campaign}
+          {where_extra}
         ORDER BY COALESCE(c.started_at, c.created_at) DESC
         LIMIT  100
     """
@@ -307,11 +687,13 @@ async def list_live_calls(
 
     items: List[LiveCallItem] = []
     for r in rows:
+        row_status = str(r["status"] or "unknown")
+        termination_requested = row_status == "termination_pending"
         items.append(LiveCallItem(
             id=str(r["id"]),
             talklee_call_id=r["talklee_call_id"],
             to_number=r["to_number"] or "",
-            status=r["status"] or "unknown",
+            status=row_status,
             started_at=r["started_at"].isoformat() if r["started_at"] else None,
             answered_at=r["answered_at"].isoformat() if r["answered_at"] else None,
             ended_at=r["ended_at"].isoformat() if r["ended_at"] else None,
@@ -320,7 +702,24 @@ async def list_live_calls(
             campaign_id=str(r["campaign_id"]) if r["campaign_id"] else None,
             campaign_name=r["campaign_name"],
             lead_id=str(r["lead_id"]) if r["lead_id"] else None,
-            caller_id=r["caller_id"],
+            caller_id=r["caller_id"] if (r["direction"] or "outbound") == "outbound" else None,
+            direction=r["direction"] or "outbound",
+            caller_ani=_display_caller_ani(r),
+            called_did=r["called_did"],
+            admission_status=r["admission_status"],
+            consent_status=r["consent_status"],
+            processing_status=r["processing_status"],
+            termination_status=("requested" if termination_requested else "none"),
+            termination_requested_at=(
+                r["updated_at"].isoformat()
+                if termination_requested and r["updated_at"]
+                else None
+            ),
+            termination_error=None,
+            # The durable row proves intent/retry ownership, not whether the
+            # process got as far as dispatching DELETE before it crashed.
+            provider_hangup_requested=None,
+            provider_hangup_confirmed=False,
         ))
 
     return LiveCallsResponse(
@@ -503,6 +902,13 @@ async def list_calls(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
     status: Optional[str] = Query(None, description="Filter by status"),
+    direction: Optional[Literal["inbound", "outbound"]] = Query(
+        None, description="Filter by call direction."
+    ),
+    inbound_campaign_id: Optional[UUID] = Query(
+        None,
+        description="Restrict to one inbound campaign; implies direction=inbound.",
+    ),
     from_date: Optional[str] = Query(None, alias="from", description="Start date (YYYY-MM-DD)"),
     to_date: Optional[str] = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
     current_user: CurrentUser = Depends(get_current_user),
@@ -533,6 +939,18 @@ async def list_calls(
             conditions.append(f"c.status = ${idx}")
             params.append(status)
             idx += 1
+        if direction:
+            conditions.append(f"c.direction = ${idx}")
+            params.append(direction)
+            idx += 1
+        if inbound_campaign_id:
+            conditions.append("c.direction = 'inbound'")
+            conditions.append(
+                f"COALESCE(c.route_snapshot #>> '{{inbound_config,id}}', "
+                f"c.route_snapshot #>> '{{route,config_id}}') = ${idx}::text"
+            )
+            params.append(str(inbound_campaign_id))
+            idx += 1
         if from_date:
             conditions.append(f"c.created_at >= ${idx}")
             params.append(from_date)
@@ -550,13 +968,33 @@ async def list_calls(
                 rows = await conn.fetch(
                     f"""
                     SELECT c.id, c.talklee_call_id, c.created_at, c.phone_number,
-                           c.status, c.duration_seconds, c.outcome,
+                           c.status, c.duration_seconds, c.outcome, c.campaign_id,
                            c.summary,
-                           c.summary_json->>'outcome' AS lead_outcome,
+                           to_jsonb(c)->'summary_json'->>'outcome' AS lead_outcome,
+                           c.direction, c.caller_ani, c.caller_ani_private,
+                           c.called_did, c.assignment_id, c.route_version,
+                           c.config_version, c.route_snapshot,
+                           c.admission_status, c.admission_reason,
+                           c.consent_status, c.processing_status, c.billing_status,
+                           c.billing_hold_reason,
                            camp.name AS campaign_name,
+                           (SELECT leg.from_number FROM call_legs leg
+                             WHERE leg.call_id = c.id
+                               AND leg.direction = 'outbound'
+                               AND NULLIF(BTRIM(leg.from_number), '') IS NOT NULL
+                             ORDER BY leg.created_at, leg.id LIMIT 1)
+                               AS outbound_from_number,
                            (SELECT r.id FROM recordings_s3 r
                              WHERE r.call_id = c.id AND r.status = 'uploaded'
                              ORDER BY r.created_at DESC LIMIT 1) AS recording_id,
+                           (SELECT r.status FROM recordings_s3 r
+                             WHERE r.call_id = c.id
+                             ORDER BY r.created_at DESC LIMIT 1) AS recording_status,
+                           ((c.transcript IS NOT NULL AND BTRIM(c.transcript) <> '')
+                             OR EXISTS (SELECT 1 FROM transcripts tr
+                                         WHERE tr.call_id = c.id
+                                           AND COALESCE(tr.full_text, '') <> ''))
+                               AS has_transcript,
                            EXISTS (SELECT 1 FROM call_feedback f
                                     WHERE f.call_id = c.id) AS has_feedback
                     FROM calls c
@@ -575,19 +1013,50 @@ async def list_calls(
         items = []
         for row in rows:
             created_at = row["created_at"]
+            snapshot, checksum, route_id = _route_metadata(row)
+            row_direction = row["direction"] or "outbound"
+            inbound_from = _display_caller_ani(row)
+            display_from = _display_from_number(row)
+            display_to = (
+                row["called_did"]
+                if row_direction == "inbound"
+                else row["phone_number"]
+            ) or ""
             items.append(CallListItem(
                 id=str(row["id"]),
                 talklee_call_id=row["talklee_call_id"],
                 timestamp=created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at),
-                to_number=row["phone_number"] or "",
+                from_number=display_from,
+                to_number=display_to,
                 status=row["status"] or "unknown",
                 duration_seconds=row["duration_seconds"],
                 outcome=row["outcome"],
                 campaign_name=row["campaign_name"],
+                campaign_id=str(row["campaign_id"]) if row["campaign_id"] else None,
                 summary=row["summary"],
                 recording_id=str(row["recording_id"]) if row["recording_id"] is not None else None,
                 lead_outcome=row["lead_outcome"],
                 has_feedback=bool(row["has_feedback"]),
+                direction=row_direction,
+                caller_ani=inbound_from,
+                called_did=row["called_did"],
+                inbound_campaign_id=(
+                    _inbound_config_id(row)
+                ),
+                assignment_id=str(row["assignment_id"]) if row["assignment_id"] else None,
+                route_id=route_id,
+                route_version=row["route_version"],
+                config_version=row["config_version"],
+                config_checksum=checksum,
+                admission_status=row["admission_status"],
+                admission_reason=row["admission_reason"],
+                consent_status=row["consent_status"],
+                processing_status=row["processing_status"],
+                billing_status=row["billing_status"],
+                billing_hold_reason=row["billing_hold_reason"],
+                recording_status=_recording_state(row, snapshot),
+                transcript_status=_transcript_state(row),
+                media_state=_media_state(row),
             ))
 
         return CallListResponse(
@@ -619,57 +1088,159 @@ async def get_call(
     Returns full call information including transcript and recording reference.
     """
     try:
-        # Get call details with tenant filtering
-        query = db_client.table("calls").select("*").eq("id", call_id)
-        query = apply_tenant_filter(query, current_user.tenant_id)
-        call_response = query.single().execute()
-        
-        if not call_response.data:
-            raise HTTPException(
-                status_code=404,
-                detail="Call not found"
-            )
-        
-        call = call_response.data
-        
-        # Get recording if exists (recordings live in recordings_s3 table)
-        recording_id = None
+        if not current_user.tenant_id:
+            raise HTTPException(status_code=403, detail="No tenant context")
+        try:
+            call_uuid = UUID(call_id)
+            tenant_uuid = UUID(str(current_user.tenant_id))
+        except (TypeError, ValueError, AttributeError):
+            raise HTTPException(status_code=404, detail="Call not found")
+
         async with db_client.pool.acquire() as conn:
-            rec_row = await conn.fetchrow(
-                "SELECT id FROM recordings_s3 WHERE call_id = $1 ORDER BY created_at DESC LIMIT 1",
-                __import__("uuid").UUID(call_id),
-            )
-        if rec_row:
-            recording_id = str(rec_row["id"])
+            async with conn.transaction():
+                await conn.execute("SET LOCAL app.bypass_rls = 'true'")
+                call_row = await conn.fetchrow(
+                    """
+                    SELECT c.*,
+                           camp.name AS campaign_name,
+                           (SELECT tr.full_text FROM transcripts tr
+                             WHERE tr.call_id=c.id
+                             ORDER BY tr.created_at DESC LIMIT 1)
+                               AS persisted_transcript,
+                           EXISTS (SELECT 1 FROM transcripts tr
+                                    WHERE tr.call_id=c.id
+                                      AND COALESCE(tr.full_text, '') <> '')
+                               AS has_transcript,
+                           (SELECT r.id FROM recordings_s3 r
+                             WHERE r.call_id=c.id
+                             ORDER BY r.created_at DESC LIMIT 1)
+                               AS recording_id,
+                           (SELECT r.status FROM recordings_s3 r
+                             WHERE r.call_id=c.id
+                             ORDER BY r.created_at DESC LIMIT 1)
+                               AS recording_status,
+                           (SELECT NULLIF(u.policy_snapshot->>'actual_seconds', '')::int
+                             FROM inbound_usage_transactions u
+                             WHERE u.call_id=c.id
+                               AND u.call_leg_id IS NULL
+                               AND u.transaction_type IN ('finalize','release','reverse')
+                             ORDER BY u.created_at DESC LIMIT 1)
+                               AS billed_duration_seconds,
+                           (SELECT leg.from_number FROM call_legs leg
+                             WHERE leg.call_id = c.id
+                               AND leg.direction = 'outbound'
+                               AND NULLIF(BTRIM(leg.from_number), '') IS NOT NULL
+                             ORDER BY leg.created_at, leg.id LIMIT 1)
+                               AS outbound_from_number,
+                           to_jsonb(c)->'summary_json' AS persisted_summary_json
+                    FROM calls c
+                    LEFT JOIN campaigns camp ON camp.id=c.campaign_id
+                    WHERE c.id=$1 AND c.tenant_id=$2
+                    """,
+                    call_uuid,
+                    tenant_uuid,
+                )
+                if not call_row:
+                    raise HTTPException(status_code=404, detail="Call not found")
+                leg_rows = await conn.fetch(
+                    """
+                    SELECT id, leg_type, direction, provider, provider_leg_id,
+                           from_number, to_number, status, started_at,
+                           answered_at, ended_at, duration_seconds, metadata
+                    FROM call_legs
+                    WHERE call_id=$1 AND leg_type ILIKE '%transfer%'
+                    ORDER BY created_at
+                    """,
+                    call_uuid,
+                )
+
+        call = dict(call_row)
+        recording_id = call.get("recording_id")
         
         # Normalize summary_json: asyncpg may return JSONB as str or dict
-        import json as _json
-        raw_summary_json = call.get("summary_json")
+        raw_summary_json = call.get("persisted_summary_json") or call.get("summary_json")
         if isinstance(raw_summary_json, str):
             try:
-                summary_json = _json.loads(raw_summary_json)
-            except (_json.JSONDecodeError, ValueError):
+                summary_json = json.loads(raw_summary_json)
+            except (json.JSONDecodeError, ValueError):
                 summary_json = None
         elif isinstance(raw_summary_json, dict):
             summary_json = raw_summary_json
         else:
             summary_json = None
 
+        snapshot, checksum, route_id = _route_metadata(call)
+        direction = call.get("direction") or "outbound"
+        inbound_from = _display_caller_ani(call)
+        display_from = _display_from_number(call)
+        display_to = (
+            call.get("called_did")
+            if direction == "inbound"
+            else call.get("phone_number")
+        ) or ""
+        transfer_legs = []
+        for leg in leg_rows:
+            item = dict(leg)
+            for key in ("id",):
+                if item.get(key) is not None:
+                    item[key] = str(item[key])
+            for key in ("started_at", "answered_at", "ended_at"):
+                if item.get(key) is not None and hasattr(item[key], "isoformat"):
+                    item[key] = item[key].isoformat()
+            item["metadata"] = _json_object(item.get("metadata"))
+            transfer_legs.append(item)
+
         created_at = call.get("created_at", "")
         return CallDetail(
             id=str(call["id"]),
             talklee_call_id=call.get("talklee_call_id"),
             timestamp=created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at),
-            to_number=call.get("phone_number", ""),
+            from_number=display_from,
+            to_number=display_to,
             status=call.get("status", "unknown"),
             duration_seconds=call.get("duration_seconds"),
             outcome=call.get("outcome"),
-            transcript=call.get("transcript"),
+            transcript=call.get("transcript") or call.get("persisted_transcript"),
             recording_id=str(recording_id) if recording_id is not None else None,
             campaign_id=str(call["campaign_id"]) if call.get("campaign_id") else None,
             lead_id=str(call["lead_id"]) if call.get("lead_id") else None,
             summary=call.get("summary"),
             summary_json=summary_json,
+            campaign_name=call.get("campaign_name"),
+            direction=direction,
+            provider=call.get("provider"),
+            provider_call_id=call.get("provider_call_id"),
+            caller_ani=inbound_from,
+            called_did=call.get("called_did"),
+            inbound_campaign_id=(
+                _inbound_config_id(call)
+            ),
+            assignment_id=str(call["assignment_id"]) if call.get("assignment_id") else None,
+            route_id=route_id,
+            route_version=call.get("route_version"),
+            config_version=call.get("config_version"),
+            config_checksum=checksum,
+            ingress=call.get("ingress"),
+            route_snapshot=snapshot if direction == "inbound" else None,
+            admission_status=call.get("admission_status"),
+            admission_reason=call.get("admission_reason"),
+            consent_status=call.get("consent_status"),
+            processing_status=call.get("processing_status"),
+            billing_status=call.get("billing_status"),
+            billing_hold_reason=call.get("billing_hold_reason"),
+            reserved_seconds=call.get("reserved_seconds"),
+            recording_status=_recording_state(call, snapshot),
+            transcript_status=_transcript_state(call),
+            media_state=_media_state(call),
+            answer_delay_seconds=_duration_between(
+                call.get("started_at"), call.get("answered_at")
+            ) if call.get("answered_at") else None,
+            conversation_duration_seconds=_duration_between(
+                call.get("answered_at"), call.get("ended_at")
+            ) if call.get("answered_at") else None,
+            billed_duration_seconds=call.get("billed_duration_seconds"),
+            cost=float(call["cost"]) if call.get("cost") is not None else None,
+            transfer_legs=transfer_legs,
         )
     
     except HTTPException:

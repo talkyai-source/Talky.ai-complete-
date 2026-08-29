@@ -153,6 +153,18 @@ async def handle_machine_interim(
     Fail-soft: any error returns False and never disturbs a live call.
     """
     try:
+        raw_direction = getattr(session, "_call_direction", None)
+        if raw_direction is None:
+            raw_direction = getattr(session, "direction", None)
+        direction = str(
+            getattr(raw_direction, "value", raw_direction) or "outbound"
+        ).strip().lower()
+        if direction == "inbound":
+            # AMD classifies the remote party that *answered an outbound
+            # dial*. On a true inbound call the speaker is our caller; phrases
+            # such as "I'd like to leave a message" are ordinary intent, not a
+            # remote answering-machine greeting.
+            return False
         verdict = assess_machine_text(
             text,
             turn_index=getattr(session, "turn_id", 0) or 0,
@@ -208,8 +220,11 @@ async def handle_machine_interim(
                 )
         if not hung_up:
             try:
-                from app.domain.services.telephony.lifecycle import _bridge
-                adapter = _bridge()._adapter
+                from app.domain.services.telephony.adapter_registry import (
+                    get_adapter,
+                )
+
+                adapter = get_adapter()
                 if adapter is not None:
                     await adapter.hangup(str(call_id))
                     hung_up = True

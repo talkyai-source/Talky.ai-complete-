@@ -183,34 +183,41 @@ async def run_knowledge_lookup(session: CallSession, query: str) -> str:
     if not q:
         return NO_KB_FACTS
     try:
-        from app.core.container import get_container
         from app.services.scripts.knowledge.retrieval import (
             render_node_answer,
+            retrieve_pinned_knowledge,
             retrieve_knowledge,
         )
 
-        container = get_container()
-        if not getattr(container, "is_initialized", False):
-            return NO_KB_FACTS
-        pool = getattr(getattr(container, "db_client", None), "pool", None)
-        if pool is None:
-            return NO_KB_FACTS
-
         _t0 = time.monotonic()
-        try:
-            hits = await asyncio.wait_for(
-                retrieve_knowledge(
-                    pool, session.tenant_id, session.campaign_id, q, k=_KB_MAX_CHUNKS,
-                    bump_hits=False,
-                ),
-                timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
+        pinned_nodes = getattr(session, "_knowledge_snapshot_nodes", None)
+        if pinned_nodes is not None:
+            hits = retrieve_pinned_knowledge(
+                pinned_nodes, q, k=_KB_MAX_CHUNKS,
             )
-        except asyncio.TimeoutError:
-            logger.warning(
-                "KB_TOOL call=%s TIMEOUT >%.0fms q=%r — answering without facts",
-                session.call_id[:8], _KNOWLEDGE_RETRIEVE_TIMEOUT_S * 1000, q[:60],
-            )
-            return NO_KB_FACTS
+        else:
+            from app.core.container import get_container
+
+            container = get_container()
+            if not getattr(container, "is_initialized", False):
+                return NO_KB_FACTS
+            pool = getattr(getattr(container, "db_client", None), "pool", None)
+            if pool is None:
+                return NO_KB_FACTS
+            try:
+                hits = await asyncio.wait_for(
+                    retrieve_knowledge(
+                        pool, session.tenant_id, session.campaign_id, q,
+                        k=_KB_MAX_CHUNKS, bump_hits=False,
+                    ),
+                    timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "KB_TOOL call=%s TIMEOUT >%.0fms q=%r — answering without facts",
+                    session.call_id[:8], _KNOWLEDGE_RETRIEVE_TIMEOUT_S * 1000, q[:60],
+                )
+                return NO_KB_FACTS
         _ms = (time.monotonic() - _t0) * 1000.0
 
         if not hits:

@@ -27,6 +27,27 @@ logger = logging.getLogger(__name__)
 _MAX_TURN_INDEX_FOR_AMD = 1
 
 
+def _is_true_inbound(call_id: str) -> bool:
+    """Return whether the live session is a genuine caller-originated call."""
+
+    try:
+        from app.domain.services.telephony.lifecycle import _state
+
+        voice_session = _state().get_voice_session(str(call_id))
+        if voice_session is None:
+            return False
+        call_session = getattr(voice_session, "call_session", None)
+        raw = (
+            getattr(call_session, "_call_direction", None)
+            or getattr(voice_session, "_call_direction", None)
+            or getattr(getattr(voice_session, "config", None), "direction", None)
+        )
+        return str(getattr(raw, "value", raw) or "").strip().lower() == "inbound"
+    except Exception:
+        # Unknown legacy sessions retain the historical outbound behaviour.
+        return False
+
+
 def _flag_session_voicemail(call_id: str) -> None:
     """Mark the live voice session (and its call session) as voicemail so the
     outcome resolver records VOICEMAIL even before its transcript-scan fallback
@@ -61,6 +82,8 @@ async def detect_and_hang_up_voicemail(
     detection hiccup can never break a real, live call.
     """
     try:
+        if _is_true_inbound(call_id):
+            return False
         if turn_index is None or turn_index > _MAX_TURN_INDEX_FOR_AMD:
             return False
         if not is_voicemail_greeting(text):
@@ -75,8 +98,9 @@ async def detect_and_hang_up_voicemail(
 
         hung_up = False
         try:
-            from app.domain.services.telephony.lifecycle import _bridge
-            adapter = _bridge()._adapter
+            from app.domain.services.telephony.adapter_registry import get_adapter
+
+            adapter = get_adapter()
             if adapter is not None:
                 await adapter.hangup(str(call_id))
                 hung_up = True

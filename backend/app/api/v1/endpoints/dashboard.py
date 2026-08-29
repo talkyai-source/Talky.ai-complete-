@@ -125,7 +125,9 @@ async def get_dashboard_summary(
             ANSWERED_OUTCOMES as _ANSWERED_OUTCOMES,
             FAILED_OUTCOMES as _FAILED_OUTCOMES,
         )
-        month_q = db_client.table("calls").select("outcome,duration_seconds")
+        month_q = db_client.table("calls").select(
+            "id,outcome,duration_seconds,is_test"
+        )
         month_q = apply_tenant_filter(month_q, current_user.tenant_id)
         month_q = month_q.gte("created_at", month_start_iso)
         month_rows = month_q.execute().data or []
@@ -136,13 +138,36 @@ async def get_dashboard_summary(
         failed_calls = sum(
             1 for r in month_rows if (r.get("outcome") or "") in _FAILED_OUTCOMES
         )
-        total_duration_seconds = sum(
-            int(r.get("duration_seconds") or 0) for r in month_rows
+        billable_month_rows = [
+            row for row in month_rows if not bool(row.get("is_test"))
+        ]
+        parent_duration_seconds = sum(
+            int(r.get("duration_seconds") or 0) for r in billable_month_rows
         )
+        month_call_ids = [
+            r.get("id") for r in billable_month_rows if r.get("id")
+        ]
+        transfer_duration_seconds = 0
+        if month_call_ids:
+            # Transfer legs inherit tenant/month/test ownership from the
+            # already-scoped parent rows above. Only terminally finalized
+            # actual duration is customer-visible usage; active reserved/held
+            # seconds remain admission capacity, not completed usage.
+            transfer_q = db_client.table("call_legs").select("duration_seconds")
+            transfer_q = transfer_q.in_("call_id", month_call_ids)
+            transfer_q = transfer_q.eq("leg_type", "transfer")
+            transfer_q = transfer_q.eq("billing_status", "finalized")
+            transfer_rows = transfer_q.execute().data or []
+            transfer_duration_seconds = sum(
+                int(row.get("duration_seconds") or 0)
+                for row in transfer_rows
+            )
 
         # Convert seconds to minutes
-        minutes_used = total_duration_seconds // 60
-        
+        minutes_used = (
+            parent_duration_seconds + transfer_duration_seconds
+        ) // 60
+
         # Get active campaigns count with tenant filtering
         campaigns_query = db_client.table("campaigns").select("id", count="exact").eq("status", "running")
         campaigns_query = apply_tenant_filter(campaigns_query, current_user.tenant_id)
@@ -150,10 +175,9 @@ async def get_dashboard_summary(
         active_campaigns = campaigns_response.count or 0
 
         # Live minutes-remaining: allocation from the tenant's plan minus the
-        # current month's actual usage from `calls`. The tenants.minutes_used
-        # column is intentionally not consulted — it's never written by any
-        # call-end hook and would always read 0, making minutes_remaining
-        # always equal allocation regardless of usage.
+        # current month's actual parent + finalized transfer-leg usage. The
+        # tenants.minutes_used column is intentionally not consulted — it is
+        # never written by a call-end hook and would always read 0.
         tenant_q = db_client.table("tenants").select("minutes_allocated").eq(
             "id", current_user.tenant_id
         )

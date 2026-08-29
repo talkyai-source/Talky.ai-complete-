@@ -529,6 +529,16 @@ class AudioIngest:
             #     eventually ends the call, so this can never loop forever;
             #   • after 60s of continuous caller silence, close the call politely.
             _OPENING_HELLO_S = float(os.getenv("VOICE_OPENING_HELLO_S", "2.5"))
+            _session_opening_timeout = getattr(
+                session, "_silence_timeout_seconds", None,
+            )
+            if isinstance(_session_opening_timeout, (int, float)) and (
+                3.0 <= float(_session_opening_timeout) <= 60.0
+            ):
+                # Inbound campaign snapshots may override only the opening
+                # silence threshold. Mid-call thinking room and the absolute
+                # silence hangup remain platform safety controls.
+                _OPENING_HELLO_S = float(_session_opening_timeout)
             # RAISED 10 -> 16 on 2026-08-12. A traced production call nudged
             # "Still there?" twice while the caller was composing a question,
             # and both times they began speaking 1.6-2.6s AFTER the prod:
@@ -1028,4 +1038,3 @@ class AudioIngest:
                                 stt_span.set_attribute(f"stt.{k}", v)
                             except Exception as _e:
                                 logger.debug("stt_span_attr k=%s: %s", k, _e)
-

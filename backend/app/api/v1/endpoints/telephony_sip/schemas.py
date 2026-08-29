@@ -8,12 +8,14 @@ module — moving them would create a circular import.
 from __future__ import annotations
 
 import re
+import ipaddress
+import os
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # --- helpers used by the validators below + by endpoint code -----------
@@ -28,6 +30,68 @@ def _validate_match_pattern(pattern: str) -> None:
         re.compile(pattern)
     except re.error as exc:
         raise ValueError(f"Invalid match_pattern regex: {exc}") from exc
+
+
+def _allow_private_sip_targets() -> bool:
+    return os.getenv("TELEPHONY_ALLOW_PRIVATE_SIP_TARGETS", "").strip().lower() in {
+        "1", "true", "on", "yes",
+    }
+
+
+def _validate_sip_host(value: str, *, field_name: str = "sip_domain") -> str:
+    host = value.strip().lower().rstrip(".")
+    if not host or any(ord(ch) < 33 or ord(ch) == 127 for ch in host):
+        raise ValueError(f"{field_name} must be one hostname or IP address")
+    if any(token in host for token in ("://", "/", "@", "?", "#", "[", "]")):
+        # Bracketed IPv6 and URL syntax are intentionally rejected.  PJSIP
+        # projection expects a bare host token, not a URI.
+        raise ValueError(f"{field_name} must not contain URL or credential syntax")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        if host == "localhost" or host.endswith((".localhost", ".local", ".internal")):
+            raise ValueError(f"{field_name} must not target a local network name")
+        labels = host.split(".")
+        if any(
+            not label
+            or len(label) > 63
+            or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", label)
+            for label in labels
+        ):
+            raise ValueError(f"{field_name} must be a valid DNS hostname or IP address")
+    else:
+        if not address.is_global and not _allow_private_sip_targets():
+            raise ValueError(
+                f"{field_name} must be public; private targets require an explicit platform override"
+            )
+    return host
+
+
+def _validate_outbound_proxy(value: str) -> str:
+    raw = value.strip().lower()
+    if raw.startswith("sip:"):
+        raw = raw[4:]
+    if any(token in raw for token in ("/", "@", "?", "#", ";", "\\")):
+        raise ValueError("outbound_proxy must be a SIP hostname/IP with optional port")
+
+    host = raw
+    port: Optional[int] = None
+    # One colon is an ordinary host:port pair. Multiple colons are a bare
+    # IPv6 literal without a port; canonicalise it with URI brackets.
+    if raw.count(":") == 1:
+        candidate_host, candidate_port = raw.rsplit(":", 1)
+        if candidate_port.isdigit():
+            host = candidate_host
+            port = int(candidate_port)
+            if port < 1 or port > 65535:
+                raise ValueError("outbound_proxy port must be between 1 and 65535")
+    canonical_host = _validate_sip_host(host, field_name="outbound_proxy")
+    try:
+        is_ipv6 = ipaddress.ip_address(canonical_host).version == 6
+    except ValueError:
+        is_ipv6 = False
+    uri_host = f"[{canonical_host}]" if is_ipv6 else canonical_host
+    return f"{uri_host}:{port}" if port is not None else uri_host
 
 
 # --- enums --------------------------------------------------------------
@@ -79,6 +143,8 @@ def normalize_trunk_metadata(meta: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         if not isinstance(val, str):
             raise ValueError(f"{key} must be a string")
         val = val.strip()
+        if any(ord(ch) < 32 or ord(ch) == 127 for ch in val):
+            raise ValueError(f"{key} must not contain control characters")
         if len(val) > max_len:
             raise ValueError(f"{key} must be at most {max_len} characters")
         out[key] = val
@@ -102,10 +168,20 @@ def normalize_trunk_metadata(meta: Optional[Dict[str, Any]]) -> Dict[str, Any]:
                 raise ValueError("caller_id must be a phone number (digits, optional leading +)")
             out["caller_id"] = cid
 
-    _opt_str("outbound_proxy", 255)
     _opt_str("auth_realm", 255)
     _opt_bool("register")
     _opt_bool("srtp")
+
+    if "outbound_proxy" in out:
+        proxy = out["outbound_proxy"]
+        if proxy is None or (isinstance(proxy, str) and not proxy.strip()):
+            out.pop("outbound_proxy", None)
+        elif not isinstance(proxy, str):
+            raise ValueError("outbound_proxy must be a string")
+        elif len(proxy.strip()) > 255:
+            raise ValueError("outbound_proxy must be at most 255 characters")
+        else:
+            out["outbound_proxy"] = _validate_outbound_proxy(proxy)
 
     # source_host — the hostname/IP the tenant's carrier signals inbound from.
     # SECURITY-relevant: it becomes the PJSIP `identify match=` that decides
@@ -129,6 +205,7 @@ def normalize_trunk_metadata(meta: Optional[Dict[str, Any]]) -> Dict[str, Any]:
                     "source_host must be a hostname or IP address "
                     "(no spaces or control characters)"
                 )
+            _validate_sip_host(sh, field_name="source_host")
             out["source_host"] = sh
 
     if "dtmf_mode" in out and out["dtmf_mode"] not in {m.value for m in DTMFMode}:
@@ -163,6 +240,11 @@ class SIPTrunkCreateRequest(BaseModel):
     auth_password: Optional[str] = Field(default=None, max_length=255)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("sip_domain")
+    @classmethod
+    def validate_sip_domain(cls, value: str) -> str:
+        return _validate_sip_host(value)
+
     @model_validator(mode="after")
     def validate_auth_pair(self) -> "SIPTrunkCreateRequest":
         if bool(self.auth_username) != bool(self.auth_password):
@@ -187,6 +269,11 @@ class SIPTrunkUpdateRequest(BaseModel):
     auth_password: Optional[str] = Field(default=None, max_length=255)
     clear_auth: bool = False
     metadata: Optional[Dict[str, Any]] = None
+
+    @field_validator("sip_domain")
+    @classmethod
+    def validate_sip_domain(cls, value: Optional[str]) -> Optional[str]:
+        return _validate_sip_host(value) if value is not None else None
 
     @model_validator(mode="after")
     def normalize_metadata(self) -> "SIPTrunkUpdateRequest":
@@ -215,6 +302,11 @@ class SIPTrunkResponse(BaseModel):
     live_registration_status: Optional[str] = None
     live_status_detail: Optional[str] = None  # e.g. "403 Forbidden" — the real reason
     live_status_checked_at: Optional[datetime] = None
+    # Derived server-side from active/direction + fresh Asterisk evidence.
+    # Clients use this instead of treating is_active as proof of operation.
+    runtime_ready: bool = False
+    runtime_status_code: str = "status_missing"
+    runtime_status_detail: str = "Asterisk runtime status is unavailable."
     created_at: datetime
     updated_at: datetime
 

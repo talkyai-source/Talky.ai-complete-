@@ -43,6 +43,7 @@ class DialerQueueService:
     PRIORITY_QUEUE = "dialer:priority:queue"
     TENANT_QUEUE_PREFIX = "dialer:tenant:{tenant_id}:queue"
     SCHEDULED_ZSET = "dialer:scheduled"
+    RETRY_IDEMPOTENCY_PREFIX = "dialer:retry-dispatch:"
     PROCESSING_ZSET = "dialer:processing"
     # Durable in-flight store (BUG 1 crash-safety). A job is moved OUT of its
     # queue and INTO this list in a SINGLE atomic LMOVE, so a worker that dies
@@ -378,6 +379,133 @@ class DialerQueueService:
             
         except Exception as e:
             logger.error(f"Failed to schedule retry for job {job.job_id}: {e}")
+            return False
+
+    async def schedule_retry_once(
+        self,
+        job: DialerJob,
+        *,
+        delay_seconds: int,
+        idempotency_key: str,
+    ) -> bool:
+        """Atomically enqueue one durable terminal-settlement retry.
+
+        PostgreSQL's call-settlement outbox may replay after a Redis success
+        when the subsequent DB acknowledgement was interrupted. A plain ZADD
+        is not idempotent here because its member is the serialized job (and
+        contains a jittered timestamp). This Lua transaction binds a stable
+        idempotency key and the exact ZSET member in one Redis script. The
+        script validates both key types before its first write, then makes the
+        marker and schedule visible atomically. Replays report success without
+        adding a second delayed job.
+        """
+
+        if not self._initialized:
+            await self.initialize()
+        if not idempotency_key or not str(idempotency_key).strip():
+            logger.error("schedule_retry_once requires an idempotency key")
+            return False
+
+        try:
+            job.attempt_number += 1
+            job.status = JobStatus.RETRY_SCHEDULED
+            jitter = random.uniform(0, min(delay_seconds * 0.25, 15.0))
+            effective_delay = delay_seconds + jitter
+            now = datetime.now(timezone.utc)
+            job.scheduled_at = now + timedelta(seconds=effective_delay)
+            execute_at = now.timestamp() + effective_delay
+            job_data = json.dumps(job.to_redis_dict())
+
+            marker_key = (
+                self.RETRY_IDEMPOTENCY_PREFIX + str(idempotency_key).strip()
+            )
+            script = """
+                local marker_type = redis.call('TYPE', KEYS[1]).ok
+                local schedule_type = redis.call('TYPE', KEYS[2]).ok
+                if marker_type ~= 'none' and marker_type ~= 'string' then
+                    return redis.error_reply('retry marker has wrong type')
+                end
+                if schedule_type ~= 'none' and schedule_type ~= 'zset' then
+                    return redis.error_reply('retry schedule has wrong type')
+                end
+                if redis.call('EXISTS', KEYS[1]) == 1 then
+                    return 0
+                end
+                redis.call('ZADD', KEYS[2], ARGV[1], ARGV[2])
+                redis.call('SET', KEYS[1], ARGV[2])
+                return 1
+            """
+            inserted = await self._redis.eval(
+                script,
+                2,
+                marker_key,
+                self.SCHEDULED_ZSET,
+                execute_at,
+                job_data,
+            )
+
+            # The schedule is already durable at this point. In-flight cleanup
+            # is idempotent and best effort; a stale-processing reaper can also
+            # repair it, while returning False here would cause needless DB
+            # outbox retention despite the retry being safely queued.
+            try:
+                await self._untrack_inflight(job.job_id)
+                await self._redis.zrem(self.PROCESSING_ZSET, job.job_id)
+            except Exception as cleanup_exc:  # noqa: BLE001
+                logger.warning(
+                    "schedule_retry_once cleanup deferred job=%s err=%s",
+                    job.job_id,
+                    cleanup_exc,
+                )
+
+            logger.info(
+                "Scheduled idempotent retry for job %s attempt=%s in %ss (%s)",
+                job.job_id,
+                job.attempt_number,
+                delay_seconds,
+                "inserted" if int(inserted or 0) == 1 else "replayed",
+            )
+            return True
+        except Exception as exc:  # noqa: BLE001 - caller retains DB outbox
+            logger.error(
+                "Failed idempotent retry schedule for job %s: %s",
+                job.job_id,
+                exc,
+            )
+            return False
+
+    async def confirm_retry_once(
+        self,
+        idempotency_key: str,
+        *,
+        retention_seconds: int = 90 * 24 * 3600,
+    ) -> bool:
+        """Age an idempotency marker only after PostgreSQL acks enqueue.
+
+        Before the database outbox acknowledgement the marker has no expiry:
+        an arbitrarily long database outage must not permit a second queued
+        retry. Once CallService durably records ``terminal_retry_enqueued_at``,
+        keeping the marker for 90 days is sufficient audit/replay protection
+        without leaking one Redis key forever for every historical attempt.
+        This cleanup is best effort and never changes enqueue durability.
+        """
+
+        if not idempotency_key or not str(idempotency_key).strip():
+            return False
+        marker_key = self.RETRY_IDEMPOTENCY_PREFIX + str(idempotency_key).strip()
+        try:
+            return bool(
+                await self._redis.expire(
+                    marker_key,
+                    max(1, int(retention_seconds)),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - marker may safely linger
+            logger.debug(
+                "retry idempotency retention update failed key=%s err=%s",
+                str(idempotency_key)[:48],
+                exc,
+            )
             return False
     
     async def process_scheduled_jobs(self) -> int:

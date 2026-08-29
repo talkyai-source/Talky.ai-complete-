@@ -280,6 +280,16 @@ class VoiceSessionConfig:
     realtime_voice: str = "marin"
     realtime_settings: Optional[Dict[str, Any]] = None
 
+    # True-inbound opening policy for the realtime speech-to-speech path.
+    # ``direction`` alone is not enough: an inbound campaign may be either
+    # caller-first or agent-first, and after-hours AI message intake is always
+    # agent-first.  These values are copied from the immutable pre-answer
+    # admission snapshot before the realtime socket is created. ``None`` keeps
+    # every legacy/outbound call on the historical direction-derived default.
+    realtime_greet_on_start: Optional[bool] = None
+    realtime_opening_greeting: Optional[str] = None
+    realtime_message_intake: bool = False
+
     # ── Callee identity ("who you're calling") ───────────────────────────
     # Set by build_telephony_session_config from the lead threaded through
     # make_call. The cascaded path bakes this into system_prompt directly;
@@ -407,17 +417,42 @@ class VoiceOrchestrator:
     # ------------------------------------------------------------------
 
     async def _persist_prompt_identity(
-        self, talklee_call_id: Any, config: VoiceSessionConfig
+        self, call_row_id: Any, config: VoiceSessionConfig, tenant_id: Any = None
     ) -> None:
-        """Write the prompt identity onto the call row (goals.md §6, task #90).
+        """Write the prompt identity onto the durable ``calls`` row
+        (goals.md §6, task #90).
+
+        WHICH KEY, AND WHY NOT talklee_call_id (2026-08-28)
+        ---------------------------------------------------
+        This used to run at session-creation time and match on
+        ``talklee_call_id``. It could never match a row. ``create_voice_session``
+        MINTS a fresh ``generate_talklee_call_id()`` for the session; the dialer
+        minted its own, unrelated one when it inserted the ``calls`` row
+        (``dialer_worker._create_call_record``), and nothing carries the
+        dialer's id onto ``VoiceSessionConfig``. Two independent random ids →
+        ``UPDATE 0`` on every single call, which is exactly why
+        ``calls.prompt_version`` was NULL everywhere.
+
+        The join the telephony bridge really does establish is
+        ``voice_session._dialer_call_id`` = ``calls.id`` — set by
+        ``call_transcript_persister.bind_telephony_call`` for outbound and from
+        the pinned admission snapshot for true inbound. That is the key used
+        here, and it is the same key the transcript, outcome and duration
+        writes use at hangup.
 
         Best-effort by design. A failed bookkeeping write must never fail a
         call — losing a conversation because an UPDATE hit a busy row would be
-        the wrong trade every time. The identity is still in the log line above,
-        so a failure costs queryability, not the fact.
+        the wrong trade every time. The identity is still in the
+        ``call_prompt_identity`` log line, so a failure costs queryability, not
+        the fact.
         """
         pool = getattr(self._db_client, "pool", None)
-        if pool is None or not talklee_call_id:
+        if pool is None or not call_row_id:
+            return
+        # An empty identity is not an identity: ask-AI and the browser
+        # assistant build their config elsewhere and have no campaign prompt.
+        # Writing '' over the row would turn "no evidence" into a value.
+        if not getattr(config, "prompt_hash", ""):
             return
         try:
             from app.core.db_utils import acquire_with_tenant
@@ -425,31 +460,34 @@ class VoiceOrchestrator:
             # Tenant context so this keeps working once the app role stops
             # bypassing row security (task #80). None routes through the
             # documented bypass path for sessions with no tenant.
-            tenant = getattr(config, "tenant_id", None)
+            tenant = tenant_id or getattr(config, "tenant_id", None)
             async with acquire_with_tenant(pool, str(tenant) if tenant else None) as conn:
                 updated = await conn.execute(
                     """UPDATE calls
                           SET prompt_template = $2,
                               prompt_version  = $3,
                               prompt_hash     = $4
-                        WHERE talklee_call_id = $1""",
-                    str(talklee_call_id),
+                        WHERE id = $1::uuid""",
+                    str(call_row_id),
                     config.prompt_template,
                     config.prompt_version,
                     config.prompt_hash,
                 )
             # "UPDATE 0" means the join key was wrong — which is invisible
-            # otherwise, and would leave every review unattributable.
+            # otherwise, and would leave every review unattributable. Now that
+            # the key is a bound calls.id, this signal actually varies: it is
+            # silent on the pre-warm/orphan sessions that never bound a row
+            # (they return above) and loud only when a bound id misses.
             if isinstance(updated, str) and updated.endswith(" 0"):
                 logger.warning(
-                    "prompt_identity_persist_matched_no_row talklee=%s — the "
-                    "calls row was not found by talklee_call_id",
-                    str(talklee_call_id)[:12],
+                    "prompt_identity_persist_matched_no_row call=%s — no calls "
+                    "row with that id",
+                    str(call_row_id)[:12],
                 )
         except Exception:  # noqa: BLE001 — see docstring
             logger.warning(
-                "prompt_identity_persist_failed talklee=%s",
-                str(talklee_call_id)[:12], exc_info=True,
+                "prompt_identity_persist_failed call=%s",
+                str(call_row_id)[:12], exc_info=True,
             )
 
     async def create_voice_session(self, config: VoiceSessionConfig) -> VoiceSession:
@@ -573,10 +611,14 @@ class VoiceOrchestrator:
             # gate ("every call has a prompt version") nor a conversation review
             # can JOIN on a log line. The row is the only durable home.
             #
-            # Matched on talklee_call_id, NOT call_id: this session's call_id is
-            # the voice-session identifier, a different UUID from the dialer's
-            # calls.id. Getting that wrong updates zero rows and looks fine.
-            await self._persist_prompt_identity(talklee_call_id, config)
+            # NOT HERE, THOUGH (2026-08-28). There is no calls row this session
+            # can be matched to yet: neither this session's call_id nor its
+            # freshly-minted talklee_call_id exists in `calls`, and the dialer's
+            # row is keyed by ids this code has never seen. The durable
+            # calls.id only arrives later, as `_dialer_call_id`, from
+            # bind_telephony_call (outbound) or the admission snapshot
+            # (inbound) — so the write happens in end_session, alongside the
+            # transcript/outcome/duration writes that use the same key.
 
         # --- Event logging ---
         event_repo = None
@@ -1033,6 +1075,20 @@ class VoiceOrchestrator:
                 )
             except Exception as evt_err:
                 logger.debug(f"Failed to log session end: {evt_err}")
+
+        # WHICH INSTRUCTIONS DID THIS CALL RUN ON? (goals.md §6, task #90)
+        # Written here rather than at session creation because this is the
+        # first point where the durable `calls.id` is on the session: the
+        # bridge binds it after answer (bind_telephony_call for outbound, the
+        # pinned admission snapshot for inbound). Sessions that never bound a
+        # row — pre-warm, ringing, orphans — carry no id and are skipped.
+        # No-ops for sessions with no campaign prompt. Never raises.
+        if session.config is not None:
+            await self._persist_prompt_identity(
+                getattr(session, "_dialer_call_id", None),
+                session.config,
+                getattr(session, "_dialer_tenant_id", None),
+            )
 
         # Determine whether this session uses singleton (shared) providers.
         # Singleton providers must NOT be cleaned up — they are reused across
@@ -1715,6 +1771,7 @@ class VoiceOrchestrator:
             )
             call_session.talklee_call_id = talklee_call_id
             call_session.barge_in_event = asyncio.Event()
+            call_session._call_direction = config.direction.value
 
             # Transcript accumulation for the realtime path. The speech-to-speech
             # model emits no transcript on its own, so the bridge feeds the
@@ -1735,6 +1792,14 @@ class VoiceOrchestrator:
             if set_barge_in:
                 set_barge_in(call_id, call_session.barge_in_event)
 
+            pinned_realtime_greeting = getattr(
+                config, "realtime_greet_on_start", None
+            )
+            greet_on_start = (
+                bool(pinned_realtime_greeting)
+                if pinned_realtime_greeting is not None
+                else config.direction == Direction.OUTBOUND
+            )
             bridge = RealtimeBridge(
                 call_id=call_id,
                 realtime_session=rt,
@@ -1745,13 +1810,13 @@ class VoiceOrchestrator:
                 campaign_id=config.campaign_id,
                 session_active=lambda: self._active_sessions.get(call_id) is not None,
                 barge_in_event=call_session.barge_in_event,
-                # Caller-speaks-first (INBOUND) calls must NOT have the agent
-                # greet at t=0 — that talks over the caller who just picked
-                # up expecting to speak first. OUTBOUND (platform-dialed)
-                # calls keep the existing greet-on-connect behaviour.
-                greet_on_start=(config.direction == Direction.OUTBOUND),
+                # True inbound can be caller-first OR agent-first. Admission
+                # pins that distinction explicitly on the config; direction is
+                # only the backwards-compatible default for older callers.
+                greet_on_start=greet_on_start,
                 transcript_service=realtime_transcript_service,
                 talklee_call_id=talklee_call_id,
+                call_direction=config.direction.value,
             )
 
             voice_session = VoiceSession(
@@ -1780,6 +1845,8 @@ class VoiceOrchestrator:
         missing fields — realtime should work even on a bare campaign."""
         from app.services.scripts.realtime_instructions import RealtimePersona
 
+        direction_value = getattr(config.direction, "value", config.direction)
+        direction_text = str(direction_value or "outbound").strip().lower()
         ac = config.agent_config
         agent_name = getattr(ac, "agent_name", None) or getattr(ac, "name", None) or "Alex"
         company = getattr(ac, "company_name", None) or getattr(ac, "company", None) or "the company"
@@ -1798,7 +1865,7 @@ class VoiceOrchestrator:
         last = (getattr(config, "callee_last_name", None) or "").strip()
         callee_company = (getattr(config, "callee_company", None) or "").strip()
         full = " ".join(p for p in (first, last) if p).strip()
-        if full:
+        if full and direction_text != "inbound":
             greet = first or full
             comp_clause = f" from {callee_company}" if callee_company else ""
             extra_notes = (
@@ -1815,6 +1882,13 @@ class VoiceOrchestrator:
             role=str(role),
             goal=str(goal),
             extra_notes=extra_notes,
+            call_direction=direction_text,
+            opening_greeting=getattr(
+                config, "realtime_opening_greeting", None
+            ),
+            message_intake=bool(
+                getattr(config, "realtime_message_intake", False)
+            ),
         )
 
     async def _create_media_gateway(self, config: VoiceSessionConfig):

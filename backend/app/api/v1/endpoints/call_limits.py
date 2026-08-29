@@ -408,14 +408,19 @@ async def add_dnc_entry(
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """Add a phone number to DNC list. Requires admin privileges."""
-    import re
     from datetime import datetime
 
-    # Normalize phone number
-    phone = entry.phone_number
-    has_plus = phone.startswith("+")
-    digits = re.sub(r"\D", "", phone)
-    normalized = f"+{digits}" if has_plus or len(digits) > 10 else f"+1{digits}"
+    from app.domain.services.dnc_service import normalize_e164_for_storage
+
+    # Normalise through the ONE DNC function -- the same one CallGuard
+    # normalises with before querying dnc_entries. This endpoint used to
+    # roll its own regex ("+1" only when there were <=10 digits), so an
+    # admin-added 7-digit number landed as "+1555 1234" style junk that
+    # matched no dial. See phone_number_normalizer's DNC INVARIANT.
+    try:
+        normalized = normalize_e164_for_storage(entry.phone_number)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # Parse expires_at
     expires = None

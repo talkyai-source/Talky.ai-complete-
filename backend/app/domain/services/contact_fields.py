@@ -27,6 +27,8 @@ raising, so the importer can keep going and report.
 """
 from __future__ import annotations
 
+import csv
+import io
 import re
 from dataclasses import dataclass, field
 from typing import Callable, Optional
@@ -103,6 +105,11 @@ class ContactField:
     # them is not useful, but calling at a civil hour is.
     agent_usable: bool = True
     max_len: int = 255
+    # What this column looks like filled in. It exists HERE, on the field,
+    # because the downloadable template is generated from this tuple — a
+    # hand-written example row drifts the moment a field is added, and the
+    # symptom is a customer filling in a column the importer no longer reads.
+    example: str = ""
 
 
 CONTACT_FIELDS: tuple[ContactField, ...] = (
@@ -110,45 +117,61 @@ CONTACT_FIELDS: tuple[ContactField, ...] = (
         "phone_number", "Phone number", "phone_number", "phone",
         aliases=("phone", "telephone", "tel", "number", "primary phone",
                  "contact number", "msisdn"),
-        validator=_valid_phone, max_len=32,
+        validator=_valid_phone, max_len=32, example="+447700900123",
     ),
     ContactField(
         "mobile_number", "Mobile", None, "phone",
         aliases=("mobile", "cell", "cellphone", "cell phone", "mobile phone"),
-        validator=_valid_phone, max_len=32,
+        validator=_valid_phone, max_len=32, example="+447700900124",
     ),
     ContactField(
         "business_number", "Business number", "business_number", "phone",
         aliases=("business phone", "work phone", "office", "office phone",
                  "work number", "landline"),
-        validator=_valid_phone, max_len=32,
+        validator=_valid_phone, max_len=32, example="+442079460000",
     ),
     ContactField(
         "first_name", "First name", "first_name",
         aliases=("firstname", "given name", "forename", "fname"),
+        example="Sian",
     ),
     ContactField(
         "last_name", "Last name", "last_name",
         aliases=("lastname", "surname", "family name", "lname"),
+        example="Roberts",
+    ),
+    # Read/derive-only in the database. Imports and manual forms may supply a
+    # full name, but the write paths split it into first_name/last_name so the
+    # generated leads.full_name column can never drift from its parts.
+    ContactField(
+        "full_name", "Full name", None,
+        aliases=("fullname", "contact name", "customer name", "lead name"),
+        # Deliberately blank in the template: every write path derives it from
+        # first_name/last_name, so a filled-in example would teach people to
+        # supply a value we then ignore.
+        max_len=511, example="",
     ),
     ContactField(
         "email", "Email", "email", "email",
         aliases=("email address", "e-mail", "mail"),
-        validator=_valid_email,
+        validator=_valid_email, example="sian.roberts@buildwright.co.uk",
     ),
     ContactField(
         "company_name", "Company", "company_name",
         aliases=("company", "organisation", "organization", "business",
                  "business name", "employer", "account"),
+        example="BuildWright Roofing",
     ),
     ContactField(
         "job_title", "Job title", "job_title",
         aliases=("title", "role", "position", "job", "job role"),
+        example="Quantity Surveyor",
     ),
     ContactField(
         "best_time_to_call", "Best time to call", "best_time_to_call",
-        aliases=("best time", "preferred time", "call time", "availability"),
-        max_len=64,
+        aliases=("best time", "preferred time", "call time", "availability",
+                 "calling hours", "call window", "calling time"),
+        max_len=64, example="Mon-Fri 9am-11am",
     ),
     ContactField(
         "timezone", "Timezone", "timezone",
@@ -156,23 +179,26 @@ CONTACT_FIELDS: tuple[ContactField, ...] = (
         validator=_valid_timezone,
         # Operational, not conversational: it decides WHEN we dial, and the
         # agent has no reason to mention it.
-        agent_usable=False, max_len=64,
+        agent_usable=False, max_len=64, example="Europe/London",
     ),
     ContactField(
         "calling_notes", "Calling notes", "calling_notes", "notes",
-        aliases=("notes", "note", "comments", "remarks", "background"),
+        aliases=("notes", "note", "call notes", "contact notes", "comments",
+                 "remarks", "background"),
         max_len=4000,
+        example="Call back after the tender closes",
     ),
     ContactField(
         "preferred_contact_method", "Preferred contact method",
         "preferred_contact_method",
         aliases=("preferred contact", "contact method", "contact preference"),
         validator=_valid_contact_method, agent_usable=False, max_len=32,
+        example="phone",
     ),
     ContactField(
         "do_not_call", "Do not call", "do_not_call", "boolean",
         aliases=("dnc", "do-not-call", "opt out", "opted out", "unsubscribe"),
-        validator=_valid_bool,
+        validator=_valid_bool, example="no",
         # NEVER shown to the agent. A do-not-call contact should not be dialled
         # at all; putting the flag in the prompt would invite the model to
         # mention it, which is the worst possible handling.
@@ -294,3 +320,27 @@ def csv_template_headers() -> list[str]:
     """The download template. Canonical names only — an import using this file
     maps cleanly with no guessing at all."""
     return [f.key for f in CONTACT_FIELDS]
+
+
+def csv_template_example_row() -> list[str]:
+    """One filled-in row, so a customer can see the SHAPE of each column rather
+    than guess what "best_time_to_call" wants."""
+    return [f.example for f in CONTACT_FIELDS]
+
+
+TEMPLATE_FILENAME = "talklee-contacts-template.csv"
+
+
+def csv_template_csv() -> str:
+    """The whole downloadable template: header row + one example row.
+
+    Generated from CONTACT_FIELDS, never hand-written, so adding a field to the
+    registry updates the template, the importer and the validator in one move.
+    ``csv.writer`` rather than ``",".join`` because an example value is allowed
+    to contain a comma and must then be quoted, exactly as a real export would.
+    """
+    buf = io.StringIO()
+    writer = csv.writer(buf, lineterminator="\n")
+    writer.writerow(csv_template_headers())
+    writer.writerow(csv_template_example_row())
+    return buf.getvalue()

@@ -57,6 +57,12 @@ class RealtimePersona:
     goal: str = "have a helpful, natural conversation with the caller"
     # Optional extra, operator-supplied freeform guidance (kept short).
     extra_notes: Optional[str] = None
+    # Direction/opening values are explicit because true inbound campaigns may
+    # be caller-first OR agent-first.  The default preserves every existing
+    # outbound realtime session.
+    call_direction: str = "outbound"
+    opening_greeting: Optional[str] = None
+    message_intake: bool = False
 
 
 # ── Block 2: expressive delivery, written for a speech-to-speech model ───────
@@ -113,6 +119,41 @@ def _knowledge_note() -> str:
 
 
 def _opening_note(persona: "RealtimePersona") -> str:
+    direction = str(persona.call_direction or "outbound").strip().lower()
+    greeting = (
+        " ".join(persona.opening_greeting.split())
+        if isinstance(persona.opening_greeting, str)
+        and persona.opening_greeting.strip()
+        else None
+    )
+    if persona.message_intake:
+        approved = (
+            f" Start with this approved greeting exactly: {greeting!r}."
+            if greeting
+            else ""
+        )
+        return (
+            "HOW YOU OPEN\n"
+            "This is an INBOUND after-hours AI message-intake call: the caller "
+            "contacted the company. Never say or imply that you called them."
+            f"{approved} Tell them the team is unavailable and invite one concise "
+            "message. Collect only their name, callback details if they volunteer "
+            "them, and the reason for the call. Ask one question at a time; do not "
+            "sell or qualify. Briefly confirm the message and close politely."
+        )
+    if direction == "inbound":
+        approved = (
+            f" When you speak first, use this approved greeting exactly: {greeting!r}."
+            if greeting
+            else ""
+        )
+        return (
+            "HOW YOU OPEN\n"
+            "This is an INBOUND call: the caller contacted the company. Never say "
+            "or imply that you called them, and never use outbound or cold-call "
+            f"framing.{approved} Answer the caller's direct question first, then "
+            "ask at most one relevant question and hand the floor back."
+        )
     return (
         "HOW YOU OPEN\n"
         f"Greet the caller warmly, briefly say who you are ({persona.agent_name} "

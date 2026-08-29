@@ -70,6 +70,54 @@ import json
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
 
+def _reject_inbound_campaign_mutation(
+    db_client: Client,
+    campaign_ids: list[str],
+    *,
+    tenant_id: Optional[str],
+) -> None:
+    """Keep the legacy outbound API from bypassing inbound version/audit rules."""
+
+    if not campaign_ids:
+        return
+    try:
+        query = (
+            db_client.table("campaigns")
+            .select("id, direction")
+            .in_("id", [str(value) for value in campaign_ids])
+        )
+        if tenant_id:
+            query = query.eq("tenant_id", tenant_id)
+        response = query.execute()
+        if getattr(response, "error", None):
+            raise RuntimeError(response.error)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("campaign direction guard unavailable: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="Campaign direction check unavailable",
+        ) from exc
+    inbound_ids = [
+        str(row.get("id"))
+        for row in (response.data or [])
+        if str(row.get("direction") or "outbound").lower() == "inbound"
+    ]
+    if inbound_ids:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "inbound_campaign_managed_separately",
+                "message": (
+                    "Inbound campaigns must be changed through the inbound "
+                    "campaign versioned lifecycle."
+                ),
+                "campaign_ids": inbound_ids,
+            },
+        )
+
+
 def _build_validated_script_config(
     *,
     persona_type: str,
@@ -343,6 +391,12 @@ async def apply_tts_config(
     if not current_user.tenant_id:
         raise HTTPException(status_code=400, detail="Current user is not associated with a tenant")
 
+    _reject_inbound_campaign_mutation(
+        db_client,
+        [str(value) for value in body.campaign_ids],
+        tenant_id=current_user.tenant_id,
+    )
+
     provider = (body.tts_provider or "").strip()
     voice_id = (body.tts_voice_id or "").strip()
     valid_voice_ids = await _valid_voice_ids_for_provider(provider)
@@ -413,6 +467,12 @@ async def update_campaign(
     try:
         if not current_user.tenant_id:
             raise HTTPException(status_code=400, detail="Current user is not associated with a tenant")
+
+        _reject_inbound_campaign_mutation(
+            db_client,
+            [campaign_id],
+            tenant_id=current_user.tenant_id,
+        )
 
         # Per-campaign provider: validate the voice against the campaign's chosen
         # provider (NULL falls back to the tenant global) — same gate as create.
@@ -548,6 +608,12 @@ async def start_campaign(
     try:
         service = _get_campaign_service(db_client)
 
+        _reject_inbound_campaign_mutation(
+            db_client,
+            [campaign_id],
+            tenant_id=current_user.tenant_id,
+        )
+
         # Trust the authenticated user's tenant_id over any value the
         # client ships in the body — clients shouldn't be able to start
         # someone else's campaign by spoofing tenant_id in JSON.
@@ -679,7 +745,29 @@ async def pause_campaign(
     """
     try:
         service = _get_campaign_service(db_client)
+        _reject_inbound_campaign_mutation(
+            db_client,
+            [campaign_id],
+            tenant_id=current_user.tenant_id,
+        )
         campaign = await service.pause_campaign(campaign_id)
+        termination = campaign.get("termination_summary") or {}
+        deferred = int(
+            termination.get("deferred", termination.get("unconfirmed", 0)) or 0
+        )
+        termination_status = str(termination.get("status") or "lookup_failed")
+        if termination_status == "confirmed":
+            message = f"Campaign {campaign_id} paused"
+        elif termination_status == "partial":
+            message = (
+                f"Campaign {campaign_id} paused; {deferred} call(s) are still "
+                "ending and will be retried automatically"
+            )
+        else:
+            message = (
+                f"Campaign {campaign_id} paused, but live-call cleanup could "
+                "not be verified"
+            )
 
         if current_user.tenant_id:
             async with db_client.pool.acquire() as conn:
@@ -688,14 +776,21 @@ async def pause_campaign(
                     tenant_id=current_user.tenant_id,
                     category="user_action",
                     title="Campaign paused",
-                    description="Operator paused the campaign.",
+                    description=message,
                     related_campaign_id=str(campaign_id),
                     actor_user_id=current_user.id,
+                    metadata={"termination_summary": termination},
                 )
 
-        return {"message": f"Campaign {campaign_id} paused", "campaign": campaign}
+        return {
+            "message": message,
+            "campaign": campaign,
+            "termination_summary": termination,
+        }
     except CampaignNotFoundError:
         raise HTTPException(status_code=404, detail="Campaign not found")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error pausing campaign {campaign_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to pause campaign")
@@ -722,7 +817,29 @@ async def stop_campaign(
     """
     try:
         service = _get_campaign_service(db_client)
+        _reject_inbound_campaign_mutation(
+            db_client,
+            [campaign_id],
+            tenant_id=current_user.tenant_id,
+        )
         campaign = await service.stop_campaign(campaign_id, clear_queue=clear_queue)
+        termination = campaign.get("termination_summary") or {}
+        deferred = int(
+            termination.get("deferred", termination.get("unconfirmed", 0)) or 0
+        )
+        termination_status = str(termination.get("status") or "lookup_failed")
+        if termination_status == "confirmed":
+            message = f"Campaign {campaign_id} stopped"
+        elif termination_status == "partial":
+            message = (
+                f"Campaign {campaign_id} stopped; {deferred} call(s) are still "
+                "ending and will be retried automatically"
+            )
+        else:
+            message = (
+                f"Campaign {campaign_id} stopped, but live-call cleanup could "
+                "not be verified"
+            )
 
         if current_user.tenant_id:
             async with db_client.pool.acquire() as conn:
@@ -731,19 +848,25 @@ async def stop_campaign(
                     tenant_id=current_user.tenant_id,
                     category="user_action",
                     title="Campaign stopped",
-                    description="Operator stopped the campaign."
+                    description=message
                                 + (" Pending jobs cleared." if clear_queue else ""),
                     related_campaign_id=str(campaign_id),
                     actor_user_id=current_user.id,
-                    metadata={"clear_queue": clear_queue},
+                    metadata={
+                        "clear_queue": clear_queue,
+                        "termination_summary": termination,
+                    },
                 )
 
         return {
-            "message": f"Campaign {campaign_id} stopped",
-            "campaign": campaign
+            "message": message,
+            "campaign": campaign,
+            "termination_summary": termination,
         }
     except CampaignNotFoundError:
         raise HTTPException(status_code=404, detail="Campaign not found")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error stopping campaign {campaign_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to stop campaign")
@@ -772,6 +895,11 @@ async def delete_campaign(
     campaign reappeared on refresh. This is the real delete.
     """
     try:
+        _reject_inbound_campaign_mutation(
+            db_client,
+            [campaign_id],
+            tenant_id=current_user.tenant_id,
+        )
         # Confirm it exists for THIS tenant (RLS-scoped) before mutating.
         existing = db_client.table("campaigns").select("id, status").eq(
             "id", campaign_id
@@ -1090,6 +1218,78 @@ def _phone_validation_relaxed(user) -> bool:
     return bool(email and email.strip().lower() in _RELAXED_PHONE_EMAILS)
 
 
+def _split_contact_full_name(full_name: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """Split the single Full name field used by the UI into the database parts.
+
+    ``leads.full_name`` is generated from first_name + last_name, so write paths
+    must never try to insert it directly. Keeping the split here also makes CSV
+    and manual contacts produce the same stored shape.
+    """
+    parts = (full_name or "").strip().split()
+    if not parts:
+        return None, None
+    return parts[0], " ".join(parts[1:]) or None
+
+
+def _resolved_contact_names(contact: ContactCreate | ContactUpdate) -> tuple[Optional[str], Optional[str]]:
+    first = (contact.first_name or "").strip() or None
+    last = (contact.last_name or "").strip() or None
+    if not first and not last and getattr(contact, "full_name", None):
+        return _split_contact_full_name(contact.full_name)
+    return first, last
+
+
+def _contact_custom_fields(contact: ContactCreate | ContactUpdate, existing: Optional[dict] = None) -> dict:
+    fields = dict(existing or {})
+    supplied = getattr(contact, "custom_fields", None)
+    if isinstance(supplied, dict):
+        fields.update(supplied)
+    # ``mobile_number`` remains an additional contact number while
+    # ``phone_number`` is the canonical number the dialler calls. It lives in
+    # custom_fields until the schema gains an explicit primary-phone selector.
+    if "mobile_number" in contact.model_fields_set:
+        mobile = (getattr(contact, "mobile_number", None) or "").strip()
+        if mobile:
+            fields["mobile_number"] = mobile
+        else:
+            fields.pop("mobile_number", None)
+    return fields
+
+
+def campaign_default_country(campaign: Optional[dict]) -> str:
+    """The ISO country a campaign's national-format numbers belong to.
+
+    Read from ``script_config.default_country_code`` (or the nested
+    ``campaign_slots.default_country_code``), defaulting to ``"US"``.
+
+    Public because the CSV/paste import in ``contacts.py`` must resolve it the
+    SAME way the manual Add-Contact path below does — when only one of the two
+    passed a country, a UK campaign's "07700 900123" normalised to
+    ``+447700900123`` on one path and the un-dialable ``+07700900123`` on the
+    other, for the same contact.
+    """
+    script_cfg = campaign.get("script_config") if isinstance(campaign, dict) else None
+    if isinstance(script_cfg, dict):
+        candidate = (
+            script_cfg.get("default_country_code")
+            or (script_cfg.get("campaign_slots") or {}).get("default_country_code")
+        )
+        if candidate:
+            return str(candidate).upper()
+    return "US"
+
+
+def _contact_response(row: dict) -> dict:
+    """Expose the user-facing full/mobile values consistently on every path."""
+    out = dict(row or {})
+    custom = out.get("custom_fields") if isinstance(out.get("custom_fields"), dict) else {}
+    out["mobile_number"] = custom.get("mobile_number") or out.get("phone_number")
+    out["full_name"] = out.get("full_name") or " ".join(
+        part for part in (out.get("first_name"), out.get("last_name")) if part
+    ).strip() or None
+    return out
+
+
 @router.post("/{campaign_id}/contacts", dependencies=[Depends(require_permission(Permission.CAMPAIGNS_UPDATE))])
 async def add_contact_to_campaign(
     campaign_id: str,
@@ -1114,27 +1314,26 @@ async def add_contact_to_campaign(
     db_client = supabase
     try:
         # 1. Validate campaign exists and belongs to the current tenant
-        campaign_query = db_client.table("campaigns").select("id, name, status, tenant_id").eq("id", campaign_id)
+        #    `script_config` is selected because step 2 reads the campaign's
+        #    country out of it. It was NOT in this projection before, so
+        #    `campaign.get("script_config")` was always None and T2.5's
+        #    per-campaign country silently never applied on this path — every
+        #    manually added number normalised as US regardless of the campaign.
+        campaign_query = db_client.table("campaigns").select(
+            "id, name, status, tenant_id, script_config"
+        ).eq("id", campaign_id)
         if current_user.tenant_id:
             campaign_query = campaign_query.eq("tenant_id", current_user.tenant_id)
         campaign_response = campaign_query.execute()
         if not campaign_response.data:
             raise HTTPException(status_code=404, detail="Campaign not found")
         campaign = campaign_response.data[0]
-        
+
         # 2. Normalize phone number — T2.5 uses the campaign's
         # default country (from script_config.campaign_slots or
         # top-level default_country_code) so non-US campaigns route
         # correctly. Falls back to US when not configured.
-        default_country = "US"
-        script_cfg = campaign.get("script_config") if isinstance(campaign, dict) else None
-        if isinstance(script_cfg, dict):
-            candidate = (
-                script_cfg.get("default_country_code")
-                or (script_cfg.get("campaign_slots") or {}).get("default_country_code")
-            )
-            if candidate:
-                default_country = str(candidate).upper()
+        default_country = campaign_default_country(campaign)
 
         # Phone validation is relaxed for specific accounts (TEMP) so they can
         # add short/odd test numbers; normal numbers still normalize to E.164.
@@ -1170,16 +1369,28 @@ async def add_contact_to_campaign(
             )
 
         deleted_rows = [r for r in (existing.data or []) if r.get("status") == "deleted"]
+        first_name, last_name = _resolved_contact_names(contact)
+        expanded_values = {
+            "first_name": first_name,
+            "last_name": last_name,
+            "email": contact.email,
+            "business_number": contact.business_number,
+            "company_name": contact.company_name,
+            "job_title": contact.job_title,
+            "best_time_to_call": contact.best_time_to_call,
+            "timezone": contact.timezone,
+            "calling_notes": contact.calling_notes,
+            "preferred_contact_method": contact.preferred_contact_method,
+            "do_not_call": contact.do_not_call,
+            "custom_fields": _contact_custom_fields(contact),
+        }
         if deleted_rows:
             # Prefer reviving a row that was a qualified lead so we don't lose it.
             deleted_rows.sort(key=lambda r: (0 if r.get("is_lead") else 1))
             revive_id = deleted_rows[0]["id"]
             revived = db_client.table("leads").update({
                 "status": "pending",
-                "first_name": contact.first_name,
-                "last_name": contact.last_name,
-                "email": contact.email,
-                "custom_fields": contact.custom_fields or {},
+                **expanded_values,
             }).eq("id", revive_id).execute()
             if revived.error or not revived.data:
                 logger.error(f"Error reviving lead {revive_id} for campaign {campaign_id}: {getattr(revived, 'error', None)}")
@@ -1187,7 +1398,7 @@ async def add_contact_to_campaign(
             logger.info(f"Contact revived in campaign {campaign_id}: {normalized_phone} (lead {revive_id})")
             return {
                 "message": "Contact added successfully",
-                "contact": revived.data[0]
+                "contact": _contact_response(revived.data[0])
             }
 
         # 4. Create lead record
@@ -1197,10 +1408,7 @@ async def add_contact_to_campaign(
             "tenant_id": campaign.get("tenant_id") or current_user.tenant_id,
             "campaign_id": campaign_id,
             "phone_number": normalized_phone,
-            "first_name": contact.first_name,
-            "last_name": contact.last_name,
-            "email": contact.email,
-            "custom_fields": contact.custom_fields or {},
+            **expanded_values,
             "status": "pending",
             "last_call_result": "pending",
             "call_attempts": 0,
@@ -1219,7 +1427,7 @@ async def add_contact_to_campaign(
 
         return {
             "message": "Contact added successfully",
-            "contact": response.data[0]
+            "contact": _contact_response(response.data[0])
         }
         
     except HTTPException:
@@ -1245,7 +1453,7 @@ async def update_contact_in_campaign(
     try:
         existing = (
             db_client.table("leads")
-            .select("id,phone_number,first_name,last_name,email,campaign_id")
+            .select("*")
             .eq("id", contact_id)
             .eq("campaign_id", campaign_id)
             .eq("tenant_id", current_user.tenant_id)
@@ -1281,12 +1489,30 @@ async def update_contact_in_campaign(
                 )
             update_payload["phone_number"] = normalized_phone
 
-        if contact.first_name is not None:
-            update_payload["first_name"] = contact.first_name
-        if contact.last_name is not None:
-            update_payload["last_name"] = contact.last_name
-        if contact.email is not None:
-            update_payload["email"] = contact.email
+        provided = contact.model_fields_set
+        if "full_name" in provided:
+            first_name, last_name = _split_contact_full_name(contact.full_name)
+            update_payload["first_name"] = first_name
+            update_payload["last_name"] = last_name
+        else:
+            if "first_name" in provided:
+                update_payload["first_name"] = contact.first_name
+            if "last_name" in provided:
+                update_payload["last_name"] = contact.last_name
+
+        for field_name in (
+            "email", "business_number", "company_name", "job_title",
+            "best_time_to_call", "timezone", "calling_notes",
+            "preferred_contact_method", "do_not_call",
+        ):
+            if field_name in provided:
+                update_payload[field_name] = getattr(contact, field_name)
+
+        if "mobile_number" in provided or "custom_fields" in provided:
+            update_payload["custom_fields"] = _contact_custom_fields(
+                contact,
+                existing.data[0].get("custom_fields"),
+            )
 
         if not update_payload:
             raise HTTPException(status_code=400, detail="No fields to update")
@@ -1300,7 +1526,7 @@ async def update_contact_in_campaign(
         )
         updated = resp.data[0] if resp.data else {**existing.data[0], **update_payload}
         logger.info("Contact %s updated in campaign %s", contact_id, campaign_id)
-        return {"message": "Contact updated successfully", "contact": updated}
+        return {"message": "Contact updated successfully", "contact": _contact_response(updated)}
 
     except HTTPException:
         raise
@@ -1384,7 +1610,7 @@ async def list_campaign_contacts(
         ).execute()
         
         return {
-            "items": response.data or [],
+            "items": [_contact_response(row) for row in (response.data or [])],
             "page": page,
             "page_size": page_size,
             "total": response.count or 0

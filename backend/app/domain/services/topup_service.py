@@ -240,6 +240,31 @@ class TopupService:
                     order["minutes"],
                 )
 
+            # THE CEILING THAT ACTUALLY BLOCKS THE CALL.
+            #
+            # `tenants.minutes_allocated` (above) is what the dialer gate and
+            # every screen read. The call guard's minutes check reads a
+            # DIFFERENT column in a DIFFERENT table —
+            # `tenant_call_limits.monthly_minutes_allocated`, read by
+            # ``call_guard._check_minutes_quota`` — and nothing syncs the two. A
+            # tenant with an admin-set ceiling could buy 250 minutes, watch the
+            # balance rise everywhere, and still be refused at origination
+            # against the old ceiling.
+            #
+            # `> 0` guard: 0 there means "no quota configured" and the guard
+            # passes. Writing 250 into it would CREATE a cap for a tenant who
+            # had none — the same trap as the unlimited sentinel above. So this
+            # only ever RAISES a ceiling that already exists, and it runs in
+            # this transaction so a crash cannot leave minutes bought that
+            # cannot be dialled.
+            await conn.execute(
+                "UPDATE tenant_call_limits "
+                "   SET monthly_minutes_allocated = monthly_minutes_allocated + $2, "
+                "       updated_at = NOW() "
+                " WHERE tenant_id = $1 AND monthly_minutes_allocated > 0",
+                order["tenant_id"], order["minutes"],
+            )
+
             await conn.execute(
                 "UPDATE topup_orders SET status='paid', paid_at=NOW(), updated_at=NOW(), "
                 "       provider_payment_id=COALESCE($2, provider_payment_id) "
@@ -328,6 +353,18 @@ class TopupService:
                 "UPDATE tenants "
                 "   SET minutes_allocated = GREATEST(0, minutes_allocated - $2) "
                 " WHERE id = $1 AND minutes_allocated > 0",
+                order["tenant_id"], order["minutes"],
+            )
+            # The enforced ceiling moves back with it. Leaving it raised after a
+            # refund hands the tenant minutes they no longer own and lets the
+            # two tables drift apart again. Floored for the same reason as
+            # above, and scoped to a ceiling that is actually configured.
+            await conn.execute(
+                "UPDATE tenant_call_limits "
+                "   SET monthly_minutes_allocated = "
+                "           GREATEST(0, monthly_minutes_allocated - $2), "
+                "       updated_at = NOW() "
+                " WHERE tenant_id = $1 AND monthly_minutes_allocated > 0",
                 order["tenant_id"], order["minutes"],
             )
             await conn.execute(

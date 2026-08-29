@@ -182,6 +182,10 @@ class LeadCaptureService:
                  -- exists to win.
                  WHERE array_position($11::text[], EXCLUDED.source)
                     >= array_position($11::text[], call_lead_details.source)
+                   -- Prod's app role is superuser + BYPASSRLS, so the table's
+                   -- policy is inert and an ON CONFLICT that matched a row
+                   -- would happily update it across tenants. Name the tenant.
+                   AND call_lead_details.tenant_id = $1::uuid
                 RETURNING id
                 """,
                 str(tenant_id), str(call_id),

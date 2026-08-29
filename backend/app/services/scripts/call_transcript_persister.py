@@ -313,6 +313,18 @@ async def save_call_transcript_on_hangup(
     dialer_call_id = getattr(voice_session, "_dialer_call_id", None)
     tenant_id_str = getattr(voice_session, "_dialer_tenant_id", None)
 
+    # 0. Structured lead capture (goals.md §7). Runs BEFORE the early-outs
+    #    below: a call whose transcript buffer is empty or already flushed can
+    #    still have established a fact on its final turn. The per-turn flush in
+    #    turn_ender covers completed turns; this covers the last one, which is
+    #    exactly the turn a hangup interrupts. Never raises.
+    await _flush_lead_details_on_hangup(
+        voice_session=voice_session,
+        dialer_call_id=dialer_call_id,
+        tenant_id_str=tenant_id_str,
+        db_pool=db_pool,
+    )
+
     # 1. Read buffer
     try:
         turns_json = transcript_service.get_transcript_json(session_call_id) or []
@@ -426,6 +438,57 @@ async def save_call_transcript_on_hangup(
         )
     finally:
         _safe_clear(transcript_service, session_call_id)
+
+
+async def _flush_lead_details_on_hangup(
+    *,
+    voice_session,
+    dialer_call_id,
+    tenant_id_str,
+    db_pool,
+) -> None:
+    """Write any lead fact the turn loop never got to persist (goals.md §7).
+
+    The per-turn flush in ``turn_ender`` runs after a turn COMPLETES. A caller
+    who gives their email and then hangs up mid-reply leaves that turn
+    incomplete, so without this the single most valuable fact of the call — the
+    one that made them an interested lead — would be the one that is lost.
+
+    Never raises: ``capture_session_slots`` swallows its own failures and this
+    wrapper covers the import and attribute reads.
+    """
+    if not (db_pool and dialer_call_id and tenant_id_str):
+        return
+    try:
+        from app.domain.services.voice_pipeline.lead_slot_capture import (
+            capture_session_slots,
+        )
+
+        call_session = getattr(voice_session, "call_session", None)
+        if call_session is None:
+            return
+        await capture_session_slots(
+            call_session,
+            pool=db_pool,
+            call_id=dialer_call_id,
+            tenant_id=tenant_id_str,
+            # Inbound binds only call+tenant onto the VoiceSession, so fall
+            # back to what the CallSession carries for the optional columns.
+            campaign_id=(
+                getattr(voice_session, "_dialer_campaign_id", None)
+                or getattr(call_session, "campaign_id", None)
+            ),
+            lead_id=(
+                getattr(voice_session, "_dialer_lead_id", None)
+                or getattr(call_session, "lead_id", None)
+            ),
+            reason="hangup",
+        )
+    except Exception as exc:  # noqa: BLE001 - teardown must not break
+        logger.warning(
+            "lead_details_hangup_flush_failed call=%s err=%s",
+            str(dialer_call_id)[:8], exc,
+        )
 
 
 def _schedule_call_summary(pool, tenant_id, call_id) -> None:

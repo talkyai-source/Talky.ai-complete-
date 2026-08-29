@@ -1,6 +1,7 @@
 """
 FastAPI Application Entry Point
 """
+
 import asyncio
 import os
 import logging
@@ -86,6 +87,117 @@ async def _event_loop_lag_heartbeat(stop_event: asyncio.Event) -> None:
             deadline = loop.time() + period
 
 
+async def _terminate_active_telephony_sessions_for_shutdown(
+    state_backend,
+    adapter=None,
+    *,
+    deadline_s: float = 5.5,
+) -> dict[str, object]:
+    """Request proof-aware PBX teardown for every session left after drain.
+
+    Returns an honest total/confirmed/deferred summary. A deferred call is intentionally left
+    in both local state and the durable Redis ledger; clearing this process's
+    heartbeat later in shutdown makes it immediately recoverable by the next
+    telephony owner. Browser/non-PBX callers keep their existing behavior via
+    the helper's default argument, while shutdown explicitly requires a PBX
+    acknowledgement before logical settlement.
+    """
+    from app.domain.services.telephony.lifecycle import _force_end_and_hangup
+    from app.domain.services.telephony.termination import request_confirmed_hangup
+
+    session_ids = {
+        str(call_id)
+        for call_id, _voice_session in state_backend.iter_voice_session_items()
+        if call_id
+    }
+    if adapter is None:
+        from app.api.v1.endpoints import telephony_bridge as _shutdown_tb
+
+        adapter = _shutdown_tb._adapter
+    owned_ids: set[str] = set()
+    owned_snapshot = getattr(adapter, "owned_call_ids", None)
+    if callable(owned_snapshot):
+        try:
+            owned_ids = {str(value) for value in owned_snapshot() if value}
+        except Exception as exc:
+            logger.warning("Shutdown: adapter ownership snapshot failed: %s", exc)
+    call_ids = sorted(session_ids | owned_ids)
+    if not call_ids:
+        return {
+            "total": 0,
+            "attempted": 0,
+            "confirmed": 0,
+            "deferred": 0,
+            "deferred_call_ids": [],
+        }
+
+    logger.info(
+        "Shutdown: requesting confirmed teardown for %d locally-owned "
+        "telephony call root(s) (drain expired)",
+        len(call_ids),
+    )
+
+    async def terminate_one(call_id: str) -> bool:
+        try:
+            if call_id in session_ids:
+                return bool(
+                    await _force_end_and_hangup(
+                        call_id,
+                        require_confirmation=True,
+                    )
+                )
+            proof = await request_confirmed_hangup(adapter, call_id)
+            return bool(proof.confirmed)
+        except asyncio.CancelledError:
+            raise
+        except Exception as shutdown_err:
+            logger.warning(
+                "Shutdown: error requesting confirmed teardown for call %s: %s",
+                call_id[:12],
+                shutdown_err,
+            )
+            return False
+
+    task_to_call = {
+        asyncio.create_task(
+            terminate_one(call_id),
+            name=f"telephony-shutdown:{call_id}",
+        ): call_id
+        for call_id in call_ids
+    }
+    done, pending = await asyncio.wait(
+        task_to_call,
+        timeout=max(0.1, min(10.0, float(deadline_s))),
+    )
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+    confirmed_ids: set[str] = set()
+    for task in done:
+        try:
+            if task.result():
+                confirmed_ids.add(task_to_call[task])
+        except (asyncio.CancelledError, Exception):
+            pass
+    deferred_ids = sorted(set(call_ids) - confirmed_ids)
+    for call_id in deferred_ids:
+        if call_id in session_ids:
+            logger.warning(
+                "Shutdown: call %s has no PBX termination proof; preserving "
+                "its session ledger for successor recovery",
+                call_id[:12],
+            )
+    return {
+        "total": len(call_ids),
+        "attempted": len(task_to_call),
+        "confirmed": len(confirmed_ids),
+        "deferred": len(deferred_ids),
+        "deferred_call_ids": deferred_ids,
+    }
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -106,7 +218,7 @@ async def lifespan(app: FastAPI):
     from app.core.telemetry import setup_telemetry, shutdown_telemetry
 
     environment = os.getenv("ENVIRONMENT", "development")
-    strict_validation = environment == "production"
+    strict_validation = environment.strip().lower() == "production"
 
     # ── 0. Production gate (T0.2 + T0.3) ─────────────────────────
     # Refuse to boot in production if any obvious fatal misconfig is
@@ -139,7 +251,8 @@ async def lifespan(app: FastAPI):
         slow_threshold = float(os.getenv("ASYNCIO_SLOW_CALLBACK_S", "0.1"))
         loop.slow_callback_duration = slow_threshold
         logger.warning(
-            "asyncio_debug_enabled slow_callback_threshold_s=%.2f", slow_threshold,
+            "asyncio_debug_enabled slow_callback_threshold_s=%.2f",
+            slow_threshold,
         )
 
     # ── 2. Service container ──────────────────────────────────────
@@ -164,17 +277,17 @@ async def lifespan(app: FastAPI):
         from app.domain.services.voice_tuning import (
             get_voice_tuning_resolver,
         )
+
         _voice_tuning_pool = getattr(container, "db_pool", None)
 
         if _voice_tuning_pool is not None:
+
             async def _voice_tuning_db_lookup(tenant_id: str):
                 # One indexed lookup; cache-bypassed by design so UI
                 # edits land on the next call without a restart.
                 async with _voice_tuning_pool.acquire() as conn:
                     async with conn.transaction():
-                        await conn.execute(
-                            "SET LOCAL app.bypass_rls = 'true'"
-                        )
+                        await conn.execute("SET LOCAL app.bypass_rls = 'true'")
                         row = await conn.fetchrow(
                             "SELECT voice_tuning FROM tenant_ai_configs "
                             "WHERE tenant_id = $1::uuid",
@@ -185,6 +298,7 @@ async def lifespan(app: FastAPI):
                 raw = row["voice_tuning"]
                 if isinstance(raw, str):
                     import json as _json
+
                     try:
                         raw = _json.loads(raw)
                     except (ValueError, TypeError):
@@ -197,13 +311,11 @@ async def lifespan(app: FastAPI):
             logger.info("voice_tuning_db_lookup_wired")
         else:
             logger.info(
-                "voice_tuning_db_lookup_skipped reason=no_db_pool "
-                "— resolver running env-only"
+                "voice_tuning_db_lookup_skipped reason=no_db_pool " "— resolver running env-only"
             )
     except Exception as exc:  # noqa: BLE001 — voice tuning never blocks startup
         logger.warning(
-            "voice_tuning_db_lookup_wiring_failed err=%s "
-            "— resolver falls back to env+defaults",
+            "voice_tuning_db_lookup_wiring_failed err=%s " "— resolver falls back to env+defaults",
             exc,
         )
 
@@ -214,11 +326,36 @@ async def lifespan(app: FastAPI):
     # can set the env.
     try:
         from app.core.redis_durability import probe_redis_durability
+
         redis_client = getattr(container, "redis", None)
         durability = await probe_redis_durability(redis_client)
         app.state.redis_durability = durability
     except Exception as exc:
         logger.warning("redis_durability_probe_raised err=%s", exc)
+
+    # Durable inbound reservations need an application-scoped reconciler.
+    # The watchdog is deliberately independent of the telephony ownership
+    # lock: every pass is idempotent and database-serialized, so a dead owner
+    # cannot strand billed minutes or concurrency leases indefinitely.
+    app.state.inbound_admission_watchdog = None
+    _inbound_pool = getattr(container, "db_pool", None)
+    if _inbound_pool is not None:
+        try:
+            from app.domain.services.telephony.inbound_admission import (
+                start_inbound_admission_watchdog,
+            )
+
+            app.state.inbound_admission_watchdog = start_inbound_admission_watchdog(
+                _inbound_pool,
+                interval_seconds=60,
+                max_age_seconds=7200,
+                batch_limit=100,
+            )
+            logger.info("inbound_admission_watchdog_started")
+        except Exception as exc:
+            logger.error("inbound_admission_watchdog_start_failed err=%s", exc)
+            if strict_validation:
+                raise
 
     # ── 2.6. Legacy-campaign audit (T2.6) ───────────────────────
     # Count campaigns still falling through to the hardcoded
@@ -229,6 +366,7 @@ async def lifespan(app: FastAPI):
             audit_legacy_campaigns,
             log_audit_summary,
         )
+
         result = await audit_legacy_campaigns(getattr(container, "db_pool", None))
         log_audit_summary(result)
         app.state.legacy_campaign_audit = result
@@ -245,12 +383,11 @@ async def lifespan(app: FastAPI):
             load_cache as _load_prompt_bodies,
             record_current_versions as _record_prompt_versions,
         )
+
         _pool = getattr(container, "db_pool", None)
         _new = await _record_prompt_versions(_pool)
         _cached = await _load_prompt_bodies(_pool)
-        logger.info(
-            "prompt_version_archive newly_recorded=%d cached=%d", _new, _cached
-        )
+        logger.info("prompt_version_archive newly_recorded=%d cached=%d", _new, _cached)
         app.state.prompt_versions_cached = _cached
     except Exception as exc:  # noqa: BLE001
         logger.warning("prompt_version_archive_failed err=%s", exc)
@@ -258,6 +395,7 @@ async def lifespan(app: FastAPI):
     # ── 3. Provider validation ────────────────────────────────────
     try:
         from app.core.validation import validate_providers_on_startup
+
         validate_providers_on_startup(strict=strict_validation)
     except RuntimeError as e:
         if strict_validation:
@@ -286,6 +424,7 @@ async def lifespan(app: FastAPI):
 
         _ai_cfg_pool = getattr(container, "db_pool", None)
         if _ai_cfg_pool is not None:
+
             async def _tenant_ai_config_db_lookup(tenant_id: str):
                 # One indexed lookup on tenant_ai_configs, cache-bypassed by
                 # design so an AI-Options edit lands on the tenant's next call
@@ -317,6 +456,7 @@ async def lifespan(app: FastAPI):
     # No-op when COST_LEDGER_ENABLED=false.
     try:
         from app.domain.services import provider_cost_ledger as _ledger
+
         await _ledger.start_flusher(lambda: getattr(container, "db_pool", None))
     except Exception as exc:
         logger.warning("cost_ledger_start_failed err=%s", exc)
@@ -330,7 +470,9 @@ async def lifespan(app: FastAPI):
     # Both are best-effort: if Redis is unavailable they no-op.
     # Use the dedicated pub/sub client (no request-path read timeout) so the
     # blocking listen() loops don't thrash-reconnect every socket_timeout.
-    redis_for_listeners = getattr(container, "redis_pubsub", None) or getattr(container, "redis", None)
+    redis_for_listeners = getattr(container, "redis_pubsub", None) or getattr(
+        container, "redis", None
+    )
     app.state.redis_listener_stop = asyncio.Event()
     app.state.redis_listener_tasks = []
     if redis_for_listeners is not None:
@@ -338,6 +480,7 @@ async def lifespan(app: FastAPI):
             keyspace_expiry_listener,
             quota_alerts_listener,
         )
+
         app.state.redis_listener_tasks = [
             asyncio.create_task(
                 keyspace_expiry_listener(
@@ -360,11 +503,10 @@ async def lifespan(app: FastAPI):
     _events_pool = getattr(container, "db_pool", None)
     if _events_pool is not None:
         from app.domain.services.event_emitter import cleanup_expired_events_loop
+
         app.state.redis_listener_tasks.append(
             asyncio.create_task(
-                cleanup_expired_events_loop(
-                    _events_pool, stop_event=app.state.redis_listener_stop
-                )
+                cleanup_expired_events_loop(_events_pool, stop_event=app.state.redis_listener_stop)
             )
         )
         logger.info("stream_events_cleanup_task_started")
@@ -379,9 +521,7 @@ async def lifespan(app: FastAPI):
     if not getattr(app.state, "_loop_lag_heartbeat_started", False):
         app.state._loop_lag_heartbeat_started = True
         app.state.redis_listener_tasks.append(
-            asyncio.create_task(
-                _event_loop_lag_heartbeat(app.state.redis_listener_stop)
-            )
+            asyncio.create_task(_event_loop_lag_heartbeat(app.state.redis_listener_stop))
         )
         logger.info("event_loop_lag_heartbeat_started period_ms=10")
 
@@ -397,24 +537,69 @@ async def lifespan(app: FastAPI):
     from app.infrastructure.telephony.adapter_factory import CallControlAdapterFactory
     from app.api.v1.endpoints import telephony_bridge as _tb
     from app.domain.services.telephony.state_backend import get_state_backend
+    from app.core.inbound_startup import (
+        platform_inbound_enabled,
+        require_inbound_admission_watchdog,
+        telephony_ownership_failure_is_fatal,
+        validate_production_inbound_database_role,
+        validate_production_inbound_adapter,
+        validate_live_production_inbound_adapter,
+        validate_production_inbound_state_backend,
+    )
+
+    _production_inbound_enabled = await platform_inbound_enabled(
+        getattr(container, "db_pool", None), environment=environment
+    )
+    await validate_production_inbound_database_role(
+        getattr(container, "db_pool", None),
+        environment=environment,
+        inbound_enabled=_production_inbound_enabled,
+    )
+
+    # A falsy db_pool skipped the inbound admission watchdog above in silence.
+    # Now that inbound status is known, refuse to serve production inbound
+    # without its reconciler (and say so loudly everywhere else).
+    require_inbound_admission_watchdog(
+        app.state.inbound_admission_watchdog,
+        strict_validation,
+        _production_inbound_enabled,
+    )
 
     _state_backend = get_state_backend()
+    validate_production_inbound_state_backend(
+        environment=environment,
+        inbound_enabled=_production_inbound_enabled,
+        configured_backend=os.getenv("TELEPHONY_STATE_BACKEND", "memory"),
+        state_backend=_state_backend,
+    )
     try:
-        _is_owner = await _state_backend.acquire_telephony_ownership()
+        if strict_validation and _production_inbound_enabled:
+            _is_owner = await _state_backend.acquire_telephony_ownership_strict()
+        else:
+            _is_owner = await _state_backend.acquire_telephony_ownership()
     except Exception as e:
-        # acquire is meant to fail open; if it somehow raises, default to
-        # owning (single-worker is the norm) so we never self-inflict an
-        # outage. The lock still protects against the multi-worker case
-        # whenever Redis is reachable.
-        logger.warning(f"Telephony ownership acquire raised (assuming owner): {e}")
+        if telephony_ownership_failure_is_fatal(strict_validation, _production_inbound_enabled):
+            logger.critical(
+                "telephony_ownership_ambiguous production startup refused err_type=%s",
+                type(e).__name__,
+            )
+            raise RuntimeError("Production telephony ownership could not be proven") from e
+        logger.warning(f"Telephony ownership acquire raised (assuming owner in dev): {e}")
         _is_owner = True
 
     # Heartbeat renews both this process's liveness marker and the owner
     # lock; start it regardless of role (harmless for a non-owner) so an
     # owner's lock never lapses under a live call. No-op on memory backend.
     try:
-        await _state_backend.start_heartbeat()
+        if strict_validation and _production_inbound_enabled:
+            await _state_backend.start_heartbeat_strict()
+        else:
+            await _state_backend.start_heartbeat()
     except Exception as e:
+        if _is_owner and telephony_ownership_failure_is_fatal(
+            strict_validation, _production_inbound_enabled
+        ):
+            raise RuntimeError("Production telephony ownership heartbeat could not start") from e
         logger.warning(f"Telephony heartbeat start failed (non-fatal): {e}")
 
     async def _auto_connect_telephony() -> None:
@@ -429,11 +614,39 @@ async def lifespan(app: FastAPI):
         if not (_tb._adapter and _tb._adapter.connected):
             adapter_type = os.getenv("TELEPHONY_ADAPTER", "auto")
             _tb._adapter = await CallControlAdapterFactory.create(adapter_type)
+            validate_production_inbound_adapter(
+                environment=environment,
+                inbound_enabled=_production_inbound_enabled,
+                configured_adapter=adapter_type,
+                adapter=_tb._adapter,
+            )
             _tb._adapter.register_call_event_handlers(
                 on_new_call=_tb._on_new_call,
                 on_call_ended=_tb._on_call_ended,
                 on_audio_received=_tb._on_audio_received,
             )
+            if hasattr(_tb._adapter, "set_inbound_admission_callback"):
+                _tb._adapter.set_inbound_admission_callback(_tb._admit_inbound_call)
+            if hasattr(_tb._adapter, "set_inbound_answered_persist_callback"):
+                _tb._adapter.set_inbound_answered_persist_callback(_tb._persist_inbound_answered)
+            if hasattr(_tb._adapter, "set_inbound_admission_finalizer"):
+                _tb._adapter.set_inbound_admission_finalizer(_tb._finalize_inbound_admission)
+            if hasattr(_tb._adapter, "set_transfer_connected_callback"):
+                _tb._adapter.set_transfer_connected_callback(_tb._on_transfer_connected)
+            if hasattr(
+                _tb._adapter,
+                "set_transfer_answered_persist_callback",
+            ):
+                _tb._adapter.set_transfer_answered_persist_callback(
+                    _tb._on_transfer_answered_persisted
+                )
+            if hasattr(
+                _tb._adapter,
+                "set_transfer_cleanup_confirmed_callback",
+            ):
+                _tb._adapter.set_transfer_cleanup_confirmed_callback(
+                    _tb._on_transfer_cleanup_confirmed
+                )
             if hasattr(_tb._adapter, "set_global_session_start_callback"):
                 _tb._adapter.set_global_session_start_callback(_tb._on_ws_session_start)
             if hasattr(_tb._adapter, "set_ringing_callback"):
@@ -446,6 +659,15 @@ async def lifespan(app: FastAPI):
             logger.info(f"Telephony bridge auto-connected: {_tb._adapter.name}")
         else:
             logger.info("Telephony bridge already connected — skipping auto-connect")
+        # Validate both freshly-created and already-connected adapters.  This
+        # prevents an earlier/manual connection from bypassing the startup
+        # contract simply because the creation branch was skipped.
+        validate_live_production_inbound_adapter(
+            environment=environment,
+            inbound_enabled=_production_inbound_enabled,
+            configured_adapter=os.getenv("TELEPHONY_ADAPTER", "auto"),
+            adapter=_tb._adapter,
+        )
         # Arm the inactivity watchdog + pod-capacity readiness wiring.
         # Without this, a normal lifespan boot left the capacity gate and
         # the zombie-session watchdog disarmed — only a manual POST to
@@ -477,17 +699,47 @@ async def lifespan(app: FastAPI):
             for attempt in range(1, 7):  # ~5 minutes of coverage
                 await asyncio.sleep(50)
                 try:
-                    if await _state_backend.acquire_telephony_ownership():
+                    if strict_validation and _production_inbound_enabled:
+                        acquired = await _state_backend.acquire_telephony_ownership_strict()
+                    else:
+                        acquired = await _state_backend.acquire_telephony_ownership()
+                    if acquired:
+                        if strict_validation and _production_inbound_enabled:
+                            await _state_backend.start_heartbeat_strict()
+                        else:
+                            await _state_backend.start_heartbeat()
                         logger.info(
                             "Telephony ownership acquired on retry %d — connecting ARI",
                             attempt,
                         )
                         await _auto_connect_telephony()
+                        # Delayed ownership is a real takeover boundary too.
+                        # Run recovery immediately; waiting for the next
+                        # watchdog tick leaves stale linked PSTN legs live for
+                        # up to another interval after ARI becomes available.
+                        try:
+                            from app.domain.services.telephony.lifecycle import (
+                                recover_orphaned_calls,
+                            )
+
+                            recovered = await recover_orphaned_calls()
+                            if recovered:
+                                logger.info(
+                                    "telephony delayed-owner recovery: reclaimed %d orphaned call(s)",
+                                    recovered,
+                                )
+                        except Exception as recovery_exc:
+                            logger.warning(
+                                "Telephony delayed-owner recovery failed "
+                                "(watchdog will retry): %s",
+                                recovery_exc,
+                            )
                         return
                 except Exception as exc:  # noqa: BLE001 — keep retrying
                     logger.warning(
                         "telephony_ownership_retry_failed attempt=%d err=%s",
-                        attempt, exc,
+                        attempt,
+                        exc,
                     )
             logger.critical(
                 "Telephony ownership NOT acquired after retries — this process "
@@ -502,6 +754,8 @@ async def lifespan(app: FastAPI):
         try:
             await _auto_connect_telephony()
         except Exception as e:
+            if strict_validation and _production_inbound_enabled:
+                raise
             logger.warning(f"Telephony bridge auto-connect failed (non-fatal): {e}")
 
         # Phase 1 item 1 — telephony state recovery. Reclaim any calls a
@@ -511,6 +765,7 @@ async def lifespan(app: FastAPI):
         # in-memory backend. Best-effort — never block startup.
         try:
             from app.domain.services.telephony.lifecycle import recover_orphaned_calls
+
             recovered = await recover_orphaned_calls()
             if recovered:
                 logger.info("telephony startup recovery: reclaimed %d orphaned call(s)", recovered)
@@ -525,17 +780,16 @@ async def lifespan(app: FastAPI):
     # forcing teardown.
     from app.core import readiness as _readiness
     from app.domain.services.telephony.state_backend import get_state_backend as _get_sb
+
     _sb = _get_sb()
     _readiness.begin_drain()
     logger.info(
         "lifespan_drain_begin active=%d timeout_s=%d",
-        _sb.voice_session_count(), _readiness.DRAIN_TIMEOUT_S,
+        _sb.voice_session_count(),
+        _readiness.DRAIN_TIMEOUT_S,
     )
     drain_deadline = asyncio.get_event_loop().time() + _readiness.DRAIN_TIMEOUT_S
-    while (
-        _sb.voice_session_count() > 0
-        and asyncio.get_event_loop().time() < drain_deadline
-    ):
+    while _sb.voice_session_count() > 0 and asyncio.get_event_loop().time() < drain_deadline:
         await asyncio.sleep(2.0)
         logger.info(
             "lifespan_drain_wait active=%d elapsed_s=%.1f",
@@ -543,27 +797,28 @@ async def lifespan(app: FastAPI):
             _readiness.drain_seconds_elapsed(),
         )
 
-    # Disconnect telephony bridge on shutdown.
-    # FIX 5 — End active voice sessions first so recordings are saved and the PBX
-    # receives a hangup signal.  Without this, callers hear abrupt disconnect and
-    # the PBX holds channels open until its own ringing/idle timeout.
-    _remaining = _sb.iter_voice_session_items()
-    if _remaining:
-        logger.info(
-            "Shutdown: ending %d active telephony session(s) (drain expired)",
-            len(_remaining),
-        )
-        for call_id, _vs in _remaining:
-            try:
-                await _tb._on_call_ended(call_id)
-            except Exception as shutdown_err:
-                logger.warning(
-                    "Shutdown: error ending call %s: %s", call_id[:12], shutdown_err
-                )
+    # Request PBX termination before logical teardown/settlement. Any channel
+    # whose teardown cannot be proved stays in the Redis ledger; shutdown later
+    # clears this incarnation's heartbeat so the successor retries it
+    # immediately. Calling ``_on_call_ended`` directly here used to release
+    # reservations while the carrier leg could still be live and billable.
+    shutdown_termination = await _terminate_active_telephony_sessions_for_shutdown(
+        _sb,
+        _tb._adapter,
+    )
+    logger.info(
+        "telephony_shutdown_termination total=%d confirmed=%d deferred=%d",
+        shutdown_termination["total"],
+        shutdown_termination["confirmed"],
+        shutdown_termination["deferred"],
+    )
 
     if _tb._adapter and _tb._adapter.connected:
         try:
-            await _tb._adapter.disconnect()
+            await _tb._adapter.disconnect(
+                drain_timeout_s=5.5,
+                force_handoff=True,
+            )
             _tb._adapter = None
             logger.info("Telephony bridge disconnected")
         except Exception as e:
@@ -580,6 +835,7 @@ async def lifespan(app: FastAPI):
     # Phase 4.2 — flush + stop the cost ledger.
     try:
         from app.domain.services import provider_cost_ledger as _ledger
+
         await _ledger.stop_flusher()
     except Exception as exc:
         logger.warning("cost_ledger_stop_failed err=%s", exc)
@@ -593,7 +849,8 @@ async def lifespan(app: FastAPI):
                 t.cancel()
         if getattr(app.state, "redis_listener_tasks", None):
             await asyncio.gather(
-                *app.state.redis_listener_tasks, return_exceptions=True,
+                *app.state.redis_listener_tasks,
+                return_exceptions=True,
             )
         logger.info("redis_coordination_listeners_stopped")
     except Exception as exc:
@@ -601,6 +858,13 @@ async def lifespan(app: FastAPI):
 
     # ── Shutdown ──────────────────────────────────────────────────
     logger.info("Shutting down Talky.ai...")
+    try:
+        _inbound_watchdog = getattr(app.state, "inbound_admission_watchdog", None)
+        if _inbound_watchdog is not None:
+            await _inbound_watchdog.stop()
+            logger.info("inbound_admission_watchdog_stopped")
+    except Exception as exc:
+        logger.warning("inbound_admission_watchdog_stop_failed err=%s", exc)
     try:
         await container.shutdown()
     except Exception as e:
@@ -639,6 +903,7 @@ register_operational_routes(app)
 
 if __name__ == "__main__":
     import uvicorn
+
     websocket_config = ConfigManager().get_websocket_config()
     uvicorn.run(
         app,

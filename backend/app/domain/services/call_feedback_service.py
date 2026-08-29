@@ -209,9 +209,10 @@ class FeedbackAudioStorage:
             raise FeedbackStorageError("Could not store feedback audio") from exc
 
     def _validated_local_path(self, raw_path: str) -> str:
-        path = os.path.abspath(raw_path)
+        root = os.path.realpath(self._local_dir)
+        path = os.path.realpath(os.path.abspath(raw_path))
         try:
-            inside_root = os.path.commonpath((self._local_dir, path)) == self._local_dir
+            inside_root = os.path.commonpath((root, path)) == root
         except ValueError:
             inside_root = False
         if not inside_root:
@@ -225,7 +226,11 @@ class FeedbackAudioStorage:
             if provider == "s3":
                 if not self._s3.is_available():
                     raise FeedbackStorageError("Feedback object storage is unavailable")
-                return await asyncio.to_thread(self._s3.download, key)
+                return await asyncio.to_thread(
+                    self._s3.download,
+                    key,
+                    str(row["audio_bucket"]),
+                )
             if provider == "local":
                 return await asyncio.to_thread(
                     _read_local,
@@ -241,18 +246,27 @@ class FeedbackAudioStorage:
         if stored.provider == "s3":
             if not self._s3.is_available():
                 raise FeedbackStorageError("Feedback object storage is unavailable for cleanup")
-            await asyncio.to_thread(self._s3.delete, stored.key)
+            await asyncio.to_thread(
+                self._s3.delete_permanently,
+                stored.key,
+                stored.bucket,
+            )
             return
         if stored.provider == "local":
             path = self._validated_local_path(stored.key)
             with suppress(FileNotFoundError):
                 await asyncio.to_thread(os.remove, path)
+            return
+        raise FeedbackStorageError("Unknown feedback storage provider")
 
     def presigned_url(self, row: Mapping[str, Any]) -> str | None:
         if row["audio_storage_provider"] != "s3" or not self._s3.is_available():
             return None
         try:
-            return self._s3.presigned_url(str(row["audio_key"]))
+            return self._s3.presigned_url(
+                str(row["audio_key"]),
+                bucket=str(row["audio_bucket"]),
+            )
         except Exception as exc:
             raise FeedbackStorageError("Could not open feedback audio") from exc
 
@@ -293,22 +307,30 @@ class CallFeedbackRepository:
         return dict(row) if row else None
 
     async def get_for_call(self, tenant_id: str, call_id: str) -> dict[str, Any] | None:
+        # The tenant predicate is explicit, not left to RLS: this deployment
+        # has already run with an app role that bypassed every policy, which
+        # would have made an id-only WHERE a cross-tenant read.
         try:
             call_uuid = self._uuid(call_id)
+            tenant_uuid = self._uuid(tenant_id)
         except (ValueError, TypeError, AttributeError):
             return None
         async with acquire_with_tenant(self._pool, tenant_id) as conn:
             row = await conn.fetchrow(
-                f"SELECT {_FEEDBACK_COLUMNS} FROM call_feedback WHERE call_id = $1",
+                f"SELECT {_FEEDBACK_COLUMNS} FROM call_feedback"
+                " WHERE call_id = $1 AND tenant_id = $2",
                 call_uuid,
+                tenant_uuid,
             )
         return dict(row) if row else None
 
     async def get_by_id(self, tenant_id: str, feedback_id: str) -> dict[str, Any] | None:
         async with acquire_with_tenant(self._pool, tenant_id) as conn:
             row = await conn.fetchrow(
-                f"SELECT {_FEEDBACK_COLUMNS} FROM call_feedback WHERE id = $1",
+                f"SELECT {_FEEDBACK_COLUMNS} FROM call_feedback"
+                " WHERE id = $1 AND tenant_id = $2",
                 self._uuid(feedback_id),
+                self._uuid(tenant_id),
             )
         return dict(row) if row else None
 

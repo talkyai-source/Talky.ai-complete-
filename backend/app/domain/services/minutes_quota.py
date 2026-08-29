@@ -10,8 +10,10 @@ being re-derived (and drifting) in each:
   * the frontend — shows remaining minutes + disables the Start button
     (via ``GET /campaigns/minutes/status``).
 
-Definition (mirrors the dashboard's live figure): this month's
-``SUM(calls.duration_seconds) // 60`` versus ``tenants.minutes_allocated``.
+Definition (mirrors the dashboard's live figure): this month's parent-call
+durations plus only ``finalized`` transfer-leg actual durations, divided by
+60, versus ``tenants.minutes_allocated``. Live child reservations are enforced
+by inbound admission but are not presented as already-used customer minutes.
 
 ``minutes_allocated <= 0`` means **unlimited** — never blocked. This is a
 deliberate sentinel: the ``tenants.minutes_used`` column is intentionally
@@ -29,7 +31,7 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class MinutesStatus:
     allocated: int          # plan allocation; 0 ⇒ unlimited
-    used_minutes: int       # this calendar month, from calls.duration_seconds
+    used_minutes: int       # current-month settled parent + transfer seconds
     remaining_minutes: int  # max(0, allocated - used); 0 when unlimited (see remaining())
     unlimited: bool
     exhausted: bool         # used >= allocated (always False when unlimited)
@@ -73,13 +75,28 @@ async def compute_minutes_status(conn: Any, tenant_id: str) -> MinutesStatus:
     )
     used_seconds = await conn.fetchval(
         """
-        SELECT COALESCE(SUM(duration_seconds), 0) FROM calls
-         WHERE tenant_id = $1
-           AND created_at >= date_trunc('month', now())
-           -- Campaign test sessions are real rows so they can be played and
-           -- reviewed, but they are not the customer's traffic and must never
-           -- reach an invoice (Alembic 0017).
-           AND NOT is_test
+        SELECT
+            COALESCE((
+                SELECT SUM(duration_seconds)
+                FROM calls c
+                WHERE c.tenant_id=$1
+                  AND c.created_at >= date_trunc('month',NOW())
+                  -- Campaign test sessions are real rows so they can be
+                  -- reviewed, but are never customer traffic (Alembic 0017).
+                  AND NOT c.is_test
+            ),0)
+            + COALESCE((
+                SELECT SUM(COALESCE(leg.duration_seconds,0))
+                FROM call_legs leg
+                JOIN calls parent ON parent.id=leg.call_id
+                WHERE parent.tenant_id=$1
+                  AND parent.created_at >= date_trunc('month',NOW())
+                  AND NOT parent.is_test
+                  AND leg.leg_type='transfer'
+                  -- A live reservation protects admission capacity, but the
+                  -- display/invoice total advances only after terminal proof.
+                  AND leg.billing_status='finalized'
+            ),0)
         """,
         tenant_id,
     )

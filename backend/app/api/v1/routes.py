@@ -34,6 +34,7 @@ from app.api.v1.endpoints.conversation_reviews import (
     router as conversation_reviews_router,
 )
 from app.api.v1.endpoints.campaigns import router as campaigns_router
+from app.api.v1.endpoints.inbound_campaigns import router as inbound_campaigns_router
 from app.api.v1.endpoints.campaign_knowledge import router as campaign_knowledge_router
 from app.api.v1.endpoints.clients import router as clients_router
 from app.api.v1.endpoints.connectors import router as connectors_router
@@ -79,6 +80,7 @@ from app.api.v1.endpoints.emergency_access import router as emergency_access_rou
 # Include all routers
 api_router.include_router(auth_router)
 api_router.include_router(campaigns_router)
+api_router.include_router(inbound_campaigns_router)
 api_router.include_router(campaign_knowledge_router)
 api_router.include_router(contacts_router)
 api_router.include_router(contact_lists_router)

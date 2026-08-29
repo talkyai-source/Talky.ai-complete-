@@ -241,6 +241,14 @@ class CampaignService:
             # 1. Validate campaign
             campaign = await self.get_campaign(campaign_id, tenant_id=scoping_tenant_id)
 
+            # Inbound configurations have their own readiness/activation
+            # lifecycle.  They must never enqueue outbound dialer jobs even if
+            # a stale client calls the legacy campaign start endpoint.
+            if campaign.get("direction", "outbound") != "outbound":
+                raise CampaignStateError(
+                    "Inbound campaigns cannot be started by the outbound dialer"
+                )
+
             # ``allow_running`` lets "call this list" enqueue a list's pending
             # leads even while the campaign is already running — the active-job
             # dedup below prevents double-dialing, so re-entry is safe.
@@ -463,8 +471,14 @@ class CampaignService:
         just validated the row against, so a successful get_campaign here
         guarantees the filtered UPDATE below matches that same row.
         """
-        # Validate exists (and belongs to this tenant)
-        await self.get_campaign(campaign_id, tenant_id=tenant_id)
+        # Validate exists (and belongs to this tenant). Inbound campaigns have
+        # a separate, versioned lifecycle with readiness and assignment audits;
+        # no internal caller may bypass it through this legacy outbound service.
+        campaign = await self.get_campaign(campaign_id, tenant_id=tenant_id)
+        if campaign.get("direction", "outbound") != "outbound":
+            raise CampaignStateError(
+                "Inbound campaigns cannot be paused by the outbound dialer"
+            )
 
         scoped_tenant = self._resolve_tenant_id(tenant_id)
         query = self.db_client.table("campaigns").update({
@@ -480,18 +494,43 @@ class CampaignService:
             # as not-found rather than raising IndexError below.
             raise CampaignNotFoundError(campaign_id)
 
-        # Hang up live calls now — best-effort, never roll back the status update.
-        hung_up = 0
+        # Hang up live calls now. The campaign state is already paused, but
+        # provider cleanup has its own explicit outcome: a partial/failed
+        # sweep is returned to the operator and retained as
+        # ``termination_pending`` for watchdog retries.
+        termination: Dict[str, Any] = {
+            "status": "lookup_failed",
+            "total_selected": 0,
+            "requested": 0,
+            "attempted": 0,
+            "confirmed": 0,
+            "deferred": 0,
+            "unconfirmed": 0,
+            "missing_identity": 0,
+            "reasons": {},
+            "lookup_error": "termination_sweep_unavailable",
+        }
         try:
             from app.api.v1.endpoints.telephony_bridge import (
                 hangup_calls_for_campaign,
             )
-            hung_up = await hangup_calls_for_campaign(campaign_id)
+            termination = await hangup_calls_for_campaign(campaign_id)
         except Exception as exc:
             logger.warning("pause_campaign hangup sweep failed: %s", exc)
 
-        logger.info(f"Campaign {campaign_id} paused (hung_up={hung_up})")
-        return response.data[0]
+        logger.info(
+            "Campaign %s paused (termination_status=%s selected=%s "
+            "requested=%s confirmed=%s deferred=%s)",
+            campaign_id,
+            termination.get("status"),
+            termination.get("total_selected", 0),
+            termination.get("requested", termination.get("attempted", 0)),
+            termination.get("confirmed", 0),
+            termination.get("deferred", termination.get("unconfirmed", 0)),
+        )
+        result = dict(response.data[0])
+        result["termination_summary"] = termination
+        return result
 
     # =========================================================================
     # Stop Campaign
@@ -513,8 +552,13 @@ class CampaignService:
                 RLS (see ``_resolve_tenant_id``); same value get_campaign
                 just validated the row against.
         """
-        # Validate exists (and belongs to this tenant)
-        await self.get_campaign(campaign_id, tenant_id=tenant_id)
+        # Validate exists (and belongs to this tenant). See pause_campaign for
+        # why direction is checked again at the domain boundary.
+        campaign = await self.get_campaign(campaign_id, tenant_id=tenant_id)
+        if campaign.get("direction", "outbound") != "outbound":
+            raise CampaignStateError(
+                "Inbound campaigns cannot be stopped by the outbound dialer"
+            )
 
         scoped_tenant = self._resolve_tenant_id(tenant_id)
         # Update campaign status
@@ -528,10 +572,10 @@ class CampaignService:
         if not response.data:
             raise CampaignNotFoundError(campaign_id)
 
-        # Stop = stop now. Cancel EVERY active job for this campaign so nothing
-        # lingers in the pipeline. The previous logic only cleared 'pending'/
-        # 'retry_scheduled', and only when clear_queue was set — which left
-        # 'processing'/'calling' jobs as zombies that kept showing as "dialing".
+        # Cancel only queued/not-yet-originated work immediately. Jobs already
+        # processing/calling remain non-terminal until the PBX sweep below has
+        # proved every leg absent and normal CallService settlement completes;
+        # cancelling them here would release logical ownership before proof.
         from app.domain.services.dialer.job_lifecycle import (
             cancel_active_jobs_for_campaign,
             REASON_CAMPAIGN_STOPPED,
@@ -552,24 +596,44 @@ class CampaignService:
         # Always hang up live calls for the campaign, regardless of whether
         # the operator chose to clear the pending queue. Stop = stop now,
         # not "stop after the in-flight calls finish on their own."
-        # Best-effort: a hangup failure must not roll back the status update.
-        hung_up = 0
+        # A hangup failure does not roll back the stopped state, but it is not
+        # hidden: callers receive an explicit partial/lookup-failed summary.
+        termination: Dict[str, Any] = {
+            "status": "lookup_failed",
+            "total_selected": 0,
+            "requested": 0,
+            "attempted": 0,
+            "confirmed": 0,
+            "deferred": 0,
+            "unconfirmed": 0,
+            "missing_identity": 0,
+            "reasons": {},
+            "lookup_error": "termination_sweep_unavailable",
+        }
         try:
             from app.api.v1.endpoints.telephony_bridge import (
                 hangup_calls_for_campaign,
             )
-            hung_up = await hangup_calls_for_campaign(campaign_id)
+            termination = await hangup_calls_for_campaign(campaign_id)
         except Exception as exc:
             logger.warning("stop_campaign hangup sweep failed: %s", exc)
 
         logger.info(
-            "Campaign %s stopped (clear_queue=%s, cleared_jobs=%s, hung_up=%s)",
+            "Campaign %s stopped (clear_queue=%s, cleared_jobs=%s, "
+            "termination_status=%s, selected=%s, requested=%s, "
+            "confirmed=%s, deferred=%s)",
             campaign_id,
             clear_queue,
             cleared_jobs,
-            hung_up,
+            termination.get("status"),
+            termination.get("total_selected", 0),
+            termination.get("requested", termination.get("attempted", 0)),
+            termination.get("confirmed", 0),
+            termination.get("deferred", termination.get("unconfirmed", 0)),
         )
-        return response.data[0]
+        result = dict(response.data[0])
+        result["termination_summary"] = termination
+        return result
 
     # =========================================================================
     # Private Helpers
@@ -624,13 +688,29 @@ class CampaignService:
         kept. When ``list_id`` is provided the result is additionally scoped to
         that single list ("call this list").
 
+        Leads the customer flagged ``do_not_call`` are excluded here, at the
+        selection boundary, so they are never enqueued at all — and so
+        ``start_campaign``'s ``total_leads`` denominator counts only leads the
+        campaign will actually attempt (the same treatment an inactive list's
+        leads already get, rather than enqueuing them and recording a
+        pseudo-outcome). ``leads.do_not_call`` is the per-contact suppression
+        flag from migration 0020; it is ADDITIVE to the tenant DNC *list*
+        (``dnc_entries``, keyed by normalised phone number and enforced by
+        CallGuard) and never a replacement for it. CallGuard re-checks the
+        flag at dial time so an older queue entry can't slip past this.
+
+        ``IS NOT TRUE`` — not ``COALESCE(do_not_call, false) = false`` — so a
+        NULL reads as "not flagged" while the predicate stays on the bare
+        column and the partial index ``idx_leads_do_not_call`` remains usable.
+
         ``tenant_id`` is applied as an app-level filter alongside RLS
         (defense-in-depth).
         """
         scoped_tenant = self._resolve_tenant_id(tenant_id)
         query = self.db_client.table("leads").select("*")\
             .eq("campaign_id", campaign_id)\
-            .in_("status", ["pending", "calling"])
+            .in_("status", ["pending", "calling"])\
+            .is_("do_not_call", "NOT TRUE")
         if scoped_tenant:
             query = query.eq("tenant_id", scoped_tenant)
         if list_id is not None:
@@ -639,6 +719,39 @@ class CampaignService:
             .order("created_at")\
             .execute()
         leads = response.data or []
+
+        # The do_not_call exclusion above produces no job, no call row and no
+        # outcome — by design. Count what it suppressed so the decision is
+        # auditable instead of invisible. Best-effort: a failed count must
+        # never stop a campaign starting. ``IS TRUE`` matches the partial
+        # index idx_leads_do_not_call exactly; ``limit(1)`` keeps the exact
+        # COUNT(*) while transferring no rows.
+        try:
+            supp_query = self.db_client.table("leads")\
+                .select("id", count="exact")\
+                .eq("campaign_id", campaign_id)\
+                .in_("status", ["pending", "calling"])\
+                .is_("do_not_call", "TRUE")\
+                .limit(1)
+            if scoped_tenant:
+                supp_query = supp_query.eq("tenant_id", scoped_tenant)
+            if list_id is not None:
+                supp_query = supp_query.eq("list_id", list_id)
+            supp_resp = supp_query.execute()
+            suppressed = getattr(supp_resp, "count", None)
+            if suppressed is None:
+                suppressed = len(getattr(supp_resp, "data", None) or [])
+            if suppressed:
+                logger.info(
+                    "campaign %s: suppressed %d lead(s) flagged do_not_call "
+                    "(not enqueued, not counted as an outcome)",
+                    campaign_id, suppressed,
+                )
+        except Exception as exc:  # noqa: BLE001 — observability only
+            logger.debug(
+                "do_not_call suppression count failed for campaign %s: %s",
+                campaign_id, exc,
+            )
 
         # Exclude leads whose list is toggled off. Skipped entirely when a
         # single list was requested (that list is being explicitly dialed).

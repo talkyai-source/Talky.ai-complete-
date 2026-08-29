@@ -64,6 +64,18 @@ def _valid_internal_token(request: Request) -> bool:
     return secrets.compare_digest(presented, configured)
 
 
+def is_internal_service_request(request: Request) -> bool:
+    """Public, fail-closed internal-service authentication predicate.
+
+    Process-wide operational controls need to combine this path with a
+    platform-admin user dependency without admitting ordinary tenant users.
+    Keeping the comparison here guarantees the same configured secret and
+    constant-time semantics as the existing dual-path call controls.
+    """
+
+    return _valid_internal_token(request)
+
+
 def require_internal_or_tenant(request: Request) -> CallerContext:
     """Gate a mutating route to EITHER a valid internal token OR a JWT user.
 

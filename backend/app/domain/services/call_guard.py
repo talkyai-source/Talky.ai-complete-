@@ -47,7 +47,14 @@ import asyncpg
 
 from app.domain.services.telephony_rate_limiter import TelephonyRateLimiter, RateLimitAction
 from app.domain.services.telephony_concurrency_limiter import TelephonyConcurrencyLimiter, LeaseKind
+from app.domain.services.phone_number_normalizer import normalize_e164_digits
 from app.domain.services.platform_runtime_controls import get_outbound_call_pause
+from app.domain.services.subscription_status import (
+    SUBSCRIPTION_BLOCKED_STATUSES,
+    TENANT_BLOCKED_STATUSES,
+    canonical as canonical_subscription_status,
+    is_blocked as subscription_status_is_blocked,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -232,6 +239,7 @@ class CallGuard:
         call_type: str = "outbound",
         estimated_duration_seconds: Optional[int] = None,
         feature_required: Optional[str] = None,
+        lead_id: Optional[str] = None,
     ) -> GuardResult:
         """
         Evaluate if a call should be allowed.
@@ -247,6 +255,10 @@ class CallGuard:
             call_type: outbound, inbound, or transfer
             estimated_duration_seconds: Estimated call duration for spend checks
             feature_required: Feature flag to check (e.g., "international_calls")
+            lead_id: Optional lead being dialled. Supplied by the dialer so
+                the DNC check can also honour the per-lead
+                ``leads.do_not_call`` suppression flag; omit it and only the
+                tenant DNC list is consulted.
 
         Returns:
             GuardResult with decision and details of all checks
@@ -318,6 +330,7 @@ class CallGuard:
                     partner_limits=partner_limits,
                     partner_id=partner_id,
                     campaign_id=campaign_id,
+                    lead_id=lead_id,
                     call_type=call_type,
                     feature_required=feature_required,
                     estimated_duration_seconds=estimated_duration_seconds,
@@ -457,8 +470,10 @@ class CallGuard:
                         reason="tenant_not_found",
                     )
 
-                status = row.get("subscription_status", "active")
-                if status in ("suspended", "cancelled"):
+                status = canonical_subscription_status(
+                    row.get("subscription_status") or "active"
+                )
+                if subscription_status_is_blocked(status, TENANT_BLOCKED_STATUSES):
                     return CheckResult(
                         check=GuardCheck.TENANT_ACTIVE,
                         passed=False,
@@ -510,8 +525,10 @@ class CallGuard:
                         reason="partner_not_found",
                     )
 
-                status = row.get("subscription_status", "active")
-                if status in ("suspended", "cancelled"):
+                status = canonical_subscription_status(
+                    row.get("subscription_status") or "active"
+                )
+                if subscription_status_is_blocked(status, TENANT_BLOCKED_STATUSES):
                     return CheckResult(
                         check=GuardCheck.PARTNER_ACTIVE,
                         passed=False,
@@ -604,9 +621,13 @@ class CallGuard:
                         reason="tenant_not_found",
                     )
 
-                status = row.get("subscription_status", "active")
+                status = canonical_subscription_status(
+                    row.get("subscription_status") or "active"
+                )
 
-                if status in ("suspended", "cancelled", "past_due"):
+                if subscription_status_is_blocked(
+                    status, SUBSCRIPTION_BLOCKED_STATUSES
+                ):
                     return CheckResult(
                         check=GuardCheck.SUBSCRIPTION_VALID,
                         passed=False,
@@ -836,11 +857,59 @@ class CallGuard:
         self,
         tenant_id: str,
         phone_number: str,
+        lead_id: Optional[str] = None,
         **kwargs
     ) -> CheckResult:
-        """Check Do-Not-Call list."""
+        """Check Do-Not-Call suppression: the per-lead flag, then the list.
+
+        Two DISTINCT mechanisms, both enforced here:
+
+          * ``leads.do_not_call`` — the per-contact suppression flag the CSV
+            import and the manual contact form write (migration 0020). It is
+            ADDITIVE to the list below, never a replacement.
+          * ``dnc_entries`` — the tenant's DNC *list*, keyed by normalised
+            phone number.
+
+        ``campaign_service._get_pending_leads`` already excludes flagged leads
+        at the selection boundary, so a flagged lead is never enqueued. This
+        check is defence in depth for the jobs that were created BEFORE the
+        flag was set and are still sitting in Redis (scheduled-set promotion,
+        crash-orphan reclaim) — those re-enqueue an existing job without
+        re-reading the lead.
+        """
         try:
             async with self._db_pool.acquire() as conn:
+                # Per-lead suppression flag. Only queried on the dialer path,
+                # which is the only caller that knows a lead_id.
+                #
+                # `AND do_not_call` keeps the predicate on the bare column so
+                # the partial index idx_leads_do_not_call ON leads (tenant_id)
+                # WHERE do_not_call is usable, and gives NULL-as-not-flagged
+                # for free (`x IS TRUE` semantics) — COALESCE(...) here would
+                # cost the index and change nothing else. tenant_id is an
+                # explicit predicate because the prod app role is
+                # superuser+BYPASSRLS; RLS alone is not enforcement.
+                if lead_id:
+                    lead_row = await conn.fetchrow(
+                        """
+                        SELECT id
+                        FROM leads
+                        WHERE id = $1
+                          AND tenant_id = $2
+                          AND do_not_call
+                        LIMIT 1
+                        """,
+                        str(lead_id),
+                        tenant_id,
+                    )
+                    if lead_row:
+                        return CheckResult(
+                            check=GuardCheck.DNC_CHECK,
+                            passed=False,
+                            reason="lead_marked_do_not_call",
+                            details={"lead_id": str(lead_id)},
+                        )
+
                 # Check tenant-specific DNC
                 row = await conn.fetchrow(
                     """
@@ -1158,22 +1227,14 @@ class CallGuard:
     # -------------------------------------------------------------------------
 
     def _normalize_phone_number(self, phone_number: str) -> str:
-        """Normalize phone number to E.164 format."""
-        if not phone_number:
-            return ""
+        """Normalize phone number to E.164 format.
 
-        # Remove all non-digit characters except leading +
-        has_plus = phone_number.startswith("+")
-        digits = re.sub(r"\D", "", phone_number)
-
-        if has_plus:
-            return f"+{digits}"
-
-        # Assume US/Canada if no country code
-        if len(digits) == 10:
-            return f"+1{digits}"
-
-        return f"+{digits}"
+        Thin wrapper over the canonical
+        ``phone_number_normalizer.normalize_e164_digits`` -- see that module
+        for why the guard uses the never-raising digit form and how it
+        differs from the DNC list's stored form.
+        """
+        return normalize_e164_digits(phone_number)
 
     def _extract_country_code(self, phone_number: str) -> Optional[str]:
         """Extract ISO country code from E.164 phone number."""

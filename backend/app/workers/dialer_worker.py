@@ -274,7 +274,25 @@ class DialerWorker:
             
             # 2. Get lead info for cooldown check
             lead_last_called = await self._get_lead_last_called(job.lead_id)
-            
+
+            # 2b. COMPLIANCE: the calling window is evaluated in the LEAD's
+            # timezone, not the account owner's. `can_make_call` has always
+            # taken a `lead_timezone`, but nothing passed it, so a London
+            # campaign's 09:00-19:00 window authorised dialling a California
+            # lead at 01:00 their time. Precedence (see lead_timezone.py):
+            #   leads.timezone (customer told us)
+            #     > phone-derived zone (a guess, behind DIALER_PER_LEAD_TIMEZONE)
+            #     > None -> CallingRules._resolve_tz falls back to the
+            #       campaign/tenant tz, i.e. exactly today's behaviour.
+            # Every failure path resolves to None; none of them raises.
+            from app.domain.services.dialer.lead_timezone import (
+                resolve_effective_lead_timezone,
+            )
+            lead_tz = resolve_effective_lead_timezone(
+                explicit_timezone=await self._get_lead_timezone(job.lead_id),
+                phone_number=job.phone_number,
+            )
+
             # 3. Check scheduling rules. Gate concurrency on the telephony
             # bridge's authoritative live-call count (global_concurrency Redis
             # ledger), NOT the dialer's in-memory counter — the latter had no
@@ -303,6 +321,7 @@ class DialerWorker:
                 lead_last_called=lead_last_called,
                 active_calls_override=active_override,
                 lead_attempts_today=lead_attempts_today,
+                lead_timezone=lead_tz,
                 enforce_window=not ignore_schedule,
             )
             
@@ -369,9 +388,15 @@ class DialerWorker:
                 # re-woke every 5 minutes for days instead of sleeping until
                 # the window actually opened.
                 if blocked.code in SCHEDULE_BLOCK_CODES:
-                    delay = self.rules_engine.get_delay_until_next_window(rules)
+                    # Same timezone the block was decided in — otherwise the
+                    # job is held against the lead's window but re-woken on
+                    # the campaign's, and lands outside the window again.
+                    delay = self.rules_engine.get_delay_until_next_window(
+                        rules, lead_timezone=lead_tz,
+                    )
                     logger.info(
-                        f"Outside calling window (tz={rules.timezone}, "
+                        f"Outside calling window (tz={lead_tz or rules.timezone}"
+                        f"{' [lead]' if lead_tz else ''}, "
                         f"window={rules.time_window_start}-{rules.time_window_end}, "
                         f"days={rules.allowed_days}). "
                         f"Retrying in {delay}s (~{delay/3600:.1f}h)"
@@ -988,6 +1013,12 @@ class DialerWorker:
                 tenant_id=str(job.tenant_id),
                 phone_number=job.phone_number,
                 campaign_id=str(job.campaign_id) if job.campaign_id else None,
+                # Lets the guard's DNC check also honour the per-lead
+                # leads.do_not_call flag. Campaign selection already excludes
+                # flagged leads, so this only ever catches a job that was
+                # queued BEFORE the contact was flagged (scheduled-set
+                # promotion / crash-orphan reclaim re-enqueue existing jobs).
+                lead_id=str(job.lead_id) if job.lead_id else None,
                 call_type="outbound",
             )
 
@@ -1113,7 +1144,8 @@ class DialerWorker:
         try:
             async with self._acquire_db() as conn:
                 rows = await conn.fetch(
-                    "SELECT DISTINCT tenant_id FROM campaigns WHERE status IN ('running', 'active')"
+                    "SELECT DISTINCT tenant_id FROM campaigns "
+                    "WHERE direction='outbound' AND status IN ('running', 'active')"
                 )
                 return [str(r["tenant_id"]) for r in rows] if rows else []
 
@@ -1168,7 +1200,7 @@ class DialerWorker:
         try:
             async with self._acquire_db() as conn:
                 return await conn.fetchval(
-                    "SELECT status FROM campaigns WHERE id = $1",
+                    "SELECT status FROM campaigns WHERE id = $1 AND direction='outbound'",
                     campaign_id,
                 )
         except Exception as e:
@@ -1346,6 +1378,28 @@ class DialerWorker:
         except Exception as e:
             logger.warning(f"Failed to get lead last_called_at: {e}")
 
+        return None
+
+    async def _get_lead_timezone(self, lead_id: str) -> Optional[str]:
+        """Read the customer-supplied per-lead IANA timezone.
+
+        ``leads.timezone`` (migration 0020, captured by CSV import and the
+        manual contact form) is the authoritative statement of where the
+        prospect actually is, so the calling-window check prefers it over
+        the phone-number-derived guess.
+
+        Best-effort by design: any failure — pool down, or the column
+        absent on a database that hasn't taken 0020 — returns None, and the
+        caller falls back to the derived zone and then the campaign
+        timezone. A timezone lookup must never drop a dial by exception.
+        """
+        try:
+            async with self._acquire_db() as conn:
+                return await conn.fetchval(
+                    "SELECT timezone FROM leads WHERE id = $1", lead_id
+                )
+        except Exception as e:
+            logger.warning(f"Failed to get lead timezone: {e}")
         return None
 
     async def _get_lead_attempts_today(self, lead_id: str) -> int:

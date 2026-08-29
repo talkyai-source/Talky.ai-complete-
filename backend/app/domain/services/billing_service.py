@@ -20,6 +20,13 @@ from app.domain.services.notification_service import (
     get_notification_service,
     NotificationChannel,
 )
+from app.domain.services.subscription_status import (
+    ACTIVE as SUBSCRIPTION_ACTIVE,
+    CANCELLED as SUBSCRIPTION_CANCELLED,
+    INACTIVE as SUBSCRIPTION_INACTIVE,
+    PAST_DUE as SUBSCRIPTION_PAST_DUE,
+    canonical as canonical_subscription_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -273,6 +280,13 @@ class BillingService:
         session = stripe.checkout.Session.create(
             customer=customer_id,
             mode="payment",
+            # IMMEDIATE methods only. Left unset, Stripe offers every method
+            # enabled on the account — on a GBP account that includes Bacs, and
+            # Klarna/SEPA elsewhere, all of which settle days after checkout.
+            # Nothing in this product handles that gap: the order shows
+            # 'pending' with no reaper and the customer has no pending-payment
+            # UI. Widen this only alongside a reaper and a pending state.
+            payment_method_types=["card"],
             line_items=[{
                 "price_data": {
                     "currency": currency.lower(),
@@ -357,9 +371,15 @@ class BillingService:
                 "subscription_status, stripe_subscription_id, plan_id, plans(name, price, minutes)"
             ).eq("id", tenant_id).single().execute()
             
-            if tenant.data and tenant.data.get("subscription_status") != "inactive":
+            if (
+                tenant.data
+                and tenant.data.get("subscription_status")
+                != SUBSCRIPTION_INACTIVE
+            ):
                 return {
-                    "status": tenant.data.get("subscription_status", "inactive"),
+                    "status": tenant.data.get(
+                        "subscription_status", SUBSCRIPTION_INACTIVE
+                    ),
                     "plan": tenant.data.get("plans"),
                     "stripe_subscription_id": tenant.data.get("stripe_subscription_id")
                 }
@@ -387,11 +407,11 @@ class BillingService:
         if self.mock_mode:
             # Update local state in mock mode
             self.db_client.table("tenants").update({
-                "subscription_status": "canceled"
+                "subscription_status": SUBSCRIPTION_CANCELLED
             }).eq("id", tenant_id).execute()
             
             return {
-                "status": "canceled",
+                "status": SUBSCRIPTION_CANCELLED,
                 "mock_mode": True,
                 "message": "Subscription canceled (mock mode)"
             }
@@ -401,9 +421,12 @@ class BillingService:
             cancel_at_period_end=cancel_at_period_end
         )
         
-        # Update local state
+        # Update local state. Stripe spells cancellation "canceled"; the call
+        # guard blocks on the canonical value, so normalise before storing.
         self.db_client.table("tenants").update({
-            "subscription_status": subscription.status
+            "subscription_status": canonical_subscription_status(
+                subscription.status
+            )
         }).eq("id", tenant_id).execute()
         
         self.db_client.table("subscriptions").update({
@@ -546,6 +569,12 @@ class BillingService:
     _TOPUP_SESSION_EVENTS = {
         "checkout.session.completed",
         "checkout.session.expired",
+        # Delayed methods settle AFTER the session completes, and Stripe
+        # reports the outcome as a pair. Routing only the failure half is how a
+        # customer gets charged and never credited: the success event has no
+        # entry in the subscription handler table either, so it fell through to
+        # "ignored" and the order sat 'pending' forever with nothing to reap it.
+        "checkout.session.async_payment_succeeded",
         "checkout.session.async_payment_failed",
     }
     # Reversals arrive on the charge, which carries no checkout session. Neither
@@ -570,7 +599,15 @@ class BillingService:
         # a partial unique index does not dedupe).
         eid = event_id or f"no_event_id:{event_type}:{data.get('id')}"
 
-        if event_type == "checkout.session.completed":
+        if event_type in ("checkout.session.completed",
+                          "checkout.session.async_payment_succeeded"):
+            # ONE credit path for both events, because a delayed payment
+            # produces both — `completed` (payment_status still processing, so
+            # deferred here) and later `async_payment_succeeded` carrying the
+            # same session. They are different event ids, so the ledger's
+            # uniqueness guard does not separate them; the order's paid state
+            # does, inside credit_paid_order's transaction.
+            #
             # payment_status is the field that actually says money arrived.
             # A session can complete with payment still processing, and
             # crediting there hands out minutes for a payment that may fail.
@@ -706,6 +743,57 @@ class BillingService:
                 "topup receipt failed (minutes ARE credited, this is cosmetic): %s", e,
             )
 
+    async def _set_plan_allocation(self, tenant_id: str, plan_minutes: int) -> None:
+        """Write the plan entitlement WITHOUT destroying purchased minutes.
+
+        Top-ups and plan allocations share one column: ``topup_service`` adds to
+        ``tenants.minutes_allocated``, and this handler used to hard-SET the
+        same column to the plan figure. A customer who bought a 500-minute
+        bundle and then changed plan lost the 500 — silently, while
+        ``billing_ledger`` still recorded the sale.
+
+        The schema has no separate "purchased" column, and the ledger is the
+        record of what was actually bought (signed, so a refund nets itself
+        out), so the balance is re-derived from it. It is a SUBSELECT inside the
+        UPDATE rather than a read followed by a write: a top-up committing
+        between the two would otherwise be overwritten — a lost update on money.
+
+        ``plan_minutes <= 0`` is the UNLIMITED sentinel (``minutes_quota``).
+        Adding a purchased balance to it would CAP an uncapped account, so it is
+        written straight through as 0.
+
+        NEVER falls back to the plan figure alone. If this cannot be written the
+        allocation is left exactly as it stands: an entitlement that failed to
+        rise is visible and recoverable, and destroyed minutes are neither.
+        """
+        try:
+            from app.core.db_utils import acquire_with_tenant
+
+            async with acquire_with_tenant(self.db_client.pool, None) as conn:
+                await conn.execute(
+                    """
+                    UPDATE tenants
+                       SET minutes_allocated = CASE
+                               WHEN $2::int <= 0 THEN 0
+                               ELSE $2::int + GREATEST(0, COALESCE((
+                                       SELECT SUM(minutes_delta)
+                                         FROM billing_ledger
+                                        WHERE tenant_id = $1::uuid
+                                   ), 0))
+                           END,
+                           minutes_used = 0
+                     WHERE id = $1::uuid
+                    """,
+                    str(tenant_id), int(plan_minutes),
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.error(
+                "plan allocation NOT applied for tenant=%s plan_minutes=%s: %s — "
+                "the previous allocation stands (purchased minutes are intact); "
+                "reconcile this plan change by hand",
+                str(tenant_id)[:8], plan_minutes, e,
+            )
+
     async def _handle_checkout_completed(self, session: Dict):
         """Handle checkout.session.completed event"""
         tenant_id = session.get("metadata", {}).get("tenant_id")
@@ -721,7 +809,7 @@ class BillingService:
         self.db_client.table("tenants").update({
             "stripe_customer_id": customer_id,
             "stripe_subscription_id": subscription_id,
-            "subscription_status": "active",
+            "subscription_status": SUBSCRIPTION_ACTIVE,
             "plan_id": plan_id
         }).eq("id", tenant_id).execute()
         
@@ -729,11 +817,10 @@ class BillingService:
         if plan_id:
             plan = self.db_client.table("plans").select("minutes").eq("id", plan_id).single().execute()
             if plan.data:
-                self.db_client.table("tenants").update({
-                    "minutes_allocated": plan.data.get("minutes", 0),
-                    "minutes_used": 0
-                }).eq("id", tenant_id).execute()
-        
+                await self._set_plan_allocation(
+                    tenant_id, int(plan.data.get("minutes", 0) or 0)
+                )
+
         logger.info(f"Activated subscription for tenant {tenant_id}")
 
         # Day 8: Audit log
@@ -761,7 +848,7 @@ class BillingService:
         
         if tenant_id:
             self.db_client.table("tenants").update({
-                "subscription_status": "canceled",
+                "subscription_status": SUBSCRIPTION_CANCELLED,
                 "stripe_subscription_id": None
             }).eq("id", tenant_id).execute()
         
@@ -860,7 +947,7 @@ class BillingService:
             # Update tenant status
             if tenant_id:
                 self.db_client.table("tenants").update({
-                    "subscription_status": "past_due"
+                    "subscription_status": SUBSCRIPTION_PAST_DUE
                 }).eq("id", tenant_id).execute()
 
         # Send payment failure notification
@@ -921,7 +1008,9 @@ class BillingService:
         # Update tenant
         if tenant_id:
             self.db_client.table("tenants").update({
-                "subscription_status": subscription["status"],
+                "subscription_status": canonical_subscription_status(
+                    subscription["status"]
+                ),
                 "stripe_subscription_id": subscription["id"]
             }).eq("id", tenant_id).execute()
 

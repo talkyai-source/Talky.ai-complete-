@@ -19,6 +19,11 @@ Configuration (all via environment variables):
                             (omit for AWS S3, set for R2/MinIO)
   S3_PRESIGNED_URL_EXPIRY = 3600                       (seconds, default 1h)
   S3_STORAGE_CLASS        = STANDARD                   (or INTELLIGENT_TIERING)
+  S3_CONNECT_TIMEOUT_SECONDS = 3                       (bounded 1-30)
+  S3_READ_TIMEOUT_SECONDS = 10                         (bounded 1-60)
+  S3_PERMANENT_DELETE_TIMEOUT_SECONDS = 45             (bounded 5-300)
+  S3_PERMANENT_DELETE_MAX_PAGES = 10                   (bounded 1-100)
+  S3_PERMANENT_DELETE_MAX_VERSIONS = 5000              (bounded 1-50000)
 
 Retention lifecycle (set on the bucket, not in this code):
   Basic plan    → 30 days  (set S3 lifecycle rule: Expiration 30 days)
@@ -30,8 +35,10 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import math
 import os
 import struct
+import time
 import wave
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -39,6 +46,40 @@ from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
+
+
+def _bounded_env_float(
+    name: str,
+    default: float,
+    *,
+    minimum: float,
+    maximum: float,
+) -> float:
+    """Read an operator timeout without permitting an unbounded value."""
+
+    try:
+        value = float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    if not math.isfinite(value):
+        value = default
+    return max(minimum, min(value, maximum))
+
+
+def _bounded_env_int(
+    name: str,
+    default: int,
+    *,
+    minimum: int,
+    maximum: int,
+) -> int:
+    """Read a storage work cap without permitting an unbounded value."""
+
+    try:
+        value = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(value, maximum))
 
 # ---------------------------------------------------------------------------
 # Optional boto3 import — graceful fallback to local storage if not installed
@@ -132,6 +173,24 @@ class S3Client:
         endpoint = os.getenv("S3_ENDPOINT_URL")  # None for AWS S3
         self.access_key = os.getenv("S3_ACCESS_KEY_ID")
         self.secret_key = os.getenv("S3_SECRET_ACCESS_KEY")
+        connect_timeout = _bounded_env_float(
+            "S3_CONNECT_TIMEOUT_SECONDS", 3.0, minimum=1.0, maximum=30.0
+        )
+        read_timeout = _bounded_env_float(
+            "S3_READ_TIMEOUT_SECONDS", 10.0, minimum=1.0, maximum=60.0
+        )
+        self._permanent_delete_timeout_seconds = _bounded_env_float(
+            "S3_PERMANENT_DELETE_TIMEOUT_SECONDS",
+            45.0,
+            minimum=5.0,
+            maximum=300.0,
+        )
+        self._permanent_delete_max_pages = _bounded_env_int(
+            "S3_PERMANENT_DELETE_MAX_PAGES", 10, minimum=1, maximum=100
+        )
+        self._permanent_delete_max_versions = _bounded_env_int(
+            "S3_PERMANENT_DELETE_MAX_VERSIONS", 5000, minimum=1, maximum=50000
+        )
 
         # boto3.client(...) returns a client object even when no credentials are
         # set, so "client is not None" is NOT a real availability signal. Require
@@ -151,6 +210,8 @@ class S3Client:
             "config": BotoCoreConfig(
                 retries={"max_attempts": 3, "mode": "adaptive"},
                 max_pool_connections=20,
+                connect_timeout=connect_timeout,
+                read_timeout=read_timeout,
             ),
         }
         if endpoint:
@@ -173,21 +234,142 @@ class S3Client:
             StorageClass=self.storage_class,
         )
 
-    def presigned_url(self, key: str) -> str:
-        """Generate a presigned GET URL valid for presigned_expiry seconds."""
+    def presigned_url(
+        self,
+        key: str,
+        download_filename: Optional[str] = None,
+        bucket: Optional[str] = None,
+    ) -> str:
+        """Generate a presigned GET URL, optionally forcing a safe download name."""
+        params: Dict[str, Any] = {"Bucket": bucket or self.bucket, "Key": key}
+        if download_filename:
+            safe_name = (
+                download_filename.replace('"', "")
+                .replace("\r", "")
+                .replace("\n", "")
+            )
+            params["ResponseContentDisposition"] = (
+                f'attachment; filename="{safe_name}"'
+            )
         return self._client.generate_presigned_url(
             "get_object",
-            Params={"Bucket": self.bucket, "Key": key},
+            Params=params,
             ExpiresIn=self.presigned_expiry,
         )
 
-    def delete(self, key: str) -> None:
-        """Delete an object. Used by retention cleanup."""
-        self._client.delete_object(Bucket=self.bucket, Key=key)
+    def delete(self, key: str, bucket: Optional[str] = None) -> None:
+        """Issue an ordinary object delete (for lifecycle/retention cleanup)."""
+        self._client.delete_object(Bucket=bucket or self.bucket, Key=key)
 
-    def download(self, key: str) -> bytes:
+    def delete_permanently(self, key: str, bucket: Optional[str] = None) -> None:
+        """Permanently delete one exact key and prove no version remains.
+
+        A bare ``delete_object`` on a versioned bucket only creates a delete
+        marker and leaves older audio recoverable. Permanent-erasure callers
+        may advance their durable intent only after this method has removed
+        every exact version/delete marker and a final HEAD proves absence.
+        """
+
+        target_bucket = bucket or self.bucket
+        deadline = time.monotonic() + getattr(
+            self, "_permanent_delete_timeout_seconds", 45.0
+        )
+        self._require_permanent_delete_time(deadline)
+        versioning = self._client.get_bucket_versioning(Bucket=target_bucket)
+        self._require_permanent_delete_time(deadline)
+        if versioning.get("Status") in {"Enabled", "Suspended"}:
+            versions = self._exact_object_versions(
+                target_bucket,
+                key,
+                deadline=deadline,
+            )
+            for offset in range(0, len(versions), 1000):
+                self._require_permanent_delete_time(deadline)
+                response = self._client.delete_objects(
+                    Bucket=target_bucket,
+                    Delete={"Objects": versions[offset : offset + 1000], "Quiet": True},
+                )
+                self._require_permanent_delete_time(deadline)
+                errors = response.get("Errors") or []
+                if errors:
+                    raise RuntimeError(
+                        f"object version deletion failed for {len(errors)} version(s)"
+                    )
+            if self._exact_object_versions(
+                target_bucket,
+                key,
+                deadline=deadline,
+            ):
+                raise RuntimeError("object versions remain after permanent deletion")
+        else:
+            self._require_permanent_delete_time(deadline)
+            self._client.delete_object(Bucket=target_bucket, Key=key)
+            self._require_permanent_delete_time(deadline)
+
+        try:
+            self._require_permanent_delete_time(deadline)
+            self._client.head_object(Bucket=target_bucket, Key=key)
+        except ClientError as exc:
+            code = str(exc.response.get("Error", {}).get("Code", ""))
+            if code in {"404", "NoSuchKey", "NotFound"}:
+                return
+            raise
+        raise RuntimeError("object remains readable after permanent deletion")
+
+    @staticmethod
+    def _require_permanent_delete_time(deadline: float) -> None:
+        if time.monotonic() >= deadline:
+            raise TimeoutError("permanent object deletion exceeded its time budget")
+
+    def _exact_object_versions(
+        self,
+        bucket: str,
+        key: str,
+        *,
+        deadline: Optional[float] = None,
+    ) -> List[Dict[str, str]]:
+        objects: List[Dict[str, str]] = []
+        key_marker: Optional[str] = None
+        version_marker: Optional[str] = None
+        pages = 0
+        max_pages = getattr(self, "_permanent_delete_max_pages", 10)
+        max_versions = getattr(self, "_permanent_delete_max_versions", 5000)
+        while True:
+            if deadline is not None:
+                self._require_permanent_delete_time(deadline)
+            pages += 1
+            if pages > max_pages:
+                raise RuntimeError("object version listing exceeded its page limit")
+            kwargs: Dict[str, Any] = {"Bucket": bucket, "Prefix": key}
+            if key_marker:
+                kwargs["KeyMarker"] = key_marker
+            if version_marker:
+                kwargs["VersionIdMarker"] = version_marker
+            response = self._client.list_object_versions(**kwargs)
+            if deadline is not None:
+                self._require_permanent_delete_time(deadline)
+            for item in [
+                *(response.get("Versions") or []),
+                *(response.get("DeleteMarkers") or []),
+            ]:
+                if item.get("Key") == key and item.get("VersionId") is not None:
+                    objects.append(
+                        {"Key": key, "VersionId": str(item["VersionId"])}
+                    )
+                    if len(objects) > max_versions:
+                        raise RuntimeError(
+                            "object version listing exceeded its version limit"
+                        )
+            if not response.get("IsTruncated"):
+                return objects
+            key_marker = response.get("NextKeyMarker")
+            version_marker = response.get("NextVersionIdMarker")
+            if not key_marker:
+                raise RuntimeError("invalid object-version pagination response")
+
+    def download(self, key: str, bucket: Optional[str] = None) -> bytes:
         """Download one object as bytes. Raises on storage/network failure."""
-        response = self._client.get_object(Bucket=self.bucket, Key=key)
+        response = self._client.get_object(Bucket=bucket or self.bucket, Key=key)
         body = response["Body"]
         try:
             return body.read()
@@ -196,10 +378,14 @@ class S3Client:
             if close:
                 close()
 
-    def head(self, key: str) -> Optional[Dict[str, Any]]:
+    def head(
+        self,
+        key: str,
+        bucket: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
         """Return object metadata or None if not found."""
         try:
-            return self._client.head_object(Bucket=self.bucket, Key=key)
+            return self._client.head_object(Bucket=bucket or self.bucket, Key=key)
         except ClientError as e:
             if e.response["Error"]["Code"] == "404":
                 return None
@@ -532,7 +718,7 @@ class RecordingService:
         async with self._db.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT s3_key, status
+                SELECT s3_key, s3_bucket, status
                 FROM recordings_s3
                 WHERE id = $1 AND tenant_id = $2
                 """,
@@ -551,7 +737,10 @@ class RecordingService:
             return None
 
         try:
-            return self._s3.presigned_url(row["s3_key"])
+            return self._s3.presigned_url(
+                row["s3_key"],
+                bucket=row["s3_bucket"],
+            )
         except Exception as exc:
             logger.error(f"Failed to generate presigned URL for {recording_id}: {exc}")
             return None

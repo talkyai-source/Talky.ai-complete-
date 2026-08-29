@@ -41,10 +41,54 @@ from app.services.scripts.prompts.prompt_safety import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# TODO(production): Replace with company name from campaign.script_config
-#                   when campaign creation UI provides it.
+# NEUTRAL company-name fallback (S1, 2026-08-28).
+#
+# This constant used to hold a real, specific company's name. On a MULTI-TENANT
+# platform that meant any tenant whose campaign (or AI config) left
+# ``company_name`` unset had its agent introduce itself on a live PSTN call
+# under ANOTHER tenant's brand — a cross-tenant leak and a misrepresentation of
+# who is calling.
+#
+# The replacement is deliberately generic and lowercase so it cannot be
+# mistaken for a brand, and it was chosen by reading every sentence the prompt
+# and the greeting build around it — all of which stay grammatical:
+#   "You are Sarah from our office."                (persona identity line)
+#   "Thanks for calling our office. Sarah here…"    (inbound greeting)
+#   "placing an OUTBOUND call on behalf of our office."  (direction block)
+#   "You only help with our office's business."     (compliance floor)
+#
+# It is a LAST RESORT, not a default to rely on: every use is logged at
+# WARNING with the tenant + campaign id (see :func:`_warn_company_name_fallback`)
+# so a misconfigured campaign is visible instead of silently borrowing an
+# identity. Making a missing company name FAIL campaign activation is the real
+# fix but it can stop live campaigns dialling, so it is a separate, explicitly
+# approved change — not this one.
 # ---------------------------------------------------------------------------
-TELEPHONY_COMPANY_NAME = "All States Estimation"
+TELEPHONY_COMPANY_NAME = "our office"
+
+
+def _warn_company_name_fallback(
+    *,
+    tenant_id: Optional[str],
+    campaign_id: Optional[str],
+    source: str,
+) -> None:
+    """Log (WARNING) that a call is running on the neutral placeholder brand.
+
+    Deliberately loud and structured: this is a misconfiguration that reaches
+    a live PSTN call, and it used to be completely silent. Carries only the
+    tenant / campaign identifiers — no credentials, no phone numbers.
+    """
+    logger.warning(
+        "company_name_fallback tenant=%s campaign=%s source=%s — no company "
+        "name is configured, so the agent will say %r on this call instead of "
+        "a real brand; set the campaign's company_name",
+        tenant_id or "-",
+        campaign_id or "-",
+        source,
+        TELEPHONY_COMPANY_NAME,
+    )
+
 
 # ---------------------------------------------------------------------------
 # TODO(production): Replace with per-campaign name pool configured in campaign
@@ -1209,7 +1253,22 @@ def build_telephony_session_config(
     persona_type = configured_persona or "lead_gen"
     knowledge_driven = bool(script_config.get("knowledge_driven")) or not configured_persona
 
-    company_name = (script_config.get("company_name") or TELEPHONY_COMPANY_NAME).strip()
+    # A campaign that never set a company name runs on the neutral placeholder
+    # (see TELEPHONY_COMPANY_NAME) — never on another tenant's brand. The old
+    # expression also let a whitespace-only value through as "" because .strip()
+    # ran AFTER the `or`; strip first so " " is treated as unset too.
+    _configured_company = script_config.get("company_name")
+    _configured_company = (
+        _configured_company.strip() if isinstance(_configured_company, str) else ""
+    )
+    _company_is_fallback = not _configured_company
+    company_name = _configured_company or TELEPHONY_COMPANY_NAME
+    if _company_is_fallback:
+        _warn_company_name_fallback(
+            tenant_id=_campaign_tenant_id(campaign),
+            campaign_id=_campaign_id(campaign),
+            source="script_config.company_name",
+        )
     agent_names_pool = script_config.get("agent_names") or []
     _agent_name_genders = script_config.get("agent_name_genders") or None
     if not isinstance(_agent_name_genders, dict):
@@ -1603,7 +1662,13 @@ def build_telephony_session_config(
         # agent name, and product names so "Dojo"/"Dojo Go" isn't heard as
         # "Dodge". Email-spelling terms are gated to capture mode separately.
         stt_keyterms=_build_call_keyterms(
-            company_name, agent_name, _extract_product_terms(script_config, company_name)
+            # The placeholder is not a brand: seeding Flux with its ordinary
+            # English words ("our", "office") would bias every transcript
+            # toward them for no recognition gain. Pass "" so only the agent
+            # name and product terms are boosted on an unconfigured campaign.
+            "" if _company_is_fallback else company_name,
+            agent_name,
+            _extract_product_terms(script_config, company_name),
         ),
         turn_0_min_confidence=_tuning.turn_0_min_confidence,
         turn_0_min_alpha_chars=_tuning.turn_0_min_alpha_chars,

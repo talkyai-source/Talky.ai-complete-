@@ -83,6 +83,20 @@ def _bridge_enabled() -> bool:
     }
 
 
+_TWILIO_OUTBOUND_DIRECTIONS = {"outbound", "outbound-api", "outbound-dial"}
+
+
+def _is_supported_answer_direction(value: object) -> bool:
+    """Only provider-originated OUTBOUND answers use this legacy bridge.
+
+    True inbound must enter through the Asterisk pre-answer admission path,
+    which commits the tenant-scoped call row and reservations before Answer.
+    Treat a missing/unknown direction as inbound-risk ambiguity and fail closed.
+    """
+
+    return str(value or "").strip().lower() in _TWILIO_OUTBOUND_DIRECTIONS
+
+
 # ---------------------------------------------------------------------------
 # Media Streams WebSocket auth
 # ---------------------------------------------------------------------------
@@ -337,6 +351,13 @@ async def twilio_answer(request: Request):
     call_sid = params.get("CallSid", "unknown")
     from_number = params.get("From", "unknown")
     to_number = params.get("To", "unknown")
+    if not _is_supported_answer_direction(params.get("Direction")):
+        logger.error(
+            "twilio_answer refused: direction=%s has no durable pre-answer "
+            "inbound admission path",
+            str(params.get("Direction") or "missing")[:32],
+        )
+        return Response(status_code=503)
     logger.info(
         "Twilio answer webhook: callSid=%s from=%s to=%s",
         call_sid[:16], from_number, to_number,
@@ -358,6 +379,11 @@ async def twilio_event(request: Request):
     """Call lifecycle status callbacks. The Media Streams WebSocket lifecycle
     is the source of truth for session teardown, so this is informational —
     we normalise + log the status."""
+    if not _bridge_enabled():
+        return Response(status_code=404)
+    if not (os.getenv("TWILIO_AUTH_TOKEN") or "").strip():
+        logger.error("twilio_event refused: TWILIO_AUTH_TOKEN unset")
+        return Response(status_code=503)
     form = await request.form()
     params = {k: str(v) for k, v in form.items()}
     if not verify_twilio_signature(

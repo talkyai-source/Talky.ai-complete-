@@ -613,9 +613,6 @@ __all__ = [
     "Permission",
     "require_role",
     "require_permission",
-    "require_tenant_access",
-    "TenantContext",
-    "get_tenant_context_dependency",
 ]
 
 

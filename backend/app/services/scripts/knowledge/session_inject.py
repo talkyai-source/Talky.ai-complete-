@@ -45,6 +45,45 @@ def _row_get(row: Any, key: str) -> Optional[Any]:
     return getattr(row, key, None)
 
 
+def apply_pinned_campaign_knowledge(call_session, snapshot: Any) -> None:
+    """Apply the immutable knowledge captured by inbound admission.
+
+    Unlike the ordinary outbound warmup path, this function performs no DB or
+    environment read.  ``enabled``, mode, metadata, and every retrievable node
+    are all taken from the durable route snapshot created before Answer.
+    """
+    if call_session is None or not isinstance(snapshot, dict):
+        return
+    if snapshot.get("enabled") is not True:
+        return
+    mode = str(snapshot.get("mode") or "none").strip().lower()
+    if mode not in ("inline", "map_retrieve", "retrieve"):
+        return
+    nodes = [dict(node) for node in (snapshot.get("nodes") or []) if isinstance(node, dict)]
+    tenant_id = str(snapshot.get("tenant_id") or "").strip()
+    campaign_id = str(snapshot.get("campaign_id") or "").strip()
+    if not tenant_id or not campaign_id:
+        return
+
+    call_session.tenant_id = call_session.tenant_id or tenant_id
+    call_session._knowledge_snapshot_nodes = nodes
+    call_session._knowledge_snapshot_checksum = snapshot.get("checksum")
+    call_session.knowledge_mode = "retrieve"
+    if mode == "retrieve":
+        return
+
+    from app.services.scripts.knowledge.retrieval import compact_tree_from_nodes
+
+    tree = compact_tree_from_nodes(
+        nodes,
+        skeleton_only=(mode == "map_retrieve"),
+        campaign_id=campaign_id,
+    )
+    header = _MAP_HEADER if mode == "map_retrieve" else _INLINE_HEADER
+    if _bake_inline_knowledge(call_session, tree, header, campaign_id, mode):
+        call_session.knowledge_mode = mode
+
+
 async def apply_campaign_knowledge(call_session, campaign_row: Any, *, pool) -> None:
     """Stamp knowledge_mode/tenant_id and bake inline knowledge into the prompt.
 

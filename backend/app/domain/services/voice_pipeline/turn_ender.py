@@ -29,6 +29,9 @@ from app.domain.services.voice_pipeline.identity_disposition import (
     contains_explicit_goodbye,
     disposition_end_line,
 )
+from app.domain.services.voice_pipeline.lead_slot_capture import (
+    capture_turn_slots,
+)
 from app.domain.services.voice_pipeline.turn_helpers import (
     _first_speaker_label,
     _persona_label,
@@ -817,6 +820,30 @@ class TurnEnder:
                         )
                 except Exception as e:
                     logger.warning(f"Failed to flush transcript for {call_id}: {e}")
+
+                # Structured lead capture (goals.md §7). turn_runner has just
+                # updated session.captured_slots from this caller turn, so this
+                # is the first moment a newly-established fact exists. Writes
+                # only what CHANGED (most turns establish nothing and this is a
+                # no-op that never touches the pool), and never raises — a
+                # lead-form row is worth strictly less than the live call.
+                #
+                # The tenant comes from the DIALER BINDING, not session.tenant_id
+                # — that field is only ever populated by the knowledge layer, so
+                # on a campaign without a knowledge base it is constant None.
+                try:
+                    _lead_container = get_container()
+                    if _lead_container.is_initialized:
+                        await capture_turn_slots(
+                            session,
+                            pool=_lead_container.db_pool,
+                            reason="turn",
+                        )
+                except Exception as e:  # noqa: BLE001 - defence in depth
+                    logger.warning(
+                        "lead_slot_capture_turn_hook_failed call=%s err=%s",
+                        call_id[:12], e,
+                    )
 
                 # Agent END_CALL: the model closed the conversation this turn
                 # (goodbye / wrong number / voicemail). Its goodbye audio has

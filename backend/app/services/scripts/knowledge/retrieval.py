@@ -15,11 +15,14 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+from difflib import SequenceMatcher
 from typing import List, Optional
 
 from app.core.db_utils import acquire_with_tenant
 
 logger = logging.getLogger(__name__)
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 # Minimum pg_trgm *word* similarity for the fuzzy fallback. We use
 # word_similarity() (not similarity()) because the query is short and the node
@@ -212,6 +215,56 @@ async def retrieve_knowledge(
         return []
 
 
+def retrieve_pinned_knowledge(
+    nodes: List[dict],
+    query: str,
+    *,
+    k: int = 2,
+) -> List[dict]:
+    """Deterministic lookup over an admission-time knowledge snapshot."""
+    q = str(query or "").strip().lower()
+    if not q or not isinstance(nodes, list):
+        return []
+    q_tokens = {token for token in _TOKEN_RE.findall(q) if len(token) > 1}
+    if not q_tokens:
+        return []
+
+    ranked = []
+    for index, raw in enumerate(nodes):
+        if not isinstance(raw, dict):
+            continue
+        node = dict(raw)
+        blob = str(
+            node.get("search_text")
+            or " ".join(
+                str(node.get(key) or "")
+                for key in ("heading", "summary", "voice_answer", "content")
+            )
+        ).lower()
+        doc_tokens = set(_TOKEN_RE.findall(blob))
+        exact = len(q_tokens & doc_tokens)
+        fuzzy = 0.0
+        if exact < len(q_tokens):
+            candidates = [word for word in doc_tokens if len(word) >= 3][:400]
+            for token in q_tokens - doc_tokens:
+                if len(token) < 3:
+                    continue
+                best = max(
+                    (SequenceMatcher(None, token, word).ratio() for word in candidates),
+                    default=0.0,
+                )
+                if best >= 0.78:
+                    fuzzy += best
+        if exact == 0 and fuzzy == 0:
+            continue
+        phrase = 1 if q in blob else 0
+        priority = int(node.get("priority") or 0)
+        score = phrase * 100.0 + exact * 10.0 + fuzzy * 5.0
+        ranked.append((score, priority, -index, node))
+    ranked.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    return [item[3] for item in ranked[: max(1, int(k or 1))]]
+
+
 async def compact_tree(
     pool,
     tenant_id: str,
@@ -248,6 +301,22 @@ async def compact_tree(
         logger.warning("compact_tree failed campaign=%s: %s", str(campaign_id)[:12], exc)
         return ""
 
+    return compact_tree_from_nodes(
+        [dict(row) for row in rows],
+        skeleton_only=skeleton_only,
+        max_chars=max_chars,
+        campaign_id=str(campaign_id),
+    )
+
+
+def compact_tree_from_nodes(
+    rows: List[dict],
+    *,
+    skeleton_only: bool = False,
+    max_chars: int = 12000,
+    campaign_id: str = "pinned",
+) -> str:
+    """Render already-pinned rows without consulting mutable storage."""
     blocks: List[str] = []
     used = 0
     dropped = 0

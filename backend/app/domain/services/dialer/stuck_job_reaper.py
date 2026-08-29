@@ -47,7 +47,17 @@ _INFLIGHT_CALL_STATUSES = (
 # bounded — `reap_stuck_calls` (CALL_STUCK_TIMEOUT_S, default 600s) closes it
 # independently, which drops it out of this set and makes the job reapable on
 # the next tick.
-_LIVE_CALL_STATUSES = ("dialing", "ringing", "answered", "in_call")
+_LIVE_CALL_STATUSES = (
+    "dialing",
+    "ringing",
+    "answered",
+    "in_call",
+    # Age only moved this call into the proof-aware teardown queue. Until the
+    # telephony owner proves every PBX leg absent and commits CallService, its
+    # linked job/lead must remain owned; reaping it here could redial while the
+    # original PSTN channel is still billable.
+    "termination_pending",
+)
 
 # ---------------------------------------------------------------------------
 # Orphaned retry_scheduled jobs
@@ -197,25 +207,26 @@ async def reap_stuck_calls(
     *,
     timeout_seconds: int = CALL_STUCK_TIMEOUT_S,
 ) -> int:
-    """Close ``calls`` rows stuck in a non-terminal status past the timeout.
+    """Mark stale calls for confirmation-aware owner recovery.
 
     A call that has sat in ``dialing`` / ``ringing`` / ``answered`` / ``in_call``
     longer than the max plausible call lifetime is a zombie: the originate hung,
     or an ARI hangup event was lost, so ``_on_call_ended`` never fired to mark it
     ENDED. Left alone it lingers as "dialing" in the live-calls panel forever AND
     — now that batch dispatch counts in-flight calls — holds a batch slot,
-    eventually wedging the campaign (it can never dial the next call). Marking it
-    ENDED frees the slot and records an honest terminal state. Any real outcome
-    already written is preserved; otherwise it's recorded as ``failed``.
+    eventually wedging the campaign. Age proves the row is stale, but it does
+    *not* prove that the provider/PBX channel is absent. Therefore the reaper
+    moves it to the nonterminal ``termination_pending`` state. The telephony
+    owner watchdog picks that state up within 30 seconds, proves every leg
+    absent, and only then performs normal settlement. This frees the dialer
+    batch slot without lying to operators or billing.
 
     Idempotent and cheap (one indexed UPDATE); safe on every worker tick.
     """
     rows = await conn.fetch(
         """
         UPDATE calls
-           SET status     = 'ended',
-               ended_at   = COALESCE(ended_at, now()),
-               outcome    = COALESCE(outcome, 'failed'),
+           SET status     = 'termination_pending',
                updated_at = now()
          WHERE status = ANY($1::text[])
            AND created_at < now() - make_interval(secs => $2::int)
@@ -227,7 +238,8 @@ async def reap_stuck_calls(
     reaped = len(rows)
     if reaped:
         logger.warning(
-            "reaper: closed %d stuck call(s) as ended (in-flight > %ss)",
+            "reaper: queued %d stuck call(s) for proof-aware termination "
+            "(in-flight > %ss)",
             reaped,
             timeout_seconds,
         )

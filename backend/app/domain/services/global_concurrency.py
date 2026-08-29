@@ -33,6 +33,7 @@ from the existing session watchdog every minute.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Any, Optional
@@ -106,21 +107,31 @@ async def acquire_lease(
     call_id: str,
     pod_id: str,
     cap: int,
+    fail_closed: bool = False,
 ) -> LeaseResult:
     """Try to reserve a global slot for `call_id`.
 
     Returns `LeaseResult(acquired=True, ...)` on success. On a full
     cluster returns `LeaseResult(acquired=False, reason="cap_reached")`.
-    When Redis is unavailable returns
+    When Redis is unavailable the legacy/default behaviour returns
     `LeaseResult(acquired=True, reason="redis_unavailable_fallback")` so
-    a degraded Redis doesn't bring down origination — the caller keeps
-    its per-pod dict as a backstop.
+    outbound origination keeps its per-pod cap as a backstop.  True inbound
+    admission passes ``fail_closed=True`` because the channel has not been
+    answered yet and accepting without a cluster lease could exceed the
+    platform cap during a Redis partition.
 
     Idempotent-ish: re-acquiring the same `call_id` does not double
     the count (SADD is a set). The lease TTL is refreshed.
     """
     if redis_client is None:
-        return LeaseResult(acquired=True, reason="redis_unavailable_fallback")
+        return LeaseResult(
+            acquired=not fail_closed,
+            reason=(
+                "redis_unavailable"
+                if fail_closed
+                else "redis_unavailable_fallback"
+            ),
+        )
 
     try:
         # Pipeline two commands atomically-ish so SCARD reflects the
@@ -149,12 +160,42 @@ async def acquire_lease(
             ex=_LEASE_TTL_SECONDS,
         )
         return LeaseResult(acquired=True, reason="acquired", current=size)
+    except asyncio.CancelledError:
+        # The inbound adapter enforces a short admission timeout with
+        # ``wait_for``. Cancellation can land after SADD but before SET/return,
+        # so strict callers must undo both keys before propagating it. This is
+        # safe for strict inbound because one PBX channel id owns one attempt.
+        if fail_closed:
+            try:
+                await asyncio.wait_for(
+                    release_lease(redis_client, call_id=call_id), timeout=1.0,
+                )
+            except asyncio.TimeoutError:
+                logger.error(
+                    "global_concurrency_cancel_cleanup_timed_out call=%s",
+                    call_id[:12] if call_id else "-",
+                )
+        raise
     except Exception as exc:
         logger.error(
-            "global_concurrency_acquire_failed call=%s err=%s — fallback to per-pod cap",
+            "global_concurrency_acquire_failed call=%s err=%s fail_closed=%s",
             call_id[:12] if call_id else "-", exc,
+            fail_closed,
         )
-        return LeaseResult(acquired=True, reason="redis_error_fallback")
+        if fail_closed:
+            try:
+                await asyncio.wait_for(
+                    release_lease(redis_client, call_id=call_id), timeout=1.0,
+                )
+            except asyncio.TimeoutError:
+                logger.error(
+                    "global_concurrency_error_cleanup_timed_out call=%s",
+                    call_id[:12] if call_id else "-",
+                )
+        return LeaseResult(
+            acquired=not fail_closed,
+            reason="redis_error" if fail_closed else "redis_error_fallback",
+        )
 
 
 async def release_lease(
@@ -175,6 +216,29 @@ async def release_lease(
             "global_concurrency_release_failed call=%s err=%s",
             call_id[:12] if call_id else "-", exc,
         )
+
+
+async def release_lease_strict(
+    redis_client: Any,
+    *,
+    call_id: str,
+) -> None:
+    """Release a slot without swallowing the Redis commit result.
+
+    Proof-owned inbound/restart teardown must not acknowledge its durable
+    cleanup ledger while the cluster capacity slot may still be present.
+    Receiving the transactional pipeline response is the commit boundary; an
+    ambiguous disconnect raises so the idempotent caller retains and retries
+    its obligation. ``None`` is an idempotent no-op because no Redis-backed
+    lease can have been acquired without a client.
+    """
+
+    if redis_client is None:
+        return
+    async with redis_client.pipeline(transaction=True) as pipe:
+        pipe.srem(_ACTIVE_SET_KEY, call_id)
+        pipe.delete(_lease_key(call_id))
+        await pipe.execute()
 
 
 async def refresh_lease(

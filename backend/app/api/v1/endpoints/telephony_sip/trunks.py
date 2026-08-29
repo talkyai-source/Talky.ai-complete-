@@ -3,15 +3,21 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import socket
 from typing import Optional
 from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool
 from app.core.tenant_rls import apply_tenant_rls_context
+from app.domain.services.telephony.trunk_runtime import (
+    evaluate_trunk_runtime,
+    trunk_status_freshness_seconds,
+)
 from app.infrastructure.connectors.encryption import get_encryption_service
 
 from ._shared import (
@@ -59,6 +65,7 @@ def _coerce_jsonb(raw):
 
 def _row_to_response(row: asyncpg.Record) -> SIPTrunkResponse:
     keys = row.keys()
+    runtime = evaluate_trunk_runtime(dict(row), require_inbound=False)
     return SIPTrunkResponse(
         id=row["id"],
         tenant_id=row["tenant_id"],
@@ -84,19 +91,45 @@ def _row_to_response(row: asyncpg.Record) -> SIPTrunkResponse:
         live_status_checked_at=(
             row["live_status_checked_at"] if "live_status_checked_at" in keys else None
         ),
+        runtime_ready=runtime.ready,
+        runtime_status_code=runtime.code,
+        runtime_status_detail=runtime.detail,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
 
 
-async def _sync_trunk_pjsip_config(row: asyncpg.Record, *, active: bool) -> None:
+def _requires_confirmed_pjsip_apply() -> bool:
+    return (
+        os.getenv("ENVIRONMENT", "development").strip().lower() == "production"
+        and os.getenv("TELEPHONY_ADAPTER", "auto").strip().lower() == "asterisk"
+    )
+
+
+def _pjsip_auto_reload_enabled() -> bool:
+    return os.getenv("TELEPHONY_PJSIP_AUTO_RELOAD", "").strip().lower() in {
+        "1", "true", "on", "yes",
+    }
+
+
+async def _sync_trunk_pjsip_config(
+    row: asyncpg.Record,
+    *,
+    active: bool,
+    previous_row: Optional[asyncpg.Record] = None,
+) -> None:
     """Render/apply or remove the per-tenant namespaced PJSIP config for a
     trunk after an activate / deactivate / update (Phase B).
 
-    FAIL-SOFT: never raises. A generation error logs a warning and leaves the
-    DB row intact — the API call still succeeds; the config just isn't applied
-    (an operator sees the warning). The Fernet password is decrypted only in
-    memory here and is NEVER logged.
+    In production Asterisk mode, activation and edits to an active trunk are
+    fail-closed: the enclosing database transaction rolls back unless a live
+    reload is executed or coalesced into an already-pending reload.  A failed
+    edit restores the previous file projection before surfacing HTTP 503.
+
+    Deactivation stays logically authoritative even if file cleanup fails:
+    the database becomes inactive immediately, admission rejects the route,
+    and the root status-updater retries stale file removal.  Development mode
+    remains fail-soft so offline API tests do not require a local Asterisk.
     """
     try:
         # The shared platform-default upstream is hand-managed
@@ -111,20 +144,88 @@ async def _sync_trunk_pjsip_config(row: asyncpg.Record, *, active: bool) -> None
         from app.infrastructure.telephony.pjsip_config_generator import (
             apply_trunk_config,
             remove_trunk_config,
+            request_pjsip_reload,
         )
+        require_live_apply = _requires_confirmed_pjsip_apply() and active
+        if require_live_apply and not _pjsip_auto_reload_enabled():
+            raise RuntimeError(
+                "TELEPHONY_PJSIP_AUTO_RELOAD must be enabled for production trunk changes"
+            )
         if active:
+            if require_live_apply:
+                # Resolve once under the same public-target policy as the
+                # probe before handing a tenant-controlled host to Asterisk.
+                from .trunk_probe import resolve_sip_target
+                await resolve_sip_target(
+                    host=row["sip_domain"],
+                    port=int(row["port"]),
+                    socktype=(
+                        socket.SOCK_STREAM
+                        if str(row["transport"]).lower() in {"tcp", "tls"}
+                        else socket.SOCK_DGRAM
+                    ),
+                )
             decrypted = None
             enc = row["auth_password_encrypted"]
             if enc:
                 decrypted = get_encryption_service().decrypt(enc)
-            await apply_trunk_config(row, decrypted_password=decrypted)
+            await apply_trunk_config(
+                row,
+                decrypted_password=decrypted,
+                require_reload=require_live_apply,
+            )
         else:
             await remove_trunk_config(str(row["id"]))
-    except Exception as exc:  # noqa: BLE001 — must not 500 the API
+    except Exception as exc:  # noqa: BLE001
+        strict_failure = _requires_confirmed_pjsip_apply() and active
+        logger.error(
+            "pjsip_config_sync_failed trunk=%s active=%s strict=%s err_type=%s",
+            str(row["id"])[:8] if row is not None else "?",
+            active,
+            strict_failure,
+            type(exc).__name__,
+        )
+        if strict_failure:
+            # The database transaction will roll back.  Restore the file to
+            # that same previous desired state so a later unrelated reload
+            # cannot apply an uncommitted activation/edit.
+            try:
+                from app.infrastructure.telephony.pjsip_config_generator import (
+                    apply_trunk_config,
+                    remove_trunk_config,
+                    request_pjsip_reload,
+                )
+                previous_active = bool(previous_row and previous_row["is_active"])
+                if previous_active:
+                    previous_decrypted = None
+                    previous_enc = previous_row["auth_password_encrypted"]
+                    if previous_enc:
+                        previous_decrypted = get_encryption_service().decrypt(previous_enc)
+                    await apply_trunk_config(
+                        previous_row,
+                        decrypted_password=previous_decrypted,
+                        reload=False,
+                    )
+                else:
+                    await remove_trunk_config(str(row["id"]), reload=False)
+                await request_pjsip_reload()
+            except Exception as compensation_exc:  # noqa: BLE001
+                logger.critical(
+                    "pjsip_config_compensation_failed trunk=%s err_type=%s",
+                    str(row["id"])[:8],
+                    type(compensation_exc).__name__,
+                )
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Asterisk did not confirm the SIP configuration reload; "
+                    "the trunk change was not committed."
+                ),
+            ) from exc
         logger.warning(
-            "pjsip_config_sync_failed trunk=%s active=%s err=%s — "
-            "DB row saved, config not applied",
-            str(row["id"])[:8] if row is not None else "?", active, exc,
+            "pjsip_config_sync_deferred trunk=%s active=%s",
+            str(row["id"])[:8] if row is not None else "?",
+            active,
         )
 
 
@@ -513,6 +614,18 @@ async def update_sip_trunk(
                         auth_username = $8,
                         auth_password_encrypted = $9,
                         metadata = $10::jsonb,
+                        live_registration_status = CASE
+                            WHEN is_active THEN 'checking'
+                            ELSE live_registration_status
+                        END,
+                        live_status_detail = CASE
+                            WHEN is_active THEN 'Awaiting Asterisk proof after configuration change'
+                            ELSE live_status_detail
+                        END,
+                        live_status_checked_at = CASE
+                            WHEN is_active THEN NOW()
+                            ELSE live_status_checked_at
+                        END,
                         updated_by = $11,
                         updated_at = NOW()
                     WHERE tenant_id = $1
@@ -531,6 +644,9 @@ async def update_sip_trunk(
                         metadata,
                         last_tested_at,
                         last_test_result,
+                        live_registration_status,
+                        live_status_detail,
+                        live_status_checked_at,
                         created_at,
                         updated_at
                     """,
@@ -573,7 +689,11 @@ async def update_sip_trunk(
             # picks up the change on the next reload. Inactive trunks have no
             # file to update. Fail-soft.
             if row["is_active"]:
-                await _sync_trunk_pjsip_config(row, active=True)
+                await _sync_trunk_pjsip_config(
+                    row,
+                    active=True,
+                    previous_row=existing,
+                )
             return response_model
 
 
@@ -659,10 +779,30 @@ async def _set_trunk_active_state(
             # shows Registered / Rejected / Unregistered live. Deactivation was, and
             # remains, always allowed.
 
+            existing = await _get_tenant_trunk(
+                conn,
+                current_user.tenant_id,
+                trunk_id,
+            )
+            if not existing:
+                return _problem(
+                    request=request,
+                    status_code=404,
+                    title="Trunk Not Found",
+                    detail="Requested trunk does not exist for tenant.",
+                    type_suffix="trunk-not-found",
+                )
+
             row = await conn.fetchrow(
                 """
                 UPDATE tenant_sip_trunks
                 SET is_active = $3,
+                    live_registration_status = CASE WHEN $3 THEN 'checking' ELSE 'inactive' END,
+                    live_status_detail = CASE
+                        WHEN $3 THEN 'Awaiting Asterisk runtime proof'
+                        ELSE NULL
+                    END,
+                    live_status_checked_at = NOW(),
                     updated_by = $4,
                     updated_at = NOW()
                 WHERE tenant_id = $1
@@ -681,6 +821,9 @@ async def _set_trunk_active_state(
                     metadata,
                     last_tested_at,
                     last_test_result,
+                    live_registration_status,
+                    live_status_detail,
+                    live_status_checked_at,
                     created_at,
                     updated_at
                 """,
@@ -716,7 +859,11 @@ async def _set_trunk_active_state(
             # config; the outbound resolver picks among a tenant's active trunks.
             # Phase B — sync THIS trunk's namespaced PJSIP config: activate →
             # render+write trunk-<id>.conf; deactivate → remove it. Fail-soft.
-            await _sync_trunk_pjsip_config(row, active=active_state)
+            await _sync_trunk_pjsip_config(
+                row,
+                active=active_state,
+                previous_row=existing,
+            )
             return response_model
 
 
@@ -855,10 +1002,12 @@ class PoolTrunkItem(BaseModel):
     label: str
     caller_id: Optional[str] = None
     registration_status: Optional[str] = None
+    runtime_ready: bool = False
+    runtime_status_detail: str = "Asterisk runtime status is unavailable."
 
 
 class PoolAssignmentBody(BaseModel):
-    pool_trunk_id: Optional[str] = None  # null clears the assignment
+    pool_trunk_id: Optional[UUID] = None  # null clears the assignment
 
 
 class PoolAssignmentResponse(BaseModel):
@@ -874,11 +1023,18 @@ async def _fetch_pool_trunk(conn, pool_trunk_id: str):
     return await conn.fetchrow(
         """
         SELECT id, auth_username, metadata->>'caller_id' AS caller_id,
-               live_registration_status, is_active
+               live_registration_status, live_status_checked_at,
+               live_status_detail, is_active, direction, metadata
         FROM tenant_sip_trunks
-        WHERE id = $1::uuid AND is_active = TRUE AND metadata->>'pool' = 'true'
+        WHERE id = $1::uuid
+          AND is_active = TRUE
+          AND direction IN ('outbound', 'both')
+          AND metadata->>'pool' = 'true'
+          AND live_registration_status = 'registered'
+          AND live_status_checked_at >= NOW() - ($2 * INTERVAL '1 second')
         """,
         pool_trunk_id,
+        trunk_status_freshness_seconds(),
     )
 
 
@@ -898,21 +1054,32 @@ async def list_pool_trunks(
             rows = await conn.fetch(
                 """
                 SELECT id, auth_username, metadata->>'caller_id' AS caller_id,
-                       live_registration_status
+                       live_registration_status, live_status_detail,
+                       live_status_checked_at, is_active, direction, metadata
                 FROM tenant_sip_trunks
                 WHERE metadata->>'pool' = 'true' AND is_active = TRUE
                 ORDER BY auth_username
                 """
             )
-    return [
-        PoolTrunkItem(
-            id=str(r["id"]),
-            label=r["auth_username"],
-            caller_id=r["caller_id"],
-            registration_status=r["live_registration_status"],
+    result: list[PoolTrunkItem] = []
+    for row in rows:
+        runtime = evaluate_trunk_runtime(dict(row), require_inbound=False)
+        outbound_direction = row["direction"] in {"outbound", "both"}
+        result.append(
+            PoolTrunkItem(
+                id=str(row["id"]),
+                label=row["auth_username"],
+                caller_id=row["caller_id"],
+                registration_status=row["live_registration_status"],
+                runtime_ready=runtime.ready and outbound_direction,
+                runtime_status_detail=(
+                    runtime.detail
+                    if outbound_direction
+                    else "Shared trunk is not outbound-capable."
+                ),
+            )
         )
-        for r in rows
-    ]
+    return result
 
 
 @router.get("/trunks/pool-assignment", response_model=PoolAssignmentResponse)
@@ -949,7 +1116,7 @@ async def set_pool_assignment(
     tenant_problem = _require_tenant(request, current_user)
     if tenant_problem:
         return tenant_problem
-    pid = (body.pool_trunk_id or "").strip() or None
+    pid = str(body.pool_trunk_id) if body.pool_trunk_id is not None else None
 
     if pid is None:
         async with db_pool.acquire() as conn:
@@ -969,7 +1136,10 @@ async def set_pool_assignment(
                 request=request,
                 status_code=400,
                 title="Invalid Pool Account",
-                detail="That trunk is not an active shared-pool account.",
+                detail=(
+                    "That shared-pool account is unavailable, not registered, "
+                    "or its Asterisk status is stale."
+                ),
                 type_suffix="invalid-pool-trunk",
             )
         snapshot = {
@@ -999,8 +1169,8 @@ async def set_pool_assignment(
 
 
 class CampaignTrunkBody(BaseModel):
-    campaign_id: str
-    trunk_id: Optional[str] = None  # null clears the assignment
+    campaign_id: UUID
+    trunk_id: Optional[UUID] = None  # null clears the assignment
 
 
 class CampaignTrunkResponse(BaseModel):
@@ -1017,7 +1187,11 @@ async def _fetch_assignable_trunk(conn, trunk_id: str, tenant_id):
     await conn.execute("SET LOCAL app.bypass_rls = 'on'")
     return await conn.fetchrow(
         """
-        SELECT id, trunk_name, auth_username, metadata->>'caller_id' AS caller_id
+        SELECT id, trunk_name, auth_username,
+               metadata->>'caller_id' AS caller_id,
+               is_active, direction, metadata,
+               live_registration_status, live_status_detail,
+               live_status_checked_at
         FROM tenant_sip_trunks
         WHERE id = $1::uuid AND is_active = TRUE
           AND (tenant_id = $2::uuid OR metadata->>'pool' = 'true')
@@ -1066,7 +1240,8 @@ async def set_campaign_trunk_assignment(
     tenant_problem = _require_tenant(request, current_user)
     if tenant_problem:
         return tenant_problem
-    tid = (body.trunk_id or "").strip() or None
+    campaign_id = str(body.campaign_id)
+    tid = str(body.trunk_id) if body.trunk_id is not None else None
 
     if tid is None:
         async with db_pool.acquire() as conn:
@@ -1075,24 +1250,45 @@ async def set_campaign_trunk_assignment(
                 "UPDATE campaigns SET calling_config = "
                 "(COALESCE(calling_config,'{}'::jsonb) - 'trunk'), updated_at = NOW() "
                 "WHERE id = $1::uuid AND tenant_id = $2::uuid",
-                body.campaign_id, current_user.tenant_id,
+                campaign_id, current_user.tenant_id,
             )
-        return CampaignTrunkResponse(campaign_id=body.campaign_id)
+        return CampaignTrunkResponse(campaign_id=campaign_id)
 
     async with db_pool.acquire() as conn:
         async with conn.transaction():
             trunk = await _fetch_assignable_trunk(conn, tid, current_user.tenant_id)
-        if trunk is None:
+        runtime = (
+            evaluate_trunk_runtime(dict(trunk), require_inbound=False)
+            if trunk is not None
+            else None
+        )
+        outbound_direction = bool(
+            trunk is not None and trunk["direction"] in {"outbound", "both"}
+        )
+        if trunk is None or not runtime or not runtime.ready or not outbound_direction:
+            runtime_detail = (
+                "The trunk is not outbound-capable."
+                if trunk is not None and not outbound_direction
+                else runtime.detail if runtime else "The trunk is unavailable."
+            )
             return _problem(
                 request=request,
                 status_code=400,
                 title="Invalid Trunk",
-                detail="That trunk is not active or not available to this tenant.",
+                detail=f"That trunk is not safe to assign: {runtime_detail}",
                 type_suffix="invalid-campaign-trunk",
             )
+        from app.domain.services.telephony.trunk_resolver import (
+            env_default_endpoint,
+            platform_default_trunk_name,
+        )
+        is_platform_default = (
+            str(trunk["trunk_name"] or "").strip().lower()
+            == platform_default_trunk_name().strip().lower()
+        )
         snapshot = {
             "id": str(trunk["id"]),
-            "endpoint": f"trunk-{trunk['id']}",
+            "endpoint": env_default_endpoint() if is_platform_default else f"trunk-{trunk['id']}",
             "caller_id": trunk["caller_id"],
             "label": trunk["trunk_name"] or trunk["auth_username"],
         }
@@ -1102,7 +1298,7 @@ async def set_campaign_trunk_assignment(
             "|| jsonb_build_object('trunk', $3::jsonb), updated_at = NOW() "
             "WHERE id = $1::uuid AND tenant_id = $2::uuid",
             # Raw dict — see create-path comment above.
-            body.campaign_id, current_user.tenant_id, snapshot,
+                campaign_id, current_user.tenant_id, snapshot,
         )
         if updated == "UPDATE 0":
             return _problem(
@@ -1113,6 +1309,6 @@ async def set_campaign_trunk_assignment(
                 type_suffix="campaign-not-found",
             )
     return CampaignTrunkResponse(
-        campaign_id=body.campaign_id,
+        campaign_id=campaign_id,
         trunk_id=snapshot["id"], label=snapshot["label"], caller_id=snapshot["caller_id"],
     )

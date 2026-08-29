@@ -7,9 +7,11 @@ reusable service following the Domain-Driven Design pattern established
 by CampaignService.
 """
 import asyncio
+import json
 import logging
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import Iterator, Optional
 
 import asyncpg
 
@@ -22,6 +24,11 @@ from app.domain.models.dialer_job import DialerJob, JobStatus, CallOutcome
 from app.domain.services.queue_service import DialerQueueService
 from app.domain.repositories.call_repository import CallRepository
 from app.domain.repositories.lead_repository import LeadRepository
+from app.domain.services.call_status import (
+    TERMINAL_CALL_STATUSES,
+    CallOutcome as CallStatusOutcome,
+)
+from app.domain.services.dialer.job_states import IN_FLIGHT_STATUSES
 from app.workers.disposition_policy import DNC_OUTCOMES
 
 logger = logging.getLogger(__name__)
@@ -63,6 +70,145 @@ class WebhookTargetMismatch(Exception):
 NON_RETRYABLE_OUTCOMES = frozenset(DNC_OUTCOMES) | {CallOutcome.GOAL_ACHIEVED}
 
 
+@dataclass(frozen=True)
+class CallStatusResult:
+    """Durable outcome of one terminal callback.
+
+    ``handle_call_status`` used to return ``None`` for both success and every
+    persistence failure.  Teardown therefore had no way to distinguish a
+    committed call/lead/job/campaign transaction from a database outage before
+    acknowledging its Redis recovery ledger.  This result is the commit proof
+    used at that boundary.
+
+    ``applied`` means this invocation won the durable settlement marker and ran
+    the database side effects.  A duplicate may still be ``durable=True`` when
+    an earlier invocation already committed them.  ``durable`` is never true
+    for a missing row, a partial legacy write, or a swallowed database error.
+    """
+
+    call_id: str
+    found: bool
+    applied: bool
+    durable: bool
+    terminal_status: Optional[str] = None
+    terminal_outcome: Optional[str] = None
+    error: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class _CallStatusExecution:
+    """Internal DB result plus an optional post-commit Redis retry action.
+
+    Iteration intentionally preserves the old private helper's three-value
+    unpacking contract for downstream tests and any out-of-tree integrations.
+    New code should read ``result`` directly.
+    """
+
+    result: CallStatusResult
+    job_id: Optional[str] = None
+    campaign_id: Optional[str] = None
+    retry_args: Optional[tuple] = field(default=None, repr=False)
+
+    def __iter__(self) -> Iterator[object]:
+        yield self.job_id
+        yield self.campaign_id
+        yield self.retry_args
+
+
+def _terminal_row_is_durable(row: object) -> bool:
+    """Return whether a row proves the canonical DB settlement committed."""
+
+    if row is None:
+        return False
+    try:
+        status = str(row["status"] or "").strip().lower()  # type: ignore[index]
+        outcome = row["outcome"]  # type: ignore[index]
+        ended_at = row["ended_at"]  # type: ignore[index]
+        settled_at = row["terminal_settled_at"]  # type: ignore[index]
+        retry_payload = row["terminal_retry_payload"]  # type: ignore[index]
+        retry_enqueued_at = row["terminal_retry_enqueued_at"]  # type: ignore[index]
+    except (KeyError, TypeError):
+        return False
+    return bool(
+        status in TERMINAL_CALL_STATUSES
+        and outcome is not None
+        and ended_at is not None
+        and settled_at is not None
+        and (retry_payload is None or retry_enqueued_at is not None)
+    )
+
+
+# Operator/telephony endpoints settle a call with the richer
+# ``call_status.CallOutcome`` vocabulary, which the dialer's own CallOutcome
+# enum does not contain. These are REFERENCED, never re-spelled: a second
+# literal copy of the answered-outcome vocabulary is exactly how the outcome
+# sets drifted apart on 2026-08-03 and made billed minutes disagree with the
+# quota gate. `test_outcome_sets_have_exactly_one_definition` enforces this.
+_POST_ANSWER_HANGUP_OUTCOMES = frozenset({
+    CallStatusOutcome.AGENT_HUNG_UP.value,
+    CallStatusOutcome.CUSTOMER_HUNG_UP.value,
+})
+
+# ``canceled`` is the US spelling already present in production rows (see
+# ``TERMINAL_CALL_STATUSES``); it has no CallOutcome member of its own, so it
+# sits alongside the canonical enum value rather than replacing it.
+_PRE_ANSWER_CANCEL_OUTCOMES = frozenset({
+    CallStatusOutcome.CANCELLED.value,
+    "canceled",
+})
+
+
+def _effective_terminal_outcome(
+    persisted: object,
+    fallback: CallOutcome,
+) -> CallOutcome:
+    """Map the first persisted terminal fact to dialer disposition truth."""
+
+    value = str(persisted or "").strip().lower()
+    try:
+        return CallOutcome(value)
+    except ValueError:
+        # Operator endpoints use the richer call-status vocabulary. Preserve
+        # that first-writer fact while mapping it to the closest existing
+        # dialer disposition (never the later callback's contradictory value).
+        if value in _POST_ANSWER_HANGUP_OUTCOMES:
+            return CallOutcome.ANSWERED
+        if value in _PRE_ANSWER_CANCEL_OUTCOMES:
+            return CallOutcome.GOAL_NOT_ACHIEVED
+        logger.warning(
+            "call_status: persisted terminal outcome %r is unmapped; using "
+            "fail-closed goal_not_achieved disposition instead of callback %s",
+            value,
+            fallback.value,
+        )
+        return CallOutcome.GOAL_NOT_ACHIEVED
+
+
+def _retry_args_from_payload(payload: object) -> Optional[tuple]:
+    """Rehydrate a durable retry outbox payload for idempotent Redis replay."""
+
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(payload, dict):
+        return None
+    try:
+        return (
+            str(payload["job_id"]),
+            dict(payload["job_data"]),
+            CallOutcome(str(payload["outcome"])),
+            str(payload.get("campaign_id") or ""),
+            str(payload.get("lead_id") or ""),
+            str(payload["tenant_id"]),
+            int(payload["attempt_number"]),
+            int(payload["delay_seconds"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 class CallService:
     """
     Domain service for call lifecycle management.
@@ -91,13 +237,16 @@ class CallService:
         # shared 4-worker thread pool AND opens a brand-new UNPOOLED
         # asyncpg.connect() per query (see postgres_adapter.QueryBuilder /
         # RpcBuilder._run_sync + _execute_async) — every call teardown paid
-        # for that on 4-6 sequential round-trips. When `db_pool` is supplied,
-        # handle_call_status routes through `_handle_call_status_pooled`
-        # instead, which does the same writes as ONE pooled, non-blocking
-        # asyncpg transaction. `db_pool=None` keeps the legacy blocking path
-        # so callers that don't pass a pool (unit tests, anything not yet
-        # wired through container.py) behave exactly as before.
-        self._db_pool = db_pool
+        # for that on 4-6 sequential round-trips. ``handle_call_status`` now
+        # commits all database effects through the pooled, non-blocking path.
+        # It fails closed without a pool because the old RPC/sequential path
+        # could claim success between separate commits.
+        # ``PostgresClient`` already owns the canonical asyncpg pool. Prefer it
+        # even when an older factory omitted the explicit ``db_pool`` keyword;
+        # this keeps every real runtime caller on the locked, transactional
+        # settlement path. The RPC/sequential methods remain only as explicit
+        # rejection shims for obsolete out-of-tree callers.
+        self._db_pool = db_pool or getattr(db_client, "pool", None)
     
     # =========================================================================
     # Call Status Handling
@@ -108,178 +257,170 @@ class CallService:
         call_uuid: str,
         outcome: CallOutcome,
         duration: Optional[int] = None
-    ) -> None:
+    ) -> CallStatusResult:
         """
         Handle a call status update from the telephony provider.
 
-        Uses the atomic RPC function (update_call_status) when available,
-        falling back to sequential writes for backward compatibility.
-
-        Steps performed:
-        1. Update call record + lead status (atomic via RPC, or sequential)
-        2. Handle dialer job completion and retry logic
-        3. Update campaign counters
-
-        2026-07-08: when this service was constructed with a `db_pool`
-        (see __init__), all of the above runs through
-        `_handle_call_status_pooled` as ONE non-blocking asyncpg
-        transaction instead of the sequential blocking calls below. The
-        `db_pool is None` branch is kept byte-for-byte as it was so any
-        caller not yet passing a pool (unit tests, etc.) is unaffected.
+        The call projection, lead status, dialer job, campaign counters and
+        retry outbox are serialized by a row lock and committed in one pooled
+        PostgreSQL transaction. A retry enqueue is then delivered from the
+        durable outbox with a stable Redis idempotency key. No-pool callers
+        receive an explicit non-durable result and perform no writes.
 
         Args:
             call_uuid: Unique call identifier from telephony provider
             outcome: The call outcome (answered, busy, failed, etc.)
             duration: Call duration in seconds (if available)
         """
+        campaign_id: Optional[str] = None
         try:
             outcome_value = outcome.value if hasattr(outcome, 'value') else str(outcome)
 
-            if self._db_pool is not None:
-                job_id, campaign_id, retry_args = await self._handle_call_status_pooled(
-                    call_uuid, outcome, outcome_value, duration,
+            if self._db_pool is None:
+                # Exact-once settlement spans call, lead, job and campaign
+                # rows. The historical RPC/sequential compatibility chain used
+                # separate connections and could mark the call committed before
+                # later effects failed. Fail closed rather than expose that
+                # partial-write mode. Every real PostgresClient supplies its
+                # pool automatically in __init__; this only rejects obsolete
+                # third-party adapters and incomplete test doubles.
+                logger.error(
+                    "handle_call_status requires an atomic database pool "
+                    "for call=%s",
+                    call_uuid,
                 )
-                if retry_args is not None:
-                    # Redis I/O — deliberately done AFTER the DB transaction
-                    # above has committed, so we never hold a pooled
-                    # connection while talking to Redis.
-                    await self._schedule_retry(*retry_args)
+                return CallStatusResult(
+                    call_id=call_uuid,
+                    found=False,
+                    applied=False,
+                    durable=False,
+                    error="atomic_pool_required",
+                )
+
+            execution = await self._handle_call_status_pooled(
+                call_uuid, outcome, outcome_value, duration,
+            )
+            campaign_id = execution.campaign_id
+            if execution.retry_args is not None:
+                # Redis I/O — deliberately done AFTER the DB transaction
+                # above has committed, so we never hold a pooled connection
+                # while talking to Redis. The DB outbox remains pending until
+                # both the idempotent enqueue and its DB acknowledgement have
+                # succeeded.
+                retry_idempotency_key = (
+                    f"call-terminal:{call_uuid}:"
+                    f"{execution.retry_args[0]}:"
+                    f"{int(execution.retry_args[6]) + 1}"
+                )
+                retry_scheduled = await self._schedule_retry(
+                    *execution.retry_args,
+                    idempotency_key=retry_idempotency_key,
+                )
+                if not retry_scheduled:
+                    return CallStatusResult(
+                        call_id=call_uuid,
+                        found=execution.result.found,
+                        applied=execution.result.applied,
+                        durable=False,
+                        terminal_status=execution.result.terminal_status,
+                        terminal_outcome=execution.result.terminal_outcome,
+                        error="retry_enqueue_failed",
+                    )
+                result = await self._mark_retry_enqueued(
+                    call_uuid,
+                    applied=execution.result.applied,
+                )
+                if result.durable:
+                    # The marker deliberately had no expiry while PostgreSQL
+                    # acknowledgement was pending. Once the DB outbox is
+                    # durable, age it best-effort; failure only leaks a safe
+                    # idempotency key and must not revoke settlement proof.
+                    confirm_retry = getattr(
+                        self._queue_service,
+                        "confirm_retry_once",
+                        None,
+                    )
+                    if callable(confirm_retry):
+                        try:
+                            await asyncio.wait_for(
+                                confirm_retry(retry_idempotency_key),
+                                timeout=1.0,
+                            )
+                        except Exception as confirm_exc:  # noqa: BLE001
+                            logger.debug(
+                                "retry idempotency marker retention failed "
+                                "call=%s err=%s",
+                                call_uuid,
+                                confirm_exc,
+                            )
             else:
-                # Legacy blocking path — unchanged.
-                # Try atomic RPC first (steps 1+2: call + lead in one transaction)
-                rpc_result = await self._try_atomic_update(call_uuid, outcome_value, duration)
+                result = execution.result
 
-                if rpc_result:
-                    # RPC succeeded — extract metadata for job/campaign handling
-                    job_id = rpc_result.get("job_id")
-                    campaign_id = rpc_result.get("campaign_id")
-                else:
-                    # Fallback: sequential writes (RPC not deployed yet)
-                    job_id, campaign_id = await self._sequential_update(
-                        call_uuid, outcome, outcome_value, duration
-                    )
+            if not result.durable:
+                return result
 
-                # Handle dialer job completion (always done app-side for retry
-                # logic). Must run BEFORE the counters: a lead that is going
-                # to be redialled has not been completed or failed yet.
-                lead_is_terminal = True
-                if job_id:
-                    lead_is_terminal = await self._handle_job_completion(
-                        job_id=job_id,
-                        outcome=outcome,
-                        campaign_id=campaign_id or "",
-                        lead_id=rpc_result.get("lead_id", "") if rpc_result else ""
-                    )
-
-                # Update campaign counters — once per LEAD, not per attempt.
-                if campaign_id and lead_is_terminal:
-                    self._update_campaign_counters(campaign_id, outcome)
-
-            logger.info(f"Call {call_uuid} status updated: {outcome}")
+            logger.info(
+                "Call %s status durably settled: %s",
+                call_uuid,
+                result.terminal_outcome,
+            )
             
             # --- Day 1: Event logging (additive, non-blocking) ---
             try:
                 from app.domain.repositories.call_event_repository import CallEventRepository
-                event_repo = CallEventRepository(self._db_client)
-                await event_repo.log_event(
-                    call_id=call_uuid,
-                    event_type="state_change",
-                    source="call_service",
-                    event_data={
-                        "outcome": outcome_value,
-                        "duration": duration,
-                        "campaign_id": campaign_id,
-                    },
-                    new_state=outcome_value,
-                )
+                if result.applied:
+                    event_repo = CallEventRepository(self._db_client)
+                    await event_repo.log_event(
+                        call_id=call_uuid,
+                        event_type="state_change",
+                        source="call_service",
+                        event_data={
+                            "outcome": result.terminal_outcome,
+                            "duration": duration,
+                            "campaign_id": campaign_id,
+                        },
+                        new_state=result.terminal_outcome or result.terminal_status,
+                    )
             except Exception as evt_err:
                 logger.debug(f"Event logging failed (non-critical): {evt_err}")
-            
+
+            return result
         except Exception as e:
             logger.error(f"Error handling call status for {call_uuid}: {e}", exc_info=True)
+            return CallStatusResult(
+                call_id=call_uuid,
+                found=False,
+                applied=False,
+                durable=False,
+                error=str(e),
+            )
     
     async def _try_atomic_update(
         self, call_uuid: str, outcome_value: str, duration: Optional[int]
     ) -> Optional[dict]:
+        """Reject the obsolete partial-transaction compatibility path.
+
+        Terminal settlement spans calls, leads, dialer jobs, campaign counters,
+        and a retry outbox. A standalone RPC cannot truthfully certify those
+        application-owned effects, so it must never be used as a fallback.
         """
-        Try to use the atomic RPC function for call+lead update.
-        Returns the RPC result dict on success, None if RPC unavailable.
-        """
-        try:
-            rpc_params = {
-                "p_call_uuid": call_uuid,
-                "p_outcome": outcome_value,
-            }
-            if duration is not None:
-                rpc_params["p_duration"] = int(duration)
-            
-            response = self._db_client.rpc("update_call_status", rpc_params).execute()
-            
-            if response.data and response.data.get("found"):
-                logger.debug(f"Atomic RPC update succeeded for call {call_uuid}")
-                return response.data
-            elif response.data and not response.data.get("found"):
-                logger.warning(f"Call not found via RPC: {call_uuid}")
-                return None
-            return None
-        except Exception as e:
-            # RPC not available (migration not applied) — fall back silently
-            logger.debug(f"RPC update_call_status not available, using fallback: {e}")
-            return None
+        raise RuntimeError("atomic_pool_required")
     
     async def _sequential_update(
         self, call_uuid: str, outcome: CallOutcome, outcome_value: str,
         duration: Optional[int]
-    ) -> tuple:
-        """
-        Fallback: sequential writes for call + lead update.
-        Returns (job_id, campaign_id) for downstream processing.
-        """
-        # Get call record via repository
-        call = await self._call_repo.get_by_id(call_uuid)
-        
-        if not call:
-            logger.warning(f"Call not found: {call_uuid}")
-            return None, None
-        
-        job_id = call.get("dialer_job_id")
-        campaign_id = call.get("campaign_id")
-        lead_id = call.get("lead_id")
-        
-        # Update call record via repository
-        call_update = {
-            "status": "completed",
-            "outcome": outcome_value,
-            "ended_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat()
-        }
-        # Persist duration whenever it was computed (including 0) so short/failed
-        # calls still record a row that reflects reality instead of leaving
-        # duration_seconds NULL. None means "not computed" — leave it untouched.
-        if duration is not None:
-            call_update["duration_seconds"] = int(duration)
-
-        await self._call_repo.update(call_uuid, call_update)
-        
-        # Update lead status via repository
-        if lead_id:
-            await self._update_lead_status(lead_id, outcome)
-        
-        return job_id, campaign_id
+    ) -> _CallStatusExecution:
+        """Reject sequential settlement because it cannot be crash-atomic."""
+        raise RuntimeError("atomic_pool_required")
 
     # =========================================================================
     # Pooled (async, non-blocking) teardown path — 2026-07-08
     # =========================================================================
     #
-    # Everything below reproduces the exact SQL the legacy path above issues
-    # (postgres_adapter's `_rpc_update_call_status` / `_rpc_increment_
-    # campaign_counter`, plus `_sequential_update` / `_update_lead_status` /
-    # `_handle_job_completion`), just run against the pooled asyncpg
-    # connection inside ONE transaction instead of N sequential blocking
-    # round-trips through `Client.table()/.rpc()` (each of which blocks the
-    # event loop on a shared 4-worker thread pool AND opens a brand-new
-    # unpooled `asyncpg.connect()`). This is a transport change only — same
-    # rows, same status values, same fail-soft behavior.
+    # Everything below owns the canonical terminal settlement transaction.
+    # The locked call row elects one database-side-effect winner, and the
+    # marker/outbox written last lets lifecycle distinguish a durable commit
+    # from a dependency failure before acknowledging its cleanup ledger.
 
     async def _handle_call_status_pooled(
         self,
@@ -287,7 +428,7 @@ class CallService:
         outcome: CallOutcome,
         outcome_value: str,
         duration: Optional[int],
-    ) -> tuple:
+    ) -> _CallStatusExecution:
         """Non-blocking equivalent of the RPC-then-fallback flow above.
 
         RLS: the teardown caller (lifecycle.py `_on_call_ended`) has no
@@ -303,10 +444,11 @@ class CallService:
         multi-statement transaction this method needs, so we go straight to
         `acquire_with_tenant`, which already gets this right.)
 
-        A saturated pool degrades gracefully: `acquire_with_tenant`'s
+        A saturated pool fails closed: `acquire_with_tenant`'s
         `timeout` mirrors `get_db()`'s bounded acquire
         (`PG_POOL_ACQUIRE_TIMEOUT`, default 10s) — on expiry we log and
-        return a no-op result instead of stalling teardown indefinitely.
+        returns an explicit non-durable result instead of stalling teardown
+        indefinitely or manufacturing success.
 
         Returns (job_id, campaign_id, retry_args) where retry_args is either
         None or the positional-argument tuple for `_schedule_retry`,
@@ -351,36 +493,107 @@ class CallService:
                 None if bypass else tenant_id,
                 timeout=_ACQUIRE_TIMEOUT_S,
             ) as conn:
-                # ---- Step 1: resolve the call row ---------------------------
+                # ---- Step 1: elect one durable settlement winner -----------
+                # The row lock is the concurrency boundary. A provider burst,
+                # an operator endpoint followed by the provider callback, and
+                # two different worker processes serialize here. The endpoint
+                # is allowed to win the terminal *status*; terminal_settled_at
+                # separately records that outbound lead/job/campaign effects
+                # have committed exactly once.
                 row = await conn.fetchrow(
                     """
-                    SELECT id, lead_id, campaign_id, dialer_job_id, status
+                    SELECT id, lead_id, campaign_id, dialer_job_id, status,
+                           outcome, ended_at, duration_seconds,
+                           terminal_settled_at, terminal_retry_payload,
+                           terminal_retry_enqueued_at
                     FROM calls WHERE id = $1
+                    FOR UPDATE
                     """,
                     call_uuid,
                 )
                 if row is None:
                     logger.warning(f"Call not found: {call_uuid}")
-                    return None, None, None
-
-                # Idempotency guard: teardown can be driven twice for the
-                # same call (the adapter's pre-Stasis terminal arm racing a
-                # later StasisEnd/ChannelDestroyed, or an in-process guard
-                # — `lifecycle._ended_calls_in_flight` / the adapter's
-                # `_end_dispatched` — getting reset by a worker restart).
-                # Once this row is already `completed`, a repeat run must
-                # NOT re-increment `leads.call_attempts`, re-bump campaign
-                # counters, or re-schedule a retry job. First writer wins;
-                # only transition out of a non-terminal status once.
-                if row["status"] == "completed":
-                    logger.info(
-                        "handle_call_status: call %s already completed — "
-                        "skipping duplicate teardown", call_uuid,
+                    return _CallStatusExecution(
+                        result=CallStatusResult(
+                            call_id=call_uuid,
+                            found=False,
+                            applied=False,
+                            durable=False,
+                            error="call_not_found",
+                        )
                     )
-                    return None, None, None
 
-                await self._update_call_row_pooled(
-                    conn, call_uuid, outcome_value, duration,
+                if row["terminal_settled_at"] is not None:
+                    # Migration 0028 stamps pre-cutover terminal rows to
+                    # prevent historical lead/campaign effects from replaying.
+                    # A rare legacy row may still be missing outcome/ended_at;
+                    # fill only those call facts under the same lock, without
+                    # re-running any settlement side effect.
+                    if (
+                        str(row["status"] or "") in TERMINAL_CALL_STATUSES
+                        and (row["outcome"] is None or row["ended_at"] is None)
+                    ):
+                        row = await self._update_call_row_pooled(
+                            conn,
+                            call_uuid,
+                            outcome_value,
+                            duration,
+                            already_terminal=True,
+                        )
+                    durable = _terminal_row_is_durable(row)
+                    pending_retry_args = None
+                    if (
+                        row["terminal_retry_payload"] is not None
+                        and row["terminal_retry_enqueued_at"] is None
+                    ):
+                        pending_retry_args = _retry_args_from_payload(
+                            row["terminal_retry_payload"]
+                        )
+                        if pending_retry_args is None:
+                            durable = False
+                    logger.info(
+                        "handle_call_status: call %s settlement already committed "
+                        "— skipping duplicate side effects", call_uuid,
+                    )
+                    return _CallStatusExecution(
+                        result=CallStatusResult(
+                            call_id=call_uuid,
+                            found=True,
+                            applied=False,
+                            durable=durable,
+                            terminal_status=str(row["status"] or ""),
+                            terminal_outcome=row["outcome"],
+                            error=None if durable else (
+                                "retry_enqueue_pending"
+                                if pending_retry_args is not None
+                                else "terminal_settlement_unverified"
+                            ),
+                        ),
+                        job_id=(
+                            str(row["dialer_job_id"])
+                            if pending_retry_args is not None
+                            and row["dialer_job_id"] else None
+                        ),
+                        campaign_id=(
+                            str(row["campaign_id"])
+                            if pending_retry_args is not None
+                            and row["campaign_id"] else None
+                        ),
+                        retry_args=pending_retry_args,
+                    )
+
+                terminal_row = await self._update_call_row_pooled(
+                    conn,
+                    call_uuid,
+                    outcome_value,
+                    duration,
+                    already_terminal=(
+                        str(row["status"] or "") in TERMINAL_CALL_STATUSES
+                    ),
+                )
+                effective_outcome = _effective_terminal_outcome(
+                    terminal_row["outcome"] if terminal_row else None,
+                    outcome,
                 )
 
                 lead_id = str(row["lead_id"]) if row["lead_id"] else None
@@ -388,7 +601,9 @@ class CallService:
                 job_id = str(row["dialer_job_id"]) if row["dialer_job_id"] else None
 
                 if lead_id:
-                    await self._update_lead_status_pooled(conn, lead_id, outcome)
+                    await self._update_lead_status_pooled(
+                        conn, lead_id, effective_outcome
+                    )
 
                 # ---- Step 2: dialer job completion + retry decision --------
                 # Runs BEFORE the campaign counters (it used to run after) so
@@ -400,23 +615,169 @@ class CallService:
                     lead_is_terminal, retry_args = await self._handle_job_completion_pooled(
                         conn,
                         job_id=job_id,
-                        outcome=outcome,
+                        outcome=effective_outcome,
                         campaign_id=campaign_id or "",
                         lead_id=lead_id or "",
                     )
 
                 # ---- Step 3: campaign counters ------------------------------
                 if campaign_id and lead_is_terminal:
-                    await self._update_campaign_counters_pooled(conn, campaign_id, outcome)
+                    await self._update_campaign_counters_pooled(
+                        conn, campaign_id, effective_outcome
+                    )
+
+                retry_payload = None
+                if retry_args is not None:
+                    (
+                        retry_job_id,
+                        retry_job_data,
+                        retry_outcome,
+                        retry_campaign_id,
+                        retry_lead_id,
+                        retry_tenant_id,
+                        retry_attempt_number,
+                        retry_delay_seconds,
+                    ) = retry_args
+                    retry_payload = {
+                        "job_id": retry_job_id,
+                        "job_data": {
+                            "priority": retry_job_data.get("priority", 5),
+                            "phone_number": retry_job_data.get("phone_number", ""),
+                        },
+                        "outcome": retry_outcome.value,
+                        "campaign_id": retry_campaign_id,
+                        "lead_id": retry_lead_id,
+                        "tenant_id": retry_tenant_id,
+                        "attempt_number": retry_attempt_number,
+                        "delay_seconds": retry_delay_seconds,
+                    }
+
+                # Commit marker is intentionally the last DB write in this
+                # transaction. Any exception above rolls back the terminal row
+                # and every side effect together, leaving the callback
+                # retryable. COALESCE protects against accidental rewrites.
+                terminal_row = await conn.fetchrow(
+                    """
+                    UPDATE calls
+                    SET terminal_settled_at = COALESCE(terminal_settled_at, NOW()),
+                        terminal_retry_payload = $2::jsonb,
+                        terminal_retry_enqueued_at = CASE
+                            WHEN $2::jsonb IS NULL THEN NULL
+                            ELSE terminal_retry_enqueued_at
+                        END,
+                        updated_at = NOW()
+                    WHERE id = $1
+                    RETURNING status, outcome, ended_at, terminal_settled_at,
+                              terminal_retry_payload,
+                              terminal_retry_enqueued_at
+                    """,
+                    call_uuid,
+                    retry_payload,
+                )
         except (asyncio.TimeoutError, DatabasePoolTimeoutError) as exc:
             logger.error(
                 "handle_call_status: DB pool acquire timed out for call=%s "
                 "— teardown degrading gracefully (no writes landed): %s",
                 call_uuid, exc,
             )
-            return None, None, None
+            return _CallStatusExecution(
+                result=CallStatusResult(
+                    call_id=call_uuid,
+                    found=False,
+                    applied=False,
+                    durable=False,
+                    error=f"db_pool_timeout:{exc}",
+                )
+            )
 
-        return job_id, campaign_id, retry_args
+        durable = _terminal_row_is_durable(terminal_row)
+        return _CallStatusExecution(
+            result=CallStatusResult(
+                call_id=call_uuid,
+                found=True,
+                applied=True,
+                durable=durable,
+                terminal_status=(
+                    str(terminal_row["status"] or "") if terminal_row else None
+                ),
+                terminal_outcome=(terminal_row["outcome"] if terminal_row else None),
+                error=None if durable else "terminal_settlement_unverified",
+            ),
+            job_id=job_id,
+            campaign_id=campaign_id,
+            retry_args=retry_args,
+        )
+
+    async def _mark_retry_enqueued(
+        self,
+        call_uuid: str,
+        *,
+        applied: bool,
+    ) -> CallStatusResult:
+        """Acknowledge a durable retry outbox only after Redis confirms it.
+
+        ``schedule_retry_once`` is idempotent, so a crash after its atomic
+        Redis write but before this PostgreSQL acknowledgement is safe: the
+        next terminal/recovery callback replays the same key, Redis reports it
+        already present, and this update completes the cross-store commit.
+        """
+
+        bypass = get_bypass_rls()
+        tenant_id = get_current_tenant_id()
+        if not bypass and not tenant_id:
+            return CallStatusResult(
+                call_id=call_uuid,
+                found=False,
+                applied=applied,
+                durable=False,
+                error="retry_ack_missing_tenant_context",
+            )
+        try:
+            async with acquire_with_tenant(
+                self._db_pool,
+                None if bypass else tenant_id,
+                timeout=_ACQUIRE_TIMEOUT_S,
+            ) as conn:
+                row = await conn.fetchrow(
+                    """
+                    UPDATE calls
+                    SET terminal_retry_enqueued_at = COALESCE(
+                            terminal_retry_enqueued_at, NOW()
+                        ),
+                        updated_at = NOW()
+                    WHERE id = $1
+                      AND terminal_retry_payload IS NOT NULL
+                    RETURNING status, outcome, ended_at,
+                              terminal_settled_at,
+                              terminal_retry_payload,
+                              terminal_retry_enqueued_at
+                    """,
+                    call_uuid,
+                )
+        except Exception as exc:  # noqa: BLE001 - returned as commit failure
+            logger.error(
+                "call_status retry outbox ack failed call=%s err=%s",
+                call_uuid,
+                exc,
+            )
+            return CallStatusResult(
+                call_id=call_uuid,
+                found=False,
+                applied=applied,
+                durable=False,
+                error=f"retry_ack_failed:{exc}",
+            )
+
+        durable = _terminal_row_is_durable(row)
+        return CallStatusResult(
+            call_id=call_uuid,
+            found=row is not None,
+            applied=applied,
+            durable=durable,
+            terminal_status=str(row["status"] or "") if row else None,
+            terminal_outcome=row["outcome"] if row else None,
+            error=None if durable else "retry_ack_unverified",
+        )
 
     async def _update_call_row_pooled(
         self,
@@ -424,29 +785,50 @@ class CallService:
         call_uuid: str,
         outcome_value: str,
         duration: Optional[int],
-    ) -> None:
-        """Same UPDATE the legacy RPC shim / `_sequential_update` issue."""
-        if duration is None:
-            await conn.execute(
+        *,
+        already_terminal: bool,
+    ):
+        """Persist terminal facts without overwriting an earlier terminal.
+
+        An operator endpoint may have written ``ended`` first. In that case
+        its status/outcome/duration remain authoritative and we only fill
+        missing facts before running the once-only settlement side effects.
+        """
+        if already_terminal:
+            return await conn.fetchrow(
                 """
                 UPDATE calls
-                SET status = 'completed', outcome = $2,
-                    ended_at = NOW(), updated_at = NOW()
+                SET outcome = COALESCE(outcome, $2),
+                    duration_seconds = COALESCE(duration_seconds, $3),
+                    ended_at = COALESCE(ended_at, NOW()),
+                    updated_at = NOW()
                 WHERE id = $1
+                RETURNING status, outcome, ended_at, duration_seconds,
+                          terminal_settled_at, terminal_retry_payload,
+                          terminal_retry_enqueued_at
                 """,
-                call_uuid, outcome_value,
+                call_uuid,
+                outcome_value,
+                int(duration) if duration is not None else None,
             )
-        else:
-            await conn.execute(
-                """
-                UPDATE calls
-                SET status = 'completed', outcome = $2,
-                    duration_seconds = $3,
-                    ended_at = NOW(), updated_at = NOW()
-                WHERE id = $1
-                """,
-                call_uuid, outcome_value, int(duration),
-            )
+
+        return await conn.fetchrow(
+            """
+            UPDATE calls
+            SET status = 'completed', outcome = $2,
+                duration_seconds = COALESCE($3, duration_seconds),
+                ended_at = COALESCE(ended_at, NOW()), updated_at = NOW()
+            WHERE id = $1
+              AND status <> ALL($4::text[])
+            RETURNING status, outcome, ended_at, duration_seconds,
+                      terminal_settled_at, terminal_retry_payload,
+                      terminal_retry_enqueued_at
+            """,
+            call_uuid,
+            outcome_value,
+            int(duration) if duration is not None else None,
+            list(TERMINAL_CALL_STATUSES),
+        )
 
     async def _update_lead_status_pooled(
         self, conn: asyncpg.Connection, lead_id: str, outcome: CallOutcome,
@@ -562,11 +944,11 @@ class CallService:
         )
         outcome_value = outcome.value if hasattr(outcome, 'value') else str(outcome)
 
-        # Idempotency guard (defense in depth, alongside the calls.status
-        # check in `_handle_call_status_pooled`): only ever transition a job
-        # OUT of PROCESSING once. If a duplicate teardown somehow reaches
-        # this far, `updated_job_id` comes back None and we must NOT
-        # re-schedule a second retry for the same job.
+        # Idempotency guard (defense in depth, alongside the call settlement
+        # marker): only ever transition a job out of the canonical in-flight
+        # states once. ``calling`` is retained for older workers/schemas while
+        # current workers use ``processing``. If a duplicate teardown reaches
+        # this far, updated_job_id is None and no second retry is scheduled.
         if decision.should_retry:
             # ATTEMPT ACCOUNTING (compliance-critical): advance the persisted
             # counter in the SAME guarded UPDATE that books the retry. Nothing
@@ -574,7 +956,7 @@ class CallService:
             # forever and `disposition_policy`'s `attempt_number >= cap` test
             # (every cap is >= 2) could never fire — a busy lead was redialled
             # every 5 minutes indefinitely. The increment rides the existing
-            # `status = 'processing'` guard, so it is atomic and cannot be
+            # in-flight-status guard, so it is atomic and cannot be
             # applied twice by a duplicate teardown. Expressed as SQL rather
             # than a Python value so it stays a pure, race-free increment.
             #
@@ -589,10 +971,11 @@ class CallService:
                 SET status = $2, last_outcome = $3, failure_reason = $4,
                     attempt_number = GREATEST(COALESCE(attempt_number, 1), 1) + 1,
                     updated_at = NOW()
-                WHERE id = $1 AND status = 'processing'
+                WHERE id = $1 AND status = ANY($5::text[])
                 RETURNING id
                 """,
                 job_id, final_status_value, outcome_value, decision.reason,
+                list(IN_FLIGHT_STATUSES),
             )
         else:
             updated_job_id = await conn.fetchval(
@@ -600,16 +983,17 @@ class CallService:
                 UPDATE dialer_jobs
                 SET status = $2, last_outcome = $3, failure_reason = $4,
                     updated_at = NOW(), completed_at = NOW()
-                WHERE id = $1 AND status = 'processing'
+                WHERE id = $1 AND status = ANY($5::text[])
                 RETURNING id
                 """,
                 job_id, final_status_value, outcome_value, decision.reason,
+                list(IN_FLIGHT_STATUSES),
             )
 
         if updated_job_id is None:
             logger.info(
                 "job_completion job=%s already finalized (status was not "
-                "'processing') — skipping duplicate finalize/retry-schedule",
+                "in-flight) — skipping duplicate finalize/retry-schedule",
                 job_id,
             )
             # Someone else already finalised (and already counted) this job.
@@ -880,7 +1264,9 @@ class CallService:
         tenant_id: str,
         attempt_number: int,
         delay_seconds: int,
-    ) -> None:
+        *,
+        idempotency_key: Optional[str] = None,
+    ) -> bool:
         """Schedule a retry for a dialer job after ``delay_seconds``.
 
         Fresh-first sequencing: a *recycled* (retry) job must never jump
@@ -921,9 +1307,31 @@ class CallService:
         )
 
         if self._queue_service:
-            await self._queue_service.schedule_retry(retry_job, delay_seconds=delay_seconds)
-        else:
-            logger.error(f"Cannot schedule retry for job {job_id}: queue service unavailable")
+            if idempotency_key:
+                schedule_once = getattr(
+                    self._queue_service, "schedule_retry_once", None
+                )
+                if not callable(schedule_once):
+                    logger.error(
+                        "Cannot durably schedule retry for job %s: queue "
+                        "service lacks idempotent retry primitive",
+                        job_id,
+                    )
+                    return False
+                return bool(
+                    await schedule_once(
+                        retry_job,
+                        delay_seconds=delay_seconds,
+                        idempotency_key=idempotency_key,
+                    )
+                )
+            return bool(
+                await self._queue_service.schedule_retry(
+                    retry_job, delay_seconds=delay_seconds
+                )
+            )
+        logger.error(f"Cannot schedule retry for job {job_id}: queue service unavailable")
+        return False
     
     # =========================================================================
     # Goal Achievement & Spam Marking

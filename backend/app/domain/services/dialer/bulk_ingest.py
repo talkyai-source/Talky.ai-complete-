@@ -57,6 +57,18 @@ class LeadRecord:
     # migration — the leads table already has custom_fields), and later
     # threaded into the outbound agent's "who you're calling" prompt block.
     company: Optional[str] = None
+    # Expanded contact fields (goals.md §11). ``phone_raw`` remains the
+    # canonical dial number; mobile/business are additional numbers and never
+    # silently replace it.
+    mobile_number: Optional[str] = None
+    business_number: Optional[str] = None
+    company_name: Optional[str] = None
+    job_title: Optional[str] = None
+    best_time_to_call: Optional[str] = None
+    timezone: Optional[str] = None
+    calling_notes: Optional[str] = None
+    preferred_contact_method: Optional[str] = None
+    do_not_call: Optional[bool] = None
     custom_fields: dict = field(default_factory=dict)
     source_row: Optional[int] = None
 
@@ -93,7 +105,30 @@ def _custom_fields_with_company(rec: "LeadRecord") -> dict:
     company = (rec.company or "").strip()
     if company:
         fields["company"] = company
+    mobile = (rec.mobile_number or "").strip()
+    if mobile:
+        fields["mobile_number"] = mobile
     return fields
+
+
+def _expanded_lead_columns(rec: "LeadRecord") -> dict:
+    """Database-backed expanded fields, omitting absent values.
+
+    Omission matters for backward compatibility: a legacy CSV with four
+    columns still produces the same insert payload aside from fields it
+    actually supplied, while a richer sample sheet persists every value.
+    """
+    values = {
+        "business_number": rec.business_number,
+        "company_name": rec.company_name or rec.company,
+        "job_title": rec.job_title,
+        "best_time_to_call": rec.best_time_to_call,
+        "timezone": rec.timezone,
+        "calling_notes": rec.calling_notes,
+        "preferred_contact_method": rec.preferred_contact_method,
+        "do_not_call": rec.do_not_call,
+    }
+    return {key: value for key, value in values.items() if value is not None}
 
 
 def parse_pasted_numbers(text: str) -> list[str]:
@@ -189,6 +224,7 @@ def ingest_lead_records(
                 "last_name": rec.last_name,
                 "email": rec.email,
                 "custom_fields": _custom_fields_with_company(rec),
+                **_expanded_lead_columns(rec),
             })
             live_phones.add(phone)
             continue
@@ -202,6 +238,7 @@ def ingest_lead_records(
             "last_name": rec.last_name,
             "email": rec.email,
             "custom_fields": _custom_fields_with_company(rec),
+            **_expanded_lead_columns(rec),
             "status": "pending",
             "last_call_result": "pending",
             "call_attempts": 0,
@@ -237,6 +274,11 @@ def ingest_lead_records(
                 "last_name": rev["last_name"],
                 "email": rev["email"],
                 "custom_fields": rev["custom_fields"],
+                **{
+                    key: value
+                    for key, value in rev.items()
+                    if key not in {"id", "first_name", "last_name", "email", "custom_fields"}
+                },
             }
             # Move a revived lead into the list it was just re-uploaded under.
             if list_id is not None:

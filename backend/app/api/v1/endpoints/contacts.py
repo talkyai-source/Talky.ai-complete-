@@ -11,13 +11,13 @@ Day 9 Enhancements:
 """
 import csv
 import io
-import re
 import logging
 import uuid
 from datetime import datetime
 from typing import List, Optional, Set
 
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Query
+from fastapi.responses import Response
 from pydantic import BaseModel
 from app.core.postgres_adapter import Client
 
@@ -30,10 +30,18 @@ router = APIRouter(prefix="/contacts", tags=["contacts"])
 
 
 class ImportError(BaseModel):
-    """Single import error"""
+    """One thing that went wrong, tied to the row and the column it came from.
+
+    goals.md §11 asks for row-level validation failures. "Invalid phone number"
+    on its own is not actionable in a 40-column spreadsheet, so ``field`` names
+    the canonical field the problem is about (``phone_number``, ``timezone``, …)
+    and stays None for whole-row problems that belong to no single column.
+    """
     row: Optional[int] = None
     error: str
     phone: Optional[str] = None
+    field: Optional[str] = None
+    value: Optional[str] = None
 
 
 class BulkImportResponse(BaseModel):
@@ -49,6 +57,12 @@ class BulkImportResponse(BaseModel):
     failed: int
     duplicates_skipped: int = 0
     errors: List[ImportError]
+    # Cells we could not use on rows that DID import. Separate from ``errors``
+    # so ``failed`` keeps meaning "contacts that did not land": a contact whose
+    # timezone was junk is still a contact, and losing it over one bad cell
+    # would be worse than the bad cell. Every entry names the row and the
+    # field, and the value was not written.
+    field_errors: List[ImportError] = []
     list_id: Optional[str] = None
     list_name: Optional[str] = None
     list_contact_count: Optional[int] = None
@@ -61,7 +75,21 @@ class BulkPasteRequest(BaseModel):
     text: str
 
 
-def _normalize_for_user(phone: str, user) -> str:
+def _campaign_default_country(campaign) -> str:
+    """The campaign's ISO country, resolved exactly as campaigns.py does.
+
+    Imported lazily (and defensively) because contacts.py <-> campaigns.py is
+    already a circular pair; a failure here must degrade to "US", never break
+    an import.
+    """
+    try:
+        from app.api.v1.endpoints.campaigns import campaign_default_country
+        return campaign_default_country(campaign)
+    except Exception:  # noqa: BLE001 — country resolution must never break import
+        return "US"
+
+
+def _normalize_for_user(phone: str, user, default_country: str = "US") -> str:
     """Normalize a phone number the SAME way the Add-Contact endpoint does, so
     CSV import and manual add never disagree.
 
@@ -71,6 +99,13 @@ def _normalize_for_user(phone: str, user) -> str:
     this, CSV import had its OWN looser rules (accepted 6-digit numbers for
     everyone), so a contact imported via CSV could be un-dialable by the
     campaign path that re-validated with the stricter normalizer.
+
+    ``default_country`` is the campaign's country (see
+    :func:`app.api.v1.endpoints.campaigns.campaign_default_country`) and is the
+    second half of that same "never disagree" promise: the manual-add path has
+    always passed it, so a UK campaign's "07700 900123" became ``+447700900123``
+    there while the CSV path — which dropped the parameter and silently used US
+    — stored the un-dialable ``+07700900123`` for the very same number.
     """
     from app.domain.services.phone_number_normalizer import (
         normalize_phone_number as _domain_normalize,
@@ -81,7 +116,9 @@ def _normalize_for_user(phone: str, user) -> str:
         relaxed = _phone_validation_relaxed(user)
     except Exception:  # noqa: BLE001 — never let the relaxed check break import
         relaxed = False
-    return normalize_phone_number_lenient(phone) if relaxed else _domain_normalize(phone)
+    if relaxed:
+        return normalize_phone_number_lenient(phone)
+    return _domain_normalize(phone, default_country=default_country or "US")
 
 
 def normalize_phone_number(phone: str) -> str:
@@ -101,39 +138,54 @@ def normalize_phone_number(phone: str) -> str:
     Raises:
         ValueError: If phone is invalid
     """
-    if not phone:
-        raise ValueError("Phone number is empty")
-    
-    # Remove all non-digit characters except leading +
-    has_plus = phone.strip().startswith('+')
-    cleaned = re.sub(r'[^\d]', '', phone)
-    
-    if not cleaned:
-        raise ValueError("Phone number contains no digits")
+    from app.domain.services.phone_number_normalizer import (
+        normalize_phone_number_legacy,
+    )
 
-    # Allow short SIP extensions (3–6 digits) to pass through as-is
-    if len(cleaned) <= 6:
-        if len(cleaned) < 3:
-            raise ValueError("Phone number too short (minimum 3 digits for SIP extensions)")
-        return cleaned  # Return raw SIP extension — no E.164 normalization
+    return normalize_phone_number_legacy(phone)
 
-    if len(cleaned) > 15:
-        raise ValueError("Phone number too long (maximum 15 digits)")
 
-    # If already has + and country code, use as-is
-    if has_plus:
-        return f"+{cleaned}"
+# =============================================================================
+# The import template (goals.md §11 "Update CSV import template")
+# =============================================================================
 
-    # If 10 digits (US/Canada without country code), add +1
-    if len(cleaned) == 10:
-        return f"+1{cleaned}"
+def _ingest_error_field(err) -> Optional[str]:
+    """Which column a shared-ingest error belongs to.
 
-    # If 11 digits starting with 1 (US/Canada with country code), add +
-    if len(cleaned) == 11 and cleaned.startswith('1'):
-        return f"+{cleaned}"
+    ``bulk_ingest`` is shared with the paste importer and carries no field, but
+    everything it reports per row is about the dial number. The exceptions are
+    the batch database failures, which belong to no column at all.
+    """
+    text = (getattr(err, "error", "") or "").lower()
+    if text.startswith("database insert failed") or text.startswith("revive failed"):
+        return None
+    return "phone_number"
 
-    # Otherwise, return with + prefix
-    return f"+{cleaned}"
+
+@router.get("/import-template")
+async def download_import_template(
+    current_user: CurrentUser = Depends(get_current_user),
+) -> Response:
+    """Download a CSV a customer can fill in and upload back.
+
+    Generated from the canonical field registry, header row plus one example
+    row, so it can never list a column the importer does not accept. A
+    hand-written template drifts the moment a field is added, and the symptom
+    is a customer filling in a column nothing reads.
+    """
+    from app.domain.services.contact_fields import TEMPLATE_FILENAME, csv_template_csv
+
+    return Response(
+        content=csv_template_csv(),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="{TEMPLATE_FILENAME}"',
+            # The accepted columns change when the registry changes; a cached
+            # copy of last month's template is exactly the drift we are
+            # removing.
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 # =============================================================================
@@ -160,11 +212,10 @@ async def upload_campaign_contacts(
     - Batch insertion for better performance
     - Detailed error reporting with row numbers
     
-    CSV Format Expected (company is optional; any extra column is preserved
-    in custom_fields and never breaks the import):
-        phone_number,first_name,last_name,email,company
-        +1234567890,John,Doe,john@example.com,Acme Roofing
-        555-123-4567,Jane,Smith,jane@example.com,
+    CSV headings are mapped through the canonical contact-field aliases, so
+    the sample sheet as well as common headings such as Mobile, Business Name,
+    Calling Hours and Call Notes are accepted. Unknown columns are preserved
+    in custom_fields and never break the import.
 
     Returns:
         ImportResult with counts and per-row errors
@@ -178,16 +229,21 @@ async def upload_campaign_contacts(
     
     try:
         # 1. Validate campaign exists AND belongs to user's tenant
-        campaign_query = db_client.table("campaigns").select("id, name, tenant_id").eq("id", campaign_id)
+        campaign_query = db_client.table("campaigns").select(
+            "id, name, tenant_id, script_config"
+        ).eq("id", campaign_id)
         campaign_query = apply_tenant_filter(campaign_query, current_user.tenant_id)
         campaign_response = campaign_query.execute()
-        
+
         if not campaign_response.data:
             raise HTTPException(status_code=404, detail="Campaign not found")
-        
+
         campaign_name = campaign_response.data[0].get("name", "Unknown")
         campaign_tenant_id = campaign_response.data[0].get("tenant_id")
-        
+        # Same country the manual Add-Contact path uses, so a CSV-imported and
+        # a hand-typed national-format number normalise identically.
+        default_country = _campaign_default_country(campaign_response.data[0])
+
         # 2. Read and decode file
         content = await file.read()
         text_content = None
@@ -208,15 +264,26 @@ async def upload_campaign_contacts(
         # 3. Parse CSV
         csv_reader = csv.DictReader(io.StringIO(text_content))
         
-        # Validate headers
-        required_headers = {'phone_number'}
-        if csv_reader.fieldnames:
-            headers = {h.lower().strip() for h in csv_reader.fieldnames}
-            if not required_headers.issubset(headers):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"CSV must have 'phone_number' column. Found: {', '.join(csv_reader.fieldnames)}"
-                )
+        # Map real-world headings to the ONE canonical field definition used by
+        # the preview endpoint and the agent-context builder. A Mobile column
+        # can be the dial number when no separate Phone number is supplied.
+        from app.domain.services.contact_fields import (
+            BY_KEY, coerce_bool, map_headers, validate_row,
+        )
+
+        fieldnames = list(csv_reader.fieldnames or [])
+        header_mapping = map_headers(fieldnames)
+        if not any(
+            mapped in {"phone_number", "mobile_number"}
+            for mapped in header_mapping.values()
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "CSV must include a phone or mobile-number column. "
+                    f"Found: {', '.join(fieldnames)}"
+                ),
+            )
         
         # 4. Parse CSV rows into LeadRecords (CSV-specific field mapping).
         #    Dedup / revive / chunk-insert is handled by the shared
@@ -226,36 +293,69 @@ async def upload_campaign_contacts(
             LeadRecord, ingest_lead_records,
         )
         records: List[LeadRecord] = []
+        field_errors: List[ImportError] = []
         for row_num, row in enumerate(csv_reader, start=2):  # Row 1 is header
-            phone_raw = None
-            first_name = last_name = email = company = None
+            values: dict[str, str] = {}
             custom_fields: dict = {}
-            for key, value in row.items():
-                key_lower = (key or "").lower().strip()
-                value_clean = value.strip() if value else None
-                if key_lower == 'phone_number':
-                    phone_raw = value_clean
-                elif key_lower == 'first_name':
-                    first_name = value_clean
-                elif key_lower == 'last_name':
-                    last_name = value_clean
-                elif key_lower == 'email':
-                    email = value_clean
-                elif key_lower == 'company':
-                    # Recognized 5th column — stored canonically as
-                    # custom_fields.company by the ingest core and later
-                    # injected into the agent's "who you're calling" prompt.
-                    company = value_clean
-                elif value_clean:
-                    # Any OTHER column is preserved verbatim in custom_fields,
-                    # so an extra/unknown column never breaks the import.
-                    custom_fields[key] = value_clean
+            for header, value in row.items():
+                value_clean = value.strip() if value else ""
+                if not value_clean:
+                    continue
+                mapped = header_mapping.get(header)
+                if mapped:
+                    # If a file repeats an equivalent heading, the first
+                    # non-empty value wins rather than changing per row.
+                    values.setdefault(mapped, value_clean)
+                else:
+                    custom_fields[header] = value_clean
+
+            # §11: row-level validation on the path that actually writes.
+            # The preview endpoint is optional and a user can upload straight
+            # past it, so without this an invalid timezone, a malformed email
+            # or a "maybe" in the do-not-call column reached the database with
+            # nobody told. A rejected cell is dropped and reported; the CONTACT
+            # still imports, because losing a person over one bad cell is worse
+            # than the bad cell.
+            for issue in validate_row(values, row_num):
+                if issue.field == "phone_number":
+                    # The dial number has a stricter authority downstream (the
+                    # shared normalizer), which already reports the row. Do not
+                    # count one bad number twice.
+                    continue
+                values.pop(issue.field, None)
+                label = BY_KEY[issue.field].label
+                field_errors.append(ImportError(
+                    row=issue.row, field=issue.field, value=issue.value,
+                    error=f"{label}: {issue.reason}",
+                ))
+
+            first_name = values.get("first_name")
+            last_name = values.get("last_name")
+            if not first_name and not last_name and values.get("full_name"):
+                name_parts = values["full_name"].split()
+                first_name = name_parts[0] if name_parts else None
+                last_name = " ".join(name_parts[1:]) or None
+
+            phone_raw = values.get("phone_number") or values.get("mobile_number")
+            company = values.get("company_name")
             records.append(LeadRecord(
                 phone_raw=phone_raw or "",
                 first_name=first_name,
                 last_name=last_name,
-                email=email,
+                email=values.get("email"),
                 company=company,
+                mobile_number=values.get("mobile_number"),
+                business_number=values.get("business_number"),
+                company_name=company,
+                job_title=values.get("job_title"),
+                best_time_to_call=values.get("best_time_to_call"),
+                timezone=values.get("timezone"),
+                calling_notes=values.get("calling_notes"),
+                preferred_contact_method=values.get("preferred_contact_method"),
+                do_not_call=(
+                    coerce_bool(values["do_not_call"])
+                    if "do_not_call" in values else None
+                ),
                 custom_fields=custom_fields,
                 source_row=row_num,
             ))
@@ -279,7 +379,7 @@ async def upload_campaign_contacts(
             campaign_id=campaign_id,
             tenant_id=campaign_tenant_id or current_user.tenant_id,
             records=records,
-            normalize=lambda p: _normalize_for_user(p, current_user),
+            normalize=lambda p: _normalize_for_user(p, current_user, default_country),
             list_id=list_id,
         )
 
@@ -302,9 +402,11 @@ async def upload_campaign_contacts(
             failed=len(result.errors),
             duplicates_skipped=result.duplicates_skipped,
             errors=[
-                ImportError(row=e.row, error=e.error, phone=e.phone)
+                ImportError(row=e.row, error=e.error, phone=e.phone,
+                            field=_ingest_error_field(e))
                 for e in result.errors[:100]
             ],
+            field_errors=field_errors[:200],
             list_id=list_id,
             list_name=file.filename if list_id is not None else None,
             list_contact_count=list_count,
@@ -343,12 +445,15 @@ async def paste_campaign_contacts(
     )
 
     # 1. Validate campaign exists AND belongs to the caller's tenant.
-    campaign_query = db_client.table("campaigns").select("id, name, tenant_id").eq("id", campaign_id)
+    campaign_query = db_client.table("campaigns").select(
+        "id, name, tenant_id, script_config"
+    ).eq("id", campaign_id)
     campaign_query = apply_tenant_filter(campaign_query, current_user.tenant_id)
     campaign_response = campaign_query.execute()
     if not campaign_response.data:
         raise HTTPException(status_code=404, detail="Campaign not found")
     campaign_tenant_id = campaign_response.data[0].get("tenant_id")
+    default_country = _campaign_default_country(campaign_response.data[0])
 
     # 2. Parse the blob into raw tokens.
     tokens = parse_pasted_numbers(body.text)
@@ -379,7 +484,7 @@ async def paste_campaign_contacts(
         campaign_id=campaign_id,
         tenant_id=campaign_tenant_id or current_user.tenant_id,
         records=records,
-        normalize=lambda p: _normalize_for_user(p, current_user),
+        normalize=lambda p: _normalize_for_user(p, current_user, default_country),
         list_id=list_id,
     )
 
@@ -403,7 +508,8 @@ async def paste_campaign_contacts(
         failed=len(result.errors),
         duplicates_skipped=result.duplicates_skipped,
         errors=[
-            ImportError(row=e.row, error=e.error, phone=e.phone)
+            ImportError(row=e.row, error=e.error, phone=e.phone,
+                        field=_ingest_error_field(e))
             for e in result.errors[:100]
         ],
         list_id=list_id,

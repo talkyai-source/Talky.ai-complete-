@@ -6,9 +6,11 @@ the number is removed from it — the job must leave the pipeline. Otherwise it
 lingers as a zombie "dialing" row and (without the dedup index) can even
 re-dial a number you've removed.
 
-These helpers cancel every ACTIVE job for a campaign or a lead in one
-statement. ``cancelled`` is a terminal status distinct from ``skipped`` (a
-transient per-call gate) so the call history stays honest about WHY a job
+Campaign cancellation touches only jobs that provably have not originated;
+in-flight jobs retain ownership until PBX proof and normal settlement. Lead
+removal retains its older all-active behavior pending a confirmation-aware
+removal workflow. ``cancelled`` is a terminal status distinct from ``skipped``
+(a transient per-call gate), so call history stays honest about WHY a job
 stopped: a deliberate removal, not a momentary skip.
 
 Uses the Supabase-style ``db_client`` adapter to match the campaign service
@@ -27,16 +29,30 @@ REASON_CAMPAIGN_STOPPED = "campaign_stopped"
 REASON_CAMPAIGN_PAUSED = "campaign_paused"
 REASON_LEAD_REMOVED = "removed_from_campaign"
 
+# These states prove the worker has not claimed/originated the attempt. A
+# campaign stop may cancel them immediately. ``processing`` and ``calling``
+# deliberately remain active until PBX absence is proven and normal
+# CallService settlement commits; cancelling them here would release the lead
+# while a carrier leg may still be live.
+NOT_ORIGINATED_JOB_STATUSES: tuple[str, ...] = (
+    "pending",
+    "queued",
+    "retry_scheduled",
+)
+
 
 def _rowcount(result) -> int:
     return len(getattr(result, "data", None) or [])
 
 
 def cancel_active_jobs_for_campaign(db_client, campaign_id: str, *, reason: str) -> int:
-    """Cancel every active job for a campaign. Returns the count cancelled.
+    """Cancel only not-yet-originated jobs for a campaign.
 
-    Idempotent: only ACTIVE jobs are touched, so re-running is a no-op once the
-    pipeline is clear.
+    In-flight ``processing``/``calling`` jobs are intentionally excluded: the
+    campaign termination sweep owns their PBX teardown, and CallService owns
+    the terminal job transition after provider absence is confirmed.
+    Idempotent: only pre-origination states are touched, so re-running is a
+    no-op once the queued pipeline is clear.
     """
     result = (
         db_client.table("dialer_jobs")
@@ -46,12 +62,17 @@ def cancel_active_jobs_for_campaign(db_client, campaign_id: str, *, reason: str)
             "last_error": reason,
         })
         .eq("campaign_id", str(campaign_id))
-        .in_("status", list(ACTIVE_STATUSES))
+        .in_("status", list(NOT_ORIGINATED_JOB_STATUSES))
         .execute()
     )
     n = _rowcount(result)
     if n:
-        logger.info("job_lifecycle: cancelled %d active job(s) for campaign %s (%s)", n, campaign_id, reason)
+        logger.info(
+            "job_lifecycle: cancelled %d not-originated job(s) for campaign %s (%s)",
+            n,
+            campaign_id,
+            reason,
+        )
     return n
 
 

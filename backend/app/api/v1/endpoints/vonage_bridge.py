@@ -79,6 +79,17 @@ def _bridge_enabled() -> bool:
     }
 
 
+def _is_supported_answer_direction(value: object) -> bool:
+    """The legacy provider bridge is outbound-only.
+
+    True inbound is admitted only by the Asterisk path that durably creates
+    the tenant call row and quota/concurrency reservations before Answer.
+    Missing or unknown direction is therefore an unsafe ambiguity.
+    """
+
+    return str(value or "").strip().lower() == "outbound"
+
+
 # ---------------------------------------------------------------------------
 # Audio WebSocket auth
 # ---------------------------------------------------------------------------
@@ -300,6 +311,13 @@ async def vonage_answer(request: Request):
     call_uuid = body.get("uuid", body.get("conversation_uuid", "unknown"))
     from_number = body.get("from", "unknown")
     to_number = body.get("to", "unknown")
+    if not _is_supported_answer_direction(body.get("direction")):
+        logger.error(
+            "vonage_answer refused: direction=%s has no durable pre-answer "
+            "inbound admission path",
+            str(body.get("direction") or "missing")[:32],
+        )
+        return JSONResponse(content={"error": "unavailable"}, status_code=503)
 
     logger.info(
         "Vonage answer webhook: uuid=%s from=%s to=%s",
@@ -357,6 +375,11 @@ async def vonage_event(request: Request):
     Maps Vonage-specific statuses to the canonical VoiceCallState via
     ``map_vonage_status()``.
     """
+    if not _bridge_enabled():
+        return JSONResponse(content={"error": "not_found"}, status_code=404)
+    if not (os.getenv("VONAGE_SIGNATURE_SECRET") or "").strip():
+        logger.error("vonage_event refused: VONAGE_SIGNATURE_SECRET unset")
+        return JSONResponse(content={"error": "unavailable"}, status_code=503)
     if not verify_vonage_signature(authorization=request.headers.get("Authorization")):
         logger.warning("vonage_event rejected: bad signature")
         return JSONResponse(content={"error": "unauthorized"}, status_code=403)

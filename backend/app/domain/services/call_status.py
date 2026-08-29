@@ -19,11 +19,12 @@ the transitions here gives us:
 * one canonical state machine to reason about,
 * one shape for the live-calls SSE/polling feed.
 
-The state machine intentionally accepts any forward transition. ARI
-events arrive out of order under load (StasisStart racing
-ChannelStateChange(Up) is a real bug we've already seen and worked
-around) — refusing "illegal" transitions would re-introduce that
-race. We log unexpected transitions so they're traceable.
+The state machine accepts forward transitions and rejects regressions with a
+database compare-and-set. ARI events arrive out of order under load
+(StasisStart racing ChannelStateChange(Up) is a real bug we've already seen),
+so the guard is deliberately monotonic rather than a brittle exact-sequence
+validator. Once any terminal state wins, no later event can make the call live
+again.
 """
 from __future__ import annotations
 
@@ -70,6 +71,54 @@ _STATE_TIMESTAMP_COLUMN: dict[CallState, Optional[str]] = {
     CallState.IN_CALL:   None,
     CallState.ENDED:     "ended_at",
 }
+
+
+# Includes terminal values written by the dialer/inbound settlement paths in
+# addition to the backwards-compatible CallState members above. The first
+# terminal writer wins; repeated or contradictory terminal callbacks are
+# idempotent and cannot rewrite the row or emit a second live-feed transition.
+TERMINAL_CALL_STATUSES = (
+    "ended",
+    "completed",
+    "failed",
+    "cancelled",
+    "canceled",
+    "rejected",
+    "busy",
+    "no_answer",
+)
+
+# Backwards-compatible private name for the transition helpers below.  API and
+# service writers should import the public constant so every path agrees on
+# what "already terminal" means.
+_TERMINAL_DB_STATUSES = TERMINAL_CALL_STATUSES
+_TERMINATION_PENDING_STATUS = "termination_pending"
+
+
+def _blocked_predecessor_statuses(state: CallState) -> tuple[str, ...]:
+    """Return states that may not transition to ``state``.
+
+    This is intentionally a partial order: duplicate states are handled by the
+    generic ``IS DISTINCT FROM`` CAS, early events cannot overwrite an
+    answered/live call, and no event can overwrite terminal truth.
+    """
+
+    if state in (CallState.ENDED, CallState.COMPLETED, CallState.FAILED):
+        return _TERMINAL_DB_STATUSES
+    if state is CallState.IN_CALL:
+        return (*_TERMINAL_DB_STATUSES, _TERMINATION_PENDING_STATUS)
+    if state is CallState.ANSWERED:
+        return (
+            "in_call",
+            *_TERMINAL_DB_STATUSES,
+            _TERMINATION_PENDING_STATUS,
+        )
+    return (
+        "answered",
+        "in_call",
+        *_TERMINAL_DB_STATUSES,
+        _TERMINATION_PENDING_STATUS,
+    )
 
 
 # Reflexive: lets callers pass a string or an enum interchangeably.
@@ -169,6 +218,7 @@ async def record_call_state_by_provider_id(
     db_pool,
     *,
     provider_call_id: str,
+    provider: Optional[str] = None,
     new_state: str | CallState,
     metadata: Optional[dict[str, Any]] = None,
 ) -> None:
@@ -192,10 +242,21 @@ async def record_call_state_by_provider_id(
                 """
                 SELECT id, tenant_id, campaign_id
                 FROM calls
-                WHERE external_call_uuid = $1
+                WHERE (
+                    provider_call_id = $1
+                    AND ($2::text IS NULL OR provider = $2)
+                )
+                   OR external_call_uuid = $1
+                ORDER BY CASE
+                    WHEN provider_call_id = $1
+                     AND ($2::text IS NULL OR provider = $2) THEN 0
+                    ELSE 1
+                END,
+                created_at DESC
                 LIMIT 1
                 """,
                 provider_call_id,
+                provider.strip().lower() if provider else None,
             )
     except Exception as exc:
         logger.warning(
@@ -248,18 +309,13 @@ async def record_call_state(
     state = coerce_state(new_state)
     ts_col = _STATE_TIMESTAMP_COLUMN.get(state)
 
-    # Forward-only guard for EARLY states. ARI events race under load
-    # (a late RINGING task can land after ANSWERED), and early-ringing
-    # signals may repeat. Never let an early state overwrite a live or
-    # terminal one — a call the UI shows as "answered" must not snap
-    # back to "ringing". Live/terminal states still accept any forward
-    # transition (see module docstring on out-of-order ARI events).
-    _early = state in (
-        CallState.QUEUED, CallState.DIALING, CallState.RINGING, CallState.INITIATED,
-    )
+    # Every write is a monotonic, idempotent compare-and-set. This closes the
+    # important ANSWERED/IN_CALL-after-ENDED race as well as the older late
+    # RINGING-after-ANSWERED race.
+    blocked = ",".join(_blocked_predecessor_statuses(state))
     _guard_sql = (
-        " AND NOT (status = ANY('{answered,in_call,ended,completed,failed}'))"
-        if _early else ""
+        " AND status IS DISTINCT FROM $1"
+        f" AND NOT (status = ANY('{{{blocked}}}'))"
     )
 
     # 1. UPDATE the calls table.
@@ -275,11 +331,12 @@ async def record_call_state(
             else:
                 sql = f"UPDATE calls SET status = $1, updated_at = NOW() WHERE id = $2{_guard_sql}"
             result = await conn.execute(sql, state.value, call_id)
-            if _early and result == "UPDATE 0":
-                # Downgrade blocked (or row gone) — skip the stream event
-                # too so the live panel never regresses either.
+            if result == "UPDATE 0":
+                # Duplicate, downgrade, contradictory terminal write, or a
+                # missing row. Skip the stream event too so polling and the
+                # event feed can never disagree about terminal truth.
                 logger.debug(
-                    "call_status.downgrade_skipped call=%s state=%s",
+                    "call_status.non_monotonic_or_duplicate_skipped call=%s state=%s",
                     call_id, state.value,
                 )
                 return
@@ -288,6 +345,10 @@ async def record_call_state(
             "call_status.update_failed call=%s state=%s err=%s",
             call_id, state.value, exc,
         )
+        # Emitting an event whose authoritative row write failed can itself
+        # resurrect a call in an event-driven UI. Preserve the DB as the single
+        # state authority and let the next provider event/reconciler retry.
+        return
 
     # 2. Emit a structured stream_events row.
     try:

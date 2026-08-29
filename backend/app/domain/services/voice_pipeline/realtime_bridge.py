@@ -94,12 +94,14 @@ class RealtimeBridge:
         knowledge_pool: Any = None,
         tenant_id: Optional[str] = None,
         campaign_id: Optional[str] = None,
+        knowledge_snapshot_nodes: Optional[list[dict]] = None,
         session_active: Optional[Any] = None,
         greet_on_start: bool = True,
         barge_in_event: Optional[asyncio.Event] = None,
         transcript_service: Optional[Any] = None,
         talklee_call_id: Optional[str] = None,
         on_connection_lost: Optional[Callable[[], Awaitable[None]]] = None,
+        call_direction: str = "outbound",
     ) -> None:
         self._call_id = call_id
         self._rt = realtime_session
@@ -108,6 +110,7 @@ class RealtimeBridge:
         self._knowledge_pool = knowledge_pool
         self._tenant_id = tenant_id
         self._campaign_id = campaign_id
+        self._knowledge_snapshot_nodes = knowledge_snapshot_nodes
         # Transcript accumulation. The realtime speech-to-speech path produces
         # NO transcript on its own; we feed the model's final agent + caller
         # transcripts into the SAME in-memory TranscriptService buffer the
@@ -118,6 +121,7 @@ class RealtimeBridge:
         self._transcript_service = transcript_service
         self._talklee_call_id = talklee_call_id
         self._turn_index = 0
+        self._call_direction = str(call_direction or "outbound").strip().lower()
         if transcript_service is not None and talklee_call_id:
             try:
                 transcript_service.bind_call_identity(call_id, talklee_call_id)
@@ -423,7 +427,7 @@ class RealtimeBridge:
                         # Real-time voicemail detection on the opening turn(s):
                         # if the callee is an answering machine, hang up now and
                         # end the pump — no message, no conversation.
-                        if _tidx <= 1:
+                        if self._call_direction != "inbound" and _tidx <= 1:
                             from app.domain.services.voice_pipeline.voicemail_detector import (
                                 detect_and_hang_up_voicemail,
                             )
@@ -507,7 +511,7 @@ class RealtimeBridge:
         saturated pool left the caller on an open-ended "let me check" hold with
         no reply ever arriving.
         """
-        if not query or not self._knowledge_pool or not self._campaign_id:
+        if not query or not self._campaign_id:
             return "No company information is available for that."
         # SECURITY — fail closed (issue #5): a missing/empty tenant must NEVER
         # reach retrieve_knowledge. acquire_with_tenant treats tenant_id=None as
@@ -515,8 +519,11 @@ class RealtimeBridge:
         # would read ACROSS tenants. Without a validated tenant we decline the
         # lookup entirely rather than risk cross-tenant KB exposure — we do NOT
         # pass None through to get a bypass.
+        pinned_nodes = self._knowledge_snapshot_nodes
         tenant_id = (self._tenant_id or "").strip()
-        if not tenant_id:
+        if pinned_nodes is None and not self._knowledge_pool:
+            return _NO_KB_INFO
+        if pinned_nodes is None and not tenant_id:
             logger.warning(
                 "realtime_bridge KB lookup BLOCKED — no tenant on session call=%s "
                 "(refusing RLS-bypass cross-tenant read)", self._call_id,
@@ -533,23 +540,27 @@ class RealtimeBridge:
         try:
             from app.services.scripts.knowledge.retrieval import (
                 render_node_answer,
+                retrieve_pinned_knowledge,
                 retrieve_knowledge,
             )
-            nodes = await asyncio.wait_for(
-                retrieve_knowledge(
-                    self._knowledge_pool,
-                    tenant_id=tenant_id,
-                    campaign_id=self._campaign_id,
-                    query=query,
-                    k=2,
-                    bump_hits=False,
-                ),
-                # The SHARED per-turn budget (kb_budget), the same one the inject
-                # path and the cascaded tool path use — not a new number. On
-                # expiry wait_for cancels the retrieval, which unwinds the pool
-                # acquire too, so a saturated pool can't hold the turn open.
-                timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
-            )
+            if pinned_nodes is not None:
+                nodes = retrieve_pinned_knowledge(pinned_nodes, query, k=2)
+            else:
+                nodes = await asyncio.wait_for(
+                    retrieve_knowledge(
+                        self._knowledge_pool,
+                        tenant_id=tenant_id,
+                        campaign_id=self._campaign_id,
+                        query=query,
+                        k=2,
+                        bump_hits=False,
+                    ),
+                    # The SHARED per-turn budget (kb_budget), the same one the inject
+                    # path and the cascaded tool path use — not a new number. On
+                    # expiry wait_for cancels the retrieval, which unwinds the pool
+                    # acquire too, so a saturated pool can't hold the turn open.
+                    timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
+                )
         except asyncio.TimeoutError:
             # Match the other two paths: on timeout the turn proceeds WITHOUT
             # facts. Returning the no-info sentinel (rather than nothing) keeps

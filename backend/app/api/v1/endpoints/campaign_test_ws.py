@@ -128,6 +128,38 @@ def _is_origin_allowed(websocket: WebSocket) -> bool:
     return origin in get_settings().allowed_origins
 
 
+async def _fetch_campaign_row(db_pool, tenant_id: str, campaign_id: str):
+    """Fetch one campaign row as a dict, scoped to ``tenant_id`` (IDOR guard).
+
+    Returns ``None`` on a miss or on any error, and the caller then refuses the
+    connection with 1008 "Campaign not found" — a tenant can never open a test
+    session against somebody else's campaign.
+
+    2026-08-27: this used to be imported from
+    ``app.domain.services.telephony.lifecycle``, but the inbound refactor moved
+    that path onto a pinned admission snapshot and deleted the helper, leaving
+    this endpoint importing a symbol that no longer exists (ImportError on every
+    connection). The query is reproduced here, where its only caller lives.
+    """
+    if db_pool is None:
+        return None
+    try:
+        from app.core.db_utils import acquire_with_tenant
+
+        async with acquire_with_tenant(db_pool, None) as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM campaigns WHERE id = $1 AND tenant_id = $2",
+                campaign_id, tenant_id,
+            )
+        return dict(row) if row else None
+    except Exception as exc:  # noqa: BLE001 — see docstring
+        logger.warning(
+            "campaign_test_campaign_fetch_failed tenant=%s campaign=%s err=%s",
+            str(tenant_id)[:8], str(campaign_id)[:8], exc,
+        )
+        return None
+
+
 async def _record_test_call(
     container, tenant_id, campaign_id, voice_session, config
 ) -> Optional[str]:
@@ -383,7 +415,6 @@ async def campaign_test_websocket(
 
     # ── Fetch the campaign row, scoped to this tenant (IDOR guard) ───────
     from app.core.container import get_container
-    from app.domain.services.telephony.lifecycle import _fetch_campaign_row
 
     container = get_container()
     if not container.is_initialized:

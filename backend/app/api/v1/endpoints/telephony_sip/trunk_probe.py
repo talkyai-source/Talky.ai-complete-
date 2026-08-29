@@ -13,6 +13,8 @@ intermediate model.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
+import os
 import re
 import socket
 import ssl
@@ -21,11 +23,86 @@ import uuid as _uuid
 from typing import Any, Dict
 
 
+def _private_sip_targets_allowed() -> bool:
+    return os.getenv("TELEPHONY_ALLOW_PRIVATE_SIP_TARGETS", "").strip().lower() in {
+        "1", "true", "on", "yes",
+    }
+
+
+def _address_is_allowed(address: str) -> bool:
+    if _private_sip_targets_allowed():
+        return True
+    try:
+        return ipaddress.ip_address(address).is_global
+    except ValueError:
+        return False
+
+
+async def resolve_sip_target(
+    *, host: str, port: int, socktype: int,
+) -> tuple[int, tuple]:
+    """Resolve once, reject every non-public answer, and return a pinned peer.
+
+    Connecting to the returned numeric address (rather than resolving the
+    tenant hostname a second time) closes DNS-rebinding against the API host.
+    Private PBXs require the explicit platform-wide escape hatch
+    ``TELEPHONY_ALLOW_PRIVATE_SIP_TARGETS=on`` plus network-level controls.
+    """
+    loop = asyncio.get_running_loop()
+    infos = await loop.getaddrinfo(
+        host,
+        port,
+        family=socket.AF_UNSPEC,
+        type=socktype,
+    )
+    if not infos:
+        raise socket.gaierror("Could not resolve SIP target")
+    unsafe = sorted({info[4][0] for info in infos if not _address_is_allowed(info[4][0])})
+    if unsafe:
+        raise PermissionError("SIP target resolves to a non-public network address")
+    family, _type, _proto, _canonname, sockaddr = infos[0]
+    return family, sockaddr
+
+
 async def probe_sip_endpoint(
     *, host: str, port: int, transport: str, timeout: float = 5.0,
 ) -> Dict[str, Any]:
     transport = transport.lower()
     start = time.perf_counter()
+
+    try:
+        family, sockaddr = await resolve_sip_target(
+            host=host,
+            port=port,
+            socktype=socket.SOCK_STREAM if transport in ("tcp", "tls") else socket.SOCK_DGRAM,
+        )
+    except PermissionError as exc:
+        return {
+            "ok": False,
+            "latency_ms": int((time.perf_counter() - start) * 1000),
+            "transport": transport,
+            "target": f"{host}:{port}",
+            "error": "unsafe_target",
+            "detail": str(exc),
+        }
+    except socket.gaierror as exc:
+        return {
+            "ok": False,
+            "latency_ms": int((time.perf_counter() - start) * 1000),
+            "transport": transport,
+            "target": f"{host}:{port}",
+            "error": "dns_failure",
+            "detail": str(exc),
+        }
+    except OSError as exc:
+        return {
+            "ok": False,
+            "latency_ms": int((time.perf_counter() - start) * 1000),
+            "transport": transport,
+            "target": f"{host}:{port}",
+            "error": "network_error",
+            "detail": str(exc) or type(exc).__name__,
+        }
 
     if transport in ("tcp", "tls"):
         try:
@@ -35,9 +112,17 @@ async def probe_sip_endpoint(
                 ssl_ctx = ssl.create_default_context()
                 ssl_ctx.check_hostname = False
                 ssl_ctx.verify_mode = ssl.CERT_NONE
-                fut = asyncio.open_connection(host, port, ssl=ssl_ctx)
+                fut = asyncio.open_connection(
+                    sockaddr[0],
+                    sockaddr[1],
+                    family=family,
+                    ssl=ssl_ctx,
+                    server_hostname=host,
+                )
             else:
-                fut = asyncio.open_connection(host, port)
+                fut = asyncio.open_connection(
+                    sockaddr[0], sockaddr[1], family=family,
+                )
             reader, writer = await asyncio.wait_for(fut, timeout=timeout)
             latency_ms = int((time.perf_counter() - start) * 1000)
             writer.close()
@@ -104,17 +189,9 @@ async def probe_sip_endpoint(
     # an empty detail — that was the "Test unreachable despite everything green"
     # bug. A plain blocking socket in a thread is loop-agnostic and reliable.
     def _blocking_probe() -> dict:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s = socket.socket(family, socket.SOCK_DGRAM)
         try:
             s.settimeout(timeout)
-            addr_info = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_DGRAM)
-            if not addr_info:
-                return {
-                    "ok": False, "latency_ms": 0, "transport": "udp",
-                    "target": f"{host}:{port}", "error": "dns_failure",
-                    "detail": "Could not resolve host",
-                }
-            sockaddr = addr_info[0][4]
             s.sendto(options, sockaddr)
             try:
                 data, _ = s.recvfrom(4096)

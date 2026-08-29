@@ -5,9 +5,9 @@ call origination path to decide whether a pre-answer announcement must
 play. Keeps the compliance decision in one place so the audio pipeline
 stays simple.
 
-The DB row lives in `tenant_recording_policy`. If no row exists for a
-tenant, we fall back to a SAFE default (two-party consent, announcement
-required) — never silently record.
+The DB row lives in `tenant_recording_policy`. Recording is enabled only by
+an explicit readable tenant policy. A missing row or a policy-store failure
+defaults recording OFF; legal intent must never be inferred from absence.
 
 2026-07-28 — SPOKEN-DISCLOSURE LEDGER
 -------------------------------------
@@ -64,18 +64,25 @@ class RecordingDecision:
     reason: str  # machine-readable; logged for audit
 
 
-# Safe default when the tenant has no row yet — opt-in, two-party,
-# announce. Better to over-protect than under-protect on a first boot.
-_SAFE_DEFAULT = RecordingDecision(
-    should_record=True,
-    announcement_required=True,
-    announcement_text=(
-        "This call may be recorded for quality and training purposes. "
-        "Press 9 at any time to opt out of recording."
-    ),
-    opt_out_dtmf_digit="9",
+# No policy is not consent. These two decisions are separate so operators can
+# distinguish an unconfigured tenant from a dependency incident, while both
+# fail closed on audio retention.
+_ABSENT_POLICY_DEFAULT = RecordingDecision(
+    should_record=False,
+    announcement_required=False,
+    announcement_text=None,
+    opt_out_dtmf_digit=None,
     retention_days=90,
-    reason="tenant_default_two_party",
+    reason="tenant_policy_absent_recording_off",
+)
+
+_POLICY_LOOKUP_FAILURE_DEFAULT = RecordingDecision(
+    should_record=False,
+    announcement_required=False,
+    announcement_text=None,
+    opt_out_dtmf_digit=None,
+    retention_days=0,
+    reason="recording_policy_lookup_failed_recording_off",
 )
 
 
@@ -98,14 +105,22 @@ class RecordingPolicyService:
         two-party list for US states. Pass None if you don't know — we
         default to two-party in that case.
         """
-        row = await self._load_row(tenant_id)
+        try:
+            row = await self._load_row(tenant_id)
+        except Exception as exc:
+            logger.error(
+                "recording_policy_lookup_failed tenant=%s err=%s — recording disabled",
+                tenant_id,
+                exc,
+            )
+            return _POLICY_LOOKUP_FAILURE_DEFAULT
         if row is None:
             logger.info(
-                "recording_policy_default_applied tenant=%s — no explicit "
-                "policy row, using safe two-party default",
+                "recording_policy_absent tenant=%s — recording disabled until "
+                "an explicit policy is configured",
                 tenant_id,
             )
-            return _SAFE_DEFAULT
+            return _ABSENT_POLICY_DEFAULT
 
         mode = row["default_consent_mode"]
         retention_days = int(row["retention_days"])
@@ -157,18 +172,11 @@ class RecordingPolicyService:
     # ──────────────────────────────────────────────────────────────────
 
     async def _load_row(self, tenant_id: str) -> Optional[dict]:
-        try:
-            async with self._db_pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    "SELECT * FROM tenant_recording_policy WHERE tenant_id = $1",
-                    tenant_id,
-                )
-        except Exception as exc:
-            logger.error(
-                "recording_policy_lookup_failed tenant=%s err=%s — applying safe default",
-                tenant_id, exc,
+        async with self._db_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM tenant_recording_policy WHERE tenant_id = $1",
+                tenant_id,
             )
-            return None
         return dict(row) if row else None
 
 
@@ -282,6 +290,16 @@ _OPT_OUT_SENTENCE = re.compile(
 )
 
 
+def contains_unsupported_dtmf_opt_out(text: Optional[str]) -> bool:
+    """Whether text promises a recording opt-out the runtime cannot honour."""
+
+    return bool(
+        not DTMF_OPT_OUT_SUPPORTED
+        and isinstance(text, str)
+        and _OPT_OUT_SENTENCE.search(text)
+    )
+
+
 def spoken_disclosure_text(decision: Any) -> Optional[str]:
     """The text to actually SPEAK for `decision`.
 
@@ -334,9 +352,15 @@ def _country_matches_any(cc: Optional[str], codes: set[str]) -> bool:
     if cc in codes:
         return True
     # If we got a subdivision like "US-CA", also match the plain "US"
-    # entry. If we got a country like "US" and the list has a more
-    # specific "US-CA", we conservatively return False (won't announce);
-    # the caller will typically pass the subdivision when it matters.
+    # entry.
     if "-" in cc and cc.split("-", 1)[0] in codes:
+        return True
+    # Reverse case: we only know the COUNTRY ("US") and the list is keyed to
+    # a subdivision ("US-CA"). We cannot prove the callee is outside that
+    # subdivision, so fail CLOSED and announce rather than silently recording
+    # a two-party-consent call with no notice.
+    if "-" not in cc and any(
+        "-" in code and code.split("-", 1)[0] == cc for code in codes
+    ):
         return True
     return False

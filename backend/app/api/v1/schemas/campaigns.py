@@ -275,7 +275,17 @@ class ContactCreate(BaseModel):
     phone_number: str = Field(..., description="Phone number in any format (will be normalized)")
     first_name: Optional[str] = Field(None, max_length=100)
     last_name: Optional[str] = Field(None, max_length=100)
+    full_name: Optional[str] = Field(None, max_length=511)
     email: Optional[str] = Field(None, max_length=255)
+    mobile_number: Optional[str] = Field(None, max_length=32)
+    business_number: Optional[str] = Field(None, max_length=32)
+    company_name: Optional[str] = Field(None, max_length=255)
+    job_title: Optional[str] = Field(None, max_length=255)
+    best_time_to_call: Optional[str] = Field(None, max_length=64)
+    timezone: Optional[str] = Field(None, max_length=64)
+    calling_notes: Optional[str] = Field(None, max_length=4000)
+    preferred_contact_method: Optional[str] = Field(None, max_length=32)
+    do_not_call: bool = False
     custom_fields: Optional[dict] = Field(default_factory=dict)
 
     @field_validator("phone_number")
@@ -297,7 +307,18 @@ class ContactUpdate(BaseModel):
     phone_number: Optional[str] = Field(None, description="New phone number (normalized)")
     first_name: Optional[str] = Field(None, max_length=100)
     last_name: Optional[str] = Field(None, max_length=100)
+    full_name: Optional[str] = Field(None, max_length=511)
     email: Optional[str] = Field(None, max_length=255)
+    mobile_number: Optional[str] = Field(None, max_length=32)
+    business_number: Optional[str] = Field(None, max_length=32)
+    company_name: Optional[str] = Field(None, max_length=255)
+    job_title: Optional[str] = Field(None, max_length=255)
+    best_time_to_call: Optional[str] = Field(None, max_length=64)
+    timezone: Optional[str] = Field(None, max_length=64)
+    calling_notes: Optional[str] = Field(None, max_length=4000)
+    preferred_contact_method: Optional[str] = Field(None, max_length=32)
+    do_not_call: Optional[bool] = None
+    custom_fields: Optional[dict] = None
 
     @field_validator("phone_number")
     @classmethod

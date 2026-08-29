@@ -160,56 +160,62 @@ async def _knowledge_block_for_turn(session: CallSession, messages: list) -> str
         if len(user_msgs) > 1 and user_msgs[1].strip():
             query = f"{last_user} {user_msgs[1]}".strip()
 
-        from app.core.container import get_container
         from app.services.scripts.knowledge.retrieval import (
             render_node_answer,
+            retrieve_pinned_knowledge,
             retrieve_knowledge,
         )
 
-        container = get_container()
-        if not getattr(container, "is_initialized", False):
-            return ""
-        pool = getattr(getattr(container, "db_client", None), "pool", None)
-        if pool is None:
-            return ""
-
         _t0 = time.monotonic()
-        # Cache check (Case 3): collapse N concurrent same-topic queries to ~1
-        # for the TTL window so a burst of identical questions stops amplifying
-        # DB load. A hit skips the pool-acquire + FTS entirely.
-        from app.services.scripts.knowledge import cache as _kb_cache
-        _cached = _kb_cache.get(session.tenant_id, session.campaign_id, query, now=_t0)
-        if _cached is not None:
-            hits = _cached
+        pinned_nodes = getattr(session, "_knowledge_snapshot_nodes", None)
+        if pinned_nodes is not None:
+            hits = retrieve_pinned_knowledge(
+                pinned_nodes, query, k=_KB_MAX_CHUNKS,
+            )
             logger.info(
-                "KB_DEBUG call=%s CACHE_HIT %d rows q=%r",
+                "KB_DEBUG call=%s PINNED_SNAPSHOT %d rows q=%r",
                 session.call_id[:8], len(hits), last_user[:60],
             )
         else:
-          try:
-            hits = await asyncio.wait_for(
-                # Pass the retrieve budget as the pool-acquire timeout too so a
-                # saturated pool fails fast INTO the budget instead of queueing
-                # unbounded behind it (Case 3 finding: acquire had no timeout).
-                retrieve_knowledge(
-                    pool, session.tenant_id, session.campaign_id, query,
-                    k=_KB_MAX_CHUNKS, bump_hits=False,
-                    acquire_timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
-                ),
-                timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
+            from app.core.container import get_container
+            from app.services.scripts.knowledge import cache as _kb_cache
+
+            container = get_container()
+            if not getattr(container, "is_initialized", False):
+                return ""
+            pool = getattr(getattr(container, "db_client", None), "pool", None)
+            if pool is None:
+                return ""
+            _cached = _kb_cache.get(
+                session.tenant_id, session.campaign_id, query, now=_t0,
             )
-            if hits:
-                _kb_cache.put(session.tenant_id, session.campaign_id, query, hits, now=_t0)
-          except asyncio.TimeoutError:
-            # TEMP diagnostic (knowledge-not-used investigation): a timeout here
-            # means FTS retrieval was too slow and the turn answered WITHOUT
-            # knowledge — a prime suspect for "agent isn't using the KB".
-            logger.warning(
-                "KB_DEBUG call=%s TIMEOUT >%.0fms mode=%s tenant=%s — turn without knowledge",
-                session.call_id[:8], _KNOWLEDGE_RETRIEVE_TIMEOUT_S * 1000,
-                session.knowledge_mode, str(session.tenant_id)[:8],
-            )
-            return ""
+            if _cached is not None:
+                hits = _cached
+                logger.info(
+                    "KB_DEBUG call=%s CACHE_HIT %d rows q=%r",
+                    session.call_id[:8], len(hits), last_user[:60],
+                )
+            else:
+                try:
+                    hits = await asyncio.wait_for(
+                        retrieve_knowledge(
+                            pool, session.tenant_id, session.campaign_id, query,
+                            k=_KB_MAX_CHUNKS, bump_hits=False,
+                            acquire_timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
+                        ),
+                        timeout=_KNOWLEDGE_RETRIEVE_TIMEOUT_S,
+                    )
+                    if hits:
+                        _kb_cache.put(
+                            session.tenant_id, session.campaign_id, query, hits, now=_t0,
+                        )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "KB_DEBUG call=%s TIMEOUT >%.0fms mode=%s tenant=%s — turn without knowledge",
+                        session.call_id[:8], _KNOWLEDGE_RETRIEVE_TIMEOUT_S * 1000,
+                        session.knowledge_mode, str(session.tenant_id)[:8],
+                    )
+                    return ""
         _ms = (time.monotonic() - _t0) * 1000.0
         if not hits:
             logger.info(

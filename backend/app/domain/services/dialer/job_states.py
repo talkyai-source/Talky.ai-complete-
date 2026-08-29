@@ -75,6 +75,10 @@ LIVE_CALL_STATUSES: tuple[str, ...] = (
     "answered",
     "in_call",
     "initiated",
+    # A stale DB row has been removed from the dialer's batch count, but the
+    # PBX owner has not yet proved every leg absent. Keep it operator-visible
+    # and eligible for an explicit confirmation-aware termination retry.
+    "termination_pending",
 )
 
 # The subset that proves a conversation is genuinely under way. Deliberately
