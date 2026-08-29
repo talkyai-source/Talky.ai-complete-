@@ -94,7 +94,11 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     email VARCHAR(255) NOT NULL UNIQUE,
     name VARCHAR(255),
     tenant_id UUID REFERENCES tenants(id),
-    role VARCHAR(50) NOT NULL DEFAULT 'user' CHECK (role IN ('platform_admin', 'partner_admin', 'tenant_admin', 'user', 'readonly')),
+    -- Constraint named explicitly so a fresh bootstrap matches the production
+    -- dump instead of PostgreSQL's auto-generated user_profiles_role_check.
+    -- Migration 0035 widens this list to every UserRole and discovers the
+    -- constraint from pg_constraint, so either historical name upgrades.
+    role VARCHAR(50) NOT NULL DEFAULT 'user' CONSTRAINT chk_user_profiles_role_valid CHECK (role IN ('platform_admin', 'partner_admin', 'tenant_admin', 'campaign_manager', 'user', 'agent', 'billing_user', 'readonly')),
     password_hash TEXT,                          -- bcrypt hash (nullable for OAuth future)
     
     -- Security hardening columns
@@ -446,6 +450,11 @@ CREATE TABLE IF NOT EXISTS calls (
     started_at TIMESTAMPTZ,
     answered_at TIMESTAMPTZ,
     ended_at TIMESTAMPTZ,
+    -- Separate from status: an operator may write the first terminal status,
+    -- while the provider callback still owns once-only outbound side effects.
+    terminal_settled_at TIMESTAMPTZ,
+    terminal_retry_payload JSONB,
+    terminal_retry_enqueued_at TIMESTAMPTZ,
     duration_seconds INTEGER,
     recording_url TEXT,
     transcript TEXT,
@@ -464,6 +473,9 @@ CREATE TABLE IF NOT EXISTS calls (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+COMMENT ON COLUMN calls.terminal_settled_at IS
+    'Proof that outbound call, lead, job, campaign and retry-outbox intent committed; full durability also requires any retry payload to be acknowledged';
+
 CREATE INDEX IF NOT EXISTS idx_calls_tenant_id ON calls(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_calls_campaign_id ON calls(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_calls_lead_id ON calls(lead_id);
@@ -471,7 +483,6 @@ CREATE INDEX IF NOT EXISTS idx_calls_status ON calls(status);
 CREATE INDEX IF NOT EXISTS idx_calls_created_at ON calls(created_at);
 CREATE INDEX IF NOT EXISTS idx_calls_external_uuid ON calls(external_call_uuid);
 CREATE INDEX IF NOT EXISTS idx_calls_talklee_id ON calls(talklee_call_id) WHERE talklee_call_id IS NOT NULL;
-
 -- 2.4 CONVERSATIONS
 CREATE TABLE IF NOT EXISTS conversations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -551,12 +562,25 @@ CREATE TABLE IF NOT EXISTS call_legs (
     answered_at      TIMESTAMPTZ,
     ended_at         TIMESTAMPTZ,
     duration_seconds INTEGER,
+    billing_status   VARCHAR(16) NOT NULL DEFAULT 'none'
+        CONSTRAINT call_legs_billing_status_valid
+        CHECK (billing_status IN ('none', 'reserved', 'held', 'finalized', 'released', 'reversed')),
+    reserved_seconds INTEGER NOT NULL DEFAULT 0
+        CONSTRAINT call_legs_reserved_seconds_nonnegative
+        CHECK (reserved_seconds >= 0),
+    -- NULL is deliberate until an authoritative carrier CDR/rate source
+    -- supplies monetary truth. Unknown provider cost must never become zero.
+    cost              NUMERIC(12, 6)
+        CONSTRAINT call_legs_cost_nonnegative
+        CHECK (cost IS NULL OR cost >= 0),
+    currency          VARCHAR(3),
     metadata         JSONB DEFAULT '{}',
     created_at       TIMESTAMPTZ DEFAULT NOW(),
     updated_at       TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_call_legs_call_id ON call_legs(call_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_call_legs_id_call ON call_legs(id, call_id);
 
 -- 3.2 CALL EVENTS (Append-only)
 CREATE TABLE IF NOT EXISTS call_events (
@@ -574,6 +598,80 @@ CREATE TABLE IF NOT EXISTS call_events (
 
 CREATE INDEX IF NOT EXISTS idx_call_events_call_id ON call_events(call_id);
 CREATE INDEX IF NOT EXISTS idx_call_events_talklee_id ON call_events(talklee_call_id) WHERE talklee_call_id IS NOT NULL;
+
+-- Call legs/events inherit tenant ownership from their parent call. Keep this
+-- database-enforced as these tables intentionally avoid a duplicate tenant_id.
+ALTER TABLE call_legs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE call_legs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS call_legs_tenant_isolation ON call_legs;
+CREATE POLICY call_legs_tenant_isolation ON call_legs
+    USING (
+        COALESCE(NULLIF(current_setting('app.bypass_rls', TRUE), '')::boolean, FALSE)
+        OR EXISTS (
+            SELECT 1 FROM calls tenant_call
+            WHERE tenant_call.id = call_legs.call_id
+              AND tenant_call.tenant_id = NULLIF(
+                  current_setting('app.current_tenant_id', TRUE), ''
+              )::uuid
+        )
+    )
+    WITH CHECK (
+        COALESCE(NULLIF(current_setting('app.bypass_rls', TRUE), '')::boolean, FALSE)
+        OR EXISTS (
+            SELECT 1 FROM calls tenant_call
+            WHERE tenant_call.id = call_legs.call_id
+              AND tenant_call.tenant_id = NULLIF(
+                  current_setting('app.current_tenant_id', TRUE), ''
+              )::uuid
+        )
+    );
+
+ALTER TABLE call_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE call_events FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS call_events_tenant_isolation ON call_events;
+CREATE POLICY call_events_tenant_isolation ON call_events
+    USING (
+        COALESCE(NULLIF(current_setting('app.bypass_rls', TRUE), '')::boolean, FALSE)
+        OR EXISTS (
+            SELECT 1 FROM calls tenant_call
+            WHERE tenant_call.id = call_events.call_id
+              AND tenant_call.tenant_id = NULLIF(
+                  current_setting('app.current_tenant_id', TRUE), ''
+              )::uuid
+        )
+    )
+    WITH CHECK (
+        COALESCE(NULLIF(current_setting('app.bypass_rls', TRUE), '')::boolean, FALSE)
+        OR EXISTS (
+            SELECT 1 FROM calls tenant_call
+            WHERE tenant_call.id = call_events.call_id
+              AND tenant_call.tenant_id = NULLIF(
+                  current_setting('app.current_tenant_id', TRUE), ''
+              )::uuid
+        )
+    );
+
+CREATE OR REPLACE FUNCTION prevent_call_event_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    -- The retention worker sets this transaction-scoped bypass before an
+    -- approved age-based DELETE. Ordinary tenant/app sessions may only append.
+    IF TG_OP = 'DELETE' AND COALESCE(
+        NULLIF(current_setting('app.bypass_rls', TRUE), '')::boolean,
+        FALSE
+    ) THEN
+        RETURN OLD;
+    END IF;
+    RAISE EXCEPTION 'call_events is append-only; insert a new event';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS call_events_immutable ON call_events;
+CREATE TRIGGER call_events_immutable
+    BEFORE UPDATE OR DELETE ON call_events
+    FOR EACH ROW EXECUTE FUNCTION prevent_call_event_mutation();
 
 -- =============================================================================
 -- SECTION 4: ASSISTANT & AGENT SYSTEM
@@ -1606,6 +1704,16 @@ CREATE INDEX IF NOT EXISTS idx_dialer_jobs_status ON dialer_jobs(status);
 CREATE INDEX IF NOT EXISTS idx_dialer_jobs_priority ON dialer_jobs(priority DESC, created_at);
 CREATE INDEX IF NOT EXISTS idx_dialer_jobs_queue ON dialer_jobs(tenant_id, status, priority DESC, scheduled_at);
 
+-- Canonical once-only call settlement resolves the originating job from the
+-- call row. Kept nullable for inbound/manual calls and added here (after
+-- dialer_jobs exists) because calls is declared earlier in this bootstrap.
+ALTER TABLE calls
+    ADD COLUMN IF NOT EXISTS dialer_job_id UUID
+        REFERENCES dialer_jobs(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_calls_dialer_job_id
+    ON calls(dialer_job_id)
+    WHERE dialer_job_id IS NOT NULL;
+
 -- =============================================================================
 -- SECTION 6.5: VOICE SECURITY & CALL GUARD (Day 7)
 -- =============================================================================
@@ -2043,6 +2151,348 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_id ON audit_logs(actor_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_id ON audit_logs(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_resource ON audit_logs(resource_type, resource_id);
 
+-- Durable boundary for irreversible platform-admin recording/feedback deletes.
+-- The API commits one of these rows before touching audio storage.  Rows are
+-- retained as audit evidence; only their forward-only processing status changes.
+SELECT set_config('app.bypass_rls', 'on', false);
+SELECT set_config(
+    'app.current_tenant_id',
+    '00000000-0000-0000-0000-000000000000',
+    false
+);
+CREATE TABLE IF NOT EXISTS admin_media_deletion_intents (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    actor_id UUID NOT NULL REFERENCES user_profiles(id) ON DELETE RESTRICT,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
+    call_id UUID NOT NULL,
+    resource_type VARCHAR(32) NOT NULL
+        CHECK (resource_type IN ('recording', 'call_feedback')),
+    resource_id UUID NOT NULL,
+    idempotency_key VARCHAR(255) NOT NULL,
+    reason TEXT NOT NULL CHECK (CHAR_LENGTH(BTRIM(reason)) >= 8),
+    resource_snapshot JSONB NOT NULL,
+    status VARCHAR(24) NOT NULL DEFAULT 'intent_committed'
+        CHECK (status IN ('intent_committed', 'object_deleted', 'completed', 'failed')),
+    attempt_count INTEGER NOT NULL DEFAULT 1 CHECK (attempt_count > 0),
+    attempt_actor_ids UUID[] NOT NULL,
+    last_error TEXT,
+    object_deleted_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    response_body JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT admin_media_deletion_actor_idempotency_unique
+        UNIQUE (actor_id, idempotency_key),
+    CONSTRAINT admin_media_deletion_resource_unique
+        UNIQUE (resource_type, resource_id),
+    CONSTRAINT admin_media_deletion_attempt_actors_check
+        CHECK (
+            cardinality(attempt_actor_ids) = attempt_count
+            AND cardinality(attempt_actor_ids) > 0
+            AND array_position(attempt_actor_ids, NULL) IS NULL
+        )
+);
+
+ALTER TABLE admin_media_deletion_intents
+    ADD COLUMN IF NOT EXISTS attempt_actor_ids UUID[];
+UPDATE admin_media_deletion_intents
+   SET attempt_actor_ids = array_fill(actor_id, ARRAY[attempt_count])
+ WHERE attempt_actor_ids IS NULL OR cardinality(attempt_actor_ids) = 0;
+ALTER TABLE admin_media_deletion_intents
+    ALTER COLUMN attempt_actor_ids SET NOT NULL;
+DO $migration$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'admin_media_deletion_intents'::regclass
+          AND conname = 'admin_media_deletion_attempt_actors_check'
+    ) THEN
+        ALTER TABLE admin_media_deletion_intents
+        ADD CONSTRAINT admin_media_deletion_attempt_actors_check
+        CHECK (
+            cardinality(attempt_actor_ids) = attempt_count
+            AND cardinality(attempt_actor_ids) > 0
+            AND array_position(attempt_actor_ids, NULL) IS NULL
+        );
+    END IF;
+END;
+$migration$;
+
+CREATE INDEX IF NOT EXISTS idx_admin_media_deletion_tenant_created
+    ON admin_media_deletion_intents(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_admin_media_deletion_status_updated
+    ON admin_media_deletion_intents(status, updated_at)
+    WHERE status <> 'completed';
+
+ALTER TABLE admin_media_deletion_intents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE admin_media_deletion_intents FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS admin_media_deletion_intents_select ON admin_media_deletion_intents;
+DROP POLICY IF EXISTS admin_media_deletion_intents_insert ON admin_media_deletion_intents;
+DROP POLICY IF EXISTS admin_media_deletion_intents_update ON admin_media_deletion_intents;
+DROP POLICY IF EXISTS admin_media_deletion_intents_delete ON admin_media_deletion_intents;
+CREATE POLICY admin_media_deletion_intents_select
+    ON admin_media_deletion_intents FOR SELECT
+    USING (
+        COALESCE(NULLIF(current_setting('app.bypass_rls', TRUE), '')::boolean, FALSE)
+        OR tenant_id = NULLIF(current_setting('app.current_tenant_id', TRUE), '')::uuid
+    );
+CREATE POLICY admin_media_deletion_intents_insert
+    ON admin_media_deletion_intents FOR INSERT
+    WITH CHECK (
+        COALESCE(NULLIF(current_setting('app.bypass_rls', TRUE), '')::boolean, FALSE)
+    );
+CREATE POLICY admin_media_deletion_intents_update
+    ON admin_media_deletion_intents FOR UPDATE
+    USING (COALESCE(NULLIF(current_setting('app.bypass_rls', TRUE), '')::boolean, FALSE))
+    WITH CHECK (COALESCE(NULLIF(current_setting('app.bypass_rls', TRUE), '')::boolean, FALSE));
+CREATE POLICY admin_media_deletion_intents_delete
+    ON admin_media_deletion_intents FOR DELETE USING (FALSE);
+
+-- Expand/contract compatibility: pre-0026 replicas omit attempt_actor_ids on
+-- INSERT and only increment attempt_count on retry. Populate/append the
+-- immutable origin actor for those writes; current replicas supply the array
+-- explicitly and pass through unchanged.
+CREATE OR REPLACE FUNCTION maintain_admin_media_deletion_attempt_actors()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        IF NEW.attempt_actor_ids IS NULL
+           OR cardinality(NEW.attempt_actor_ids) = 0 THEN
+            NEW.attempt_actor_ids := array_fill(
+                NEW.actor_id,
+                ARRAY[NEW.attempt_count]
+            );
+        END IF;
+    ELSIF NEW.attempt_count = OLD.attempt_count + 1
+          AND NEW.attempt_actor_ids
+              IS NOT DISTINCT FROM OLD.attempt_actor_ids THEN
+        NEW.attempt_actor_ids := array_append(
+            OLD.attempt_actor_ids,
+            NEW.actor_id
+        );
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_maintain_admin_media_deletion_attempt_actors
+    ON admin_media_deletion_intents;
+CREATE TRIGGER trg_maintain_admin_media_deletion_attempt_actors
+BEFORE INSERT OR UPDATE OF attempt_count, attempt_actor_ids
+ON admin_media_deletion_intents
+FOR EACH ROW EXECUTE FUNCTION maintain_admin_media_deletion_attempt_actors();
+
+CREATE OR REPLACE FUNCTION protect_admin_media_deletion_intent()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'admin_media_deletion_intents is an immutable audit record';
+    END IF;
+    IF NEW.id IS DISTINCT FROM OLD.id
+       OR NEW.actor_id IS DISTINCT FROM OLD.actor_id
+       OR NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
+       OR NEW.call_id IS DISTINCT FROM OLD.call_id
+       OR NEW.resource_type IS DISTINCT FROM OLD.resource_type
+       OR NEW.resource_id IS DISTINCT FROM OLD.resource_id
+       OR NEW.idempotency_key IS DISTINCT FROM OLD.idempotency_key
+       OR NEW.reason IS DISTINCT FROM OLD.reason
+       OR NEW.resource_snapshot IS DISTINCT FROM OLD.resource_snapshot
+       OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+        RAISE EXCEPTION 'admin media deletion audit fields are immutable';
+    END IF;
+    IF NOT (
+        NEW.status = OLD.status
+        OR (OLD.status = 'intent_committed' AND NEW.status IN ('object_deleted', 'failed'))
+        OR (OLD.status = 'failed' AND NEW.status IN ('intent_committed', 'object_deleted'))
+        OR (OLD.status = 'object_deleted' AND NEW.status = 'completed')
+    ) THEN
+        RAISE EXCEPTION 'invalid admin media deletion status transition: % -> %',
+            OLD.status, NEW.status;
+    END IF;
+    IF NEW.attempt_count < OLD.attempt_count
+       OR NEW.attempt_count > OLD.attempt_count + 1
+       OR cardinality(NEW.attempt_actor_ids) <> NEW.attempt_count
+       OR NEW.attempt_actor_ids[1:OLD.attempt_count]
+          IS DISTINCT FROM OLD.attempt_actor_ids
+       OR (OLD.object_deleted_at IS NOT NULL
+           AND NEW.object_deleted_at IS DISTINCT FROM OLD.object_deleted_at)
+       OR (OLD.completed_at IS NOT NULL
+           AND NEW.completed_at IS DISTINCT FROM OLD.completed_at) THEN
+        RAISE EXCEPTION 'admin media deletion progress cannot move backwards';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_protect_admin_media_deletion_intent_update
+    ON admin_media_deletion_intents;
+CREATE TRIGGER trg_protect_admin_media_deletion_intent_update
+    BEFORE UPDATE ON admin_media_deletion_intents
+    FOR EACH ROW EXECUTE FUNCTION protect_admin_media_deletion_intent();
+DROP TRIGGER IF EXISTS trg_protect_admin_media_deletion_intent_delete
+    ON admin_media_deletion_intents;
+CREATE TRIGGER trg_protect_admin_media_deletion_intent_delete
+    BEFORE DELETE ON admin_media_deletion_intents
+    FOR EACH ROW EXECUTE FUNCTION protect_admin_media_deletion_intent();
+
+-- Append-only bindings keep (actor, Idempotency-Key) globally scoped to one
+-- irreversible deletion intent, including recovery by a replacement admin.
+CREATE TABLE IF NOT EXISTS admin_media_deletion_request_keys (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    intent_id UUID NOT NULL
+        REFERENCES admin_media_deletion_intents(id) ON DELETE RESTRICT,
+    actor_id UUID NOT NULL REFERENCES user_profiles(id) ON DELETE RESTRICT,
+    idempotency_key VARCHAR(255) NOT NULL,
+    request_reason TEXT NOT NULL
+        CHECK (CHAR_LENGTH(BTRIM(request_reason)) >= 8),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT admin_media_deletion_request_actor_key_unique
+        UNIQUE (actor_id, idempotency_key)
+);
+
+-- Serialize origin inserts from old replicas with recovery aliases written by
+-- new replicas. Whichever transaction owns an actor/key first determines the
+-- one durable intent; the other fails before authorizing a second deletion.
+CREATE OR REPLACE FUNCTION guard_admin_media_deletion_origin_key()
+RETURNS TRIGGER AS $$
+BEGIN
+    PERFORM pg_advisory_xact_lock(
+        hashtextextended(
+            'talky:media-delete-key:' || NEW.actor_id::text || ':' ||
+            NEW.idempotency_key,
+            0
+        )
+    );
+    IF EXISTS (
+        SELECT 1 FROM admin_media_deletion_request_keys k
+        WHERE k.actor_id = NEW.actor_id
+          AND k.idempotency_key = NEW.idempotency_key
+          AND k.intent_id <> NEW.id
+    ) THEN
+        RAISE EXCEPTION
+            'Idempotency-Key is already bound to another media deletion'
+            USING ERRCODE = 'unique_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION guard_admin_media_deletion_request_key()
+RETURNS TRIGGER AS $$
+BEGIN
+    PERFORM pg_advisory_xact_lock(
+        hashtextextended(
+            'talky:media-delete-key:' || NEW.actor_id::text || ':' ||
+            NEW.idempotency_key,
+            0
+        )
+    );
+    IF EXISTS (
+        SELECT 1 FROM admin_media_deletion_intents i
+        WHERE i.actor_id = NEW.actor_id
+          AND i.idempotency_key = NEW.idempotency_key
+          AND i.id <> NEW.intent_id
+    ) THEN
+        RAISE EXCEPTION
+            'Idempotency-Key is already bound to another media deletion'
+            USING ERRCODE = 'unique_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_guard_admin_media_deletion_origin_key
+    ON admin_media_deletion_intents;
+CREATE TRIGGER trg_guard_admin_media_deletion_origin_key
+BEFORE INSERT ON admin_media_deletion_intents
+FOR EACH ROW EXECUTE FUNCTION guard_admin_media_deletion_origin_key();
+DROP TRIGGER IF EXISTS trg_guard_admin_media_deletion_request_key
+    ON admin_media_deletion_request_keys;
+CREATE TRIGGER trg_guard_admin_media_deletion_request_key
+BEFORE INSERT ON admin_media_deletion_request_keys
+FOR EACH ROW EXECUTE FUNCTION guard_admin_media_deletion_request_key();
+
+INSERT INTO admin_media_deletion_request_keys (
+    intent_id, actor_id, idempotency_key, request_reason
+)
+SELECT id, actor_id, idempotency_key, reason
+FROM admin_media_deletion_intents
+ON CONFLICT (actor_id, idempotency_key) DO NOTHING;
+
+DO $migration$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM admin_media_deletion_intents i
+        JOIN admin_media_deletion_request_keys k
+          ON k.actor_id = i.actor_id
+         AND k.idempotency_key = i.idempotency_key
+        WHERE k.intent_id <> i.id
+           OR k.request_reason <> i.reason
+    ) THEN
+        RAISE EXCEPTION 'media deletion request-key backfill conflict';
+    END IF;
+END;
+$migration$;
+
+CREATE INDEX IF NOT EXISTS idx_admin_media_deletion_request_keys_intent
+    ON admin_media_deletion_request_keys(intent_id, created_at);
+
+ALTER TABLE admin_media_deletion_request_keys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE admin_media_deletion_request_keys FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS admin_media_deletion_request_keys_select
+    ON admin_media_deletion_request_keys;
+DROP POLICY IF EXISTS admin_media_deletion_request_keys_insert
+    ON admin_media_deletion_request_keys;
+DROP POLICY IF EXISTS admin_media_deletion_request_keys_update
+    ON admin_media_deletion_request_keys;
+DROP POLICY IF EXISTS admin_media_deletion_request_keys_delete
+    ON admin_media_deletion_request_keys;
+CREATE POLICY admin_media_deletion_request_keys_select
+    ON admin_media_deletion_request_keys FOR SELECT
+    USING (
+        COALESCE(NULLIF(current_setting('app.bypass_rls', TRUE), '')::boolean, FALSE)
+        OR EXISTS (
+            SELECT 1
+            FROM admin_media_deletion_intents i
+            WHERE i.id = intent_id
+              AND i.tenant_id = NULLIF(
+                  current_setting('app.current_tenant_id', TRUE), ''
+              )::uuid
+        )
+    );
+CREATE POLICY admin_media_deletion_request_keys_insert
+    ON admin_media_deletion_request_keys FOR INSERT
+    WITH CHECK (
+        COALESCE(NULLIF(current_setting('app.bypass_rls', TRUE), '')::boolean, FALSE)
+    );
+CREATE POLICY admin_media_deletion_request_keys_update
+    ON admin_media_deletion_request_keys FOR UPDATE USING (FALSE);
+CREATE POLICY admin_media_deletion_request_keys_delete
+    ON admin_media_deletion_request_keys FOR DELETE USING (FALSE);
+
+CREATE OR REPLACE FUNCTION protect_admin_media_deletion_request_key()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION
+        'admin_media_deletion_request_keys is an immutable audit record';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_protect_admin_media_deletion_request_key_update
+    ON admin_media_deletion_request_keys;
+CREATE TRIGGER trg_protect_admin_media_deletion_request_key_update
+BEFORE UPDATE ON admin_media_deletion_request_keys
+FOR EACH ROW EXECUTE FUNCTION protect_admin_media_deletion_request_key();
+DROP TRIGGER IF EXISTS trg_protect_admin_media_deletion_request_key_delete
+    ON admin_media_deletion_request_keys;
+CREATE TRIGGER trg_protect_admin_media_deletion_request_key_delete
+BEFORE DELETE ON admin_media_deletion_request_keys
+FOR EACH ROW EXECUTE FUNCTION protect_admin_media_deletion_request_key();
+
+SELECT set_config('app.bypass_rls', 'off', false);
+SELECT set_config('app.current_tenant_id', '', false);
+
 -- 3. SECURITY_EVENTS (High-priority alerts)
 CREATE TABLE IF NOT EXISTS security_events (
     event_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -2129,6 +2579,68 @@ CREATE TABLE IF NOT EXISTS suspension_events (
 
 CREATE INDEX IF NOT EXISTS idx_suspension_events_target ON suspension_events(target_type, target_id);
 CREATE INDEX IF NOT EXISTS idx_suspension_events_active ON suspension_events(target_id, is_active) WHERE is_active = TRUE;
+
+-- Serialize tenant/partner COMPLIANCE holds with irreversible media deletion.
+CREATE OR REPLACE FUNCTION serialize_compliance_media_hold()
+RETURNS TRIGGER AS $$
+DECLARE
+    held_tenant_id UUID;
+BEGIN
+    IF NEW.suspension_type = 'COMPLIANCE'
+       AND NEW.is_active = TRUE
+       AND NEW.restored_at IS NULL THEN
+        IF NEW.target_type = 'tenant' THEN
+            PERFORM pg_advisory_xact_lock(
+                hashtextextended('talky:media-hold:' || NEW.target_id::text, 0)
+            );
+        ELSIF NEW.target_type = 'partner' THEN
+            FOR held_tenant_id IN
+                SELECT id FROM tenants
+                WHERE white_label_partner_id = NEW.target_id
+                ORDER BY id
+            LOOP
+                PERFORM pg_advisory_xact_lock(
+                    hashtextextended(
+                        'talky:media-hold:' || held_tenant_id::text,
+                        0
+                    )
+                );
+            END LOOP;
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_serialize_compliance_media_hold ON suspension_events;
+CREATE TRIGGER trg_serialize_compliance_media_hold
+BEFORE INSERT OR UPDATE OF
+    target_type, target_id, suspension_type, is_active, restored_at,
+    suspended_until
+ON suspension_events
+FOR EACH ROW EXECUTE FUNCTION serialize_compliance_media_hold();
+
+-- Partner membership is part of the effective hold predicate. Serialize a
+-- tenant moving into/out of a partner with the same lock used by deletion and
+-- partner-hold creation so membership cannot change between check and erase.
+CREATE OR REPLACE FUNCTION serialize_tenant_partner_membership()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.white_label_partner_id IS DISTINCT FROM
+       OLD.white_label_partner_id THEN
+        PERFORM pg_advisory_xact_lock(
+            hashtextextended('talky:media-hold:' || NEW.id::text, 0)
+        );
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_serialize_tenant_partner_membership ON tenants;
+CREATE TRIGGER trg_serialize_tenant_partner_membership
+BEFORE UPDATE OF white_label_partner_id
+ON tenants
+FOR EACH ROW EXECUTE FUNCTION serialize_tenant_partner_membership();
 
 -- =============================================================================
 -- CALL VELOCITY TRACKING (FOR PATTERN DETECTION)
@@ -2226,49 +2738,79 @@ CREATE OR REPLACE FUNCTION update_call_status(
 )
 RETURNS JSON
 LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
 AS $$
 DECLARE
     v_call RECORD;
-    v_lead_status TEXT;
+    v_updated RECORD;
+    v_applied BOOLEAN := FALSE;
+    v_terminal_statuses CONSTANT TEXT[] := ARRAY[
+        'ended','completed','failed','cancelled','canceled','rejected',
+        'busy','no_answer'
+    ];
 BEGIN
-    UPDATE calls SET
-        status = 'completed',
-        outcome = p_outcome,
-        duration_seconds = COALESCE(p_duration, duration_seconds),
-        ended_at = NOW(),
-        updated_at = NOW()
-    WHERE id = p_call_uuid
-    RETURNING id, lead_id, action_plan_id, campaign_id
-    INTO v_call;
+    SELECT id, lead_id, campaign_id, status, outcome, ended_at,
+           duration_seconds, terminal_settled_at, terminal_retry_payload,
+           terminal_retry_enqueued_at
+      INTO v_call
+      FROM calls
+     WHERE id = p_call_uuid
+     FOR UPDATE;
 
-    IF v_call.id IS NULL THEN
-        RETURN json_build_object('found', false, 'call_id', p_call_uuid);
+    IF NOT FOUND THEN
+        RETURN json_build_object(
+            'found', false, 'applied', false, 'durable', false,
+            'call_id', p_call_uuid
+        );
     END IF;
 
-    CASE p_outcome
-        WHEN 'answered' THEN v_lead_status := 'contacted';
-        WHEN 'goal_achieved' THEN v_lead_status := 'completed';
-        WHEN 'spam', 'invalid', 'unavailable', 'disconnected', 'rejected' THEN v_lead_status := 'dnc';
-        ELSE v_lead_status := 'called';
-    END CASE;
-
-    IF v_call.lead_id IS NOT NULL THEN
-        UPDATE leads SET
-            status = v_lead_status,
-            last_call_result = p_outcome,
-            last_called_at = NOW(),
-            call_attempts = COALESCE(call_attempts, 0) + 1,
-            updated_at = NOW()
-        WHERE id = v_call.lead_id;
+    -- Compatibility projection only. Full terminal settlement spans the
+    -- lead, dialer job, campaign counters and retry outbox, and therefore is
+    -- committed by CallService's pooled transaction. This function never
+    -- creates terminal_settled_at by itself.
+    IF v_call.status = ANY(v_terminal_statuses) THEN
+        UPDATE calls
+           SET outcome = COALESCE(outcome, p_outcome),
+               duration_seconds = COALESCE(duration_seconds, p_duration),
+               ended_at = COALESCE(ended_at, NOW()),
+               updated_at = NOW()
+         WHERE id = p_call_uuid
+         RETURNING status, outcome, ended_at, terminal_settled_at,
+                   terminal_retry_payload, terminal_retry_enqueued_at
+              INTO v_updated;
+    ELSE
+        UPDATE calls
+           SET status = 'completed', outcome = p_outcome,
+               duration_seconds = COALESCE(p_duration, duration_seconds),
+               ended_at = COALESCE(ended_at, NOW()), updated_at = NOW()
+         WHERE id = p_call_uuid
+           AND NOT (COALESCE(status, '') = ANY(v_terminal_statuses))
+         RETURNING status, outcome, ended_at, terminal_settled_at,
+                   terminal_retry_payload, terminal_retry_enqueued_at
+              INTO v_updated;
+        v_applied := FOUND;
     END IF;
 
     RETURN json_build_object(
         'found', true,
+        'applied', v_applied,
+        'durable', (
+            v_updated.status = ANY(v_terminal_statuses)
+            AND v_updated.outcome IS NOT NULL
+            AND v_updated.ended_at IS NOT NULL
+            AND v_updated.terminal_settled_at IS NOT NULL
+            AND (
+                v_updated.terminal_retry_payload IS NULL
+                OR v_updated.terminal_retry_enqueued_at IS NOT NULL
+            )
+        ),
         'call_id', v_call.id,
         'lead_id', v_call.lead_id,
         'campaign_id', v_call.campaign_id,
-        'outcome', p_outcome,
-        'lead_status', v_lead_status
+        'status', v_updated.status,
+        'outcome', v_updated.outcome,
+        'settlement_required', (v_updated.terminal_settled_at IS NULL)
     );
 END;
 $$;
@@ -2332,6 +2874,10 @@ INSERT INTO permissions (name, description, resource, action, is_system) VALUES
     ('campaigns:update', 'Modify existing campaigns', 'campaigns', 'update', TRUE),
     ('campaigns:delete', 'Delete campaigns', 'campaigns', 'delete', TRUE),
     ('campaigns:admin', 'Full administrative control over all campaigns', 'campaigns', 'admin', TRUE),
+    ('inbound:read', 'View inbound campaign configuration', 'inbound', 'read', TRUE),
+    ('inbound:manage', 'Create and edit inbound campaigns', 'inbound', 'manage', TRUE),
+    ('inbound:assign', 'Assign tenant-owned DIDs and trunks', 'inbound', 'assign', TRUE),
+    ('inbound:controls', 'Manage tenant inbound runtime controls', 'inbound', 'controls', TRUE),
     ('users:create', 'Create new users within tenant', 'users', 'create', TRUE),
     ('users:read', 'View user profiles', 'users', 'read', TRUE),
     ('users:update', 'Update user profiles', 'users', 'update', TRUE),
@@ -2346,6 +2892,9 @@ INSERT INTO permissions (name, description, resource, action, is_system) VALUES
     ('calls:create', 'Initiate calls', 'calls', 'create', TRUE),
     ('calls:read', 'View call history and recordings', 'calls', 'read', TRUE),
     ('calls:delete', 'Delete call records', 'calls', 'delete', TRUE),
+    ('recordings:read', 'View and play call recordings', 'recordings', 'read', TRUE),
+    ('recordings:download', 'Download call recordings', 'recordings', 'download', TRUE),
+    ('recordings:delete', 'Permanently delete call recordings', 'recordings', 'delete', TRUE),
     ('connectors:create', 'Add new connectors', 'connectors', 'create', TRUE),
     ('connectors:read', 'View connector configurations', 'connectors', 'read', TRUE),
     ('connectors:update', 'Modify connector settings', 'connectors', 'update', TRUE),
@@ -2370,6 +2919,57 @@ WHERE
     (r.name = 'partner_admin' AND (p.resource NOT LIKE 'platform:%' OR p.name = 'platform:tenants:read')) OR
     (r.name = 'platform_admin')
 ON CONFLICT DO NOTHING;
+
+-- Inbound permissions are listed explicitly so the fresh baseline remains
+-- authoritative even if the broad legacy role rule above is tightened.
+WITH inbound_grants(role_name, permission_name) AS (
+    VALUES
+        ('readonly', 'inbound:read'),
+        ('user', 'inbound:read'),
+        ('tenant_admin', 'inbound:read'),
+        ('tenant_admin', 'inbound:manage'),
+        ('tenant_admin', 'inbound:assign'),
+        ('tenant_admin', 'inbound:controls'),
+        ('partner_admin', 'inbound:read'),
+        ('partner_admin', 'inbound:manage'),
+        ('partner_admin', 'inbound:assign'),
+        ('partner_admin', 'inbound:controls'),
+        ('platform_admin', 'inbound:read'),
+        ('platform_admin', 'inbound:manage'),
+        ('platform_admin', 'inbound:assign'),
+        ('platform_admin', 'inbound:controls')
+)
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM inbound_grants g
+JOIN roles r ON r.name = g.role_name
+JOIN permissions p ON p.name = g.permission_name
+ON CONFLICT (role_id, permission_id) DO NOTHING;
+
+-- Recording grants are explicit because playback, export, and irreversible
+-- deletion must remain independently revocable. In particular, ordinary users
+-- retain historical download access while readonly users receive playback only.
+WITH recording_grants(role_name, permission_name) AS (
+    VALUES
+        ('readonly', 'recordings:read'),
+        ('user', 'recordings:read'),
+        ('user', 'recordings:download'),
+        ('tenant_admin', 'recordings:read'),
+        ('tenant_admin', 'recordings:download'),
+        ('tenant_admin', 'recordings:delete'),
+        ('partner_admin', 'recordings:read'),
+        ('partner_admin', 'recordings:download'),
+        ('partner_admin', 'recordings:delete'),
+        ('platform_admin', 'recordings:read'),
+        ('platform_admin', 'recordings:download'),
+        ('platform_admin', 'recordings:delete')
+)
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM recording_grants g
+JOIN roles r ON r.name = g.role_name
+JOIN permissions p ON p.name = g.permission_name
+ON CONFLICT (role_id, permission_id) DO NOTHING;
 
 -- =============================================================================
 -- SECTION 10: VIEWS

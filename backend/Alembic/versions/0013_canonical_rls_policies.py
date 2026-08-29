@@ -72,7 +72,8 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     op.execute(
-        text("""
+        text(
+            """
         DO $rls$
         DECLARE
             tbl        record;
@@ -92,6 +93,13 @@ def upgrade() -> None:
                 WHERE c.relnamespace = 'public'::regnamespace
                   AND c.relkind      = 'r'
                   AND c.relrowsecurity
+                  -- complete_schema.sql is a conservative 0008 floor but may
+                  -- contain idempotent objects owned by later migrations.
+                  -- 0023 validates and installs specialized command-specific
+                  -- policies for this irreversible-deletion audit table; a
+                  -- generic 0013 policy would violate that ownership boundary
+                  -- and make the full 0008-to-head bootstrap fail closed.
+                  AND c.relname NOT IN ('admin_media_deletion_intents')
                 ORDER BY c.relname
             LOOP
                 -- A nullable tenant_id means the table legitimately holds
@@ -132,7 +140,8 @@ def upgrade() -> None:
             END LOOP;
         END
         $rls$;
-    """)
+    """
+        )
     )
 
 
@@ -143,7 +152,8 @@ def downgrade() -> None:
     # shapes from memory would be worse than having none while RLS is bypassed
     # anyway. Recover them from the schema baseline if ever genuinely needed.
     op.execute(
-        text("""
+        text(
+            """
         DO $rls_down$
         DECLARE tbl record;
         BEGIN
@@ -160,5 +170,6 @@ def downgrade() -> None:
             END LOOP;
         END
         $rls_down$;
-    """)
+    """
+        )
     )

@@ -6459,6 +6459,12 @@ CREATE POLICY ttc_tenant_isolation ON public.tenant_telephony_credentials USING 
 
 \unrestrict WthdvmB2Ew7ahIziU3gjqwSr9zUkYrnyrSAnGDhy8bZSgKAActWC7ZdVHtJBfkC
 
+-- pg_dump deliberately cleared search_path near the start of the generated
+-- snapshot.  The hand-maintained additions below use unqualified application
+-- object names, so restore an explicit creation namespace first.  pg_catalog
+-- remains implicitly searched before public for built-in functions.
+SELECT pg_catalog.set_config('search_path', 'public', false);
+
 
 -- =============================================================================
 -- Appended 2026-06-03: tenant_ai_credentials was applied on prod but missing

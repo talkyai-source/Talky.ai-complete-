@@ -108,11 +108,47 @@ def upgrade() -> None:
         )
     )
 
-    targets = [(DOJO_TENANT, "internal validation tenant — frozen live-call batch "
-                             "for the MVP model pair (docs/MODEL-SELECTION.md)")]
+    # Migration 0013 FORCE-enables tenant RLS before this revision.  Count and
+    # resolve the historical targets through the canonical transaction-local
+    # migration/worker bypass; otherwise an unset tenant context can make a
+    # populated database look empty and incorrectly take the bootstrap skip.
+    prior_bypass = (
+        conn.execute(text("SELECT current_setting('app.bypass_rls', TRUE)")).scalar() or ""
+    )
+    conn.execute(text("SELECT set_config('app.bypass_rls', 'on', TRUE)"))
+
+    # Both supported bootstrap inputs are schema-only snapshots.  A truly
+    # fresh database therefore has no tenant AI rows, and there is no
+    # tenant-specific data move to perform.  Keep the exact-one assertions
+    # below for every non-empty database: that is the production safety guard
+    # against silently moving the wrong tenant or skipping a renamed target.
+    tenant_config_count = int(
+        conn.execute(text("SELECT count(*) FROM tenant_ai_configs")).scalar() or 0
+    )
+    if tenant_config_count == 0:
+        print(
+            "  tenant_ai_configs is empty (schema-only bootstrap); "
+            "skipping historical six-tenant AI data move"
+        )
+        conn.execute(
+            text("SELECT set_config('app.bypass_rls', :prior, TRUE)"),
+            {"prior": prior_bypass},
+        )
+        return
+
+    targets = [
+        (
+            DOJO_TENANT,
+            "internal validation tenant — frozen live-call batch "
+            "for the MVP model pair (docs/MODEL-SELECTION.md)",
+        )
+    ]
     targets += [
-        (t, "repair: llama-3.1-8b-instant 404s on this Groq account; calls were "
-            "silently running the Gemini fallback")
+        (
+            t,
+            "repair: llama-3.1-8b-instant 404s on this Groq account; calls were "
+            "silently running the Gemini fallback",
+        )
         for t in DEAD_LLAMA_TENANTS
     ]
 
@@ -148,8 +184,15 @@ def upgrade() -> None:
                 VALUES (:tid, :op_, :om, :np, :nm, :reason, :batch)
                 """
             ),
-            {"tid": tenant_id, "op_": old_provider, "om": old_model,
-             "np": NEW_PROVIDER, "nm": NEW_MODEL, "reason": reason, "batch": BATCH},
+            {
+                "tid": tenant_id,
+                "op_": old_provider,
+                "om": old_model,
+                "np": NEW_PROVIDER,
+                "nm": NEW_MODEL,
+                "reason": reason,
+                "batch": BATCH,
+            },
         )
         conn.execute(
             text(
@@ -170,6 +213,10 @@ def upgrade() -> None:
     print("  after:")
     for prov, model, n in remaining:
         print(f"    {prov}/{model}: {n}")
+    conn.execute(
+        text("SELECT set_config('app.bypass_rls', :prior, TRUE)"),
+        {"prior": prior_bypass},
+    )
 
 
 def downgrade() -> None:
