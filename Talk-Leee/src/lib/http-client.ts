@@ -478,6 +478,16 @@ export function createHttpClient(config: HttpClientConfig) {
                     ? (body as { detail?: unknown }).detail
                     : undefined;
             const legacyMessage = typeof legacyDetail === "string" ? legacyDetail : undefined;
+            const legacyRecord =
+                legacyDetail && typeof legacyDetail === "object"
+                    ? legacyDetail as Record<string, unknown>
+                    : undefined;
+            const legacyCodeValue = legacyRecord?.code ?? legacyRecord?.error;
+            const legacyCode = typeof legacyCodeValue === "string" ? legacyCodeValue : undefined;
+            const legacyObjectMessage = typeof legacyRecord?.message === "string" ? legacyRecord.message : undefined;
+            const legacyObjectDetails = legacyRecord && "details" in legacyRecord
+                ? legacyRecord.details
+                : legacyDetail;
 
             const defaultCode =
                 res.status === 401
@@ -490,9 +500,9 @@ export function createHttpClient(config: HttpClientConfig) {
                           ? "server_error"
                           : "http_error";
 
-            const code = envelopeCode ?? defaultCode;
-            const message = envelopeMessage ?? legacyMessage ?? defaultMessageForStatus(res.status);
-            const detailsForError = envelopeDetails ?? legacyDetail ?? body;
+            const code = envelopeCode ?? legacyCode ?? defaultCode;
+            const message = envelopeMessage ?? legacyObjectMessage ?? legacyMessage ?? defaultMessageForStatus(res.status);
+            const detailsForError = envelopeDetails ?? legacyObjectDetails ?? body;
 
             // Single source of truth for token expiry — clear the
             // stored token, then fire the global session-expired
@@ -596,7 +606,7 @@ export function createHttpClient(config: HttpClientConfig) {
 
         if (!res.ok) {
             const requestId = res.headers.get("x-request-id") ?? res.headers.get("x-correlation-id") ?? undefined;
-            const code =
+            const defaultCode =
                 res.status === 401
                     ? "unauthorized"
                     : res.status === 403
@@ -612,19 +622,31 @@ export function createHttpClient(config: HttpClientConfig) {
             const body = await readBody(res);
             const envelope =
                 body && typeof body === "object" && "error" in (body as Record<string, unknown>)
-                    ? ((body as { error?: unknown }).error as { message?: unknown } | undefined)
+                    ? ((body as { error?: unknown }).error as { code?: unknown; message?: unknown; details?: unknown } | undefined)
                     : undefined;
+            const envelopeCode = typeof envelope?.code === "string" ? envelope.code : undefined;
             const envelopeMessage = typeof envelope?.message === "string" ? envelope.message : undefined;
+            const envelopeDetails = envelope?.details;
             const legacyDetail =
                 body && typeof body === "object" && "detail" in (body as Record<string, unknown>)
                     ? (body as { detail?: unknown }).detail
                     : undefined;
             const legacyMessage = typeof legacyDetail === "string" ? legacyDetail : undefined;
+            const legacyRecord =
+                legacyDetail && typeof legacyDetail === "object"
+                    ? legacyDetail as Record<string, unknown>
+                    : undefined;
+            const legacyCodeValue = legacyRecord?.code ?? legacyRecord?.error;
+            const legacyCode = typeof legacyCodeValue === "string" ? legacyCodeValue : undefined;
+            const legacyObjectMessage = typeof legacyRecord?.message === "string" ? legacyRecord.message : undefined;
+            const legacyObjectDetails = legacyRecord && "details" in legacyRecord
+                ? legacyRecord.details
+                : legacyDetail;
             throw new ApiClientError({
                 status: res.status,
-                code,
-                message: envelopeMessage ?? legacyMessage ?? defaultMessageForStatus(res.status),
-                details: legacyDetail ?? body,
+                code: envelopeCode ?? legacyCode ?? defaultCode,
+                message: envelopeMessage ?? legacyObjectMessage ?? legacyMessage ?? defaultMessageForStatus(res.status),
+                details: envelopeDetails ?? legacyObjectDetails ?? body,
                 url,
                 method,
                 requestId,

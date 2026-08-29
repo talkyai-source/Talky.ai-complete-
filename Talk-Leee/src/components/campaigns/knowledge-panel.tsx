@@ -102,6 +102,10 @@ function KnowledgeTreeNode(props: TreeNodeProps) {
 
     const [draft, setDraft] = useState<NodeEdit>({ heading: "", voice_answer: "", content: "" });
     useEffect(() => {
+        // Seed the editable draft from the live node when edit mode is entered;
+        // after that the draft is user-typed local state, so it can't be
+        // computed inline during render without clobbering keystrokes.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- initializes edit-mode draft on isEditing transition, not derivable during render
         if (isEditing) setDraft({
             heading: node.heading ?? "",
             voice_answer: node.voice_answer ?? "",
@@ -236,6 +240,7 @@ export function KnowledgePanel({ campaignId }: KnowledgePanelProps) {
         }
     }, [campaignId]);
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async knowledge fetch on mount/campaignId change, not derivable during render
     useEffect(() => { void refresh(); }, [refresh]);
 
     const markBusy = (id: string, on: boolean) =>

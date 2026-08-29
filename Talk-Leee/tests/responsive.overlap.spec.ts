@@ -141,7 +141,7 @@ async function stubAppRoutes(page: Parameters<typeof test>[1]["page"]) {
         });
     });
 
-    await page.route(/\/ai\/options\/providers\/?(\?.*)?$/, async (route) => {
+    await page.route(/\/ai-options\/providers\/?(\?.*)?$/, async (route) => {
         const req = route.request();
         if (req.resourceType() === "document") return route.continue();
         if (req.method() !== "GET") return route.continue();
@@ -171,7 +171,7 @@ async function stubAppRoutes(page: Parameters<typeof test>[1]["page"]) {
         });
     });
 
-    await page.route(/\/ai\/options\/voices\/?(\?.*)?$/, async (route) => {
+    await page.route(/\/ai-options\/voices\/?(\?.*)?$/, async (route) => {
         const req = route.request();
         if (req.resourceType() === "document") return route.continue();
         if (req.method() !== "GET") return route.continue();
@@ -237,7 +237,7 @@ async function stubAppRoutes(page: Parameters<typeof test>[1]["page"]) {
         });
     });
 
-    await page.route(/\/ai\/options\/config\/?(\?.*)?$/, async (route) => {
+    await page.route(/\/ai-options\/config\/?(\?.*)?$/, async (route) => {
         const req = route.request();
         if (req.resourceType() === "document") return route.continue();
         if (req.method() !== "GET") return route.continue();

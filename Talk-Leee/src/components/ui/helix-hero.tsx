@@ -47,7 +47,10 @@ function DescriptionSlideshow({ paragraphs }: { paragraphs: string[]; intervalMs
     }, []);
 
     // Measured before the first paint so the shortest paragraph never renders
-    // at its own height and then pushes everything below it down.
+    // at its own height and then pushes everything below it down. The
+    // measurement reads getBoundingClientRect, so it needs the mounted DOM and
+    // cannot run during render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- measures DOM layout (getBoundingClientRect) which requires the mounted DOM
     useLayoutEffect(() => {
         let cancelled = false;
         measureHeight();
@@ -81,6 +84,9 @@ function DescriptionSlideshow({ paragraphs }: { paragraphs: string[]; intervalMs
     useEffect(() => {
         if (phase !== "typing") return;
         if (visibleWords >= activeWords.length) {
+            // Phase-machine transition driven by a completed typing pass —
+            // an event reaction, not something derivable during render.
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- advances the typing phase-machine once the reveal completes
             setPhase("holding");
             return;
         }

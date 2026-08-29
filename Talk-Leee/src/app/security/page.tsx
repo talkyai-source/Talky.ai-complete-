@@ -198,9 +198,16 @@ function ChangePasswordForm() {
             </div>
 
             {/* Not a footnote: changing your password signs out every other
-                session, which is the point of doing it after a scare. */}
+                session, which is the point of doing it after a scare.
+
+                The 15 minutes is not padding. auth/password.py:131 revokes
+                every refresh token, but a device that already holds an access
+                token keeps using it until it expires — 15 minutes at most.
+                "Signs out all of your other sessions" on its own reads as
+                instant, and someone acting on a compromise needs the real
+                number. */}
             <p className="text-xs text-muted-foreground">
-                Changing your password signs out all of your other sessions.
+                Changing your password signs out all of your other sessions, each within 15 minutes.
             </p>
 
             <div className="flex items-center gap-3">
@@ -266,6 +273,7 @@ export default function SecurityPage() {
     }, []);
 
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches and stores MFA status when the auth token becomes available or changes
         void refreshMfa(token);
     }, [token, refreshMfa]);
 
@@ -475,11 +483,33 @@ export default function SecurityPage() {
                 </Section>
 
                 {/* ── 3. Active sessions ───────────────────────────────────── */}
+                {/* WHAT REVOKING ACTUALLY DOES.
+
+                    This used to say "Revoking ends that session immediately",
+                    which is not what happens. DELETE /sessions/{id} removes the
+                    row in `security_sessions` and the legacy `talky_sid`
+                    session, and stops there: there is no column linking
+                    `refresh_tokens` to `security_sessions`, so the device's
+                    refresh token survives and it can keep minting access tokens
+                    on a rolling 7-day window
+                    (backend/app/api/v1/endpoints/sessions.py:213-249,
+                    refresh_tokens.py REFRESH_TOKEN_LIFETIME_DAYS = 7).
+
+                    The consequence — "the device you just revoked still works"
+                    — is the whole reason someone opens this section after a
+                    scare, so it goes in the always-visible description and not
+                    only in the tip (goals.md §8: do not hide essential warnings
+                    inside a tooltip).
+
+                    The password route is real, not a consolation:
+                    auth/password.py:131 calls revoke_all_user_refresh_tokens,
+                    so every device is forced to re-authenticate once its
+                    15-minute access token expires. */}
                 <Section
                     icon={Monitor}
                     title="Active sessions"
-                    description="Everywhere your account is currently signed in. Revoke anything you do not recognise."
-                    tip="Each entry is one browser or device. Revoking ends that session immediately; it does not change your password."
+                    description="Everywhere your account is currently signed in. Revoking an entry does not sign that device out — to do that, change your password."
+                    tip="Revoking removes the entry from this list and ends its server-side session. It cannot invalidate that device's sign-in token: the two are not linked in the database. So the device keeps access, and each time it checks in it renews that access for another 7 days. Changing your password revokes the tokens instead, and every other device is signed out within 15 minutes."
                 >
                     <DeviceList token={token} />
                 </Section>
@@ -492,12 +522,12 @@ export default function SecurityPage() {
                         description="Keys and activity for the whole account. Visible because you are an administrator."
                     >
                         <div className="grid gap-3 sm:grid-cols-2">
-                            <AdminLinkCard
-                                href="/admin/api-keys"
-                                icon={Key}
-                                title="API keys and tokens"
-                                description="Create, rotate and revoke programmatic access"
-                            />
+                            {/* Two of these four destinations work and two do
+                                not, and the difference is stated here rather
+                                than discovered after the click. Both broken
+                                pages are kept listed for the same reason the IP
+                                allow-list below is: an absence that is written
+                                down is not mistaken for an outage. */}
                             <AdminLinkCard
                                 href="/admin/audit-logs"
                                 icon={ScrollText}
@@ -511,10 +541,16 @@ export default function SecurityPage() {
                                 description="Security events and access review"
                             />
                             <AdminLinkCard
+                                href="/admin/api-keys"
+                                icon={Key}
+                                title="API keys and tokens"
+                                description="Not available here — no key management API is served"
+                            />
+                            <AdminLinkCard
                                 href="/admin/voice-security"
                                 icon={ShieldCheck}
                                 title="Voice security"
-                                description="Call origination and telephony protections"
+                                description="Not available here — call guards are not served"
                             />
                         </div>
                     </Section>

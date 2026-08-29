@@ -44,8 +44,8 @@ export function CallIssuesBanner() {
     const extra = visible.length - 1;
 
     return (
-        <div className="mb-4 flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-600 dark:text-red-400" />
+        <div role="alert" aria-live="polite" className="mb-4 flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm">
+            <AlertTriangle aria-hidden className="mt-0.5 h-5 w-5 shrink-0 text-red-600 dark:text-red-400" />
             <div className="min-w-0 flex-1">
                 <div className="font-semibold text-red-800 dark:text-red-300">{top.title}</div>
                 {top.description ? (
@@ -60,8 +60,8 @@ export function CallIssuesBanner() {
             <button
                 type="button"
                 onClick={() => setDismissed((d) => new Set(d).add(top.id))}
-                aria-label="Dismiss"
-                className="shrink-0 text-red-700/70 transition-colors hover:text-red-800 dark:text-red-300/70 dark:hover:text-red-200"
+                aria-label={`Dismiss call issue: ${top.title}`}
+                className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-red-700/70 transition-colors hover:bg-red-500/10 hover:text-red-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 dark:text-red-300/70 dark:hover:text-red-200"
             >
                 <X className="h-4 w-4" />
             </button>

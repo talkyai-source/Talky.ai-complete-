@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode, useCallback } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode, useCallback } from "react";
 import { api } from "@/lib/api";
 import { clearFreshLoginGrace, resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider, isApiClientError } from "@/lib/http-client";
 import { consumeLegacyAuthCookie, getBrowserAuthToken, isBearerFallbackEnabled, setBrowserAuthToken } from "@/lib/auth-token";
@@ -106,6 +106,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return null;
     });
 
+    // Latest-value mirror of `accessToken` for effects that must NOT re-run
+    // when the token rotates (see the bootstrap effect below).
+    const accessTokenRef = useRef(accessToken);
+    useEffect(() => {
+        accessTokenRef.current = accessToken;
+    }, [accessToken]);
+
     // Plumb the live token to the shared HTTP client. Every request reads
     // _externalTokenProvider() at request time, so a rotation here is
     // automatically picked up by all consumers without anyone re-reading
@@ -195,9 +202,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // /auth/login even with a valid cookie. The branch on
     // isBearerFallbackEnabled() restores the correct cookie-mode
     // behaviour.
+    //
+    // Dependencies: this effect deliberately runs ONCE, on mount, and reads
+    // the token through `accessTokenRef` instead of listing `accessToken` as a
+    // dependency. Listing it would re-run the whole bootstrap on every token
+    // write — login, refresh rotation, cross-tab sync — each one firing a
+    // fresh /auth/me and flipping `loading` back on under the user, and the
+    // in-effect retry path (`loadMe`) can itself trigger a refresh, so the
+    // re-runs would feed each other. The ref keeps the value current without
+    // making it a trigger; at mount it is exactly the lazily-initialised
+    // localStorage token anyway.
     useEffect(() => {
         let cancelled = false;
-        const legacyToken = accessToken ?? getBrowserAuthToken();
+        const legacyToken = accessTokenRef.current ?? getBrowserAuthToken();
         const inCookieOnlyMode = !isBearerFallbackEnabled();
         if (!legacyToken && !inCookieOnlyMode) {
             // Bearer mode + no Bearer = anonymous cold visit. Don't
@@ -484,7 +501,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // back to /auth/login on click.
         if (user) return "authenticated";
         return "anonymous";
-    }, [loading, user, accessToken]);
+        // `accessToken` is deliberately NOT a dependency: since the cookie-only
+        // fix above, the status is derived from `loading` + `user` alone, so
+        // listing the token only made this memo churn on every rotation.
+    }, [loading, user]);
 
     const value = useMemo(
         () => ({ user, loading, accessToken, status, login, register, logout, setToken, refreshUser, applyLoginResult }),

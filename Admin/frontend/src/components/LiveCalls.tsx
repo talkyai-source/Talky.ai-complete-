@@ -1,14 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Loader2, Play, Pause } from 'lucide-react';
 import { api } from '../lib/api';
-
-interface Call {
-    id: string;
-    tenant: string;
-    agent: string;
-    status: 'in-progress' | 'queued' | 'failed';
-    duration: string;
-}
+import type { LiveCallItem } from '../lib/api';
+import { CallTerminationAction } from './CallTerminationAction';
+import { getTerminationPhase, mergePolledLiveCalls } from '../lib/call-termination';
 
 function formatDuration(seconds: number): string {
     if (!Number.isFinite(seconds) || seconds <= 0) return '-';
@@ -17,7 +12,15 @@ function formatDuration(seconds: number): string {
     return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-function mapApiStatus(s: string): Call['status'] {
+type DisplayStatus = 'in-progress' | 'queued' | 'failed' | 'ending' | 'end-failed' | 'ended';
+
+function mapApiStatus(call: LiveCallItem): DisplayStatus {
+    const terminationPhase = getTerminationPhase(call);
+    if (terminationPhase === 'requested') return 'ending';
+    if (terminationPhase === 'failed') return 'end-failed';
+    if (terminationPhase === 'confirmed') return 'ended';
+
+    const s = call.status;
     if (['in_progress', 'initiated', 'dialing', 'ringing', 'answered', 'in_call'].includes(s)) {
         return 'in-progress';
     }
@@ -25,11 +28,15 @@ function mapApiStatus(s: string): Call['status'] {
     return 'failed';
 }
 
-function StatusBadge({ status }: { status: Call['status'] }) {
+function StatusBadge({ call }: { call: LiveCallItem }) {
+    const status = mapApiStatus(call);
     const statusConfig = {
         'in-progress': { label: 'In Progress', className: 'in-progress', dotClass: 'green' },
         'queued': { label: 'Queued', className: 'queued', dotClass: 'orange' },
         'failed': { label: 'Failed', className: 'failed', dotClass: 'red' },
+        'ending': { label: 'Ending', className: 'ending', dotClass: 'orange' },
+        'end-failed': { label: 'End failed', className: 'end-failed', dotClass: 'red' },
+        'ended': { label: 'Ended', className: 'ended', dotClass: 'gray' },
     };
 
     const config = statusConfig[status];
@@ -43,11 +50,12 @@ function StatusBadge({ status }: { status: Call['status'] }) {
 }
 
 export function LiveCalls() {
-    const [calls, setCalls] = useState<Call[]>([]);
+    const [calls, setCalls] = useState<LiveCallItem[]>([]);
     const [isPaused, setIsPaused] = useState(false);
     const [pauseLoading, setPauseLoading] = useState(false);
     const [showConfirm, setShowConfirm] = useState(false);
     const [pauseReason, setPauseReason] = useState('');
+    const [pollError, setPollError] = useState<string | null>(null);
 
     // Fetch pause status on mount
     useEffect(() => {
@@ -77,17 +85,14 @@ export function LiveCalls() {
                 if (response.error) throw new Error(response.error.message);
                 if (cancelled) return;
                 const items = response.data ?? [];
-                setCalls(
-                    items.map((c) => ({
-                        id: c.id,
-                        tenant: c.tenant_name || c.tenant_id || '—',
-                        agent: c.campaign_name || 'AI Bot',
-                        status: mapApiStatus(c.status),
-                        duration: formatDuration(c.duration_seconds),
-                    })),
-                );
-            } catch {
-                if (!cancelled) setCalls([]);
+                setCalls((current) => mergePolledLiveCalls(current, items));
+                setPollError(null);
+            } catch (error) {
+                if (!cancelled) {
+                    setPollError(error instanceof Error
+                        ? error.message
+                        : 'Live-call refresh failed. Existing statuses may be stale.');
+                }
             }
         };
         void fetchOnce();
@@ -96,6 +101,16 @@ export function LiveCalls() {
             cancelled = true;
             window.clearInterval(id);
         };
+    }, []);
+
+    const patchCall = useCallback((callId: string, patch: Partial<LiveCallItem>) => {
+        setCalls((current) => current.map((call) => (
+            call.id === callId ? { ...call, ...patch } : call
+        )));
+    }, []);
+
+    const confirmCallEnded = useCallback((callId: string) => {
+        setCalls((current) => current.filter((call) => call.id !== callId));
     }, []);
 
     const handlePauseToggle = useCallback(async () => {
@@ -190,6 +205,12 @@ export function LiveCalls() {
                 </div>
             )}
 
+            {pollError && (
+                <div className="error-banner inline" role="alert">
+                    <p>{pollError} Existing call statuses remain visible until refresh succeeds.</p>
+                </div>
+            )}
+
             <div className="card-body">
                 <table className="table">
                     <thead>
@@ -203,20 +224,29 @@ export function LiveCalls() {
                         </tr>
                     </thead>
                     <tbody>
-                        {calls.map((call, index) => (
-                            <tr key={`${call.id}-${index}`}>
+                        {calls.map((call) => (
+                            <tr key={call.id}>
                                 <td>{call.id}</td>
-                                <td>{call.tenant}</td>
-                                <td>{call.agent}</td>
+                                <td>{call.tenant_name || call.tenant_id || '—'}</td>
+                                <td>{call.campaign_name || 'AI Bot'}</td>
                                 <td>
-                                    <StatusBadge status={call.status} />
+                                    <StatusBadge call={call} />
                                 </td>
-                                <td>{call.duration}</td>
+                                <td>{formatDuration(call.duration_seconds)}</td>
                                 <td>
-                                    <button className="btn btn-end">End Call</button>
+                                    <CallTerminationAction
+                                        call={call}
+                                        onPatch={patchCall}
+                                        onConfirmed={confirmCallEnded}
+                                    />
                                 </td>
                             </tr>
                         ))}
+                        {calls.length === 0 && (
+                            <tr>
+                                <td className="table-empty-row" colSpan={6}>No active calls</td>
+                            </tr>
+                        )}
                     </tbody>
                 </table>
             </div>

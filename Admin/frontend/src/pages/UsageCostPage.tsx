@@ -4,6 +4,7 @@ import { Header } from '../components/Header';
 import { UsageBreakdownCard } from '../components/UsageBreakdownCard';
 import { DollarSign, RefreshCw, Info, Building2 } from 'lucide-react';
 import { api } from '../lib/api';
+import { formatCurrencyAmount } from '../lib/call-cost';
 
 // Shape returned by GET /admin/usage/breakdown?group_by=tenant
 interface TenantUsageRow {
@@ -29,6 +30,10 @@ export function UsageCostPage() {
     const [tenantRows, setTenantRows] = useState<TenantUsageRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [costCurrency, setCostCurrency] = useState('USD');
+    const [monetaryNote, setMonetaryNote] = useState(
+        'Authoritative inbound monetary totals are ledger-only and are not shown here.',
+    );
     // Bumped on Refresh / date change to force the summary card to refetch.
     const [reloadKey, setReloadKey] = useState(0);
 
@@ -46,6 +51,10 @@ export function UsageCostPage() {
                 setTenantRows([]);
             } else {
                 const rows = (res.data?.breakdown ?? []) as unknown as TenantUsageRow[];
+                if (res.data) {
+                    setCostCurrency(res.data.cost_currency);
+                    setMonetaryNote(res.data.monetary_note);
+                }
                 // Highest spend / usage first.
                 rows.sort((a, b) => (b.total_minutes ?? 0) - (a.total_minutes ?? 0));
                 setTenantRows(rows);
@@ -115,9 +124,9 @@ export function UsageCostPage() {
                     <div className="usage-disclaimer">
                         <Info size={15} />
                         <span>
-                            Call minutes and API-call counts are actual. Provider costs are estimates
-                            derived from usage (Deepgram ~$0.0325/min, Groq ~$0.01/call), not billed
-                            amounts. Per-tenant cost shows $0 until telephony cost is recorded on each call.
+                            Call minutes and call counts include inbound and outbound activity. Provider
+                            costs are USD estimates; per-tenant legacy call cost includes outbound calls
+                            only. {monetaryNote}
                         </span>
                     </div>
 
@@ -163,7 +172,9 @@ export function UsageCostPage() {
                                                 <th>Tenant</th>
                                                 <th style={{ textAlign: 'right' }}>Calls</th>
                                                 <th style={{ textAlign: 'right' }}>Minutes</th>
-                                                <th style={{ textAlign: 'right' }}>Cost</th>
+                                                <th style={{ textAlign: 'right' }}>
+                                                    Legacy outbound cost ({costCurrency})
+                                                </th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -177,7 +188,11 @@ export function UsageCostPage() {
                                                         {(r.total_minutes ?? 0).toLocaleString()}
                                                     </td>
                                                     <td style={{ textAlign: 'right' }}>
-                                                        ${(r.total_cost ?? 0).toFixed(2)}
+                                                        {formatCurrencyAmount(
+                                                            r.total_cost ?? 0,
+                                                            costCurrency,
+                                                            2,
+                                                        )}
                                                     </td>
                                                 </tr>
                                             ))}

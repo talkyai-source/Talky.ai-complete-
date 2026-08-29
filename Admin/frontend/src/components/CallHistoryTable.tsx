@@ -14,6 +14,8 @@ import {
     Mic2,
     AudioLines,
     RotateCcw,
+    PhoneIncoming,
+    PhoneOutgoing,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import type { CallHistoryItem, CallHistoryParams, TenantListItem } from '../lib/api';
@@ -81,6 +83,7 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
     const [search, setSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState('');
     const [tenantFilter, setTenantFilter] = useState('');
+    const [directionFilter, setDirectionFilter] = useState('');
     const [fromDate, setFromDate] = useState('');
     const [toDate, setToDate] = useState('');
     const [tenants, setTenants] = useState<TenantListItem[]>([]);
@@ -105,6 +108,9 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
             if (debouncedSearch) params.search = debouncedSearch;
             if (statusFilter) params.status = statusFilter;
             if (tenantFilter) params.tenant_id = tenantFilter;
+            if (directionFilter === 'inbound' || directionFilter === 'outbound') {
+                params.direction = directionFilter;
+            }
             if (fromDate) params.from_date = fromDate;
             if (toDate) params.to_date = toDate;
 
@@ -120,7 +126,7 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
         } finally {
             setLoading(false);
         }
-    }, [page, pageSize, debouncedSearch, statusFilter, tenantFilter, fromDate, toDate]);
+    }, [page, pageSize, debouncedSearch, statusFilter, tenantFilter, directionFilter, fromDate, toDate]);
 
     useEffect(() => {
         fetchCalls();
@@ -170,6 +176,19 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
                     </select>
                 </div>
                 <select
+                    value={directionFilter}
+                    onChange={(event) => {
+                        setDirectionFilter(event.target.value);
+                        setPage(1);
+                    }}
+                    className="filter-select"
+                    aria-label="Filter by call direction"
+                >
+                    <option value="">All directions</option>
+                    <option value="inbound">Inbound</option>
+                    <option value="outbound">Outbound</option>
+                </select>
+                <select
                     value={tenantFilter}
                     onChange={(event) => {
                         setTenantFilter(event.target.value);
@@ -209,13 +228,14 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
                         aria-label="Calls to date"
                     />
                 </div>
-                {(statusFilter || tenantFilter || fromDate || toDate || search) && (
+                {(statusFilter || tenantFilter || directionFilter || fromDate || toDate || search) && (
                     <button
                         className="btn btn-secondary btn-sm"
                         onClick={() => {
                             setSearch('');
                             setStatusFilter('');
                             setTenantFilter('');
+                            setDirectionFilter('');
                             setFromDate('');
                             setToDate('');
                             setPage(1);
@@ -252,6 +272,7 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
                                 <th>Date/Time</th>
                                 <th>Tenant</th>
                                 <th>Phone Number</th>
+                                <th>Direction / DID</th>
                                 <th>Campaign</th>
                                 <th>Status</th>
                                 <th>Media &amp; Review</th>
@@ -263,7 +284,16 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
                                 <tr
                                     key={call.id}
                                     onClick={() => onCallSelect(call.id)}
+                                    onKeyDown={(event) => {
+                                        if (event.key === 'Enter' || event.key === ' ') {
+                                            event.preventDefault();
+                                            onCallSelect(call.id);
+                                        }
+                                    }}
                                     className="clickable-row"
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-label={`Open ${call.direction || 'outbound'} call ${call.id}`}
                                 >
                                     <td>{formatDate(call.created_at)}</td>
                                     <td>
@@ -273,6 +303,13 @@ export function CallHistoryTable({ onCallSelect }: CallHistoryTableProps) {
                                         </div>
                                     </td>
                                     <td className="phone-cell">{call.phone_number}</td>
+                                    <td>
+                                        <span className={`direction-badge direction-${call.direction || 'outbound'}`}>
+                                            {call.direction === 'inbound' ? <PhoneIncoming size={13} /> : <PhoneOutgoing size={13} />}
+                                            {call.direction || 'outbound'}
+                                        </span>
+                                        {call.called_did && <span className="called-did">DID {call.called_did}</span>}
+                                    </td>
                                     <td>{call.campaign_name || '-'}</td>
                                     <td>
                                         <CallStatusBadge status={call.status} outcome={call.outcome} />

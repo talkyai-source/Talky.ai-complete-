@@ -15,24 +15,6 @@ import {
  * are guarding against.
  */
 
-function withFakeFetch(status: number, run: () => Promise<void>) {
-    return async () => {
-        const prev = (globalThis as unknown as { fetch?: unknown }).fetch;
-        (globalThis as unknown as { fetch: unknown }) = {
-            fetch: (async () =>
-                new Response(JSON.stringify({ detail: "expired" }), {
-                    status,
-                    headers: { "content-type": "application/json" },
-                })) as unknown as typeof fetch,
-        };
-        try {
-            await run();
-        } finally {
-            (globalThis as unknown as { fetch?: unknown }).fetch = prev;
-        }
-    };
-}
-
 test("401 fires the registered session-expired handler and clears the token", async () => {
     let stored: string | null = "valid-token";
     const setToken = (t: string | null) => {

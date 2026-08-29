@@ -143,7 +143,12 @@ export function AssistantVoiceMode({
             }
         }
     }, []);
-    teardownRef.current = teardown;
+    // Publish the latest teardown from an effect, never during render: a
+    // render-phase ref write is not guaranteed to run under the React
+    // Compiler, which would leave the ref holding a stale closure.
+    useEffect(() => {
+        teardownRef.current = teardown;
+    }, [teardown]);
 
     // --- TTS playback ------------------------------------------------------
     const playChunk = useCallback((buffer: ArrayBuffer) => {

@@ -11,7 +11,10 @@ import { UsersPage } from './pages/UsersPage';
 import { UsageCostPage } from './pages/UsageCostPage';
 import { IncidentsPage } from './pages/IncidentsPage';
 import { SystemHealthPage } from './pages/SystemHealthPage';
+import { InboundControlPage } from './pages/InboundControlPage';
 import './index.css';
+
+const PLATFORM_ROLES = ['platform_admin', 'super_admin'];
 
 function App() {
   return (
@@ -25,7 +28,7 @@ function App() {
           <Route
             path="/"
             element={
-              <AdminRouteGuard>
+              <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
                 <CommandCenterPage />
               </AdminRouteGuard>
             }
@@ -33,7 +36,7 @@ function App() {
           <Route
             path="/command-center"
             element={
-              <AdminRouteGuard>
+              <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
                 <CommandCenterPage />
               </AdminRouteGuard>
             }
@@ -41,7 +44,7 @@ function App() {
           <Route
             path="/tenants"
             element={
-              <AdminRouteGuard>
+              <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
                 <TenantsPage />
               </AdminRouteGuard>
             }
@@ -49,8 +52,16 @@ function App() {
           <Route
             path="/calls"
             element={
-              <AdminRouteGuard>
+              <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
                 <CallsPage />
+              </AdminRouteGuard>
+            }
+          />
+          <Route
+            path="/inbound"
+            element={
+              <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
+                <InboundControlPage />
               </AdminRouteGuard>
             }
           />
@@ -65,7 +76,7 @@ function App() {
           <Route
             path="/connectors"
             element={
-              <AdminRouteGuard>
+              <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
                 <ConnectorsPage />
               </AdminRouteGuard>
             }
@@ -73,7 +84,7 @@ function App() {
           <Route
             path="/users"
             element={
-              <AdminRouteGuard>
+              <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
                 <UsersPage />
               </AdminRouteGuard>
             }
@@ -81,7 +92,7 @@ function App() {
           <Route
             path="/usage-cost"
             element={
-              <AdminRouteGuard>
+              <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
                 <UsageCostPage />
               </AdminRouteGuard>
             }

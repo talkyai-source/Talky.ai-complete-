@@ -152,6 +152,7 @@ export default function MFASetup({ token, onSuccess, onError, onCancel }: MFASet
             <div className="space-y-4">
               <div className="bg-white dark:bg-white/5 border border-border rounded-lg p-4 flex items-center justify-center">
                 {qrCode ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- qrCode is a data:image/png;base64 URI generated per-request by the backend (backend/app/core/security/totp.py); it must not go through next/image's remote optimizer
                   <img src={qrCode} alt="MFA QR Code" className="w-48 h-48" />
                 ) : (
                   <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />

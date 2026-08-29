@@ -44,10 +44,21 @@ export function MagneticText({
         return () => ro.disconnect()
     }, [])
 
+    // Drive the circle's transform imperatively. It used to be an inline
+    // `style` built from `currentPos.current`, i.e. a ref read during render —
+    // which the React Compiler is free to skip, leaving the circle stuck at the
+    // last rendered position (or invisible, since the scale rides along with
+    // it). The position is animation state, not render state, so it belongs on
+    // the DOM node: this effect writes the hover scale (and the current
+    // position) on every hover transition, and the rAF loop below keeps writing
+    // it while the pointer moves.
     useEffect(() => {
-        if (!isHovered) return
         const circleEl = circleRef.current
         const innerEl = innerTextRef.current
+        if (circleEl) {
+            circleEl.style.transform = `translate(${currentPos.current.x}px, ${currentPos.current.y}px) translate(-50%, -50%) scale(${isHovered ? 1 : 0})`
+        }
+        if (!isHovered) return
         const lerp = (start: number, end: number, factor: number) => start + (end - start) * factor
 
         const animate = () => {
@@ -127,7 +138,9 @@ export function MagneticText({
                 style={{
                     width: 180,
                     height: 180,
-                    transform: `translate(${currentPos.current.x}px, ${currentPos.current.y}px) translate(-50%, -50%) scale(${isHovered ? 1 : 0})`,
+                    // Initial (never-hovered) placement only; the effect above
+                    // owns every subsequent transform write.
+                    transform: "translate(0px, 0px) translate(-50%, -50%) scale(0)",
                     transition: "transform 0.5s cubic-bezier(0.33, 1, 0.68, 1)",
                 }}
             >

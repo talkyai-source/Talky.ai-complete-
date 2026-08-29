@@ -78,6 +78,9 @@ function PartnersAdmin() {
     };
 
     useEffect(() => {
+        // Fetches the partner list on mount; `load` sets loading/items/error
+        // state as the request resolves — the standard fetch-on-mount pattern.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches partner list on mount, load() sets state once the request resolves
         void load();
     }, []);
 

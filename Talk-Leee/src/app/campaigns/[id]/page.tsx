@@ -155,6 +155,7 @@ export default function CampaignDetailPage() {
 
     useEffect(() => {
         if (campaignId) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches and stores campaign data when the route's campaignId changes
             void loadData();
         }
     }, [campaignId, loadData]);
@@ -241,8 +242,11 @@ export default function CampaignDetailPage() {
     async function handlePause() {
         try {
             setActionLoading(true);
-            await dashboardApi.pauseCampaign(campaignId);
+            const result = await dashboardApi.pauseCampaign(campaignId);
             await loadData();
+            if (result.termination_summary.status !== "confirmed") {
+                alert(result.message);
+            }
         } catch (err) {
             alert(err instanceof Error ? err.message : "Failed to pause campaign");
         } finally {
@@ -253,8 +257,11 @@ export default function CampaignDetailPage() {
     async function handleStop() {
         try {
             setActionLoading(true);
-            await dashboardApi.stopCampaign(campaignId);
+            const result = await dashboardApi.stopCampaign(campaignId);
             await loadData();
+            if (result.termination_summary.status !== "confirmed") {
+                alert(result.message);
+            }
         } catch (err) {
             alert(err instanceof Error ? err.message : "Failed to stop campaign");
         } finally {
@@ -343,11 +350,11 @@ export default function CampaignDetailPage() {
                     <motion.div
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="flex items-start justify-between"
+                        className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between"
                     >
-                        <div>
-                            <div className="flex items-center gap-3">
-                                <h2 className="text-2xl font-semibold text-foreground">{campaign.name}</h2>
+                        <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-3">
+                                <h2 className="break-words text-2xl font-semibold text-foreground">{campaign.name}</h2>
                                 <span className={`px-3 py-1 text-sm font-medium rounded-full ${getStatusStyle(campaign.status)}`}>
                                     {campaign.status}
                                 </span>
@@ -357,7 +364,7 @@ export default function CampaignDetailPage() {
                             )}
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center lg:w-auto lg:justify-end">
                             {/* Live minutes remaining — visible right next to the
                                 control that consumes them. Amber when low, red at 0. */}
                             {minutes && !minutes.unlimited && (
@@ -552,9 +559,9 @@ export default function CampaignDetailPage() {
                         transition={{ delay: 0.3 }}
                         className="content-card"
                     >
-                        <div className="flex items-center justify-between mb-4">
+                        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <h3 className="text-lg font-semibold text-foreground">Contacts</h3>
-                            <div className="flex gap-2">
+                            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
                                 <Button size="sm" variant="outline" onClick={() => setCsvModalOpen(true)}>
                                     <Upload className="w-4 h-4" />
                                     Import CSV

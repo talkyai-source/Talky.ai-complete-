@@ -108,10 +108,16 @@ export function AgentNameGender({ names, value, onChange, voiceGender }: Props) 
                     return (
                         <div key={name} className={`flex items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 ${conflict ? "border-amber-500/60 bg-amber-50/50 dark:bg-amber-950/20" : "border-gray-200 dark:border-white/10"}`}>
                             <span className="text-sm font-medium text-gray-900 dark:text-zinc-100 truncate">{name}</span>
-                            <div className="flex shrink-0 overflow-hidden rounded-md border border-gray-200 dark:border-white/10">
+                            <div
+                                className="flex shrink-0 overflow-hidden rounded-md border border-gray-200 dark:border-white/10"
+                                role="radiogroup"
+                                aria-label={`Gender for ${name}`}
+                            >
                                 <button
                                     type="button"
                                     onClick={() => set(name, "male")}
+                                    role="radio"
+                                    aria-checked={g === "male"}
                                     className={`px-2.5 py-1 text-xs font-medium transition-colors ${
                                         g === "male"
                                             ? "bg-sky-500 text-white"
@@ -123,6 +129,8 @@ export function AgentNameGender({ names, value, onChange, voiceGender }: Props) 
                                 <button
                                     type="button"
                                     onClick={() => set(name, "female")}
+                                    role="radio"
+                                    aria-checked={g === "female"}
                                     className={`px-2.5 py-1 text-xs font-medium transition-colors border-l border-gray-200 dark:border-white/10 ${
                                         g === "female"
                                             ? "bg-pink-500 text-white"

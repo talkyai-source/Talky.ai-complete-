@@ -3,6 +3,7 @@ import { useAuth } from '../lib/auth';
 
 interface AdminRouteGuardProps {
     children: React.ReactNode;
+    allowedRoles?: string[];
 }
 
 // Dev mode flag - set via environment variable
@@ -16,7 +17,7 @@ const DEV_MODE = import.meta.env.VITE_ADMIN_DEV_MODE === 'true';
  * 
  * In dev mode (VITE_ADMIN_DEV_MODE=true), bypasses all auth checks.
  */
-export function AdminRouteGuard({ children }: AdminRouteGuardProps) {
+export function AdminRouteGuard({ children, allowedRoles }: AdminRouteGuardProps) {
     const { isAuthenticated, isLoading, user } = useAuth();
     const location = useLocation();
 
@@ -50,7 +51,8 @@ export function AdminRouteGuard({ children }: AdminRouteGuardProps) {
         'admin',
         'super_admin',
     ];
-    if (!user || !ADMIN_ROLES.includes(user.role)) {
+    const effectiveRoles = allowedRoles ?? ADMIN_ROLES;
+    if (!user || !effectiveRoles.includes(user.role)) {
         return (
             <div className="access-denied">
                 <h1>Access Denied</h1>

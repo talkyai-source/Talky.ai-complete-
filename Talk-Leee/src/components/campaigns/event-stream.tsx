@@ -66,10 +66,8 @@ function group(events: StreamEvent[]) {
 
 export function EventStream({
     campaigns,
-    initialEvents: _initialEvents,
 }: {
     campaigns: Campaign[];
-    initialEvents?: StreamEvent[];
 }) {
     const TODAY_VISIBLE = 3;
     const todayFirstItemRef = useRef<HTMLButtonElement | null>(null);
@@ -84,7 +82,7 @@ export function EventStream({
     // is sent to the backend so we don't over-fetch categories the user
     // isn't viewing.
     const eventsQuery = useEventStream(quick);
-    const events: StreamEvent[] = eventsQuery.data ?? [];
+    const events: StreamEvent[] = useMemo(() => eventsQuery.data ?? [], [eventsQuery.data]);
 
     // Track previous events so we can play sound / desktop notification
     // only on genuinely new entries (not on every refetch).

@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { sharedHttpClient } from "@/lib/api";
-import { apiBaseUrl } from "@/lib/env";
 
 export interface ModelInfo {
     id: string;

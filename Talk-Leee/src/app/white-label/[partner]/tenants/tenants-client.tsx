@@ -49,7 +49,7 @@ function normalizePartnerId(partnerId: string) {
     return partnerId.trim().toLowerCase();
 }
 
-function getPartnerLimits(_partnerId: string): PartnerLimits {
+function getPartnerLimits(): PartnerLimits {
     // Real partner limits are persisted server-side per partner row; this
     // client-only widget no longer fabricates them. The form lets the
     // operator configure the actual limit and persists locally until the
@@ -57,7 +57,7 @@ function getPartnerLimits(_partnerId: string): PartnerLimits {
     return { maxMinutes: 0, maxConcurrency: 0 };
 }
 
-function initialTenantsForPartner(_partnerId: string): Tenant[] {
+function initialTenantsForPartner(): Tenant[] {
     // Previously seeded with hardcoded "Clinic AI", "Dental Bot",
     // "Salon Assistant" rows for demo partners. Removed — empty state
     // is the honest default until the backend exposes
@@ -101,8 +101,10 @@ function clampMinZero(n: number) {
 }
 
 export function PartnerTenantsClient({ partnerId, partnerDisplayName }: { partnerId: string; partnerDisplayName: string }) {
-    const limits = useMemo(() => getPartnerLimits(partnerId), [partnerId]);
-    const [tenants, setTenants] = useState<Tenant[]>(() => initialTenantsForPartner(partnerId));
+    // Limits no longer vary by partner client-side (see getPartnerLimits) —
+    // the memo just keeps a stable object identity for the deps below.
+    const limits = useMemo(() => getPartnerLimits(), []);
+    const [tenants, setTenants] = useState<Tenant[]>(() => initialTenantsForPartner());
     const [loaded, setLoaded] = useState(false);
 
     const [formOpen, setFormOpen] = useState(false);
@@ -114,6 +116,10 @@ export function PartnerTenantsClient({ partnerId, partnerDisplayName }: { partne
 
     useEffect(() => {
         const key = storageKeyForPartner(partnerId);
+        // Resets the "loaded" flag when the partner changes, before the
+        // synchronous localStorage read below repopulates it — this hydrates
+        // from an external store keyed on `partnerId`, not derived render state.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- resets loading flag when partnerId changes, ahead of the localStorage hydration read
         setLoaded(false);
         try {
             const raw = globalThis.localStorage?.getItem(key) ?? null;
@@ -144,13 +150,13 @@ export function PartnerTenantsClient({ partnerId, partnerDisplayName }: { partne
                         .filter(Boolean) as Tenant[];
                     setTenants(safe);
                 } else {
-                    setTenants(initialTenantsForPartner(partnerId));
+                    setTenants(initialTenantsForPartner());
                 }
             } else {
-                setTenants(initialTenantsForPartner(partnerId));
+                setTenants(initialTenantsForPartner());
             }
         } catch {
-            setTenants(initialTenantsForPartner(partnerId));
+            setTenants(initialTenantsForPartner());
         } finally {
             setLoaded(true);
         }
@@ -462,6 +468,11 @@ function TenantFormModal({
 
     useEffect(() => {
         if (!open) return;
+        // Reseeds the draft from the parent-supplied initial values every
+        // time the modal opens (create vs. edit, or a different tenant to
+        // edit) — a reset-on-open pattern, not state derivable from props
+        // at render time since the user goes on to freely edit `draft`.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- reseeds the form draft each time the modal opens
         setDraft(initialDraft);
     }, [initialDraft, open]);
 

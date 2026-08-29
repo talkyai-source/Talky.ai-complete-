@@ -72,9 +72,12 @@ export interface CallAnalyticsResponse {
 export interface Recording {
     id: string;
     call_id: string;
-    phone_number?: string;
+    phone_number?: string | null;
     created_at: string;
-    duration_seconds?: number;
+    duration_seconds?: number | null;
+    file_size_bytes?: number | null;
+    status: string;
+    legal_hold: boolean;
 }
 
 export interface RecordingListResponse {
@@ -82,6 +85,11 @@ export interface RecordingListResponse {
     page: number;
     page_size: number;
     total: number;
+}
+
+export interface DeleteRecordingInput {
+    reason: string;
+    idempotencyKey: string;
 }
 
 // Campaign Transcripts (Script Card)
@@ -110,7 +118,7 @@ export interface CampaignCallsResponse {
 // Extended API - Real backend integration.
 //
 // AH-Phase-B: shared HttpClient instance (see lib/api.ts → sharedHttpClient).
-// The two binary sites here (uploadCSV multipart, fetchRecordingBlob audio)
+// Binary sites here (uploads and recording playback/download)
 // go through `client.requestRaw` — same cookie+bearer auth and
 // refresh-on-401 retry as every JSON call, but it returns the raw Response
 // so binary/multipart bodies aren't JSON-parsed. Earlier these used bare
@@ -250,7 +258,8 @@ class ExtendedApi {
     async listRecordings(
         callId?: string,
         page: number = 1,
-        pageSize: number = 20
+        pageSize: number = 20,
+        signal?: AbortSignal,
     ): Promise<RecordingListResponse> {
         const params: Record<string, string> = {
             page: String(page),
@@ -262,10 +271,15 @@ class ExtendedApi {
             path: "/recordings",
             method: "GET",
             params,
+            signal,
         });
     }
 
-    async fetchRecordingBlob(recordingId: string): Promise<string> {
+    /**
+     * Fetch bytes authorized for in-browser playback. The caller owns any
+     * object URL it creates from this blob and must revoke that URL.
+     */
+    async fetchRecordingPlaybackBlob(recordingId: string, signal?: AbortSignal): Promise<Blob> {
         // Route through requestRaw so this binary stream gets the SAME auth
         // (cookie + optional bearer) AND refresh-on-401 retry as every JSON
         // call. The previous bare fetch() did no refresh, so once the
@@ -274,9 +288,37 @@ class ExtendedApi {
         const response = await this.client.requestRaw({
             path: `/recordings/${recordingId}/stream`,
             method: "GET",
+            signal,
         });
-        const blob = await response.blob();
-        return URL.createObjectURL(blob);
+        return response.blob();
+    }
+
+    /** Download is a separate, independently authorized and audited action. */
+    async downloadRecordingBlob(recordingId: string, signal?: AbortSignal): Promise<Blob> {
+        const response = await this.client.requestRaw({
+            path: `/recordings/${recordingId}/download`,
+            method: "GET",
+            signal,
+        });
+        return response.blob();
+    }
+
+    /**
+     * Permanently delete recording media. The idempotency key belongs to one
+     * dialog attempt and must be retained unchanged for transport retries.
+     */
+    async deleteRecording(
+        recordingId: string,
+        input: DeleteRecordingInput,
+        signal?: AbortSignal,
+    ): Promise<void> {
+        await this.client.request<void>({
+            path: `/recordings/${recordingId}`,
+            method: "DELETE",
+            headers: { "Idempotency-Key": input.idempotencyKey },
+            body: { reason: input.reason },
+            signal,
+        });
     }
 
     // ── Call feedback voice notes ─────────────────────────────────────────
@@ -429,7 +471,7 @@ class ExtendedApi {
     }
 
     /**
-     * Same reasoning as fetchRecordingBlob: route the binary through requestRaw
+     * Same reasoning as recording playback: route the binary through requestRaw
      * so it carries auth and inherits refresh-on-401. In production this 302s
      * to a short-lived S3 URL, which fetch follows on our behalf.
      */

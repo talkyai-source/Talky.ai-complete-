@@ -216,6 +216,7 @@
   body {
     @apply bg-background text-foreground;
     overflow-x: hidden;
+    transition: background-color 300ms ease-in-out, color 300ms ease-in-out;
   }
 }
 
@@ -882,6 +883,14 @@ details > summary.home-menu-toggle {
 .dark .content-card:hover {
   background: rgba(255, 255, 255, 0.08);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .content-card,
+  .content-card:hover {
+    transform: none;
+    transition: none;
+  }
 }
 
 /* Subtle Float Animation */

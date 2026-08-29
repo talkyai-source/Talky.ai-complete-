@@ -14,6 +14,7 @@ const LABELS: Record<string, string> = {
     meetings: "Meetings",
     reminders: "Reminders",
     campaigns: "Campaigns",
+    "inbound-campaigns": "Inbound Campaigns",
     calls: "Call History",
     contacts: "Contacts",
     analytics: "Analytics",

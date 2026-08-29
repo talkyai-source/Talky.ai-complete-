@@ -59,11 +59,17 @@ export function Select({
     const [panelStyle, setPanelStyle] = useState<{ left: number; top: number; width: number } | null>(null);
 
     useEffect(() => {
+        // Portal (createPortal to document.body) hydration gate — document
+        // isn't safely available for portal rendering until after mount.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- hydration-mounted flag gating the document.body portal
         setMounted(true);
     }, []);
 
     useEffect(() => {
         if (!open) {
+            // Clear stale panel position once closed, and recomputed fresh
+            // (via getBoundingClientRect below) the next time it opens.
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- clears stale panel position on close; recomputed from DOM on next open
             setPanelStyle(null);
             return;
         }
@@ -102,6 +108,9 @@ export function Select({
     }, [open]);
 
     useEffect(() => {
+        // Reset keyboard-active option to the selected one whenever the
+        // popover closes, so reopening starts highlighting the current value.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- resets active option to selection on close, not derivable during render
         if (!open) setActiveIndex(selectedIndex);
     }, [open, selectedIndex]);
 

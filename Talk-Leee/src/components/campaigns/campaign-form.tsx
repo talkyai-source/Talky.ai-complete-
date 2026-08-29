@@ -337,7 +337,6 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
         return () => {
             stopPreview();
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const campaignVoices = globalAiConfig
@@ -512,12 +511,20 @@ export function CampaignForm({ mode, campaignId, initialData }: Props) {
                                         <button
                                             type="button"
                                             disabled={submitting || !selectedVoice}
+                                            // `stopPreview` / `handlePreviewVoice` touch the
+                                            // audio refs, and both are called here from a
+                                            // click handler — never during render. The
+                                            // compiler only flags them because this JSX is
+                                            // produced by the inline IIFE above, which hides
+                                            // the event-handler shape from its analysis.
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 if (!selectedVoice) return;
                                                 if (isPlayingSelected) {
+                                                    // eslint-disable-next-line react-hooks/refs -- called from onClick, not render; IIFE-wrapped JSX defeats the compiler's handler detection
                                                     stopPreview();
                                                 } else {
+                                                    // eslint-disable-next-line react-hooks/refs -- called from onClick, not render; IIFE-wrapped JSX defeats the compiler's handler detection
                                                     void handlePreviewVoice(selectedVoice.id);
                                                 }
                                             }}

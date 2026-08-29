@@ -296,6 +296,7 @@ function MeetingsContent() {
 
     useEffect(() => {
         if (!createOpen) return;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- clears stale validation error and seeds default title/when whenever the create modal opens
         setFormError(null);
         if (title.length > 0) return;
         setTitle("");
@@ -324,9 +325,17 @@ function MeetingsContent() {
         if (!leadId) return;
         if (!leadSelectedLabel) return;
         if (leadQuery.trim() === leadSelectedLabel.trim()) return;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs the typeahead text back to the selected lead's label once the dropdown closes
         setLeadQuery(leadSelectedLabel);
     }, [createOpen, leadId, leadOpen, leadQuery, leadSelectedLabel]);
 
+    // sanitizeMeetingNotesHtml builds DOM nodes (document.createElement) to
+    // strip disallowed tags/attributes, which the compiler treats as a
+    // render side effect it can't verify as safe to skip re-running — so it
+    // won't preserve this memoization. Re-sanitizing on every render of the
+    // drawer is wasted work for the same notes string, so the manual
+    // memoization is kept intentionally.
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- sanitizeMeetingNotesHtml touches document.createElement, which the compiler can't prove is safe to memoize past
     const sanitizedSelectedNotes = useMemo(() => {
         if (!selected?.notes) return "";
         return sanitizeMeetingNotesHtml(selected.notes);

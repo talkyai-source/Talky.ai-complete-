@@ -56,9 +56,12 @@ export function ContactLists({
     const [callingId, setCallingId] = useState<string | null>(null);
 
     // Keep callbacks in refs so they aren't effect dependencies (parents often
-    // pass fresh closures each render).
+    // pass fresh closures each render). Assigning during render reads/writes a
+    // ref outside an effect/handler, so update it in an effect instead.
     const loadedCb = useRef(onListsLoaded);
-    loadedCb.current = onListsLoaded;
+    useEffect(() => {
+        loadedCb.current = onListsLoaded;
+    });
 
     const load = useCallback(async () => {
         try {
@@ -74,6 +77,9 @@ export function ContactLists({
     }, [campaignId]);
 
     useEffect(() => {
+        // Fetch on mount and whenever campaignId/refreshToken change; load()
+        // sets loading/error/lists internally as the async request resolves.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- async data fetch on mount/refresh, not derivable during render
         void load();
     }, [load, refreshToken]);
 

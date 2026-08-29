@@ -153,7 +153,9 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
         try {
             router.push(target);
         } catch {
-            window.location.href = target;
+            // Last-resort hard navigation if the router isn't usable yet.
+            // Resolved against the origin so it is unambiguously absolute.
+            window.location.assign(new URL(target, window.location.origin).toString());
         }
     };
 

@@ -50,9 +50,11 @@ const THUMBS_DOWN_RATING = 2;
 export function QuickReviewButtons({
     callId,
     className = "",
+    touchFriendly = false,
 }: {
     callId: string;
     className?: string;
+    touchFriendly?: boolean;
 }) {
     const queryClient = useQueryClient();
     const [error, setError] = useState<string | null>(null);
@@ -101,68 +103,66 @@ export function QuickReviewButtons({
     const isDown = current > 0 && current <= 2;
     const busy = save.isPending || mine.isLoading;
 
-    const base =
-        "inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
+    const base = `inline-flex ${touchFriendly ? "h-11 w-11" : "h-8 w-8"} items-center justify-center rounded-lg border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50`;
     const idle =
         "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground";
 
     return (
-        <div
-            className={`flex items-center gap-1 ${className}`}
-            role="group"
-            aria-label="Rate how the agent handled this call"
-        >
-            <button
-                type="button"
-                onClick={() => rate(THUMBS_UP_RATING)}
-                disabled={busy}
-                aria-pressed={isUp}
-                aria-label={isUp ? "Rated good — click to keep" : "Rate this conversation good"}
-                title={
-                    error
-                        ? error
-                        : isUp
-                            ? "You rated this good"
-                            : "Good conversation"
-                }
-                className={`${base} ${isUp
-                    ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                    : idle
-                    }`}
-            >
-                {busy && save.variables === THUMBS_UP_RATING ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                    <ThumbsUp className="h-4 w-4" />
-                )}
-            </button>
+        <div className={`flex min-w-0 flex-col items-start gap-1 ${className}`}>
+            <div className="flex items-center gap-1" role="group" aria-label="Rate how the agent handled this call">
+                <button
+                    type="button"
+                    onClick={() => rate(THUMBS_UP_RATING)}
+                    disabled={busy}
+                    aria-pressed={isUp}
+                    aria-label={isUp ? "Rated good — click to keep" : "Rate this conversation good"}
+                    title={
+                        error
+                            ? error
+                            : isUp
+                                ? "You rated this good"
+                                : "Good conversation"
+                    }
+                    className={`${base} ${isUp
+                        ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                        : idle
+                        }`}
+                >
+                    {busy && save.variables === THUMBS_UP_RATING ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                        <ThumbsUp className="h-4 w-4" />
+                    )}
+                </button>
 
-            <button
-                type="button"
-                onClick={() => rate(THUMBS_DOWN_RATING)}
-                disabled={busy}
-                aria-pressed={isDown}
-                aria-label={
-                    isDown ? "Rated poor — click to keep" : "Rate this conversation poor"
-                }
-                title={
-                    error
-                        ? error
-                        : isDown
-                            ? "You rated this poor — it is in the needs-listening queue"
-                            : "Something went wrong in this call"
-                }
-                className={`${base} ${isDown
-                    ? "border-red-500/50 bg-red-500/10 text-red-600 dark:text-red-400"
-                    : idle
-                    }`}
-            >
-                {busy && save.variables === THUMBS_DOWN_RATING ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                    <ThumbsDown className="h-4 w-4" />
-                )}
-            </button>
+                <button
+                    type="button"
+                    onClick={() => rate(THUMBS_DOWN_RATING)}
+                    disabled={busy}
+                    aria-pressed={isDown}
+                    aria-label={
+                        isDown ? "Rated poor — click to keep" : "Rate this conversation poor"
+                    }
+                    title={
+                        error
+                            ? error
+                            : isDown
+                                ? "You rated this poor — it is in the needs-listening queue"
+                                : "Something went wrong in this call"
+                    }
+                    className={`${base} ${isDown
+                        ? "border-red-500/50 bg-red-500/10 text-red-600 dark:text-red-400"
+                        : idle
+                        }`}
+                >
+                    {busy && save.variables === THUMBS_DOWN_RATING ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                        <ThumbsDown className="h-4 w-4" />
+                    )}
+                </button>
+            </div>
+            {error ? <p role="alert" className="max-w-44 text-[11px] leading-tight text-destructive">{error}</p> : null}
         </div>
     );
 }

@@ -135,16 +135,16 @@ function TestStatusBadge({ trunk }: { trunk: SipTrunkRow }) {
     const live = trunk.live_registration_status;
     if (live) {
         const cls =
-            live === "registered"
+            trunk.runtime_ready
                 ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                : live === "rejected"
+                : live === "rejected" || live === "failed" || live === "missing_config"
                     ? "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400"
-                    : live === "unregistered"
+                    : live === "unregistered" || live === "registering" || live === "checking"
                         ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
                         : "border-gray-500/30 bg-gray-500/10 text-gray-700 dark:text-gray-400";
         const label = live.charAt(0).toUpperCase() + live.slice(1);
         // Show the REAL backend reason (e.g. "403 Forbidden") right in the badge.
-        const detail = trunk.live_status_detail ? ` · ${trunk.live_status_detail}` : "";
+        const detail = trunk.runtime_status_detail ? ` · ${trunk.runtime_status_detail}` : "";
         const checked = trunk.live_status_checked_at
             ? ` · ${new Date(trunk.live_status_checked_at).toLocaleTimeString()}`
             : "";
@@ -247,12 +247,13 @@ function PoolAccountSelector() {
                     >
                         <option value="">— None (use my own trunk) —</option>
                         {pool.map((p) => (
-                            <option key={p.id} value={p.id}>
+                            <option key={p.id} value={p.id} disabled={!p.runtime_ready}>
                                 {p.label}
                                 {p.caller_id ? ` · ${p.caller_id}` : ""}
                                 {p.registration_status && p.registration_status !== "registered"
                                     ? ` · ${p.registration_status}`
                                     : ""}
+                                {!p.runtime_ready ? ` · unavailable: ${p.runtime_status_detail}` : ""}
                             </option>
                         ))}
                     </Select>
@@ -432,11 +433,13 @@ export function SipTrunksList() {
                     message: t.trunk_name,
                 });
             } else {
-                await activateMutation.mutateAsync(t.id);
+                const enabled = await activateMutation.mutateAsync(t.id);
                 notificationsStore.create({
-                    type: "success",
-                    title: "Trunk activated",
-                    message: t.trunk_name,
+                    type: enabled.runtime_ready ? "success" : "warning",
+                    title: enabled.runtime_ready ? "Trunk runtime ready" : "Trunk enabled; runtime check pending",
+                    message: enabled.runtime_ready
+                        ? t.trunk_name
+                        : `${t.trunk_name}: ${enabled.runtime_status_detail}`,
                 });
             }
         } catch (e: unknown) {
@@ -470,9 +473,9 @@ export function SipTrunksList() {
                         </CardTitle>
                         <CardDescription>
                             Point Talk-Lee at your own Asterisk / FreeSWITCH / Kamailio trunk. Set a caller ID and tune
-                            DTMF, registration, proxy and SRTP under <strong>Advanced options</strong>. Run{" "}
-                            <strong>Test</strong> to verify reachability — activation is blocked until at least one
-                            successful test.
+                            DTMF, registration, proxy and SRTP under <strong>Advanced options</strong>. <strong>Test</strong>{" "}
+                            is an optional reachability probe; inbound service remains blocked until fresh live Asterisk
+                            endpoint or registration evidence appears.
                         </CardDescription>
                     </div>
                     <Button onClick={openCreate} size="sm">

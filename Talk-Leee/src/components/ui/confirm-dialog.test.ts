@@ -1,7 +1,7 @@
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { createElement, useState } from "react";
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { createElement, useEffect, useState } from "react";
+import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ensureDom } from "@/test-utils/dom";
 import { renderWithQueryClient } from "@/test-utils/render";
@@ -101,6 +101,79 @@ test("ConfirmDialog shows error when confirm fails and stays open", async () => 
         assert.ok(screen.getByText("Nope"));
         assert.ok(screen.getByRole("dialog"));
     });
+});
+
+// A parent can close the dialog WITHOUT going through onOpenChange — the
+// mutation succeeded elsewhere, the route changed, a bulk action finished. That
+// path never reaches the internal reset, so `pending` / `inlineError` used to
+// survive into the next open.
+let setOpenFromParent: ((next: boolean) => void) | null = null;
+
+function ParentControlledHarness({ onConfirm }: { onConfirm: () => void | Promise<void> }) {
+    const [open, setOpen] = useState(true);
+    useEffect(() => {
+        setOpenFromParent = setOpen;
+        return () => {
+            setOpenFromParent = null;
+        };
+    }, []);
+    return createElement(ConfirmDialog, {
+        open,
+        // The parent owns `open` and ignores the callback entirely.
+        onOpenChange: () => {},
+        intent: "disconnect",
+        warningText: "Disconnect the connector?",
+        onConfirm,
+    });
+}
+
+async function reopenFromParent() {
+    await act(async () => {
+        setOpenFromParent?.(false);
+    });
+    await act(async () => {
+        setOpenFromParent?.(true);
+    });
+}
+
+test("ConfirmDialog clears the inline error when the parent closes it directly", async () => {
+    const userEvent = (await import("@testing-library/user-event")).default;
+    const user = userEvent.setup({ document: globalThis.document });
+    renderWithQueryClient(
+        createElement(ParentControlledHarness, {
+            onConfirm: () => {
+                throw new Error("Nope");
+            },
+        })
+    );
+
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Disconnect" }));
+    await waitFor(() => assert.ok(screen.getByText("Nope")));
+
+    await reopenFromParent();
+
+    assert.ok(screen.getByRole("dialog"));
+    assert.equal(screen.queryByText("Nope"), null);
+});
+
+test("ConfirmDialog clears the pending spinner when the parent closes it directly", async () => {
+    const userEvent = (await import("@testing-library/user-event")).default;
+    const user = userEvent.setup({ document: globalThis.document });
+    renderWithQueryClient(
+        createElement(ParentControlledHarness, {
+            // Never settles: the dialog stays in its pending state until
+            // something else resets it.
+            onConfirm: () => new Promise<void>(() => {}),
+        })
+    );
+
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Disconnect" }));
+    await waitFor(() => assert.ok(screen.getByRole("button", { name: /Disconnect\.\.\./ })));
+
+    await reopenFromParent();
+
+    const confirm = within(screen.getByRole("dialog")).getByRole("button", { name: "Disconnect" });
+    assert.equal((confirm as HTMLButtonElement).disabled, false);
 });
 
 test("ConfirmDialog intent=cancel uses default copy", () => {

@@ -56,6 +56,12 @@ export default function WhiteLabelTenantAgentSettingsPage() {
     const [testing, setTesting] = useState(false);
     const [testSummary, setTestSummary] = useState<{ ok: number; rateLimited: number; other: number } | null>(null);
     const [cooldownUntil, setCooldownUntil] = useState<number>(0);
+    // `now` stands in for Date.now() in render-time calculations below —
+    // calling Date.now() directly during render is impure under the React
+    // Compiler. Ticking it in an effect also makes the cooldown countdown
+    // actually update instead of freezing at whatever value it had at the
+    // last unrelated re-render.
+    const [now, setNow] = useState<number>(() => Date.now());
 
     const trimmedPrompt = systemPrompt.trim();
     const trimmedGreeting = greetingMessage.trim();
@@ -88,6 +94,10 @@ export default function WhiteLabelTenantAgentSettingsPage() {
     useEffect(() => {
         if (!partnerId || !tenantId) return;
         let cancelled = false;
+        // Kicks off an async fetch on mount/param change; the loading flag
+        // has to flip synchronously here so the UI shows a spinner before
+        // the network response arrives — it can't be derived from render.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- mount/param-change data fetch, flips the loading flag before the async response arrives
         setLoading(true);
         setInlineError(null);
         setSuccess(null);
@@ -131,6 +141,11 @@ export default function WhiteLabelTenantAgentSettingsPage() {
     }, [partnerId, tenantId]);
 
     useEffect(() => {
+        // Clamps transferEnabled back to false if partner policy disallows
+        // transfer after it was already on (allowTransfer can flip async,
+        // e.g. after a settings reload) — not derivable at render time
+        // because transferEnabled is also independently user-toggled.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- resets transferEnabled when policy disallows it after being enabled
         if (!allowTransfer && transferEnabled) setTransferEnabled(false);
     }, [allowTransfer, transferEnabled]);
 
@@ -186,21 +201,31 @@ export default function WhiteLabelTenantAgentSettingsPage() {
 
     const title = branding ? `${branding.displayName} Agent Settings` : "Agent Settings";
 
+    // Ticks `now` while a cooldown is active so the countdown below
+    // actually counts down, and so canRunTest flips back to true on its
+    // own once the cooldown lapses. No-op (and unsubscribes) once there is
+    // no cooldown to track.
+    useEffect(() => {
+        if (cooldownUntil <= 0) return;
+        const id = setInterval(() => setNow(Date.now()), 250);
+        return () => clearInterval(id);
+    }, [cooldownUntil]);
+
     const canRunTest = useMemo(() => {
         if (!tenantId) return false;
         if (loading || saving) return false;
         if (testing) return false;
-        if (Date.now() < cooldownUntil) return false;
+        if (now < cooldownUntil) return false;
         const n = Number(testParallel);
         if (!Number.isFinite(n) || n < 1) return false;
         return true;
-    }, [cooldownUntil, loading, saving, tenantId, testParallel, testing]);
+    }, [cooldownUntil, loading, now, saving, tenantId, testParallel, testing]);
 
     const cooldownSeconds = useMemo(() => {
-        const ms = cooldownUntil - Date.now();
+        const ms = cooldownUntil - now;
         if (ms <= 0) return 0;
         return Math.ceil(ms / 1000);
-    }, [cooldownUntil]);
+    }, [cooldownUntil, now]);
 
     const runConcurrencyTest = async () => {
         if (!canRunTest) return;

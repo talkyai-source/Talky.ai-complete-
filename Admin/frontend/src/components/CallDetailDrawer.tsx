@@ -7,19 +7,26 @@ import {
     Calendar,
     FileText,
     MessageSquare,
-    DollarSign,
+    Coins,
     Target,
     AudioLines,
     Mic2,
     RefreshCw,
     Trash2,
     AlertCircle,
+    PhoneIncoming,
+    PhoneOutgoing,
+    Route,
+    ShieldAlert,
+    ShieldCheck,
 } from 'lucide-react';
 import { api } from '../lib/api';
+import { formatCallCost } from '../lib/call-cost';
 import type {
     AdminCallDetail,
     AdminFeedbackItem,
     AdminRecordingItem,
+    AdminTransferLeg,
     TranscriptTurn,
 } from '../lib/api';
 import { AdminMediaPlayer } from './AdminMediaPlayer';
@@ -57,6 +64,11 @@ function summaryString(summary: Record<string, unknown> | null, key: string): st
 
 function humanize(value: string): string {
     return value.replace(/_/g, ' ');
+}
+
+function StatusBadgeInline({ value }: { value: string }) {
+    const safe = value.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    return <span className={`call-status-badge status-${safe}`}>{humanize(value)}</span>;
 }
 
 function TimelineSection({ timeline }: { timeline: AdminCallDetail['timeline'] }) {
@@ -109,6 +121,47 @@ function TranscriptSection({ transcript, transcriptJson }: {
     return <p className="no-data">No transcript available</p>;
 }
 
+function transferMetadataNumber(leg: AdminTransferLeg, key: string): number | null {
+    const value = leg.metadata?.[key];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value);
+    return null;
+}
+
+function TransferLegsSection({ legs }: { legs: AdminTransferLeg[] }) {
+    if (legs.length === 0) return null;
+    return (
+        <section className="transfer-legs-panel" aria-labelledby="transfer-legs-heading">
+            <div className="qualification-panel-header">
+                <strong id="transfer-legs-heading"><Route size={15} /> Transfer legs</strong>
+                <span>{legs.length}</span>
+            </div>
+            <div className="transfer-leg-list">
+                {legs.map((leg, index) => {
+                    const attempt = transferMetadataNumber(leg, 'attempt');
+                    const hop = transferMetadataNumber(leg, 'hop');
+                    return (
+                        <article className="transfer-leg-card" key={leg.id || index}>
+                            <div className="transfer-leg-card-header">
+                                <strong>{leg.to_number || 'Unknown destination'}</strong>
+                                <StatusBadgeInline value={leg.status || 'unknown'} />
+                            </div>
+                            <dl>
+                                <div><dt>Provider</dt><dd>{leg.provider || 'Unknown'}</dd></div>
+                                <div><dt>Started</dt><dd>{formatDate(leg.started_at)}</dd></div>
+                                <div><dt>Answered</dt><dd>{formatDate(leg.answered_at)}</dd></div>
+                                <div><dt>Ended</dt><dd>{formatDate(leg.ended_at)}</dd></div>
+                                <div><dt>Duration</dt><dd>{formatDuration(leg.duration_seconds ?? null)}</dd></div>
+                                {(attempt !== null || hop !== null) && <div><dt>Policy position</dt><dd>{attempt !== null ? `attempt ${attempt}` : ''}{attempt !== null && hop !== null ? ' · ' : ''}{hop !== null ? `hop ${hop}` : ''}</dd></div>}
+                            </dl>
+                        </article>
+                    );
+                })}
+            </div>
+        </section>
+    );
+}
+
 type DetailTab = 'timeline' | 'transcript' | 'recordings' | 'feedback';
 type MediaDeleteTarget =
     | { kind: 'recording'; item: AdminRecordingItem }
@@ -123,6 +176,8 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
     const [activeTab, setActiveTab] = useState<DetailTab>('timeline');
     const [retryingFeedback, setRetryingFeedback] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState<MediaDeleteTarget | null>(null);
+    const [deleteReason, setDeleteReason] = useState('');
+    const [deleteIdempotencyKey, setDeleteIdempotencyKey] = useState('');
     const [deleting, setDeleting] = useState(false);
 
     const loadMedia = useCallback(async (selectedCallId: string) => {
@@ -175,15 +230,25 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
     };
 
     const deleteMedia = async () => {
-        if (!deleteTarget || !callId) return;
+        if (!deleteTarget || !callId || !deleteIdempotencyKey) return;
         setDeleting(true);
         const response = deleteTarget.kind === 'recording'
-            ? await api.deleteAdminRecording(deleteTarget.item.id)
-            : await api.deleteAdminFeedback(deleteTarget.item.id);
+            ? await api.deleteAdminRecording(
+                deleteTarget.item.id,
+                deleteReason.trim(),
+                deleteIdempotencyKey,
+            )
+            : await api.deleteAdminFeedback(
+                deleteTarget.item.id,
+                deleteReason.trim(),
+                deleteIdempotencyKey,
+            );
         if (response.error) {
             setError(response.error.message);
         } else {
             setDeleteTarget(null);
+            setDeleteReason('');
+            setDeleteIdempotencyKey('');
             try {
                 await loadMedia(callId);
             } catch (caught) {
@@ -191,6 +256,23 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
             }
         }
         setDeleting(false);
+    };
+
+    const openMediaDelete = (target: MediaDeleteTarget) => {
+        if (target.item.legal_hold) return;
+        const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        setDeleteTarget(target);
+        setDeleteReason('');
+        setDeleteIdempotencyKey(`admin-media:${target.kind}:${target.item.id}:${id}`);
+    };
+
+    const closeMediaDelete = () => {
+        if (deleting) return;
+        setDeleteTarget(null);
+        setDeleteReason('');
+        setDeleteIdempotencyKey('');
     };
 
     const qualification = call ? summaryString(call.summary_json, 'qualification_status') : null;
@@ -206,10 +288,10 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
     return (
         <>
             <div className="drawer-overlay" onClick={onClose}></div>
-            <div className="drawer call-detail-drawer">
+            <div className="drawer call-detail-drawer" role="dialog" aria-modal="true" aria-labelledby="call-detail-title">
                 <div className="drawer-header">
-                    <h2>Call Details</h2>
-                    <button className="drawer-close" onClick={onClose}>
+                    <h2 id="call-detail-title">Call Details</h2>
+                    <button className="drawer-close" onClick={onClose} aria-label="Close call details">
                         <X size={20} />
                     </button>
                 </div>
@@ -237,7 +319,11 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                             <div className="call-info-header">
                                 <div className="call-phone">
                                     <Phone size={20} />
-                                    <span>{call.phone_number}</span>
+                                    <span>{call.caller_ani || call.phone_number}</span>
+                                    <span className={`direction-badge direction-${call.direction || 'outbound'}`}>
+                                        {call.direction === 'inbound' ? <PhoneIncoming size={13} /> : <PhoneOutgoing size={13} />}
+                                        {call.direction || 'outbound'}
+                                    </span>
                                 </div>
                                 <span className={`call-status-badge status-${call.status}`}>
                                     {call.outcome || call.status}
@@ -276,11 +362,39 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                                 )}
                                 {call.cost !== null && (
                                     <div className="meta-item">
-                                        <DollarSign size={14} />
-                                        <span className="meta-value">${call.cost.toFixed(4)}</span>
+                                        <Coins size={14} />
+                                        <span className="meta-value">
+                                            {formatCallCost(call.cost, call.currency)}
+                                        </span>
                                     </div>
                                 )}
                             </div>
+
+                            {(call.direction === 'inbound' || call.called_did || call.admission_status) && (
+                                <div className="inbound-call-operations" aria-label="Inbound routing and processing details">
+                                    <div className="qualification-panel-header">
+                                        <strong><Route size={15} /> Inbound route</strong>
+                                        <StatusBadgeInline value={call.admission_status || 'unknown'} />
+                                    </div>
+                                    <dl>
+                                        <div><dt>Caller ANI</dt><dd>{call.caller_ani || 'Private / unavailable'}</dd></div>
+                                        <div><dt>Called DID</dt><dd>{call.called_did || 'Unknown'}</dd></div>
+                                        <div><dt>Provider / ingress</dt><dd>{[call.provider, call.ingress].filter(Boolean).join(' / ') || 'Unknown'}</dd></div>
+                                        <div><dt>Route version</dt><dd>{call.route_version ?? '—'}</dd></div>
+                                        <div><dt>Config version</dt><dd>{call.config_version ?? '—'}</dd></div>
+                                        <div><dt>Admission reason</dt><dd>{call.admission_reason || 'Accepted'}</dd></div>
+                                    </dl>
+                                    <div className="inbound-processing-states">
+                                        <span><ShieldCheck size={13} /> consent: {call.consent_status || 'unknown'}</span>
+                                        <span>processing: {call.processing_status || 'unknown'}</span>
+                                        <span>billing: {call.billing_status || 'unknown'}</span>
+                                        {call.billing_hold_reason && <span>hold: {call.billing_hold_reason}</span>}
+                                        {call.reserved_seconds !== null && call.reserved_seconds !== undefined && <span>reserved: {call.reserved_seconds}s</span>}
+                                    </div>
+                                </div>
+                            )}
+
+                            <TransferLegsSection legs={call.transfer_legs ?? []} />
 
                             {/* Summary */}
                             {call.summary && (
@@ -317,10 +431,12 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                             )}
 
                             {/* Tabs */}
-                            <div className="drawer-tabs">
+                            <div className="drawer-tabs" role="tablist" aria-label="Call detail sections">
                                 <button
                                     className={`tab-btn ${activeTab === 'timeline' ? 'active' : ''}`}
                                     onClick={() => setActiveTab('timeline')}
+                                    role="tab"
+                                    aria-selected={activeTab === 'timeline'}
                                 >
                                     <Clock size={14} />
                                     Timeline
@@ -328,6 +444,8 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                                 <button
                                     className={`tab-btn ${activeTab === 'transcript' ? 'active' : ''}`}
                                     onClick={() => setActiveTab('transcript')}
+                                    role="tab"
+                                    aria-selected={activeTab === 'transcript'}
                                 >
                                     <MessageSquare size={14} />
                                     Transcript
@@ -335,6 +453,8 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                                 <button
                                     className={`tab-btn ${activeTab === 'recordings' ? 'active' : ''}`}
                                     onClick={() => setActiveTab('recordings')}
+                                    role="tab"
+                                    aria-selected={activeTab === 'recordings'}
                                 >
                                     <AudioLines size={14} />
                                     Recordings {recordings.length > 0 && `(${recordings.length})`}
@@ -342,6 +462,8 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                                 <button
                                     className={`tab-btn ${activeTab === 'feedback' ? 'active' : ''}`}
                                     onClick={() => setActiveTab('feedback')}
+                                    role="tab"
+                                    aria-selected={activeTab === 'feedback'}
                                 >
                                     <Mic2 size={14} />
                                     Feedback {feedback && '(1)'}
@@ -384,9 +506,12 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                                                         <span>{formatDuration(recording.duration_seconds)} · {recording.storage}</span>
                                                         <button
                                                             className="btn btn-danger btn-sm"
-                                                            onClick={() => setDeleteTarget({ kind: 'recording', item: recording })}
+                                                            onClick={() => openMediaDelete({ kind: 'recording', item: recording })}
+                                                            disabled={recording.legal_hold}
+                                                            title={recording.legal_hold ? 'Deletion blocked by an active compliance/legal hold' : undefined}
                                                         >
-                                                            <Trash2 size={14} /> Delete
+                                                            {recording.legal_hold ? <ShieldAlert size={14} /> : <Trash2 size={14} />}
+                                                            {recording.legal_hold ? 'Legal hold' : 'Delete'}
                                                         </button>
                                                     </div>
                                                 </div>
@@ -437,9 +562,12 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                                                     )}
                                                     <button
                                                         className="btn btn-danger btn-sm"
-                                                        onClick={() => setDeleteTarget({ kind: 'feedback', item: feedback })}
+                                                        onClick={() => openMediaDelete({ kind: 'feedback', item: feedback })}
+                                                        disabled={feedback.legal_hold}
+                                                        title={feedback.legal_hold ? 'Deletion blocked by an active compliance/legal hold' : undefined}
                                                     >
-                                                        <Trash2 size={14} /> Delete
+                                                        {feedback.legal_hold ? <ShieldAlert size={14} /> : <Trash2 size={14} />}
+                                                        {feedback.legal_hold ? 'Legal hold' : 'Delete'}
                                                     </button>
                                                 </div>
                                             </div>
@@ -458,8 +586,11 @@ export function CallDetailDrawer({ callId, onClose }: CallDetailDrawerProps) {
                 confirmLabel="Delete permanently"
                 variant="danger"
                 loading={deleting}
+                reason={deleteReason}
+                onReasonChange={setDeleteReason}
+                reasonLabel="Deletion reason"
                 onConfirm={() => void deleteMedia()}
-                onCancel={() => setDeleteTarget(null)}
+                onCancel={closeMediaDelete}
             />
         </>
     );

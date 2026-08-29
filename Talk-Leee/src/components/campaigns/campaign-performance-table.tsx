@@ -290,7 +290,6 @@ export function CampaignPerformanceTable({
     onResume,
     onDelete,
     onDuplicate,
-    onUpdate,
 }: {
     campaigns: Campaign[];
     loading: boolean;
@@ -299,7 +298,6 @@ export function CampaignPerformanceTable({
     onResume: (id: string) => Promise<void>;
     onDelete: (id: string) => Promise<void>;
     onDuplicate: (id: string) => Promise<void>;
-    onUpdate: (next: Campaign) => Promise<void>;
 }) {
     const router = useRouter();
     const [sort, setSort] = useState<CampaignSortSpec[]>([]);
@@ -331,6 +329,9 @@ export function CampaignPerformanceTable({
 
     useLayoutEffect(() => {
         if (!statusOpen) {
+            // Resets the portal's measured position so a later open recomputes
+            // fresh from getBoundingClientRect rather than flashing the old spot.
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing stale DOM-measured position on close, not derivable during render
             setStatusPanelStyle(null);
             return;
         }

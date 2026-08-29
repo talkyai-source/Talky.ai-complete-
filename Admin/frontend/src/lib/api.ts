@@ -97,6 +97,27 @@ export interface QuotaUpdateRequest {
 // Day 4: Calls Module Types
 // =============================================================================
 
+export type CallTerminationStatus = 'none' | 'requested' | 'confirmed' | 'failed';
+
+export type CallTerminationRequestStatus =
+    | 'confirmed'
+    | 'requested'
+    | 'failed'
+    | 'already_terminal';
+
+export interface TerminateCallResponse {
+    status: CallTerminationRequestStatus;
+    call_id: string;
+    previous_status: string;
+    new_status?: string | null;
+    call_status?: string | null;
+    termination_status: CallTerminationStatus;
+    provider_hangup_requested: boolean;
+    provider_hangup_confirmed: boolean;
+    provider_hangup_error: string | null;
+    detail?: string;
+}
+
 export interface LiveCallItem {
     id: string;
     tenant_id: string;
@@ -106,6 +127,15 @@ export interface LiveCallItem {
     status: 'queued' | 'dialing' | 'ringing' | 'answered' | 'in_call' | 'initiated' | string;
     started_at: string | null;
     duration_seconds: number;
+    direction?: 'inbound' | 'outbound' | string;
+    caller_ani?: string | null;
+    called_did?: string | null;
+    admission_status?: string | null;
+    termination_status?: CallTerminationStatus | null;
+    termination_requested_at?: string | null;
+    termination_error?: string | null;
+    provider_hangup_requested?: boolean;
+    provider_hangup_confirmed?: boolean;
 }
 
 export interface CallHistoryItem {
@@ -123,6 +153,15 @@ export interface CallHistoryItem {
     has_recording: boolean;
     has_feedback: boolean;
     feedback_transcript_status: string | null;
+    direction?: 'inbound' | 'outbound' | string;
+    caller_ani?: string | null;
+    called_did?: string | null;
+    admission_status?: string | null;
+    admission_reason?: string | null;
+    consent_status?: string | null;
+    processing_status?: string | null;
+    billing_status?: string | null;
+    billing_hold_reason?: string | null;
 }
 
 export interface CallHistoryResponse {
@@ -142,6 +181,22 @@ export interface TranscriptTurn {
     role: 'assistant' | 'user';
     content: string;
     timestamp?: string;
+}
+
+export interface AdminTransferLeg {
+    id: string;
+    leg_type?: string | null;
+    direction?: string | null;
+    provider?: string | null;
+    provider_leg_id?: string | null;
+    from_number?: string | null;
+    to_number?: string | null;
+    status: string;
+    started_at?: string | null;
+    answered_at?: string | null;
+    ended_at?: string | null;
+    duration_seconds?: number | null;
+    metadata?: Record<string, unknown> | null;
 }
 
 export interface AdminCallDetail {
@@ -165,9 +220,32 @@ export interface AdminCallDetail {
     summary_json: Record<string, unknown> | null;
     recording_url: string | null;
     cost: number | null;
+    currency?: string | null;
     timeline: TimelineEvent[];
     created_at: string;
     updated_at?: string;
+    direction?: 'inbound' | 'outbound' | string;
+    provider?: string | null;
+    provider_call_id?: string | null;
+    caller_ani?: string | null;
+    called_did?: string | null;
+    ingress?: string | null;
+    route_version?: number | null;
+    config_version?: number | null;
+    route_snapshot?: Record<string, unknown> | null;
+    admission_status?: string | null;
+    admission_reason?: string | null;
+    consent_status?: string | null;
+    processing_status?: string | null;
+    billing_status?: string | null;
+    billing_hold_reason?: string | null;
+    reserved_seconds?: number | null;
+    transfer_legs?: AdminTransferLeg[];
+    termination_status?: CallTerminationStatus | null;
+    termination_requested_at?: string | null;
+    termination_error?: string | null;
+    provider_hangup_requested?: boolean;
+    provider_hangup_confirmed?: boolean;
 }
 
 export interface CallHistoryParams {
@@ -178,6 +256,7 @@ export interface CallHistoryParams {
     tenant_id?: string;
     from_date?: string;
     to_date?: string;
+    direction?: 'inbound' | 'outbound';
 }
 
 export interface AdminRecordingItem {
@@ -196,6 +275,10 @@ export interface AdminRecordingItem {
     created_at: string;
     updated_at: string | null;
     playable: boolean;
+    direction?: 'inbound' | 'outbound' | string;
+    caller_ani?: string | null;
+    called_did?: string | null;
+    legal_hold: boolean;
 }
 
 export interface AdminRecordingListResponse {
@@ -227,6 +310,10 @@ export interface AdminFeedbackItem {
     created_at: string;
     updated_at: string;
     retryable: boolean;
+    direction?: 'inbound' | 'outbound' | string;
+    caller_ani?: string | null;
+    called_did?: string | null;
+    legal_hold: boolean;
 }
 
 export interface AdminFeedbackListResponse {
@@ -244,6 +331,7 @@ export interface AdminMediaParams {
     call_id?: string;
     from_date?: string;
     to_date?: string;
+    direction?: 'inbound' | 'outbound';
 }
 
 export interface AdminRecordingParams extends AdminMediaParams {
@@ -252,6 +340,88 @@ export interface AdminRecordingParams extends AdminMediaParams {
 
 export interface AdminFeedbackParams extends AdminMediaParams {
     transcript_status?: string;
+}
+
+// =============================================================================
+// Inbound operations control plane
+// =============================================================================
+
+export type InboundAssignmentStatus =
+    | 'draft'
+    | 'active'
+    | 'paused'
+    | 'quarantined'
+    | 'archived'
+    | 'released';
+
+export interface AdminInboundRuntimeControls {
+    inbound_enabled: boolean;
+    recording_enabled: boolean;
+    transfer_enabled: boolean;
+    settlement_enabled: boolean;
+    version: number;
+    updated_at?: string | null;
+    updated_by?: string | null;
+    reason?: string | null;
+}
+
+export interface AdminInboundOverview {
+    active_assignments: number;
+    paused_assignments: number;
+    quarantined_assignments: number;
+    denied_last_24h: number;
+    controls: AdminInboundRuntimeControls;
+}
+
+export interface AdminInboundAssignment {
+    id: string;
+    tenant_id: string;
+    tenant_name: string;
+    masked_did: string;
+    campaign_id: string;
+    campaign_name: string;
+    trunk_id: string | null;
+    status: InboundAssignmentStatus;
+    version: number;
+    config_version: number | null;
+    readiness: {
+        ready: boolean;
+        checks: Array<{ key: string; label: string; passed: boolean; detail: string }>;
+        blockers: Array<{ code: string; message: string; remediation: string }>;
+    };
+    last_call_at: string | null;
+    last_error: string | null;
+}
+
+export interface AdminInboundAssignmentListResponse {
+    items: AdminInboundAssignment[];
+    total: number;
+}
+
+export interface AdminInboundAssignmentParams {
+    tenant_id?: string;
+    status?: string;
+    search?: string;
+}
+
+export interface AdminInboundReassignmentRequest {
+    id: string;
+    assignment_id: string;
+    source_tenant_id: string;
+    target_tenant_id: string;
+    target_campaign_id: string;
+    status: 'pending' | 'approved' | 'rejected' | 'expired' | string;
+    requested_by: string;
+    approved_by?: string | null;
+    reason: string;
+    decision_reason?: string | null;
+    requested_at: string;
+    decided_at?: string | null;
+}
+
+export interface AdminInboundReassignmentListResponse {
+    items: AdminInboundReassignmentRequest[];
+    total: number;
 }
 
 // =============================================================================
@@ -383,6 +553,11 @@ export interface UsageSummaryResponse {
     providers: UsageBreakdownItem[];
     period_start: string;
     period_end: string;
+    cost_currency: string;
+    legacy_calls_cost_scope: 'outbound_only';
+    authoritative_inbound_monetary_totals_included: false;
+    authoritative_inbound_monetary_source: 'inbound_usage_transactions' | string;
+    monetary_note: string;
 }
 
 export interface UsageBreakdownResponse {
@@ -390,6 +565,11 @@ export interface UsageBreakdownResponse {
     group_by: string;
     period_start: string;
     period_end: string;
+    cost_currency: string;
+    legacy_calls_cost_scope: 'outbound_only';
+    authoritative_inbound_monetary_totals_included: false;
+    authoritative_inbound_monetary_source: 'inbound_usage_transactions' | string;
+    monetary_note: string;
 }
 
 export interface UsageParams {
@@ -821,6 +1001,57 @@ interface ApiResponse<T> {
     };
 }
 
+type AdminApiError = NonNullable<ApiResponse<unknown>['error']>;
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+    return value !== null && typeof value === 'object' && !Array.isArray(value)
+        ? value as Record<string, unknown>
+        : null;
+}
+
+/**
+ * FastAPI endpoints currently return both the canonical
+ * `{ error: { code, message, details } }` envelope and the legacy
+ * `{ detail: string | { code, message, readiness } }` envelope. Keep the
+ * Admin UI on one safe string-only contract until the backend migration is
+ * complete; React must never receive `detail` as a renderable object.
+ */
+export function normalizeAdminApiError(payload: unknown): AdminApiError {
+    const root = recordValue(payload) ?? {};
+    const error = recordValue(root.error);
+    const detail = recordValue(root.detail);
+    const source = error ?? detail ?? root;
+    // FastAPI's confirmation-aware termination errors use
+    // `detail.error`/`detail.reason` rather than `detail.code`. Preserve that
+    // stable machine code instead of collapsing a useful provider failure to
+    // UNKNOWN_ERROR.
+    const rawCode = source.code ?? source.error ?? source.reason ?? root.code;
+    const code = (typeof rawCode === 'string' ? rawCode : 'unknown_error')
+        .trim()
+        .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+        .replace(/[^a-zA-Z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .toUpperCase() || 'UNKNOWN_ERROR';
+    const candidates = [
+        source.message,
+        source.provider_hangup_error,
+        source.reason,
+        typeof source.error === 'string' ? source.error : undefined,
+        root.message,
+        typeof root.detail === 'string' ? root.detail : undefined,
+        typeof root.error === 'string' ? root.error : undefined,
+    ];
+    const message = candidates.find((value): value is string => (
+        typeof value === 'string' && value.trim().length > 0
+    ))?.trim() ?? 'An error occurred';
+    const details = error?.details
+        ?? source.readiness
+        ?? root.details
+        ?? (detail ? root.detail : undefined);
+
+    return { code, message, details };
+}
+
 interface RequestOptions {
     method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
     body?: unknown;
@@ -872,19 +1103,13 @@ class ApiClient {
                 body: body ? JSON.stringify(body) : undefined,
             });
 
-            const data = await response.json();
+            const data: unknown = await response.json();
 
             if (!response.ok) {
-                return {
-                    error: {
-                        code: data.error?.code || 'UNKNOWN_ERROR',
-                        message: data.error?.message || data.detail || 'An error occurred',
-                        details: data.error?.details,
-                    },
-                };
+                return { error: normalizeAdminApiError(data) };
             }
 
-            return { data };
+            return { data: data as T };
         } catch (error) {
             return {
                 error: {
@@ -904,8 +1129,9 @@ class ApiClient {
         if (!response.ok) {
             let message = `Media request failed (${response.status})`;
             try {
-                const payload = await response.json();
-                message = payload.detail || payload.error?.message || message;
+                const payload: unknown = await response.json();
+                const normalized = normalizeAdminApiError(payload);
+                message = normalized.message === 'An error occurred' ? message : normalized.message;
             } catch {
                 // Non-JSON storage/provider errors retain the status message.
             }
@@ -1124,6 +1350,7 @@ class ApiClient {
         if (params?.tenant_id) searchParams.append('tenant_id', params.tenant_id);
         if (params?.from_date) searchParams.append('from_date', params.from_date);
         if (params?.to_date) searchParams.append('to_date', params.to_date);
+        if (params?.direction) searchParams.append('direction', params.direction);
         const query = searchParams.toString() ? '?' + searchParams.toString() : '';
         return this.request<CallHistoryResponse>(`/admin/calls/history${query}`);
     }
@@ -1133,14 +1360,7 @@ class ApiClient {
     }
 
     async terminateCall(callId: string) {
-        return this.request<{
-            detail: string;
-            call_id: string;
-            previous_status: string;
-            new_status: string;
-            provider_hangup_requested: boolean;
-            provider_hangup_error: string | null;
-        }>(
+        return this.request<TerminateCallResponse>(
             `/admin/calls/${callId}/terminate`,
             { method: 'POST' }
         );
@@ -1156,6 +1376,7 @@ class ApiClient {
         if (params?.call_id) query.set('call_id', params.call_id);
         if (params?.from_date) query.set('from_date', params.from_date);
         if (params?.to_date) query.set('to_date', params.to_date);
+        if (params?.direction) query.set('direction', params.direction);
         const suffix = query.size ? `?${query.toString()}` : '';
         return this.request<AdminRecordingListResponse>(`/admin/recordings${suffix}`);
     }
@@ -1170,6 +1391,7 @@ class ApiClient {
         if (params?.call_id) query.set('call_id', params.call_id);
         if (params?.from_date) query.set('from_date', params.from_date);
         if (params?.to_date) query.set('to_date', params.to_date);
+        if (params?.direction) query.set('direction', params.direction);
         const suffix = query.size ? `?${query.toString()}` : '';
         return this.request<AdminFeedbackListResponse>(`/admin/feedback${suffix}`);
     }
@@ -1181,15 +1403,19 @@ class ApiClient {
         );
     }
 
-    async deleteAdminRecording(recordingId: string) {
-        return this.request<{ detail: string }>(`/admin/recordings/${recordingId}`, {
+    async deleteAdminRecording(recordingId: string, reason: string, idempotencyKey: string) {
+        return this.request<{ detail: string; deletion_intent_id?: string }>(`/admin/recordings/${recordingId}`, {
             method: 'DELETE',
+            body: { reason },
+            headers: { 'Idempotency-Key': idempotencyKey },
         });
     }
 
-    async deleteAdminFeedback(feedbackId: string) {
-        return this.request<{ detail: string }>(`/admin/feedback/${feedbackId}`, {
+    async deleteAdminFeedback(feedbackId: string, reason: string, idempotencyKey: string) {
+        return this.request<{ detail: string; deletion_intent_id?: string }>(`/admin/feedback/${feedbackId}`, {
             method: 'DELETE',
+            body: { reason },
+            headers: { 'Idempotency-Key': idempotencyKey },
         });
     }
 
@@ -1199,6 +1425,112 @@ class ApiClient {
 
     getAdminFeedbackAudio(feedbackId: string) {
         return this.requestBlob(`/admin/feedback/${feedbackId}/audio`);
+    }
+
+    // Inbound operations. Every mutation is versioned and carries an
+    // idempotency key so a repeated click or network retry is safe.
+    async getAdminInboundOverview() {
+        return this.request<AdminInboundOverview>('/admin/inbound/overview');
+    }
+
+    async getAdminInboundAssignments(params?: AdminInboundAssignmentParams) {
+        const query = new URLSearchParams();
+        if (params?.tenant_id) query.set('tenant_id', params.tenant_id);
+        if (params?.status) query.set('status', params.status);
+        if (params?.search) query.set('search', params.search);
+        const suffix = query.size ? `?${query.toString()}` : '';
+        return this.request<AdminInboundAssignmentListResponse>(
+            `/admin/inbound/assignments${suffix}`,
+        );
+    }
+
+    async getAdminInboundControls() {
+        return this.request<AdminInboundRuntimeControls>('/admin/inbound/controls');
+    }
+
+    async updateAdminInboundControls(
+        payload: Partial<Pick<
+            AdminInboundRuntimeControls,
+            'inbound_enabled' | 'recording_enabled' | 'transfer_enabled' | 'settlement_enabled'
+        >> & { reason: string; expected_version: number },
+        idempotencyKey: string,
+    ) {
+        return this.request<AdminInboundRuntimeControls>('/admin/inbound/controls', {
+            method: 'PATCH',
+            body: payload,
+            headers: { 'Idempotency-Key': idempotencyKey },
+        });
+    }
+
+    async quarantineAdminInboundAssignment(
+        assignmentId: string,
+        expectedVersion: number,
+        reason: string,
+        idempotencyKey: string,
+    ) {
+        return this.request<AdminInboundAssignment>(
+            `/admin/inbound/assignments/${assignmentId}/quarantine`,
+            {
+                method: 'POST',
+                body: { expected_version: expectedVersion, reason },
+                headers: { 'Idempotency-Key': idempotencyKey },
+            },
+        );
+    }
+
+    async unquarantineAdminInboundAssignment(
+        assignmentId: string,
+        expectedVersion: number,
+        reason: string,
+        idempotencyKey: string,
+    ) {
+        return this.request<AdminInboundAssignment>(
+            `/admin/inbound/assignments/${assignmentId}/unquarantine`,
+            {
+                method: 'POST',
+                body: { expected_version: expectedVersion, reason },
+                headers: { 'Idempotency-Key': idempotencyKey },
+            },
+        );
+    }
+
+    async requestAdminInboundReassignment(
+        payload: {
+            assignment_id: string;
+            target_tenant_id: string;
+            target_campaign_id: string;
+            reason: string;
+            expected_version: number;
+        },
+        idempotencyKey: string,
+    ) {
+        return this.request<AdminInboundReassignmentRequest>('/admin/inbound/reassignments', {
+            method: 'POST',
+            body: payload,
+            headers: { 'Idempotency-Key': idempotencyKey },
+        });
+    }
+
+    async getAdminInboundReassignments(status = 'pending') {
+        const query = new URLSearchParams({ status });
+        return this.request<AdminInboundReassignmentListResponse>(
+            `/admin/inbound/reassignments?${query.toString()}`,
+        );
+    }
+
+    async approveAdminInboundReassignment(
+        requestId: string,
+        reason: string,
+        idempotencyKey: string,
+    ) {
+        return this.request<AdminInboundReassignmentRequest>(
+            `/admin/inbound/reassignments/${requestId}/approve`,
+            {
+                method: 'POST',
+                body: { reason },
+                headers: { 'Idempotency-Key': idempotencyKey },
+            },
+        );
     }
 
     // =========================================================================

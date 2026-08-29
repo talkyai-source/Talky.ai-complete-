@@ -541,6 +541,21 @@ body {
   color: #c53030;
 }
 
+.status-badge.ending {
+  background: #feebc8;
+  color: #92400e;
+}
+
+.status-badge.end-failed {
+  background: #fed7d7;
+  color: #c53030;
+}
+
+.status-badge.ended {
+  background: rgba(156, 163, 175, 0.15);
+  color: var(--text-muted);
+}
+
 .status-dot {
   width: 6px;
   height: 6px;
@@ -557,6 +572,10 @@ body {
 
 .status-dot.red {
   background: var(--accent-red);
+}
+
+.status-dot.gray {
+  background: var(--text-muted);
 }
 
 /* System Health */
@@ -1867,6 +1886,16 @@ body {
   color: var(--text-muted);
 }
 
+.call-status-badge.status-ending {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--accent-orange);
+}
+
+.call-status-badge.status-end-failed {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--accent-red);
+}
+
 /* Table Cells */
 .call-id-cell {
   font-family: 'JetBrains Mono', monospace;
@@ -1908,6 +1937,46 @@ body {
 .confirm-inline span {
   color: var(--accent-red);
   font-weight: 500;
+}
+
+.termination-action {
+  display: flex;
+  min-width: 132px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.termination-pending-button {
+  white-space: nowrap;
+}
+
+.termination-note,
+.termination-error {
+  display: block;
+  max-width: 210px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.termination-note {
+  color: var(--text-muted);
+}
+
+.termination-error {
+  color: var(--accent-red);
+  overflow-wrap: anywhere;
+}
+
+.call-termination-confirm {
+  flex-wrap: wrap;
+  max-width: 230px;
+}
+
+.table-empty-row {
+  padding: 28px 16px !important;
+  color: var(--text-muted) !important;
+  text-align: center;
 }
 
 /* Table Footer */
@@ -3835,4 +3904,362 @@ body {
   background: var(--bg-main);
   color: var(--text-secondary);
   border: 1px solid var(--border-color);
+}
+
+/* ── Inbound operations control plane ─────────────────────────── */
+.inbound-control-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.inbound-control-page .page-header {
+  margin-bottom: 0;
+}
+
+.inbound-control-page .page-header > .btn {
+  margin-left: auto;
+}
+
+.inbound-stat-grid {
+  margin-bottom: 0;
+}
+
+.inbound-stat-grid .stat-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.inbound-stat-grid .stat-card > svg {
+  width: 24px;
+  height: 24px;
+  color: var(--accent-blue);
+}
+
+.inbound-stat-grid .stat-card > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.inbound-stat-grid .stat-card span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.inbound-stat-grid .stat-card strong {
+  color: var(--text-primary);
+  font-size: 24px;
+  line-height: 1;
+}
+
+.inbound-control-section .card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.section-help {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.inbound-switch-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.inbound-switch {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  padding: 13px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  background: var(--bg-main);
+  cursor: pointer;
+}
+
+.inbound-switch:focus-within {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
+.inbound-switch input {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  accent-color: var(--accent-blue);
+}
+
+.inbound-switch span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.inbound-switch small {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.inbound-control-save {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin-top: 14px;
+}
+
+.inbound-control-save .form-group {
+  margin: 0;
+}
+
+.control-version {
+  margin: 9px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.inbound-assignment-table td {
+  vertical-align: top;
+}
+
+.inbound-assignment-table .transcript-error {
+  max-width: 240px;
+  margin: 6px 0 0;
+}
+
+.inbound-action-panel {
+  border-left: 3px solid var(--accent-orange);
+}
+
+.inbound-action-panel textarea,
+.inbound-action-panel select,
+.inbound-action-panel input,
+.inbound-control-save input {
+  width: 100%;
+  border: 1px solid var(--border-color);
+  background: var(--bg-main);
+  color: var(--text-primary);
+  border-radius: var(--border-radius);
+  padding: 9px 10px;
+  font: inherit;
+}
+
+.pending-reassignment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.pending-reassignment {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  padding: 12px 14px;
+  background: var(--bg-main);
+}
+
+.pending-reassignment p,
+.pending-reassignment small {
+  margin: 3px 0 0;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 900px) {
+  .inbound-switch-grid,
+  .inbound-control-save {
+    grid-template-columns: 1fr;
+  }
+
+  .inbound-control-save .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 640px) {
+  .inbound-control-page .page-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .inbound-control-page .page-header > .btn {
+    margin-left: 0;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .pending-reassignment {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .inbound-assignment-table {
+    min-width: 960px;
+  }
+}
+
+.direction-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.direction-inbound {
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--accent-blue);
+}
+
+.direction-outbound {
+  background: rgba(139, 92, 246, 0.12);
+  color: #8b5cf6;
+}
+
+.called-did {
+  display: block;
+  margin-top: 5px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.inbound-call-operations {
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid rgba(59, 130, 246, 0.28);
+  border-radius: var(--border-radius);
+  background: rgba(59, 130, 246, 0.055);
+}
+
+.inbound-call-operations .qualification-panel-header strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inbound-call-operations dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px 14px;
+  margin: 12px 0;
+}
+
+.inbound-call-operations dl > div {
+  min-width: 0;
+}
+
+.inbound-call-operations dt {
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.inbound-call-operations dd {
+  overflow-wrap: anywhere;
+  margin: 3px 0 0;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.inbound-processing-states {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.inbound-processing-states span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 10.5px;
+}
+
+.transfer-legs-panel {
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  background: var(--bg-secondary);
+}
+
+.transfer-legs-panel .qualification-panel-header strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.transfer-leg-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.transfer-leg-card {
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  background: var(--bg-card);
+}
+
+.transfer-leg-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.transfer-leg-card dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  margin: 0;
+}
+
+.transfer-leg-card dl > div {
+  min-width: 0;
+}
+
+.transfer-leg-card dt {
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.transfer-leg-card dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+@media (max-width: 520px) {
+  .inbound-call-operations dl,
+  .transfer-leg-card dl {
+    grid-template-columns: 1fr;
+  }
 }

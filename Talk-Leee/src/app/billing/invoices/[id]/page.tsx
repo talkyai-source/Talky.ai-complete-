@@ -7,6 +7,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Download, FileText, Loader2, Printer } from "lucide-react";
 import { useBillingInvoice } from "@/lib/billing-api";
+import { ErrorState } from "@/components/states/page-states";
+import { formatBillingError } from "@/components/billing/billing-overview";
 
 type InvoiceDetail = {
   id: string;
@@ -70,6 +72,27 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
         <div className="flex items-center justify-center py-16 text-muted-foreground">
           <Loader2 className="mr-2 h-5 w-5 animate-spin" aria-hidden /> Loading invoice…
         </div>
+      </DashboardLayout>
+    );
+  }
+
+  // "Invoice not found" is only honest when the backend actually said 404.
+  // A 403 or an outage is a different fact and gets a different screen.
+  if (query.isError) {
+    return (
+      <DashboardLayout title="Invoice">
+        <ErrorState
+          title="This invoice did not load"
+          message={`${formatBillingError(query.error)} The invoice itself is unaffected.`}
+          troubleshooting={[
+            "Retry below, or reload the page.",
+            "If you have just signed in on another tab, sign in again here.",
+            "Billing is visible to owners and admins — ask an account owner if you are not one.",
+          ]}
+          onRetry={() => void query.refetch()}
+          actionHref="/billing/invoices"
+          actionLabel="All Invoices"
+        />
       </DashboardLayout>
     );
   }

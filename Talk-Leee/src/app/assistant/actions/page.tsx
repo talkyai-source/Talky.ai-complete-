@@ -251,6 +251,7 @@ function LeadTypeahead({
     const listRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs the editable local query text when the controlled `value` prop changes
         setQuery(value);
     }, [value]);
 
@@ -266,6 +267,7 @@ function LeadTypeahead({
     }, [options, query]);
 
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- resets the highlighted option whenever the filter text or open state changes
         setActiveIndex(0);
     }, [query, open]);
 
@@ -428,6 +430,7 @@ export default function AssistantActionsPage() {
         const savedUi = safeJsonParse<{ viewMode?: ViewMode; tab?: Tab }>(window.localStorage.getItem(UI_STORAGE_KEY), {});
         const savedVerification = safeJsonParse<Record<string, boolean>>(window.localStorage.getItem(VERIFICATION_STORAGE_KEY), {});
 
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot mount hydration of filters from localStorage (browser-only source)
         if (savedFilters.pageSize) setPageSize(savedFilters.pageSize);
         if (savedFilters.statuses?.length) setStatuses(savedFilters.statuses);
         if (typeof savedFilters.actionType === "string") setActionType(savedFilters.actionType);

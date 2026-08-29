@@ -13,10 +13,19 @@
 
 export type ContactRow = {
     phone: string;
+    mobile_number: string;
+    business_number: string;
     first_name: string;
     last_name: string;
+    full_name: string;
     email: string;
     company: string;
+    job_title: string;
+    best_time_to_call: string;
+    timezone: string;
+    calling_notes: string;
+    preferred_contact_method: string;
+    do_not_call: string;
 };
 
 export type ContactCsvParse = {
@@ -69,15 +78,31 @@ export function mapHeaders(headers: string[]) {
     };
     return {
         phone: findBy(
-            ["e164", "tonumber", "mobileno", "mobilenumber", "mobile", "cellphone", "cell",
-             "phonenumber", "phone", "contactno", "telephone", "tel", "number"],
-            ["valid", "status", "type", "count", "email"],
+            ["primaryphone", "dialnumber", "e164", "tonumber", "phonenumber",
+             "phone", "contactno", "telephone", "tel", "number"],
+            ["valid", "status", "type", "count", "email", "mobile", "cell",
+             "business", "office", "work"],
+        ),
+        mobile: findBy(
+            ["mobilenumber", "mobileno", "mobilephone", "cellphone", "mobile", "cell"],
+            ["valid", "status", "type", "count"],
+        ),
+        businessNumber: findBy(
+            ["businessnumber", "businessphone", "workphone", "worknumber",
+             "officephone", "officenumber", "landline"],
+            ["valid", "status", "type", "count"],
         ),
         first: findBy(["firstname", "givenname", "fname"]),
         last: findBy(["lastname", "surname", "familyname", "lname"]),
-        full: findBy(["fullname"]),
+        full: findBy(["fullname", "contactname", "customername", "leadname"]),
         email: findBy(["emailaddress", "email"], ["valid", "status", "extra", "secondary"]),
         company: findBy(["companyname", "company", "organization", "organisation", "business", "accountname"]),
+        jobTitle: findBy(["jobtitle", "jobrole", "position", "role", "title"]),
+        bestTimeToCall: findBy(["besttimetocall", "callinghours", "callwindow", "preferredtime", "calltime", "availability"]),
+        timezone: findBy(["timezone", "tz"]),
+        callingNotes: findBy(["callingnotes", "callnotes", "contactnotes", "notes", "comments", "remarks", "background"]),
+        preferredContactMethod: findBy(["preferredcontactmethod", "preferredcontact", "contactmethod", "contactpreference"]),
+        doNotCall: findBy(["donotcall", "dnc", "optout", "optedout", "unsubscribe"]),
     };
 }
 
@@ -87,7 +112,7 @@ export function mapHeaders(headers: string[]) {
 export function findHeaderRow(grid: string[][]): number {
     for (let i = 0; i < Math.min(grid.length, 15); i++) {
         const m = mapHeaders(grid[i]);
-        if (m.phone >= 0 && (m.first >= 0 || m.last >= 0 || m.full >= 0)) return i;
+        if ((m.phone >= 0 || m.mobile >= 0) && (m.first >= 0 || m.last >= 0 || m.full >= 0)) return i;
     }
     return 0;
 }
@@ -103,7 +128,7 @@ export function parseContactsCsv(text: string): ContactCsvParse {
     const headerRow = findHeaderRow(grid);
     const headers = grid[headerRow] ?? [];
     const m = mapHeaders(headers);
-    if (m.phone < 0) {
+    if (m.phone < 0 && m.mobile < 0) {
         return { headerRow, headers, rows: [], phoneFound: false };
     }
     const rows: ContactRow[] = grid.slice(headerRow + 1).map((r) => {
@@ -115,12 +140,25 @@ export function parseContactsCsv(text: string): ContactCsvParse {
             first = parts[0] ?? "";
             last = parts.slice(1).join(" ");
         }
+        const fullName = m.full >= 0
+            ? (r[m.full] ?? "").trim()
+            : [first, last].filter(Boolean).join(" ");
+        const mobile = m.mobile >= 0 ? (r[m.mobile] ?? "").trim() : "";
         return {
-            phone: (r[m.phone] ?? "").trim(),
+            phone: (m.phone >= 0 ? (r[m.phone] ?? "") : mobile).trim(),
+            mobile_number: mobile,
+            business_number: m.businessNumber >= 0 ? (r[m.businessNumber] ?? "").trim() : "",
             first_name: first,
             last_name: last,
+            full_name: fullName,
             email: m.email >= 0 ? (r[m.email] ?? "").trim() : "",
             company: m.company >= 0 ? (r[m.company] ?? "").trim() : "",
+            job_title: m.jobTitle >= 0 ? (r[m.jobTitle] ?? "").trim() : "",
+            best_time_to_call: m.bestTimeToCall >= 0 ? (r[m.bestTimeToCall] ?? "").trim() : "",
+            timezone: m.timezone >= 0 ? (r[m.timezone] ?? "").trim() : "",
+            calling_notes: m.callingNotes >= 0 ? (r[m.callingNotes] ?? "").trim() : "",
+            preferred_contact_method: m.preferredContactMethod >= 0 ? (r[m.preferredContactMethod] ?? "").trim() : "",
+            do_not_call: m.doNotCall >= 0 ? (r[m.doNotCall] ?? "").trim() : "",
         };
     }).filter((r) => r.phone || r.first_name || r.last_name);
     return { headerRow, headers, rows, phoneFound: true };

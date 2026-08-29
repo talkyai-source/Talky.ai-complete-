@@ -145,6 +145,10 @@ export function VoiceFeedbackRecorder({ callId }: { callId: string }) {
 
     const [pendingLooksStale, setPendingLooksStale] = useState(false);
     useEffect(() => {
+        // Resets staleness whenever the note (or its status) changes, then
+        // arms a timer to flip it true once PENDING_STALE_MS has elapsed —
+        // an external-clock subscription, not state derivable at render time.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- resets staleness on note change before arming the stale-after-N-ms timer below
         setPendingLooksStale(false);
         if (note?.transcript_status !== "pending") return;
         const age = Date.now() - new Date(note.updated_at).getTime();

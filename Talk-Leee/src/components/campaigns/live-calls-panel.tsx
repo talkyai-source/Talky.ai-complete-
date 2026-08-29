@@ -20,8 +20,12 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { Phone, PhoneCall, PhoneOff, PhoneIncoming, CircleCheck, CircleX, Loader2, ChevronRight, ChevronDown, FileText } from "lucide-react";
 
 import { api } from "@/lib/api";
+import type { CallTerminationStatus, LiveCallItem } from "@/lib/api";
 import { dashboardApi } from "@/lib/dashboard-api";
 import { extendedApi } from "@/lib/extended-api";
+import { isApiClientError } from "@/lib/http-client";
+import { getRecordingCapabilities } from "@/lib/media-permissions";
+import { useEffectivePermissions } from "@/lib/queries/inbound-queries";
 
 // Per-call recording + transcript, fetched the moment a call ends so the
 // operator can review it inline without stopping the campaign or leaving the
@@ -35,12 +39,98 @@ type CallReview = {
     error?: string;
     blobUrl?: string;
     recordingLoading?: boolean;
+    recordingError?: string;
 };
 
 const POLL_INTERVAL_MS = 1500;
 const RECENT_WINDOW_SECONDS = 60;
 
-type LiveCall = Awaited<ReturnType<typeof api.listLiveCalls>>["items"][number];
+type LiveCall = LiveCallItem;
+
+export type LocalTermination = {
+    status: Exclude<CallTerminationStatus, "none">;
+    error: string | null;
+    submitting: boolean;
+};
+
+type TerminationView =
+    | { phase: "none"; error: null; message: null }
+    | { phase: "pending"; error: string | null; message: string }
+    | { phase: "failed"; error: string; message: string };
+
+const TERMINAL_CALL_STATUSES = new Set([
+    "ended", "completed", "failed", "cancelled", "canceled", "busy",
+    "no_answer", "rejected",
+]);
+
+export function isTerminalLiveCall(status: string): boolean {
+    return TERMINAL_CALL_STATUSES.has(status.trim().toLowerCase());
+}
+
+export function terminationView(
+    call: Pick<LiveCall, "status" | "termination_status" | "termination_error">,
+    local?: LocalTermination,
+): TerminationView {
+    if (isTerminalLiveCall(call.status)) {
+        return { phase: "none", error: null, message: null };
+    }
+
+    if (local?.submitting) {
+        return { phase: "pending", error: null, message: "Sending hangup request…" };
+    }
+
+    const serverStatus = call.termination_status && call.termination_status !== "none"
+        ? call.termination_status
+        : call.status.trim().toLowerCase() === "termination_pending"
+            ? "requested"
+            : undefined;
+    const status = local?.status ?? serverStatus;
+    const error = local ? local.error : call.termination_error ?? null;
+
+    if (status === "failed") {
+        return {
+            phase: "failed",
+            error: error ?? "The provider did not confirm that the call ended.",
+            message: "Hangup failed",
+        };
+    }
+    if (status === "confirmed") {
+        return {
+            phase: "pending",
+            error,
+            message: "Provider confirmed; syncing call state…",
+        };
+    }
+    if (status === "requested") {
+        return {
+            phase: "pending",
+            error,
+            message: "Awaiting provider confirmation…",
+        };
+    }
+    return { phase: "none", error: null, message: null };
+}
+
+function hangupErrorMessage(error: unknown): string {
+    if (isApiClientError(error)) {
+        const details = error.details && typeof error.details === "object"
+            ? error.details as Record<string, unknown>
+            : undefined;
+        const providerError = typeof details?.provider_hangup_error === "string"
+            ? details.provider_hangup_error.trim()
+            : "";
+        if (providerError) return providerError;
+
+        const reason = typeof details?.reason === "string" ? details.reason.trim() : "";
+        if (reason === "confirmation_timeout" || reason === "hangup_unconfirmed") {
+            return "The provider did not confirm that the call ended before the timeout.";
+        }
+        if (error.code === "termination_unconfirmed") {
+            return "The provider did not confirm that the call ended.";
+        }
+    }
+    return error instanceof Error ? error.message : "Failed to hang up call";
+}
 
 type StatusLook = {
     label: string;
@@ -110,6 +200,26 @@ function statusLook(status: string, outcome?: string | null): StatusLook {
     }
 }
 
+function terminationStatusLook(view: TerminationView): StatusLook | null {
+    if (view.phase === "pending") {
+        return {
+            label: "Ending",
+            pillClass: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
+            Icon: Loader2,
+            iconClass: "animate-spin",
+        };
+    }
+    if (view.phase === "failed") {
+        return {
+            label: "Hangup failed",
+            pillClass: "bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-300",
+            Icon: CircleX,
+            iconClass: "",
+        };
+    }
+    return null;
+}
+
 function humanOutcome(outcome: string): string {
     switch (outcome) {
         case "answered": return "Answered";
@@ -149,22 +259,39 @@ export type LiveCallsPanelProps = {
 };
 
 export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPanelProps) {
+    const permissions = useEffectivePermissions();
+    const recordingCapabilities = getRecordingCapabilities(
+        permissions.isSuccess ? permissions.data.permissions : undefined,
+    );
+    const canPlayMedia = permissions.isSuccess && recordingCapabilities.canRead;
+    const canDownloadMedia = permissions.isSuccess && recordingCapabilities.canDownload;
+    const canPlayMediaRef = useRef(canPlayMedia);
+    useEffect(() => {
+        canPlayMediaRef.current = canPlayMedia;
+    }, [canPlayMedia]);
     const [items, setItems] = useState<LiveCall[]>([]);
     const [error, setError] = useState<string | null>(null);
     // Tick every second so elapsed-time counters update between polls.
     const [nowMs, setNowMs] = useState<number>(() => Date.now());
-    const [hangingUpId, setHangingUpId] = useState<string | null>(null);
+    const [terminations, setTerminations] = useState<Record<string, LocalTermination>>({});
+    const hangupRequestsInFlight = useRef<Set<string>>(new Set());
     const aborted = useRef(false);
 
     // Inline recording + transcript review for ended calls.
     const [expanded, setExpanded] = useState<Record<string, boolean>>({});
     const [reviews, setReviews] = useState<Record<string, CallReview>>({});
     const reviewsRef = useRef<Record<string, CallReview>>({});
-    reviewsRef.current = reviews;
+    // Mirror the committed reviews into a ref from an effect, never during
+    // render: under the React Compiler a render-phase ref write is not
+    // guaranteed to run (the render can be memoized away), which would leave
+    // the unmount cleanup below revoking a stale set of object URLs.
+    useEffect(() => {
+        reviewsRef.current = reviews;
+    }, [reviews]);
     const requested = useRef<Set<string>>(new Set());
 
     // Release any recording object URLs on unmount so they don't leak browser
-    // memory over a long operator session (fetchRecordingBlob mints a blob URL
+    // memory over a long operator session (playback mints a blob URL
     // per played recording).
     useEffect(() => {
         return () => {
@@ -173,6 +300,24 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
             }
         };
     }, []);
+
+    useEffect(() => {
+        if (canPlayMedia) return;
+        setReviews((current) => {
+            let changed = false;
+            const next: Record<string, CallReview> = {};
+            for (const [callId, review] of Object.entries(current)) {
+                if (review.blobUrl) {
+                    URL.revokeObjectURL(review.blobUrl);
+                }
+                if (review.blobUrl || review.recordingLoading) changed = true;
+                next[callId] = review.blobUrl || review.recordingLoading
+                    ? { ...review, blobUrl: undefined, recordingLoading: false, recordingError: undefined }
+                    : review;
+            }
+            return changed ? next : current;
+        });
+    }, [canPlayMedia]);
 
     // Fetch a call's transcript + recording id. Polls a few times because the
     // recording upload + transcript persist land a beat after "ended".
@@ -206,48 +351,122 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
         }
     }, []);
 
-    // Lazily fetch the recording audio blob (authenticated) on expand.
+    // Lazily fetch the authenticated recording bytes only after an explicit
+    // "Load recording" click. Expanding a row never downloads audio.
+    //
+    // SECURITY NOTE — `recordings:download` is NOT enforceable in this
+    // component. Playback needs the audio bytes in the page, and every route
+    // that can deliver them is authorized by `recordings:read`:
+    //   - GET /recordings/{id}/stream  → RECORDINGS_READ (bytes, or a 302 to a
+    //     presigned S3 URL). It lives on the API origin and is authorized by
+    //     the bearer/HttpOnly-cookie pair the fetch layer attaches, so it can
+    //     NOT be used as a bare `<audio src>`; and even if it could, that URL
+    //     would itself be copyable.
+    //   - GET /recordings/{id}/url    → RECORDINGS_DOWNLOAD (correctly gated,
+    //     so it is unavailable to exactly the users we want to restrict).
+    // There is no read-scoped signed playback URL to point `<audio src>` at,
+    // so we keep blob playback and treat `controlsList="nodownload"` as what it
+    // is — a UI hint. A download-denied operator can still lift the bytes out
+    // of devtools. Real enforcement has to happen server-side (e.g. a
+    // read-scoped, short-lived, single-use streaming token, or watermarked /
+    // transcoded preview audio). Until then we minimise exposure: the object
+    // URL is minted only on an explicit click, and for download-denied users it
+    // is revoked as soon as playback stops (see `releaseRecording`) and on
+    // unmount, so no long-lived copyable handle is left on the page.
     const loadRecording = useCallback(async (callId: string, recordingId: string) => {
-        setReviews((r) => ({ ...r, [callId]: { ...(r[callId] ?? { ready: true }), recordingLoading: true } }));
+        if (!canPlayMediaRef.current) return;
+        setReviews((r) => ({ ...r, [callId]: { ...(r[callId] ?? { ready: true }), recordingLoading: true, recordingError: undefined } }));
         try {
-            const url = await extendedApi.fetchRecordingBlob(recordingId);
+            const blob = await extendedApi.fetchRecordingPlaybackBlob(recordingId);
+            const url = URL.createObjectURL(blob);
+            if (aborted.current || !canPlayMediaRef.current) {
+                URL.revokeObjectURL(url);
+                return;
+            }
             setReviews((r) => ({ ...r, [callId]: { ...(r[callId] ?? { ready: true }), blobUrl: url, recordingLoading: false } }));
-        } catch {
-            setReviews((r) => ({ ...r, [callId]: { ...(r[callId] ?? { ready: true }), recordingLoading: false } }));
+        } catch (error) {
+            if (!aborted.current) {
+                setReviews((r) => ({
+                    ...r,
+                    [callId]: {
+                        ...(r[callId] ?? { ready: true }),
+                        recordingLoading: false,
+                        recordingError: error instanceof Error ? error.message : "Failed to load recording",
+                    },
+                }));
+            }
         }
+    }, []);
+
+    // Revoke a recording's object URL and drop it from state, so the row falls
+    // back to the "Load recording" button. Called when playback stops for a
+    // user without `recordings:download`: the handle only exists while the
+    // audio is actually playing.
+    const releaseRecording = useCallback((callId: string) => {
+        const url = reviewsRef.current[callId]?.blobUrl;
+        if (!url) return;
+        URL.revokeObjectURL(url);
+        setReviews((r) => {
+            const review = r[callId];
+            if (!review?.blobUrl) return r;
+            return { ...r, [callId]: { ...review, blobUrl: undefined } };
+        });
     }, []);
 
     const toggleExpand = useCallback((callId: string) => {
         setExpanded((e) => ({ ...e, [callId]: !e[callId] }));
-        const rv = reviewsRef.current[callId];
-        // On first expand, kick the recording blob if we know its id.
-        if (rv?.recordingId && !rv.blobUrl && !rv.recordingLoading) {
-            void loadRecording(callId, rv.recordingId);
-        }
-    }, [loadRecording]);
+    }, []);
 
     async function handleHangup(callId: string) {
+        const call = items.find((item) => item.id === callId);
+        if (
+            !call
+            || hangupRequestsInFlight.current.has(callId)
+            || terminationView(call, terminations[callId]).phase === "pending"
+        ) return;
+
+        hangupRequestsInFlight.current.add(callId);
+        setTerminations((current) => ({
+            ...current,
+            [callId]: { status: "requested", error: null, submitting: true },
+        }));
         try {
-            setHangingUpId(callId);
-            await api.hangupCall(callId);
-            // Optimistic: mark ended locally so the row leaves "in flight"
-            // instantly; the next poll reconciles with the server.
-            //
-            // Deliberately does NOT guess the outcome. It used to fill in
-            // "agent_hung_up", which claims the AI agent ended a conversation
-            // it was having — untrue for the phantom stuck rows this button
-            // mostly clears. The server decides from whether the call was
-            // actually answered; showing nothing for one poll is honest,
-            // showing the wrong label is not.
-            setItems((prev) =>
-                prev.map((it) =>
-                    it.id === callId ? { ...it, status: "ended" } : it,
-                ),
-            );
+            const result = await api.hangupCall(callId);
+            const failed = result.status === "failed" || result.termination_status === "failed";
+            const responseStatus: LocalTermination["status"] = failed
+                ? "failed"
+                : result.status === "confirmed"
+                    || result.status === "already_terminal"
+                    || result.termination_status === "confirmed"
+                    ? "confirmed"
+                    : "requested";
+            const unconfirmedError = result.provider_hangup_error
+                ?? (result.status === "confirmed" && !result.provider_hangup_confirmed
+                    ? "The provider has not confirmed the hangup yet."
+                    : result.status === "requested" && !result.provider_hangup_requested
+                        ? "The provider has not acknowledged the hangup request yet."
+                        : null);
+            setTerminations((current) => ({
+                ...current,
+                [callId]: {
+                    status: responseStatus,
+                    error: failed
+                        ? unconfirmedError ?? "The provider did not confirm that the call ended."
+                        : unconfirmedError,
+                    submitting: false,
+                },
+            }));
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to hang up call");
+            setTerminations((current) => ({
+                ...current,
+                [callId]: {
+                    status: "failed",
+                    error: hangupErrorMessage(err),
+                    submitting: false,
+                },
+            }));
         } finally {
-            setHangingUpId(null);
+            hangupRequestsInFlight.current.delete(callId);
         }
     }
 
@@ -263,6 +482,31 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
                 });
                 if (aborted.current) return;
                 setItems(res.items);
+                setTerminations((current) => {
+                    const polledById = new Map(res.items.map((item) => [item.id, item]));
+                    let changed = false;
+                    const next: Record<string, LocalTermination> = {};
+                    for (const [callId, local] of Object.entries(current)) {
+                        const polled = polledById.get(callId);
+                        if (!polled || isTerminalLiveCall(polled.status)) {
+                            changed = true;
+                            continue;
+                        }
+                        const serverStatus = polled.termination_status;
+                        if (serverStatus && serverStatus !== "none" && !local.submitting) {
+                            const reconciled: LocalTermination = {
+                                status: serverStatus,
+                                error: polled.termination_error ?? null,
+                                submitting: false,
+                            };
+                            next[callId] = reconciled;
+                            if (reconciled.status !== local.status || reconciled.error !== local.error) changed = true;
+                        } else {
+                            next[callId] = local;
+                        }
+                    }
+                    return changed ? next : current;
+                });
                 setError(null);
             } catch (err) {
                 if (aborted.current) return;
@@ -286,11 +530,11 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
     }, [campaignId]);
 
     const live = useMemo(
-        () => items.filter((it) => !["ended", "completed", "failed"].includes(it.status)),
+        () => items.filter((it) => !isTerminalLiveCall(it.status)),
         [items],
     );
     const recentlyEnded = useMemo(
-        () => items.filter((it) => ["ended", "completed", "failed"].includes(it.status)),
+        () => items.filter((it) => isTerminalLiveCall(it.status)),
         [items],
     );
 
@@ -346,8 +590,10 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
                         </thead>
                         <tbody className="divide-y divide-gray-200 dark:divide-white/10">
                             {items.map((c) => {
-                                const look = statusLook(c.status, c.outcome);
-                                const live = !["ended", "completed", "failed"].includes(c.status);
+                                const terminal = isTerminalLiveCall(c.status);
+                                const termination = terminationView(c, terminations[c.id]);
+                                const look = terminationStatusLook(termination) ?? statusLook(c.status, c.outcome);
+                                const live = !terminal;
                                 const elapsed = live
                                     ? elapsedSeconds(c.answered_at ?? c.started_at, nowMs)
                                     : c.duration_seconds ?? null;
@@ -377,6 +623,15 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
                                                     <look.Icon className={`h-3.5 w-3.5 ${look.iconClass}`} aria-hidden />
                                                     {look.label}
                                                 </span>
+                                                {termination.phase !== "none" ? (
+                                                    <div
+                                                        className={`mt-1 max-w-56 text-[11px] leading-tight ${termination.error ? "text-red-600 dark:text-red-400" : "text-muted-foreground"}`}
+                                                        role={termination.error ? "alert" : "status"}
+                                                        title={termination.error ?? termination.message}
+                                                    >
+                                                        {termination.error ?? termination.message}
+                                                    </div>
+                                                ) : null}
                                             </td>
                                             <td className="px-4 py-2 font-mono text-sm tabular-nums">
                                                 {fmtDuration(elapsed)}
@@ -389,16 +644,21 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
                                                     <button
                                                         type="button"
                                                         onClick={(e) => { e.stopPropagation(); handleHangup(c.id); }}
-                                                        disabled={hangingUpId === c.id}
-                                                        aria-label={`Hang up call to ${c.to_number}`}
-                                                        title="Hang up"
-                                                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-red-600 transition-colors hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-950/50 disabled:opacity-50"
+                                                        disabled={termination.phase === "pending"}
+                                                        aria-label={termination.phase === "failed"
+                                                            ? `Retry hangup for call to ${c.to_number}`
+                                                            : termination.phase === "pending"
+                                                                ? `Ending call to ${c.to_number}`
+                                                                : `Hang up call to ${c.to_number}`}
+                                                        title={termination.phase === "failed" ? "Retry hangup" : termination.message ?? "Hang up"}
+                                                        className={`inline-flex h-7 items-center justify-center gap-1 rounded-md text-red-600 transition-colors hover:bg-red-100 dark:text-red-400 dark:hover:bg-red-950/50 disabled:cursor-wait disabled:opacity-60 ${termination.phase === "failed" ? "px-2 text-xs font-medium" : "w-7"}`}
                                                     >
-                                                        {hangingUpId === c.id ? (
+                                                        {termination.phase === "pending" ? (
                                                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
                                                         ) : (
                                                             <PhoneOff className="h-3.5 w-3.5" />
                                                         )}
+                                                        {termination.phase === "failed" ? "Retry" : null}
                                                     </button>
                                                 ) : (
                                                     <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
@@ -416,6 +676,9 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
                                                         onLoadRecording={() => {
                                                             if (rv?.recordingId) void loadRecording(c.id, rv.recordingId);
                                                         }}
+                                                        onReleaseRecording={() => releaseRecording(c.id)}
+                                                        canPlayMedia={canPlayMedia}
+                                                        canDownloadMedia={canDownloadMedia}
                                                     />
                                                 </td>
                                             </tr>
@@ -435,9 +698,15 @@ export function LiveCallsPanel({ campaignId, title = "Live calls" }: LiveCallsPa
 function CallReviewPanel({
     review,
     onLoadRecording,
+    onReleaseRecording,
+    canPlayMedia,
+    canDownloadMedia,
 }: {
     review?: CallReview;
     onLoadRecording: () => void;
+    onReleaseRecording: () => void;
+    canPlayMedia: boolean;
+    canDownloadMedia: boolean;
 }) {
     const stillFinalizing =
         !review ||
@@ -464,9 +733,22 @@ function CallReviewPanel({
         <div className="space-y-3">
             <div>
                 {review.blobUrl ? (
-                    // eslint-disable-next-line jsx-a11y/media-has-caption
-                    <audio controls src={review.blobUrl} className="h-9 w-full max-w-md" />
-                ) : review.recordingId ? (
+                    // `controlsList="nodownload"` is a browser HINT, not a
+                    // control — it hides the menu item and nothing more. For a
+                    // user without `recordings:download` we additionally revoke
+                    // the object URL the moment playback stops, so the page is
+                    // not left holding a freely copyable handle to the audio.
+                    // See the SECURITY NOTE on `loadRecording`: withholding the
+                    // bytes entirely is only possible server-side.
+                    <audio
+                        controls
+                        controlsList={canDownloadMedia ? undefined : "nodownload"}
+                        src={review.blobUrl}
+                        onPause={canDownloadMedia ? undefined : onReleaseRecording}
+                        onEnded={canDownloadMedia ? undefined : onReleaseRecording}
+                        className="h-9 w-full max-w-md"
+                    />
+                ) : review.recordingId && canPlayMedia ? (
                     review.recordingLoading ? (
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                             <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
@@ -482,9 +764,16 @@ function CallReviewPanel({
                             Load recording
                         </button>
                     )
+                ) : review.recordingId ? (
+                    <div className="text-xs text-muted-foreground">Playback permission is required.</div>
                 ) : (
                     <div className="text-xs text-muted-foreground">No recording for this call.</div>
                 )}
+                {review.recordingError ? (
+                    <div className="mt-1 text-xs text-red-600 dark:text-red-400" role="alert">
+                        Couldn&apos;t load recording: {review.recordingError}
+                    </div>
+                ) : null}
             </div>
 
             <div>

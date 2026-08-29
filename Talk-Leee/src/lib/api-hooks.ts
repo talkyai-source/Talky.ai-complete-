@@ -2,7 +2,7 @@
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { backendApi, type AdminResourceListInput, type AuditLogsListInput, type SecurityEventsListInput } from "@/lib/backend-api";
-import { dashboardApi, type Call } from "@/lib/dashboard-api";
+import { dashboardApi, type Call, type CallListFilters } from "@/lib/dashboard-api";
 import { extendedApi } from "@/lib/extended-api";
 import type { AssistantRun, CalendarEvent, Connector, PartnerSummary, Reminder, TenantSummary } from "@/lib/models";
 import { emailAuditStore } from "@/lib/email-audit";
@@ -34,7 +34,7 @@ export const queryKeys = {
     campaign: (id: string) => ["campaign", id] as const,
     campaignStats: (id: string) => ["campaignStats", id] as const,
     campaignContacts: (campaignId: string, page: number, pageSize: number) => ["campaignContacts", campaignId, page, pageSize] as const,
-    calls: (page: number, pageSize: number) => ["calls", page, pageSize] as const,
+    calls: (page: number, pageSize: number, filters?: CallListFilters) => ["calls", page, pageSize, filters?.direction ?? "all", filters?.inboundCampaignId ?? "all"] as const,
     call: (id: string) => ["call", id] as const,
     callTranscript: (id: string, format: "json" | "text") => ["callTranscript", id, format] as const,
     callSummary: (id: string) => ["callSummary", id] as const,
@@ -639,10 +639,10 @@ export function useCampaignContacts(campaignId: string | undefined, page: number
     });
 }
 
-export function useCalls(page: number, pageSize: number) {
+export function useCalls(page: number, pageSize: number, filters: CallListFilters = {}) {
     return useQuery<{ calls: Call[]; total: number }>({
-        queryKey: queryKeys.calls(page, pageSize),
-        queryFn: () => dashboardApi.listCalls(page, pageSize),
+        queryKey: queryKeys.calls(page, pageSize, filters),
+        queryFn: () => dashboardApi.listCalls(page, pageSize, filters),
         placeholderData: keepPreviousData,
     });
 }

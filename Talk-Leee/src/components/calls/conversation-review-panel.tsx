@@ -14,15 +14,28 @@
  * the button says "Update review" once you have left one — silently replacing
  * someone else's assessment would be worse than not having the feature.
  *
- * REWARD HONESTY
- * --------------
- * §3 wants reward eligibility shown BEFORE submission. The rules come from the
- * API (`/calls/reviews/options`) rather than being hardcoded, so the UI cannot
- * promise points that the server will decline to grant — and when rewards are
- * switched off entirely, it says nothing about them at all rather than dangling
- * something that will not arrive.
+ * NO REWARD COPY — AND WHY IT WAS REMOVED
+ * ---------------------------------------
+ * §3 asks for reward eligibility to be shown before submission, and this panel
+ * used to render it from the API's `rewards_enabled` / `points_per_review`
+ * ("Earns 10 points", "points added"). That copy is gone.
+ *
+ * The reward path is inert in every environment that actually runs. It is gated
+ * on `REVIEW_REWARDS_ENABLED` (backend conversation_review_service.py:94,
+ * default "false"), and that variable appears in no .env.example, no deploy
+ * script and no systemd unit — so the award is always 0 and no ledger row can
+ * exist. Rendering eligibility from a flag that is structurally false either
+ * says nothing (the common case) or, the moment anyone flips it in one place
+ * without the ledger being reachable, promises a user something the platform
+ * cannot deliver.
+ *
+ * The ledger plumbing is deliberately left alone — `awarded_points` still comes
+ * back on the review and the backend still writes it when enabled. The rule
+ * here is narrower: do not ADVERTISE a reward until it is actually paid. When
+ * the env var is deployed and a ledger row can be shown to exist, put the copy
+ * back and delete the guard test in this component's spec.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Check, Loader2, MessageSquare, RotateCcw, Star } from "lucide-react";
 
@@ -32,6 +45,8 @@ import {
     type ConversationReview,
     type ReviewOptions,
 } from "@/lib/extended-api";
+import { useEffectivePermissions } from "@/lib/queries/inbound-queries";
+import { getReviewCapabilities, isRetryableSubmitStatus } from "@/lib/review-permissions";
 
 /** Human wording for the eleven machine tags. Order matches goals.md §3. */
 const TAG_LABELS: Record<string, string> = {
@@ -57,6 +72,16 @@ export function reviewQueryKey(callId: string) {
 export function ConversationReviewPanel({ callId }: { callId: string }) {
     const queryClient = useQueryClient();
 
+    // The form is gated on the permission the SUBMIT needs, not the one the
+    // read needed. See getReviewCapabilities: the GET is calls:read and the PUT
+    // is calls:create, so a readonly account loads its (empty) review perfectly
+    // well and is refused only at the moment it presses Submit.
+    const permissions = useEffectivePermissions();
+    const permissionsSettled = permissions.isSuccess || permissions.isError;
+    const reviewCapabilities = getReviewCapabilities(
+        permissions.isSuccess ? permissions.data.permissions : undefined,
+    );
+
     const optionsQuery = useQuery<ReviewOptions>({
         queryKey: ["reviewOptions"],
         queryFn: () => extendedApi.getReviewOptions(),
@@ -78,7 +103,10 @@ export function ConversationReviewPanel({ callId }: { callId: string }) {
     const [tags, setTags] = useState<string[]>([]);
     const [comment, setComment] = useState("");
     const [justSaved, setJustSaved] = useState<ConversationReview | null>(null);
-    const [error, setError] = useState<string | null>(null);
+    // The status is kept alongside the message because it decides whether a
+    // retry is offered at all, and a formatted message cannot be interrogated
+    // for that later.
+    const [error, setError] = useState<{ message: string; status?: number } | null>(null);
 
     // Seed the form from an existing review so "edit" starts from what you
     // wrote, not from blank.
@@ -92,6 +120,7 @@ export function ConversationReviewPanel({ callId }: { callId: string }) {
     // out of the way otherwise.
     useEffect(() => {
         if (!existing) return;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- seeds the edit form from a fetched/refetched review, keyed on id+updated_at so it doesn't clobber in-progress typing
         setRating(existing.rating);
         setTags(existing.tags ?? []);
         setComment(existing.comment ?? "");
@@ -108,7 +137,10 @@ export function ConversationReviewPanel({ callId }: { callId: string }) {
             setError(null);
         },
         onError: (err: unknown) =>
-            setError(err instanceof Error ? err.message : "Couldn't save your review"),
+            setError({
+                message: err instanceof Error ? err.message : "Couldn't save your review",
+                status: (err as { status?: number } | null)?.status,
+            }),
     });
 
     const toggleTag = useCallback((tag: string) => {
@@ -117,17 +149,40 @@ export function ConversationReviewPanel({ callId }: { callId: string }) {
     }, []);
 
     const opts = optionsQuery.data;
-    const hasDetail = tags.length > 0 || comment.trim().length > 0;
-    const wouldEarn = useMemo(() => {
-        if (!opts?.rewards_enabled) return 0;
-        if (existing) return 0;                       // edits never re-credit
-        if (!hasDetail && !opts.bare_rating_earns_reward) return 0;
-        return opts.points_per_review;
-    }, [opts, existing, hasDetail]);
 
     const others = (othersQuery.data ?? []).filter((r) => r.id !== existing?.id);
 
-    if (mineQuery.isLoading || optionsQuery.isLoading) {
+    // Reading teammates' reviews is what calls:read buys, so it survives every
+    // branch below — losing sight of them is not part of being unable to write.
+    const othersSection = others.length > 0 ? (
+        <div className="mt-5 border-t border-border pt-4">
+            <h4 className="mb-2 text-xs font-medium text-muted-foreground">
+                {others.length} other review{others.length > 1 ? "s" : ""} on this call
+            </h4>
+            <ul className="space-y-2">
+                {others.map((r) => (
+                    <li key={r.id} className="rounded-lg border border-border bg-muted/40 p-2">
+                        <div className="flex items-center gap-2 text-xs">
+                            <span className="font-mono">{r.rating}/5</span>
+                            <span className="text-muted-foreground">
+                                {new Date(r.created_at).toLocaleDateString()}
+                            </span>
+                        </div>
+                        {r.tags.length > 0 && (
+                            <p className="mt-1 text-[11px] text-muted-foreground">
+                                {r.tags.map((t) => TAG_LABELS[t] ?? t).join(" · ")}
+                            </p>
+                        )}
+                        {r.comment && (
+                            <p className="mt-1 text-xs text-foreground/90">{r.comment}</p>
+                        )}
+                    </li>
+                ))}
+            </ul>
+        </div>
+    ) : null;
+
+    if (mineQuery.isLoading || optionsQuery.isLoading || !permissionsSettled) {
         return (
             <Panel>
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -137,15 +192,28 @@ export function ConversationReviewPanel({ callId }: { callId: string }) {
         );
     }
 
-    // A 403 here means the account may see the call but not review it. Say that
-    // rather than showing a form whose submit will always fail.
-    if (mineQuery.isError && (mineQuery.error as { status?: number })?.status === 403) {
+    // THE GATE IS ON WRITING, NOT ON READING.
+    //
+    // This used to key on a 403 from the read, which is the wrong signal twice
+    // over: the read is gated on calls:read, so anyone who can open the call
+    // page passes it, and the branch therefore never fired for the account it
+    // was meant to protect. Meanwhile the submit is gated on calls:create, which
+    // a readonly account does not hold — so it saw the whole form, typed a
+    // review, and only learned it was not allowed after pressing Submit.
+    //
+    // A failed permission lookup is reported as a failed lookup rather than as a
+    // refusal: "we could not check" and "you may not" are different facts, and
+    // only one of them is about the person reading it.
+    if (!reviewCapabilities.canWrite) {
         return (
             <Panel>
                 <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <AlertCircle className="h-4 w-4" />
-                    You don&apos;t have permission to review calls.
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    {reviewCapabilities.source === "unavailable"
+                        ? "Your permissions couldn't be checked, so reviewing is unavailable right now."
+                        : "You don't have permission to review calls. You can read reviews left by your teammates."}
                 </p>
+                {othersSection}
             </Panel>
         );
     }
@@ -263,18 +331,13 @@ export function ConversationReviewPanel({ callId }: { callId: string }) {
                     <span className="text-xs text-muted-foreground">Pick a rating to continue.</span>
                 )}
 
-                {/* §3: reward eligibility BEFORE submission, never a promise the
-                    server will decline to keep. */}
-                {rating > 0 && opts?.rewards_enabled && !existing && (
+                {/* No reward eligibility line here on purpose — see the note at
+                    the top of this file. What replaced it is the honest ask:
+                    detail is worth adding because it is read, not because it
+                    pays. */}
+                {rating > 0 && !existing && (
                     <span className="text-xs text-muted-foreground">
-                        {wouldEarn > 0
-                            ? `Earns ${wouldEarn} points`
-                            : "Add a tag or a comment to earn points"}
-                    </span>
-                )}
-                {rating > 0 && opts?.rewards_enabled && existing && (
-                    <span className="text-xs text-muted-foreground">
-                        Editing won&apos;t award points again
+                        A tag or a comment makes this far more useful to your team.
                     </span>
                 )}
             </div>
@@ -283,7 +346,6 @@ export function ConversationReviewPanel({ callId }: { callId: string }) {
                 <p className="mt-3 flex items-center gap-2 text-xs text-emerald-600">
                     <Check className="h-3.5 w-3.5" />
                     Review saved
-                    {justSaved.awarded_points > 0 && ` — ${justSaved.awarded_points} points added`}
                     {justSaved.prompt_version && (
                         <span className="text-muted-foreground">
                             · recorded against {justSaved.prompt_version}
@@ -296,55 +358,43 @@ export function ConversationReviewPanel({ callId }: { callId: string }) {
                 <div className="mt-3 flex items-start gap-2 text-xs text-destructive">
                     <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                     <div className="space-y-1.5">
-                        <p>{error}</p>
+                        <p>{error.message}</p>
                         {/* RETRY, not just a message (goals.md §3).
                             A save that fails on a flaky connection otherwise
                             leaves someone staring at their own typed review
                             with no way forward but to re-type it elsewhere —
                             the form still holds every word, so the only thing
-                            missing was a button to send them again. */}
-                        <button
-                            type="button"
-                            onClick={() => { setError(null); save.mutate(); }}
-                            disabled={save.isPending}
-                            className="inline-flex items-center gap-1.5 rounded-md border border-destructive/40 px-2 py-1 font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
-                        >
-                            {save.isPending
-                                ? <Loader2 className="h-3 w-3 animate-spin" />
-                                : <RotateCcw className="h-3 w-3" />}
-                            Try again
-                        </button>
+                            missing was a button to send them again.
+
+                            But only where a second attempt could actually
+                            differ. On a 403 or a 422 the button re-sent the same
+                            rejected request indefinitely, which looks like a way
+                            out and is not one; that case gets a sentence
+                            explaining why there is nothing to retry. */}
+                        {isRetryableSubmitStatus(error.status) ? (
+                            <button
+                                type="button"
+                                onClick={() => { setError(null); save.mutate(); }}
+                                disabled={save.isPending}
+                                className="inline-flex items-center gap-1.5 rounded-md border border-destructive/40 px-2 py-1 font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
+                            >
+                                {save.isPending
+                                    ? <Loader2 className="h-3 w-3 animate-spin" />
+                                    : <RotateCcw className="h-3 w-3" />}
+                                Try again
+                            </button>
+                        ) : (
+                            <p className="text-muted-foreground">
+                                {error.status === 403
+                                    ? "Your account is not allowed to review calls, so retrying will not help."
+                                    : "Sending this again would be refused the same way. Change the review, or ask an administrator."}
+                            </p>
+                        )}
                     </div>
                 </div>
             )}
 
-            {others.length > 0 && (
-                <div className="mt-5 border-t border-border pt-4">
-                    <h4 className="mb-2 text-xs font-medium text-muted-foreground">
-                        {others.length} other review{others.length > 1 ? "s" : ""} on this call
-                    </h4>
-                    <ul className="space-y-2">
-                        {others.map((r) => (
-                            <li key={r.id} className="rounded-lg border border-border bg-muted/40 p-2">
-                                <div className="flex items-center gap-2 text-xs">
-                                    <span className="font-mono">{r.rating}/5</span>
-                                    <span className="text-muted-foreground">
-                                        {new Date(r.created_at).toLocaleDateString()}
-                                    </span>
-                                </div>
-                                {r.tags.length > 0 && (
-                                    <p className="mt-1 text-[11px] text-muted-foreground">
-                                        {r.tags.map((t) => TAG_LABELS[t] ?? t).join(" · ")}
-                                    </p>
-                                )}
-                                {r.comment && (
-                                    <p className="mt-1 text-xs text-foreground/90">{r.comment}</p>
-                                )}
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-            )}
+            {othersSection}
         </Panel>
     );
 }

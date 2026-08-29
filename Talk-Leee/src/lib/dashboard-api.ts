@@ -1,5 +1,4 @@
 import { sharedHttpClient } from "@/lib/api";
-import { apiBaseUrl } from "@/lib/env";
 
 // Dashboard Types
 export interface DashboardSummary {
@@ -39,6 +38,8 @@ export interface Campaign {
     name: string;
     description?: string;
     status: string;
+    /** Explicit call direction; absent on historical outbound campaigns. */
+    direction?: "inbound" | "outbound";
     system_prompt: string;
     voice_id: string;
     tts_provider?: string | null;   // per-campaign TTS engine; null = tenant global
@@ -114,7 +115,6 @@ export interface Call {
     outcome?: string;
     duration_seconds?: number;
     transcript?: string;
-    recording_url?: string;
     created_at: string;
     started_at?: string;
     ended_at?: string;
@@ -126,6 +126,55 @@ export interface Call {
     lead_outcome?: string | null;
     /** True when a reviewer has left a voice note on this call. */
     has_feedback?: boolean;
+    /** Direction defaults to outbound for historical rows. */
+    direction?: "inbound" | "outbound";
+    /** Originating party. Null is valid for privacy-blocked inbound ANI. */
+    from_number?: string | null;
+    /** Destination party; for inbound calls this is the called public DID. */
+    to_number?: string | null;
+    /** Inbound caller identity. May be privacy-masked by the server. */
+    caller_ani?: string | null;
+    /** Public DID that received the inbound call. */
+    called_did?: string | null;
+    inbound_campaign_id?: string | null;
+    assignment_id?: string | null;
+    route_id?: string | null;
+    route_version?: number | null;
+    config_version?: number | null;
+    config_checksum?: string | null;
+    admission_status?: string | null;
+    admission_reason?: string | null;
+    consent_status?: string | null;
+    processing_status?: string | null;
+    billing_status?: string | null;
+    billing_hold_reason?: string | null;
+    recording_status?: string | null;
+    transcript_status?: string | null;
+    media_state?: string | null;
+}
+
+export interface CampaignTerminationSummary {
+    status: "confirmed" | "partial" | "lookup_failed";
+    total_selected: number;
+    requested: number;
+    attempted: number;
+    confirmed: number;
+    deferred: number;
+    unconfirmed: number;
+    missing_identity: number;
+    reasons: Record<string, number>;
+    lookup_error: string | null;
+}
+
+export interface CampaignControlResponse {
+    message: string;
+    campaign: Campaign & { termination_summary?: CampaignTerminationSummary };
+    termination_summary: CampaignTerminationSummary;
+}
+
+export interface CallListFilters {
+    direction?: "inbound" | "outbound";
+    inboundCampaignId?: string;
 }
 
 // AI Call Summary Types
@@ -165,9 +214,21 @@ export interface Contact {
     id: string;
     campaign_id: string;
     phone_number: string;
+    /** Additional mobile value; falls back to phone_number in API responses. */
+    mobile_number?: string;
+    business_number?: string;
     first_name?: string;
     last_name?: string;
+    full_name?: string;
     email?: string;
+    company_name?: string;
+    job_title?: string;
+    best_time_to_call?: string;
+    timezone?: string;
+    calling_notes?: string;
+    preferred_contact_method?: string;
+    do_not_call?: boolean;
+    custom_fields?: Record<string, unknown>;
     status: string;
     last_call_result: string;
     call_attempts: number;
@@ -179,6 +240,23 @@ export interface Contact {
     follow_up_note?: string | null;
     qualified_at?: string | null;
     qualified_call_id?: string | null;
+}
+
+export interface ContactMutation {
+    phone_number: string;
+    mobile_number?: string;
+    business_number?: string;
+    first_name?: string;
+    last_name?: string;
+    full_name?: string;
+    email?: string;
+    company_name?: string;
+    job_title?: string;
+    best_time_to_call?: string;
+    timezone?: string;
+    calling_notes?: string;
+    preferred_contact_method?: string;
+    do_not_call?: boolean;
 }
 
 // Contact List Types (grouped uploads / pasted batches).
@@ -212,6 +290,7 @@ interface CallListItem {
     talklee_call_id?: string;
     timestamp: string;
     to_number: string;
+    from_number?: string | null;
     status: string;
     duration_seconds?: number;
     outcome?: string;
@@ -219,6 +298,25 @@ interface CallListItem {
     recording_id?: string | null;
     lead_outcome?: string | null;
     has_feedback?: boolean;
+    campaign_id?: string | null;
+    direction?: "inbound" | "outbound" | string;
+    caller_ani?: string | null;
+    called_did?: string | null;
+    inbound_campaign_id?: string | null;
+    assignment_id?: string | null;
+    route_id?: string | null;
+    route_version?: number | null;
+    config_version?: number | null;
+    config_checksum?: string | null;
+    admission_status?: string | null;
+    admission_reason?: string | null;
+    consent_status?: string | null;
+    processing_status?: string | null;
+    billing_status?: string | null;
+    billing_hold_reason?: string | null;
+    recording_status?: string | null;
+    transcript_status?: string | null;
+    media_state?: string | null;
 }
 
 // Dashboard API - Real backend integration.
@@ -348,14 +446,14 @@ class DashboardApi {
         });
     }
 
-    async pauseCampaign(id: string): Promise<{ message: string }> {
+    async pauseCampaign(id: string): Promise<CampaignControlResponse> {
         return this.client.request({
             path: `/campaigns/${id}/pause`,
             method: "POST",
         });
     }
 
-    async stopCampaign(id: string): Promise<{ message: string }> {
+    async stopCampaign(id: string): Promise<CampaignControlResponse> {
         return this.client.request({
             path: `/campaigns/${id}/stop`,
             method: "POST",
@@ -432,7 +530,7 @@ class DashboardApi {
 
     async addContact(
         campaignId: string,
-        data: { phone_number: string; first_name?: string; last_name?: string; email?: string }
+        data: ContactMutation,
     ): Promise<{ message: string; contact: Contact }> {
         return this.client.request({
             path: `/campaigns/${campaignId}/contacts`,
@@ -457,7 +555,7 @@ class DashboardApi {
     async updateContact(
         campaignId: string,
         contactId: string,
-        data: { phone_number?: string; first_name?: string; last_name?: string; email?: string }
+        data: Partial<ContactMutation>
     ): Promise<{ message: string; contact: Contact }> {
         return this.client.request({
             path: `/campaigns/${campaignId}/contacts/${contactId}`,
@@ -467,20 +565,25 @@ class DashboardApi {
     }
 
     // Calls
-    async listCalls(page: number = 1, pageSize: number = 20): Promise<{ calls: Call[]; total: number }> {
+    async listCalls(page: number = 1, pageSize: number = 20, filters: CallListFilters = {}): Promise<{ calls: Call[]; total: number }> {
         const response = await this.client.request<{ items: (CallListItem & { summary?: string })[]; total: number }>({
             path: "/calls",
             method: "GET",
-            params: { page: String(page), page_size: String(pageSize) },
+            params: {
+                page: String(page),
+                page_size: String(pageSize),
+                direction: filters.direction,
+                inbound_campaign_id: filters.inboundCampaignId,
+            },
         });
 
         // Map backend CallListItem to frontend Call format
         const calls: Call[] = response.items.map(item => ({
             id: item.id,
-            campaign_id: "",
+            campaign_id: item.campaign_id ?? "",
             campaign_name: item.campaign_name,
             lead_id: "",
-            phone_number: item.to_number,
+            phone_number: item.direction === "inbound" ? item.from_number || item.caller_ani || "Private caller" : item.to_number,
             status: item.status,
             outcome: item.outcome,
             duration_seconds: item.duration_seconds,
@@ -489,6 +592,26 @@ class DashboardApi {
             recording_id: item.recording_id,
             lead_outcome: item.lead_outcome,
             has_feedback: item.has_feedback,
+            direction: item.direction === "inbound" ? "inbound" : "outbound",
+            from_number: item.from_number ?? item.caller_ani,
+            to_number: item.to_number ?? item.called_did,
+            caller_ani: item.caller_ani ?? item.from_number,
+            called_did: item.called_did ?? item.to_number,
+            inbound_campaign_id: item.inbound_campaign_id,
+            assignment_id: item.assignment_id,
+            route_id: item.route_id,
+            route_version: item.route_version,
+            config_version: item.config_version,
+            config_checksum: item.config_checksum,
+            admission_status: item.admission_status,
+            admission_reason: item.admission_reason,
+            consent_status: item.consent_status,
+            processing_status: item.processing_status,
+            billing_status: item.billing_status,
+            billing_hold_reason: item.billing_hold_reason,
+            recording_status: item.recording_status,
+            transcript_status: item.transcript_status,
+            media_state: item.media_state,
         }));
         
         return {
@@ -498,7 +621,7 @@ class DashboardApi {
     }
 
     async getCall(id: string): Promise<CallDetail> {
-        const response = await this.client.request<{
+        const response = await this.client.request<CallListItem & {
             id: string;
             talklee_call_id?: string;
             timestamp: string;
@@ -521,22 +644,37 @@ class DashboardApi {
             id: response.id,
             campaign_id: response.campaign_id || "",
             lead_id: response.lead_id || "",
-            phone_number: response.to_number,
+            phone_number: response.direction === "inbound" ? response.from_number || response.caller_ani || "Private caller" : response.to_number,
             status: response.status,
             outcome: response.outcome,
             duration_seconds: response.duration_seconds,
             transcript: response.transcript,
-            recording_url: response.recording_id ? this.getRecordingUrl(response.recording_id) : undefined,
             created_at: response.timestamp,
             summary: response.summary,
             recording_id: response.recording_id,
+            direction: response.direction === "inbound" ? "inbound" : "outbound",
+            from_number: response.from_number ?? response.caller_ani,
+            to_number: response.to_number ?? response.called_did,
+            caller_ani: response.caller_ani ?? response.from_number,
+            called_did: response.called_did ?? response.to_number,
+            inbound_campaign_id: response.inbound_campaign_id,
+            assignment_id: response.assignment_id,
+            route_id: response.route_id,
+            route_version: response.route_version,
+            config_version: response.config_version,
+            config_checksum: response.config_checksum,
+            admission_status: response.admission_status,
+            admission_reason: response.admission_reason,
+            consent_status: response.consent_status,
+            processing_status: response.processing_status,
+            billing_status: response.billing_status,
+            billing_hold_reason: response.billing_hold_reason,
+            recording_status: response.recording_status,
+            transcript_status: response.transcript_status,
+            media_state: response.media_state,
         };
     }
     
-    private getRecordingUrl(recordingId: string): string {
-        return `${apiBaseUrl()}/recordings/${recordingId}/stream`;
-    }
-
     async getCallTranscript(id: string, format: "json" | "text" = "json"): Promise<{
         format: string;
         turns?: Array<{ role: string; content: string; timestamp: string }>;

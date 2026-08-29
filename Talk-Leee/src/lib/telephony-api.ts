@@ -82,6 +82,9 @@ export interface SipTrunkRow {
     live_registration_status?: string | null;
     live_status_detail?: string | null;
     live_status_checked_at?: string | null;
+    runtime_ready: boolean;
+    runtime_status_code: string;
+    runtime_status_detail: string;
     created_at: string;
 }
 
@@ -270,6 +273,8 @@ export interface PoolTrunkItem {
     label: string;
     caller_id?: string | null;
     registration_status?: string | null;
+    runtime_ready: boolean;
+    runtime_status_detail: string;
 }
 
 export interface PoolAssignment {

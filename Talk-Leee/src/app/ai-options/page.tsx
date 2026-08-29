@@ -195,6 +195,7 @@ export default function AIOptionsPage() {
     }
     const [error, setError] = useState("");
     const [saveSuccess, setSaveSuccess] = useState(false);
+    const [saving, setSaving] = useState(false);
     const [latencyWarnings, setLatencyWarnings] = useState<string[]>([]);
 
     // Derived from the cached queries (no local mirror to drift out of sync).
@@ -216,6 +217,7 @@ export default function AIOptionsPage() {
     const [applyModal, setApplyModal] = useState<{ provider: string; voiceId: string; voiceLabel?: string } | null>(null);
 
     const voicePreviewAudioRef = useRef<HTMLAudioElement | null>(null);
+    const saveInFlightRef = useRef(false);
 
     // Seed the editable draft exactly ONCE — after providers + config load and
     // voices have settled (success or failure), so the picked voice/model are
@@ -250,13 +252,18 @@ export default function AIOptionsPage() {
             ? normalizedConfig.tts_provider
             : (uniqueVoices[0]?.provider ?? normalizedConfig.tts_provider);
 
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot draft seed once async providers/config/voices queries have all settled
         setConfig(normalizedConfig);
         setTtsProvider(initialProvider);
         seededRef.current = true;
     }, [providersQuery.data, configQuery.data, voicesQuery.data, voicesQuery.isLoading]);
 
     async function handleSaveConfig() {
-        if (!config) return;
+        if (!config || saveInFlightRef.current) return;
+        saveInFlightRef.current = true;
+        setSaving(true);
+        setError("");
+        setSaveSuccess(false);
         setLatencyWarnings([]);
         try {
             const normalizedConfig: AIProviderConfig = {
@@ -285,6 +292,9 @@ export default function AIOptionsPage() {
             if (latency_warnings.length > 0) setTimeout(() => setLatencyWarnings([]), 8000);
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to save configuration");
+        } finally {
+            saveInFlightRef.current = false;
+            setSaving(false);
         }
     }
 
@@ -443,6 +453,9 @@ export default function AIOptionsPage() {
     }
 
     const llmModelInfo = providers?.llm.models.find((m) => m.id === config?.llm_model);
+    const llmModelUnavailable = Boolean(
+        config && providers && !providers.llm.models.some((model) => model.id === config.llm_model),
+    );
     const sttEngines = providers?.stt.engines ?? [];
     const sttEngineInfo = sttEngines.find((e) => e.id === config?.stt_engine);
     const ttsModelInfo = ttsModelsForSelectedProvider.find((model) => model.id === config?.tts_model);
@@ -483,7 +496,7 @@ export default function AIOptionsPage() {
                                 </div>
                                 <div>
                                     <h3 className="text-base font-semibold text-foreground sm:text-lg">Pipeline Mode</h3>
-                                    <p className="text-xs text-muted-foreground sm:text-sm">Choose how this tenant's calls are processed</p>
+                                    <p className="text-xs text-muted-foreground sm:text-sm">Choose how this tenant&apos;s calls are processed</p>
                                 </div>
                             </div>
                             <Segmented
@@ -542,7 +555,7 @@ export default function AIOptionsPage() {
 
                                 <div className="mb-4 rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
                                     Realtime speaks with its own built-in voice and turn-taking — there is no separate STT/TTS
-                                    step. Campaign compliance and persona still apply, delivered through this model's instructions.
+                                    step. Campaign compliance and persona still apply, delivered through this model&apos;s instructions.
                                 </div>
 
                                 <label className="mb-1.5 block text-sm font-medium text-muted-foreground">Voice</label>
@@ -613,19 +626,35 @@ export default function AIOptionsPage() {
                         <SectionHeader icon={<Cpu className="h-5 w-5" />} title="LLM Model" subtitle={providers?.llm.providers?.join(" / ") || "Groq"} />
                         <div className="grid gap-5 lg:grid-cols-[1fr_auto]">
                             <div className="space-y-3">
-                                <label className="block text-sm font-medium text-muted-foreground">Model</label>
+                                <label htmlFor="ai-options-llm-model" className="block text-sm font-medium text-muted-foreground">Model</label>
                                 <select
+                                    id="ai-options-llm-model"
                                     value={config.llm_model}
                                     onChange={(e) => {
                                         const picked = providers?.llm.models.find((m) => m.id === e.target.value);
                                         setConfig({ ...config, llm_model: e.target.value, llm_provider: (picked?.provider as typeof config.llm_provider) || config.llm_provider });
                                     }}
+                                    aria-invalid={llmModelUnavailable}
+                                    aria-describedby={llmModelUnavailable ? "ai-options-llm-model-warning" : undefined}
                                     className={selectCls}
                                 >
+                                    {llmModelUnavailable && (
+                                        <option value={config.llm_model} disabled>
+                                            [{config.llm_provider}] {config.llm_model} (currently unavailable)
+                                        </option>
+                                    )}
                                     {providers?.llm.models.map((model) => (
                                         <option key={model.id} value={model.id}>{model.provider ? `[${model.provider}] ${model.name}` : model.name}</option>
                                     ))}
                                 </select>
+                                {llmModelUnavailable && (
+                                    <div id="ai-options-llm-model-warning" role="status" className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+                                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                                        <p>
+                                            The saved model <span className="break-all font-semibold">{config.llm_model}</span> is not in the current provider catalog. Its value has been preserved; choose an available model to replace it.
+                                        </p>
+                                    </div>
+                                )}
                                 {llmModelInfo && (
                                     <div className="rounded-lg border border-border bg-muted/40 p-3">
                                         <p className="text-sm text-foreground">{llmModelInfo.description}</p>
@@ -633,7 +662,7 @@ export default function AIOptionsPage() {
                                     </div>
                                 )}
                             </div>
-                            <div className="flex items-center justify-center gap-4 rounded-xl border border-border bg-muted/30 px-4 py-2">
+                            <div className="grid w-full grid-cols-2 place-items-center gap-2 rounded-xl border border-border bg-muted/30 px-2 py-2 sm:w-[274px] sm:justify-self-center sm:gap-4 sm:px-4">
                                 <RadialKnob
                                     label="Temp" value={config.llm_temperature}
                                     min={0} max={2} step={0.1}
@@ -697,8 +726,9 @@ export default function AIOptionsPage() {
                     <Card delay={0.08} className="xl:col-span-5">
                         <SectionHeader icon={<Mic className="h-5 w-5" />} title="Speech-to-Text" subtitle="The engine that hears the caller" />
                         <div className="space-y-3">
-                            <label className="block text-sm font-medium text-muted-foreground">Engine</label>
+                            <label htmlFor="ai-options-stt-engine" className="block text-sm font-medium text-muted-foreground">Engine</label>
                             <select
+                                id="ai-options-stt-engine"
                                 value={config.stt_engine}
                                 onChange={(e) => setConfig({ ...config, stt_engine: e.target.value })}
                                 className={selectCls}
@@ -931,8 +961,15 @@ export default function AIOptionsPage() {
 
                     {/* Save */}
                     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="sticky bottom-4 z-10 flex justify-end">
-                        <button onClick={handleSaveConfig} className="flex items-center gap-2 rounded-xl bg-emerald-500 px-8 py-3 font-semibold text-white shadow-lg shadow-emerald-500/30 transition hover:scale-[1.02] hover:bg-emerald-600 active:scale-[0.98]">
-                            <Save className="h-5 w-5" /><span>Save Configuration</span>
+                        <button
+                            type="button"
+                            onClick={handleSaveConfig}
+                            disabled={saving}
+                            aria-busy={saving}
+                            className="flex items-center gap-2 rounded-xl bg-emerald-500 px-8 py-3 font-semibold text-white shadow-lg shadow-emerald-500/30 transition hover:scale-[1.02] hover:bg-emerald-600 active:scale-[0.98] disabled:cursor-wait disabled:opacity-70 disabled:hover:scale-100 disabled:hover:bg-emerald-500"
+                        >
+                            {saving ? <RefreshCw className="h-5 w-5 animate-spin" aria-hidden /> : <Save className="h-5 w-5" aria-hidden />}
+                            <span>{saving ? "Saving…" : "Save Configuration"}</span>
                         </button>
                     </motion.div>
                 </div>

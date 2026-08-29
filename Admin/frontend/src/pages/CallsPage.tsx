@@ -55,10 +55,12 @@ export function CallsPage() {
                     </div>
 
                     {/* Tab Navigation */}
-                    <div className="page-tabs">
+                    <div className="page-tabs" role="tablist" aria-label="Call administration sections">
                         <button
                             className={`page-tab ${activeTab === 'live' ? 'active' : ''}`}
                             onClick={() => setActiveTab('live')}
+                            role="tab"
+                            aria-selected={activeTab === 'live'}
                         >
                             <Radio size={16} />
                             Live Calls
@@ -66,6 +68,8 @@ export function CallsPage() {
                         <button
                             className={`page-tab ${activeTab === 'history' ? 'active' : ''}`}
                             onClick={() => setActiveTab('history')}
+                            role="tab"
+                            aria-selected={activeTab === 'history'}
                         >
                             <History size={16} />
                             History
@@ -73,6 +77,8 @@ export function CallsPage() {
                         <button
                             className={`page-tab ${activeTab === 'recordings' ? 'active' : ''}`}
                             onClick={() => setActiveTab('recordings')}
+                            role="tab"
+                            aria-selected={activeTab === 'recordings'}
                         >
                             <AudioLines size={16} />
                             Recordings
@@ -80,6 +86,8 @@ export function CallsPage() {
                         <button
                             className={`page-tab ${activeTab === 'feedback' ? 'active' : ''}`}
                             onClick={() => setActiveTab('feedback')}
+                            role="tab"
+                            aria-selected={activeTab === 'feedback'}
                         >
                             <Mic2 size={16} />
                             Feedback

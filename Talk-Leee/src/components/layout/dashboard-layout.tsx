@@ -45,6 +45,10 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
     // not on every background re-auth (the "refresh-from-fresh" fix).
     const [hasAuthedOnce, setHasAuthedOnce] = useState(false);
     useEffect(() => {
+        // This is a one-way latch across renders (once true, stays true for
+        // the life of the component) — it can't be computed from the
+        // current render's inputs alone, it depends on auth history.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- one-way latch remembering past auth state, not derivable from current render
         if (user) setHasAuthedOnce(true);
     }, [user]);
 
@@ -68,7 +72,10 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
         try {
             router.replace(`/auth/login?next=${encodeURIComponent(next)}`);
         } catch {
-            window.location.href = `/auth/login?next=${encodeURIComponent(next)}`;
+            // router.replace threw (e.g. router not ready yet) — fall back
+            // to a hard navigation. Making the destination explicitly
+            // absolute satisfies next/next/no-location-assign-relative-destination.
+            window.location.href = new URL(`/auth/login?next=${encodeURIComponent(next)}`, window.location.origin).toString();
         }
     }, [authLoading, pathname, requireAuth, router, user]);
 

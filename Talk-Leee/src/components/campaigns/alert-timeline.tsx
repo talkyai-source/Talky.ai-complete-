@@ -74,7 +74,7 @@ export function AlertTimeline({ campaigns }: { campaigns: Campaign[] }) {
     const alertsQuery = useAlerts({ severity: sev, type, status });
     const ackMutation = useAckAlert();
     const resolveMutation = useResolveAlert();
-    const remoteAlerts: AlertItem[] = alertsQuery.data ?? [];
+    const remoteAlerts: AlertItem[] = useMemo(() => alertsQuery.data ?? [], [alertsQuery.data]);
 
     // Snooze is still local-only (no backend column for it). Track snooze
     // overrides keyed by alert id; merge into the rendered list.

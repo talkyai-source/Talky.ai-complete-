@@ -7,6 +7,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Check, Loader2, Star } from "lucide-react";
 import { useBillingPlan, useBillingPlans } from "@/lib/billing-api";
+import { ErrorState } from "@/components/states/page-states";
+import { formatBillingError } from "@/components/billing/billing-overview";
 import { api } from "@/lib/api";
 
 type PlanRow = {
@@ -39,6 +41,11 @@ export default function PlansPage() {
   const currentPlanId = subscription?.plan_id ?? "";
 
   const loading = plansQuery.isLoading || subQuery.isLoading;
+  // A failed catalogue fetch used to arrive as `[]` and render "No plans
+  // available yet." — which tells a customer we sell nothing. The
+  // subscription is in the same gate because without it every card would be
+  // labelled "Upgrade", including the one they are already paying for.
+  const failed = plansQuery.isError || subQuery.isError;
 
   async function startCheckout(planId: string) {
     setCheckoutError(null);
@@ -63,7 +70,10 @@ export default function PlansPage() {
         return;
       }
       if (!data.checkout_url) throw new Error("No checkout URL returned");
-      window.location.href = data.checkout_url;
+      // assign() rather than `location.href = …`: writing through the global
+      // is a mutation the React Compiler rejects, and this is an external
+      // Stripe Checkout URL, so it must be a full document navigation.
+      window.location.assign(data.checkout_url);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Failed to start checkout";
       setCheckoutError(msg);
@@ -106,6 +116,22 @@ export default function PlansPage() {
           <div className="flex items-center justify-center py-16 text-muted-foreground">
             <Loader2 className="mr-2 h-5 w-5 animate-spin" aria-hidden /> Loading plans…
           </div>
+        ) : failed ? (
+          <ErrorState
+            title="Plans did not load"
+            message={`${formatBillingError(plansQuery.isError ? plansQuery.error : subQuery.error)} Your current plan is unchanged.`}
+            troubleshooting={[
+              "Retry below, or reload the page.",
+              "If you have just signed in on another tab, sign in again here.",
+              "Nothing has been charged — no plan change was started.",
+            ]}
+            onRetry={() => {
+              void plansQuery.refetch();
+              void subQuery.refetch();
+            }}
+            actionHref="/billing"
+            actionLabel="Back to Billing"
+          />
         ) : plans.length === 0 ? (
           <Card>
             <CardContent className="py-10 text-center text-sm text-muted-foreground">

@@ -12,6 +12,11 @@ interface ConfirmationModalProps {
     onConfirm: () => void;
     onCancel: () => void;
     loading?: boolean;
+    reason?: string;
+    onReasonChange?: (reason: string) => void;
+    reasonLabel?: string;
+    reasonPlaceholder?: string;
+    reasonMinLength?: number;
 }
 
 export function ConfirmationModal({
@@ -23,10 +28,20 @@ export function ConfirmationModal({
     variant = 'danger',
     onConfirm,
     onCancel,
-    loading = false
+    loading = false,
+    reason = '',
+    onReasonChange,
+    reasonLabel = 'Reason for this action',
+    reasonPlaceholder = 'Explain why this irreversible action is required',
+    reasonMinLength = 8,
 }: ConfirmationModalProps) {
     const modalRef = useRef<HTMLDivElement>(null);
     const confirmButtonRef = useRef<HTMLButtonElement>(null);
+    const reasonInputRef = useRef<HTMLTextAreaElement>(null);
+    const requiresReason = Boolean(onReasonChange);
+    const normalizedReason = reason.trim();
+    const reasonIsValid = !requiresReason
+        || (normalizedReason.length >= reasonMinLength && /\p{L}/u.test(normalizedReason));
 
     // Handle Escape key
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -39,8 +54,10 @@ export function ConfirmationModal({
     useEffect(() => {
         if (isOpen) {
             document.addEventListener('keydown', handleKeyDown);
-            // Focus the confirm button when modal opens
-            confirmButtonRef.current?.focus();
+            // Irreversible actions require a reason, so start at the evidence
+            // field rather than putting a destructive button under focus.
+            if (requiresReason) reasonInputRef.current?.focus();
+            else confirmButtonRef.current?.focus();
             // Prevent body scroll
             document.body.style.overflow = 'hidden';
         }
@@ -49,7 +66,7 @@ export function ConfirmationModal({
             document.removeEventListener('keydown', handleKeyDown);
             document.body.style.overflow = '';
         };
-    }, [isOpen, handleKeyDown]);
+    }, [isOpen, handleKeyDown, requiresReason]);
 
     // Handle backdrop click
     const handleBackdropClick = (e: React.MouseEvent) => {
@@ -101,6 +118,28 @@ export function ConfirmationModal({
 
                 <div className="modal-body">
                     <p className="modal-message">{message}</p>
+                    {onReasonChange && (
+                        <label className="modal-reason-field">
+                            <span>{reasonLabel}</span>
+                            <textarea
+                                ref={reasonInputRef}
+                                value={reason}
+                                onChange={(event) => onReasonChange(event.target.value)}
+                                placeholder={reasonPlaceholder}
+                                minLength={reasonMinLength}
+                                maxLength={1000}
+                                rows={3}
+                                required
+                                disabled={loading}
+                                aria-describedby="modal-reason-help"
+                            />
+                            <small id="modal-reason-help">
+                                {reasonIsValid
+                                    ? 'This reason will be retained in the deletion audit.'
+                                    : `Enter a meaningful reason of at least ${reasonMinLength} characters.`}
+                            </small>
+                        </label>
+                    )}
                 </div>
 
                 <div className="modal-footer">
@@ -115,7 +154,7 @@ export function ConfirmationModal({
                         ref={confirmButtonRef}
                         className={`btn btn-${variant}`}
                         onClick={onConfirm}
-                        disabled={loading}
+                        disabled={loading || !reasonIsValid}
                     >
                         {loading ? (
                             <>

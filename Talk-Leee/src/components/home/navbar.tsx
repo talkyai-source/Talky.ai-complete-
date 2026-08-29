@@ -150,10 +150,16 @@ export function Navbar() {
   }, []);
 
   useEffect(() => {
+    // Close the mobile menu whenever route navigation completes — this
+    // reacts to an external event (pathname change), not to a render input.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- closes mobile menu on navigation, not derivable during render
     closeMobileMenu();
   }, [closeMobileMenu, pathname]);
 
   useEffect(() => {
+    // Clear any suppressed dropdown once the route actually changes, so a
+    // stale suppression doesn't linger on the new page.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clears dropdown suppression on navigation, not derivable during render
     setSuppressedDropdownLabel(null);
   }, [pathname]);
 

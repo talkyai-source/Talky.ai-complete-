@@ -16,7 +16,7 @@
  * genuinely new qualifications after that point raise a toast.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useEventStream } from "@/lib/event-stream-api";
 import { useNotificationsActions } from "@/lib/notifications-client";
 
@@ -32,21 +32,35 @@ export function QualifiedLeadAlerts() {
     const { create } = useNotificationsActions();
     const seenRef = useRef<Set<string>>(new Set());
     const seededRef = useRef(false);
+    // `hydrated` gates the data effect below. It has to be state, not a ref:
+    // this component's only job is de-duping, and a ref read/written during
+    // render is not reliable under React Compiler memoization — if the render
+    // is skipped, the hydration never runs and every already-seen lead toasts
+    // again. State + an effect makes the ordering explicit: hydrate first,
+    // flip the flag, and only then let the data effect look at `seenRef`.
+    const [hydrated, setHydrated] = useState(false);
 
     // Hydrate the seen-set once, before the first data effect runs.
-    if (!seededRef.current && typeof window !== "undefined") {
+    useEffect(() => {
         try {
             const raw = window.localStorage.getItem(SEEN_KEY);
             if (raw) {
                 const ids = JSON.parse(raw) as string[];
-                if (Array.isArray(ids)) ids.forEach((id) => seenRef.current.add(id));
+                if (Array.isArray(ids)) for (const id of ids) seenRef.current.add(id);
             }
         } catch {
             /* ignore */
         }
-    }
+        // One-shot localStorage hydration: it cannot run during render (no
+        // `window` on the server) and this flag is what orders it before the
+        // data effect, so the cascading-render the rule warns about is the
+        // entire point here — it happens once, on mount, and renders nothing.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot mount hydration that gates the effect below
+        setHydrated(true);
+    }, []);
 
     useEffect(() => {
+        if (!hydrated) return;
         if (!data || data.length === 0) return;
 
         const leads = data.filter(
@@ -96,7 +110,7 @@ export function QualifiedLeadAlerts() {
                 data: { kind: "qualified_lead", ...(e.metadata ?? {}) },
             });
         }
-    }, [data, create]);
+    }, [data, create, hydrated]);
 
     return null;
 }

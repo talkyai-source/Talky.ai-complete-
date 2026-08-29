@@ -1,9 +1,7 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
 import { Bot, Cpu, Mic, ShieldCheck } from "lucide-react";
 import { motion } from "framer-motion";
-import Link from "next/link";
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 

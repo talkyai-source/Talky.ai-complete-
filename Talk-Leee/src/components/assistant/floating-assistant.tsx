@@ -26,6 +26,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Bot, History, Loader2, MessageCircle, Mic, Plus, Send, X } from "lucide-react";
 import { apiBaseUrl } from "@/lib/env";
 import { useAccessToken } from "@/lib/auth-hooks";
@@ -105,6 +106,7 @@ function greetingMessage(): ChatMessage {
 // notification bell sits at top-right, so bottom-right is otherwise
 // clear of UI chrome.
 export function FloatingAssistant() {
+    const router = useRouter();
     const [open, setOpen] = useState(false);
     // Voice mode: tapping the mic swaps the text chat body for the live
     // voice-agent transcript (our STT/TTS + the same tool agent). The text WS
@@ -122,7 +124,16 @@ export function FloatingAssistant() {
     const [conversationEpoch, setConversationEpoch] = useState(0);
     const [input, setInput] = useState("");
     const wsRef = useRef<WebSocket | null>(null);
+    // The ref is authoritative for the async paths (connect, socket handlers);
+    // `conversationId` mirrors it for the two child components that need the
+    // value at RENDER time. Reading the ref during render is not safe under
+    // the React Compiler, so every write below updates both.
     const conversationIdRef = useRef<string | null>(null);
+    const [conversationId, setConversationId] = useState<string | null>(null);
+    const setConversationIdEverywhere = useCallback((id: string | null) => {
+        conversationIdRef.current = id;
+        setConversationId(id);
+    }, []);
     const reconnectAttemptsRef = useRef(0);
     const reconnectTimerRef = useRef<number | null>(null);
     const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -152,26 +163,22 @@ export function FloatingAssistant() {
     //     on the WS handshake → backend uses cookie, no auth frame
     //     needed.
     // Token rotation still triggers a reconnect because accessToken is
-    // in the wsUrl useMemo deps — the connect callback identity
-    // changes and the open/close effect tears down + re-connects with
-    // the fresh credential set.
+    // in the `connect` callback's deps — its identity changes and the
+    // open/close effect tears down + re-connects with the fresh
+    // credential set.
     const accessToken = useAccessToken();
     const { user } = useAuth();
+    // Base socket URL only — the `conversation_id` query param is appended in
+    // connect() from the ref. Reading a ref here (during render) is unsafe
+    // under the React Compiler, which may skip the render entirely; and the
+    // reconnect chain never actually depended on this string changing:
+    // `connect` lists accessToken and conversationEpoch itself, so a token
+    // rotation or a thread switch changes ITS identity and the lifecycle
+    // effect re-connects, picking up whatever the ref holds at that moment.
     const wsUrl = useMemo(() => {
-        // accessToken is in the deps below (not interpolated into the
-        // URL) so a token rotation invalidates the memo identity and
-        // triggers a reconnect with the new credential set.
-        // conversationEpoch does the same when the user switches threads
-        // (New chat / History open) so the socket re-binds to the new
-        // conversation_id read from the ref.
-        void accessToken;
-        void conversationEpoch;
         if (!user) return null;
-        const params = new URLSearchParams();
-        if (conversationIdRef.current) params.set("conversation_id", conversationIdRef.current);
-        const qs = params.toString();
-        return `${resolveWsBase()}/assistant/chat${qs ? `?${qs}` : ""}`;
-    }, [user, accessToken, conversationEpoch]);
+        return `${resolveWsBase()}/assistant/chat`;
+    }, [user]);
 
     const isAuthed = wsUrl !== null;
 
@@ -181,20 +188,21 @@ export function FloatingAssistant() {
     // the current URL as `next` so we land back exactly where the user
     // was chatting (or "/" when called from the homepage).
     // Start a fresh thread: clear the id BEFORE bumping the epoch so the
-    // re-memoized wsUrl omits conversation_id and the backend opens a new
-    // conversation row on first persist.
+    // reconnect that the epoch triggers builds a URL without a
+    // conversation_id, and the backend opens a new conversation row on
+    // first persist.
     const startNewConversation = useCallback(() => {
-        conversationIdRef.current = null;
+        setConversationIdEverywhere(null);
         setMessages([greetingMessage()]);
         setShowHistory(false);
         setVoiceMode(false);
         setConversationEpoch((e) => e + 1);
-    }, []);
+    }, [setConversationIdEverywhere]);
 
     // Resume a stored thread: rehydrate the transcript locally and re-bind
     // the socket so the backend loads the same history for the model.
     const openConversation = useCallback((id: string, stored: StoredMessage[]) => {
-        conversationIdRef.current = id;
+        setConversationIdEverywhere(id);
         const mapped: ChatMessage[] = stored
             .filter(
                 (m) =>
@@ -212,7 +220,7 @@ export function FloatingAssistant() {
         setShowHistory(false);
         setVoiceMode(false);
         setConversationEpoch((e) => e + 1);
-    }, []);
+    }, [setConversationIdEverywhere]);
 
     const goToSignIn = useCallback(() => {
         if (typeof window === "undefined") return;
@@ -226,8 +234,12 @@ export function FloatingAssistant() {
         ) {
             params.set("next", currentPath || "/");
         }
-        window.location.href = `/auth/login?${params.toString()}`;
-    }, []);
+        // Client-side navigation to an internal route: the assistant panel is
+        // just a widget, so there is no session state to tear down here — and
+        // a hard `location.href` assignment to a relative path is exactly what
+        // next/no-location-assign-relative-destination warns about.
+        router.push(`/auth/login?${params.toString()}`);
+    }, [router]);
 
     // Phase 6 universal-auth-state: closeSocket is the planned-teardown
     // path (panel collapsed, unmount, token rotation, logout). Strip the
@@ -267,7 +279,16 @@ export function FloatingAssistant() {
         }
     }, []);
 
-    const connect = useCallback(async () => {
+    // Named function expression so the reconnect timer below can schedule
+    // *itself* without reading the outer `connect` const before it is
+    // initialised (which the compiler rejects, and which would otherwise need
+    // a second ref just to point back at this callback).
+    const connect = useCallback(async function connectImpl(): Promise<void> {
+        // Referenced only to keep it in the dependency list: switching threads
+        // (New chat / opening one from History) bumps the epoch, which changes
+        // this callback's identity and makes the lifecycle effect below
+        // re-connect, re-reading conversationIdRef as it builds the URL.
+        void conversationEpoch;
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
         if (!wsUrl) {
             // No token — the panel renders an inline "Sign in" CTA, so we
@@ -293,9 +314,15 @@ export function FloatingAssistant() {
             setStatus("idle");
             return;
         }
+        // Bind to the current thread at CONNECT time (the ref is authoritative
+        // and always at least as fresh as anything render could have seen).
+        const params = new URLSearchParams();
+        if (conversationIdRef.current) params.set("conversation_id", conversationIdRef.current);
+        const qs = params.toString();
+        const socketUrl = `${wsUrl}${qs ? `?${qs}` : ""}`;
         let ws: WebSocket;
         try {
-            ws = new WebSocket(wsUrl);
+            ws = new WebSocket(socketUrl);
         } catch {
             setStatus("error");
             return;
@@ -364,14 +391,14 @@ export function FloatingAssistant() {
             switch (payload.type) {
                 case "connected":
                     if (payload.conversation_id && payload.conversation_id !== "new") {
-                        conversationIdRef.current = payload.conversation_id;
+                        setConversationIdEverywhere(payload.conversation_id);
                     }
                     break;
                 case "conversation_created":
                     // Backend persisted a new conversation row — capture its id
                     // so a reconnect resumes this same thread.
                     if (typeof payload.conversation_id === "string") {
-                        conversationIdRef.current = payload.conversation_id;
+                        setConversationIdEverywhere(payload.conversation_id);
                     }
                     break;
                 case "assistant_typing":
@@ -511,16 +538,16 @@ export function FloatingAssistant() {
                 reconnectAttemptsRef.current = attempt;
                 setStatus("connecting");
                 const delay = Math.min(15_000, 500 * 2 ** attempt);
-                reconnectTimerRef.current = window.setTimeout(connect, delay);
+                reconnectTimerRef.current = window.setTimeout(() => { void connectImpl(); }, delay);
             } else {
                 setStatus("closed");
             }
         };
-    }, [accessToken, open, wsUrl]);
+    }, [accessToken, open, wsUrl, conversationEpoch, setConversationIdEverywhere]);
 
     // Lifecycle: connect when expanded, close when collapsed, AND
     // reconnect when accessToken rotates mid-session. Token rotation
-    // flows through wsUrl → connect (deps include wsUrl) → this effect
+    // flows through connect's deps → this effect
     // re-runs. The cleanup closes the prior socket cleanly (Phase 6
     // detaches its event handlers first, so the delayed onclose can't
     // misfire); the body opens a new socket with the rotated token.
@@ -744,15 +771,13 @@ export function FloatingAssistant() {
 
                     {voiceMode ? (
                         <AssistantVoiceMode
-                            conversationId={conversationIdRef.current}
+                            conversationId={conversationId}
                             onClose={() => setVoiceMode(false)}
-                            onConversationId={(id) => {
-                                conversationIdRef.current = id;
-                            }}
+                            onConversationId={setConversationIdEverywhere}
                         />
                     ) : showHistory ? (
                         <ConversationHistory
-                            activeId={conversationIdRef.current}
+                            activeId={conversationId}
                             onOpen={openConversation}
                         />
                     ) : (

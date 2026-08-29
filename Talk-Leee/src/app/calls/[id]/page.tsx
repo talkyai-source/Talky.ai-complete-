@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState, useRef, useCallback } from "react";
+import { useMemo, useState, useRef, useCallback, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Phone, Clock, FileText, Play, Download, Pause, Loader2 } from "lucide-react";
+import { ArrowLeft, Phone, PhoneIncoming, PhoneOutgoing, Clock, FileText, Play, Download, Pause, Loader2, Route, ShieldCheck } from "lucide-react";
 import { motion } from "framer-motion";
 import { useCall, useCallTranscript } from "@/lib/api-hooks";
 import { extendedApi } from "@/lib/extended-api";
@@ -12,6 +13,8 @@ import { statusPillClass } from "@/lib/status-colors";
 import { VoiceFeedbackRecorder } from "@/components/calls/voice-feedback-recorder";
 import { ConversationReviewPanel } from "@/components/calls/conversation-review-panel";
 import { LeadDetailsPanel } from "@/components/calls/lead-details-panel";
+import { getRecordingCapabilities } from "@/lib/media-permissions";
+import { useEffectivePermissions } from "@/lib/queries/inbound-queries";
 
 // Shared util so call detail agrees with call history + contacts on green/red.
 const getStatusStyle = statusPillClass;
@@ -41,38 +44,94 @@ export default function CallDetailPage() {
     const callId = params.id as string;
 
     const callQuery = useCall(callId);
+    const permissions = useEffectivePermissions();
     const transcriptQuery = useCallTranscript(callId, "json");
     const call = callQuery.data ?? null;
+    const recordingId = call?.recording_id;
+    // This must be the dedicated inbound-config identifier returned by the
+    // server. Never fall back to the base AI campaign id: they address
+    // different resources and would produce a misleading detail/history link.
+    const inboundCampaignId = typeof call?.inbound_campaign_id === "string"
+        ? call.inbound_campaign_id.trim()
+        : "";
     const transcript = useMemo(() => (transcriptQuery.data?.turns ?? []) as TranscriptTurn[], [transcriptQuery.data?.turns]);
     const error = callQuery.isError ? (callQuery.error instanceof Error ? callQuery.error.message : "Failed to load call details") : "";
 
-    const [recordingBlobUrl, setRecordingBlobUrl] = useState<string | null>(null);
     const [recordingLoading, setRecordingLoading] = useState(false);
+    const [recordingDownloading, setRecordingDownloading] = useState(false);
     const [recordingError, setRecordingError] = useState<string | null>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const audioRef = useRef<HTMLAudioElement | null>(null);
+    const mountedRef = useRef(true);
+    const recordingBlobUrlRef = useRef<string | null>(null);
+    const playbackAbortRef = useRef<AbortController | null>(null);
+    const downloadAbortRef = useRef<AbortController | null>(null);
+    const permissionCapabilities = getRecordingCapabilities(permissions.isSuccess ? permissions.data.permissions : undefined);
+    const permissionsSettled = permissions.isSuccess || permissions.isError;
+    const canPlayMedia = permissionsSettled && permissionCapabilities.canRead;
+    const canDownloadMedia = permissionsSettled && permissionCapabilities.canDownload;
+    const canPlayMediaRef = useRef(canPlayMedia);
+
+    useEffect(() => {
+        canPlayMediaRef.current = canPlayMedia;
+    }, [canPlayMedia]);
+
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+            playbackAbortRef.current?.abort();
+            downloadAbortRef.current?.abort();
+            audioRef.current?.pause();
+            if (recordingBlobUrlRef.current) URL.revokeObjectURL(recordingBlobUrlRef.current);
+            recordingBlobUrlRef.current = null;
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!canPlayMedia) {
+            playbackAbortRef.current?.abort();
+        }
+        if (!canPlayMedia && recordingBlobUrlRef.current) {
+            audioRef.current?.pause();
+            URL.revokeObjectURL(recordingBlobUrlRef.current);
+            recordingBlobUrlRef.current = null;
+            audioRef.current = null;
+        }
+    }, [canPlayMedia]);
 
     const loadRecording = useCallback(async (recordingId: string): Promise<string> => {
-        if (recordingBlobUrl) return recordingBlobUrl;
+        if (recordingBlobUrlRef.current) return recordingBlobUrlRef.current;
         setRecordingLoading(true);
         setRecordingError(null);
+        const controller = new AbortController();
+        playbackAbortRef.current?.abort();
+        playbackAbortRef.current = controller;
         try {
-            const url = await extendedApi.fetchRecordingBlob(recordingId);
-            setRecordingBlobUrl(url);
+            const blob = await extendedApi.fetchRecordingPlaybackBlob(recordingId, controller.signal);
+            const url = URL.createObjectURL(blob);
+            if (!mountedRef.current || controller.signal.aborted || !canPlayMediaRef.current) {
+                URL.revokeObjectURL(url);
+                throw new DOMException("Request aborted", "AbortError");
+            }
+            recordingBlobUrlRef.current = url;
             return url;
         } catch (e) {
-            const msg = e instanceof Error ? e.message : "Failed to load recording";
-            setRecordingError(msg);
+            if (mountedRef.current && !controller.signal.aborted) {
+                const msg = e instanceof Error ? e.message : "Failed to load recording";
+                setRecordingError(msg);
+            }
             throw e;
         } finally {
-            setRecordingLoading(false);
+            if (playbackAbortRef.current === controller) playbackAbortRef.current = null;
+            if (mountedRef.current) setRecordingLoading(false);
         }
-    }, [recordingBlobUrl]);
+    }, []);
 
     const handlePlay = useCallback(async () => {
-        if (!call?.recording_id) return;
+        if (!recordingId || !canPlayMedia) return;
         try {
-            const url = await loadRecording(call.recording_id);
+            const url = await loadRecording(recordingId);
             if (!audioRef.current) {
                 audioRef.current = new Audio(url);
                 audioRef.current.onended = () => setIsPlaying(false);
@@ -88,20 +147,34 @@ export default function CallDetailPage() {
         } catch {
             // error already set in state
         }
-    }, [call?.recording_id, isPlaying, loadRecording]);
+    }, [canPlayMedia, isPlaying, loadRecording, recordingId]);
 
     const handleDownload = useCallback(async () => {
-        if (!call?.recording_id) return;
+        if (!recordingId || !canDownloadMedia || recordingDownloading) return;
+        const controller = new AbortController();
+        downloadAbortRef.current?.abort();
+        downloadAbortRef.current = controller;
+        setRecordingDownloading(true);
+        setRecordingError(null);
+        let url: string | null = null;
         try {
-            const url = await loadRecording(call.recording_id);
+            const blob = await extendedApi.downloadRecordingBlob(recordingId, controller.signal);
+            if (!mountedRef.current || controller.signal.aborted) return;
+            url = URL.createObjectURL(blob);
             const a = document.createElement("a");
             a.href = url;
-            a.download = `recording-${call.recording_id}.wav`;
+            a.download = `recording-${recordingId}.wav`;
             a.click();
-        } catch {
-            // error already set in state
+        } catch (error) {
+            if (!controller.signal.aborted && mountedRef.current) {
+                setRecordingError(error instanceof Error ? error.message : "Failed to download recording");
+            }
+        } finally {
+            if (url) URL.revokeObjectURL(url);
+            if (downloadAbortRef.current === controller) downloadAbortRef.current = null;
+            if (mountedRef.current) setRecordingDownloading(false);
         }
-    }, [call?.recording_id, loadRecording]);
+    }, [canDownloadMedia, recordingDownloading, recordingId]);
 
     return (
         <DashboardLayout title="Call Details" description="Transcript, recording, and metadata for this call.">
@@ -135,9 +208,7 @@ export default function CallDetailPage() {
                         >
                             <div className="flex items-center justify-between gap-3 mb-4">
                                 <h2 className="text-sm font-semibold text-foreground">Call Details</h2>
-                                <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${getStatusStyle(call.status)}`}>
-                                    {call.status}
-                                </span>
+                                <div className="flex flex-wrap justify-end gap-2"><span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold ${call.direction === "inbound" ? "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300" : "border-border bg-muted text-muted-foreground"}`}>{call.direction === "inbound" ? <PhoneIncoming className="h-3.5 w-3.5" aria-hidden /> : <PhoneOutgoing className="h-3.5 w-3.5" aria-hidden />}{call.direction === "inbound" ? "Inbound" : "Outbound"}</span><span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${getStatusStyle(call.status)}`}>{call.status}</span></div>
                             </div>
 
                             <div className="space-y-3">
@@ -146,10 +217,17 @@ export default function CallDetailPage() {
                                         <Phone className="h-5 w-5" />
                                     </div>
                                     <div className="min-w-0 flex-1">
-                                        <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Phone Number</div>
+                                        <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{call.direction === "inbound" ? "Caller ANI" : "Phone Number"}</div>
                                         <div className="mt-0.5 truncate text-sm font-semibold text-foreground">{call.phone_number}</div>
                                     </div>
                                 </div>
+
+                                {call.direction === "inbound" ? (
+                                    <div className="group flex items-center gap-3 rounded-2xl border border-border bg-muted/60 p-3 shadow-sm">
+                                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-background/60 text-foreground"><PhoneIncoming className="h-5 w-5" /></div>
+                                        <div className="min-w-0 flex-1"><div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Called DID</div><div className="mt-0.5 truncate text-sm font-semibold text-foreground">{call.to_number || "Unavailable"}</div></div>
+                                    </div>
+                                ) : null}
 
                                 <div className="group flex items-center gap-3 rounded-2xl border border-border bg-muted/60 p-3 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:bg-background hover:shadow-md">
                                     <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-background/60 text-foreground transition-colors group-hover:bg-background">
@@ -180,6 +258,29 @@ export default function CallDetailPage() {
                                 </div>
                             </div>
                         </motion.div>
+
+                        {call.direction === "inbound" ? (
+                            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} className="content-card">
+                                <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-foreground"><Route className="h-4 w-4 text-primary" aria-hidden />Inbound route snapshot</h2>
+                                <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                                    <Metadata label="Inbound campaign" value={inboundCampaignId || undefined} />
+                                    <Metadata label="Assignment" value={call.assignment_id} />
+                                    <Metadata label="Route" value={call.route_id} />
+                                    <Metadata label="Route version" value={call.route_version} />
+                                    <Metadata label="Config version" value={call.config_version} />
+                                    <Metadata label="Config checksum" value={call.config_checksum ? `${call.config_checksum.slice(0, 12)}…` : undefined} />
+                                </dl>
+                                {inboundCampaignId ? <Button asChild variant="outline" size="sm" className="mt-4"><Link href={`/inbound-campaigns/${encodeURIComponent(inboundCampaignId)}`}>Open inbound campaign</Link></Button> : null}
+                            </motion.div>
+                        ) : null}
+
+                        {call.direction === "inbound" && (call.admission_status || call.consent_status || call.processing_status || call.media_state || call.recording_status || call.transcript_status) ? (
+                            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }} className="content-card">
+                                <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-foreground"><ShieldCheck className="h-4 w-4 text-primary" aria-hidden />Consent and media state</h2>
+                                <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1"><Metadata label="Admission" value={call.admission_status} /><Metadata label="Consent" value={call.consent_status} /><Metadata label="Processing" value={call.processing_status} /><Metadata label="Media" value={call.media_state} /><Metadata label="Recording" value={call.recording_status} /><Metadata label="Transcript" value={call.transcript_status} /></dl>
+                                {call.admission_reason ? <p className="mt-3 rounded-lg border border-amber-500/25 bg-amber-500/5 p-2 text-xs text-muted-foreground">{call.admission_reason}</p> : null}
+                            </motion.div>
+                        ) : null}
 
                         {call.summary && (
                             <motion.div
@@ -214,7 +315,7 @@ export default function CallDetailPage() {
                                             variant="outline"
                                             className="flex-1 hover:scale-[1.02] hover:shadow-md active:scale-[0.99]"
                                             onClick={handlePlay}
-                                            disabled={recordingLoading}
+                                            disabled={recordingLoading || !canPlayMedia}
                                         >
                                             {recordingLoading ? (
                                                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -225,20 +326,21 @@ export default function CallDetailPage() {
                                             )}
                                             {isPlaying ? "Pause" : "Play"}
                                         </Button>
-                                        <Button
+                                        {canDownloadMedia ? <Button
                                             variant="outline"
                                             className="flex-1 hover:scale-[1.02] hover:shadow-md active:scale-[0.99]"
                                             onClick={handleDownload}
-                                            disabled={recordingLoading}
+                                            disabled={recordingDownloading}
                                         >
-                                            {recordingLoading ? (
+                                            {recordingDownloading ? (
                                                 <Loader2 className="w-4 h-4 animate-spin" />
                                             ) : (
                                                 <Download className="w-4 h-4" />
                                             )}
                                             Download
-                                        </Button>
+                                        </Button> : null}
                                     </div>
+                                    {!permissionsSettled ? <p className="text-xs text-muted-foreground">Checking media permissions…</p> : !canPlayMedia ? <p className="text-xs text-muted-foreground">You do not have permission to play this recording.</p> : !canDownloadMedia ? <p className="text-xs text-muted-foreground">Playback is allowed; download requires a separate media permission.</p> : null}
                                 </div>
                             </motion.div>
                         )}
@@ -334,4 +436,8 @@ export default function CallDetailPage() {
             ) : null}
         </DashboardLayout>
     );
+}
+
+function Metadata({ label, value }: { label: string; value: string | number | null | undefined }) {
+    return <div className="rounded-xl border border-border bg-muted/40 px-3 py-2"><dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</dt><dd className="mt-1 break-all font-mono text-xs text-foreground">{value === null || value === undefined || value === "" ? "Unknown" : String(value)}</dd></div>;
 }

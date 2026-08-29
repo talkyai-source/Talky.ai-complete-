@@ -33,6 +33,10 @@ export function ThemeProvider({
     const [mounted, setMounted] = useState(false);
 
     useEffect(() => {
+        // Hydration gate: reads localStorage/matchMedia, which are
+        // browser-only APIs unavailable during SSR/first render — this
+        // must run post-mount.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- hydration-mounted flag; reads browser-only APIs unavailable during SSR
         setMounted(true);
         const savedTheme = localStorage.getItem(storageKey) as Theme;
         if (savedTheme) {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, type UsageSummaryResponse } from '../lib/api';
+import { formatCurrencyAmount } from '../lib/call-cost';
 
 // Cluster-wide usage panel. Previously rendered hardcoded percentages
 // (Calls 85%, Tokens 45%, Storage 30%) — those are gone. We now pull
@@ -10,15 +11,6 @@ import { api, type UsageSummaryResponse } from '../lib/api';
 function formatNumber(n: number): string {
     if (!Number.isFinite(n)) return '—';
     return Math.round(n).toLocaleString();
-}
-
-function formatMoney(n: number): string {
-    if (!Number.isFinite(n)) return '—';
-    return new Intl.NumberFormat(undefined, {
-        style: 'currency',
-        currency: 'USD',
-        maximumFractionDigits: 2,
-    }).format(n);
 }
 
 export function QuotaUsage() {
@@ -58,9 +50,13 @@ export function QuotaUsage() {
             value: formatNumber(summary?.total_api_calls ?? 0),
         },
         {
-            label: 'Cost',
+            label: 'Estimated / legacy cost (inbound ledger excluded)',
             color: 'green' as const,
-            value: formatMoney(summary?.total_cost ?? 0),
+            value: formatCurrencyAmount(
+                summary?.total_cost ?? 0,
+                summary?.cost_currency,
+                2,
+            ),
         },
     ];
 

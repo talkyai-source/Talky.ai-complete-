@@ -6,10 +6,12 @@ import {
     MessageSquare,
     Mic,
     Brain,
-    RefreshCw
+    RefreshCw,
+    Info,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import type { UsageSummaryResponse } from '../lib/api';
+import { formatCurrencyAmount } from '../lib/call-cost';
 
 interface UsageBreakdownCardProps {
     tenantId?: string;
@@ -109,8 +111,10 @@ export function UsageBreakdownCard({ tenantId, fromDate, toDate }: UsageBreakdow
                             <DollarSign size={20} />
                         </div>
                         <div className="stat-content">
-                            <span className="stat-value">${summary.total_cost.toFixed(2)}</span>
-                            <span className="stat-label">Total Cost</span>
+                            <span className="stat-value">
+                                {formatCurrencyAmount(summary.total_cost, summary.cost_currency, 2)}
+                            </span>
+                            <span className="stat-label">Estimated / legacy cost</span>
                         </div>
                     </div>
                     <div className="usage-stat">
@@ -156,7 +160,11 @@ export function UsageBreakdownCard({ tenantId, fromDate, toDate }: UsageBreakdow
                                                 <span className="provider-name">{config.label}</span>
                                             </div>
                                             <span className="provider-cost">
-                                                ${item.estimated_cost.toFixed(2)}
+                                                {formatCurrencyAmount(
+                                                    item.estimated_cost,
+                                                    summary.cost_currency,
+                                                    2,
+                                                )}
                                             </span>
                                         </div>
                                         <div className="breakdown-bar-container">
@@ -182,6 +190,10 @@ export function UsageBreakdownCard({ tenantId, fromDate, toDate }: UsageBreakdow
                         </div>
                     </div>
                 )}
+                <div className="usage-disclaimer">
+                    <Info size={15} />
+                    <span>{summary.monetary_note}</span>
+                </div>
             </div>
         </div>
     );

@@ -207,8 +207,8 @@ function readCookieFromHeader(req: NextRequest, name: string) {
     return undefined;
 }
 
-export async function middleware(req: NextRequest) {
-    const { pathname, search } = req.nextUrl;
+export async function proxy(req: NextRequest) {
+    const { pathname } = req.nextUrl;
 
     const inProd = process.env.NODE_ENV === "production";
     const https = isHttps(req);

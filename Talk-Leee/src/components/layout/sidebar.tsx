@@ -28,6 +28,7 @@ import {
     ChevronDown,
     Plug,
     MessageSquare,
+    PhoneIncoming,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ViewportDrawer } from "@/components/ui/viewport-drawer";
@@ -57,6 +58,7 @@ type NavItem = {
 const navigation: NavItem[] = [
     { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
     { name: "Campaigns", href: "/campaigns", icon: Megaphone },
+    { name: "Inbound", href: "/inbound-campaigns", icon: PhoneIncoming },
     { name: "Call History", href: "/calls", icon: Phone },
     { name: "Contacts", href: "/contacts", icon: Users },
     { name: "Analytics", href: "/analytics", icon: BarChart2 },
@@ -160,6 +162,10 @@ export function Sidebar({ className }: { className?: string }) {
 
     // Automatically expand dropdowns if a child is active
     useEffect(() => {
+        // Reacts to route changes (pathname) to auto-open the dropdown that
+        // contains the newly active link — an external-event sync, not
+        // something derivable purely from the current render.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- auto-expands nav dropdown on route change, not derivable during render
         setOpenDropdowns((prev) => {
             const next = new Set(prev);
             let changed = false;
@@ -228,7 +234,11 @@ export function Sidebar({ className }: { className?: string }) {
 
     const handleLogout = () => {
         void logout().finally(() => {
-            window.location.href = "/";
+            // A full page reload is required here: it tears down all
+            // in-memory React state/providers and clears client caches so no
+            // stale authenticated state survives into the logged-out view.
+            // Absolute destination satisfies next/next/no-location-assign-relative-destination.
+            window.location.href = new URL("/", window.location.origin).toString();
         });
     };
 

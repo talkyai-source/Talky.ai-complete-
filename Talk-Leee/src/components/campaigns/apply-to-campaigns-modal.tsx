@@ -35,6 +35,9 @@ export function ApplyToCampaignsModal({
     useEffect(() => {
         if (!open) return;
         let cancelled = false;
+        // Reset transient state each time the modal opens, then kick off the
+        // async campaign fetch below — not derivable during render.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- reset-on-open before an async fetch, not derived render state
         setLoading(true); setError(null); setDoneCount(null); setSelected(new Set());
         dashboardApi.listCampaigns()
             .then((r) => { if (!cancelled) setCampaigns(r.campaigns); })

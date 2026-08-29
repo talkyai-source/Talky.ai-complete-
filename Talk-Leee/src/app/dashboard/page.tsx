@@ -729,6 +729,7 @@ export default function DashboardPage() {
         const snap = (ms: number) => Math.round(ms / stepMs) * stepMs;
         const end = snap(sim.lastUpdatedMs);
         const start = snap(end - liveRangeHours * 60 * 60 * 1000);
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- seeds custom range bounds once, from the live clock, the first time custom mode is entered
         setCustomEndMs(end);
         setCustomStartMs(start);
     }, [callRangeMode, customEndMs, customStartMs, liveRangeHours, sim.lastUpdatedMs]);
@@ -865,7 +866,6 @@ export default function DashboardPage() {
 
         const now = activeRange.endMs;
         const windowStart = activeRange.startMs;
-        const rangeMs = Math.max(1, now - windowStart);
 
         // Only real user-placed notes mark the chart now. The old hardcoded
         // "Campaign A/B start/end", "Deploy", and "Maintenance" markers were
@@ -980,10 +980,6 @@ export default function DashboardPage() {
         summary,
     ]);
 
-    useEffect(() => {
-        loadData();
-    }, []);
-
     async function loadData() {
         try {
             setLoading(true);
@@ -1009,6 +1005,14 @@ export default function DashboardPage() {
             setLoading(false);
         }
     }
+
+    useEffect(() => {
+        // Initial REST fetch on mount; loadData() flips the loading flag
+        // synchronously so the shell shows a spinner before the response
+        // arrives — not state derivable during render.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- mount data fetch; loadData sets loading/error/series as it resolves
+        loadData();
+    }, []);
 
     // liveSummary and liveBars are now driven exclusively by the WebSocket
     // stream (when connected) and the initial REST fetch. The previous
@@ -1375,6 +1379,7 @@ export default function DashboardPage() {
     const [campaignEnabled, setCampaignEnabled] = useState<Record<string, boolean>>({});
 
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- preserves existing per-campaign toggle state while adding/removing keys as the campaign list changes
         setCampaignEnabled((prev) => {
             const next: Record<string, boolean> = { ...prev };
             for (const c of campaignLineSeries.campaigns) {

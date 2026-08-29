@@ -62,6 +62,10 @@ export function SendEmailModal({
 
     useEffect(() => {
         if (!open) return;
+        // Reset the whole wizard whenever the modal is (re-)opened — these
+        // are all local wizard fields, not derivable from props, and must
+        // go back to their initial values each time `open` flips true.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- resets wizard state on each modal open, not derivable during render
         setStep("recipients");
         setRecipientsText("");
         setSubject("");
@@ -77,6 +81,10 @@ export function SendEmailModal({
     useEffect(() => {
         if (!template) return;
         if (editingHtml) return;
+        // Seed the editable HTML from the selected template the first time
+        // (or after it's cleared on template switch) — only fires while
+        // editingHtml is empty, so it never clobbers in-progress edits.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- lazily seeds editor content from the selected template without clobbering in-progress edits
         setEditingHtml(template.html);
     }, [template, editingHtml]);
 

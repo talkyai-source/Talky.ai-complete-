@@ -178,3 +178,63 @@ test("requestRaw surfaces the backend error detail on a non-OK response", async 
     (globalThis as unknown as { fetch?: unknown }).fetch = prevFetch;
 });
 
+test("http client preserves structured FastAPI detail codes", async () => {
+    const prevFetch = (globalThis as unknown as { fetch?: unknown }).fetch;
+    (globalThis as unknown as { fetch: unknown }).fetch = (async () => new Response(
+        JSON.stringify({
+            detail: {
+                code: "recording_delete_storage_failed",
+                message: "Recording bytes could not be removed",
+                details: { retryable: true },
+            },
+        }),
+        { status: 503, headers: { "content-type": "application/json" } },
+    )) as unknown as typeof fetch;
+
+    try {
+        const client = createHttpClient({ baseUrl: "http://example.test" });
+        await assert.rejects(
+            client.request({ path: "/recordings/abc", method: "DELETE" }),
+            (error: unknown) => {
+                assert.ok(error instanceof ApiClientError);
+                assert.equal(error.code, "recording_delete_storage_failed");
+                assert.equal(error.message, "Recording bytes could not be removed");
+                assert.deepEqual(error.details, { retryable: true });
+                return true;
+            },
+        );
+    } finally {
+        (globalThis as unknown as { fetch?: unknown }).fetch = prevFetch;
+    }
+});
+
+test("requestRaw preserves canonical error codes for binary endpoints", async () => {
+    const prevFetch = (globalThis as unknown as { fetch?: unknown }).fetch;
+    (globalThis as unknown as { fetch: unknown }).fetch = (async () => new Response(
+        JSON.stringify({
+            error: {
+                code: "permission_denied",
+                message: "Recording download is not allowed",
+                details: { required: "recordings:download" },
+            },
+        }),
+        { status: 403, headers: { "content-type": "application/json" } },
+    )) as unknown as typeof fetch;
+
+    try {
+        const client = createHttpClient({ baseUrl: "http://example.test" });
+        await assert.rejects(
+            client.requestRaw({ path: "/recordings/abc/download" }),
+            (error: unknown) => {
+                assert.ok(error instanceof ApiClientError);
+                assert.equal(error.code, "permission_denied");
+                assert.equal(error.message, "Recording download is not allowed");
+                assert.deepEqual(error.details, { required: "recordings:download" });
+                return true;
+            },
+        );
+    } finally {
+        (globalThis as unknown as { fetch?: unknown }).fetch = prevFetch;
+    }
+});
+

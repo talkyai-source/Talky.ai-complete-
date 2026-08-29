@@ -6,6 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Download, FileText, Loader2 } from "lucide-react";
 import { useBillingInvoices } from "@/lib/billing-api";
+import { ErrorState } from "@/components/states/page-states";
+import { formatBillingError } from "@/components/billing/billing-overview";
 
 type InvoiceRow = {
   id: string;
@@ -76,6 +78,19 @@ export default function InvoicesPage() {
               <div className="flex items-center justify-center py-12 text-muted-foreground">
                 <Loader2 className="mr-2 h-5 w-5 animate-spin" aria-hidden /> Loading invoices…
               </div>
+            ) : query.isError ? (
+              // Never "No invoices yet" on a failed fetch — that tells a
+              // customer they have never been billed.
+              <ErrorState
+                title="Invoices did not load"
+                message={`${formatBillingError(query.error)} Your invoices are unchanged — this page just could not read them.`}
+                troubleshooting={[
+                  "Retry below, or reload the page.",
+                  "If you have just signed in on another tab, sign in again here.",
+                  "Billing is visible to owners and admins — ask an account owner if you are not one.",
+                ]}
+                onRetry={() => void query.refetch()}
+              />
             ) : invoices.length === 0 ? (
               <div className="py-12 text-center text-sm text-muted-foreground">
                 No invoices yet. Invoices will appear here after your first billing cycle.

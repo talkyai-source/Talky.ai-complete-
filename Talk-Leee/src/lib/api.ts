@@ -146,6 +146,41 @@ export const ChangePasswordResponseSchema = z
 
 export type ChangePasswordResponse = z.infer<typeof ChangePasswordResponseSchema>;
 
+export type CallTerminationStatus = "none" | "requested" | "confirmed" | "failed";
+
+export interface LiveCallItem {
+    id: string;
+    talklee_call_id?: string | null;
+    to_number: string;
+    status: string;
+    started_at?: string | null;
+    answered_at?: string | null;
+    ended_at?: string | null;
+    duration_seconds?: number | null;
+    outcome?: string | null;
+    campaign_id?: string | null;
+    campaign_name?: string | null;
+    lead_id?: string | null;
+    caller_id?: string | null;
+    termination_status?: CallTerminationStatus;
+    termination_requested_at?: string | null;
+    termination_error?: string | null;
+    provider_hangup_requested?: boolean | null;
+    provider_hangup_confirmed?: boolean;
+}
+
+export const HangupCallResponseSchema = z.object({
+    status: z.enum(["confirmed", "requested", "failed", "already_terminal"]),
+    call_id: z.string(),
+    call_status: z.string(),
+    termination_status: z.enum(["none", "requested", "confirmed", "failed"]),
+    provider_hangup_requested: z.boolean(),
+    provider_hangup_confirmed: z.boolean(),
+    provider_hangup_error: z.string().nullable(),
+});
+
+export type HangupCallResponse = z.infer<typeof HangupCallResponseSchema>;
+
 /* ------------------------------------------------------------------ */
 /*  API Client                                                         */
 /* ------------------------------------------------------------------ */
@@ -635,21 +670,7 @@ class ApiClient {
      * intentionally keeps the shape lean so frequent polling is cheap.
      */
     async listLiveCalls(input?: { campaignId?: string; recentWindowSeconds?: number }): Promise<{
-        items: Array<{
-            id: string;
-            talklee_call_id?: string | null;
-            to_number: string;
-            status: string;
-            started_at?: string | null;
-            answered_at?: string | null;
-            ended_at?: string | null;
-            duration_seconds?: number | null;
-            outcome?: string | null;
-            campaign_id?: string | null;
-            campaign_name?: string | null;
-            lead_id?: string | null;
-            caller_id?: string | null;
-        }>;
+        items: LiveCallItem[];
         server_time: string;
     }> {
         const path = "/calls/live";
@@ -663,33 +684,19 @@ class ApiClient {
             timeoutMs: 8_000,
         });
         return data as {
-            items: Array<{
-                id: string;
-                talklee_call_id?: string | null;
-                to_number: string;
-                status: string;
-                started_at?: string | null;
-                answered_at?: string | null;
-                ended_at?: string | null;
-                duration_seconds?: number | null;
-                outcome?: string | null;
-                campaign_id?: string | null;
-                campaign_name?: string | null;
-                lead_id?: string | null;
-                caller_id?: string | null;
-            }>;
+            items: LiveCallItem[];
             server_time: string;
         };
     }
 
     /** Hang up a single in-flight call from the live panel (operator action). */
-    async hangupCall(callId: string): Promise<{ status: string; call_id: string }> {
+    async hangupCall(callId: string): Promise<HangupCallResponse> {
         const data = await this.client().request({
             path: `/calls/${callId}/hangup`,
             method: "POST",
             timeoutMs: 8_000,
         });
-        return data as { status: string; call_id: string };
+        return HangupCallResponseSchema.parse(data);
     }
 
     /**

@@ -65,6 +65,10 @@ export function ConversationHistory({
     }, []);
 
     useEffect(() => {
+        // Fetches the conversation list on mount (and whenever `load`
+        // changes identity); it sets rows/error state as the request
+        // resolves — the standard fetch-on-mount pattern.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches conversation list on mount, load() sets state once the request resolves
         void load();
     }, [load]);
 

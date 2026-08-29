@@ -98,6 +98,10 @@ function ProviderCard({
     const [showSaved, setShowSaved] = useState<boolean>(Boolean(existing?.has_credentials));
 
     useEffect(() => {
+        // Re-sync local editable state whenever the server-backed `existing`
+        // row changes (e.g. after a save/delete refetch) — these are
+        // editable fields, not values that can be computed during render.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- resyncs local editable fields when the server-backed provider row changes
         setShowSaved(Boolean(existing?.has_credentials));
         setFromNumber(existing?.from_number ?? "");
     }, [existing?.has_credentials, existing?.from_number]);

@@ -55,6 +55,7 @@ export default function SettingsPage() {
     const [savingProfile, setSavingProfile] = useState(false);
 
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs the editable profile fields from AuthContext when the loaded user changes
         setProfileName(user?.name ?? "");
         setProfileBusiness(user?.business_name ?? "");
     }, [user?.name, user?.business_name]);

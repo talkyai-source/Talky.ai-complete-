@@ -60,7 +60,7 @@ export function RadialKnob({
         let deg = (Math.atan2(dx, -dy) * 180) / Math.PI;
         deg = Math.min(END, Math.max(START, deg));
         onChange(clampSnap(min + ((deg - START) / (END - START)) * (max - min)));
-    }, [onChange, clampSnap, min, max]);
+    }, [onChange, clampSnap, min, max, START, END]);
 
     const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
         (e.target as Element).setPointerCapture?.(e.pointerId);
@@ -80,12 +80,14 @@ export function RadialKnob({
     const gid = useId();
 
     return (
-        <div className="flex flex-col items-center gap-1 select-none text-foreground">
+        <div className="flex w-full min-w-0 flex-col items-center gap-1 select-none text-foreground">
             <svg
                 ref={ref} width={size} height={size} viewBox="0 0 100 100"
-                role="slider" tabIndex={0} aria-valuemin={min} aria-valuemax={max} aria-valuenow={value} aria-label={label}
+                role="slider" tabIndex={0} aria-valuemin={min} aria-valuemax={max} aria-valuenow={value}
+                aria-valuetext={hint ? `${display} (${hint})` : display} aria-label={label}
                 onPointerDown={onPointerDown} onPointerMove={onPointerMove} onKeyDown={onKeyDown}
-                className="cursor-pointer touch-none text-foreground outline-none"
+                className="aspect-square h-auto w-full cursor-pointer touch-none rounded-full text-foreground outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                style={{ maxWidth: size }}
             >
                 <defs>
                     <radialGradient id={`kg-${gid}`} cx="50%" cy="34%" r="75%">

@@ -11,8 +11,10 @@ import {
   Clock,
   Loader2,
   Plus,
+  RotateCcw,
   Zap,
 } from "lucide-react";
+import { isApiClientError } from "@/lib/http-client";
 import {
   canTopUp,
   creditHasLanded,
@@ -48,6 +50,16 @@ import {
  *    off than before they paid.
  */
 
+/** The backend's own words where it gave any, never a cause we made up. */
+function formatTopupError(err: unknown): string {
+  if (isApiClientError(err)) {
+    if (err.status === 403) return "You do not have permission to view billing for this account.";
+    if (err.status === 401) return "Your session has expired.";
+    return err.message;
+  }
+  return err instanceof Error ? err.message : "The request did not complete.";
+}
+
 const POLL_MS = 2500;
 const POLL_GIVE_UP_MS = 45_000;
 
@@ -68,9 +80,20 @@ export function TopupCard() {
   const packages = packagesQ.data ?? [];
   const orders = ordersQ.data ?? [];
 
+  // A failed balance or catalogue fetch is not an empty catalogue. Before this
+  // gate, a 403 on the balance left `balance` null and the card spun forever on
+  // "Loading bundles…", and a failed catalogue said "No top-up bundles are
+  // available on your account" — both of which describe an account state that
+  // nothing had checked.
+  const catalogueFailed = balanceQ.isError || packagesQ.isError;
+  const catalogueError = balanceQ.isError ? balanceQ.error : packagesQ.error;
+
   // The balance we came back with. When it moves, the webhook has landed.
   const baseline = useRef<number | null>(null);
-  const startedAt = useRef<number>(Date.now());
+  // Stamped in the effect below (together with `baseline`), never here:
+  // Date.now() during render is impure and the compiler rejects it. Nothing
+  // reads this before that effect has run.
+  const startedAt = useRef<number>(0);
   const [credited, setCredited] = useState(false);
 
   useEffect(() => {
@@ -256,7 +279,35 @@ export function TopupCard() {
         ) : null}
 
         {/* ── the catalogue ── */}
-        {unlimited ? (
+        {catalogueFailed ? (
+          <div
+            role="alert"
+            className="flex flex-col gap-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600 dark:text-red-400" aria-hidden />
+              <div className="text-red-800 dark:text-red-300">
+                <div className="font-semibold">Your minute balance did not load.</div>
+                <div className="text-xs opacity-90">
+                  {formatTopupError(catalogueError)} Nothing has been charged, and no
+                  bundles are shown until we can read your balance.
+                </div>
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="self-start sm:self-auto"
+              onClick={() => {
+                void balanceQ.refetch();
+                void packagesQ.refetch();
+              }}
+            >
+              <RotateCcw className="mr-1 h-4 w-4" aria-hidden /> Retry
+            </Button>
+          </div>
+        ) : unlimited ? (
           <p className="rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
             Your plan has unlimited minutes, so there is nothing to top up.
           </p>
@@ -323,7 +374,25 @@ export function TopupCard() {
         )}
 
         {/* ── what has been bought ── */}
-        {orders.length > 0 ? (
+        {ordersQ.isError ? (
+          <div
+            role="alert"
+            className="flex items-start gap-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm"
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600 dark:text-red-400" aria-hidden />
+            <span className="text-red-800 dark:text-red-300">
+              Your recent top-ups did not load, so this list is not shown. Any
+              purchase you have made is unaffected.{" "}
+              <button
+                type="button"
+                className="font-semibold underline underline-offset-2"
+                onClick={() => void ordersQ.refetch()}
+              >
+                Retry
+              </button>
+            </span>
+          </div>
+        ) : orders.length > 0 ? (
           <div className="pt-2">
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Recent top-ups

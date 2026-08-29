@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { apiBaseUrl } from "@/lib/env";
 import { useAuth } from "@/lib/auth-context";
-import { getBrowserAuthToken } from "@/lib/auth-token";
+import { useAccessToken } from "@/lib/auth-hooks";
 import { sharedHttpClient } from "@/lib/api";
 
 function resolveBackendWsBaseUrl(): string {
@@ -51,6 +51,7 @@ export function TestAgentButton({
     disabled?: boolean;
 }) {
     const { status: authStatus } = useAuth();
+    const accessToken = useAccessToken();
     const isAuthed = authStatus === "authenticated";
 
     const [modalOpen, setModalOpen] = useState(false);
@@ -378,9 +379,8 @@ export function TestAgentButton({
                 // token is available (cookie-less environments) send it as the
                 // first frame — the backend reads the cookie first and ignores
                 // this otherwise.
-                const token = getBrowserAuthToken();
-                if (token) {
-                    try { ws.send(JSON.stringify({ type: "auth", token })); } catch { /* */ }
+                if (accessToken) {
+                    try { ws.send(JSON.stringify({ type: "auth", token: accessToken })); } catch { /* */ }
                 }
             };
 
@@ -438,7 +438,7 @@ export function TestAgentButton({
         };
 
         openSocket(0);
-    }, [campaignId, handleMessage, endSession, stopMicrophone, cleanupPlayback]);
+    }, [accessToken, campaignId, handleMessage, endSession, stopMicrophone, cleanupPlayback]);
 
     const handleStart = useCallback(() => {
         setModalOpen(false);

@@ -24,6 +24,20 @@ import {
     isRecommendedVoiceForPersona,
 } from "@/lib/campaign-personas";
 
+function descriptiveVoiceLabel(voice: VoiceInfo): string {
+    const name = voice.name.trim() || "Unnamed voice";
+    // Some providers already include the descriptor in the display name
+    // (for example, "Bella - Professional, Bright, Warm"). Keep those names
+    // intact; otherwise use the first description sentence as a compact label.
+    if (/\s[-–—]\s\S/.test(name)) return name;
+
+    const description = voice.description.trim();
+    if (!description) return name;
+
+    const summary = description.split(/[.!?](?:\s|$)/, 1)[0]?.trim();
+    return summary ? `${name} - ${summary}` : name;
+}
+
 export type VoiceProviderPickerProps = {
     personaType: PersonaType;
     voiceId: string;
@@ -52,8 +66,14 @@ export function VoiceProviderPicker({
     const [error, setError] = useState<string | null>(null);
     const audioCtxRef = useRef<AudioContext | null>(null);
 
+    // Latest-callback refs. These are written from an effect, never during
+    // render: under the React Compiler a render-phase ref write can be skipped
+    // when the render is memoized away, which would leave the async callbacks
+    // below firing a stale parent handler.
     const emitProvider = useRef(onProviderChange);
-    emitProvider.current = onProviderChange;
+    useEffect(() => {
+        emitProvider.current = onProviderChange;
+    }, [onProviderChange]);
 
     useEffect(() => {
         let cancelled = false;
@@ -81,7 +101,9 @@ export function VoiceProviderPicker({
     // Depends on `voices` too so it resolves once the catalog arrives for a
     // voice that was already saved on the campaign.
     const emitGender = useRef(onVoiceGenderChange);
-    emitGender.current = onVoiceGenderChange;
+    useEffect(() => {
+        emitGender.current = onVoiceGenderChange;
+    }, [onVoiceGenderChange]);
     useEffect(() => {
         const g = voices.find((v) => v.id === voiceId)?.gender;
         const norm = (g || "").trim().toLowerCase();
@@ -167,11 +189,16 @@ export function VoiceProviderPicker({
             ) : shownVoices.length === 0 ? (
                 <p className="mt-1 text-xs text-muted-foreground">No voices for this provider.</p>
             ) : (
-                <div className="mt-1 grid max-h-56 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                <div
+                    className="mt-1 grid max-h-56 gap-2 overflow-y-auto pr-1 sm:grid-cols-2"
+                    role="radiogroup"
+                    aria-label="Available voices"
+                >
                     {shownVoices.map((v) => {
                         const rec = isRecommendedVoiceForPersona(v, personaType);
                         const selected = voiceId === v.id;
                         const playing = playingId === v.id;
+                        const label = descriptiveVoiceLabel(v);
                         return (
                             <div
                                 key={v.id}
@@ -183,10 +210,13 @@ export function VoiceProviderPicker({
                                 <button
                                     type="button"
                                     onClick={() => onVoiceChange(v.id, v.name)}
+                                    role="radio"
+                                    aria-checked={selected}
+                                    aria-label={`Select ${label}`}
                                     className="flex min-w-0 flex-1 items-center justify-between gap-2 px-3 py-2 text-left"
                                 >
                                     <span className="min-w-0">
-                                        <span className="block truncate font-medium text-gray-900 dark:text-zinc-100">{v.name}</span>
+                                        <span className="block truncate font-medium text-gray-900 dark:text-zinc-100" title={label}>{label}</span>
                                         <span className="block truncate text-xs text-muted-foreground">
                                             {[v.gender, v.accent].filter(Boolean).join(" · ") || v.language}
                                         </span>

@@ -12,6 +12,7 @@ import {
     RefreshCw,
     RotateCcw,
     Search,
+    ShieldAlert,
     Trash2,
 } from 'lucide-react';
 
@@ -47,11 +48,14 @@ export function FeedbackTable({ onCallSelect }: FeedbackTableProps) {
     const [debouncedSearch, setDebouncedSearch] = useState('');
     const [status, setStatus] = useState('');
     const [tenantId, setTenantId] = useState('');
+    const [direction, setDirection] = useState('');
     const [fromDate, setFromDate] = useState('');
     const [toDate, setToDate] = useState('');
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [retryingId, setRetryingId] = useState<string | null>(null);
     const [deleteTarget, setDeleteTarget] = useState<AdminFeedbackItem | null>(null);
+    const [deleteReason, setDeleteReason] = useState('');
+    const [deleteIdempotencyKey, setDeleteIdempotencyKey] = useState('');
     const [deleting, setDeleting] = useState(false);
 
     useEffect(() => {
@@ -75,6 +79,7 @@ export function FeedbackTable({ onCallSelect }: FeedbackTableProps) {
         if (debouncedSearch) params.search = debouncedSearch;
         if (status) params.transcript_status = status;
         if (tenantId) params.tenant_id = tenantId;
+        if (direction === 'inbound' || direction === 'outbound') params.direction = direction;
         if (fromDate) params.from_date = fromDate;
         if (toDate) params.to_date = toDate;
         const response = await api.getAdminFeedback(params);
@@ -86,7 +91,7 @@ export function FeedbackTable({ onCallSelect }: FeedbackTableProps) {
             setTotal(response.data.total);
         }
         setLoading(false);
-    }, [page, debouncedSearch, status, tenantId, fromDate, toDate]);
+    }, [page, debouncedSearch, status, tenantId, direction, fromDate, toDate]);
 
     useEffect(() => {
         // The request is intentionally tied to the complete filter snapshot.
@@ -110,29 +115,53 @@ export function FeedbackTable({ onCallSelect }: FeedbackTableProps) {
     };
 
     const deleteFeedback = async () => {
-        if (!deleteTarget) return;
+        if (!deleteTarget || !deleteIdempotencyKey) return;
         setDeleting(true);
-        const response = await api.deleteAdminFeedback(deleteTarget.id);
+        const response = await api.deleteAdminFeedback(
+            deleteTarget.id,
+            deleteReason.trim(),
+            deleteIdempotencyKey,
+        );
         if (response.error) {
             setError(response.error.message);
         } else {
             setDeleteTarget(null);
+            setDeleteReason('');
+            setDeleteIdempotencyKey('');
             await fetchItems();
         }
         setDeleting(false);
+    };
+
+    const openDelete = (item: AdminFeedbackItem) => {
+        if (item.legal_hold) return;
+        const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        setDeleteTarget(item);
+        setDeleteReason('');
+        setDeleteIdempotencyKey(`admin-media:feedback:${item.id}:${id}`);
+    };
+
+    const closeDelete = () => {
+        if (deleting) return;
+        setDeleteTarget(null);
+        setDeleteReason('');
+        setDeleteIdempotencyKey('');
     };
 
     const resetFilters = () => {
         setSearch('');
         setStatus('');
         setTenantId('');
+        setDirection('');
         setFromDate('');
         setToDate('');
         setPage(1);
     };
 
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
-    const filtersActive = Boolean(search || status || tenantId || fromDate || toDate);
+    const filtersActive = Boolean(search || status || tenantId || direction || fromDate || toDate);
 
     return (
         <div className="call-history-container">
@@ -162,6 +191,16 @@ export function FeedbackTable({ onCallSelect }: FeedbackTableProps) {
                         <option value="failed">Failed</option>
                     </select>
                 </div>
+                <select
+                    className="filter-select"
+                    value={direction}
+                    onChange={(event) => { setDirection(event.target.value); setPage(1); }}
+                    aria-label="Filter feedback by direction"
+                >
+                    <option value="">All directions</option>
+                    <option value="inbound">Inbound</option>
+                    <option value="outbound">Outbound</option>
+                </select>
                 <select
                     className="filter-select"
                     value={tenantId}
@@ -248,6 +287,9 @@ export function FeedbackTable({ onCallSelect }: FeedbackTableProps) {
                                         <div className="stacked-cell">
                                             <span><Building2 size={13} /> {item.tenant_name}</span>
                                             <strong>{item.phone_number || 'Unknown number'}</strong>
+                                            <span className={`direction-badge direction-${item.direction || 'outbound'}`}>
+                                                {item.direction || 'outbound'}{item.called_did ? ` · DID ${item.called_did}` : ''}
+                                            </span>
                                             <button className="link-button" onClick={() => onCallSelect(item.call_id)}>
                                                 {item.call_id.slice(0, 8)}… <ExternalLink size={11} />
                                             </button>
@@ -307,8 +349,14 @@ export function FeedbackTable({ onCallSelect }: FeedbackTableProps) {
                                             <button className="btn btn-secondary btn-sm" onClick={() => onCallSelect(item.call_id)}>
                                                 <ExternalLink size={14} /> Call
                                             </button>
-                                            <button className="btn btn-danger btn-sm" onClick={() => setDeleteTarget(item)}>
-                                                <Trash2 size={14} /> Delete
+                                            <button
+                                                className="btn btn-danger btn-sm"
+                                                onClick={() => openDelete(item)}
+                                                disabled={item.legal_hold}
+                                                title={item.legal_hold ? 'Deletion blocked by an active compliance/legal hold' : undefined}
+                                            >
+                                                {item.legal_hold ? <ShieldAlert size={14} /> : <Trash2 size={14} />}
+                                                {item.legal_hold ? 'Legal hold' : 'Delete'}
                                             </button>
                                         </div>
                                     </td>
@@ -343,8 +391,11 @@ export function FeedbackTable({ onCallSelect }: FeedbackTableProps) {
                 confirmLabel="Delete feedback"
                 variant="danger"
                 loading={deleting}
+                reason={deleteReason}
+                onReasonChange={setDeleteReason}
+                reasonLabel="Deletion reason"
                 onConfirm={() => void deleteFeedback()}
-                onCancel={() => setDeleteTarget(null)}
+                onCancel={closeDelete}
             />
         </div>
     );

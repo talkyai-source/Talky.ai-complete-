@@ -161,6 +161,7 @@ export function ScriptCard({ campaignId }: ScriptCardProps) {
     );
 
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- async transcript fetch on mount/campaign change, not derivable during render
         if (campaignId) void load(1);
     }, [campaignId, load]);
 

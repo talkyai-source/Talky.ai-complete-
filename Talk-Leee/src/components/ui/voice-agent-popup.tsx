@@ -517,6 +517,16 @@ export function VoiceAgentPopup() {
         setAudioLevel(0);
     }, []);
 
+    // Latest `startMicrophone`, published for handleMessage below. Declared
+    // (and kept in sync) BEFORE the hook that captures it: writing to a ref
+    // that an earlier hook already closed over counts as mutating a hook
+    // argument under the React Compiler, which is what the immutability rule
+    // was reporting here.
+    const startMicrophoneRef = useRef<(() => void) | null>(null);
+    useEffect(() => {
+        startMicrophoneRef.current = () => { void startMicrophone(); };
+    }, [startMicrophone]);
+
     const handleMessage = useCallback(async (event: MessageEvent) => {
         const payload = event.data;
 
@@ -623,12 +633,6 @@ export function VoiceAgentPopup() {
                 break;
         }
     }, [initializeAudioPlayer, queueAudioChunk, resetAudioPlayer]);
-
-    // Store startMicrophone in ref for use in handleMessage
-    const startMicrophoneRef = useRef<(() => void) | null>(null);
-    useEffect(() => {
-        startMicrophoneRef.current = () => { void startMicrophone(); };
-    }, [startMicrophone]);
 
     const endSession = useCallback(() => {
         connectingRef.current = false;

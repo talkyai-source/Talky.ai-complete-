@@ -20,9 +20,26 @@ export default function CampaignsPage() {
 
     const pause = useMutation({
         mutationFn: (id: string) => dashboardApi.pauseCampaign(id),
-        onSuccess: (_res, id) => {
+        onSuccess: (res, id) => {
             qc.setQueryData<Campaign[]>(queryKeys.campaigns(), (prev) => (prev ?? []).map((c) => (c.id === id ? { ...c, status: "paused" } : c)));
-            notificationsStore.create({ type: "success", title: "Campaign paused", message: "Campaign paused successfully." });
+            const termination = res.termination_summary;
+            if (termination.status === "confirmed") {
+                notificationsStore.create({ type: "success", title: "Campaign paused", message: res.message });
+            } else {
+                notificationsStore.create({
+                    type: "warning",
+                    title: termination.status === "partial" ? "Campaign paused — calls ending" : "Campaign paused — cleanup unverified",
+                    message: res.message,
+                });
+            }
+        },
+        onError: (err) => {
+            void qc.invalidateQueries({ queryKey: queryKeys.campaigns() });
+            notificationsStore.create({
+                type: "error",
+                title: "Can't pause campaign",
+                message: err instanceof Error ? err.message : "Could not pause the campaign.",
+            });
         },
     });
 
@@ -98,10 +115,6 @@ export default function CampaignsPage() {
         qc.setQueryData<Campaign[]>(queryKeys.campaigns(), (prev) => [copy, ...(prev ?? [])]);
     }
 
-    async function handleUpdate(next: Campaign) {
-        qc.setQueryData<Campaign[]>(queryKeys.campaigns(), (prev) => (prev ?? []).map((c) => (c.id === next.id ? next : c)));
-    }
-
     return (
         <DashboardLayout title="Campaign Performance" description="Sorting, filtering, bulk actions, and live ops signals">
             <div className="space-y-6">
@@ -114,7 +127,6 @@ export default function CampaignsPage() {
                     onResume={handleResume}
                     onDelete={handleDelete}
                     onDuplicate={handleDuplicate}
-                    onUpdate={handleUpdate}
                 />
                 <EventStream campaigns={campaigns} />
                 <AlertTimeline campaigns={campaigns} />
