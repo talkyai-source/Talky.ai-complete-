@@ -38,6 +38,9 @@ cmake --build "$BUILD_DIR" -- -j"$(nproc)" >/dev/null
 ctest --test-dir "$BUILD_DIR" --output-on-failure
 
 echo "[2/8] Starting voice-gateway-cpp runtime..."
+# shellcheck source=gateway_test_env.sh
+source "$REPO_ROOT/telephony/scripts/gateway_test_env.sh"
+provision_voice_gateway_test_env
 "$BUILD_DIR/voice_gateway" --host "$HOST" --port "$PORT" >"$GATEWAY_LOG" 2>&1 &
 GW_PID=$!
 

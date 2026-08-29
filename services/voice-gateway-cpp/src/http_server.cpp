@@ -25,6 +25,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -642,10 +643,173 @@ struct FdGuard {
     FdGuard& operator=(const FdGuard&) = delete;
 };
 
+std::optional<std::string> valid_secret_environment_value(const char* name) {
+    const char* configured = std::getenv(name);
+    if (configured == nullptr) {
+        return std::nullopt;
+    }
+    const std::string value = trim(configured);
+    if (value.size() < 32 || value.size() > 512) {
+        return std::nullopt;
+    }
+    for (const unsigned char c : value) {
+        if (c < 0x20 || c == 0x7F) {
+            return std::nullopt;
+        }
+    }
+    return value;
+}
+
+struct PinnedBackendOrigin {
+    std::string host;
+    uint16_t port{0};
+    std::string authority;
+};
+
+bool parse_backend_internal_origin(const std::string& value, PinnedBackendOrigin& origin) {
+    // BACKEND_INTERNAL_URL is an origin, not an arbitrary base URL. Keep its
+    // accepted grammar deliberately smaller than RFC 3986 so the request
+    // sender and admission check cannot disagree about userinfo, implicit
+    // ports, alternative IP spellings, or path normalization.
+    if (value.empty() || value.size() > 256) {
+        return false;
+    }
+    for (const unsigned char c : value) {
+        if (c <= 0x20 || c == 0x7F) {
+            return false;
+        }
+    }
+    static const std::string kScheme = "http://";
+    if (value.compare(0, kScheme.size(), kScheme) != 0 ||
+        value.find_first_of("?#") != std::string::npos) {
+        return false;
+    }
+
+    const std::size_t authority_start = kScheme.size();
+    const std::size_t path_start = value.find('/', authority_start);
+    const std::string authority = path_start == std::string::npos
+                                      ? value.substr(authority_start)
+                                      : value.substr(authority_start, path_start - authority_start);
+    const std::string base_path = path_start == std::string::npos ? std::string() : value.substr(path_start);
+    if (!base_path.empty()) {
+        return false;  // no path or trailing slash: the adapter appends the route
+    }
+    if (authority.empty() || authority.find('@') != std::string::npos) {
+        return false;
+    }
+
+    const std::size_t colon = authority.find(':');
+    if (colon == std::string::npos || colon == 0 || colon + 1 >= authority.size() ||
+        authority.find(':', colon + 1) != std::string::npos) {
+        return false;
+    }
+    const std::string host = authority.substr(0, colon);
+    const std::string port_text = authority.substr(colon + 1);
+    if (port_text.size() > 5 ||
+        (port_text.size() > 1 && port_text.front() == '0') ||
+        port_text.find_first_not_of("0123456789") != std::string::npos) {
+        return false;
+    }
+    unsigned int parsed_port = 0;
+    const auto port_result = std::from_chars(
+        port_text.data(), port_text.data() + port_text.size(), parsed_port);
+    if (port_result.ec != std::errc() || port_result.ptr != port_text.data() + port_text.size() ||
+        parsed_port == 0 || parsed_port > 65535) {
+        return false;
+    }
+
+    in_addr address{};
+    if (::inet_pton(AF_INET, host.c_str(), &address) != 1) {
+        return false;
+    }
+    const std::uint32_t host_order = ntohl(address.s_addr);
+    if ((host_order & 0xff000000U) != 0x7f000000U) {
+        return false;
+    }
+    char canonical_host[INET_ADDRSTRLEN]{};
+    if (::inet_ntop(AF_INET, &address, canonical_host, sizeof(canonical_host)) == nullptr ||
+        host != canonical_host) {
+        return false;
+    }
+
+    origin.host = host;
+    origin.port = static_cast<uint16_t>(parsed_port);
+    origin.authority = host + ":" + std::to_string(parsed_port);
+    return authority == origin.authority;
+}
+
+bool load_pinned_backend_origin(PinnedBackendOrigin& origin, std::string& error) {
+    const char* configured_url = std::getenv("BACKEND_INTERNAL_URL");
+    if (configured_url == nullptr || !parse_backend_internal_origin(configured_url, origin)) {
+        error =
+            "BACKEND_INTERNAL_URL must be an exact plain http numeric loopback origin with an explicit "
+            "canonical port and no credentials, query, fragment, or base path";
+        return false;
+    }
+    const char* callback_host = std::getenv("VOICE_GATEWAY_CALLBACK_HOST");
+    if (callback_host == nullptr || origin.host != callback_host) {
+        error =
+            "VOICE_GATEWAY_CALLBACK_HOST must exactly match the BACKEND_INTERNAL_URL numeric loopback host";
+        return false;
+    }
+    return true;
+}
+
+bool safe_callback_session_id(const std::string& value) {
+    if (value.empty() || value.size() > 128) {
+        return false;
+    }
+    for (const unsigned char c : value) {
+        const bool ascii_alnum = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                                 (c >= '0' && c <= '9');
+        const bool safe = ascii_alnum || c == '-' || c == '.' || c == '_' || c == '~';
+        if (!safe) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The shared secret that proves an outbound callback really came from this
+// gateway. The backend's caller-audio route
+// (POST /api/v1/sip/telephony/audio/{session_id}) checks it as the
+// X-Internal-Service-Token header — see backend/app/core/security/
+// internal_auth.py (is_internal_service_request). Authentication is mandatory;
+// the production binary refuses to start without a valid token.
+//
+// Read ONCE at first use, like the other gateway env knobs. The executable's
+// startup validation rejects unset/empty/malformed values. The defensive empty
+// result here is retained for library tests and alternate embeddings:
+//   * malformed    -> a value shorter than 32 bytes, with a control character
+//                     (CR/LF would inject a header/request line), or longer
+//                     than 512 bytes is treated as unset rather than spliced in.
+// Surrounding whitespace is trimmed because the backend compares against its
+// own os.getenv(...).strip() and HTTP parsers strip OWS around header values,
+// so an untrimmed value would silently mismatch.
+const std::string& internal_service_token() {
+    static const std::string token = []() -> std::string {
+        const auto value = valid_secret_environment_value("INTERNAL_SERVICE_TOKEN");
+        return value.has_value() ? value.value() : std::string();
+    }();
+    return token;
+}
+
 // Send a fire-and-forget HTTP POST to the given URL with a JSON body.
 // Runs synchronously; callers should dispatch to a thread if low latency is needed.
 // Returns false on any network/parse error (silently drops the callback).
 bool http_post(const std::string& url, const std::string& json_body) {
+    // This is an independent last-mile guard, not merely an assumption that
+    // /sessions/start already checked the value. Never construct a request or
+    // attach INTERNAL_SERVICE_TOKEN for any destination outside the exact
+    // BACKEND_INTERNAL_URL origin and caller-audio route.
+    if (!audio_callback_url_is_allowed(url)) {
+        return false;
+    }
+    const std::string& token = internal_service_token();
+    if (token.empty()) {
+        return false;
+    }
+
     // Parse URL: http://host:port/path
     if (url.size() < 8) {
         return false;
@@ -689,8 +853,11 @@ bool http_post(const std::string& url, const std::string& json_body) {
     std::ostringstream req;
     req << "POST " << path << " HTTP/1.0\r\n"
         << "Host: " << host_port << "\r\n"
-        << "Content-Type: application/json\r\n"
-        << "Content-Length: " << json_body.size() << "\r\n"
+        << "Content-Type: application/json\r\n";
+    // The exact-origin guard above has already run, so this credential can only
+    // be sent to the pinned backend listener.
+    req << "X-Internal-Service-Token: " << token << "\r\n";
+    req << "Content-Length: " << json_body.size() << "\r\n"
         << "Connection: close\r\n"
         << "\r\n"
         << json_body;
@@ -996,24 +1163,15 @@ std::optional<std::string> extract_session_id_from_path(const std::string& path)
 }
 
 // --- Control-plane auth + callback allowlisting (VG-18) ---
-// Both are OPT-IN via environment so default behavior is unchanged (the control
-// plane is localhost-bound today). Set VOICE_GATEWAY_AUTH_TOKEN to require
-// "Authorization: Bearer <token>" on every request except GET /health; set
-// VOICE_GATEWAY_CALLBACK_HOST to restrict the audio_callback_url host. Read once.
+// The production executable requires the complete token/origin configuration
+// at startup. Library-level behavior retains optional control auth for isolated
+// tests, while callback destinations fail closed even for alternate embeddings.
 const std::string& gateway_auth_token() {
     static const std::string token = [] {
-        const char* v = std::getenv("VOICE_GATEWAY_AUTH_TOKEN");
-        return (v != nullptr) ? std::string(v) : std::string();
+        const auto value = valid_secret_environment_value("VOICE_GATEWAY_AUTH_TOKEN");
+        return value.has_value() ? value.value() : std::string();
     }();
     return token;
-}
-
-const std::string& callback_host_allowlist() {
-    static const std::string host = [] {
-        const char* v = std::getenv("VOICE_GATEWAY_CALLBACK_HOST");
-        return (v != nullptr && *v != '\0') ? std::string(v) : std::string();
-    }();
-    return host;
 }
 
 bool request_authorized(const HttpRequest& request) {
@@ -1033,41 +1191,80 @@ bool request_authorized(const HttpRequest& request) {
     if (value.compare(0, kPrefix.size(), kPrefix) != 0) {
         return false;
     }
-    return value.compare(kPrefix.size(), token.size(), token) == 0;
-}
-
-// Acceptable iff it has no control characters (blocks CRLF request-line injection
-// into the outbound POST), uses plaintext http:// (the only scheme http_post
-// actually speaks), and — when the allowlist env is set — targets that host
-// (SSRF/audio-exfiltration containment).
-bool is_allowed_callback_url(const std::string& url) {
-    // Bounded: the URL is echoed into every outbound POST request line, so an
-    // unbounded value would inflate every callback (review/batch-D byte cap).
-    if (url.size() > 512) {
-        return false;
+    unsigned char difference = 0;
+    for (std::size_t i = 0; i < token.size(); ++i) {
+        difference |= static_cast<unsigned char>(value[kPrefix.size() + i]) ^
+                      static_cast<unsigned char>(token[i]);
     }
-    for (const unsigned char c : url) {
-        if (c < 0x20 || c == 0x7F) {
-            return false;
-        }
-    }
-    static const std::string kScheme = "http://";
-    if (url.size() <= kScheme.size() || url.compare(0, kScheme.size(), kScheme) != 0) {
-        return false;
-    }
-    const std::string& allowed = callback_host_allowlist();
-    if (allowed.empty()) {
-        return true;  // host allowlist disabled (default)
-    }
-    const std::size_t host_start = kScheme.size();
-    const std::size_t host_end = url.find_first_of(":/", host_start);
-    const std::string host = (host_end == std::string::npos)
-                                 ? url.substr(host_start)
-                                 : url.substr(host_start, host_end - host_start);
-    return host == allowed;
+    return difference == 0;
 }
 
 }  // namespace
+
+bool validate_gateway_security_environment(std::string& error) {
+    const auto internal_token = valid_secret_environment_value("INTERNAL_SERVICE_TOKEN");
+    if (!internal_token.has_value()) {
+        error = "INTERNAL_SERVICE_TOKEN is missing or invalid";
+        return false;
+    }
+    const auto gateway_token = valid_secret_environment_value("VOICE_GATEWAY_AUTH_TOKEN");
+    if (!gateway_token.has_value()) {
+        error = "VOICE_GATEWAY_AUTH_TOKEN is missing or invalid";
+        return false;
+    }
+    if (internal_token.value() == gateway_token.value()) {
+        error = "INTERNAL_SERVICE_TOKEN and VOICE_GATEWAY_AUTH_TOKEN must be distinct";
+        return false;
+    }
+
+    PinnedBackendOrigin origin;
+    return load_pinned_backend_origin(origin, error);
+}
+
+bool audio_callback_url_is_allowed(
+    const std::string& url,
+    const std::string& expected_session_id) {
+    // The URL is emitted into every request line. Keep it bounded, prohibit all
+    // controls/whitespace, and reject URL features the tiny HTTP client does
+    // not intentionally implement.
+    if (url.empty() || url.size() > 512 || url.find_first_of("?#") != std::string::npos) {
+        return false;
+    }
+    for (const unsigned char c : url) {
+        if (c <= 0x20 || c == 0x7F) {
+            return false;
+        }
+    }
+
+    PinnedBackendOrigin origin;
+    std::string origin_error;
+    if (!load_pinned_backend_origin(origin, origin_error)) {
+        return false;
+    }
+
+    static const std::string kScheme = "http://";
+    if (url.compare(0, kScheme.size(), kScheme) != 0) {
+        return false;
+    }
+    const std::size_t authority_start = kScheme.size();
+    const std::size_t path_start = url.find('/', authority_start);
+    if (path_start == std::string::npos ||
+        url.substr(authority_start, path_start - authority_start) != origin.authority) {
+        return false;
+    }
+
+    static const std::string kAudioPathPrefix = "/api/v1/sip/telephony/audio/";
+    const std::string path = url.substr(path_start);
+    if (path.compare(0, kAudioPathPrefix.size(), kAudioPathPrefix) != 0) {
+        return false;
+    }
+    const std::string session_id = path.substr(kAudioPathPrefix.size());
+    if (!safe_callback_session_id(session_id)) {
+        return false;
+    }
+    return expected_session_id.empty() ||
+           (safe_callback_session_id(expected_session_id) && session_id == expected_session_id);
+}
 
 HttpServer::HttpServer(std::string host, uint16_t port, SessionRegistry& registry)
     : host_(std::move(host)), port_(port), registry_(registry) {}
@@ -1383,9 +1580,13 @@ void HttpServer::handle_client(const int client_fd) {
         return;
     }
 
-    // Auth gate (VG-18): everything except the liveness probe requires a valid
-    // bearer token when VOICE_GATEWAY_AUTH_TOKEN is configured; a no-op otherwise.
-    if (!(request->method == "GET" && request->path == "/health") && !request_authorized(request.value())) {
+    // Auth gate (VG-18): mutating/session-detail controls require a valid bearer
+    // token. The loopback-only aggregate health/stats probes remain read-only so
+    // deployment can prove zero active sessions without putting a secret in a
+    // process argument or generated evidence file.
+    const bool public_probe = request->method == "GET" &&
+                              (request->path == "/health" || request->path == "/stats");
+    if (!public_probe && !request_authorized(request.value())) {
         write_response(client_fd, 401, "Unauthorized", "{\"error\":\"unauthorized\"}");
         return;
     }
@@ -1499,7 +1700,7 @@ void HttpServer::handle_client(const int client_fd) {
         if (audio_callback_url.has_value()) {
             // Reject control-char / non-http / off-allowlist callback URLs before
             // the gateway will POST caller audio to them (VG-18).
-            if (!is_allowed_callback_url(audio_callback_url.value())) {
+            if (!audio_callback_url_is_allowed(audio_callback_url.value(), config.session_id)) {
                 write_response(client_fd, 400, "Bad Request", "{\"error\":\"callback_url_not_allowed\"}");
                 return;
             }

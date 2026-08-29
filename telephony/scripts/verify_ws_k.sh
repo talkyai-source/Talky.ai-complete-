@@ -95,10 +95,15 @@ done
 
 echo "[8/8] Optional promtool validation (if Docker available)..."
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  metrics_token_file="$(mktemp)"
+  trap 'rm -f -- "$metrics_token_file"' EXIT
+  printf '%s' 'static-verifier-token-not-for-runtime' >"$metrics_token_file"
+  chmod 0644 "$metrics_token_file"
   docker run --rm \
     --entrypoint /bin/promtool \
     -v "$PROM_CONFIG:/etc/prometheus/prometheus.yml:ro" \
     -v "$PROM_RULES:/etc/prometheus/rules/telephony_ws_k_rules.yml:ro" \
+    -v "$metrics_token_file:/etc/prometheus/secrets/talky_metrics_token:ro" \
     prom/prometheus:v2.54.1 \
     check config /etc/prometheus/prometheus.yml >/dev/null
   docker run --rm \
@@ -106,6 +111,8 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     -v "$PROM_RULES:/etc/prometheus/rules/telephony_ws_k_rules.yml:ro" \
     prom/prometheus:v2.54.1 \
     check rules /etc/prometheus/rules/telephony_ws_k_rules.yml >/dev/null
+  rm -f -- "$metrics_token_file"
+  trap - EXIT
   echo "[OK] promtool config and rules checks passed"
 else
   echo "[WARN] Docker is unavailable/inaccessible; skipped promtool validation"

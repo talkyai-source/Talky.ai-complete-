@@ -39,6 +39,9 @@ namespace {
 
 int g_pass = 0;
 int g_fail = 0;
+constexpr char kInternalToken[] = "gw-test-internal-token-0123456789abcdef";
+constexpr char kControlToken[] = "gw-test-control-token-fedcba9876543210";
+constexpr char kBackendOrigin[] = "http://127.0.0.1:18089";
 
 void check(const bool cond, const std::string& name) {
     if (cond) {
@@ -290,6 +293,91 @@ std::string http_roundtrip(const uint16_t port, const std::string& raw) {
 
 std::string post_request(const std::string& path, const std::string& body) {
     std::ostringstream o;
+    o << "POST " << path << " HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+      << "Authorization: Bearer " << kControlToken << "\r\n"
+      << "Content-Type: application/json\r\n"
+      << "Content-Length: " << body.size() << "\r\nConnection: close\r\n\r\n"
+      << body;
+    return o.str();
+}
+
+void set_valid_gateway_security_environment() {
+    setenv("INTERNAL_SERVICE_TOKEN", kInternalToken, 1);
+    setenv("VOICE_GATEWAY_AUTH_TOKEN", kControlToken, 1);
+    setenv("VOICE_GATEWAY_CALLBACK_HOST", "127.0.0.1", 1);
+    setenv("BACKEND_INTERNAL_URL", kBackendOrigin, 1);
+}
+
+// The executable's startup contract and the sender's final destination check
+// use the same parser. Exercise ambiguous URL forms and credential reuse as
+// pure deterministic cases before any function-local environment cache is read.
+void test_gateway_security_configuration() {
+    set_valid_gateway_security_environment();
+    std::string error;
+    check(voice_gateway::validate_gateway_security_environment(error),
+          "origin_valid_security_environment");
+
+    setenv("VOICE_GATEWAY_AUTH_TOKEN", kInternalToken, 1);
+    error.clear();
+    check(!voice_gateway::validate_gateway_security_environment(error) &&
+              error.find("must be distinct") != std::string::npos,
+          "origin_reused_secrets_rejected");
+    set_valid_gateway_security_environment();
+
+    setenv("INTERNAL_SERVICE_TOKEN", "short", 1);
+    error.clear();
+    check(!voice_gateway::validate_gateway_security_environment(error) &&
+              error.find("INTERNAL_SERVICE_TOKEN") != std::string::npos,
+          "origin_short_internal_secret_rejected");
+    set_valid_gateway_security_environment();
+
+    const std::vector<std::string> invalid_origins = {
+        "https://127.0.0.1:18089",
+        "http://127.0.0.1",
+        "http://127.0.0.1:08089",
+        "http://127.0.0.1:18089/",
+        "http://127.0.0.1:18089/base",
+        "http://user@127.0.0.1:18089",
+        "http://127.0.0.1:18089?x=1",
+        "http://127.0.0.1:18089#fragment",
+        "http://203.0.113.9:18089",
+    };
+    for (std::size_t i = 0; i < invalid_origins.size(); ++i) {
+        setenv("BACKEND_INTERNAL_URL", invalid_origins[i].c_str(), 1);
+        error.clear();
+        check(!voice_gateway::validate_gateway_security_environment(error),
+              "origin_invalid_backend_url_" + std::to_string(i));
+    }
+    set_valid_gateway_security_environment();
+
+    setenv("VOICE_GATEWAY_CALLBACK_HOST", "127.0.0.2", 1);
+    error.clear();
+    check(!voice_gateway::validate_gateway_security_environment(error) &&
+              error.find("must exactly match") != std::string::npos,
+          "origin_callback_host_mismatch_rejected");
+    set_valid_gateway_security_environment();
+
+    const std::string valid_callback =
+        std::string(kBackendOrigin) + "/api/v1/sip/telephony/audio/origin-ok";
+    check(voice_gateway::audio_callback_url_is_allowed(valid_callback, "origin-ok"),
+          "origin_exact_audio_callback_allowed");
+    check(!voice_gateway::audio_callback_url_is_allowed(
+              "http://127.0.0.1:18088/api/v1/sip/telephony/audio/origin-ok", "origin-ok"),
+          "origin_wrong_loopback_port_rejected");
+    check(!voice_gateway::audio_callback_url_is_allowed(
+              "http://127.0.0.1:18089/other/origin-ok", "origin-ok"),
+          "origin_wrong_path_rejected");
+    check(!voice_gateway::audio_callback_url_is_allowed(
+              "http://127.0.0.1:18089/api/v1/sip/telephony/audio/%2f", "%2f"),
+          "origin_encoded_session_id_rejected");
+    check(!voice_gateway::audio_callback_url_is_allowed(valid_callback + "?next=bad", "origin-ok"),
+          "origin_query_rejected");
+    check(!voice_gateway::audio_callback_url_is_allowed(valid_callback, "different-session"),
+          "origin_session_path_mismatch_rejected");
+}
+
+std::string unauthenticated_post_request(const std::string& path, const std::string& body) {
+    std::ostringstream o;
     o << "POST " << path << " HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n"
       << "Content-Length: " << body.size() << "\r\nConnection: close\r\n\r\n"
       << body;
@@ -298,7 +386,7 @@ std::string post_request(const std::string& path, const std::string& body) {
 
 // VG-18 (+ VG-11 start path, + VG-19/VG-03 shutdown): drive the real HttpServer
 // end to end. A CRLF-laced callback URL must be rejected; a clean start must
-// succeed with auth off (default); /health is unauthenticated.
+// succeed with the control token; /health remains unauthenticated.
 void test_control_plane_callback_validation() {
     voice_gateway::SessionRegistry registry;
     voice_gateway::HttpServer server("127.0.0.1", 18099, registry);
@@ -310,13 +398,45 @@ void test_control_plane_callback_validation() {
     const std::string bad_body =
         "{\"session_id\":\"vg18-bad\",\"listen_ip\":\"127.0.0.1\",\"listen_port\":41700,"
         "\"remote_ip\":\"127.0.0.1\",\"remote_port\":41701,\"codec\":\"pcmu\",\"ptime_ms\":20,"
-        "\"audio_callback_url\":\"http://127.0.0.1:8000/x\\r\\nX-Injected: 1\"}";
+        "\"audio_callback_url\":\"http://127.0.0.1:18089/api/v1/sip/telephony/audio/vg18-bad\\r\\nX-Injected: 1\"}";
     const std::string bad_resp = http_roundtrip(18099, post_request("/v1/sessions/start", bad_body));
     check(bad_resp.find("callback_url_not_allowed") != std::string::npos, "vg18_crlf_callback_rejected");
 
+    const std::string off_host_body =
+        "{\"session_id\":\"vg18-off-host\",\"listen_ip\":\"127.0.0.1\",\"listen_port\":41704,"
+        "\"remote_ip\":\"127.0.0.1\",\"remote_port\":41705,\"codec\":\"pcmu\",\"ptime_ms\":20,"
+        "\"audio_callback_url\":\"http://203.0.113.9:18089/api/v1/sip/telephony/audio/vg18-off-host\"}";
+    const std::string off_host_resp =
+        http_roundtrip(18099, post_request("/v1/sessions/start", off_host_body));
+    check(off_host_resp.find("callback_url_not_allowed") != std::string::npos,
+          "vg18_off_host_callback_rejected");
+
+    const std::string wrong_port_body =
+        "{\"session_id\":\"vg18-wrong-port\",\"listen_ip\":\"127.0.0.1\",\"listen_port\":41706,"
+        "\"remote_ip\":\"127.0.0.1\",\"remote_port\":41707,\"codec\":\"pcmu\",\"ptime_ms\":20,"
+        "\"audio_callback_url\":\"http://127.0.0.1:18088/api/v1/sip/telephony/audio/vg18-wrong-port\"}";
+    const std::string wrong_port_resp =
+        http_roundtrip(18099, post_request("/v1/sessions/start", wrong_port_body));
+    check(wrong_port_resp.find("callback_url_not_allowed") != std::string::npos,
+          "vg18_wrong_loopback_port_rejected");
+
+    const std::string wrong_path_body =
+        "{\"session_id\":\"vg18-wrong-path\",\"listen_ip\":\"127.0.0.1\",\"listen_port\":41708,"
+        "\"remote_ip\":\"127.0.0.1\",\"remote_port\":41709,\"codec\":\"pcmu\",\"ptime_ms\":20,"
+        "\"audio_callback_url\":\"http://127.0.0.1:18089/audio/vg18-wrong-path\"}";
+    const std::string wrong_path_resp =
+        http_roundtrip(18099, post_request("/v1/sessions/start", wrong_path_body));
+    check(wrong_path_resp.find("callback_url_not_allowed") != std::string::npos,
+          "vg18_non_audio_route_rejected");
+
     const std::string ok_body =
         "{\"session_id\":\"vg18-ok\",\"listen_ip\":\"127.0.0.1\",\"listen_port\":41702,"
-        "\"remote_ip\":\"127.0.0.1\",\"remote_port\":41703,\"codec\":\"pcmu\",\"ptime_ms\":20}";
+        "\"remote_ip\":\"127.0.0.1\",\"remote_port\":41703,\"codec\":\"pcmu\",\"ptime_ms\":20,"
+        "\"audio_callback_url\":\"http://127.0.0.1:18089/api/v1/sip/telephony/audio/vg18-ok\"}";
+    const std::string unauthenticated_resp =
+        http_roundtrip(18099, unauthenticated_post_request("/v1/sessions/start", ok_body));
+    check(unauthenticated_resp.find("401 Unauthorized") != std::string::npos,
+          "vg18_unauthenticated_control_rejected");
     const std::string ok_resp = http_roundtrip(18099, post_request("/v1/sessions/start", ok_body));
     check(ok_resp.find("\"status\":\"started\"") != std::string::npos, "vg18_valid_start_ok");
     (void)http_roundtrip(18099, post_request("/v1/sessions/stop", "{\"session_id\":\"vg18-ok\"}"));
@@ -798,6 +918,12 @@ public:
         }
     }
     [[nodiscard]] int posts() const { return posts_.load(); }
+    // Raw bytes of the most recent POST (request line + headers + body), so a
+    // test can assert on what the gateway actually put on the wire.
+    [[nodiscard]] std::string last_request() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return last_request_;
+    }
 
 private:
     void run() {
@@ -833,6 +959,8 @@ private:
             }
             if (header_end != std::string::npos && raw.rfind("POST", 0) == 0) {
                 posts_.fetch_add(1);
+                std::lock_guard<std::mutex> lock(mutex_);
+                last_request_ = raw;
             }
             const char resp[] = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok";
             (void)send(c, resp, sizeof(resp) - 1, MSG_NOSIGNAL);
@@ -843,6 +971,8 @@ private:
     int fd_{-1};
     std::atomic<bool> running_{true};
     std::atomic<int> posts_{0};
+    mutable std::mutex mutex_;   // guards last_request_
+    std::string last_request_;
     std::thread worker_;
 };
 
@@ -975,7 +1105,7 @@ void test_interrupt_send_barrier() {
 // = 2 full batches + 1 partial; without the finisher the sink sees only 2 POSTs
 // and the caller's final frames are silently discarded.
 void test_sink_finish_flushes_tail() {
-    MiniHttpSink sink(18093);
+    MiniHttpSink sink(18089);
     voice_gateway::SessionRegistry registry;
     voice_gateway::HttpServer server("127.0.0.1", 18092, registry);
     std::string err;
@@ -986,7 +1116,8 @@ void test_sink_finish_flushes_tail() {
     const std::string start_body =
         "{\"session_id\":\"sink-e\",\"listen_ip\":\"127.0.0.1\",\"listen_port\":41710,"
         "\"remote_ip\":\"127.0.0.1\",\"remote_port\":41711,\"codec\":\"pcmu\",\"ptime_ms\":20,"
-        "\"audio_callback_url\":\"http://127.0.0.1:18093/audio\",\"audio_callback_batch_frames\":2}";
+        "\"audio_callback_url\":\"http://127.0.0.1:18089/api/v1/sip/telephony/audio/sink-e\","
+        "\"audio_callback_batch_frames\":2}";
     const std::string start_resp = http_roundtrip(18092, post_request("/v1/sessions/start", start_body));
     check(start_resp.find("\"status\":\"started\"") != std::string::npos, "sinkE_session_started");
 
@@ -1014,6 +1145,58 @@ void test_sink_finish_flushes_tail() {
     server_thread.join();
 }
 
+// The caller-audio callback must carry X-Internal-Service-Token when
+// INTERNAL_SERVICE_TOKEN is configured. The backend's audio-ingest route
+// (POST /api/v1/sip/telephony/audio/{session_id}) authenticates on exactly that
+// header, so without it TELEPHONY_GATEWAY_AUDIO_REQUIRE_INTERNAL_TOKEN=true
+// would 403 every RTP batch of every live call and silently kill STT.
+void test_audio_callback_sends_internal_token() {
+    MiniHttpSink sink(18089);
+    voice_gateway::SessionRegistry registry;
+    voice_gateway::HttpServer server("127.0.0.1", 18090, registry);
+    std::string err;
+    check(server.start(err), "token_server_start");
+    std::thread server_thread([&server] { server.run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+
+    const std::string start_body =
+        "{\"session_id\":\"tok-1\",\"listen_ip\":\"127.0.0.1\",\"listen_port\":41720,"
+        "\"remote_ip\":\"127.0.0.1\",\"remote_port\":41721,\"codec\":\"pcmu\",\"ptime_ms\":20,"
+        "\"audio_callback_url\":\"http://127.0.0.1:18089/api/v1/sip/telephony/audio/tok-1\","
+        "\"audio_callback_batch_frames\":1}";
+    const std::string start_resp = http_roundtrip(18090, post_request("/v1/sessions/start", start_body));
+    check(start_resp.find("\"status\":\"started\"") != std::string::npos, "token_session_started");
+
+    const int tx = socket(AF_INET, SOCK_DGRAM, 0);
+    sockaddr_in dst{};
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons(41720);
+    inet_pton(AF_INET, "127.0.0.1", &dst.sin_addr);
+    uint32_t ts = 0;
+    for (uint16_t s = 200; s < 203; ++s) {
+        send_rtp(tx, dst, s, ts, 0x7777u, static_cast<uint8_t>(s & 0xFF));
+        ts += 160;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    for (int i = 0; i < 200 && sink.posts() == 0; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    check(sink.posts() > 0, "token_callback_delivered");
+
+    // Header name is matched case-sensitively here on purpose: this is the
+    // literal the deployed binary emits, and the value is the one main() put in
+    // the environment before any http_post read it.
+    const std::string raw = sink.last_request();
+    check(raw.find(std::string("X-Internal-Service-Token: ") + kInternalToken + "\r\n") !=
+              std::string::npos,
+          "audio_callback_carries_internal_service_token");
+
+    (void)http_roundtrip(18090, post_request("/v1/sessions/stop", "{\"session_id\":\"tok-1\"}"));
+    close(tx);
+    server.stop();
+    server_thread.join();
+}
+
 }  // namespace
 
 int main() {
@@ -1021,6 +1204,9 @@ int main() {
     // test_body_budget_503 can exhaust it with a 16 KiB request. Read once at
     // first use; every other test's bodies are far below 8 KiB.
     setenv("VOICE_GATEWAY_MAX_INFLIGHT_BODY_BYTES", "8192", 1);
+    // Configure security BEFORE the first auth/callback helper caches a token.
+    set_valid_gateway_security_environment();
+    test_gateway_security_configuration();
     test_tts_overflow_accounting();
     test_jitter_flood_no_deadlock();
     test_stt_reorder_ordering();
@@ -1039,6 +1225,7 @@ int main() {
     test_tts_utterance_idempotency();
     test_interrupt_send_barrier();
     test_sink_finish_flushes_tail();
+    test_audio_callback_sends_internal_token();
     test_slowloris_header_deadline();
     std::cout << "passed=" << g_pass << " failed=" << g_fail << "\n";
     return g_fail == 0 ? 0 : 1;

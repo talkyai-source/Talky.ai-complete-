@@ -1,10 +1,13 @@
 {
   "attempted": 0,
+  "status": "not_measured",
   "reaction_ms": {
     "available": false,
     "p95": null,
     "threshold": 250.0
   },
-  "pass": true,
-  "note": "Barge-in reaction timing is not directly measurable from SIP-only Day10 probe."
+  "pass": null,
+  "external_live_media_evidence_required": true,
+  "sip_only_scope_contract_pass": true,
+  "note": "Historical SIP-only run: no RTP was sent or received, so this artifact is not barge-in evidence and cannot satisfy a production release gate."
 }

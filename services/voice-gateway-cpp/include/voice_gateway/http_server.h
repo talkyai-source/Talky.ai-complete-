@@ -12,6 +12,19 @@
 
 namespace voice_gateway {
 
+// Validate the complete callback credential/origin contract used by the
+// production executable. The returned error names only the invalid setting;
+// it never contains a secret value.
+[[nodiscard]] bool validate_gateway_security_environment(std::string& error);
+
+// Accept only the caller-audio callback route on the exact origin pinned by
+// BACKEND_INTERNAL_URL + VOICE_GATEWAY_CALLBACK_HOST. When expected_session_id
+// is non-empty, the URL path must end in that exact safe session identifier.
+// http_post repeats this check immediately before attaching the internal token.
+[[nodiscard]] bool audio_callback_url_is_allowed(
+    const std::string& url,
+    const std::string& expected_session_id = std::string());
+
 class HttpServer {
 public:
     HttpServer(std::string host, uint16_t port, SessionRegistry& registry);

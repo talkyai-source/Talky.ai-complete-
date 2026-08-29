@@ -3,7 +3,6 @@
 #include <atomic>
 #include <csignal>
 #include <cstdint>
-#include <cstdlib>
 #include <chrono>
 #include <iostream>
 #include <string>
@@ -64,6 +63,15 @@ int main(int argc, char** argv) {
         // rather than silently starting on defaults (VG-35).
         std::cerr << "Unknown or malformed argument: " << arg << std::endl;
         std::cerr << "Usage: voice_gateway [--host 127.0.0.1] [--port 18080]" << std::endl;
+        return 2;
+    }
+
+    // Refuse before binding unless callback credentials and the complete
+    // backend origin are pinned. The validator never returns secret material
+    // in its error text.
+    std::string security_error;
+    if (!voice_gateway::validate_gateway_security_environment(security_error)) {
+        std::cerr << security_error << "; refusing startup" << std::endl;
         return 2;
     }
 

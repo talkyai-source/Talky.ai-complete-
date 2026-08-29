@@ -16,6 +16,16 @@ services:
       ASTERISK_SIP_PORT: "${ASTERISK_SIP_PORT:-5070}"
       RTP_PORT_MIN: "${RTP_PORT_MIN:-40000}"
       RTP_PORT_MAX: "${RTP_PORT_MAX:-44999}"
+      OPENSIPS_CANARY_ENABLED: "${OPENSIPS_CANARY_ENABLED:-0}"
+      OPENSIPS_CANARY_PERCENT: "${OPENSIPS_CANARY_PERCENT:-0}"
+      OPENSIPS_CANARY_FREEZE: "${OPENSIPS_CANARY_FREEZE:-1}"
+      OPENSIPS_CANARY_DID: "${OPENSIPS_CANARY_DID:-__UNCONFIGURED_DID__}"
+      OPENSIPS_CANARY_AGENT_ID: "${OPENSIPS_CANARY_AGENT_ID:-__UNCONFIGURED_AGENT__}"
+      OPENSIPS_CANARY_SOURCE_REGEX: '${OPENSIPS_CANARY_SOURCE_REGEX:-^127\.0\.0\.1$}'
+    command:
+      - /bin/sh
+      - -ec
+      - ASTERISK_EXTENSIONS_CONFIG=/etc/asterisk/extensions.conf ASTERISK_PJSIP_CONFIG=/etc/asterisk/pjsip.conf /bin/sh /usr/local/bin/assert_canary_ingress.sh asterisk; exec asterisk -f -U asterisk -G asterisk
     volumes:
       - ../../asterisk/conf/modules.conf:/etc/asterisk/modules.conf:ro
       - ../../asterisk/conf/pjsip.conf:/etc/asterisk/pjsip.conf:ro
@@ -24,6 +34,7 @@ services:
       - ../../asterisk/conf/ari.conf:/etc/asterisk/ari.conf:ro
       - ../../asterisk/conf/features.conf:/etc/asterisk/features.conf:ro
       - ../../asterisk/conf/rtp.conf:/etc/asterisk/rtp.conf:ro
+      - ../../scripts/assert_canary_ingress.sh:/usr/local/bin/assert_canary_ingress.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "asterisk -rx 'core show uptime seconds' >/dev/null 2>&1 || exit 1"]
       interval: 15s
@@ -33,11 +44,12 @@ services:
   freeswitch:
     image: "${FREESWITCH_IMAGE:-safarov/freeswitch:latest}"
     container_name: talky-freeswitch
+    profiles: ["backup"]
     restart: unless-stopped
     network_mode: host
-    # FreeSWITCH is always running as the hot-standby B2BUA.
-    # OpenSIPS dispatcher routes calls here automatically when Asterisk is down.
-    # To disable FreeSWITCH in a single-PBX deployment add: profiles: ["backup"]
+    # Out-of-band recovery/drill target only.  It is deliberately absent from
+    # the inbound canary dispatcher and does not start unless an operator uses
+    # `docker compose --profile backup ...`.  There is no automatic failover.
     volumes:
       - ../../freeswitch/conf/autoload_configs/event_socket.conf.xml:/etc/freeswitch/autoload_configs/event_socket.conf.xml:ro
       - ../../freeswitch/conf/autoload_configs/xml_curl.conf.xml:/etc/freeswitch/autoload_configs/xml_curl.conf.xml:ro
@@ -78,6 +90,12 @@ services:
       OPENSIPS_SIP_PORT: "${OPENSIPS_SIP_PORT:-15060}"
       OPENSIPS_TLS_PORT: "${OPENSIPS_TLS_PORT:-15061}"
       OPENSIPS_TLS_ONLY: "${OPENSIPS_TLS_ONLY:-0}"
+      OPENSIPS_CANARY_ENABLED: "${OPENSIPS_CANARY_ENABLED:-0}"
+      OPENSIPS_CANARY_PERCENT: "${OPENSIPS_CANARY_PERCENT:-0}"
+      OPENSIPS_CANARY_FREEZE: "${OPENSIPS_CANARY_FREEZE:-1}"
+      OPENSIPS_CANARY_DID: "${OPENSIPS_CANARY_DID:-__UNCONFIGURED_DID__}"
+      OPENSIPS_CANARY_AGENT_ID: "${OPENSIPS_CANARY_AGENT_ID:-__UNCONFIGURED_AGENT__}"
+      OPENSIPS_CANARY_SOURCE_REGEX: '${OPENSIPS_CANARY_SOURCE_REGEX:-^127\.0\.0\.1$}'
     depends_on:
       asterisk:
         condition: service_healthy
@@ -86,13 +104,14 @@ services:
     command:
       - /bin/sh
       - -lc
-      - export OPENSIPS_UDP_WORKERS="${OPENSIPS_UDP_WORKERS:-$(nproc)}"; exec opensips -F -f /etc/opensips/opensips.cfg
+      - export OPENSIPS_UDP_WORKERS="${OPENSIPS_UDP_WORKERS:-$(nproc)}"; OPENSIPS_CONFIG=/etc/opensips/opensips.cfg DISPATCHER_CONFIG=/etc/opensips/dispatcher.list /bin/sh /usr/local/bin/assert_canary_ingress.sh opensips; opensips -C -f /etc/opensips/opensips.cfg; exec opensips -F -f /etc/opensips/opensips.cfg
     volumes:
       - ../../opensips/conf/opensips.cfg:/etc/opensips/opensips.cfg:ro
       - ../../opensips/conf/dispatcher.list:/etc/opensips/dispatcher.list:ro
       - ../../opensips/conf/address.list:/etc/opensips/address.list:ro
-      - ../../opensips/conf/tls.cfg:/etc/opensips/tls.cfg:ro
+      - ../../opensips/tls.cfg:/etc/opensips/tls.cfg:ro
       - ../../opensips/certs:/etc/opensips/certs:ro
+      - ../../scripts/assert_canary_ingress.sh:/usr/local/bin/assert_canary_ingress.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "opensips -C -f /etc/opensips/opensips.cfg >/dev/null 2>&1 || exit 1"]
       interval: 15s

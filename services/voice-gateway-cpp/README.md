@@ -39,6 +39,37 @@ This service is the planned RTP/media gateway layer between:
    - `telephony/scripts/verify_day6_media_resilience.sh`
    - `telephony/scripts/day6_media_resilience_probe.py`
 
+## Environment
+
+The production executable requires all of these before it opens a listener:
+
+- `INTERNAL_SERVICE_TOKEN`: sent as `X-Internal-Service-Token` on every
+  caller-audio callback. It must match the backend value.
+- `VOICE_GATEWAY_AUTH_TOKEN`: a distinct bearer secret required on session and
+  control endpoints. The Asterisk adapter sends the matching value.
+- `VOICE_GATEWAY_CALLBACK_HOST`: one numeric loopback IPv4 address and the only host
+  permitted in `audio_callback_url`. It must match the host in the backend's
+  `BACKEND_INTERNAL_URL` (normally `127.0.0.1`).
+- `BACKEND_INTERNAL_URL`: the exact plain-HTTP loopback origin, including an
+  explicit port (normally `http://127.0.0.1:8000`). Credentials, an implicit or
+  non-canonical port, query, fragment, trailing slash, and base path are rejected.
+
+Both secrets must contain 32-512 valid characters and must be distinct. Unset,
+blank, overlong, short, reused, or control-character-bearing secrets refuse
+gateway startup. A callback is accepted only when its scheme, numeric host, and
+port exactly match `BACKEND_INTERNAL_URL`, its host also exactly matches
+`VOICE_GATEWAY_CALLBACK_HOST`, and its path is
+`/api/v1/sip/telephony/audio/<safe-session-id>`. The sender repeats that full
+check immediately before attaching `INTERNAL_SERVICE_TOKEN`, so a different
+loopback port cannot receive the token or caller audio. `GET /health` and aggregate
+`GET /stats` remain unauthenticated read-only probes on the loopback listener;
+all session/control routes require the gateway bearer token.
+
+Deploy only through `deploy_to_server.sh`: it requires a durable traffic freeze
+and zero-call evidence, builds and tests the exact SHA, publishes the gateway
+atomically, restarts it first, and starts the matching backend only after the
+gateway is healthy. There is no legacy unauthenticated audio mode.
+
 ## Notes
 
 1. Codec is intentionally locked to `pcmu` and `ptime_ms=20` for frozen-plan compliance.

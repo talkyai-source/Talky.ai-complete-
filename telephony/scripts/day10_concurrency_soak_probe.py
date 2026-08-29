@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Day 10 concurrency + soak probe.
+"""Day 10 SIP-signaling concurrency + soak probe.
 
 Runs staged concurrent SIP load against the Day 9 runtime path, derives
-RFC6076-style session KPIs, identifies safe concurrency threshold, and executes
-a sustained soak window.
+RFC6076-style session KPIs, identifies a safe concurrency threshold, and
+executes a sustained soak window.  This probe does not open an RTP socket or
+generate media, so it cannot execute or measure two-way audio or barge-in.
+Those release gates require separate live-media evidence.
 """
 
 from __future__ import annotations
@@ -303,11 +305,15 @@ def _run_single_call(
             )
 
         final_code = invite_codes[-1] if invite_codes else None
-        setup_delay = float(final_recv_ms - invite_sent_ms) if final_recv_ms is not None else None
+        setup_delay = (
+            float(final_recv_ms - invite_sent_ms) if final_recv_ms is not None else None
+        )
 
         if not final_headers or final_code != 200:
             ended_at = _now_ms()
-            reason = "invite_timeout" if not final_headers else f"invite_failed_{final_code}"
+            reason = (
+                "invite_timeout" if not final_headers else f"invite_failed_{final_code}"
+            )
             return Day10CallResult(
                 stage_label=stage_label,
                 call_index=call_index,
@@ -453,7 +459,9 @@ def _run_single_call(
             timeout_s=max(1.0, invite_timeout_s),
             call_id=call_id,
         )
-        disconnect_delay_ms = float(bye_resp_ms - bye_sent_ms) if bye_resp_ms is not None else None
+        disconnect_delay_ms = (
+            float(bye_resp_ms - bye_sent_ms) if bye_resp_ms is not None else None
+        )
 
         fallback_success = bye_code in {200, 481}
         ended_at = _now_ms()
@@ -470,7 +478,9 @@ def _run_single_call(
             remote_bye_received=False,
             remote_bye_elapsed_ms=None,
             caller_bye_code=bye_code,
-            reason="caller_bye_fallback" if fallback_success else "bye_response_timeout",
+            reason=(
+                "caller_bye_fallback" if fallback_success else "bye_response_timeout"
+            ),
             call_id=call_id,
             bind_ip=bind_ip,
             target=f"{host}:{port}",
@@ -558,7 +568,9 @@ def _runtime_snapshot(gateway_base_url: str) -> Dict[str, Any]:
 
     if gateway_base_url:
         try:
-            stats_resp = requests.get(gateway_base_url.rstrip("/") + "/stats", timeout=3)
+            stats_resp = requests.get(
+                gateway_base_url.rstrip("/") + "/stats", timeout=3
+            )
             if stats_resp.ok:
                 stats = stats_resp.json()
                 payload["gateway_active_sessions"] = stats.get("active_sessions")
@@ -605,7 +617,12 @@ def _run_load_window(
     )
     stage_call_budget = max(
         max(1, int(concurrency)),
-        int(math.ceil(max(0.1, float(duration_seconds)) / max(0.01, effective_dispatch_interval)))
+        int(
+            math.ceil(
+                max(0.1, float(duration_seconds))
+                / max(0.01, effective_dispatch_interval)
+            )
+        )
         + max(1, int(concurrency)),
     )
     dispatched_calls = 0
@@ -651,7 +668,9 @@ def _run_load_window(
             if sample_interval_seconds > 0:
                 timeout = min(timeout, max(0.05, next_sample_at - time.monotonic()))
 
-            done, pending = wait(futures, timeout=max(0.05, timeout), return_when=FIRST_COMPLETED)
+            done, pending = wait(
+                futures, timeout=max(0.05, timeout), return_when=FIRST_COMPLETED
+            )
             futures = set(pending)
             for fut in done:
                 try:
@@ -703,15 +722,21 @@ def _summarize_results(
     attempts = len(rows)
     successes = sum(1 for r in rows if r.success)
     failures = attempts - successes
-    setup_delays = [float(r.setup_delay_ms) for r in rows if r.setup_delay_ms is not None]
-    disconnect_delays = [float(r.disconnect_delay_ms) for r in rows if r.disconnect_delay_ms is not None]
+    setup_delays = [
+        float(r.setup_delay_ms) for r in rows if r.setup_delay_ms is not None
+    ]
+    disconnect_delays = [
+        float(r.disconnect_delay_ms) for r in rows if r.disconnect_delay_ms is not None
+    ]
 
     scenario_breakdown: Dict[str, Dict[str, int]] = {}
     tenant_breakdown: Dict[str, Dict[str, int]] = {}
     for row in rows:
         scenario = row.scenario or "unknown"
         tenant = row.tenant_id or "unknown"
-        scenario_breakdown.setdefault(scenario, {"attempted": 0, "success": 0, "failed": 0})
+        scenario_breakdown.setdefault(
+            scenario, {"attempted": 0, "success": 0, "failed": 0}
+        )
         tenant_breakdown.setdefault(tenant, {"attempted": 0, "success": 0, "failed": 0})
         scenario_breakdown[scenario]["attempted"] += 1
         tenant_breakdown[tenant]["attempted"] += 1
@@ -725,7 +750,9 @@ def _summarize_results(
     transfer_attempted = scenario_breakdown.get("transfer", {}).get("attempted", 0)
     transfer_success = scenario_breakdown.get("transfer", {}).get("success", 0)
     transfer_success_ratio = (
-        float(transfer_success) / float(transfer_attempted) if transfer_attempted > 0 else None
+        float(transfer_success) / float(transfer_attempted)
+        if transfer_attempted > 0
+        else None
     )
     reason_breakdown = dict(Counter(str(row.reason or "unknown") for row in rows))
 
@@ -736,8 +763,12 @@ def _summarize_results(
         "calls_attempted": attempts,
         "calls_success": successes,
         "calls_failed": failures,
-        "session_setup_success_ratio": (float(successes) / float(attempts)) if attempts else 0.0,
-        "ineffective_session_attempt_percent": (float(failures) * 100.0 / float(attempts)) if attempts else 0.0,
+        "session_setup_success_ratio": (
+            (float(successes) / float(attempts)) if attempts else 0.0
+        ),
+        "ineffective_session_attempt_percent": (
+            (float(failures) * 100.0 / float(attempts)) if attempts else 0.0
+        ),
         "srd_ms": {
             "p50": _percentile(setup_delays, 50),
             "p95": _percentile(setup_delays, 95),
@@ -776,18 +807,23 @@ def _evaluate_gate(
     isa_max_percent: float,
     transfer_success_min: float,
     require_transfer: bool,
+    forbid_transfer: bool,
     bargein_reaction_p95_max_ms: float,
     require_bargein_reaction: bool,
 ) -> Dict[str, Any]:
     reasons: List[str] = []
 
     setup_ratio = _safe_float(summary.get("session_setup_success_ratio"), default=0.0)
-    isa_percent = _safe_float(summary.get("ineffective_session_attempt_percent"), default=100.0)
+    isa_percent = _safe_float(
+        summary.get("ineffective_session_attempt_percent"), default=100.0
+    )
     srd_p95 = summary.get("srd_ms", {}).get("p95")
     sdd_p95 = summary.get("sdd_ms", {}).get("p95")
 
     if setup_ratio < setup_success_min:
-        reasons.append(f"setup_success_ratio={setup_ratio:.4f} < {setup_success_min:.4f}")
+        reasons.append(
+            f"setup_success_ratio={setup_ratio:.4f} < {setup_success_min:.4f}"
+        )
     if srd_p95 is None or float(srd_p95) > srd_p95_max_ms:
         reasons.append(f"srd_p95_ms={srd_p95} > {srd_p95_max_ms}")
     if sdd_p95 is None or float(sdd_p95) > sdd_p95_max_ms:
@@ -796,18 +832,31 @@ def _evaluate_gate(
         reasons.append(f"isa_percent={isa_percent:.4f} > {isa_max_percent:.4f}")
 
     transfer_attempted = int(summary.get("transfer", {}).get("attempted", 0) or 0)
+    transfer_success = int(summary.get("transfer", {}).get("success", 0) or 0)
     transfer_ratio = summary.get("transfer", {}).get("success_ratio")
-    if require_transfer or transfer_attempted > 0:
+    if forbid_transfer:
+        if transfer_attempted > 0 or transfer_success > 0:
+            reasons.append(
+                "transfer scenario activity is forbidden "
+                f"(attempted={transfer_attempted}, success={transfer_success})"
+            )
+    elif require_transfer or transfer_attempted > 0:
         if transfer_ratio is None or float(transfer_ratio) < transfer_success_min:
-            reasons.append(f"transfer_success_ratio={transfer_ratio} < {transfer_success_min:.4f}")
+            reasons.append(
+                f"transfer_success_ratio={transfer_ratio} < {transfer_success_min:.4f}"
+            )
 
-    barge_available = bool(summary.get("barge_in", {}).get("reaction_ms", {}).get("available", False))
+    barge_available = bool(
+        summary.get("barge_in", {}).get("reaction_ms", {}).get("available", False)
+    )
     barge_p95 = summary.get("barge_in", {}).get("reaction_ms", {}).get("p95")
     if require_bargein_reaction:
         if not barge_available:
             reasons.append("barge_in_reaction_ms unavailable")
         elif barge_p95 is None or float(barge_p95) > bargein_reaction_p95_max_ms:
-            reasons.append(f"barge_in_reaction_p95_ms={barge_p95} > {bargein_reaction_p95_max_ms}")
+            reasons.append(
+                f"barge_in_reaction_p95_ms={barge_p95} > {bargein_reaction_p95_max_ms}"
+            )
 
     return {
         "pass": len(reasons) == 0,
@@ -850,7 +899,9 @@ def _soak_trend_check(
 
     reasons: List[str] = []
     if ratio_drop > max_success_ratio_drop:
-        reasons.append(f"success_ratio_drop={ratio_drop:.4f} > {max_success_ratio_drop:.4f}")
+        reasons.append(
+            f"success_ratio_drop={ratio_drop:.4f} > {max_success_ratio_drop:.4f}"
+        )
     if mem_growth_mb is not None and mem_growth_mb > max_mem_growth_mb:
         reasons.append(f"mem_growth_mb={mem_growth_mb:.2f} > {max_mem_growth_mb:.2f}")
 
@@ -911,9 +962,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--remote-bye-timeout", type=float, default=8.0)
     parser.add_argument("--hold-seconds", type=float, default=2.0)
 
-    parser.add_argument("--profile-baseline-percent", type=int, default=50)
-    parser.add_argument("--profile-bargein-percent", type=int, default=30)
-    parser.add_argument("--profile-transfer-percent", type=int, default=20)
+    # Fail-safe defaults describe what this harness can actually execute: SIP
+    # signaling only.  Media/barge-in and transfer scenarios are opt-in gates.
+    parser.add_argument("--profile-baseline-percent", type=int, default=100)
+    parser.add_argument("--profile-bargein-percent", type=int, default=0)
+    parser.add_argument("--profile-transfer-percent", type=int, default=0)
 
     parser.add_argument("--tenant-ids", default="day10-default")
 
@@ -924,8 +977,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--transfer-success-min", type=float, default=0.95)
     parser.add_argument("--bargein-reaction-p95-max-ms", type=float, default=250.0)
     parser.add_argument("--require-transfer", type=int, choices=(0, 1), default=0)
-    parser.add_argument("--require-bargein-reaction", type=int, choices=(0, 1), default=0)
-    parser.add_argument("--require-tenant-fairness", type=int, choices=(0, 1), default=0)
+    parser.add_argument(
+        "--require-bargein-reaction", type=int, choices=(0, 1), default=0
+    )
+    parser.add_argument(
+        "--require-tenant-fairness", type=int, choices=(0, 1), default=0
+    )
 
     parser.add_argument("--headroom-ratio", type=float, default=0.8)
     parser.add_argument("--stop-on-first-breach", type=int, choices=(0, 1), default=1)
@@ -952,10 +1009,31 @@ def main() -> int:
     args = _build_parser().parse_args()
 
     stage_levels = _parse_stage_levels(args.stage_concurrency)
-    if args.profile_baseline_percent < 0 or args.profile_bargein_percent < 0 or args.profile_transfer_percent < 0:
+    if (
+        args.profile_baseline_percent < 0
+        or args.profile_bargein_percent < 0
+        or args.profile_transfer_percent < 0
+    ):
         raise SystemExit("profile percentages must be >= 0")
-    if args.profile_baseline_percent + args.profile_bargein_percent + args.profile_transfer_percent <= 0:
+    if (
+        args.profile_baseline_percent
+        + args.profile_bargein_percent
+        + args.profile_transfer_percent
+        <= 0
+    ):
         raise SystemExit("sum of profile percentages must be > 0")
+    if args.profile_bargein_percent != 0 or bool(args.require_bargein_reaction):
+        raise SystemExit(
+            "SIP-only Day10 probe cannot generate RTP media or execute/measure barge-in; "
+            "set --profile-bargein-percent=0 and --require-bargein-reaction=0, then "
+            "supply separate live-media release evidence"
+        )
+    if bool(args.require_transfer) and args.profile_transfer_percent <= 0:
+        raise SystemExit(
+            "--require-transfer=1 requires --profile-transfer-percent to be greater than 0"
+        )
+
+    transfer_forbidden = args.profile_transfer_percent == 0
 
     tenant_ids = [t.strip() for t in (args.tenant_ids or "").split(",") if t.strip()]
     if not tenant_ids:
@@ -1001,6 +1079,7 @@ def main() -> int:
         isa_max_percent=float(args.isa_max_percent),
         transfer_success_min=float(args.transfer_success_min),
         require_transfer=False,
+        forbid_transfer=transfer_forbidden,
         bargein_reaction_p95_max_ms=float(args.bargein_reaction_p95_max_ms),
         require_bargein_reaction=False,
     )
@@ -1023,7 +1102,11 @@ def main() -> int:
 
     if not smoke_gate["pass"] and bool(args.enforce_gates):
         _persist_call_results()
-        print(json.dumps({"event": "smoke_failed", "reasons": smoke_gate["reasons"]}, indent=2))
+        print(
+            json.dumps(
+                {"event": "smoke_failed", "reasons": smoke_gate["reasons"]}, indent=2
+            )
+        )
         return 2
 
     ramp_results: List[Dict[str, Any]] = []
@@ -1068,6 +1151,7 @@ def main() -> int:
             isa_max_percent=float(args.isa_max_percent),
             transfer_success_min=float(args.transfer_success_min),
             require_transfer=bool(args.require_transfer),
+            forbid_transfer=transfer_forbidden,
             bargein_reaction_p95_max_ms=float(args.bargein_reaction_p95_max_ms),
             require_bargein_reaction=bool(args.require_bargein_reaction),
         )
@@ -1096,7 +1180,9 @@ def main() -> int:
 
     recommended = 0
     if safe_threshold > 0:
-        recommended = max(1, int(math.floor(float(safe_threshold) * float(args.headroom_ratio))))
+        recommended = max(
+            1, int(math.floor(float(safe_threshold) * float(args.headroom_ratio)))
+        )
 
     capacity_report = {
         "stage_levels": stage_levels,
@@ -1110,7 +1196,9 @@ def main() -> int:
 
     if safe_threshold <= 0 and bool(args.enforce_gates):
         _persist_call_results()
-        print(json.dumps({"event": "ramp_failed", "capacity": capacity_report}, indent=2))
+        print(
+            json.dumps({"event": "ramp_failed", "capacity": capacity_report}, indent=2)
+        )
         return 3
 
     soak_rows: List[Day10CallResult] = []
@@ -1170,6 +1258,7 @@ def main() -> int:
             isa_max_percent=float(args.isa_max_percent),
             transfer_success_min=float(args.transfer_success_min),
             require_transfer=bool(args.require_transfer),
+            forbid_transfer=transfer_forbidden,
             bargein_reaction_p95_max_ms=float(args.bargein_reaction_p95_max_ms),
             require_bargein_reaction=bool(args.require_bargein_reaction),
         )
@@ -1213,28 +1302,53 @@ def main() -> int:
         rows=all_rows,
     )
 
+    transfer_attempted = int(all_summary.get("transfer", {}).get("attempted", 0) or 0)
+    transfer_success = int(all_summary.get("transfer", {}).get("success", 0) or 0)
+    transfer_ratio = all_summary.get("transfer", {}).get("success_ratio")
+    if transfer_forbidden:
+        transfer_pass = transfer_attempted == 0 and transfer_success == 0
+        transfer_status = "forbidden_no_activity" if transfer_pass else "scope_breach"
+    elif bool(args.require_transfer) and transfer_attempted <= 0:
+        transfer_pass = False
+        transfer_status = "required_but_not_attempted"
+    else:
+        transfer_pass = transfer_ratio is None or float(transfer_ratio) >= float(
+            args.transfer_success_min
+        )
+        transfer_status = "observed" if transfer_attempted > 0 else "not_requested"
+
     transfer_payload = {
-        "attempted": all_summary.get("transfer", {}).get("attempted", 0),
-        "success": all_summary.get("transfer", {}).get("success", 0),
-        "success_ratio": all_summary.get("transfer", {}).get("success_ratio"),
+        "mode": "forbidden" if transfer_forbidden else "synthetic_scenario_labels",
+        "status": transfer_status,
+        "attempted": transfer_attempted,
+        "success": transfer_success,
+        "success_ratio": transfer_ratio,
         "threshold": float(args.transfer_success_min),
-        "pass": (
-            all_summary.get("transfer", {}).get("success_ratio") is None
-            or float(all_summary.get("transfer", {}).get("success_ratio") or 0.0)
-            >= float(args.transfer_success_min)
+        "pass": transfer_pass,
+        "note": (
+            "These counts are SIP load scenario labels, not proof of a PBX/provider transfer outcome; "
+            "the verifier must separately reconcile controller transfer events."
         ),
     }
     _write_json(args.output_transfer, transfer_payload)
 
     barge_payload = {
         "attempted": all_summary.get("barge_in", {}).get("attempted", 0),
+        "status": "not_measured",
         "reaction_ms": {
             "available": False,
             "p95": None,
             "threshold": float(args.bargein_reaction_p95_max_ms),
         },
-        "pass": not bool(args.require_bargein_reaction),
-        "note": "Barge-in reaction timing is not directly measurable from SIP-only Day10 probe.",
+        "pass": None,
+        "external_live_media_evidence_required": True,
+        "sip_only_scope_contract_pass": (
+            int(all_summary.get("barge_in", {}).get("attempted", 0) or 0) == 0
+        ),
+        "note": (
+            "Not measured: this SIP-only probe neither sends nor receives RTP and cannot "
+            "execute or measure barge-in. Use separately reviewed live-media evidence."
+        ),
     }
     _write_json(args.output_bargein, barge_payload)
 
@@ -1290,7 +1404,7 @@ def main() -> int:
         return 4
     if not transfer_payload["pass"]:
         return 5
-    if not barge_payload["pass"]:
+    if not barge_payload["sip_only_scope_contract_pass"]:
         return 6
     if not tenant_fairness_payload["pass"]:
         return 7

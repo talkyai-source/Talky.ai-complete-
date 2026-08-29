@@ -152,6 +152,9 @@ cmake --build "$GATEWAY_BUILD_DIR" -- -j"$(nproc)" >/dev/null
 ctest --test-dir "$GATEWAY_BUILD_DIR" --output-on-failure >/dev/null
 
 echo "[7/16] Starting C++ voice gateway runtime..."
+# shellcheck source=gateway_test_env.sh
+source "$SCRIPT_DIR/gateway_test_env.sh"
+provision_voice_gateway_test_env
 "$GATEWAY_BUILD_DIR/voice_gateway" --host "$GATEWAY_HOST" --port "$GATEWAY_HTTP_PORT" >"$GATEWAY_LOG" 2>&1 &
 GW_PID=$!
 for _ in $(seq 1 80); do
@@ -300,10 +303,14 @@ echo "[12/16] Capturing gateway stats and enforcing no active sessions..."
 curl -fsS "$GATEWAY_BASE_URL/stats" >"$GATEWAY_STATS_JSON"
 "$PYTHON_BIN" - <<PY
 import json
+import os
 import requests
 from pathlib import Path
 
-sessions = requests.get("${GATEWAY_BASE_URL}/v1/sessions", timeout=5).json().get("sessions", [])
+gateway_headers = {"Authorization": f"Bearer {os.environ['VOICE_GATEWAY_AUTH_TOKEN']}"}
+sessions = requests.get(
+    "${GATEWAY_BASE_URL}/v1/sessions", headers=gateway_headers, timeout=5
+).json().get("sessions", [])
 active = [s for s in sessions if str(s.get("state") or "") not in {"stopped", "failed"}]
 report = {
     "active_session_count": len(active),

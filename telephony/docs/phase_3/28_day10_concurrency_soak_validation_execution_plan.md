@@ -1,14 +1,24 @@
-# Day 10 Execution Plan: Concurrency + Soak Validation (Final Go/No-Go)
+# Day 10 Execution Plan: SIP-Signaling Concurrency + Soak Validation
 
 Date: 2026-03-03  
 Plan authority: `telephony/docs/phase_3/19_talk_lee_frozen_integration_plan.md`  
-Day scope: Day 10 only (final production-readiness gate on top of Day 9)
+Day scope: Day 10 SIP-signaling concurrency gate on top of Day 9
+
+> **Contract correction (2026-08-29):** the Day 10 load generator opens only a
+> SIP socket; it does not bind the advertised RTP port, send/receive RTP, inject
+> speech, or execute/measure barge-in. Its decision is therefore scoped to SIP
+> signaling concurrency/soak and is never a production release verdict. The
+> transfer-disabled inbound candidate runs at profile `100/0/0`, fails on any
+> transfer event/counter/outcome, and requires separate candidate-bound live
+> carrier media/barge-in evidence under
+> `docs/INBOUND_CALLING_RELEASE_GATE.md`.
 
 ---
 
 ## 1) Objective
 
-Close the frozen 10-day plan with an official, measurable production-readiness gate for the telephony runtime:
+Measure the SIP-signaling concurrency and recovery portion of the frozen
+10-day plan for the telephony runtime:
 
 `OpenSIPS -> Asterisk -> ARI External Media -> C++ Gateway -> AI Pipeline`
 
@@ -16,7 +26,7 @@ Mandatory Day 10 outcomes:
 1. Safe concurrency threshold is measured, documented, and reproducible.
 2. Sustained soak run proves runtime stability (no resource leak trend, no control-path collapse).
 3. Recovery behavior is validated under controlled service restarts.
-4. Final Go/No-Go checklist is generated from objective evidence only.
+4. A scoped SIP-harness checklist is generated from objective evidence only.
 
 ---
 
@@ -24,10 +34,11 @@ Mandatory Day 10 outcomes:
 
 In scope:
 1. Load generation and concurrency ramp on the active telephony path only.
-2. Soak validation with mixed call behaviors (baseline, barge-in, blind transfer).
+2. Soak validation with baseline SIP signaling; barge-in and transfer profiles
+   are zero for the transfer-disabled inbound candidate.
 3. Restart-based recovery drills during live load.
 4. Capacity and headroom report (CPU, memory, network, call metrics).
-5. Final Day 10 verifier and evidence package.
+5. Scoped Day 10 SIP verifier and evidence package.
 
 Out of scope (explicitly blocked for Day 10):
 1. New architecture changes, codec changes, or routing rewrites.
@@ -93,10 +104,10 @@ Proven open-source implementation patterns (reference only, no copy/paste):
 
 ## 4) Day 10 Design Principles
 
-1. No architecture drift: Day 10 validates the frozen production path, it does not redesign it.
+1. No architecture drift: Day 10 validates the frozen SIP-signaling slice; live carrier/media gates remain separate.
 2. Metrics-before-opinion: all decisions are based on measured outputs and stored artifacts.
 3. Standard terminology: report SIP KPIs using RFC 6076-aligned naming.
-4. Safety-first thresholding: publish only a threshold with headroom, never the absolute break point as production target.
+4. Safety-first thresholding: publish a SIP-harness threshold with headroom, never a production media-capacity target.
 5. Deterministic cleanup: every run ends with explicit leak checks (ARI channels/bridges, gateway sessions, tenant leases).
 6. Controlled failure only: restart and impairment drills are scripted, bounded, and reversible.
 7. No workaround policy is mandatory.
@@ -107,15 +118,17 @@ Proven open-source implementation patterns (reference only, no copy/paste):
 
 ### 5.1 Load Profiles
 
-Profile mix for Day 10 runs:
-1. `P1 Baseline AI Turn` (no transfer): 50%
-2. `P2 Barge-In Active` (Day 8 policy path): 30%
-3. `P3 Blind Transfer Attempt` (Day 9 path): 20%
+Profile mix for the transfer-disabled inbound candidate:
+1. `P1 Baseline SIP Session` (no transfer/media assertion): 100%
+2. `P2 Barge-In Active`: 0% (unsupported by this probe; external live-media gate)
+3. `P3 Blind Transfer Attempt`: 0% (outside the release scope)
 
 Traffic model rules:
 1. All calls enter via OpenSIPS edge.
-2. Media is forced through ARI externalMedia + C++ gateway path.
-3. Transfer and tenant controls stay enabled exactly as Day 9 acceptance baseline.
+2. SIP signaling enters the configured ARI/gateway control path, but the probe's
+   advertised RTP port is unbound and proves no media behavior.
+3. Blind transfer remains disabled; any transfer dispatch, outcome, or non-zero
+   counter fails the run.
 
 ### 5.2 Ramp and Soak Policy
 
@@ -129,12 +142,12 @@ Ramp phases (default):
 Threshold policy:
 1. The first stage that breaches any hard gate marks `break_stage`.
 2. `safe_concurrency_threshold` = previous passing stage.
-3. Production recommendation = `safe_concurrency_threshold * 0.8` (20% headroom).
+3. SIP-harness headroom value = `safe_concurrency_threshold * 0.8` (20% headroom); it is not a production capacity recommendation.
 
 Soak policy:
 1. Duration: 120 minutes minimum.
-2. Concurrency: recommended production value above.
-3. Mixed profile traffic remains enabled for full soak.
+2. Concurrency: SIP-harness headroom value above.
+3. Baseline SIP profile remains at 100% for the full soak.
 
 ### 5.3 KPI Contract
 
@@ -146,8 +159,8 @@ SIP control KPIs (RFC 6076-aligned naming):
 
 Runtime KPIs:
 1. Calls completed per minute
-2. Transfer attempt/success/failure/reject counters
-3. Barge-in reaction p95
+2. Transfer attempt/success/failure/reject counters (all must remain zero)
+3. Barge-in reaction p95 is not emitted by this harness; it comes from the external live-media gate
 4. Active session and lease counts
 
 System KPIs:
@@ -161,8 +174,8 @@ Hard gate defaults (Day 10 initial values):
 2. `SRD p95 <= 2000 ms`
 3. `SDD p95 <= 1500 ms`
 4. `ISA <= 1.0%`
-5. Transfer success ratio (transfer-attempted subset) >= 95.0%
-6. Barge-in reaction `p95 <= 250 ms`
+5. Zero transfer events, attempts, successes, failures, rejects, or inflight transfers
+6. Candidate-bound external live-media evidence passes two-way audio and barge-in
 7. Zero leaked ARI external channels/bridges/gateway sessions at run end
 
 ---
@@ -174,14 +187,14 @@ Step 1: Freeze Day 9 baseline
 2. Block Day 10 execution if Day 9 cleanup invariants fail.
 
 Step 2: Build Day 10 load harness
-1. Add deterministic Day 10 probe orchestration for mixed profiles.
+1. Add deterministic Day 10 baseline SIP-signaling orchestration.
 2. Support staged concurrency ramp and timed soak mode.
 3. Persist machine-readable per-stage summaries.
 
 Step 3: Add Day 10 verifier
 1. Add `telephony/scripts/verify_day10_concurrency_soak.sh`.
 2. Enforce hard gates and fail fast on breach.
-3. Produce final Go/No-Go JSON + Markdown report.
+3. Produce scoped SIP-harness decision JSON + Markdown report.
 
 Step 4: Add restart recovery drills under load
 1. Execute controlled restart of OpenSIPS, Asterisk, RTPengine, and C++ gateway.
@@ -189,7 +202,7 @@ Step 4: Add restart recovery drills under load
 3. Ensure post-recovery calls return to pass baseline.
 
 Step 5: Capacity and headroom reporting
-1. Publish threshold stage, recommended production concurrency, and evidence traces.
+1. Publish threshold stage, SIP-harness headroom value, and evidence traces.
 2. Capture bottleneck notes and tuning actions (if any) without changing architecture.
 
 Step 6: Final closure gate
@@ -205,19 +218,19 @@ Step 6: Final closure gate
 | ID | Test Case | Method | Pass Criteria | Evidence Output |
 |---|---|---|---|---|
 | D10-TC-01 | Harness sanity | Run 20 calls at low load to validate probe + verifier wiring. | 20/20 calls complete; artifacts generated; no script error. | `day10_harness_smoke.json`, `day10_verifier_output.txt` |
-| D10-TC-02 | Concurrency ramp | Execute R1..R5 stages (5 min each) with mixed profiles. | Stage-level KPIs satisfy hard gates through highest passing stage. | `day10_ramp_stage_results.json` |
+| D10-TC-02 | Concurrency ramp | Execute R1..R5 stages (5 min each) with the baseline SIP profile. | Stage-level SIP KPIs satisfy hard gates through highest passing stage. | `day10_ramp_stage_results.json` |
 | D10-TC-03 | Threshold identification | Continue ramp until first gate breach; compute safe threshold and 20% headroom value. | `safe_concurrency_threshold` and `recommended_concurrency` computed deterministically. | `day10_capacity_threshold_report.json` |
-| D10-TC-04 | Soak stability (120 min) | Run mixed traffic at recommended concurrency for 2h. | No hard gate breach for 120 min; no monotonic degradation trend. | `day10_soak_summary.json`, `day10_soak_timeseries.csv` |
-| D10-TC-05 | Transfer under load | Keep Day 9 transfer profile active during ramp/soak. | Transfer success ratio >= 95%; no uncontrolled transfer failure burst. | `day10_transfer_load_report.json` |
-| D10-TC-06 | Barge-in under load | Keep Day 8 barge-in profile active during ramp/soak. | Barge-in reaction p95 <= 250 ms; no stuck TTS playback state. | `day10_bargein_load_report.json` |
+| D10-TC-04 | Soak stability (120 min) | Run baseline SIP traffic at the scoped headroom value for 2h. | No hard gate breach for 120 min; no monotonic degradation trend. | `day10_soak_summary.json`, `day10_soak_timeseries.csv` |
+| D10-TC-05 | Transfer-disabled scope | Start the primary and recovery controllers with blind transfer disabled and scan all controller events/counters plus the probe report. | Zero `transfer_*` events, non-zero transfer counters, attempts, or outcomes. | `day10_transfer_load_report.json`, `day10_ari_event_trace.log` |
+| D10-TC-06 | Live media and barge-in (external gate) | Review real staging carrier calls against the exact frozen candidate; do not use the SIP probe for media. | Candidate-bound manifest proves two-way audio and barge-in and names call IDs, immutable evidence, and reviewers. | `day10_external_live_media_evidence.json` |
 | D10-TC-07 | Tenant isolation fairness | Drive at least 2 tenants concurrently; saturate one tenant intentionally. | Saturated tenant gets deterministic rejects; other tenant maintains >= 98% setup success. | `day10_tenant_fairness_report.json` |
 | D10-TC-08 | Asterisk restart recovery | Restart `talky-asterisk` mid-load using scripted drill. | Service recovers within SLA window; call success returns to baseline within 2 minutes. | `day10_recovery_asterisk.json`, `day10_recovery_timeline.log` |
 | D10-TC-09 | OpenSIPS restart recovery | Restart `talky-opensips` mid-load. | SIP ingress recovers within SLA window; no persistent call-setup collapse. | `day10_recovery_opensips.json` |
-| D10-TC-10 | RTPengine restart recovery | Restart `talky-rtpengine` mid-load. | Media path recovers; no persistent one-way-audio spike after recovery window. | `day10_recovery_rtpengine.json` |
+| D10-TC-10 | RTPengine signaling-path restart drill | Restart `talky-rtpengine` during the SIP harness, then run separate live-media recovery calls. | Harness recovery passes and external live-media evidence proves no persistent one-way-audio failure. | `day10_recovery_rtpengine.json`, `day10_external_live_media_evidence.json` |
 | D10-TC-11 | C++ gateway restart recovery | Restart gateway process/container mid-load. | New calls recover to baseline; stale sessions are cleaned; no ghost sessions. | `day10_recovery_gateway.json` |
 | D10-TC-12 | Long-call session timer integrity | Keep long-duration calls active during soak and monitor refresh behavior. | Session timer behavior consistent with configured policy; no premature teardown burst. | `day10_session_timer_report.json` |
 | D10-TC-13 | End-state leak audit | Compare baseline vs post-run ARI channels/bridges, gateway sessions, leases. | Zero leaked external channels, bridges, gateway sessions, and active transfer leases. | `day10_leak_audit_report.json` |
-| D10-TC-14 | Go/No-Go checklist generation | Generate final decision file from measured outputs only. | Checklist complete; decision is deterministic (`go` or `no-go`) with reasons. | `day10_go_no_go_checklist.md`, `day10_go_no_go.json` |
+| D10-TC-14 | Scoped decision generation | Generate the SIP-harness decision from measured outputs only. | Checklist deterministically says `sip-harness-go` or `sip-harness-no-go`, identifies its scope, and states that it does not determine production release readiness. | `day10_go_no_go_checklist.md`, `day10_go_no_go.json` |
 
 ### 7.2 Restart Recovery SLA Targets (Initial)
 
@@ -236,12 +249,15 @@ If any SLA target fails:
 ## 8) Acceptance Criteria (Day 10 Complete)
 
 Day 10 is complete only when all conditions pass:
-1. Safe concurrency threshold is measured and documented with 20% production headroom.
+1. SIP-signaling concurrency threshold is measured and documented with 20% test headroom; it is not presented as a production media-capacity recommendation.
 2. 120-minute soak run passes without hard-gate breach.
 3. Restart recovery drills pass SLA targets for all required services.
 4. No ghost sessions/bridges/channels/leases remain after run.
-5. Final Go/No-Go report is generated with objective evidence.
+5. The scoped SIP-harness report is generated with objective evidence.
 6. Day 10 verifier returns deterministic pass/fail.
+7. Production release approval separately requires the candidate-bound live
+   carrier media/barge-in manifest and every gate in
+   `docs/INBOUND_CALLING_RELEASE_GATE.md`.
 
 If any condition fails:
 1. Day 10 is `Not Complete`.
@@ -281,4 +297,6 @@ Verifier/probe targets:
 
 1. Day 10 runs only after Day 9 acceptance is closed.
 2. No tuning changes are applied during the official measurement window unless a full rerun is performed.
-3. Go/No-Go is evidence-driven only; no subjective override.
+3. The scoped SIP-harness decision is evidence-driven only; no subjective override.
+4. Production release readiness is decided only by the complete inbound release
+   gate, including candidate-bound external live carrier media/barge-in proof.

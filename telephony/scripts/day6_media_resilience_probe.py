@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import socket
 import time
 import urllib.error
@@ -28,9 +29,17 @@ class ScenarioResult:
     stats: dict[str, Any]
 
 
-def http_json(method: str, url: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def http_json(
+    method: str, url: str, payload: dict[str, Any] | None = None
+) -> dict[str, Any]:
     body = None
     headers = {"Content-Type": "application/json"}
+    gateway_token = os.getenv("VOICE_GATEWAY_AUTH_TOKEN", "").strip()
+    if not gateway_token:
+        raise RuntimeError(
+            "VOICE_GATEWAY_AUTH_TOKEN is required for gateway control requests"
+        )
+    headers["Authorization"] = f"Bearer {gateway_token}"
     if payload is not None:
         body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url=url, method=method, data=body, headers=headers)
@@ -72,20 +81,33 @@ def build_rtp_packet(seq: int, timestamp: int, ssrc: int, payload: bytes) -> byt
     return bytes(header) + payload
 
 
-def send_rtp_sequence(target_port: int, sequence_numbers: list[int], pace_ms: float = 0.0) -> None:
+def send_rtp_sequence(
+    target_port: int, sequence_numbers: list[int], pace_ms: float = 0.0
+) -> None:
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     payload = bytes([0x7E] * 160)
     ssrc = 0x44445555
     ts = 16000
     for idx, seq in enumerate(sequence_numbers):
-        packet = build_rtp_packet(seq=seq & 0xFFFF, timestamp=(ts + idx * 160) & 0xFFFFFFFF, ssrc=ssrc, payload=payload)
+        packet = build_rtp_packet(
+            seq=seq & 0xFFFF,
+            timestamp=(ts + idx * 160) & 0xFFFFFFFF,
+            ssrc=ssrc,
+            payload=payload,
+        )
         sock.sendto(packet, ("127.0.0.1", target_port))
         if pace_ms > 0.0:
             time.sleep(pace_ms / 1000.0)
     sock.close()
 
 
-def start_session(base_url: str, session_id: str, listen_port: int, remote_port: int, overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+def start_session(
+    base_url: str,
+    session_id: str,
+    listen_port: int,
+    remote_port: int,
+    overrides: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "session_id": session_id,
         "listen_ip": "127.0.0.1",
@@ -100,14 +122,20 @@ def start_session(base_url: str, session_id: str, listen_port: int, remote_port:
 
 
 def stop_session(base_url: str, session_id: str, reason: str) -> dict[str, Any]:
-    return http_json("POST", f"{base_url}/v1/sessions/stop", {"session_id": session_id, "reason": reason})
+    return http_json(
+        "POST",
+        f"{base_url}/v1/sessions/stop",
+        {"session_id": session_id, "reason": reason},
+    )
 
 
 def session_stats(base_url: str, session_id: str) -> dict[str, Any]:
     return http_json("GET", f"{base_url}/v1/sessions/{session_id}/stats")
 
 
-def wait_for_terminal_reason(base_url: str, session_id: str, expected_reason: str, timeout_s: float = 6.0) -> tuple[bool, dict[str, Any]]:
+def wait_for_terminal_reason(
+    base_url: str, session_id: str, expected_reason: str, timeout_s: float = 6.0
+) -> tuple[bool, dict[str, Any]]:
     deadline = time.monotonic() + timeout_s
     last_stats: dict[str, Any] = {}
     while time.monotonic() < deadline:
@@ -141,7 +169,9 @@ def run_startup_timeout(base_url: str) -> ScenarioResult:
         },
     )
 
-    passed, stats = wait_for_terminal_reason(base_url, session_id, "start_timeout", timeout_s=4.0)
+    passed, stats = wait_for_terminal_reason(
+        base_url, session_id, "start_timeout", timeout_s=4.0
+    )
     stop_session(base_url, session_id, "cleanup_start_timeout")
 
     return ScenarioResult(
@@ -176,7 +206,9 @@ def run_no_rtp_timeout(base_url: str) -> ScenarioResult:
 
     send_rtp_sequence(listen_port, [1000, 1001, 1002, 1003, 1004], pace_ms=20.0)
 
-    passed, stats = wait_for_terminal_reason(base_url, session_id, "no_rtp_timeout", timeout_s=4.0)
+    passed, stats = wait_for_terminal_reason(
+        base_url, session_id, "no_rtp_timeout", timeout_s=4.0
+    )
     stop_session(base_url, session_id, "cleanup_no_rtp_timeout")
 
     return ScenarioResult(
@@ -211,7 +243,9 @@ def run_hold_timeout(base_url: str) -> ScenarioResult:
 
     send_rtp_sequence(listen_port, [2000, 2001, 2002, 2003, 2004], pace_ms=20.0)
 
-    passed, stats = wait_for_terminal_reason(base_url, session_id, "no_rtp_timeout_hold", timeout_s=4.0)
+    passed, stats = wait_for_terminal_reason(
+        base_url, session_id, "no_rtp_timeout_hold", timeout_s=4.0
+    )
     stop_session(base_url, session_id, "cleanup_hold_timeout")
 
     return ScenarioResult(
@@ -256,7 +290,8 @@ def run_reorder_duplicate(base_url: str) -> ScenarioResult:
     passed = (
         start_resp.get("status") == "started"
         and int(stats.get("http_status", 200)) == 200
-        and str(stats.get("state") or "") in {"buffering", "active", "degraded", "starting"}
+        and str(stats.get("state") or "")
+        in {"buffering", "active", "degraded", "starting"}
         and (out_of_order > 0 or duplicates > 0)
     )
 
@@ -267,7 +302,9 @@ def run_reorder_duplicate(base_url: str) -> ScenarioResult:
         name="burst_reorder_loss",
         passed=passed,
         expected_reason="running_or_manual_stop",
-        observed_reason=str(post_stop.get("stop_reason") or stats.get("stop_reason") or ""),
+        observed_reason=str(
+            post_stop.get("stop_reason") or stats.get("stop_reason") or ""
+        ),
         observed_state=str(post_stop.get("state") or stats.get("state") or ""),
         notes=f"out_of_order={out_of_order} duplicate={duplicates}",
         stats=post_stop if int(post_stop.get("http_status", 200)) == 200 else stats,
@@ -316,7 +353,9 @@ def run_queue_pressure(base_url: str) -> ScenarioResult:
         name="queue_pressure",
         passed=passed,
         expected_reason="running_or_manual_stop",
-        observed_reason=str(post_stop.get("stop_reason") or stats.get("stop_reason") or ""),
+        observed_reason=str(
+            post_stop.get("stop_reason") or stats.get("stop_reason") or ""
+        ),
         observed_state=str(post_stop.get("state") or stats.get("state") or ""),
         notes=f"overflow={overflow} dropped={dropped}",
         stats=post_stop if int(post_stop.get("http_status", 200)) == 200 else stats,
@@ -369,10 +408,18 @@ def main() -> int:
         if timeout_key in timeout_summary:
             timeout_summary[timeout_key] += 1
 
-        jitter_metrics["jitter_buffer_overflow_drops"] += int(row.stats.get("jitter_buffer_overflow_drops", 0))
-        jitter_metrics["jitter_buffer_late_drops"] += int(row.stats.get("jitter_buffer_late_drops", 0))
-        jitter_metrics["duplicate_packets"] += int(row.stats.get("duplicate_packets", 0))
-        jitter_metrics["out_of_order_packets"] += int(row.stats.get("out_of_order_packets", 0))
+        jitter_metrics["jitter_buffer_overflow_drops"] += int(
+            row.stats.get("jitter_buffer_overflow_drops", 0)
+        )
+        jitter_metrics["jitter_buffer_late_drops"] += int(
+            row.stats.get("jitter_buffer_late_drops", 0)
+        )
+        jitter_metrics["duplicate_packets"] += int(
+            row.stats.get("duplicate_packets", 0)
+        )
+        jitter_metrics["out_of_order_packets"] += int(
+            row.stats.get("out_of_order_packets", 0)
+        )
         jitter_metrics["dropped_packets"] += int(row.stats.get("dropped_packets", 0))
 
     result_payload = {

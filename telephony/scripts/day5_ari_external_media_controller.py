@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import signal
 import time
 from dataclasses import dataclass
@@ -61,7 +62,9 @@ class TransferConfig:
 class TenantRuntimeGuard:
     """Simple in-process tenant guard for active sessions and transfer inflight limits."""
 
-    def __init__(self, *, tenant_id: str, max_active_calls: int, max_transfer_inflight: int) -> None:
+    def __init__(
+        self, *, tenant_id: str, max_active_calls: int, max_transfer_inflight: int
+    ) -> None:
         self._tenant_id = str(tenant_id or "default-tenant").strip() or "default-tenant"
         self._max_active_calls = max(1, int(max_active_calls))
         self._max_transfer_inflight = max(1, int(max_transfer_inflight))
@@ -135,7 +138,9 @@ class PortAllocator:
 
 
 class AriHttpClient:
-    def __init__(self, host: str, port: int, username: str, password: str, timeout_s: float = 5.0) -> None:
+    def __init__(
+        self, host: str, port: int, username: str, password: str, timeout_s: float = 5.0
+    ) -> None:
         self._base = f"http://{host}:{port}/ari"
         self._api_key = f"{username}:{password}"
         self._timeout_s = timeout_s
@@ -144,13 +149,25 @@ class AriHttpClient:
     def close(self) -> None:
         self._session.close()
 
-    def _request(self, method: str, path: str, *, params: Optional[dict] = None, json_body: Optional[dict] = None, ok: tuple[int, ...] = (200, 201, 204)) -> dict:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Optional[dict] = None,
+        json_body: Optional[dict] = None,
+        ok: tuple[int, ...] = (200, 201, 204),
+    ) -> dict:
         query = dict(params or {})
         query["api_key"] = self._api_key
         url = f"{self._base}{path}"
-        response = self._session.request(method, url, params=query, json=json_body, timeout=self._timeout_s)
+        response = self._session.request(
+            method, url, params=query, json=json_body, timeout=self._timeout_s
+        )
         if response.status_code not in ok:
-            raise AriClientError(f"{method} {path} failed: {response.status_code} {response.text[:400]}")
+            raise AriClientError(
+                f"{method} {path} failed: {response.status_code} {response.text[:400]}"
+            )
 
         if not response.text:
             return {}
@@ -171,9 +188,13 @@ class AriHttpClient:
         return str(bridge_id)
 
     def add_channel_to_bridge(self, bridge_id: str, channel_id: str) -> None:
-        self._request("POST", f"/bridges/{bridge_id}/addChannel", params={"channel": channel_id})
+        self._request(
+            "POST", f"/bridges/{bridge_id}/addChannel", params={"channel": channel_id}
+        )
 
-    def create_external_media(self, app: str, external_host: str, *, fmt: str = "ulaw") -> str:
+    def create_external_media(
+        self, app: str, external_host: str, *, fmt: str = "ulaw"
+    ) -> str:
         data = self._request(
             "POST",
             "/channels/externalMedia",
@@ -193,14 +214,22 @@ class AriHttpClient:
         return str(channel_id)
 
     def get_channel_var(self, channel_id: str, variable: str) -> str:
-        data = self._request("GET", f"/channels/{channel_id}/variable", params={"variable": variable})
+        data = self._request(
+            "GET", f"/channels/{channel_id}/variable", params={"variable": variable}
+        )
         value = data.get("value")
         if value is None or value == "":
-            raise AriClientError(f"channel var {variable} missing on channel {channel_id}")
+            raise AriClientError(
+                f"channel var {variable} missing on channel {channel_id}"
+            )
         return str(value)
 
     def transfer_progress(self, channel_id: str) -> None:
-        self._request("POST", f"/channels/{channel_id}/transfer_progress", ok=(200, 204, 404, 409, 422))
+        self._request(
+            "POST",
+            f"/channels/{channel_id}/transfer_progress",
+            ok=(200, 204, 404, 409, 422),
+        )
 
     def redirect_channel(self, channel_id: str, endpoint: str) -> None:
         self._request(
@@ -210,11 +239,17 @@ class AriHttpClient:
             ok=(200, 204),
         )
 
-    def continue_channel(self, channel_id: str, context: str, extension: str, priority: int = 1) -> None:
+    def continue_channel(
+        self, channel_id: str, context: str, extension: str, priority: int = 1
+    ) -> None:
         self._request(
             "POST",
             f"/channels/{channel_id}/continue",
-            params={"context": context, "extension": extension, "priority": int(priority)},
+            params={
+                "context": context,
+                "extension": extension,
+                "priority": int(priority),
+            },
             ok=(200, 204),
         )
 
@@ -249,11 +284,31 @@ class GatewayHttpClient:
     def close(self) -> None:
         self._session.close()
 
-    def _request(self, method: str, path: str, *, payload: Optional[dict] = None, ok: tuple[int, ...] = (200,)) -> dict:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        payload: Optional[dict] = None,
+        ok: tuple[int, ...] = (200,),
+    ) -> dict:
         url = f"{self._base}{path}"
-        response = self._session.request(method, url, json=payload, timeout=self._timeout_s)
+        token = os.getenv("VOICE_GATEWAY_AUTH_TOKEN", "").strip()
+        if not token:
+            raise GatewayClientError(
+                "VOICE_GATEWAY_AUTH_TOKEN is required for gateway control requests"
+            )
+        response = self._session.request(
+            method,
+            url,
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=self._timeout_s,
+        )
         if response.status_code not in ok:
-            raise GatewayClientError(f"{method} {path} failed: {response.status_code} {response.text[:400]}")
+            raise GatewayClientError(
+                f"{method} {path} failed: {response.status_code} {response.text[:400]}"
+            )
         return response.json() if response.text else {}
 
     def start_session(
@@ -276,7 +331,9 @@ class GatewayHttpClient:
             "ptime_ms": 20,
             "echo_enabled": bool(echo_enabled),
         }
-        return self._request("POST", "/v1/sessions/start", payload=payload, ok=(200, 409))
+        return self._request(
+            "POST", "/v1/sessions/start", payload=payload, ok=(200, 409)
+        )
 
     def stop_session(self, session_id: str, reason: str) -> dict:
         return self._request(
@@ -495,17 +552,31 @@ class Day5Controller:
 
         try:
             bridge_id = await self._run_in_thread(self.ari.create_bridge)
-            await self._run_in_thread(self.ari.add_channel_to_bridge, bridge_id, user_channel_id)
+            await self._run_in_thread(
+                self.ari.add_channel_to_bridge, bridge_id, user_channel_id
+            )
 
             external_channel_id = await self._run_in_thread(
                 self.ari.create_external_media,
                 self.app_name,
                 f"{self.gateway_rtp_ip}:{listen_port}",
             )
-            await self._run_in_thread(self.ari.add_channel_to_bridge, bridge_id, external_channel_id)
+            await self._run_in_thread(
+                self.ari.add_channel_to_bridge, bridge_id, external_channel_id
+            )
 
-            remote_ip = await self._run_in_thread(self.ari.get_channel_var, external_channel_id, "UNICASTRTP_LOCAL_ADDRESS")
-            remote_port = int(await self._run_in_thread(self.ari.get_channel_var, external_channel_id, "UNICASTRTP_LOCAL_PORT"))
+            remote_ip = await self._run_in_thread(
+                self.ari.get_channel_var,
+                external_channel_id,
+                "UNICASTRTP_LOCAL_ADDRESS",
+            )
+            remote_port = int(
+                await self._run_in_thread(
+                    self.ari.get_channel_var,
+                    external_channel_id,
+                    "UNICASTRTP_LOCAL_PORT",
+                )
+            )
 
             await self._run_in_thread(
                 self.gateway.start_session,
@@ -555,7 +626,9 @@ class Day5Controller:
             )
             if session_id:
                 try:
-                    await self._run_in_thread(self.gateway.stop_session, session_id, "start_failed")
+                    await self._run_in_thread(
+                        self.gateway.stop_session, session_id, "start_failed"
+                    )
                 except Exception:  # noqa: BLE001
                     pass
             if external_channel_id:
@@ -586,9 +659,13 @@ class Day5Controller:
         self.allocator.release(binding.listen_port)
 
         try:
-            await self._run_in_thread(self.gateway.stop_session, binding.session_id, reason)
+            await self._run_in_thread(
+                self.gateway.stop_session, binding.session_id, reason
+            )
         finally:
-            await self._run_in_thread(self.ari.delete_channel, binding.external_channel_id)
+            await self._run_in_thread(
+                self.ari.delete_channel, binding.external_channel_id
+            )
             await self._run_in_thread(self.ari.delete_bridge, binding.bridge_id)
 
         self.completed_calls += 1
@@ -627,7 +704,9 @@ class Day5Controller:
     async def _poll_gateway_sessions(self) -> None:
         for user_channel_id, binding in list(self.sessions.items()):
             try:
-                stats = await self._run_in_thread(self.gateway.session_stats, binding.session_id)
+                stats = await self._run_in_thread(
+                    self.gateway.session_stats, binding.session_id
+                )
             except Exception as exc:  # noqa: BLE001
                 self._emit(
                     "gateway_stats_error",
@@ -661,17 +740,31 @@ class Day5Controller:
         self._emit("controller_started", ws_url=ws_url)
         last_gateway_poll = time.monotonic()
 
-        async with websockets.connect(ws_url, max_size=2 * 1024 * 1024, ping_interval=20, ping_timeout=20) as ws:
+        async with websockets.connect(
+            ws_url, max_size=2 * 1024 * 1024, ping_interval=20, ping_timeout=20
+        ) as ws:
             while not self._stop:
-                if self.max_completed_calls > 0 and self.completed_calls >= self.max_completed_calls and not self.sessions:
+                if (
+                    self.max_completed_calls > 0
+                    and self.completed_calls >= self.max_completed_calls
+                    and not self.sessions
+                ):
                     break
 
                 if self.idle_timeout_seconds > 0:
                     idle_for = time.monotonic() - self._last_activity
-                    if idle_for >= self.idle_timeout_seconds and not self.sessions and self.started_calls > 0:
+                    if (
+                        idle_for >= self.idle_timeout_seconds
+                        and not self.sessions
+                        and self.started_calls > 0
+                    ):
                         break
 
-                if self.sessions and (time.monotonic() - last_gateway_poll) >= self.gateway_poll_interval_seconds:
+                if (
+                    self.sessions
+                    and (time.monotonic() - last_gateway_poll)
+                    >= self.gateway_poll_interval_seconds
+                ):
                     await self._poll_gateway_sessions()
                     last_gateway_poll = time.monotonic()
 
@@ -700,7 +793,11 @@ class Day5Controller:
 
         bridges = await self._run_in_thread(self.ari.list_bridges)
         channels = await self._run_in_thread(self.ari.list_channels)
-        external_channels = [c.get("id") for c in channels if str(c.get("name") or "").startswith("UnicastRTP/")]
+        external_channels = [
+            c.get("id")
+            for c in channels
+            if str(c.get("name") or "").startswith("UnicastRTP/")
+        ]
 
         self._emit(
             "controller_finished",
@@ -718,7 +815,10 @@ class Day5Controller:
             remaining_external_channels=len(external_channels),
         )
 
-        if self.max_completed_calls > 0 and self.completed_calls < self.max_completed_calls:
+        if (
+            self.max_completed_calls > 0
+            and self.completed_calls < self.max_completed_calls
+        ):
             return 2
         if external_channels:
             return 3
@@ -741,9 +841,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gateway-poll-interval-seconds", type=float, default=1.0)
     parser.add_argument("--gateway-echo-enabled", type=int, choices=(0, 1), default=1)
     parser.add_argument("--blind-transfer-enabled", type=int, choices=(0, 1), default=0)
-    parser.add_argument("--blind-transfer-endpoint", default="Local/blind_target@wsm-synthetic")
+    parser.add_argument(
+        "--blind-transfer-endpoint", default="Local/blind_target@wsm-synthetic"
+    )
     parser.add_argument("--blind-transfer-delay-seconds", type=float, default=1.5)
-    parser.add_argument("--blind-transfer-use-continue", type=int, choices=(0, 1), default=0)
+    parser.add_argument(
+        "--blind-transfer-use-continue", type=int, choices=(0, 1), default=0
+    )
     parser.add_argument("--blind-transfer-continue-context", default="wsm-synthetic")
     parser.add_argument("--blind-transfer-continue-extension", default="blind_target")
     parser.add_argument("--blind-transfer-continue-priority", type=int, default=1)
@@ -754,7 +858,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 async def _async_main(args: argparse.Namespace) -> int:
-    ari = AriHttpClient(args.ari_host, args.ari_port, args.ari_username, args.ari_password)
+    ari = AriHttpClient(
+        args.ari_host, args.ari_port, args.ari_username, args.ari_password
+    )
     gateway = GatewayHttpClient(args.gateway_base_url)
     transfer_config = TransferConfig(
         enabled=bool(args.blind_transfer_enabled),

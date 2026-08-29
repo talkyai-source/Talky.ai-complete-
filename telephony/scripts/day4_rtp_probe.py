@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import socket
 import statistics
 import time
@@ -26,9 +27,17 @@ class EchoPacket:
     received_at: float
 
 
-def http_json(method: str, url: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def http_json(
+    method: str, url: str, payload: dict[str, Any] | None = None
+) -> dict[str, Any]:
     body = None
     headers = {"Content-Type": "application/json"}
+    gateway_token = os.getenv("VOICE_GATEWAY_AUTH_TOKEN", "").strip()
+    if not gateway_token:
+        raise RuntimeError(
+            "VOICE_GATEWAY_AUTH_TOKEN is required for gateway control requests"
+        )
+    headers["Authorization"] = f"Bearer {gateway_token}"
     if payload is not None:
         body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url=url, method=method, data=body, headers=headers)
@@ -66,7 +75,9 @@ def parse_rtp_packet(data: bytes, received_at: float) -> EchoPacket | None:
 
     seq = (data[2] << 8) | data[3]
     ts = (data[4] << 24) | (data[5] << 16) | (data[6] << 8) | data[7]
-    return EchoPacket(seq=seq, ts=ts, payload_len=len(data) - 12, received_at=received_at)
+    return EchoPacket(
+        seq=seq, ts=ts, payload_len=len(data) - 12, received_at=received_at
+    )
 
 
 def percentile(values: list[float], p: float) -> float:
@@ -126,7 +137,9 @@ def main() -> int:
     echo_packets: list[EchoPacket] = []
 
     try:
-        response_start = http_json("POST", f"{base_url}/v1/sessions/start", start_payload)
+        response_start = http_json(
+            "POST", f"{base_url}/v1/sessions/start", start_payload
+        )
         started = True
 
         # Health and process stats before media burst.
@@ -137,7 +150,12 @@ def main() -> int:
 
         # Burst send to force queueing in the paced transmitter.
         for idx in range(args.packet_count):
-            pkt = build_rtp_packet(seq=1000 + idx, timestamp=50000 + (idx * 160), ssrc=ssrc, payload=payload)
+            pkt = build_rtp_packet(
+                seq=1000 + idx,
+                timestamp=50000 + (idx * 160),
+                ssrc=ssrc,
+                payload=payload,
+            )
             sender_sock.sendto(pkt, ("127.0.0.1", listen_port))
 
         # Collect echoed packets.
@@ -151,7 +169,9 @@ def main() -> int:
             if parsed is not None:
                 echo_packets.append(parsed)
 
-        session_stats = http_json("GET", f"{base_url}/v1/sessions/{args.session_id}/stats")
+        session_stats = http_json(
+            "GET", f"{base_url}/v1/sessions/{args.session_id}/stats"
+        )
         with open(args.output_stats_sample, "w", encoding="utf-8") as f:
             json.dump(session_stats, f, indent=2)
 

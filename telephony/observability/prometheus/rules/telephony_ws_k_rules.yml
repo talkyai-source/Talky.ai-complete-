@@ -20,6 +20,16 @@ groups:
   - name: talky_telephony_ws_k_alerts
     interval: 30s
     rules:
+      - alert: TalkyTelephonyMetricsTargetDown
+        expr: up{job="talky_backend_telephony"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: telephony
+        annotations:
+          summary: "Telephony metrics target is unreachable"
+          description: "Prometheus cannot scrape the backend telephony metrics target."
+
       - alert: TalkyTelephonyMetricsScrapeFailed
         expr: talky_telephony_metrics_scrape_success == 0
         for: 2m
@@ -29,6 +39,98 @@ groups:
         annotations:
           summary: "Telephony metrics scrape is failing"
           description: "Backend /metrics scrape failed or SLO collection query errored."
+
+      - alert: TalkyTelephonyMetricsRefreshStale
+        expr: time() - talky_telephony_metrics_scrape_timestamp_seconds > 120
+        for: 1m
+        labels:
+          severity: critical
+          team: telephony
+        annotations:
+          summary: "Telephony SLO metrics have not refreshed for two minutes"
+          description: >-
+            Prometheus can still see the backend target, but its last successful
+            database-backed telemetry refresh is stale. Treat this as loss of
+            release evidence until the collector and database path recover.
+
+      - alert: TalkyInboundRoutingOrAdmissionDependencyFailure
+        expr: >-
+          sum(increase(inbound_decisions_total{
+            direction="inbound",
+            status="rejected",
+            reason=~"routing_dependency_unavailable|admission_dependency_unavailable"
+          }[5m])) > 0
+        labels:
+          severity: critical
+          team: telephony
+        annotations:
+          summary: "Inbound routing or admission dependency failed closed"
+          description: >-
+            At least one inbound attempt was rejected because routing or
+            admission dependencies were unavailable. Calls remain fail-closed;
+            investigate the backend/database path before resuming a batch.
+
+      - alert: TalkyInboundBillingHoldCreated
+        expr: >-
+          sum(increase(inbound_usage_events_total{
+            event="finalize",
+            result=~"provider_answer_ambiguous|settlement_switch_disabled|usage_exceeded_reservation"
+          }[5m])) > 0
+        labels:
+          severity: critical
+          team: telephony
+        annotations:
+          summary: "An inbound billing hold was created"
+          description: >-
+            A provider Answer ambiguity, disabled settlement switch, or usage
+            over the reservation created a billing hold. This occurrence alert
+            does not measure unresolved-hold age; stop the batch and reconcile
+            the durable call and ledger evidence.
+
+      - alert: TalkyInboundStaleReservationRecoveryQueued
+        expr: >-
+          sum(increase(inbound_usage_events_total{
+            event="recovery",
+            result="queued"
+          }[5m])) > 0
+        labels:
+          severity: critical
+          team: telephony
+        annotations:
+          summary: "Stale inbound reservation entered recovery"
+          description: >-
+            The proof-aware recovery scan found a non-terminal call with a
+            stale reservation and queued it for termination reconciliation.
+            This occurrence alert does not prove recovery completion or expose
+            the oldest reservation age.
+
+      - alert: TalkyAsteriskInboundTransferCleanupUnconfirmed
+        expr: >-
+          sum(increase(asterisk_inbound_transfer_cleanup_total{
+            result=~"unconfirmed|domain_finalize_failed|error"
+          }[5m])) > 0
+        labels:
+          severity: critical
+          team: telephony
+        annotations:
+          summary: "Asterisk could not prove inbound transfer cleanup"
+          description: >-
+            A supervised-transfer cleanup was unconfirmed or failed. Keep
+            transfer disabled and reconcile both Talky-owned channel IDs before
+            allowing another controlled proof.
+
+      - alert: TalkyAsteriskInboundTransferInflightStuck
+        expr: asterisk_inbound_transfer_inflight > 0
+        for: 2m
+        labels:
+          severity: critical
+          team: telephony
+        annotations:
+          summary: "Asterisk inbound transfer has no terminal outcome"
+          description: >-
+            At least one accepted supervised transfer has remained in-flight
+            for two minutes. Treat it as an orphan-risk signal and prove linked
+            caller/target cleanup before resuming transfer testing.
 
       - alert: TalkyTelephonyCallSetupSLOViolation
         expr: job:talky_telephony_calls_setup_success_ratio:avg5m < 0.985 and talky_telephony_calls_setup_attempts > 20

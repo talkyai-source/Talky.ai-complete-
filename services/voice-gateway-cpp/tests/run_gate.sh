@@ -88,7 +88,20 @@ build gateway-tsan "$OUT/vg_tsan" $SAN_TSAN $LIB src/main.cpp
 build gateway-asan "$OUT/vg_asan" $SAN_ASAN $LIB src/main.cpp
 
 # Signal-path shutdown smoke under ASan+UBSan: start, probe /health over
-# /dev/tcp, SIGTERM, require a clean (0) orderly-shutdown exit.
+# /dev/tcp, SIGTERM, require a clean (0) orderly-shutdown exit. Use isolated,
+# process-only credentials and a pinned backend origin; the production binary
+# intentionally refuses to bind without the complete security contract.
+GATEWAY_TEST_ENV_HELPER="../../telephony/scripts/gateway_test_env.sh"
+if [ ! -r "$GATEWAY_TEST_ENV_HELPER" ]; then
+    echo "  [FAIL] missing gateway test environment helper"
+    exit 1
+fi
+# shellcheck source=/dev/null
+source "$GATEWAY_TEST_ENV_HELPER"
+if ! provision_voice_gateway_test_env; then
+    echo "  [FAIL] unable to provision gateway test environment"
+    exit 1
+fi
 echo "== run:gateway-asan-shutdown-smoke =="
 ASAN_OPTIONS="abort_on_error=1 detect_leaks=1" UBSAN_OPTIONS="halt_on_error=1 print_stacktrace=1" \
     "$OUT/vg_asan" --host 127.0.0.1 --port 18094 >"$OUT/vg_smoke.log" 2>&1 &
