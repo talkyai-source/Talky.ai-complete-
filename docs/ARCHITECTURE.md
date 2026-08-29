@@ -21,23 +21,56 @@ results back to a CRM.
         ▼                      ▼                       ▼                     ▼
   ┌───────────┐          ┌───────────┐          ┌────────────┐         ┌──────────┐
   │ PostgreSQL│          │   Redis   │          │  Telephony │         │ AI provs │
-  │   (RLS)   │          │  (cache,  │          │ FreeSWITCH │         │ Deepgram │
-  │           │          │  rate-lim)│          │ Asterisk   │         │ Groq     │
-  └───────────┘          └───────────┘          │ OpenSIPS   │         │ Cartesia │
-                                                │ RTPengine  │         │ Gemini   │
+  │   (RLS)   │          │  (cache,  │          │  Asterisk  │         │ Deepgram │
+  │           │          │  rate-lim)│          │     +      │         │ Groq     │
+  └───────────┘          └───────────┘          │ C++ voice  │         │ Cartesia │
+                                                │  gateway   │         │ Gemini   │
                                                 └────────────┘         └──────────┘
 ```
+
+Asterisk is the only SIP/media process in production. FreeSWITCH, OpenSIPS,
+Kamailio and rtpengine are modelled under `telephony/` but are **not deployed**.
 
 ## Process boundaries
 
 | Component | Tech | Purpose |
 |---|---|---|
-| Backend API | FastAPI / Python 3.11 | REST + WebSocket; orchestrates calls, agents, CRM |
-| Frontend | Next.js (Talk-Leee) | Operator UI |
+| Backend API | FastAPI / Python (3.12.3 in production) | REST + WebSocket; orchestrates calls, agents, CRM |
+| Frontend | Next.js (Talk-Leee) + Vite (Admin) | Operator UI; deploys to Vercel from `main` |
 | Postgres 15 | with Row-Level Security | Tenant-isolated state |
 | Redis 7 | AOF-persistent | Cache, rate-limits, session store |
-| Telephony media | FreeSWITCH / Asterisk / OpenSIPS / RTPengine | SIP signaling + RTP media |
+| Telephony media | see the table below | SIP signalling + RTP media |
+| Voice gateway | C++ (`services/voice-gateway-cpp`) | Media gateway on `127.0.0.1:18080` |
 | AI providers | external HTTPS | Deepgram (STT), Groq / Gemini (LLM), Cartesia / Google TTS |
+
+### Telephony: what is deployed vs. what is only modelled
+
+The repository carries configuration for a five-component telephony stack.
+**Production runs Asterisk and nothing else** — verified on the box with
+`pgrep -a -f 'asterisk|opensips|kamailio|rtpengine|freeswitch'`, which returns
+only `asterisk` and its `astcanary` watchdog helper. Treat the rest of
+`telephony/` as design scaffold.
+
+| Component | Status |
+|---|---|
+| **Asterisk** | **Deployed in production** — the only SIP/media process on the box |
+| FreeSWITCH | Modelled in repo, **not deployed in production** (Asterisk-only) |
+| OpenSIPS | Modelled in repo, **not deployed in production** (Asterisk-only) |
+| Kamailio | Modelled in repo, **not deployed in production** (Asterisk-only) |
+| rtpengine | Modelled in repo, **not deployed in production** (Asterisk-only) |
+
+## How it runs in production
+
+A single Hetzner bare-metal host, hybrid by layer:
+
+| Layer | Runtime |
+|---|---|
+| API, dialer/voice/reminder workers, C++ gateway | **systemd units** from the git checkout at `/opt/talky` (see `backend/systemd/`) |
+| Postgres 15, Redis 7 | **docker compose**, project `talky`, from `/opt/talky/docker-compose.yml` |
+| Talk-Leee + Admin frontends | **Vercel**, auto-deploy from `main` (excluded from the prod checkout) |
+
+There is no Kubernetes and no running Prometheus/Grafana on the box. See
+[DEPLOYMENT.md](./DEPLOYMENT.md) and [RUNBOOK.md](./RUNBOOK.md).
 
 ## Code layout (backend)
 
@@ -70,9 +103,9 @@ Order matters; see [`app/core/app_bootstrap.py`](../backend/app/core/app_bootstr
 
 1. Operator hits `POST /api/v1/calls/start` from the UI
 2. Backend resolves tenant, checks rate limits, persists a `Call` row
-3. Backend signals the telephony adapter (FreeSWITCH/Asterisk) to dial
-4. Once answered, RTP media flows through RTPengine; backend opens a
-   WebSocket bridge for the audio frames
+3. Backend signals the telephony adapter (Asterisk, via ARI) to dial
+4. Once answered, RTP media flows through the C++ voice gateway; backend opens
+   a WebSocket bridge for the audio frames
 5. Frames stream → Deepgram STT → transcript chunks
 6. Transcript chunks → Groq/Gemini LLM agent (LangGraph state machine)
 7. LLM response → Cartesia/Google TTS → audio frames back to caller

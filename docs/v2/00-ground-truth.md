@@ -144,7 +144,7 @@ infrastructure**, and every document and video describing the telephony stack mu
 
 ## Q4 — Docker · **FINDING F-2 (High)** · refutes the "systemd only" model
 
-The assumption going in — recorded in `HANDOFF-NEXT-AGENT.md` and in this board's revision **R-2** —
+The assumption going in — recorded in `docs/sessions/worklogs/HANDOFF-NEXT-AGENT.md` and in this board's revision **R-2** —
 was that production is systemd and the compose path is dead. That is **half wrong**:
 
 ```bash
@@ -384,11 +384,11 @@ around, and the concurrency knee has never been measured. This number belongs in
 | **F-1** | **High** | `talky-voice-gateway.service` runs in production from an **unversioned** unit file. No copy in the repo. Content captured above. |
 | **F-2** | **High** | Postgres and Redis run as **Docker containers** via `/opt/talky/docker-compose.yml`, not bare metal. Architecture docs and the planned runbook are wrong. |
 | **F-3** | Med | `talky-api` is `Type=exec` / `Restart=on-failure`, **no watchdog** — while all three workers are `Type=notify` / `Restart=always` / `WatchdogSec=180`. The repo unit matches, so this is by design or by omission, not deploy drift. The board records systemd fixes 17–18 as "already done"; for the API they are not. Needs a decision, not a blind change (uvicorn does not `sd_notify` natively). |
-| **F-4** | Med | The repo has **two** systemd directories — `backend/systemd/` (6 `.service` + 2 `.timer` + target + installer) and `backend/deploy/systemd/` (trunk-status only). Nothing states which is authoritative, and the installer reads only the first. |
+| **F-4** | Med | ~~The repo has **two** systemd directories — `backend/systemd/` (6 `.service` + 2 `.timer` + target + installer) and `backend/deploy/systemd/` (trunk-status only). Nothing states which is authoritative, and the installer reads only the first.~~ **RESOLVED 2026-08-27:** the trunk-status `.service` + `.timer` moved into `backend/systemd/`, which is now the single source of truth. `install-services.sh` globs that one directory. |
 | **F-5** | Low | Production is one commit behind `origin/main`; the gap is documentation-only. |
 | **F-6** | Low | `backend/deploy/healthwatch.sh` is mode-drifted on the server (`+x` applied live, not committed). A fresh deploy would ship it non-executable. |
 | **F-7** | Low | `docs/ARCHITECTURE.md:35` says Python 3.11; production runs 3.12.3. |
-| **F-8** | Low | Stray `dream_*.py` scratch files committed at repository root in `0ffa7fa6`. |
+| **F-8** | Low | ~~Stray `dream_*.py` scratch files committed at repository root in `0ffa7fa6`.~~ **RESOLVED 2026-08-27:** moved to `scripts/archive/dream/`. |
 | **F-9** | Info | Idle `hello-world` container from install verification, 2 months old. |
 | **F-10** | **High** | **Every Python service runs as `root`.** No `User=` directive in `talky-api`, `talky-dialer-worker`, `talky-voice-worker` or `talky-reminder-worker`; `talky-trunk-status` sets `User=root` explicitly. Confirmed live (`systemctl show -p User` returns empty → root). The only non-root service is the C++ gateway (`User=admins`) — the inverse of what you would choose. No dedicated service account exists. |
 | **F-11** | Med | The test gate runs on **Python 3.11.9** locally while production runs **3.12.3**. A green gate is not evidence for the deployed interpreter. See `tickets/BASELINE.md`. |
