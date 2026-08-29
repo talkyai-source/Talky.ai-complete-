@@ -1,10 +1,12 @@
 [Unit]
-Description=Talky SIP-trunk live registration status updater (reads pjsip show registrations -> DB)
+Description=Talky SIP-trunk live endpoint and registration status updater
 After=asterisk.service postgresql.service
 
 [Service]
 Type=oneshot
 # root: needs the asterisk CLI + reads /opt/talky/backend/.env for DATABASE_URL
 User=root
+WorkingDirectory=/opt/talky/backend
+EnvironmentFile=/opt/talky/backend/.env
 ExecStart=/opt/talky/backend/venv/bin/python /opt/talky/backend/scripts/trunk_live_status_updater.py
 TimeoutStartSec=30

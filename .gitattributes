@@ -1,0 +1,36 @@
+# ============================================================================
+# Talky.ai — line-ending and binary normalisation
+# ============================================================================
+# The repo is developed on Windows and deployed to Linux (Hetzner). Without
+# this file, CRLF from a Windows checkout leaks into committed shell scripts
+# and systemd units, which the production box then refuses to execute.
+#
+# NOTE: this was added WITHOUT running `git add --renormalize .` — the working
+# tree had a large uncommitted change set at the time. Existing blobs keep
+# whatever endings they already have; new and re-saved files normalise.
+# Run the renormalise pass separately once the tree is clean.
+# ----------------------------------------------------------------------------
+
+# Default: let git detect text, store LF in the object database.
+* text=auto eol=lf
+
+# --- Explicitly binary: never touch these bytes -----------------------------
+*.png   binary
+*.jpg   binary
+*.gif   binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary
+*.pdf   binary
+*.docx  binary
+*.wav   binary
+*.mp3   binary
+
+# --- Platform-specific scripts ----------------------------------------------
+# Executed by the Linux production box: LF is mandatory (CRLF breaks the
+# shebang line).
+*.sh    text eol=lf
+
+# Executed by the Windows shell: CRLF.
+*.ps1   text eol=crlf
+*.bat   text eol=crlf

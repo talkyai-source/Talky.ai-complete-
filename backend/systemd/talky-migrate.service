@@ -1,0 +1,15 @@
+[Unit]
+Description=Talky.ai database migrations
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/talky/backend
+EnvironmentFile=/opt/talky/backend/.env
+ExecStart=/opt/talky/backend/venv/bin/alembic -c /opt/talky/backend/alembic.ini upgrade head
+TimeoutStartSec=180
+
+# Intentionally not install-enabled. Deployments invoke this unit explicitly
+# before restarting application processes; migrations must never run merely
+# because the machine booted.

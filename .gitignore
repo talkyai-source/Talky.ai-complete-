@@ -119,3 +119,11 @@ call_logs.md
 call_logs2.md
 raw_logs*.md
 *_raw_logs.md
+
+# local scratch (inbound test venv/pgdata, renders)
+tmp/
+
+# scratch / tooling output (added 2026-08-30)
+output/
+outputs/
+testsprite_tests/
