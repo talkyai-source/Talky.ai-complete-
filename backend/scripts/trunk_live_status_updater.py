@@ -218,9 +218,32 @@ async def main() -> None:
     fails = read_reg_failures()
     conn = await asyncpg.connect(load_database_url())
     try:
+        # This is a platform-wide maintenance task: it must observe every
+        # tenant's trunks, and it opens a raw connection rather than going
+        # through postgres_adapter, so nothing has set the tenant GUC for it.
+        # Once the app role loses BYPASSRLS the 0013 policy
+        #   COALESCE(NULLIF(current_setting('app.bypass_rls', TRUE),''
+        #            )::boolean, FALSE) OR tenant_id = ...
+        # evaluates FALSE on an unset GUC and this SELECT returns zero rows.
+        # The loop below would then exit 0 having updated nothing, freezing
+        # live_status_checked_at until evaluate_trunk_runtime() starts denying
+        # every inbound call "trunk_not_ready" while `pjsip show registrations`
+        # still reports Registered.
+        await conn.execute("SET app.bypass_rls = 'true'")
+
         rows = await conn.fetch(
             "SELECT id, trunk_name, is_active, metadata, auth_username FROM tenant_sip_trunks"
         )
+        if not rows:
+            # Never fail quietly: a zero-row read here is indistinguishable from
+            # a healthy no-op, and admission depends on this timestamp.
+            print(
+                "trunk status updater read 0 trunks — refusing to report success. "
+                "Check that app.bypass_rls is honoured by the 0013 policy for this "
+                "role, or that tenant_sip_trunks is genuinely empty.",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
         cleanup_count = reconcile_inactive_config_files(rows, endpoints)
         for r in rows:
             raw = r["metadata"]
