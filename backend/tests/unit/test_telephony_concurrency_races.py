@@ -10,10 +10,12 @@ Claim 2 (telephony_bridge): early gateway audio must be routed by the FULL
 session id / exact mapping. The old truncated ``call_id[:12]`` prefix fallback
 let two concurrent calls whose ids collide in the first 12 chars cross audio.
 """
+
 from __future__ import annotations
 
 import base64
 import logging
+import time
 
 import pytest
 
@@ -23,6 +25,7 @@ import pytest
 # when this file is run in isolation. (Pre-existing repo import-order quirk,
 # unrelated to the fix.)
 import app.api.v1.dependencies  # noqa: F401,E402
+from app.infrastructure.metrics import inbound_metrics
 
 from app.infrastructure.telephony.asterisk_adapter import (
     AsteriskAdapter,
@@ -33,6 +36,7 @@ from app.infrastructure.telephony.asterisk_adapter import (
 # ---------------------------------------------------------------------------
 # Claim 3 — a dead media leg must hang up the still-live parent
 # ---------------------------------------------------------------------------
+
 
 async def test_on_stasis_end_hangs_up_parent_channel():
     """When teardown runs (e.g. the ExternalMedia leg died while the parent
@@ -60,7 +64,7 @@ async def test_on_stasis_end_hangs_up_parent_channel():
     async def fake_gateway(method, path, payload=None, ok=(200,)):
         return {}
 
-    ad._ari = fake_ari          # type: ignore[assignment]
+    ad._ari = fake_ari  # type: ignore[assignment]
     ad._gateway = fake_gateway  # type: ignore[assignment]
 
     ad._active_sessions[parent] = {"session_id": "sess", "listen_port": 32050, "bridge_id": "br1"}
@@ -79,6 +83,7 @@ async def test_on_stasis_end_hangs_up_parent_channel():
 # ---------------------------------------------------------------------------
 # Claim 4 — TTS delivery failure must surface (not be swallowed as success)
 # ---------------------------------------------------------------------------
+
 
 async def test_send_tts_raises_when_no_gateway_session():
     ad = AsteriskAdapter()
@@ -116,9 +121,38 @@ async def test_send_tts_success_does_not_raise():
     assert calls == ["/v1/sessions/tts/play"]
 
 
+async def test_first_inbound_agent_audio_is_measured_once_after_gateway_accepts(monkeypatch):
+    ad = AsteriskAdapter()
+    ad._gateway_sessions["inbound-1"] = "sess-inbound-1"
+    ad._active_sessions["inbound-1"] = {
+        "direction": "inbound",
+        "answered_at_monotonic": time.monotonic() - 0.25,
+        "first_agent_audio_recorded": False,
+    }
+    observed: list[float] = []
+
+    async def ok_gateway(method, path, payload=None, ok=(200,)):
+        return {}
+
+    monkeypatch.setattr(ad, "_gateway", ok_gateway)
+    monkeypatch.setattr(
+        inbound_metrics,
+        "record_inbound_answer_to_first_audio",
+        observed.append,
+    )
+
+    await ad.send_tts_audio("inbound-1", b"\x7f" * 160)
+    await ad.send_tts_audio("inbound-1", b"\x7f" * 160)
+
+    assert len(observed) == 1
+    assert observed[0] >= 0.25
+    assert ad._active_sessions["inbound-1"]["first_agent_audio_recorded"] is True
+
+
 # ---------------------------------------------------------------------------
 # Claim 1 — deterministic trunk-leg → origination correlation
 # ---------------------------------------------------------------------------
+
 
 def _adapter_with_linkedids(linkedid_by_channel):
     """Build an adapter whose _ari GET CHANNEL(linkedid) returns a canned value
@@ -143,10 +177,12 @@ async def test_out_of_order_trunk_legs_map_to_correct_parents():
     A_pre = "talky-out-aaaaaaaa-1111-2222-3333-444444444444"
     B_pre = "talky-out-bbbbbbbb-5555-6666-7777-888888888888"
 
-    ad = _adapter_with_linkedids({
-        "trunk-legB": B_pre,   # B's leg reports linkedid == B's origination id
-        "trunk-legA": A_pre,
-    })
+    ad = _adapter_with_linkedids(
+        {
+            "trunk-legB": B_pre,  # B's leg reports linkedid == B's origination id
+            "trunk-legA": A_pre,
+        }
+    )
     # Registered in origination order A, then B.
     ad._track_originated_channel(A_pre)
     ad._track_originated_channel(B_pre)
@@ -255,10 +291,11 @@ async def test_start_trunk_leg_aliases_correct_pair():
 # Claim 2 — early audio must never bind to the wrong session via [:12] prefix
 # ---------------------------------------------------------------------------
 
+
 class _FakeStateBackend:
     def __init__(self, direct_map):
-        self._direct = dict(direct_map)          # session_id -> call_id (exact)
-        self.early = {}                          # session_id -> list[bytes]
+        self._direct = dict(direct_map)  # session_id -> call_id (exact)
+        self.early = {}  # session_id -> list[bytes]
 
     def get_call_id_for_gateway_session(self, session_id):
         return self._direct.get(session_id)
@@ -341,9 +378,7 @@ async def test_exact_session_audio_routes_normally(monkeypatch):
 
     audio_bytes = b"\x01" * 160
     body = {"session_id": session_a, "pcmu_base64": base64.b64encode(audio_bytes).decode()}
-    await tb.receive_gateway_audio(
-        session_a, _FakeRequest(body, internal_token=internal_token)
-    )
+    await tb.receive_gateway_audio(session_a, _FakeRequest(body, internal_token=internal_token))
 
     assert routed == [(call_a, audio_bytes)]
     assert fake_sb.early == {}

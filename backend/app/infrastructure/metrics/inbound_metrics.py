@@ -125,6 +125,12 @@ _asterisk_transfer_inflight = _gauge(
     "Accepted Asterisk transfer attempts without a terminal outcome.",
     (),
 )
+_answer_to_first_audio = _histogram(
+    "inbound_answer_to_first_audio_seconds",
+    "Time from confirmed provider Answer to the first agent audio accepted by the gateway.",
+    (),
+    buckets=(0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0, 8.0, 12.0, 20.0),
+)
 
 
 _TRANSFER_OUTCOMES = frozenset({"connected", "failed"})
@@ -285,3 +291,9 @@ def set_asterisk_transfer_inflight(value: int) -> None:
     """Publish accepted attempts that do not yet have a terminal outcome."""
 
     _asterisk_transfer_inflight.set(max(0, int(value)))
+
+
+def record_inbound_answer_to_first_audio(duration_seconds: float) -> None:
+    """Observe caller dead-air latency without adding call or tenant labels."""
+
+    _answer_to_first_audio.observe(max(0.0, float(duration_seconds)))

@@ -23,6 +23,46 @@ def _adapter() -> AsteriskAdapter:
     return adapter
 
 
+@pytest.mark.parametrize(
+    ("reason", "reason_code"),
+    [
+        ("unknown_did", 1),
+        ("did_not_verified", 1),
+        ("max_active_calls_reached", 17),
+        ("admission_timeout", 42),
+        ("subscription_inactive", 21),
+        ("new_policy_denial", 21),
+        ("after_hours_closed", None),
+    ],
+)
+def test_inbound_denial_reason_mapping_is_explicit_and_fail_closed(reason, reason_code):
+    assert AsteriskAdapter._inbound_denial_reason_code(reason) == reason_code
+
+
+@pytest.mark.asyncio
+async def test_reasoned_preanswer_hangup_retries_bare_in_same_iteration(monkeypatch):
+    adapter = _adapter()
+    requests: list[dict] = []
+
+    async def ari(method, path, **kwargs):
+        assert method == "DELETE"
+        assert path == "/channels/denied-1"
+        requests.append(kwargs)
+        if len(requests) == 1:
+            raise RuntimeError("older ARI rejected reason_code")
+        return 404, {}
+
+    async def must_not_list():
+        raise AssertionError("bare DELETE 404 is authoritative absence proof")
+
+    monkeypatch.setattr(adapter, "_ari", ari)
+    monkeypatch.setattr(adapter, "list_active_channel_ids", must_not_list)
+
+    assert await adapter.hangup_confirmed("denied-1", reason_code=42) is True
+    assert requests[0]["params"] == {"reason_code": "42"}
+    assert "params" not in requests[1]
+
+
 @pytest.mark.asyncio
 async def test_delete_acceptance_is_not_termination_while_channel_remains(monkeypatch):
     adapter = _adapter()
@@ -95,9 +135,10 @@ async def test_explicit_recovered_legs_share_one_confirmation_deadline(monkeypat
     monkeypatch.setattr(adapter, "_ari", ari)
     monkeypatch.setattr(adapter, "list_active_channel_ids", active)
 
-    assert await adapter.hangup_many_confirmed(
-        ["recovered-parent", "recovered-transfer-target"]
-    ) is True
+    assert (
+        await adapter.hangup_many_confirmed(["recovered-parent", "recovered-transfer-target"])
+        is True
+    )
     assert deleted == ["recovered-parent", "recovered-transfer-target"]
 
 
@@ -155,9 +196,7 @@ async def test_hangup_request_does_not_finalize_while_parent_channel_remains(mon
     monkeypatch.setattr(adapter, "_release_rtp_port", gateway)
     adapter._on_any_call_end = on_end
 
-    await adapter._handle_ari_event(
-        {"type": "ChannelHangupRequest", "channel": {"id": call_id}}
-    )
+    await adapter._handle_ari_event({"type": "ChannelHangupRequest", "channel": {"id": call_id}})
     await asyncio.wait_for(first_inventory.wait(), timeout=1)
     await asyncio.sleep(0.04)
     assert ended == []

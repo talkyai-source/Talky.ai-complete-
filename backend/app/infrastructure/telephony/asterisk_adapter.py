@@ -78,6 +78,38 @@ def _masked_number(value: Any) -> str:
 # default to 2 hours (the gateway's own default) and make it env-tunable.
 _SESSION_FINAL_TIMEOUT_MS = int(os.getenv("TELEPHONY_SESSION_FINAL_TIMEOUT_MS", "7200000"))
 
+# ARI ``reason_code`` values are Q.850 causes. Asterisk maps these to the SIP
+# responses callers and upstream carriers understand: 1 -> 404, 17 -> 486,
+# 42 -> 5xx congestion (normally 503), and 21 -> 603. Keep the vocabulary
+# explicit so a newly introduced admission reason cannot accidentally become
+# retryable congestion and create a carrier retry storm.
+_INBOUND_NOT_FOUND_REASONS = frozenset(
+    {
+        "invalid_did",
+        "unknown_did",
+        "ambiguous_did",
+        "tenant_conflict",
+        "did_not_verified",
+    }
+)
+_INBOUND_BUSY_REASONS = frozenset({"max_active_calls_reached"})
+_INBOUND_TRANSIENT_REASONS = frozenset(
+    {
+        "trunk_not_ready",
+        "concurrency_policy_missing",
+        "admission_timeout",
+        "admission_callback_error",
+        "admission_dependency_unavailable",
+        "routing_dependency_unavailable",
+        "callback_unavailable",
+        "finalizer_unavailable",
+        "answer_persist_unavailable",
+        "empty_admission_decision",
+        "incomplete_admission_decision",
+        "transfer_runtime_unavailable",
+    }
+)
+
 
 class TtsDeliveryError(RuntimeError):
     """Raised by send_tts_audio when a TTS packet could NOT be delivered to the
@@ -835,6 +867,7 @@ class AsteriskAdapter(CallControlAdapter):
             connector = aiohttp.TCPConnector()
             timeout = aiohttp.ClientTimeout(total=3)
             async with aiohttp.ClientSession(connector=connector) as sess:
+
                 async def _ari_ok() -> bool:
                     async with sess.get(
                         f"http://{self._ari_host}:{self._ari_port}/ari/asterisk/info",
@@ -3335,6 +3368,7 @@ class AsteriskAdapter(CallControlAdapter):
         channel_id: str,
         *,
         reason: str,
+        reason_code: Optional[int] = None,
     ) -> None:
         """Durably own a rejected PBX leg until hard absence proof.
 
@@ -3390,6 +3424,7 @@ class AsteriskAdapter(CallControlAdapter):
                     if await self.hangup_many_confirmed(
                         (channel_id,),
                         fence_root=False,
+                        reason_code=reason_code,
                     ):
                         finalizer = self._on_inbound_admission_finalize
                         if callable(finalizer):
@@ -3461,6 +3496,27 @@ class AsteriskAdapter(CallControlAdapter):
             name=f"asterisk-unclaimed-hangup:{channel_id}",
         )
 
+    @staticmethod
+    def _inbound_denial_reason_code(reason: str) -> Optional[int]:
+        """Map a bounded admission result to its caller-facing Q.850 cause.
+
+        Unknown policy/configuration denials are deliberately terminal (21),
+        not congestion. Only the explicit transient allowlist may invite an
+        upstream retry. The configured after-hours ``hangup`` action retains
+        normal clearing to preserve its existing operator-selected behaviour.
+        """
+
+        normalized = str(reason or "").strip().lower()
+        if normalized == "after_hours_closed":
+            return None
+        if normalized in _INBOUND_NOT_FOUND_REASONS:
+            return 1
+        if normalized in _INBOUND_BUSY_REASONS:
+            return 17
+        if normalized in _INBOUND_TRANSIENT_REASONS:
+            return 42
+        return 21
+
     def _schedule_preanswer_hangup_and_release(
         self,
         channel_id: str,
@@ -3477,7 +3533,10 @@ class AsteriskAdapter(CallControlAdapter):
         async def _run() -> None:
             try:
                 while channel_id in self._inbound_admissions:
-                    if await self.hangup_confirmed(channel_id):
+                    if await self.hangup_confirmed(
+                        channel_id,
+                        reason_code=self._inbound_denial_reason_code(reason),
+                    ):
                         released = await asyncio.shield(
                             self._release_cached_inbound_admission(
                                 channel_id,
@@ -3532,7 +3591,16 @@ class AsteriskAdapter(CallControlAdapter):
             # negative decision leaves the channel unanswered and hangs it up.
             meta = self._extract_inbound_meta(event)
             self._inbound_call_meta[channel_id] = meta
+            admission_started = time.monotonic()
             admission = await self._admit_inbound(channel_id, meta)
+            logger.info(
+                "inbound_admission_elapsed channel=%s allowed=%s reason=%s "
+                "admission_elapsed_ms=%.1f",
+                channel_id[:12],
+                bool(admission.get("allowed")),
+                str(admission.get("reason") or "-")[:80],
+                (time.monotonic() - admission_started) * 1000.0,
+            )
             if not admission.get("allowed"):
                 reason = str(admission.get("reason") or "admission_denied")
                 if channel_id in self._inbound_admissions:
@@ -3544,6 +3612,7 @@ class AsteriskAdapter(CallControlAdapter):
                     self._schedule_unclaimed_hangup(
                         channel_id,
                         reason=reason,
+                        reason_code=self._inbound_denial_reason_code(reason),
                     )
                 return
 
@@ -3802,6 +3871,8 @@ class AsteriskAdapter(CallControlAdapter):
                 "listen_port": listen_port,
                 "bridge_id": bridge_id,
                 "direction": "inbound",
+                "answered_at_monotonic": answered_at_monotonic,
+                "first_agent_audio_recorded": False,
             }
             self._ext_channels[channel_id] = ext_channel_id
             self._bridges[channel_id] = bridge_id
@@ -4252,6 +4323,40 @@ class AsteriskAdapter(CallControlAdapter):
             # Reset error counter on first successful delivery.
             self._tts_error_counts.pop(call_id, None)
 
+            # The gateway has accepted the packet, which is the earliest local
+            # proof that agent audio is queued for the caller. Measure exactly
+            # once from the confirmed provider Answer; failed gateway writes
+            # deliberately never count as first audio.
+            try:
+                active_session = getattr(self, "_active_sessions", {}).get(call_id)
+                if (
+                    isinstance(active_session, dict)
+                    and active_session.get("direction") == "inbound"
+                    and active_session.get("first_agent_audio_recorded") is not True
+                ):
+                    answered_at = active_session.get("answered_at_monotonic")
+                    if isinstance(answered_at, (int, float)):
+                        now = time.monotonic()
+                        elapsed_s = max(0.0, now - float(answered_at))
+                        active_session["first_agent_audio_recorded"] = True
+                        active_session["first_agent_audio_at_monotonic"] = now
+                        from app.infrastructure.metrics.inbound_metrics import (
+                            record_inbound_answer_to_first_audio,
+                        )
+
+                        record_inbound_answer_to_first_audio(elapsed_s)
+                        logger.info(
+                            "inbound_first_agent_audio channel=%s " "answer_to_first_audio_ms=%.1f",
+                            call_id[:12],
+                            elapsed_s * 1000.0,
+                        )
+            except Exception as exc:  # noqa: BLE001 - audio already succeeded
+                logger.warning(
+                    "inbound_first_agent_audio_observation_failed channel=%s err=%s",
+                    call_id[:12],
+                    exc,
+                )
+
             # DID CANCELLED AUDIO RESUME? The gateway just ACCEPTED this chunk.
             # If we are still inside the window after an interrupt, this is the
             # cancelled generation getting through — the caller hears the agent
@@ -4553,6 +4658,7 @@ class AsteriskAdapter(CallControlAdapter):
         call_ids: Any,
         *,
         fence_root: bool = True,
+        reason_code: Optional[int] = None,
     ) -> bool:
         """Fence transfer creation, then remove and prove explicit legs absent.
 
@@ -4569,9 +4675,78 @@ class AsteriskAdapter(CallControlAdapter):
         if fence_root:
             self._termination_fenced_call_ids.add(owned_channel_ids[0])
         async with self._transfer_setup_lock:
-            return await self._hangup_many_confirmed_locked(owned_channel_ids)
+            return await self._hangup_many_confirmed_locked(
+                owned_channel_ids,
+                reason_code=reason_code,
+            )
 
-    async def _hangup_many_confirmed_locked(self, call_ids: Any) -> bool:
+    async def _delete_channel_with_reason_fallback(
+        self,
+        channel_id: str,
+        *,
+        reason_code: Optional[int],
+        timeout_s: float,
+    ) -> Any:
+        """Request one ARI hangup, retrying bare if cause delivery fails.
+
+        Some deployed/older ARI builds can reject an otherwise documented
+        ``reason_code`` query. A rejected reason must never turn into a live,
+        unanswered, billable channel, so the compatibility retry happens in
+        this same cleanup iteration. The shared confirmation deadline still
+        bounds both requests and the subsequent absence proof.
+        """
+
+        if reason_code is not None and reason_code not in {1, 17, 21, 42}:
+            raise ValueError("unsupported inbound hangup reason_code")
+
+        started = asyncio.get_running_loop().time()
+        request_timeout = max(0.001, float(timeout_s))
+        request_kwargs: Dict[str, Any] = {
+            "ok": (200, 204, 404),
+            "return_status": True,
+        }
+        if reason_code is not None:
+            # Reserve half of this iteration's remaining budget for the bare
+            # compatibility request if the reasoned request stalls.
+            request_timeout = max(0.001, request_timeout / 2.0)
+            request_kwargs["params"] = {"reason_code": str(reason_code)}
+        try:
+            return await asyncio.wait_for(
+                self._ari(
+                    "DELETE",
+                    f"/channels/{channel_id}",
+                    **request_kwargs,
+                ),
+                timeout=request_timeout,
+            )
+        except Exception as exc:
+            if reason_code is None:
+                raise
+            logger.warning(
+                "inbound_reasoned_hangup_failed channel=%s reason_code=%d " "fallback=bare err=%s",
+                channel_id[:12],
+                reason_code,
+                exc,
+            )
+
+        elapsed = asyncio.get_running_loop().time() - started
+        remaining = max(0.001, float(timeout_s) - elapsed)
+        return await asyncio.wait_for(
+            self._ari(
+                "DELETE",
+                f"/channels/{channel_id}",
+                ok=(200, 204, 404),
+                return_status=True,
+            ),
+            timeout=remaining,
+        )
+
+    async def _hangup_many_confirmed_locked(
+        self,
+        call_ids: Any,
+        *,
+        reason_code: Optional[int] = None,
+    ) -> bool:
         """Remove explicit human legs and prove their absence in one deadline.
 
         ARI accepting ``DELETE /channels/{id}`` is only a control-plane
@@ -4601,14 +4776,10 @@ class AsteriskAdapter(CallControlAdapter):
             if remaining <= 0:
                 break
             try:
-                response = await asyncio.wait_for(
-                    self._ari(
-                        "DELETE",
-                        f"/channels/{channel_id}",
-                        ok=(200, 204, 404),
-                        return_status=True,
-                    ),
-                    timeout=remaining,
+                response = await self._delete_channel_with_reason_fallback(
+                    channel_id,
+                    reason_code=reason_code,
+                    timeout_s=remaining,
                 )
                 status = response[0] if isinstance(response, tuple) else None
                 if status == 404:
@@ -4655,7 +4826,12 @@ class AsteriskAdapter(CallControlAdapter):
         )
         return False
 
-    async def hangup_confirmed(self, call_id: str) -> bool:
+    async def hangup_confirmed(
+        self,
+        call_id: str,
+        *,
+        reason_code: Optional[int] = None,
+    ) -> bool:
         """Remove every currently-owned human leg with hard PBX proof."""
 
         channel_ids = [call_id]
@@ -4665,7 +4841,10 @@ class AsteriskAdapter(CallControlAdapter):
         target_transfer = self._transfers_by_target.get(call_id)
         if target_transfer is not None:
             channel_ids.extend([target_transfer.parent_id, target_transfer.target_id])
-        return await self.hangup_many_confirmed(channel_ids)
+        return await self.hangup_many_confirmed(
+            channel_ids,
+            reason_code=reason_code,
+        )
 
     async def hangup(self, call_id: str) -> None:
         """Delete (hang up) a channel via ARI, preserving legacy fail-soft API."""

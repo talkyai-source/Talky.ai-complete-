@@ -242,9 +242,7 @@ async def test_answer_http_response_only_releases_when_noncommit_is_proven(
     async def ari(method, path, **kwargs):
         if method == "POST" and path == "/channels/inbound-1/answer":
             raise _AriResponseError(method, path, answer_status, "test response")
-        if method == "DELETE" and path == "/channels/inbound-1" and kwargs.get(
-            "return_status"
-        ):
+        if method == "DELETE" and path == "/channels/inbound-1" and kwargs.get("return_status"):
             return 404, {}
         return {}
 
@@ -255,9 +253,7 @@ async def test_answer_http_response_only_releases_when_noncommit_is_proven(
     finalizer.assert_awaited_once()
     assert finalizer.await_args.kwargs["reason"] == expected_reason
     assert finalizer.await_args.kwargs["release_only"] is expected_release_only
-    assert finalizer.await_args.kwargs["duration_seconds"] == (
-        0 if expected_release_only else 1
-    )
+    assert finalizer.await_args.kwargs["duration_seconds"] == (0 if expected_release_only else 1)
 
 
 @pytest.mark.asyncio
@@ -430,6 +426,7 @@ async def test_denied_inbound_hangs_up_without_answer_or_media():
     adapter.hangup_many_confirmed.assert_awaited_once_with(
         ("inbound-1",),
         fence_root=False,
+        reason_code=1,
     )
     assert adapter.get_inbound_admission("inbound-1") is None
     assert "inbound-1" not in adapter._inbound_cleanup_pending
@@ -471,10 +468,11 @@ async def test_unclaimed_denial_registers_durable_retry_until_absence_proof(
     adapter.set_inbound_admission_finalizer(finalize)
     _enable_answer_persistence(adapter)
 
-    async def confirmed(call_ids, *, fence_root=True):
+    async def confirmed(call_ids, *, fence_root=True, reason_code=None):
         nonlocal attempts
         assert call_ids == ("unclaimed-1",)
         assert fence_root is False
+        assert reason_code == 1
         attempts += 1
         if attempts == 1:
             first_attempt.set()
@@ -525,6 +523,7 @@ async def test_missing_admission_callback_fails_closed():
     adapter.hangup_many_confirmed.assert_awaited_once_with(
         ("inbound-1",),
         fence_root=False,
+        reason_code=42,
     )
 
 
@@ -546,6 +545,7 @@ async def test_missing_finalizer_denies_before_reserving():
     adapter.hangup_many_confirmed.assert_awaited_once_with(
         ("inbound-1",),
         fence_root=False,
+        reason_code=42,
     )
 
 
@@ -568,6 +568,7 @@ async def test_missing_answer_persistence_hook_denies_before_reserving():
     adapter.hangup_many_confirmed.assert_awaited_once_with(
         ("inbound-1",),
         fence_root=False,
+        reason_code=42,
     )
 
 
@@ -604,6 +605,7 @@ async def test_duplicate_stasis_start_admits_only_once():
     adapter.hangup_many_confirmed.assert_awaited_once_with(
         ("inbound-1",),
         fence_root=False,
+        reason_code=21,
     )
 
 
