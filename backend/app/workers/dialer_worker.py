@@ -5,6 +5,7 @@ Background worker for processing outbound call jobs
 Run as separate process:
     python -m app.workers.dialer_worker
 """
+
 import asyncio
 import logging
 import os
@@ -35,48 +36,48 @@ from app.domain.models.voice_contract import generate_talklee_call_id
 from app.domain.services.queue_service import DialerQueueService
 from app.domain.services.scheduling_rules import SchedulingRuleEngine
 from app.core.db import init_db_pool, close_db_pool, Database
+from app.core.db_utils import acquire_with_tenant
 
 logger = logging.getLogger(__name__)
 
 # Configure logging for worker
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
 
 class DialerWorker:
     """
     Background worker for processing dialer jobs.
-    
+
     Responsibilities:
     - Dequeue jobs from Redis
     - Check scheduling rules (time window, concurrent limits)
     - Initiate outbound calls via telephony provider
     - Handle call results and schedule retries
-    
+
     Architecture:
     - Runs as separate process from FastAPI
     - Connects to same Redis and PostgreSQL instances
     - Publishes call events for Voice Worker to handle
     """
-    
+
     # Worker configuration
     POLL_INTERVAL = 1.0  # Seconds between queue checks when empty
     SCHEDULED_CHECK_INTERVAL = 60  # Seconds between scheduled job checks
     MAX_CONSECUTIVE_ERRORS = 10
-    
+
     # API base URL for webhooks
     API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
-    
+
     def __init__(self):
         self.queue_service = DialerQueueService()
         self.rules_engine = SchedulingRuleEngine()
-        
+
         self.running = False
         self._db_pool: Optional[asyncpg.Pool] = None
         self._redis: Optional[redis.Redis] = None
-        
+
         # Stats
         self._jobs_processed = 0
         self._jobs_failed = 0
@@ -88,14 +89,15 @@ class DialerWorker:
     async def initialize(self) -> None:
         """Initialize connections to Redis and PostgreSQL."""
         logger.info("Initializing Dialer Worker...")
-        
+
         # Initialize queue service (Redis)
         await self.queue_service.initialize()
-        
+
         # Initialize PostgreSQL pool — reuse the container's pool when running
         # inside FastAPI to avoid creating a second connection pool.
         try:
             from app.core.container import get_container
+
             container = get_container()
             if container.is_initialized and container.db_pool:
                 self._db_pool = container.db_pool
@@ -106,17 +108,17 @@ class DialerWorker:
         except Exception:
             self._db_pool = await init_db_pool()
             logger.info("Dialer Worker created standalone DB pool (fallback)")
-        
+
         # Initialize separate Redis connection for pub/sub
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
         self._redis = await redis.from_url(redis_url, decode_responses=True)
-        
+
         logger.info("Dialer Worker initialized successfully")
-    
+
     async def run(self) -> None:
         """
         Main worker loop.
-        
+
         Continuously:
         1. Process any due scheduled retries
         2. Dequeue and process jobs
@@ -157,7 +159,9 @@ class DialerWorker:
                 # 1. Check for due scheduled jobs (every 10s)
                 now_utc = datetime.now(timezone.utc)
                 if self._last_scheduled_check.tzinfo is None:
-                    self._last_scheduled_check = self._last_scheduled_check.replace(tzinfo=timezone.utc)
+                    self._last_scheduled_check = self._last_scheduled_check.replace(
+                        tzinfo=timezone.utc
+                    )
                 if (now_utc - self._last_scheduled_check).total_seconds() > 10:
                     moved = await self.queue_service.process_scheduled_jobs()
                     if moved > 0:
@@ -171,30 +175,27 @@ class DialerWorker:
                 if (now_utc - self._last_reap_check).total_seconds() > 30:
                     await self._reap_stuck_jobs_tick()
                     self._last_reap_check = now_utc
-                
+
                 # 2. Get active tenants
                 tenant_ids = await self._get_active_tenant_ids()
-                
+
                 # 3. Dequeue next job
-                job = await self.queue_service.dequeue_job(
-                    tenant_ids=tenant_ids,
-                    timeout=5
-                )
-                
+                job = await self.queue_service.dequeue_job(tenant_ids=tenant_ids, timeout=5)
+
                 if job:
                     await self.process_job(job)
                     consecutive_errors = 0
                 else:
                     # No jobs available, wait before checking again
                     await asyncio.sleep(self.POLL_INTERVAL)
-                
+
             except asyncio.CancelledError:
                 logger.info("Worker received cancellation signal")
                 break
             except Exception as e:
                 consecutive_errors += 1
                 logger.error(f"Worker error ({consecutive_errors}): {e}", exc_info=True)
-                
+
                 if consecutive_errors >= self.MAX_CONSECUTIVE_ERRORS:
                     # Fatal: exit with a non-zero code so systemd (Restart=always)
                     # sees a failure and restarts the process cleanly, instead of
@@ -211,14 +212,16 @@ class DialerWorker:
     async def process_job(self, job: DialerJob) -> None:
         """
         Process a single dialer job.
-        
+
         Steps:
         1. Get tenant calling rules
         2. Check if we can make call now
         3. Initiate the call
         4. Create call record in database
         """
-        logger.info(f"Processing job {job.job_id} for lead {job.lead_id} (attempt {job.attempt_number})")
+        logger.info(
+            f"Processing job {job.job_id} for lead {job.lead_id} (attempt {job.attempt_number})"
+        )
 
         # Reset bridge-response state captured by `_make_call` — must be
         # cleared per-job so a previous failure doesn't classify the
@@ -251,7 +254,8 @@ class DialerWorker:
             if await self._tenant_minutes_exhausted(job.tenant_id):
                 logger.info(
                     "Skipping job %s — tenant %s is out of plan minutes",
-                    job.job_id, job.tenant_id,
+                    job.job_id,
+                    job.tenant_id,
                 )
                 await self._publish_block(job, "out_of_minutes")
                 await self._emit_out_of_minutes_event(job)
@@ -267,11 +271,13 @@ class DialerWorker:
             tenant_rules = await self._get_tenant_rules(job.tenant_id)
             campaign_cfg = await self._get_campaign_calling_config(job.campaign_id)
             from app.domain.services.dialer.campaign_schedule import (
-                effective_rules, schedule_ignored,
+                effective_rules,
+                schedule_ignored,
             )
+
             rules = effective_rules(tenant_rules, campaign_cfg)
             ignore_schedule = schedule_ignored(campaign_cfg)
-            
+
             # 2. Get lead info for cooldown check
             lead_last_called = await self._get_lead_last_called(job.lead_id)
 
@@ -288,6 +294,7 @@ class DialerWorker:
             from app.domain.services.dialer.lead_timezone import (
                 resolve_effective_lead_timezone,
             )
+
             lead_tz = resolve_effective_lead_timezone(
                 explicit_timezone=await self._get_lead_timezone(job.lead_id),
                 phone_number=job.phone_number,
@@ -302,6 +309,7 @@ class DialerWorker:
             active_override = None
             try:
                 from app.domain.services.global_concurrency import current_count
+
                 if self._redis is not None:
                     active_override = await current_count(self._redis)
             except Exception as exc:
@@ -324,7 +332,7 @@ class DialerWorker:
                 lead_timezone=lead_tz,
                 enforce_window=not ignore_schedule,
             )
-            
+
             # 3b. TESTING OVERRIDE — explicit, opt-in, OFF by default.
             #
             # ⚠️ COMPLIANCE: calling-hour/day rules exist for legal reasons
@@ -340,17 +348,21 @@ class DialerWorker:
             self._schedule_override = None
             if not can_call:
                 from app.domain.services.dialer.block_reasons import (
-                    SCHEDULE_BLOCK_CODES, classify, describe_schedule,
+                    SCHEDULE_BLOCK_CODES,
+                    classify,
+                    describe_schedule,
                     testing_override_notice,
                 )
                 from app.domain.services.dialer.testing_override import (
-                    log_override_used, schedule_override_source,
+                    log_override_used,
+                    schedule_override_source,
                 )
 
                 blocked = classify(reason, rules=rules)
                 override_source = (
                     schedule_override_source(campaign_cfg)
-                    if blocked.code in SCHEDULE_BLOCK_CODES else None
+                    if blocked.code in SCHEDULE_BLOCK_CODES
+                    else None
                 )
                 if override_source:
                     log_override_used(
@@ -371,7 +383,9 @@ class DialerWorker:
                     await self._publish_reason(
                         job,
                         testing_override_notice(
-                            rules, source=override_source, raw_reason=reason,
+                            rules,
+                            source=override_source,
+                            raw_reason=reason,
                         ),
                     )
                     can_call = True
@@ -392,7 +406,8 @@ class DialerWorker:
                     # job is held against the lead's window but re-woken on
                     # the campaign's, and lands outside the window again.
                     delay = self.rules_engine.get_delay_until_next_window(
-                        rules, lead_timezone=lead_tz,
+                        rules,
+                        lead_timezone=lead_tz,
                     )
                     logger.info(
                         f"Outside calling window (tz={lead_tz or rules.timezone}"
@@ -423,13 +438,19 @@ class DialerWorker:
                     # allowed hours. Avoids burning retries hammering the cap.
                     now = datetime.now(timezone.utc)
                     next_midnight = (now + timedelta(days=1)).replace(
-                        hour=0, minute=5, second=0, microsecond=0,
+                        hour=0,
+                        minute=5,
+                        second=0,
+                        microsecond=0,
                     )
                     delay = max(300, int((next_midnight - now).total_seconds()))
                     logger.info(
                         "Daily per-lead cap hit for lead %s (%s) — retrying after "
                         "midnight in %ds (~%.1fh)",
-                        job.lead_id, reason, delay, delay / 3600,
+                        job.lead_id,
+                        reason,
+                        delay,
+                        delay / 3600,
                     )
                 else:
                     delay = 300  # 5 minutes for other reasons (concurrent limit, etc.)
@@ -442,7 +463,7 @@ class DialerWorker:
                 await self.queue_service.schedule_retry(job, delay_seconds=delay)
                 await self._update_job_status(job.job_id, JobStatus.SKIPPED, reason=reason)
                 return
-            
+
             # 4. Concurrency is now tracked authoritatively by the telephony
             # bridge's global_concurrency ledger (acquired on answer, released
             # on hangup, self-healed by the watchdog reconcile) and read above
@@ -461,12 +482,16 @@ class DialerWorker:
             if campaign_status not in {"running", "active"}:
                 logger.info(
                     "Campaign %s went %s during job %s validation — skipping originate",
-                    job.campaign_id, campaign_status or "missing", job.job_id,
+                    job.campaign_id,
+                    campaign_status or "missing",
+                    job.job_id,
                 )
                 await self._publish_block(job, "campaign_stopped_before_originate")
                 await self.queue_service.mark_skipped(job.job_id, reason="campaign_stopped")
                 await self._update_job_status(
-                    job.job_id, JobStatus.SKIPPED, error="campaign_stopped_before_originate",
+                    job.job_id,
+                    JobStatus.SKIPPED,
+                    error="campaign_stopped_before_originate",
                 )
                 return
 
@@ -486,15 +511,23 @@ class DialerWorker:
                 if inflight >= batch_size:
                     logger.debug(
                         "batch_gate: campaign %s at capacity (%d/%d in flight) — "
-                        "deferring job %s", job.campaign_id, inflight, batch_size,
+                        "deferring job %s",
+                        job.campaign_id,
+                        inflight,
+                        batch_size,
                         job.job_id,
                     )
                     await self._publish_block(
-                        job, "batch_capacity", rules=rules, retry_after_seconds=5,
+                        job,
+                        "batch_capacity",
+                        rules=rules,
+                        retry_after_seconds=5,
                     )
                     await self.queue_service.schedule_retry(job, delay_seconds=5)
                     await self._update_job_status(
-                        job.job_id, JobStatus.RETRY_SCHEDULED, reason="batch_capacity",
+                        job.job_id,
+                        JobStatus.RETRY_SCHEDULED,
+                        reason="batch_capacity",
                     )
                     return
 
@@ -511,16 +544,24 @@ class DialerWorker:
                 if since_last is not None and since_last < call_gap:
                     wait = max(1, call_gap - since_last)
                     logger.debug(
-                        "call_gap: campaign %s dialed %ds ago (<%ds) — deferring "
-                        "job %s by %ds", job.campaign_id, since_last, call_gap,
-                        job.job_id, wait,
+                        "call_gap: campaign %s dialed %ds ago (<%ds) — deferring " "job %s by %ds",
+                        job.campaign_id,
+                        since_last,
+                        call_gap,
+                        job.job_id,
+                        wait,
                     )
                     await self._publish_block(
-                        job, "call_gap", rules=rules, retry_after_seconds=wait,
+                        job,
+                        "call_gap",
+                        rules=rules,
+                        retry_after_seconds=wait,
                     )
                     await self.queue_service.schedule_retry(job, delay_seconds=wait)
                     await self._update_job_status(
-                        job.job_id, JobStatus.RETRY_SCHEDULED, reason="call_gap",
+                        job.job_id,
+                        JobStatus.RETRY_SCHEDULED,
+                        reason="call_gap",
                     )
                     return
 
@@ -531,20 +572,29 @@ class DialerWorker:
             # (measured: 12-23s replies, audio gaps). Atomic Redis claim —
             # whoever wins dials; everyone else waits out the window.
             from app.domain.services.dialer.global_pacing import (
-                claim_tenant_dial_slot, release_tenant_dial_slot,
+                claim_tenant_dial_slot,
+                release_tenant_dial_slot,
             )
+
             _tenant_wait = await claim_tenant_dial_slot(self._redis, job.tenant_id)
             if _tenant_wait > 0:
                 logger.debug(
                     "tenant_gap: tenant %s dialed recently — deferring job %s by %ds",
-                    job.tenant_id, job.job_id, _tenant_wait,
+                    job.tenant_id,
+                    job.job_id,
+                    _tenant_wait,
                 )
                 await self._publish_block(
-                    job, "tenant_gap", rules=rules, retry_after_seconds=_tenant_wait,
+                    job,
+                    "tenant_gap",
+                    rules=rules,
+                    retry_after_seconds=_tenant_wait,
                 )
                 await self.queue_service.schedule_retry(job, delay_seconds=_tenant_wait)
                 await self._update_job_status(
-                    job.job_id, JobStatus.RETRY_SCHEDULED, reason="tenant_gap",
+                    job.job_id,
+                    JobStatus.RETRY_SCHEDULED,
+                    reason="tenant_gap",
                 )
                 return
 
@@ -577,12 +627,17 @@ class DialerWorker:
                 if guard_decision == "block":
                     # Block the call - mark job as blocked, don't retry
                     await self._publish_block(job, "call_guard_blocked", rules=rules)
-                    await self._update_job_status(job.job_id, JobStatus.BLOCKED, reason="call_guard_blocked")
+                    await self._update_job_status(
+                        job.job_id, JobStatus.BLOCKED, reason="call_guard_blocked"
+                    )
                     return
                 elif guard_decision == "throttle":
                     # Throttle - reschedule with delay
                     await self._publish_block(
-                        job, "call_guard_throttled", rules=rules, retry_after_seconds=60,
+                        job,
+                        "call_guard_throttled",
+                        rules=rules,
+                        retry_after_seconds=60,
                     )
                     await self.queue_service.schedule_retry(job, delay_seconds=60)
                     # RETRY_SCHEDULED, not SKIPPED. `schedule_retry` just put a
@@ -598,14 +653,18 @@ class DialerWorker:
                     # RETRY_SCHEDULED; these two call-guard branches were the
                     # odd ones out.
                     await self._update_job_status(
-                        job.job_id, JobStatus.RETRY_SCHEDULED,
+                        job.job_id,
+                        JobStatus.RETRY_SCHEDULED,
                         reason="call_guard_throttled",
                     )
                     return
                 elif guard_decision == "queue":
                     # Queue - reschedule to retry later
                     await self._publish_block(
-                        job, "call_guard_queued", rules=rules, retry_after_seconds=30,
+                        job,
+                        "call_guard_queued",
+                        rules=rules,
+                        retry_after_seconds=30,
                     )
                     await self.queue_service.schedule_retry(job, delay_seconds=30)
                     # See the throttle branch above — SKIPPED here would drop
@@ -613,7 +672,8 @@ class DialerWorker:
                     # retry is still pending in Redis, allowing a duplicate
                     # job (and so a duplicate call) for the same person.
                     await self._update_job_status(
-                        job.job_id, JobStatus.RETRY_SCHEDULED,
+                        job.job_id,
+                        JobStatus.RETRY_SCHEDULED,
                         reason="call_guard_queued",
                     )
                     return
@@ -632,7 +692,9 @@ class DialerWorker:
                     # campaign isn't paced against a failed attempt.
                     await release_tenant_dial_slot(self._redis, job.tenant_id)
                     await self._publish_block(
-                        job, "voice_pipeline_unavailable", rules=rules,
+                        job,
+                        "voice_pipeline_unavailable",
+                        rules=rules,
                         retry_after_seconds=60,
                     )
                     await self._update_lead_status(job.lead_id, "pending")
@@ -646,7 +708,9 @@ class DialerWorker:
 
                 if provider_call_id:
                     # 6. Create tracked DB records using an internal UUID plus provider call ID.
-                    internal_call_id, talklee_call_id, leg_id = await self._create_call_record(job, provider_call_id)
+                    internal_call_id, talklee_call_id, leg_id = await self._create_call_record(
+                        job, provider_call_id
+                    )
 
                     # B1: transition the call into the public state machine
                     # (Track B). The dialer worker drove the call to "dialing"
@@ -655,8 +719,10 @@ class DialerWorker:
                     # written by the asterisk_adapter ARI callbacks.
                     try:
                         from app.domain.services.call_status import (
-                            CallState, record_call_state,
+                            CallState,
+                            record_call_state,
                         )
+
                         await record_call_state(
                             self._db_pool,
                             call_id=internal_call_id,
@@ -674,7 +740,8 @@ class DialerWorker:
                         # B1 must never block a successful originate.
                         logger.warning(
                             "call_status.dialing_emit_failed call=%s err=%s",
-                            internal_call_id, state_exc,
+                            internal_call_id,
+                            state_exc,
                         )
 
                     # 7. Update lead status to 'calling'
@@ -684,7 +751,9 @@ class DialerWorker:
                     job.call_id = internal_call_id
                     job.status = JobStatus.PROCESSING
                     job.processed_at = datetime.now(timezone.utc)
-                    await self._update_job_status(job.job_id, JobStatus.PROCESSING, call_id=internal_call_id)
+                    await self._update_job_status(
+                        job.job_id, JobStatus.PROCESSING, call_id=internal_call_id
+                    )
 
                     # 9. Voice worker notification DISABLED — telephony bridge
                     #    handles the full call lifecycle via ARI callbacks
@@ -714,6 +783,7 @@ class DialerWorker:
                             from app.domain.services.dialer.block_state import (
                                 clear_block_reason,
                             )
+
                             await clear_block_reason(self._redis, job.campaign_id)
                         except Exception as exc:  # noqa: BLE001
                             logger.debug("block_state clear failed: %s", exc)
@@ -726,12 +796,12 @@ class DialerWorker:
                     await self._emit_progress_event_throttled(job)
                 else:
                     raise Exception("No call_id returned from telephony provider")
-                    
+
             finally:
                 # Unregister call (will be re-registered when answered if needed)
                 # For now, we track at initiation level
                 pass
-                
+
         except Exception as e:
             # Nothing dialed — release the tenant pacing slot (best-effort)
             # so a failed originate doesn't burn the whole gap window.
@@ -739,6 +809,7 @@ class DialerWorker:
                 from app.domain.services.dialer.global_pacing import (
                     release_tenant_dial_slot,
                 )
+
                 await release_tenant_dial_slot(self._redis, job.tenant_id)
             except Exception:
                 pass
@@ -757,6 +828,7 @@ class DialerWorker:
                 smart_decision,
                 use_smart_policy,
             )
+
             if use_smart_policy():
                 code, msg = parse_bridge_error(self._last_bridge_body)
                 category, reason = classify_telephony_response(
@@ -800,16 +872,20 @@ class DialerWorker:
             except Exception as record_exc:
                 logger.warning(
                     "failed to persist failure classification for job=%s: %s",
-                    job.job_id, record_exc,
+                    job.job_id,
+                    record_exc,
                 )
 
             if decision.should_retry:
                 await self._update_lead_status(job.lead_id, "pending")
                 await self.queue_service.schedule_retry(
-                    job, delay_seconds=decision.delay_seconds,
+                    job,
+                    delay_seconds=decision.delay_seconds,
                 )
                 await self._update_job_status(
-                    job.job_id, JobStatus.RETRY_SCHEDULED, error=str(e),
+                    job.job_id,
+                    JobStatus.RETRY_SCHEDULED,
+                    error=str(e),
                 )
             else:
                 # Either the category disallows retries (INVALID_INPUT)
@@ -817,9 +893,11 @@ class DialerWorker:
                 await self._update_lead_status(job.lead_id, "failed")
                 await self.queue_service.mark_failed(job.job_id, str(e))
                 await self._update_job_status(
-                    job.job_id, JobStatus.FAILED, error=str(e),
+                    job.job_id,
+                    JobStatus.FAILED,
+                    error=str(e),
                 )
-    
+
     # Sentinel returned by _make_call when the bridge says the voice
     # pipeline is not ready (HTTP 503). Distinct from None ("real failure")
     # so process_job can apply infrastructure-aware backoff without
@@ -851,6 +929,7 @@ class DialerWorker:
         """
         try:
             from app.domain.services.dialer.block_state import publish_block_reason
+
             await publish_block_reason(
                 self._redis,
                 self._db_pool,
@@ -860,7 +939,9 @@ class DialerWorker:
             )
         except Exception as exc:  # noqa: BLE001
             logger.debug(
-                "block_reason publish failed job=%s err=%s", job.job_id, exc,
+                "block_reason publish failed job=%s err=%s",
+                job.job_id,
+                exc,
             )
 
     async def _publish_block(
@@ -876,8 +957,11 @@ class DialerWorker:
         don't already hold a structured reason."""
         try:
             from app.domain.services.dialer.block_reasons import classify
+
             reason = classify(
-                raw_reason, rules=rules, retry_after_seconds=retry_after_seconds,
+                raw_reason,
+                rules=rules,
+                retry_after_seconds=retry_after_seconds,
             )
         except Exception as exc:  # noqa: BLE001
             logger.debug("block_reason classify failed raw=%s err=%s", raw_reason, exc)
@@ -952,13 +1036,16 @@ class DialerWorker:
                     "gate. Provision the token in the worker environment."
                 )
             async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                async with session.post(
+                    url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
                     if resp.status == 503:
                         body = await resp.text()
                         logger.warning(
                             "Voice pipeline unavailable (503) — will retry "
                             "without consuming attempt budget. dest=%s body=%s",
-                            job.phone_number, body[:300],
+                            job.phone_number,
+                            body[:300],
                         )
                         return self._PIPELINE_UNAVAILABLE
                     if resp.status not in (200, 202):
@@ -968,7 +1055,9 @@ class DialerWorker:
                         self._last_bridge_body = body
                         logger.error(
                             "Telephony bridge rejected call: status=%s body=%s dest=%s",
-                            resp.status, body[:200], job.phone_number,
+                            resp.status,
+                            body[:200],
+                            job.phone_number,
                         )
                         return None
 
@@ -980,13 +1069,18 @@ class DialerWorker:
                         logger.info(
                             "CALL INITIATED via bridge (%s): %s call_id=%s... "
                             "(campaign=%s, lead=%s)",
-                            self._last_provider_name, job.phone_number,
-                            call_id[:8], job.campaign_id, job.lead_id,
+                            self._last_provider_name,
+                            job.phone_number,
+                            call_id[:8],
+                            job.campaign_id,
+                            job.lead_id,
                         )
                     else:
                         logger.warning(
                             "CALL FAILED via bridge: %s (campaign=%s, lead=%s)",
-                            job.phone_number, job.campaign_id, job.lead_id,
+                            job.phone_number,
+                            job.campaign_id,
+                            job.lead_id,
                         )
                     return call_id
 
@@ -1046,6 +1140,7 @@ class DialerWorker:
                 return  # within the same 60-second window — skip
 
             from app.domain.services.event_emitter import emit_event_via_pool
+
             await emit_event_via_pool(
                 self._db_pool,
                 tenant_id=str(job.tenant_id),
@@ -1070,61 +1165,33 @@ class DialerWorker:
         result, surfacing as 'campaign is missing') or throw an
         invalid-UUID error when the GUC is unset.
 
-        The nil-UUID sentinel on app.current_tenant_id ensures the policy's
-        UUID cast doesn't throw even if some path evaluates the left side
-        of the OR.
-
-        ⚠️ CORRECTION (TKT-009, F-24). This docstring previously claimed that
-        setting bypass_rls without LOCAL "keeps the value alive for the
-        connection's lifetime, including after it's returned to the pool and
-        reused." **That is false, and it was the stated rationale for the
-        pattern below.**
-
-        asyncpg's pool issues `RESET ALL` on release (pool.py -> Connection.reset),
-        so the GUC does NOT survive back into the pool. The bypass works here only
-        because it is re-issued on every acquire — not because it persists.
-
-        Two consequences worth keeping in mind before editing this:
-
-          * The value not persisting is what makes this SAFE today. Do not
-            "restore" persistence.
-          * Under PgBouncer transaction pooling this breaks differently: a bare
-            SET is its own implicit transaction, so it lands on one server
-            connection while the next statement may be routed to another. The
-            bypass would fail to apply AND pollute a connection other tenants use.
-
-        The correct form is `acquire_with_tenant(pool, None)` in
-        app/core/db_utils.py, which does exactly what this method intends,
-        transaction-scoped. Converting it is deliberately deferred — see
-        docs/v2/rls-set-audit.md. Until then this file is allowlisted in
-        tests/unit/test_rls_set_local_invariant.py.
+        The canonical helper sets both the bypass and nil tenant UUID inside
+        one transaction. Neither value can leak to the next pool borrower or
+        disappear between statements under transaction pooling.
         """
         pool = self._db_pool
-        async with pool.acquire() as conn:
-            await conn.execute("SET app.bypass_rls = 'on'")
-            await conn.execute(
-                "SET app.current_tenant_id = '00000000-0000-0000-0000-000000000000'"
-            )
+        async with acquire_with_tenant(pool, None) as conn:
             yield conn
 
     async def _reap_stuck_jobs_tick(self) -> None:
         """Reap zombies each tick, best-effort:
-          * stuck dialer JOBS (hung originate) → marked failed, lead freed;
-          * stuck CALL rows (non-terminal past the max call lifetime) → closed
-            as ended, so they leave the live-calls panel AND free their
-            batch-dispatch slot (a stale 'dialing' row must never wedge the
-            batch gate);
-          * ORPHANED retry_scheduled jobs (past any legitimate retry delay) →
-            marked failed, freeing the lead's active-job slot. Without this a
-            job whose Redis schedule entry was lost holds that slot forever and
-            the lead can never be dialled again — found in production wedged
-            for 21 days. Logic lives in dialer.stuck_job_reaper."""
+        * stuck dialer JOBS (hung originate) → marked failed, lead freed;
+        * stuck CALL rows (non-terminal past the max call lifetime) → closed
+          as ended, so they leave the live-calls panel AND free their
+          batch-dispatch slot (a stale 'dialing' row must never wedge the
+          batch gate);
+        * ORPHANED retry_scheduled jobs (past any legitimate retry delay) →
+          marked failed, freeing the lead's active-job slot. Without this a
+          job whose Redis schedule entry was lost holds that slot forever and
+          the lead can never be dialled again — found in production wedged
+          for 21 days. Logic lives in dialer.stuck_job_reaper."""
         try:
             from app.domain.services.dialer.stuck_job_reaper import (
                 reap_orphaned_scheduled_jobs,
                 reap_stuck_jobs,
                 reap_stuck_calls,
             )
+
             async with self._acquire_db() as conn:
                 await reap_stuck_jobs(conn)
                 await reap_stuck_calls(conn)
@@ -1164,6 +1231,7 @@ class DialerWorker:
         """
         try:
             from app.domain.services.minutes_quota import compute_minutes_status
+
             async with self._acquire_db() as conn:
                 status = await compute_minutes_status(conn, tenant_id)
                 return status.exhausted
@@ -1180,6 +1248,7 @@ class DialerWorker:
                 if not acquired:
                     return  # already alerted within the last 5 minutes
             from app.domain.services.event_emitter import emit_event_via_pool
+
             await emit_event_via_pool(
                 self._db_pool,
                 tenant_id=str(job.tenant_id),
@@ -1206,14 +1275,13 @@ class DialerWorker:
         except Exception as e:
             logger.error(f"Failed to get campaign status for {campaign_id}: {e}")
             return None
-    
+
     async def _get_tenant_rules(self, tenant_id: str) -> CallingRules:
         """Get calling rules for a tenant."""
         try:
             async with self._acquire_db() as conn:
                 row = await conn.fetchrow(
-                    "SELECT calling_rules FROM tenants WHERE id = $1",
-                    tenant_id
+                    "SELECT calling_rules FROM tenants WHERE id = $1", tenant_id
                 )
                 if row and row["calling_rules"]:
                     # asyncpg returns JSON/JSONB as string or dict depending on driver config
@@ -1222,12 +1290,12 @@ class DialerWorker:
                     if isinstance(rules_data, str):
                         rules_data = json.loads(rules_data)
                     return CallingRules.from_dict(rules_data)
-            
+
         except Exception as e:
             logger.warning(f"Failed to get tenant rules, using defaults: {e}")
-        
+
         return CallingRules.default()
-    
+
     async def _get_campaign_calling_config(self, campaign_id: str) -> Optional[dict]:
         """Load a campaign's per-campaign calling schedule (timezone, window,
         days, ignore_schedule override). Returns None when unset so the
@@ -1303,7 +1371,8 @@ class DialerWorker:
         except Exception as exc:
             logger.warning(
                 "batch_gate: in-flight count failed campaign=%s err=%s",
-                campaign_id, exc,
+                campaign_id,
+                exc,
             )
             return 0
 
@@ -1337,7 +1406,9 @@ class DialerWorker:
                 return
             now = datetime.now(timezone.utc).timestamp()
             await self._redis.set(
-                self._campaign_last_dial_key(campaign_id), str(now), ex=3700,
+                self._campaign_last_dial_key(campaign_id),
+                str(now),
+                ex=3700,
             )
         except Exception as exc:
             logger.debug("call_gap: mark_dialed failed campaign=%s err=%s", campaign_id, exc)
@@ -1361,7 +1432,8 @@ class DialerWorker:
         except Exception as exc:
             logger.warning(
                 "call_gap: last-dial lookup failed campaign=%s err=%s",
-                campaign_id, exc,
+                campaign_id,
+                exc,
             )
             return None
 
@@ -1369,12 +1441,9 @@ class DialerWorker:
         """Get the last time a lead was called."""
         try:
             async with self._acquire_db() as conn:
-                val = await conn.fetchval(
-                    "SELECT last_called_at FROM leads WHERE id = $1",
-                    lead_id
-                )
+                val = await conn.fetchval("SELECT last_called_at FROM leads WHERE id = $1", lead_id)
                 return val  # asyncpg returns appropriate datetime object
-            
+
         except Exception as e:
             logger.warning(f"Failed to get lead last_called_at: {e}")
 
@@ -1395,9 +1464,7 @@ class DialerWorker:
         """
         try:
             async with self._acquire_db() as conn:
-                return await conn.fetchval(
-                    "SELECT timezone FROM leads WHERE id = $1", lead_id
-                )
+                return await conn.fetchval("SELECT timezone FROM leads WHERE id = $1", lead_id)
         except Exception as e:
             logger.warning(f"Failed to get lead timezone: {e}")
         return None
@@ -1425,7 +1492,9 @@ class DialerWorker:
             logger.warning(f"Failed to count lead attempts today: {e}")
         return 0
 
-    async def _create_call_record(self, job: DialerJob, provider_call_id: str) -> tuple[str, str, str]:
+    async def _create_call_record(
+        self, job: DialerJob, provider_call_id: str
+    ) -> tuple[str, str, str]:
         """
         Create a call record in the database with separate internal and provider IDs.
 
@@ -1447,6 +1516,7 @@ class DialerWorker:
                 from app.domain.services.dialer.testing_override import (
                     override_audit_payload,
                 )
+
                 override_audit = override_audit_payload(
                     source=self._schedule_override.get("source", "unknown"),
                     blocked_reason=self._schedule_override.get("blocked_reason"),
@@ -1505,12 +1575,14 @@ class DialerWorker:
                     provider_call_id,
                     job.phone_number,
                     "initiated",
-                    json.dumps({
-                        "job_id": job.job_id,
-                        "campaign_id": job.campaign_id,
-                        "provider_call_id": provider_call_id,
-                        **override_audit,
-                    }),
+                    json.dumps(
+                        {
+                            "job_id": job.job_id,
+                            "campaign_id": job.campaign_id,
+                            "provider_call_id": provider_call_id,
+                            **override_audit,
+                        }
+                    ),
                 )
 
                 await conn.execute(
@@ -1525,12 +1597,14 @@ class DialerWorker:
                     leg_id,
                     "leg_started",
                     "dialer_worker",
-                    json.dumps({
-                        "leg_type": "pstn_outbound",
-                        "provider": getattr(self, "_last_provider_name", "sip"),
-                        "provider_call_id": provider_call_id,
-                        **override_audit,
-                    }),
+                    json.dumps(
+                        {
+                            "leg_type": "pstn_outbound",
+                            "provider": getattr(self, "_last_provider_name", "sip"),
+                            "provider_call_id": provider_call_id,
+                            **override_audit,
+                        }
+                    ),
                     "initiated",
                 )
 
@@ -1558,7 +1632,7 @@ class DialerWorker:
         except Exception as e:
             logger.error(f"Failed to create call record: {e}")
             return internal_call_id, talklee_call_id, ""
-    
+
     async def _update_lead_status(self, lead_id: str, status: str) -> None:
         """Update lead status in database."""
         try:
@@ -1571,8 +1645,7 @@ class DialerWorker:
                     #              never connected.  last_called_at is set on terminal
                     #              states (completed / failed) instead.
                     await conn.execute(
-                        "UPDATE leads SET status = $1 WHERE id = $2",
-                        status, lead_id
+                        "UPDATE leads SET status = $1 WHERE id = $2", status, lead_id
                     )
                 else:
                     # Terminal / completion states (failed, completed, etc.) —
@@ -1582,7 +1655,8 @@ class DialerWorker:
                         UPDATE leads SET status = $1, last_called_at = NOW()
                         WHERE id = $2
                         """,
-                        status, lead_id
+                        status,
+                        lead_id,
                     )
         except Exception as e:
             logger.error(f"Failed to update lead status: {e}")
@@ -1591,10 +1665,7 @@ class DialerWorker:
         """Clear last_called_at so a stale origination-time timestamp cannot block retries."""
         try:
             async with self._acquire_db() as conn:
-                await conn.execute(
-                    "UPDATE leads SET last_called_at = NULL WHERE id = $1",
-                    lead_id
-                )
+                await conn.execute("UPDATE leads SET last_called_at = NULL WHERE id = $1", lead_id)
         except Exception as e:
             logger.error(f"Failed to clear lead last_called_at: {e}")
 
@@ -1604,19 +1675,16 @@ class DialerWorker:
         status: JobStatus,
         call_id: Optional[str] = None,
         error: Optional[str] = None,
-        reason: Optional[str] = None
+        reason: Optional[str] = None,
     ) -> None:
         """Update job status in database."""
         try:
             # Build update query dynamically or use simple execution
-            status_val = status.value if hasattr(status, 'value') else status
-            
+            status_val = status.value if hasattr(status, "value") else status
+
             async with self._acquire_db() as conn:
                 db = Database(conn)
-                data = {
-                    "status": status_val,
-                    "updated_at": datetime.now(timezone.utc)
-                }
+                data = {"status": status_val, "updated_at": datetime.now(timezone.utc)}
                 if call_id:
                     data["call_id"] = call_id
                     data["processed_at"] = datetime.now(timezone.utc)
@@ -1637,9 +1705,9 @@ class DialerWorker:
 
                 if status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.GOAL_ACHIEVED]:
                     data["completed_at"] = datetime.now(timezone.utc)
-                    
+
                 await db.update("dialer_jobs", data, "id = $1", [job_id])
-                
+
         except Exception as e:
             logger.error(f"Failed to update job status: {e}")
 
@@ -1667,13 +1735,16 @@ class DialerWorker:
                         updated_at = NOW()
                     WHERE id = $1
                     """,
-                    job_id, category, reason,
+                    job_id,
+                    category,
+                    reason,
                 )
         except Exception as exc:
             logger.warning(
                 "could not write failure_category/reason for job=%s "
                 "(missing columns? not yet migrated?): %s",
-                job_id, exc,
+                job_id,
+                exc,
             )
 
     async def _publish_call_event(
@@ -1694,7 +1765,7 @@ class DialerWorker:
                 "campaign_id": job.campaign_id,
                 "lead_id": job.lead_id,
                 "tenant_id": job.tenant_id,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
             await self._redis.publish("voice:calls:active", json.dumps(event))
@@ -1707,26 +1778,26 @@ class DialerWorker:
 
         except Exception as e:
             logger.error(f"Failed to publish call event: {e}")
-    
+
     async def shutdown(self) -> None:
         """Graceful shutdown."""
         logger.info("Shutting down Dialer Worker...")
         self.running = False
-        
+
         # Close connections
         await self.queue_service.close()
         if self._redis:
             await self._redis.aclose()
-        
+
         if self._db_pool:
             await close_db_pool()
-        
+
         # Log final stats
         logger.info(
             f"Dialer Worker shutdown complete. "
             f"Processed: {self._jobs_processed}, Failed: {self._jobs_failed}"
         )
-    
+
     def get_stats(self) -> dict:
         """Get worker statistics."""
         return {
@@ -1734,9 +1805,8 @@ class DialerWorker:
             "jobs_processed": self._jobs_processed,
             "jobs_failed": self._jobs_failed,
             "active_calls": {
-                tenant_id: count 
-                for tenant_id, count in self.rules_engine._active_calls.items()
-            }
+                tenant_id: count for tenant_id, count in self.rules_engine._active_calls.items()
+            },
         }
 
     # Redis key the health API (/api/v1/healthz/workers) watches to tell a
@@ -1796,19 +1866,19 @@ async def main():
     """Entry point for running dialer worker as separate process."""
     # Setup simple logging first
     logging.basicConfig(level=logging.INFO)
-    
+
     worker = DialerWorker()
-    
+
     # Handle shutdown signals
     loop = asyncio.get_event_loop()
-    
+
     def signal_handler():
         logger.info("Received shutdown signal")
         worker.running = False
-    
+
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, signal_handler)
-    
+
     try:
         await worker.run()
     except KeyboardInterrupt:

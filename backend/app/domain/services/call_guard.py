@@ -45,6 +45,7 @@ from uuid import UUID
 
 import asyncpg
 
+from app.core.db_utils import acquire_with_tenant
 from app.domain.services.telephony_rate_limiter import TelephonyRateLimiter, RateLimitAction
 from app.domain.services.telephony_concurrency_limiter import TelephonyConcurrencyLimiter, LeaseKind
 from app.domain.services.phone_number_normalizer import normalize_e164_digits
@@ -64,6 +65,7 @@ _E164_RE = re.compile(r"^\+[1-9]\d{1,14}$")
 
 class GuardDecision(str, Enum):
     """Possible decisions from the call guard."""
+
     ALLOW = "allow"
     BLOCK = "block"
     QUEUE = "queue"
@@ -72,6 +74,7 @@ class GuardDecision(str, Enum):
 
 class GuardCheck(str, Enum):
     """Individual guard checks performed."""
+
     PLATFORM_CALLS_ENABLED = "platform_calls_enabled"
     TENANT_ACTIVE = "tenant_active"
     PARTNER_ACTIVE = "partner_active"
@@ -96,16 +99,19 @@ class GuardCheck(str, Enum):
 # experience. Keep this set narrow — everything NOT listed here keeps the
 # original fail-open-on-infra-error behavior intentionally, so a DB blip in
 # e.g. the rate limiter or concurrency lookup never blocks legitimate calls.
-_FAIL_CLOSED_ON_ERROR_CHECKS = frozenset({
-    GuardCheck.PLATFORM_CALLS_ENABLED,
-    GuardCheck.DNC_CHECK,
-    GuardCheck.SPEND_LIMIT,
-})
+_FAIL_CLOSED_ON_ERROR_CHECKS = frozenset(
+    {
+        GuardCheck.PLATFORM_CALLS_ENABLED,
+        GuardCheck.DNC_CHECK,
+        GuardCheck.SPEND_LIMIT,
+    }
+)
 
 
 @dataclass
 class CheckResult:
     """Result of a single guard check."""
+
     check: GuardCheck
     passed: bool
     latency_ms: int = 0
@@ -125,6 +131,7 @@ class CheckResult:
 @dataclass
 class GuardResult:
     """Complete result from call guard evaluation."""
+
     decision: GuardDecision
     tenant_id: str
     phone_number: str
@@ -152,6 +159,7 @@ class GuardResult:
 @dataclass
 class TenantCallLimits:
     """Tenant call limits configuration."""
+
     calls_per_minute: int = 60
     calls_per_hour: int = 1000
     calls_per_day: int = 10000
@@ -178,6 +186,7 @@ class TenantCallLimits:
 @dataclass
 class PartnerLimits:
     """Partner aggregate limits."""
+
     max_tenants: int = 10
     current_tenant_count: int = 0
     aggregate_calls_per_minute: int = 600
@@ -360,7 +369,8 @@ class CallGuard:
                     passed=not fail_closed,
                     latency_ms=int((time.time() - check_start) * 1000),
                     reason=(
-                        f"check_error_blocked: {str(e)}" if fail_closed
+                        f"check_error_blocked: {str(e)}"
+                        if fail_closed
                         else f"check_error_skipped: {str(e)}"
                     ),
                 )
@@ -446,14 +456,10 @@ class CallGuard:
             },
         )
 
-    async def _check_tenant_active(
-        self,
-        tenant_id: str,
-        **kwargs
-    ) -> CheckResult:
+    async def _check_tenant_active(self, tenant_id: str, **kwargs) -> CheckResult:
         """Check if tenant is active and not suspended."""
         try:
-            async with self._db_pool.acquire() as conn:
+            async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
                 row = await conn.fetchrow(
                     """
                     SELECT id, subscription_status
@@ -470,9 +476,7 @@ class CallGuard:
                         reason="tenant_not_found",
                     )
 
-                status = canonical_subscription_status(
-                    row.get("subscription_status") or "active"
-                )
+                status = canonical_subscription_status(row.get("subscription_status") or "active")
                 if subscription_status_is_blocked(status, TENANT_BLOCKED_STATUSES):
                     return CheckResult(
                         check=GuardCheck.TENANT_ACTIVE,
@@ -497,7 +501,7 @@ class CallGuard:
         tenant_id: str,
         partner_id: Optional[str] = None,
         partner_limits: Optional[PartnerLimits] = None,
-        **kwargs
+        **kwargs,
     ) -> CheckResult:
         """Check if partner (if applicable) is active."""
         if not partner_id:
@@ -525,9 +529,7 @@ class CallGuard:
                         reason="partner_not_found",
                     )
 
-                status = canonical_subscription_status(
-                    row.get("subscription_status") or "active"
-                )
+                status = canonical_subscription_status(row.get("subscription_status") or "active")
                 if subscription_status_is_blocked(status, TENANT_BLOCKED_STATUSES):
                     return CheckResult(
                         check=GuardCheck.PARTNER_ACTIVE,
@@ -547,11 +549,7 @@ class CallGuard:
                 reason="schema_check_skipped",
             )
 
-    async def _check_subscription(
-        self,
-        tenant_id: str,
-        **kwargs
-    ) -> CheckResult:
+    async def _check_subscription(self, tenant_id: str, **kwargs) -> CheckResult:
         """Check if tenant has valid subscription/billing status.
 
         Cached in Redis for 60s (guard:subscription:{tenant_id}) — subscription
@@ -585,11 +583,13 @@ class CallGuard:
                 await self._redis.setex(
                     cache_key,
                     60,
-                    json.dumps({
-                        "passed": result.passed,
-                        "reason": result.reason,
-                        "details": result.details,
-                    }),
+                    json.dumps(
+                        {
+                            "passed": result.passed,
+                            "reason": result.reason,
+                            "details": result.details,
+                        }
+                    ),
                 )
             except Exception as e:
                 logger.debug(f"subscription cache write failed: {e}")
@@ -621,13 +621,9 @@ class CallGuard:
                         reason="tenant_not_found",
                     )
 
-                status = canonical_subscription_status(
-                    row.get("subscription_status") or "active"
-                )
+                status = canonical_subscription_status(row.get("subscription_status") or "active")
 
-                if subscription_status_is_blocked(
-                    status, SUBSCRIPTION_BLOCKED_STATUSES
-                ):
+                if subscription_status_is_blocked(status, SUBSCRIPTION_BLOCKED_STATUSES):
                     return CheckResult(
                         check=GuardCheck.SUBSCRIPTION_VALID,
                         passed=False,
@@ -653,7 +649,7 @@ class CallGuard:
         tenant_limits: Optional[TenantCallLimits] = None,
         partner_limits: Optional[PartnerLimits] = None,
         feature_required: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ) -> CheckResult:
         """Check if required feature is enabled."""
         if not feature_required:
@@ -705,11 +701,7 @@ class CallGuard:
             reason="feature_default_allowed",
         )
 
-    async def _check_number_valid(
-        self,
-        phone_number: str,
-        **kwargs
-    ) -> CheckResult:
+    async def _check_number_valid(self, phone_number: str, **kwargs) -> CheckResult:
         """Check if phone number is valid E.164 format."""
         if not phone_number:
             return CheckResult(
@@ -732,10 +724,7 @@ class CallGuard:
         )
 
     async def _check_rate_limit(
-        self,
-        tenant_id: str,
-        tenant_limits: Optional[TenantCallLimits] = None,
-        **kwargs
+        self, tenant_id: str, tenant_limits: Optional[TenantCallLimits] = None, **kwargs
     ) -> CheckResult:
         """Check rate limits using TelephonyRateLimiter."""
         if not tenant_limits:
@@ -765,10 +754,7 @@ class CallGuard:
         )
 
     async def _check_concurrency(
-        self,
-        tenant_id: str,
-        tenant_limits: Optional[TenantCallLimits] = None,
-        **kwargs
+        self, tenant_id: str, tenant_limits: Optional[TenantCallLimits] = None, **kwargs
     ) -> CheckResult:
         """Check concurrency limits."""
         if not tenant_limits:
@@ -791,7 +777,11 @@ class CallGuard:
         return CheckResult(
             check=GuardCheck.CONCURRENCY_LIMIT,
             passed=current_calls < max_calls,
-            reason=None if current_calls < max_calls else f"concurrency_limit: {current_calls}/{max_calls}",
+            reason=(
+                None
+                if current_calls < max_calls
+                else f"concurrency_limit: {current_calls}/{max_calls}"
+            ),
             details={
                 "active_calls": current_calls,
                 "max_calls": max_calls,
@@ -799,10 +789,7 @@ class CallGuard:
         )
 
     async def _check_geographic(
-        self,
-        phone_number: str,
-        tenant_limits: Optional[TenantCallLimits] = None,
-        **kwargs
+        self, phone_number: str, tenant_limits: Optional[TenantCallLimits] = None, **kwargs
     ) -> CheckResult:
         """Check if destination is in allowed countries."""
         country_code = self._extract_country_code(phone_number)
@@ -832,7 +819,10 @@ class CallGuard:
             )
 
         # Check blocked country codes
-        if tenant_limits.blocked_country_codes and country_code in tenant_limits.blocked_country_codes:
+        if (
+            tenant_limits.blocked_country_codes
+            and country_code in tenant_limits.blocked_country_codes
+        ):
             return CheckResult(
                 check=GuardCheck.GEOGRAPHIC_ALLOWED,
                 passed=False,
@@ -840,7 +830,10 @@ class CallGuard:
             )
 
         # Check allowed country codes (if set, must be in list)
-        if tenant_limits.allowed_country_codes and country_code not in tenant_limits.allowed_country_codes:
+        if (
+            tenant_limits.allowed_country_codes
+            and country_code not in tenant_limits.allowed_country_codes
+        ):
             return CheckResult(
                 check=GuardCheck.GEOGRAPHIC_ALLOWED,
                 passed=False,
@@ -854,11 +847,7 @@ class CallGuard:
         )
 
     async def _check_dnc(
-        self,
-        tenant_id: str,
-        phone_number: str,
-        lead_id: Optional[str] = None,
-        **kwargs
+        self, tenant_id: str, phone_number: str, lead_id: Optional[str] = None, **kwargs
     ) -> CheckResult:
         """Check Do-Not-Call suppression: the per-lead flag, then the list.
 
@@ -878,7 +867,7 @@ class CallGuard:
         re-reading the lead.
         """
         try:
-            async with self._db_pool.acquire() as conn:
+            async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
                 # Per-lead suppression flag. Only queried on the dialer path,
                 # which is the only caller that knows a lead_id.
                 #
@@ -963,7 +952,7 @@ class CallGuard:
         tenant_id: str,
         tenant_limits: Optional[TenantCallLimits] = None,
         estimated_duration_seconds: Optional[int] = None,
-        **kwargs
+        **kwargs,
     ) -> CheckResult:
         """Check monthly spend limit."""
         if not tenant_limits or tenant_limits.monthly_spend_cap is None:
@@ -1015,7 +1004,7 @@ class CallGuard:
         tenant_id: str,
         tenant_limits: Optional[TenantCallLimits] = None,
         estimated_duration_seconds: Optional[int] = None,
-        **kwargs
+        **kwargs,
     ) -> CheckResult:
         """Block origination once the tenant's monthly minutes are exhausted.
 
@@ -1056,7 +1045,6 @@ class CallGuard:
         used = tenant_limits.monthly_minutes_used or 0
         try:
             from app.domain.services.minutes_quota import compute_minutes_status
-            from app.core.db_utils import acquire_with_tenant
 
             # RLS is real now (Alembic 0013 + the app role losing BYPASSRLS):
             # a bare pool.acquire() sees ZERO rows in `calls`/`call_legs`, so
@@ -1077,7 +1065,8 @@ class CallGuard:
             logger.warning(
                 "call_guard: live minutes lookup failed for tenant=%s (%s) — "
                 "falling back to the stored counter, which may be stale",
-                str(tenant_id)[:8], exc,
+                str(tenant_id)[:8],
+                exc,
             )
 
         # Round this call's minutes UP (carriers bill per started minute).
@@ -1110,7 +1099,7 @@ class CallGuard:
         tenant_id: str,
         phone_number: str = "",
         tenant_limits: Optional[TenantCallLimits] = None,
-        **kwargs
+        **kwargs,
     ) -> CheckResult:
         """Check business hours restriction.
 
@@ -1176,8 +1165,8 @@ class CallGuard:
                         "business_hours": f"{start.isoformat()}-{end.isoformat()}",
                         "timezone": tz_used,
                         "tz_source": (
-                            "callee" if tz_used == callee_tz_name
-                            and callee_tz_name != tenant_tz
+                            "callee"
+                            if tz_used == callee_tz_name and callee_tz_name != tenant_tz
                             else "tenant_fallback"
                         ),
                         "phone_number": phone_number,
@@ -1190,18 +1179,14 @@ class CallGuard:
             details={
                 "timezone": tz_used,
                 "tz_source": (
-                    "callee" if tz_used == callee_tz_name
-                    and callee_tz_name != tenant_tz
+                    "callee"
+                    if tz_used == callee_tz_name and callee_tz_name != tenant_tz
                     else "tenant_fallback"
                 ),
             },
         )
 
-    async def _check_velocity(
-        self,
-        tenant_id: str,
-        **kwargs
-    ) -> CheckResult:
+    async def _check_velocity(self, tenant_id: str, **kwargs) -> CheckResult:
         """Check for recent abuse events indicating velocity anomalies."""
         try:
             async with self._db_pool.acquire() as conn:
@@ -1361,12 +1346,10 @@ class CallGuard:
             # arithmetic (raises TypeError) or `json.dumps` (raises
             # TypeError, silently swallowed by the cache try/except below).
             monthly_spend_cap=(
-                float(row["monthly_spend_cap"])
-                if row["monthly_spend_cap"] is not None else None
+                float(row["monthly_spend_cap"]) if row["monthly_spend_cap"] is not None else None
             ),
             monthly_spend_used=(
-                float(row["monthly_spend_used"])
-                if row["monthly_spend_used"] is not None else 0.0
+                float(row["monthly_spend_used"]) if row["monthly_spend_used"] is not None else 0.0
             ),
             max_call_duration_seconds=row["max_call_duration_seconds"],
             min_call_interval_seconds=row["min_call_interval_seconds"],
@@ -1392,27 +1375,29 @@ class CallGuard:
                 await self._redis.setex(
                     cache_key,
                     60,
-                    json.dumps({
-                        "calls_per_minute": limits.calls_per_minute,
-                        "calls_per_hour": limits.calls_per_hour,
-                        "calls_per_day": limits.calls_per_day,
-                        "max_concurrent_calls": limits.max_concurrent_calls,
-                        "max_queue_size": limits.max_queue_size,
-                        "monthly_minutes_allocated": limits.monthly_minutes_allocated,
-                        "monthly_minutes_used": limits.monthly_minutes_used,
-                        "monthly_spend_cap": limits.monthly_spend_cap,
-                        "monthly_spend_used": limits.monthly_spend_used,
-                        "max_call_duration_seconds": limits.max_call_duration_seconds,
-                        "min_call_interval_seconds": limits.min_call_interval_seconds,
-                        "allowed_country_codes": limits.allowed_country_codes,
-                        "blocked_country_codes": limits.blocked_country_codes,
-                        "blocked_prefixes": limits.blocked_prefixes,
-                        "features_enabled": limits.features_enabled,
-                        "features_disabled": limits.features_disabled,
-                        "respect_business_hours": limits.respect_business_hours,
-                        "business_hours_timezone": limits.business_hours_timezone,
-                        "is_active": limits.is_active,
-                    }),
+                    json.dumps(
+                        {
+                            "calls_per_minute": limits.calls_per_minute,
+                            "calls_per_hour": limits.calls_per_hour,
+                            "calls_per_day": limits.calls_per_day,
+                            "max_concurrent_calls": limits.max_concurrent_calls,
+                            "max_queue_size": limits.max_queue_size,
+                            "monthly_minutes_allocated": limits.monthly_minutes_allocated,
+                            "monthly_minutes_used": limits.monthly_minutes_used,
+                            "monthly_spend_cap": limits.monthly_spend_cap,
+                            "monthly_spend_used": limits.monthly_spend_used,
+                            "max_call_duration_seconds": limits.max_call_duration_seconds,
+                            "min_call_interval_seconds": limits.min_call_interval_seconds,
+                            "allowed_country_codes": limits.allowed_country_codes,
+                            "blocked_country_codes": limits.blocked_country_codes,
+                            "blocked_prefixes": limits.blocked_prefixes,
+                            "features_enabled": limits.features_enabled,
+                            "features_disabled": limits.features_disabled,
+                            "respect_business_hours": limits.respect_business_hours,
+                            "business_hours_timezone": limits.business_hours_timezone,
+                            "is_active": limits.is_active,
+                        }
+                    ),
                 )
             except Exception:
                 pass
@@ -1466,15 +1451,14 @@ class CallGuard:
             # above: coerce here so the JSON cache write below never raises.
             revenue_share_percent=(
                 float(row["revenue_share_percent"])
-                if row["revenue_share_percent"] is not None else None
+                if row["revenue_share_percent"] is not None
+                else None
             ),
             min_billing_amount=(
-                float(row["min_billing_amount"])
-                if row["min_billing_amount"] is not None else None
+                float(row["min_billing_amount"]) if row["min_billing_amount"] is not None else None
             ),
             max_billing_amount=(
-                float(row["max_billing_amount"])
-                if row["max_billing_amount"] is not None else None
+                float(row["max_billing_amount"]) if row["max_billing_amount"] is not None else None
             ),
             feature_whitelist=row["feature_whitelist"] or [],
             feature_blacklist=row["feature_blacklist"] or [],
@@ -1488,21 +1472,23 @@ class CallGuard:
                 await self._redis.setex(
                     cache_key,
                     60,
-                    json.dumps({
-                        "max_tenants": limits.max_tenants,
-                        "current_tenant_count": limits.current_tenant_count,
-                        "aggregate_calls_per_minute": limits.aggregate_calls_per_minute,
-                        "aggregate_calls_per_hour": limits.aggregate_calls_per_hour,
-                        "aggregate_calls_per_day": limits.aggregate_calls_per_day,
-                        "aggregate_concurrent_calls": limits.aggregate_concurrent_calls,
-                        "revenue_share_percent": limits.revenue_share_percent,
-                        "min_billing_amount": limits.min_billing_amount,
-                        "max_billing_amount": limits.max_billing_amount,
-                        "feature_whitelist": limits.feature_whitelist,
-                        "feature_blacklist": limits.feature_blacklist,
-                        "fraud_detection_sensitivity": limits.fraud_detection_sensitivity,
-                        "is_active": limits.is_active,
-                    }),
+                    json.dumps(
+                        {
+                            "max_tenants": limits.max_tenants,
+                            "current_tenant_count": limits.current_tenant_count,
+                            "aggregate_calls_per_minute": limits.aggregate_calls_per_minute,
+                            "aggregate_calls_per_hour": limits.aggregate_calls_per_hour,
+                            "aggregate_calls_per_day": limits.aggregate_calls_per_day,
+                            "aggregate_concurrent_calls": limits.aggregate_concurrent_calls,
+                            "revenue_share_percent": limits.revenue_share_percent,
+                            "min_billing_amount": limits.min_billing_amount,
+                            "max_billing_amount": limits.max_billing_amount,
+                            "feature_whitelist": limits.feature_whitelist,
+                            "feature_blacklist": limits.feature_blacklist,
+                            "fraud_detection_sensitivity": limits.fraud_detection_sensitivity,
+                            "is_active": limits.is_active,
+                        }
+                    ),
                 )
             except Exception:
                 pass

@@ -16,6 +16,7 @@ Both paths must now fail CLOSED for DNC specifically, while non-compliance
 design (a transient infra blip there must not block an otherwise-compliant
 call).
 """
+
 from __future__ import annotations
 
 import inspect
@@ -31,12 +32,19 @@ from app.domain.services.call_guard import (
     _FAIL_CLOSED_ON_ERROR_CHECKS,
 )
 
+
 # `_check_dnc` reads only `self._db_pool` — build a minimal stand-in rather
 # than wiring a real asyncpg pool.
 class _FakeConn:
     def __init__(self, *, row=None, raise_exc=None):
         self._row = row
         self._raise_exc = raise_exc
+
+    def transaction(self):
+        return _FakeAcquireCtx(self)
+
+    async def execute(self, *_a, **_k):
+        return "SELECT 1"
 
     async def fetchrow(self, *a, **k):
         if self._raise_exc is not None:
@@ -67,7 +75,11 @@ def _guard_with_conn(conn) -> CallGuard:
     return CallGuard(db_pool=_FakePool(conn), redis_client=None)
 
 
+_TENANT_ID = "00000000-0000-0000-0000-000000000101"
+
+
 # ── `_check_dnc` itself: PostgresError must fail CLOSED ────────────────────
+
 
 @pytest.mark.asyncio
 async def test_dnc_postgres_error_fails_closed():
@@ -75,7 +87,7 @@ async def test_dnc_postgres_error_fails_closed():
     `passed=True` — this test fails against it (asserts `passed is False`)."""
     guard = _guard_with_conn(_FakeConn(raise_exc=asyncpg.PostgresError("db down")))
 
-    result = await guard._check_dnc(tenant_id="t1", phone_number="+15551234567")
+    result = await guard._check_dnc(tenant_id=_TENANT_ID, phone_number="+15551234567")
 
     assert result.check == GuardCheck.DNC_CHECK
     assert result.passed is False, (
@@ -90,7 +102,7 @@ async def test_dnc_listed_number_still_blocks():
     row = {"id": "dnc-1", "source": "tenant_upload", "reason": "opt_out"}
     guard = _guard_with_conn(_FakeConn(row=row))
 
-    result = await guard._check_dnc(tenant_id="t1", phone_number="+15551234567")
+    result = await guard._check_dnc(tenant_id=_TENANT_ID, phone_number="+15551234567")
 
     assert result.passed is False
     assert "number_on_dnc_list" in result.reason
@@ -100,12 +112,13 @@ async def test_dnc_listed_number_still_blocks():
 async def test_dnc_clean_number_passes():
     guard = _guard_with_conn(_FakeConn(row=None))
 
-    result = await guard._check_dnc(tenant_id="t1", phone_number="+15551234567")
+    result = await guard._check_dnc(tenant_id=_TENANT_ID, phone_number="+15551234567")
 
     assert result.passed is True
 
 
 # ── generic per-check exception handler in evaluate() ───────────────────────
+
 
 def test_fail_closed_set_contains_dnc_and_spend_only_the_intended_checks():
     assert GuardCheck.PLATFORM_CALLS_ENABLED in _FAIL_CLOSED_ON_ERROR_CHECKS

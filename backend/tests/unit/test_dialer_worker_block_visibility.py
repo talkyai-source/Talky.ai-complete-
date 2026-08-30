@@ -266,6 +266,10 @@ async def test_override_is_stamped_on_the_call_record(monkeypatch):
     executed: list[tuple] = []
 
     class _Conn:
+        @asynccontextmanager
+        async def transaction(self):
+            yield self
+
         async def execute(self, sql, *args):
             executed.append((sql, args))
 
@@ -311,6 +315,10 @@ async def test_normal_call_record_carries_no_override_marker():
     executed: list[tuple] = []
 
     class _Conn:
+        @asynccontextmanager
+        async def transaction(self):
+            yield self
+
         async def execute(self, sql, *args):
             executed.append((sql, args))
 

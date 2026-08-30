@@ -5,6 +5,7 @@ the call pipeline resolves per-tenant instead of falling back to the
 shared env vars. Plaintext never leaves the wire in responses — only
 the last four characters and a label.
 """
+
 from __future__ import annotations
 
 import logging
@@ -15,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, field_validator
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool, require_admin
+from app.core.db_utils import acquire_with_tenant
 from app.domain.services.credential_resolver import env_var_for_provider
 from app.infrastructure.connectors.encryption import get_encryption_service
 
@@ -26,6 +28,7 @@ router = APIRouter(prefix="/tenant-ai-credentials", tags=["Tenant AI Credentials
 # ────────────────────────────────────────────────────────────────────────────
 # Request / response models
 # ────────────────────────────────────────────────────────────────────────────
+
 
 class CredentialCreateRequest(BaseModel):
     provider: str = Field(..., min_length=1, max_length=64)
@@ -46,6 +49,7 @@ class CredentialCreateRequest(BaseModel):
 
 class CredentialResponse(BaseModel):
     """Safe-to-expose representation. Never includes plaintext."""
+
     id: str
     tenant_id: str
     provider: str
@@ -60,6 +64,7 @@ class CredentialResponse(BaseModel):
 # ────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ────────────────────────────────────────────────────────────────────────────
+
 
 def _require_tenant(user: CurrentUser) -> str:
     if not user.tenant_id:
@@ -85,13 +90,14 @@ def _row_to_response(row) -> CredentialResponse:
 # Endpoints
 # ────────────────────────────────────────────────────────────────────────────
 
+
 @router.get("/", response_model=List[CredentialResponse])
 async def list_credentials(
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
 ) -> List[CredentialResponse]:
     tenant_id = _require_tenant(current_user)
-    async with db_pool.acquire() as conn:
+    async with acquire_with_tenant(db_pool, tenant_id) as conn:
         rows = await conn.fetch(
             """
             SELECT id, tenant_id, provider, credential_kind, last4, label,
@@ -121,7 +127,7 @@ async def create_credential(
     encrypted = encryption.encrypt(payload.api_key)
     last4 = payload.api_key[-4:] if len(payload.api_key) >= 4 else None
 
-    async with db_pool.acquire() as conn:
+    async with acquire_with_tenant(db_pool, tenant_id) as conn:
         async with conn.transaction():
             # Disable any existing active row for this tuple.
             await conn.execute(
@@ -155,7 +161,9 @@ async def create_credential(
 
     logger.info(
         "tenant_credential_created tenant=%s provider=%s kind=%s",
-        tenant_id, payload.provider, payload.credential_kind,
+        tenant_id,
+        payload.provider,
+        payload.credential_kind,
     )
     return _row_to_response(row)
 
@@ -169,7 +177,7 @@ async def disable_credential(
     """Disable a credential. Row kept for audit; resolver ignores
     disabled rows."""
     tenant_id = _require_tenant(current_user)
-    async with db_pool.acquire() as conn:
+    async with acquire_with_tenant(db_pool, tenant_id) as conn:
         await conn.execute(
             """
             UPDATE tenant_ai_credentials

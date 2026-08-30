@@ -1,4 +1,5 @@
 """GET /telephony/sip/quotas/status — read-only quota counters."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -9,6 +10,7 @@ from fastapi import APIRouter, Depends, Request
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool
 from app.core.tenant_rls import apply_tenant_rls_context
+from app.core.db_utils import acquire_with_tenant
 
 from ._shared import _get_rate_limiter, _require_tenant
 from .schemas import TelephonyQuotaStatusItem, TelephonyQuotaStatusResponse
@@ -29,8 +31,18 @@ async def get_telephony_quota_status(
         return tenant_problem
 
     limiter = _get_rate_limiter()
-    async with db_pool.acquire() as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=request.headers.get("x-request-id"))
+    async with acquire_with_tenant(
+        db_pool,
+        current_user.tenant_id,
+        user_id=current_user.id,
+        request_id=request.headers.get("x-request-id"),
+    ) as conn:
+        await apply_tenant_rls_context(
+            conn,
+            current_user.tenant_id,
+            current_user.id,
+            request_id=request.headers.get("x-request-id"),
+        )
         statuses = await limiter.get_status(
             conn=conn,
             tenant_id=current_user.tenant_id,

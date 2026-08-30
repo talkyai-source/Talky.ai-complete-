@@ -139,8 +139,10 @@ _TABLE_STOPWORDS = {
     "now",
 }
 
-_SET_LOCAL_RE = re.compile(
-    r"set\s+local\s+app\.(bypass_rls|current_tenant_id)", re.IGNORECASE
+_SET_LOCAL_RE = re.compile(r"set\s+local\s+app\.(bypass_rls|current_tenant_id)", re.IGNORECASE)
+_SET_CONFIG_LOCAL_RE = re.compile(
+    r"set_config\s*\(\s*['\"]app\.(?:bypass_rls|current_tenant_id)['\"]\s*," r"[\s\S]*?\btrue\s*\)",
+    re.IGNORECASE,
 )
 
 # A name that plausibly carries a tenant id.
@@ -273,7 +275,21 @@ def _tables_in(node: ast.AST) -> set[str]:
 
 
 def _has_set_local(node: ast.AST) -> bool:
-    return any(_SET_LOCAL_RE.search(s) for s in _iter_strings(node))
+    strings = list(_iter_strings(node))
+    if any(_SET_LOCAL_RE.search(s) or _SET_CONFIG_LOCAL_RE.search(s) for s in strings):
+        return True
+    # core.db.get_read_db establishes a read-only transaction and delegates
+    # its transaction-local SETs to this private helper. Keep this deliberately
+    # narrow: apply_tenant_rls_context historically used session scope and is
+    # not accepted as proof here.
+    return any(
+        isinstance(sub, ast.Call)
+        and (
+            (isinstance(sub.func, ast.Name) and sub.func.id == "_apply_rls_context")
+            or (isinstance(sub.func, ast.Attribute) and sub.func.attr == "_apply_rls_context")
+        )
+        for sub in ast.walk(node)
+    )
 
 
 def _tenant_source(func: Optional[ast.AST]) -> Optional[str]:
@@ -408,9 +424,7 @@ _HELPER_SITES = {("app/core/db_utils.py", "acquire_with_tenant")}
 
 def score(rec: dict, rls_tables: set[str], tenant_scoped: set[str]) -> dict:
     rls_hits = sorted(t for t in rec["tables"] if t in rls_tables)
-    scoped_hits = sorted(
-        t for t in rec["tables"] if t in tenant_scoped and t not in rls_tables
-    )
+    scoped_hits = sorted(t for t in rec["tables"] if t in tenant_scoped and t not in rls_tables)
     rec["rls_tables_touched"] = rls_hits
     rec["tenant_scoped_tables_touched"] = scoped_hits
     rec["rls_protected"] = bool(rls_hits)
@@ -578,13 +592,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         return 2
 
     rls_tables, tenant_scoped = discover_rls_tables(backend_root)
-    records = [
-        score(rec, rls_tables, tenant_scoped)
-        for rec in collect(app_root, backend_root)
-    ]
-    records.sort(
-        key=lambda r: (_VERDICT_ORDER[r["verdict"]], r["file"], r["line"])
-    )
+    records = [score(rec, rls_tables, tenant_scoped) for rec in collect(app_root, backend_root)]
+    records.sort(key=lambda r: (_VERDICT_ORDER[r["verdict"]], r["file"], r["line"]))
 
     by_form: dict[str, int] = {}
     for rec in records:
@@ -609,9 +618,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 ),
                 "backend_root": backend_root.as_posix(),
                 "rls_protected_tables": sorted(rls_tables),
-                "tenant_scoped_tables_without_policy": sorted(
-                    tenant_scoped - rls_tables
-                ),
+                "tenant_scoped_tables_without_policy": sorted(tenant_scoped - rls_tables),
                 "summary": summary,
                 "acquisitions": shown,
             },

@@ -24,9 +24,9 @@ async def test_apply_tenant_rls_context_sets_tenant_and_user():
         request_id="req-1",
     )
     assert conn.calls == [
-        ("SELECT set_config('app.current_tenant_id', $1, false)", "tenant-1"),
-        ("SELECT set_config('app.current_user_id', $1, false)", "user-1"),
-        ("SELECT set_config('app.current_request_id', $1, false)", "req-1"),
+        ("SELECT set_config('app.current_tenant_id', $1, true)", "tenant-1"),
+        ("SELECT set_config('app.current_user_id', $1, true)", "user-1"),
+        ("SELECT set_config('app.current_request_id', $1, true)", "req-1"),
     ]
 
 
@@ -35,9 +35,9 @@ async def test_apply_tenant_rls_context_clears_optional_context():
     conn = FakeConn()
     await apply_tenant_rls_context(conn, tenant_id="tenant-1")
     assert conn.calls == [
-        ("SELECT set_config('app.current_tenant_id', $1, false)", "tenant-1"),
-        ("SELECT set_config('app.current_user_id', $1, false)", ""),
-        ("SELECT set_config('app.current_request_id', $1, false)", ""),
+        ("SELECT set_config('app.current_tenant_id', $1, true)", "tenant-1"),
+        ("SELECT set_config('app.current_user_id', $1, true)", ""),
+        ("SELECT set_config('app.current_request_id', $1, true)", ""),
     ]
 
 

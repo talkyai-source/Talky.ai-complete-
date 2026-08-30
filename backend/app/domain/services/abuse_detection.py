@@ -33,6 +33,8 @@ Usage:
 
 from __future__ import annotations
 
+from app.core.db_utils import acquire_with_tenant
+
 import json
 import logging
 import re
@@ -49,6 +51,7 @@ logger = logging.getLogger(__name__)
 
 class AbuseType(str, Enum):
     """Types of abuse patterns that can be detected."""
+
     VELOCITY_SPIKE = "velocity_spike"
     SHORT_DURATION_PATTERN = "short_duration_pattern"
     REPEAT_NUMBER = "repeat_number"
@@ -65,6 +68,7 @@ class AbuseType(str, Enum):
 
 class Severity(str, Enum):
     """Severity levels for abuse events."""
+
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -74,6 +78,7 @@ class Severity(str, Enum):
 @dataclass
 class AbuseEvent:
     """An detected abuse event."""
+
     abuse_type: AbuseType
     severity: Severity
     tenant_id: str
@@ -128,11 +133,11 @@ PREMIUM_RATE_PREFIXES = [
     "+1976",  # US premium
     "+4487",  # UK premium
     "+4498",  # UK premium
-    "+339",   # France premium
-    "+338",   # France premium
-    "+809",   # Caribbean/Some premium
-    "+876",   # Jamaica (often used for scams)
-    "+809",   # Dominican Republic (some premium)
+    "+339",  # France premium
+    "+338",  # France premium
+    "+809",  # Caribbean/Some premium
+    "+876",  # Jamaica (often used for scams)
+    "+809",  # Dominican Republic (some premium)
 ]
 
 
@@ -238,20 +243,22 @@ class AbuseDetectionService:
 
         # Short duration pattern (call pumping)
         if duration_seconds < 10:
-            events.append(AbuseEvent(
-                abuse_type=AbuseType.SHORT_DURATION_PATTERN,
-                severity=Severity.LOW,
-                tenant_id=tenant_id,
-                phone_number=phone_number,
-                details={
-                    "call_id": call_id,
-                    "duration": duration_seconds,
-                    "threshold": 10,
-                },
-                recommended_action="flag",
-                trigger_value=float(duration_seconds),
-                threshold_value=10.0,
-            ))
+            events.append(
+                AbuseEvent(
+                    abuse_type=AbuseType.SHORT_DURATION_PATTERN,
+                    severity=Severity.LOW,
+                    tenant_id=tenant_id,
+                    phone_number=phone_number,
+                    details={
+                        "call_id": call_id,
+                        "duration": duration_seconds,
+                        "threshold": 10,
+                    },
+                    recommended_action="flag",
+                    trigger_value=float(duration_seconds),
+                    threshold_value=10.0,
+                )
+            )
 
         # Wangiri pattern (missed call fraud)
         if duration_seconds < 5 and not was_answered:
@@ -260,21 +267,25 @@ class AbuseDetectionService:
 
         # High cost alert
         if cost and cost > 1.0:  # $1+ per minute is high
-            events.append(AbuseEvent(
-                abuse_type=AbuseType.TOLL_FRAUD,
-                severity=Severity.MEDIUM,
-                tenant_id=tenant_id,
-                phone_number=phone_number,
-                details={
-                    "call_id": call_id,
-                    "cost": cost,
-                    "duration": duration_seconds,
-                    "cost_per_minute": (cost / duration_seconds * 60) if duration_seconds > 0 else 0,
-                },
-                recommended_action="warn",
-                trigger_value=cost,
-                threshold_value=1.0,
-            ))
+            events.append(
+                AbuseEvent(
+                    abuse_type=AbuseType.TOLL_FRAUD,
+                    severity=Severity.MEDIUM,
+                    tenant_id=tenant_id,
+                    phone_number=phone_number,
+                    details={
+                        "call_id": call_id,
+                        "cost": cost,
+                        "duration": duration_seconds,
+                        "cost_per_minute": (
+                            (cost / duration_seconds * 60) if duration_seconds > 0 else 0
+                        ),
+                    },
+                    recommended_action="warn",
+                    trigger_value=cost,
+                    threshold_value=1.0,
+                )
+            )
 
         # Store for aggregate analysis
         await self._store_call_metrics(
@@ -306,7 +317,8 @@ class AbuseDetectionService:
         """
         events = []
 
-        async with self._db_pool.acquire() as conn:
+        # Periodic platform scan intentionally aggregates every tenant.
+        async with acquire_with_tenant(self._db_pool, None) as conn:
             # Find tenants with unusual call volume in last 5 minutes
             rows = await conn.fetch(
                 """
@@ -348,56 +360,62 @@ class AbuseDetectionService:
                         severity = Severity.MEDIUM
                         action = "throttle"
 
-                    events.append(AbuseEvent(
-                        abuse_type=AbuseType.VELOCITY_SPIKE,
-                        severity=severity,
-                        tenant_id=tenant_id,
-                        details={
-                            "current_5min": call_count,
-                            "historical_avg_5min": avg_calls,
-                            "multiplier": multiplier,
-                            "unique_numbers": row["unique_numbers"],
-                            "short_calls": row["short_calls"],
-                            "high_risk_calls": row["high_risk_calls"],
-                        },
-                        recommended_action=action,
-                        trigger_value=float(call_count),
-                        threshold_value=float(avg_calls * 3),
-                    ))
+                    events.append(
+                        AbuseEvent(
+                            abuse_type=AbuseType.VELOCITY_SPIKE,
+                            severity=severity,
+                            tenant_id=tenant_id,
+                            details={
+                                "current_5min": call_count,
+                                "historical_avg_5min": avg_calls,
+                                "multiplier": multiplier,
+                                "unique_numbers": row["unique_numbers"],
+                                "short_calls": row["short_calls"],
+                                "high_risk_calls": row["high_risk_calls"],
+                            },
+                            recommended_action=action,
+                            trigger_value=float(call_count),
+                            threshold_value=float(avg_calls * 3),
+                        )
+                    )
 
                 # Check for high proportion of short calls (call pumping)
                 short_call_ratio = row["short_calls"] / call_count if call_count > 0 else 0
                 if short_call_ratio > 0.5 and call_count > 10:
-                    events.append(AbuseEvent(
-                        abuse_type=AbuseType.SHORT_DURATION_PATTERN,
-                        severity=Severity.HIGH,
-                        tenant_id=tenant_id,
-                        details={
-                            "total_calls": call_count,
-                            "short_calls": row["short_calls"],
-                            "short_call_ratio": short_call_ratio,
-                        },
-                        recommended_action="block",
-                        trigger_value=short_call_ratio,
-                        threshold_value=0.5,
-                    ))
+                    events.append(
+                        AbuseEvent(
+                            abuse_type=AbuseType.SHORT_DURATION_PATTERN,
+                            severity=Severity.HIGH,
+                            tenant_id=tenant_id,
+                            details={
+                                "total_calls": call_count,
+                                "short_calls": row["short_calls"],
+                                "short_call_ratio": short_call_ratio,
+                            },
+                            recommended_action="block",
+                            trigger_value=short_call_ratio,
+                            threshold_value=0.5,
+                        )
+                    )
 
                 # Check for international spike
                 high_risk_ratio = row["high_risk_calls"] / call_count if call_count > 0 else 0
                 if high_risk_ratio > 0.3:
-                    events.append(AbuseEvent(
-                        abuse_type=AbuseType.INTERNATIONAL_SPIKE,
-                        severity=Severity.HIGH,
-                        tenant_id=tenant_id,
-                        details={
-                            "total_calls": call_count,
-                            "high_risk_calls": row["high_risk_calls"],
-                            "high_risk_ratio": high_risk_ratio,
-                        },
-                        recommended_action="block",
-                        trigger_value=high_risk_ratio,
-                        threshold_value=0.3,
-                    ))
+                    events.append(
+                        AbuseEvent(
+                            abuse_type=AbuseType.INTERNATIONAL_SPIKE,
+                            severity=Severity.HIGH,
+                            tenant_id=tenant_id,
+                            details={
+                                "total_calls": call_count,
+                                "high_risk_calls": row["high_risk_calls"],
+                                "high_risk_ratio": high_risk_ratio,
+                            },
+                            recommended_action="block",
+                            trigger_value=high_risk_ratio,
+                            threshold_value=0.3,
+                        )
+                    )
 
         # Persist events
         for event in events:
@@ -417,7 +435,9 @@ class AbuseDetectionService:
         """
         events = []
 
-        async with self._db_pool.acquire() as conn:
+        # Partner aggregation intentionally spans all tenants owned by the
+        # partner; SQL still carries the explicit partner predicate.
+        async with acquire_with_tenant(self._db_pool, None) as conn:
             # Get aggregate stats for partner's tenants
             row = await conn.fetchrow(
                 """
@@ -452,20 +472,22 @@ class AbuseDetectionService:
                 actual_calls = row["total_calls"]
 
                 if actual_calls > max_calls:
-                    events.append(AbuseEvent(
-                        abuse_type=AbuseType.VELOCITY_SPIKE,
-                        severity=Severity.HIGH,
-                        tenant_id=partner_id,
-                        partner_id=partner_id,
-                        details={
-                            "aggregate_calls": actual_calls,
-                            "aggregate_limit": max_calls,
-                            "affected_tenants": row["tenant_count"],
-                        },
-                        recommended_action="throttle",
-                        trigger_value=float(actual_calls),
-                        threshold_value=float(max_calls),
-                    ))
+                    events.append(
+                        AbuseEvent(
+                            abuse_type=AbuseType.VELOCITY_SPIKE,
+                            severity=Severity.HIGH,
+                            tenant_id=partner_id,
+                            partner_id=partner_id,
+                            details={
+                                "aggregate_calls": actual_calls,
+                                "aggregate_limit": max_calls,
+                                "affected_tenants": row["tenant_count"],
+                            },
+                            recommended_action="throttle",
+                            trigger_value=float(actual_calls),
+                            threshold_value=float(max_calls),
+                        )
+                    )
 
         return events
 
@@ -481,7 +503,7 @@ class AbuseDetectionService:
         window_minutes: int = 5,
     ) -> List[AbuseEvent]:
         """Check for rapid successive calls to same number (harassment)."""
-        async with self._db_pool.acquire() as conn:
+        async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
             recent_count = await conn.fetchval(
                 f"""
                 SELECT COUNT(*)
@@ -496,21 +518,23 @@ class AbuseDetectionService:
             )
 
             if recent_count and recent_count >= threshold:
-                return [AbuseEvent(
-                    abuse_type=AbuseType.REPEAT_NUMBER,
-                    severity=Severity.MEDIUM,
-                    tenant_id=tenant_id,
-                    phone_number=phone_number,
-                    details={
-                        "phone_number": phone_number,
-                        "recent_calls": recent_count,
-                        "threshold": threshold,
-                        "window_minutes": window_minutes,
-                    },
-                    recommended_action="block",
-                    trigger_value=float(recent_count),
-                    threshold_value=float(threshold),
-                )]
+                return [
+                    AbuseEvent(
+                        abuse_type=AbuseType.REPEAT_NUMBER,
+                        severity=Severity.MEDIUM,
+                        tenant_id=tenant_id,
+                        phone_number=phone_number,
+                        details={
+                            "phone_number": phone_number,
+                            "recent_calls": recent_count,
+                            "threshold": threshold,
+                            "window_minutes": window_minutes,
+                        },
+                        recommended_action="block",
+                        trigger_value=float(recent_count),
+                        threshold_value=float(threshold),
+                    )
+                ]
 
         return []
 
@@ -521,7 +545,7 @@ class AbuseDetectionService:
     ) -> List[AbuseEvent]:
         """Check for sequential number dialing (war dialing)."""
         # Get last 5 numbers called by this tenant
-        async with self._db_pool.acquire() as conn:
+        async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
             recent_numbers = await conn.fetch(
                 """
                 SELECT phone_number
@@ -540,13 +564,15 @@ class AbuseDetectionService:
 
             # Check if numbers are sequential
             if len(numbers) >= 3 and self._are_sequential(numbers):
-                return [AbuseEvent(
-                    abuse_type=AbuseType.SEQUENTIAL_DIALING,
-                    severity=Severity.HIGH,
-                    tenant_id=tenant_id,
-                    details={"numbers": numbers},
-                    recommended_action="block",
-                )]
+                return [
+                    AbuseEvent(
+                        abuse_type=AbuseType.SEQUENTIAL_DIALING,
+                        severity=Severity.HIGH,
+                        tenant_id=tenant_id,
+                        details={"numbers": numbers},
+                        recommended_action="block",
+                    )
+                ]
 
         return []
 
@@ -558,17 +584,19 @@ class AbuseDetectionService:
         """Check if number is premium rate."""
         for prefix in PREMIUM_RATE_PREFIXES:
             if phone_number.startswith(prefix):
-                return [AbuseEvent(
-                    abuse_type=AbuseType.PREMIUM_RATE,
-                    severity=Severity.HIGH,
-                    tenant_id=tenant_id,
-                    phone_number=phone_number,
-                    details={
-                        "number": phone_number,
-                        "matched_prefix": prefix,
-                    },
-                    recommended_action="block",
-                )]
+                return [
+                    AbuseEvent(
+                        abuse_type=AbuseType.PREMIUM_RATE,
+                        severity=Severity.HIGH,
+                        tenant_id=tenant_id,
+                        phone_number=phone_number,
+                        details={
+                            "number": phone_number,
+                            "matched_prefix": prefix,
+                        },
+                        recommended_action="block",
+                    )
+                ]
         return []
 
     async def _check_high_risk_destination(
@@ -580,18 +608,20 @@ class AbuseDetectionService:
         country_code = self._extract_country_code(phone_number)
 
         if country_code in HIGH_RISK_COUNTRIES:
-            return [AbuseEvent(
-                abuse_type=AbuseType.TOLL_FRAUD,
-                severity=Severity.MEDIUM,
-                tenant_id=tenant_id,
-                phone_number=phone_number,
-                details={
-                    "number": phone_number,
-                    "country_code": country_code,
-                    "risk_category": "high_fraud_risk",
-                },
-                recommended_action="warn",
-            )]
+            return [
+                AbuseEvent(
+                    abuse_type=AbuseType.TOLL_FRAUD,
+                    severity=Severity.MEDIUM,
+                    tenant_id=tenant_id,
+                    phone_number=phone_number,
+                    details={
+                        "number": phone_number,
+                        "country_code": country_code,
+                        "risk_category": "high_fraud_risk",
+                    },
+                    recommended_action="warn",
+                )
+            ]
 
         return []
 
@@ -602,7 +632,7 @@ class AbuseDetectionService:
     ) -> List[AbuseEvent]:
         """Check for Wangiri (missed call) fraud pattern."""
         # Wangiri: Many short calls from same number
-        async with self._db_pool.acquire() as conn:
+        async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
             short_calls = await conn.fetchval(
                 """
                 SELECT COUNT(*)
@@ -618,19 +648,21 @@ class AbuseDetectionService:
             )
 
             if short_calls and short_calls >= 3:
-                return [AbuseEvent(
-                    abuse_type=AbuseType.WANGIRI,
-                    severity=Severity.HIGH,
-                    tenant_id=tenant_id,
-                    phone_number=phone_number,
-                    details={
-                        "short_calls_count": short_calls,
-                        "pattern": "wangiri",
-                    },
-                    recommended_action="block",
-                    trigger_value=float(short_calls),
-                    threshold_value=3.0,
-                )]
+                return [
+                    AbuseEvent(
+                        abuse_type=AbuseType.WANGIRI,
+                        severity=Severity.HIGH,
+                        tenant_id=tenant_id,
+                        phone_number=phone_number,
+                        details={
+                            "short_calls_count": short_calls,
+                            "pattern": "wangiri",
+                        },
+                        recommended_action="block",
+                        trigger_value=float(short_calls),
+                        threshold_value=3.0,
+                    )
+                ]
 
         return []
 
@@ -653,9 +685,9 @@ class AbuseDetectionService:
             digits.sort()
             sequential_count = 1
             for i in range(1, len(digits)):
-                if digits[i] - digits[i-1] == 1:
+                if digits[i] - digits[i - 1] == 1:
                     sequential_count += 1
-                elif digits[i] != digits[i-1]:  # Allow duplicates
+                elif digits[i] != digits[i - 1]:  # Allow duplicates
                     break
 
             return sequential_count >= 3
@@ -718,7 +750,7 @@ class AbuseDetectionService:
         window_hours: int = 24,
     ) -> float:
         """Get historical average calls for tenant."""
-        async with self._db_pool.acquire() as conn:
+        async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
             # Average over last 7 days for same hour
             row = await conn.fetchrow(
                 """

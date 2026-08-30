@@ -18,11 +18,14 @@ What we ship here:
 - An auditor used by the `/health` endpoint to surface the count
   without exposing tenant/campaign IDs publicly.
 """
+
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Optional
+
+from app.core.db_utils import acquire_with_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +39,7 @@ class LegacyCampaignAuditResult:
     `unmigrated_ids` is intentionally a small sample, not the full
     list. Use the DB directly when you need the full set.
     """
+
     probed: bool
     total_active: int = 0
     missing_persona: int = 0
@@ -74,7 +78,8 @@ async def audit_legacy_campaigns(
         return LegacyCampaignAuditResult(probed=False, error="no_db_pool")
 
     try:
-        async with db_pool.acquire() as conn:
+        # Startup audit intentionally scans all tenants.
+        async with acquire_with_tenant(db_pool, None) as conn:
             total = await conn.fetchval(
                 "SELECT COUNT(*) FROM campaigns WHERE status = ANY($1::text[])",
                 list(_ACTIVE_STATUSES),

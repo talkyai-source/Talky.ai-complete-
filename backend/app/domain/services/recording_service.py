@@ -30,6 +30,7 @@ Retention lifecycle (set on the bucket, not in this code):
   Professional  → 90 days
   Enterprise    → 365 days
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -81,6 +82,7 @@ def _bounded_env_int(
         value = default
     return max(minimum, min(value, maximum))
 
+
 # ---------------------------------------------------------------------------
 # Optional boto3 import — graceful fallback to local storage if not installed
 # ---------------------------------------------------------------------------
@@ -88,18 +90,19 @@ try:
     import boto3
     from botocore.exceptions import ClientError, BotoCoreError
     from botocore.config import Config as BotoCoreConfig
+
     _BOTO3_AVAILABLE = True
 except ImportError:
     _BOTO3_AVAILABLE = False
     logger.warning(
-        "boto3 not installed — S3 recording upload disabled. "
-        "Install with: pip install boto3"
+        "boto3 not installed — S3 recording upload disabled. " "Install with: pip install boto3"
     )
 
 
 # ---------------------------------------------------------------------------
 # RecordingBuffer (unchanged from original — no behaviour change)
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class RecordingBuffer:
@@ -108,6 +111,7 @@ class RecordingBuffer:
 
     Works with all MediaGateway implementations (Vonage, RTP, etc.)
     """
+
     call_id: str
     sample_rate: int = 16000
     channels: int = 1
@@ -158,6 +162,7 @@ class RecordingBuffer:
 # ---------------------------------------------------------------------------
 # S3Client wrapper — thin layer over boto3
 # ---------------------------------------------------------------------------
+
 
 class S3Client:
     """
@@ -243,14 +248,8 @@ class S3Client:
         """Generate a presigned GET URL, optionally forcing a safe download name."""
         params: Dict[str, Any] = {"Bucket": bucket or self.bucket, "Key": key}
         if download_filename:
-            safe_name = (
-                download_filename.replace('"', "")
-                .replace("\r", "")
-                .replace("\n", "")
-            )
-            params["ResponseContentDisposition"] = (
-                f'attachment; filename="{safe_name}"'
-            )
+            safe_name = download_filename.replace('"', "").replace("\r", "").replace("\n", "")
+            params["ResponseContentDisposition"] = f'attachment; filename="{safe_name}"'
         return self._client.generate_presigned_url(
             "get_object",
             Params=params,
@@ -271,9 +270,7 @@ class S3Client:
         """
 
         target_bucket = bucket or self.bucket
-        deadline = time.monotonic() + getattr(
-            self, "_permanent_delete_timeout_seconds", 45.0
-        )
+        deadline = time.monotonic() + getattr(self, "_permanent_delete_timeout_seconds", 45.0)
         self._require_permanent_delete_time(deadline)
         versioning = self._client.get_bucket_versioning(Bucket=target_bucket)
         self._require_permanent_delete_time(deadline)
@@ -353,13 +350,9 @@ class S3Client:
                 *(response.get("DeleteMarkers") or []),
             ]:
                 if item.get("Key") == key and item.get("VersionId") is not None:
-                    objects.append(
-                        {"Key": key, "VersionId": str(item["VersionId"])}
-                    )
+                    objects.append({"Key": key, "VersionId": str(item["VersionId"])})
                     if len(objects) > max_versions:
-                        raise RuntimeError(
-                            "object version listing exceeded its version limit"
-                        )
+                        raise RuntimeError("object version listing exceeded its version limit")
             if not response.get("IsTruncated"):
                 return objects
             key_marker = response.get("NextKeyMarker")
@@ -408,6 +401,7 @@ def _write_wav_file(recordings_dir: str, filepath: str, wav_data: bytes) -> None
 # RecordingService
 # ---------------------------------------------------------------------------
 
+
 class RecordingService:
     """
     Handles recording storage for call audio.
@@ -441,8 +435,10 @@ class RecordingService:
         Format: {tenant_id}/{campaign_id}/{call_id}.wav
         Sanitised to prevent path traversal.
         """
+
         def safe(s: str) -> str:
             return s.replace("/", "-").replace("\\", "-").replace("..", "-") if s else "unknown"
+
         return f"{safe(tenant_id)}/{safe(campaign_id)}/{safe(call_id)}.wav"
 
     def _generate_storage_path(self, call_id: str, tenant_id: str, campaign_id: str) -> str:
@@ -512,6 +508,7 @@ class RecordingService:
                 RecordingPolicyService,
                 consent_satisfied,
             )
+
             policy = RecordingPolicyService(self._db)
             decision = await policy.decide(
                 tenant_id=tenant_id,
@@ -520,7 +517,9 @@ class RecordingService:
             if not decision.should_record:
                 logger.info(
                     "recording_skipped_by_policy call=%s tenant=%s reason=%s",
-                    call_id, tenant_id, decision.reason,
+                    call_id,
+                    tenant_id,
+                    decision.reason,
                 )
                 return None
 
@@ -539,7 +538,9 @@ class RecordingService:
                     "recording_suppressed_no_disclosure call=%s tenant=%s "
                     "reason=%s — policy requires a spoken recording notice "
                     "and none was delivered on this call; audio discarded",
-                    call_id, tenant_id, decision.reason,
+                    call_id,
+                    tenant_id,
+                    decision.reason,
                 )
                 return None
         except Exception as exc:
@@ -548,14 +549,14 @@ class RecordingService:
             # non-consensual recordings to S3.
             logger.error(
                 "recording_policy_lookup_failed call=%s tenant=%s err=%s — skipping upload",
-                call_id, tenant_id, exc,
+                call_id,
+                tenant_id,
+                exc,
             )
             return None
 
         if not self._s3.is_available():
-            logger.info(
-                f"S3 not configured — saving recording locally for call {call_id}."
-            )
+            logger.info(f"S3 not configured — saving recording locally for call {call_id}.")
             return await self._save_local(call_id, buffer, tenant_id, campaign_id)
 
         try:
@@ -578,9 +579,7 @@ class RecordingService:
             # result so save_and_link's return value / ordering is
             # unchanged. `wav_data`/`key` are plain immutable bytes/str, so
             # there is nothing for the thread to race against.
-            await asyncio.to_thread(
-                self._s3.upload, key, wav_data, content_type="audio/wav"
-            )
+            await asyncio.to_thread(self._s3.upload, key, wav_data, content_type="audio/wav")
             upload_finished = datetime.utcnow()
 
             logger.info(f"Recording uploaded: {key}")
@@ -596,7 +595,7 @@ class RecordingService:
                 upload_finished=upload_finished,
             )
 
-            await self._update_call_recording_url(call_id, recording_id)
+            await self._update_call_recording_url(call_id, tenant_id, recording_id)
             return str(recording_id) if recording_id else None
 
         except Exception as exc:
@@ -636,12 +635,14 @@ class RecordingService:
             from app.domain.services.recording_policy_service import (
                 disclosure_known_failed,
             )
+
             if disclosure_known_failed(call_id):
                 logger.error(
                     "recording_suppressed_no_disclosure call=%s tenant=%s "
                     "— required recording notice was not delivered; "
                     "local save skipped",
-                    call_id, tenant_id,
+                    call_id,
+                    tenant_id,
                 )
                 return None
         except Exception as exc:
@@ -692,7 +693,7 @@ class RecordingService:
         )
 
         if recording_id:
-            await self._update_call_recording_url(call_id, recording_id)
+            await self._update_call_recording_url(call_id, tenant_id, recording_id)
             logger.info(f"Local recording registered in DB: recording_id={recording_id}")
             return str(recording_id)
         else:
@@ -715,7 +716,7 @@ class RecordingService:
         if not self._s3.is_available():
             return None
 
-        async with self._db.acquire() as conn:
+        async with acquire_with_tenant(self._db, tenant_id) as conn:
             row = await conn.fetchrow(
                 """
                 SELECT s3_key, s3_bucket, status
@@ -727,9 +728,7 @@ class RecordingService:
             )
 
         if not row:
-            logger.warning(
-                f"Recording {recording_id} not found or tenant {tenant_id} denied"
-            )
+            logger.warning(f"Recording {recording_id} not found or tenant {tenant_id} denied")
             return None
 
         if row["status"] != "uploaded":
@@ -747,7 +746,7 @@ class RecordingService:
 
     async def list_for_call(self, call_id: str, tenant_id: str) -> List[Dict[str, Any]]:
         """Return all recording metadata rows for a call."""
-        async with self._db.acquire() as conn:
+        async with acquire_with_tenant(self._db, tenant_id) as conn:
             rows = await conn.fetch(
                 """
                 SELECT id, call_id, s3_key, file_size_bytes,
@@ -763,9 +762,7 @@ class RecordingService:
 
     # ── Private DB helpers ────────────────────────────────────────
 
-    async def _resolve_call_uuid(
-        self, call_id: str, tenant_id: str, conn: Any
-    ) -> Optional[UUID]:
+    async def _resolve_call_uuid(self, call_id: str, tenant_id: str, conn: Any) -> Optional[UUID]:
         """Resolve an incoming ``call_id`` to the authoritative ``calls.id``.
 
         ``call_id`` is a proper UUID on the dialer/campaign path, but on
@@ -804,7 +801,8 @@ class RecordingService:
         except Exception as exc:
             logger.warning(
                 "recording_call_id_resolution_failed call_id=%s err=%s",
-                call_id, exc,
+                call_id,
+                exc,
             )
             return None
 
@@ -816,7 +814,8 @@ class RecordingService:
             "no matching calls row (channel id not a UUID and no "
             "external_call_uuid match); recording will not have a "
             "recordings_s3 DB row (WAV remains on disk/S3 only)",
-            call_id, tenant_id,
+            call_id,
+            tenant_id,
         )
         return None
 
@@ -842,13 +841,15 @@ class RecordingService:
         never silently dropped by a ``UUID()`` parse failure.
         """
         try:
-            async with self._db.acquire() as conn:
+            async with acquire_with_tenant(self._db, tenant_id) as conn:
                 try:
                     tenant_uuid = UUID(tenant_id)
                 except (ValueError, AttributeError, TypeError):
                     logger.warning(
                         "Failed to insert recording_s3 record: invalid "
-                        "tenant_id=%s for call_id=%s", tenant_id, call_id,
+                        "tenant_id=%s for call_id=%s",
+                        tenant_id,
+                        call_id,
                     )
                     return None
 
@@ -870,9 +871,7 @@ class RecordingService:
                         "SELECT set_config('app.current_tenant_id', $1, true)",
                         str(tenant_uuid),
                     )
-                    resolved_call_id = await self._resolve_call_uuid(
-                        call_id, tenant_id, conn
-                    )
+                    resolved_call_id = await self._resolve_call_uuid(call_id, tenant_id, conn)
                     if resolved_call_id is None:
                         return None
 
@@ -904,13 +903,13 @@ class RecordingService:
             return None
 
     async def _update_call_recording_url(
-        self, call_id: str, recording_id: Optional[UUID]
+        self, call_id: str, tenant_id: str, recording_id: Optional[UUID]
     ) -> None:
         """Point calls.recording_url at the internal stream API path."""
         if not recording_id:
             return
         try:
-            async with self._db.acquire() as conn:
+            async with acquire_with_tenant(self._db, tenant_id) as conn:
                 await conn.execute(
                     """
                     UPDATE calls
@@ -932,7 +931,7 @@ class RecordingService:
     ) -> None:
         """Insert a 'failed' row so the failure is visible in the admin panel."""
         try:
-            async with self._db.acquire() as conn:
+            async with acquire_with_tenant(self._db, tenant_id) as conn:
                 await conn.execute(
                     """
                     INSERT INTO recordings_s3 (
@@ -955,6 +954,7 @@ class RecordingService:
 # ---------------------------------------------------------------------------
 # mix_stereo_recording — telephony two-channel recording mixer
 # ---------------------------------------------------------------------------
+
 
 def mix_stereo_recording(
     caller_chunks: List[bytes],
@@ -1028,8 +1028,8 @@ def mix_stereo_recording(
     for i in range(total_samples):
         l_off = i * 2
         s_off = i * 4
-        stereo[s_off:s_off + 2] = left_buf[l_off:l_off + 2]
-        stereo[s_off + 2:s_off + 4] = agent_buf[l_off:l_off + 2]
+        stereo[s_off : s_off + 2] = left_buf[l_off : l_off + 2]
+        stereo[s_off + 2 : s_off + 4] = agent_buf[l_off : l_off + 2]
 
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
@@ -1045,6 +1045,7 @@ def mix_stereo_recording(
 # Backwards-compatible factory
 # ---------------------------------------------------------------------------
 
+
 def make_recording_service(db_pool: Any) -> RecordingService:
     """
     Factory used by the DI container and existing call sites.
@@ -1053,3 +1054,6 @@ def make_recording_service(db_pool: Any) -> RecordingService:
     Now:        make_recording_service(db_pool) — asyncpg pool
     """
     return RecordingService(db_pool=db_pool)
+
+
+from app.core.db_utils import acquire_with_tenant

@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool
 from app.core.container import get_container
+from app.core.db_utils import acquire_with_tenant
 from app.core.tenant_rls import apply_tenant_rls_context
 from app.domain.services.telephony_concurrency_limiter import (
     LeaseKind,
@@ -144,8 +145,12 @@ async def acquire_concurrency_lease(
     if tenant_problem:
         return tenant_problem
 
-    async with db_pool.acquire() as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=x_request_id)
+    async with acquire_with_tenant(
+        db_pool, current_user.tenant_id, user_id=current_user.id, request_id=x_request_id
+    ) as conn:
+        await apply_tenant_rls_context(
+            conn, current_user.tenant_id, current_user.id, request_id=x_request_id
+        )
         async with conn.transaction():
             decision = await limiter.acquire_lease(
                 conn,
@@ -185,8 +190,12 @@ async def release_concurrency_lease(
     if tenant_problem:
         return tenant_problem
 
-    async with db_pool.acquire() as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=x_request_id)
+    async with acquire_with_tenant(
+        db_pool, current_user.tenant_id, user_id=current_user.id, request_id=x_request_id
+    ) as conn:
+        await apply_tenant_rls_context(
+            conn, current_user.tenant_id, current_user.id, request_id=x_request_id
+        )
         async with conn.transaction():
             released = await limiter.release_lease(
                 conn,
@@ -226,8 +235,12 @@ async def heartbeat_concurrency_lease(
     if tenant_problem:
         return tenant_problem
 
-    async with db_pool.acquire() as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=x_request_id)
+    async with acquire_with_tenant(
+        db_pool, current_user.tenant_id, user_id=current_user.id, request_id=x_request_id
+    ) as conn:
+        await apply_tenant_rls_context(
+            conn, current_user.tenant_id, current_user.id, request_id=x_request_id
+        )
         async with conn.transaction():
             updated = await limiter.heartbeat_lease(
                 conn,
@@ -264,8 +277,12 @@ async def expire_stale_concurrency_leases(
     if tenant_problem:
         return tenant_problem
 
-    async with db_pool.acquire() as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=x_request_id)
+    async with acquire_with_tenant(
+        db_pool, current_user.tenant_id, user_id=current_user.id, request_id=x_request_id
+    ) as conn:
+        await apply_tenant_rls_context(
+            conn, current_user.tenant_id, current_user.id, request_id=x_request_id
+        )
         async with conn.transaction():
             expired = await limiter.expire_stale_leases(
                 conn,
@@ -292,8 +309,18 @@ async def get_concurrency_status(
     if tenant_problem:
         return tenant_problem
 
-    async with db_pool.acquire() as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=request.headers.get("x-request-id"))
+    async with acquire_with_tenant(
+        db_pool,
+        current_user.tenant_id,
+        user_id=current_user.id,
+        request_id=request.headers.get("x-request-id"),
+    ) as conn:
+        await apply_tenant_rls_context(
+            conn,
+            current_user.tenant_id,
+            current_user.id,
+            request_id=request.headers.get("x-request-id"),
+        )
         status = await limiter.get_status(conn, tenant_id=current_user.tenant_id)
 
     return ConcurrencyStatusResponse(

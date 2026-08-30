@@ -280,6 +280,12 @@ class _FakeConn:
         self._dnc_row = dnc_row
         self.queries = []
 
+    def transaction(self):
+        return _FakeAcquireCtx(self)
+
+    async def execute(self, *_a, **_k):
+        return "SET"
+
     async def fetchrow(self, query, *args):
         self.queries.append(query)
         if "FROM leads" in query:
@@ -306,13 +312,18 @@ class _FakePool:
         return _FakeAcquireCtx(self._conn)
 
 
+_GUARD_TENANT_ID = "00000000-0000-0000-0000-000000000111"
+
+
 @pytest.mark.asyncio
 async def test_guard_blocks_a_lead_flagged_do_not_call():
     conn = _FakeConn(lead_row={"id": "lead-1"}, dnc_row=None)
     guard = CallGuard(db_pool=_FakePool(conn), redis_client=None)
 
     result = await guard._check_dnc(
-        tenant_id="t1", phone_number="+15551234567", lead_id="lead-1"
+        tenant_id=_GUARD_TENANT_ID,
+        phone_number="+15551234567",
+        lead_id="lead-1",
     )
 
     assert result.check == GuardCheck.DNC_CHECK
@@ -330,7 +341,9 @@ async def test_guard_allows_a_lead_that_is_not_flagged():
     guard = CallGuard(db_pool=_FakePool(conn), redis_client=None)
 
     result = await guard._check_dnc(
-        tenant_id="t1", phone_number="+15551234567", lead_id="lead-1"
+        tenant_id=_GUARD_TENANT_ID,
+        phone_number="+15551234567",
+        lead_id="lead-1",
     )
 
     assert result.passed is True
@@ -347,7 +360,9 @@ async def test_guard_lead_predicate_is_index_friendly_and_null_safe():
     guard = CallGuard(db_pool=_FakePool(conn), redis_client=None)
 
     await guard._check_dnc(
-        tenant_id="t1", phone_number="+15551234567", lead_id="lead-1"
+        tenant_id=_GUARD_TENANT_ID,
+        phone_number="+15551234567",
+        lead_id="lead-1",
     )
 
     lead_sql = next(q for q in conn.queries if "FROM leads" in q)
@@ -367,7 +382,9 @@ async def test_guard_skips_the_lead_lookup_when_no_lead_id_is_supplied():
     conn = _FakeConn(lead_row={"id": "lead-1"}, dnc_row=None)
     guard = CallGuard(db_pool=_FakePool(conn), redis_client=None)
 
-    result = await guard._check_dnc(tenant_id="t1", phone_number="+15551234567")
+    result = await guard._check_dnc(
+        tenant_id=_GUARD_TENANT_ID, phone_number="+15551234567"
+    )
 
     assert result.passed is True
     assert not any("FROM leads" in q for q in conn.queries)
@@ -384,7 +401,9 @@ async def test_guard_still_blocks_on_the_tenant_dnc_list():
     guard = CallGuard(db_pool=_FakePool(conn), redis_client=None)
 
     result = await guard._check_dnc(
-        tenant_id="t1", phone_number="+15551234567", lead_id="lead-1"
+        tenant_id=_GUARD_TENANT_ID,
+        phone_number="+15551234567",
+        lead_id="lead-1",
     )
 
     assert result.passed is False

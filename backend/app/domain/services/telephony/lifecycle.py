@@ -1674,9 +1674,7 @@ async def _register_unknown_asterisk_cleanup_candidates(
     if not callable(inventory):
         return 0
     ownership_check = getattr(state_backend, "is_telephony_owner", None)
-    if not callable(ownership_check) or (
-        not owner_already_confirmed and not ownership_check()
-    ):
+    if not callable(ownership_check) or (not owner_already_confirmed and not ownership_check()):
         return 0
 
     live_channels = await inventory()
@@ -1939,9 +1937,7 @@ async def recover_orphaned_calls() -> int:
                 # the durable Answer write. Preserve any pre-Answer child
                 # reservation until authoritative carrier reconciliation.
                 recovery_context["hold_ambiguous_transfer_legs"] = True
-            if callable(
-                getattr(active_adapter, "recovery_excluded_channel_ids", None)
-            ):
+            if callable(getattr(active_adapter, "recovery_excluded_channel_ids", None)):
                 final_live_exclusions = _current_recovery_exclusions(
                     sb,
                     active_adapter,
@@ -1949,9 +1945,7 @@ async def recover_orphaned_calls() -> int:
                 )
                 if final_live_exclusions is None:
                     deferred_for_retry = True
-                    logger.warning(
-                        "orphan_recovery_deferred_unverifiable_final_local_state"
-                    )
+                    logger.warning("orphan_recovery_deferred_unverifiable_final_local_state")
                     continue
                 if str(call_id) in final_live_exclusions:
                     deferred_for_retry = True
@@ -5027,7 +5021,11 @@ async def _on_call_ended(
                     _cause = _adp.get_hangup_cause(call_id) if _adp else None
                 except Exception:
                     _cause = None
-                async with _c4.db_pool.acquire() as _conn:
+                from app.core.db_utils import acquire_with_tenant
+
+                # Provider callback does not carry a tenant; this lookup exists
+                # to discover it before all subsequent tenant-scoped work.
+                async with acquire_with_tenant(_c4.db_pool, None) as _conn:
                     _row = await _conn.fetchrow(
                         """
                         SELECT id, tenant_id FROM calls

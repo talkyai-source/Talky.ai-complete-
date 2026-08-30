@@ -20,6 +20,7 @@ For higher-throughput emission points (e.g. dialer worker batch
 progress), wrap calls in a Redis SETNX/EXPIRE throttle so the table
 isn't hammered. See `dialer_worker.py` for the canonical example.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -81,7 +82,10 @@ async def emit_event(
     except Exception as exc:  # noqa: BLE001 — fire-and-forget by design
         logger.warning(
             "emit_event.failed tenant=%s category=%s title=%r error=%s",
-            tenant_id, category, title, exc,
+            tenant_id,
+            category,
+            title,
+            exc,
         )
 
 
@@ -100,11 +104,9 @@ async def cleanup_expired_events_loop(
     while not stop_event.is_set():
         try:
             total = 0
-            async with pool.acquire() as conn:
-                await conn.execute("SET app.bypass_rls = 'on'")
-                await conn.execute(
-                    "SET app.current_tenant_id = '00000000-0000-0000-0000-000000000000'"
-                )
+            # Cross-tenant retention worker. The canonical helper keeps bypass
+            # transaction-local so it cannot leak to the next pool borrower.
+            async with acquire_with_tenant(pool, None) as conn:
                 # Delete in bounded batches so a large backlog can't long-lock.
                 for _ in range(200):  # hard cap = 1M rows/run, plenty
                     status = await conn.execute(
@@ -174,5 +176,8 @@ async def emit_event_via_pool(
         # otherwise because emission is deliberately swallowed.
         logger.warning(
             "emit_event_via_pool.failed tenant=%s category=%s title=%r error=%s",
-            tenant_id, category, title, exc,
+            tenant_id,
+            category,
+            title,
+            exc,
         )

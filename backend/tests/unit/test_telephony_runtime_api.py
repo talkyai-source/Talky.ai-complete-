@@ -412,6 +412,8 @@ class FakeRuntimeConn:
 
     async def execute(self, query: str, *args):
         normalized = " ".join(query.split())
+        if normalized.startswith("SET LOCAL app."):
+            return "SET"
         if normalized.startswith("SELECT set_config('app.current_tenant_id'"):
             self.current_tenant_id = str(args[0]) if args and args[0] is not None else None
             return "SELECT 1"

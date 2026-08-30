@@ -1,4 +1,5 @@
 """SIP trunk endpoints — list / create / update / activate / deactivate."""
+
 from __future__ import annotations
 
 import json
@@ -13,6 +14,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool
+from app.core.db_utils import acquire_with_tenant
 from app.core.tenant_rls import apply_tenant_rls_context
 from app.domain.services.telephony.trunk_runtime import (
     evaluate_trunk_runtime,
@@ -46,6 +48,7 @@ router = APIRouter(tags=["Telephony SIP"])
 
 
 # --- helpers (trunk-specific) ------------------------------------------
+
 
 def _coerce_jsonb(raw):
     """asyncpg returns JSONB as dict on the modern codec and as str otherwise.
@@ -85,9 +88,7 @@ def _row_to_response(row: asyncpg.Record) -> SIPTrunkResponse:
         live_registration_status=(
             row["live_registration_status"] if "live_registration_status" in keys else None
         ),
-        live_status_detail=(
-            row["live_status_detail"] if "live_status_detail" in keys else None
-        ),
+        live_status_detail=(row["live_status_detail"] if "live_status_detail" in keys else None),
         live_status_checked_at=(
             row["live_status_checked_at"] if "live_status_checked_at" in keys else None
         ),
@@ -108,7 +109,10 @@ def _requires_confirmed_pjsip_apply() -> bool:
 
 def _pjsip_auto_reload_enabled() -> bool:
     return os.getenv("TELEPHONY_PJSIP_AUTO_RELOAD", "").strip().lower() in {
-        "1", "true", "on", "yes",
+        "1",
+        "true",
+        "on",
+        "yes",
     }
 
 
@@ -137,6 +141,7 @@ async def _sync_trunk_pjsip_config(
         from app.domain.services.telephony.trunk_resolver import (
             platform_default_trunk_name,
         )
+
         name = (row["trunk_name"] or "").strip().lower()
         if name and name == platform_default_trunk_name().strip().lower():
             return
@@ -146,6 +151,7 @@ async def _sync_trunk_pjsip_config(
             remove_trunk_config,
             request_pjsip_reload,
         )
+
         require_live_apply = _requires_confirmed_pjsip_apply() and active
         if require_live_apply and not _pjsip_auto_reload_enabled():
             raise RuntimeError(
@@ -156,6 +162,7 @@ async def _sync_trunk_pjsip_config(
                 # Resolve once under the same public-target policy as the
                 # probe before handing a tenant-controlled host to Asterisk.
                 from .trunk_probe import resolve_sip_target
+
                 await resolve_sip_target(
                     host=row["sip_domain"],
                     port=int(row["port"]),
@@ -195,6 +202,7 @@ async def _sync_trunk_pjsip_config(
                     remove_trunk_config,
                     request_pjsip_reload,
                 )
+
                 previous_active = bool(previous_row and previous_row["is_active"])
                 if previous_active:
                     previous_decrypted = None
@@ -263,6 +271,7 @@ async def _get_tenant_trunk(
 
 # --- endpoints ---------------------------------------------------------
 
+
 @router.get("/trunks", response_model=list[SIPTrunkResponse])
 async def list_sip_trunks(
     request: Request,
@@ -273,8 +282,18 @@ async def list_sip_trunks(
     if tenant_problem:
         return tenant_problem
 
-    async with db_pool.acquire() as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=request.headers.get("x-request-id"))
+    async with acquire_with_tenant(
+        db_pool,
+        current_user.tenant_id,
+        user_id=current_user.id,
+        request_id=request.headers.get("x-request-id"),
+    ) as conn:
+        await apply_tenant_rls_context(
+            conn,
+            current_user.tenant_id,
+            current_user.id,
+            request_id=request.headers.get("x-request-id"),
+        )
         rows = await conn.fetch(
             """
             SELECT
@@ -344,8 +363,18 @@ async def create_sip_trunk(
         encryption.encrypt(payload.auth_password) if payload.auth_password else None
     )
 
-    async with db_pool.acquire() as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=request.headers.get("x-request-id"))
+    async with acquire_with_tenant(
+        db_pool,
+        current_user.tenant_id,
+        user_id=current_user.id,
+        request_id=request.headers.get("x-request-id"),
+    ) as conn:
+        await apply_tenant_rls_context(
+            conn,
+            current_user.tenant_id,
+            current_user.id,
+            request_id=request.headers.get("x-request-id"),
+        )
         async with conn.transaction():
             state, cached_response, cached_code = await _claim_idempotency(
                 conn,
@@ -500,8 +529,18 @@ async def update_sip_trunk(
     request_hash = _stable_hash(patch_payload)
     operation = f"sip_trunks:update:{trunk_id}"
 
-    async with db_pool.acquire() as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=request.headers.get("x-request-id"))
+    async with acquire_with_tenant(
+        db_pool,
+        current_user.tenant_id,
+        user_id=current_user.id,
+        request_id=request.headers.get("x-request-id"),
+    ) as conn:
+        await apply_tenant_rls_context(
+            conn,
+            current_user.tenant_id,
+            current_user.id,
+            request_id=request.headers.get("x-request-id"),
+        )
         async with conn.transaction():
             state, cached_response, cached_code = await _claim_idempotency(
                 conn,
@@ -560,7 +599,9 @@ async def update_sip_trunk(
                 )
 
             existing_auth_user = existing["auth_username"]
-            if payload.clear_auth and ("auth_username" in patch_payload or "auth_password" in patch_payload):
+            if payload.clear_auth and (
+                "auth_username" in patch_payload or "auth_password" in patch_payload
+            ):
                 return _problem(
                     request=request,
                     status_code=400,
@@ -721,8 +762,18 @@ async def _set_trunk_active_state(
     )
     request_hash = _stable_hash({"trunk_id": str(trunk_id), "active_state": active_state})
 
-    async with db_pool.acquire() as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=request.headers.get("x-request-id"))
+    async with acquire_with_tenant(
+        db_pool,
+        current_user.tenant_id,
+        user_id=current_user.id,
+        request_id=request.headers.get("x-request-id"),
+    ) as conn:
+        await apply_tenant_rls_context(
+            conn,
+            current_user.tenant_id,
+            current_user.id,
+            request_id=request.headers.get("x-request-id"),
+        )
         async with conn.transaction():
             state, cached_response, cached_code = await _claim_idempotency(
                 conn,
@@ -933,15 +984,23 @@ async def test_sip_trunk(
     if tenant_problem:
         return tenant_problem
 
-    async with db_pool.acquire() as conn:
+    async with acquire_with_tenant(
+        db_pool,
+        current_user.tenant_id,
+        user_id=current_user.id,
+        request_id=request.headers.get("x-request-id"),
+    ) as conn:
         await apply_tenant_rls_context(
-            conn, current_user.tenant_id, current_user.id,
+            conn,
+            current_user.tenant_id,
+            current_user.id,
             request_id=request.headers.get("x-request-id"),
         )
         row = await conn.fetchrow(
             "SELECT sip_domain, port, transport FROM tenant_sip_trunks "
             "WHERE id = $1 AND tenant_id = $2",
-            trunk_id, current_user.tenant_id,
+            trunk_id,
+            current_user.tenant_id,
         )
     if not row:
         return _problem(
@@ -953,13 +1012,22 @@ async def test_sip_trunk(
         )
 
     result = await probe_sip_endpoint(
-        host=row["sip_domain"], port=row["port"], transport=row["transport"],
+        host=row["sip_domain"],
+        port=row["port"],
+        transport=row["transport"],
     )
     tested_at = datetime.now(timezone.utc)
 
-    async with db_pool.acquire() as conn:
+    async with acquire_with_tenant(
+        db_pool,
+        current_user.tenant_id,
+        user_id=current_user.id,
+        request_id=request.headers.get("x-request-id"),
+    ) as conn:
         await apply_tenant_rls_context(
-            conn, current_user.tenant_id, current_user.id,
+            conn,
+            current_user.tenant_id,
+            current_user.id,
             request_id=request.headers.get("x-request-id"),
         )
         await conn.execute(
@@ -1048,7 +1116,9 @@ async def list_pool_trunks(
     tenant_problem = _require_tenant(request, current_user)
     if tenant_problem:
         return tenant_problem
-    async with db_pool.acquire() as conn:
+    async with acquire_with_tenant(
+        db_pool, current_user.tenant_id, user_id=current_user.id
+    ) as conn:
         async with conn.transaction():
             await conn.execute("SET LOCAL app.bypass_rls = 'on'")
             rows = await conn.fetch(
@@ -1091,7 +1161,9 @@ async def get_pool_assignment(
     tenant_problem = _require_tenant(request, current_user)
     if tenant_problem:
         return tenant_problem
-    async with db_pool.acquire() as conn:
+    async with acquire_with_tenant(
+        db_pool, current_user.tenant_id, user_id=current_user.id
+    ) as conn:
         await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id)
         raw = await conn.fetchval(
             "SELECT calling_rules->'pool_trunk' FROM tenants WHERE id = $1",
@@ -1119,7 +1191,9 @@ async def set_pool_assignment(
     pid = str(body.pool_trunk_id) if body.pool_trunk_id is not None else None
 
     if pid is None:
-        async with db_pool.acquire() as conn:
+        async with acquire_with_tenant(
+            db_pool, current_user.tenant_id, user_id=current_user.id
+        ) as conn:
             await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id)
             await conn.execute(
                 "UPDATE tenants SET calling_rules = (COALESCE(calling_rules,'{}'::jsonb) - 'pool_trunk'), "
@@ -1128,27 +1202,28 @@ async def set_pool_assignment(
             )
         return PoolAssignmentResponse()
 
-    async with db_pool.acquire() as conn:
-        async with conn.transaction():
-            pool = await _fetch_pool_trunk(conn, pid)
-        if pool is None:
-            return _problem(
-                request=request,
-                status_code=400,
-                title="Invalid Pool Account",
-                detail=(
-                    "That shared-pool account is unavailable, not registered, "
-                    "or its Asterisk status is stale."
-                ),
-                type_suffix="invalid-pool-trunk",
-            )
-        snapshot = {
-            "id": str(pool["id"]),
-            "endpoint": f"trunk-{pool['id']}",
-            "caller_id": pool["caller_id"],
-            "label": pool["auth_username"],
-        }
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id)
+    async with acquire_with_tenant(db_pool, None, user_id=current_user.id) as conn:
+        pool = await _fetch_pool_trunk(conn, pid)
+    if pool is None:
+        return _problem(
+            request=request,
+            status_code=400,
+            title="Invalid Pool Account",
+            detail=(
+                "That shared-pool account is unavailable, not registered, "
+                "or its Asterisk status is stale."
+            ),
+            type_suffix="invalid-pool-trunk",
+        )
+    snapshot = {
+        "id": str(pool["id"]),
+        "endpoint": f"trunk-{pool['id']}",
+        "caller_id": pool["caller_id"],
+        "label": pool["auth_username"],
+    }
+    async with acquire_with_tenant(
+        db_pool, current_user.tenant_id, user_id=current_user.id
+    ) as conn:
         await conn.execute(
             "UPDATE tenants SET calling_rules = COALESCE(calling_rules,'{}'::jsonb) "
             "|| jsonb_build_object('pool_trunk', $2::jsonb), updated_at = NOW() WHERE id = $1",
@@ -1196,7 +1271,8 @@ async def _fetch_assignable_trunk(conn, trunk_id: str, tenant_id):
         WHERE id = $1::uuid AND is_active = TRUE
           AND (tenant_id = $2::uuid OR metadata->>'pool' = 'true')
         """,
-        trunk_id, str(tenant_id),
+        trunk_id,
+        str(tenant_id),
     )
 
 
@@ -1210,19 +1286,24 @@ async def get_campaign_trunk_assignment(
     tenant_problem = _require_tenant(request, current_user)
     if tenant_problem:
         return tenant_problem
-    async with db_pool.acquire() as conn:
+    async with acquire_with_tenant(
+        db_pool, current_user.tenant_id, user_id=current_user.id
+    ) as conn:
         await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id)
         raw = await conn.fetchval(
             "SELECT calling_config->'trunk' FROM campaigns "
             "WHERE id = $1::uuid AND tenant_id = $2::uuid",
-            campaign_id, current_user.tenant_id,
+            campaign_id,
+            current_user.tenant_id,
         )
     if not raw:
         return CampaignTrunkResponse(campaign_id=campaign_id)
     ct = raw if isinstance(raw, dict) else json.loads(raw)
     return CampaignTrunkResponse(
         campaign_id=campaign_id,
-        trunk_id=ct.get("id"), label=ct.get("label"), caller_id=ct.get("caller_id"),
+        trunk_id=ct.get("id"),
+        label=ct.get("label"),
+        caller_id=ct.get("caller_id"),
     )
 
 
@@ -1244,71 +1325,76 @@ async def set_campaign_trunk_assignment(
     tid = str(body.trunk_id) if body.trunk_id is not None else None
 
     if tid is None:
-        async with db_pool.acquire() as conn:
+        async with acquire_with_tenant(
+            db_pool, current_user.tenant_id, user_id=current_user.id
+        ) as conn:
             await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id)
             await conn.execute(
                 "UPDATE campaigns SET calling_config = "
                 "(COALESCE(calling_config,'{}'::jsonb) - 'trunk'), updated_at = NOW() "
                 "WHERE id = $1::uuid AND tenant_id = $2::uuid",
-                campaign_id, current_user.tenant_id,
+                campaign_id,
+                current_user.tenant_id,
             )
         return CampaignTrunkResponse(campaign_id=campaign_id)
 
-    async with db_pool.acquire() as conn:
-        async with conn.transaction():
-            trunk = await _fetch_assignable_trunk(conn, tid, current_user.tenant_id)
-        runtime = (
-            evaluate_trunk_runtime(dict(trunk), require_inbound=False)
-            if trunk is not None
-            else None
+    async with acquire_with_tenant(db_pool, None, user_id=current_user.id) as conn:
+        trunk = await _fetch_assignable_trunk(conn, tid, current_user.tenant_id)
+    runtime = (
+        evaluate_trunk_runtime(dict(trunk), require_inbound=False) if trunk is not None else None
+    )
+    outbound_direction = bool(trunk is not None and trunk["direction"] in {"outbound", "both"})
+    if trunk is None or not runtime or not runtime.ready or not outbound_direction:
+        runtime_detail = (
+            "The trunk is not outbound-capable."
+            if trunk is not None and not outbound_direction
+            else runtime.detail if runtime else "The trunk is unavailable."
         )
-        outbound_direction = bool(
-            trunk is not None and trunk["direction"] in {"outbound", "both"}
+        return _problem(
+            request=request,
+            status_code=400,
+            title="Invalid Trunk",
+            detail=f"That trunk is not safe to assign: {runtime_detail}",
+            type_suffix="invalid-campaign-trunk",
         )
-        if trunk is None or not runtime or not runtime.ready or not outbound_direction:
-            runtime_detail = (
-                "The trunk is not outbound-capable."
-                if trunk is not None and not outbound_direction
-                else runtime.detail if runtime else "The trunk is unavailable."
-            )
-            return _problem(
-                request=request,
-                status_code=400,
-                title="Invalid Trunk",
-                detail=f"That trunk is not safe to assign: {runtime_detail}",
-                type_suffix="invalid-campaign-trunk",
-            )
-        from app.domain.services.telephony.trunk_resolver import (
-            env_default_endpoint,
-            platform_default_trunk_name,
-        )
-        is_platform_default = (
-            str(trunk["trunk_name"] or "").strip().lower()
-            == platform_default_trunk_name().strip().lower()
-        )
-        snapshot = {
-            "id": str(trunk["id"]),
-            "endpoint": env_default_endpoint() if is_platform_default else f"trunk-{trunk['id']}",
-            "caller_id": trunk["caller_id"],
-            "label": trunk["trunk_name"] or trunk["auth_username"],
-        }
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id)
+    from app.domain.services.telephony.trunk_resolver import (
+        env_default_endpoint,
+        platform_default_trunk_name,
+    )
+
+    is_platform_default = (
+        str(trunk["trunk_name"] or "").strip().lower()
+        == platform_default_trunk_name().strip().lower()
+    )
+    snapshot = {
+        "id": str(trunk["id"]),
+        "endpoint": env_default_endpoint() if is_platform_default else f"trunk-{trunk['id']}",
+        "caller_id": trunk["caller_id"],
+        "label": trunk["trunk_name"] or trunk["auth_username"],
+    }
+    async with acquire_with_tenant(
+        db_pool, current_user.tenant_id, user_id=current_user.id
+    ) as conn:
         updated = await conn.execute(
             "UPDATE campaigns SET calling_config = COALESCE(calling_config,'{}'::jsonb) "
             "|| jsonb_build_object('trunk', $3::jsonb), updated_at = NOW() "
             "WHERE id = $1::uuid AND tenant_id = $2::uuid",
             # Raw dict — see create-path comment above.
-                campaign_id, current_user.tenant_id, snapshot,
+            campaign_id,
+            current_user.tenant_id,
+            snapshot,
         )
-        if updated == "UPDATE 0":
-            return _problem(
-                request=request,
-                status_code=404,
-                title="Campaign Not Found",
-                detail="No such campaign under this tenant.",
-                type_suffix="campaign-not-found",
-            )
+    if updated == "UPDATE 0":
+        return _problem(
+            request=request,
+            status_code=404,
+            title="Campaign Not Found",
+            detail="No such campaign under this tenant.",
+            type_suffix="campaign-not-found",
+        )
     return CampaignTrunkResponse(
         campaign_id=campaign_id,
-        trunk_id=snapshot["id"], label=snapshot["label"], caller_id=snapshot["caller_id"],
+        trunk_id=snapshot["id"],
+        label=snapshot["label"],
+        caller_id=snapshot["caller_id"],
     )

@@ -38,11 +38,13 @@ from __future__ import annotations
 
 import ast
 import re
+import runpy
 from pathlib import Path
 
 import pytest
 
-_APP_ROOT = Path(__file__).resolve().parents[2] / "app"
+_BACKEND_ROOT = Path(__file__).resolve().parents[2]
+_APP_ROOT = _BACKEND_ROOT / "app"
 
 # A bare `SET app.<guc>` -- session scope. `SET LOCAL app.<guc>` is fine.
 _SESSION_SET = re.compile(r"\bSET\s+(?!LOCAL\b)app\.", re.IGNORECASE)
@@ -62,23 +64,7 @@ _SESSION_SET_CONFIG = re.compile(
 # Remove an entry the moment its file is fixed. `test_allowlist_has_no_stale_entries`
 # will fail if an entry stops being needed, so this list cannot silently rot into
 # permanent permission.
-_KNOWN_UNSAFE: dict[str, str] = {
-    "core/tenant_rls.py": (
-        "apply_tenant_rls_context() uses set_config(..., false). Root cause of 36 "
-        "call sites across the telephony_sip / telephony_runtime endpoints."
-    ),
-    "workers/dialer_worker.py": (
-        "DialerWorker._acquire_db sets app.bypass_rls at session scope; 14 methods "
-        "use it. Fix is acquire_with_tenant(pool, None), which implements the same "
-        "intent transaction-scoped."
-    ),
-    "domain/services/event_emitter.py": (
-        "cleanup_expired_events_loop sets bypass + nil tenant at session scope."
-    ),
-    "domain/services/billing_service.py": (
-        "_claim_webhook_event sets bypass + nil tenant at session scope."
-    ),
-}
+_KNOWN_UNSAFE: dict[str, str] = {}
 
 
 def _python_files() -> list[Path]:
@@ -166,9 +152,9 @@ def test_canonical_helper_is_transaction_scoped() -> None:
         "acquire_with_tenant must open an explicit transaction — that is the whole "
         "reason it is the canonical helper."
     )
-    assert not _session_scoped_rls_statements(src), (
-        "acquire_with_tenant must not use session-scoped RLS statements."
-    )
+    assert not _session_scoped_rls_statements(
+        src
+    ), "acquire_with_tenant must not use session-scoped RLS statements."
 
 
 # ---------------------------------------------------------------------------
@@ -212,31 +198,58 @@ def test_canonical_helper_is_transaction_scoped() -> None:
 # PROVENANCE: 0013 does NOT enumerate them — it discovers them dynamically
 # ("every public table that has RLS enabled *and* a tenant_id column", see the
 # DO block in Alembic/versions/0013_canonical_rls_policies.py), so there is no
-# list in the migration to import. This constant is therefore written out by
-# hand from the ``ALTER TABLE ... ENABLE ROW LEVEL SECURITY`` statements in
-# Alembic/versions/ that also carry a tenant_id column, narrowed to the tables
-# the 2026-08-30 NOBYPASSRLS cutover sweep covers.
-#
-# DELIBERATELY NARROWER THAN THE DATABASE. The full RLS set is ~37 tables;
-# widening this constant to all of them reports 34 further sites, dominated by
-# the pre-login ``user_profiles`` reads under app/api/v1/endpoints/auth/** and
-# the ``assistant_actions`` writes in services/{email,sms}_service.py. Those
-# are a separate remediation, not this sweep's — widen the list when it is
-# taken on, and expect the allowlist below to grow with it.
+# list in the migration to import. This constant is generated from the schema
+# inventory and deliberately covers every RLS-protected table known to this
+# repository. Adding a new policy/table requires adding it here in the same
+# change; the inventory script independently discovers the schema set and its
+# test below prevents drift.
 _RLS_TABLES = (
-    "calls",
+    "admin_media_deletion_intents",
+    "admin_media_deletion_request_keys",
+    "billing_ledger",
+    "call_events",
+    "call_feedback",
     "call_legs",
-    "stream_events",
+    "calls",
     "campaigns",
+    "connectors",
+    "contact_lists",
+    "conversations",
     "leads",
+    "recordings_s3",
+    "stream_events",
     "tenant_ai_credentials",
-    "tenant_recording_policy",
-    "tenant_sip_trunks",
+    "tenant_codec_policies",
     "tenant_phone_numbers",
-    "inbound_did_assignments",
-    "inbound_campaign_configs",
-    "tenant_inbound_controls",
+    "tenant_policy_audit_log",
+    "tenant_provider_cost_events",
+    "tenant_recording_policy",
+    "tenant_route_policies",
+    "tenant_runtime_policy_events",
+    "tenant_runtime_policy_versions",
+    "tenant_sip_trunks",
+    "tenant_sip_trust_policies",
+    "tenant_telephony_concurrency_events",
+    "tenant_telephony_concurrency_leases",
+    "tenant_telephony_concurrency_policies",
+    "tenant_telephony_credentials",
+    "tenant_telephony_idempotency",
+    "tenant_telephony_quota_events",
+    "tenant_telephony_threshold_policies",
+    "webhook_deliveries",
+    "webhook_endpoints",
 )
+
+
+def test_rls_table_guard_matches_schema_inventory() -> None:
+    """A migration cannot add protected surface without extending this guard."""
+    inventory = runpy.run_path(str(_BACKEND_ROOT / "scripts" / "rls_acquire_inventory.py"))
+    discovered, _tenant_scoped = inventory["discover_rls_tables"](_BACKEND_ROOT)
+    assert set(_RLS_TABLES) == discovered, (
+        "RLS table guard drifted from the schema inventory. "
+        f"missing={sorted(discovered - set(_RLS_TABLES))}, "
+        f"stale={sorted(set(_RLS_TABLES) - discovered)}"
+    )
 
 # A table named in a real SQL position, not in prose. `calls` is an ordinary
 # English word ("the dialer calls the guard"), so an unanchored word match
@@ -247,16 +260,11 @@ _SQL_TABLE_REF = re.compile(
     re.IGNORECASE,
 )
 
-# Helpers that establish an RLS context on the connection they are handed. A
-# call to one of these counts as establishing context, otherwise every endpoint
-# that delegates the SET to a helper is reported for a GUC it does in fact set.
-#
-# ``apply_tenant_rls_context`` sets it at SESSION scope, which is its own bug —
-# but that is invariant 1's bug (core/tenant_rls.py is in _KNOWN_UNSAFE above),
-# not the absence this test is about.
+# Helpers that keep an RLS context alive for the complete connection use. A
+# transaction-local SET performed before a bare acquire cannot count: its
+# statement transaction ends before the protected query runs.
 _CONTEXT_HELPERS = (
     "acquire_with_tenant",  # core/db_utils.py — the canonical helper
-    "apply_tenant_rls_context",  # core/tenant_rls.py
     "set_tenant_context_in_db",  # core/security/tenant_isolation.py
     "tenant_context(",  # core/security/tenant_isolation.py
     "_apply_rls_context",  # core/db.py
@@ -269,81 +277,9 @@ _ANY_GUC_SET = re.compile(
 _ANY_SET_CONFIG = re.compile(r"set_config\s*\(\s*['\"]app\.", re.IGNORECASE)
 
 
-# Sites that acquire a pooled connection, query an RLS-protected table, and set
-# no tenant context at all. Keyed "<path under app/>::<qualified function>".
-#
-# EVERY ENTRY HERE IS A BUG, not an approval. They are recorded so the invariant
-# is enforced for all new code while the 2026-08-30 sweep lands. Delete an entry
-# the moment its site is fixed.
-_KNOWN_NO_GUC: dict[str, str] = {
-    "api/v1/endpoints/calls.py::hangup_live_call": (
-        "Tenant is known (current_user.tenant_id, already an explicit predicate) — "
-        "wants acquire_with_tenant(pool, tenant_uuid)."
-    ),
-    "api/v1/endpoints/calls.py::list_call_issues": (
-        "Tenant is known from current_user; the sibling list_calls in the same file "
-        "already opens a transaction and SET LOCAL app.bypass_rls inside it."
-    ),
-    "api/v1/endpoints/tenant_ai_credentials.py::list_credentials": (
-        "Tenant comes from _require_tenant(current_user) — wants acquire_with_tenant."
-    ),
-    "api/v1/endpoints/tenant_ai_credentials.py::create_credential": (
-        "Tenant comes from _require_tenant(current_user); the disable+insert pair "
-        "already runs in an explicit transaction that could carry the SET LOCAL."
-    ),
-    "api/v1/endpoints/tenant_ai_credentials.py::disable_credential": (
-        "Tenant comes from _require_tenant(current_user) — wants acquire_with_tenant."
-    ),
-    "core/legacy_campaign_audit.py::audit_legacy_campaigns": (
-        "Startup observability probe counting active campaigns across ALL tenants — "
-        "genuinely platform scope, wants acquire_with_tenant(pool, None)."
-    ),
-    "domain/services/abuse_detection.py::AbuseDetectionService.analyze_velocity_patterns": (
-        "Platform abuse scan, grouped BY tenant_id across every tenant — platform scope."
-    ),
-    "domain/services/abuse_detection.py::AbuseDetectionService.analyze_partner_aggregate": (
-        "Aggregates every tenant under one partner — platform scope."
-    ),
-    "domain/services/abuse_detection.py::AbuseDetectionService._check_rapid_calls": (
-        "Abuse detector on the platform scan path — platform scope."
-    ),
-    "domain/services/abuse_detection.py::AbuseDetectionService._check_sequential_dialing": (
-        "Abuse detector on the platform scan path — platform scope."
-    ),
-    "domain/services/abuse_detection.py::AbuseDetectionService._check_wangiri_pattern": (
-        "Abuse detector on the platform scan path — platform scope."
-    ),
-    "domain/services/abuse_detection.py::AbuseDetectionService._get_historical_avg_calls": (
-        "Historical baseline for the platform scan path — platform scope."
-    ),
-    "domain/services/call_guard.py::CallGuard._check_dnc": (
-        "Dialer path; tenant_id is already an explicit predicate on the leads query, "
-        "so the id is in hand — only the GUC is missing. A DNC check that reads zero "
-        "rows fails OPEN and dials a suppressed contact."
-    ),
-    "domain/services/recording_service.py::RecordingService._update_call_recording_url": (
-        "UPDATE calls by call_id only; the tenant is available on the service's upload "
-        "path and needs threading through."
-    ),
-    "domain/services/telephony/lifecycle.py::_on_call_ended": (
-        "Hangup settlement looks the call up BY provider_call_id in order to LEARN its "
-        "tenant_id — the tenant genuinely is not known yet, so this one is platform "
-        "scope: acquire_with_tenant(pool, None)."
-    ),
-    "workers/reminder_worker.py::ReminderWorker._process_due_reminders": (
-        "Worker scans due reminders across all tenants — platform scope."
-    ),
-}
-
-# Entries the 2026-08-30 NOBYPASSRLS sweep is repairing RIGHT NOW, in this same
-# working tree, in files fenced to other agents. They are exempt from the
-# staleness check below ONLY so this test is green either way while the sweep
-# lands — a fix arriving mid-run must not turn the suite red.
-#
-# When the sweep is done, delete each key from BOTH this set and _KNOWN_NO_GUC.
-# Nothing else belongs here: a site that is not actively being fixed gets a
-# staleness-checked _KNOWN_NO_GUC entry and no exemption.
-_SWEEP_IN_FLIGHT: frozenset[str] = frozenset(_KNOWN_NO_GUC)
+# There is intentionally no grandfather list. A new bare pooled acquisition on
+# a protected table fails CI in the same change that introduces it.
+_KNOWN_NO_GUC: dict[str, str] = {}
 
 
 def _acquisitions_without_tenant_context(path: Path) -> list[tuple[str, int, list[str]]]:
@@ -398,9 +334,7 @@ def _acquisitions_without_tenant_context(path: Path) -> list[tuple[str, int, lis
                         tables = sorted(
                             {
                                 m.lower()
-                                for m in _SQL_TABLE_REF.findall(
-                                    string_literals(functions[-1])
-                                )
+                                for m in _SQL_TABLE_REF.findall(string_literals(functions[-1]))
                             }
                         )
                         if tables:
@@ -453,8 +387,6 @@ def test_no_guc_allowlist_has_no_stale_entries() -> None:
     """An entry whose site no longer offends must be deleted, not left to rot."""
     stale: list[str] = []
     for key in _KNOWN_NO_GUC:
-        if key in _SWEEP_IN_FLIGHT:
-            continue  # being repaired in this same run; see _SWEEP_IN_FLIGHT
         rel, _, qualname = key.partition("::")
         path = _APP_ROOT / rel
         if not path.exists():
@@ -466,17 +398,4 @@ def test_no_guc_allowlist_has_no_stale_entries() -> None:
     assert not stale, (
         "Stale _KNOWN_NO_GUC entries in test_rls_set_local_invariant.py: "
         f"{stale}. Remove them so the allowlist keeps meaning what it says."
-    )
-
-
-def test_sweep_exemptions_are_real_allowlist_entries() -> None:
-    """_SWEEP_IN_FLIGHT may only exempt keys the allowlist actually carries.
-
-    Without this the two structures drift and a key can sit in the exemption
-    set forever, silently excusing a site that nothing else tracks.
-    """
-    orphans = sorted(_SWEEP_IN_FLIGHT - set(_KNOWN_NO_GUC))
-    assert not orphans, (
-        f"_SWEEP_IN_FLIGHT keys with no _KNOWN_NO_GUC entry: {orphans}. "
-        "Delete a site from both structures together when its fix lands."
     )

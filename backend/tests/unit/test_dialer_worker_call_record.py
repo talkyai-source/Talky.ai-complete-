@@ -10,6 +10,7 @@ was permanently dead on the pooled (production) path.
 """
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any
 
 import pytest
@@ -24,6 +25,10 @@ class _RecordingConn:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
+
+    @asynccontextmanager
+    async def transaction(self):
+        yield self
 
     async def execute(self, query: str, *args: Any) -> None:
         self.calls.append((" ".join(query.split()), args))
@@ -85,6 +90,10 @@ async def test_create_call_record_persists_dialer_job_id():
 @pytest.mark.asyncio
 async def test_create_call_record_swallows_db_errors_and_still_returns_ids():
     class _BoomConn:
+        @asynccontextmanager
+        async def transaction(self):
+            yield self
+
         async def execute(self, *a, **k):
             raise RuntimeError("db down")
 

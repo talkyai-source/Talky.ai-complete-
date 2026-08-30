@@ -2,6 +2,7 @@
 Call History Endpoints
 Provides paginated call list and individual call details
 """
+
 import logging
 import json
 from datetime import datetime, timezone
@@ -99,11 +100,17 @@ def _media_state(call: Any) -> Optional[str]:
     if processing == "failed":
         return "failed"
     if processing in {"completed", "released"} or status in {
-        "ended", "completed", "failed", "cancelled",
+        "ended",
+        "completed",
+        "failed",
+        "cancelled",
     }:
         return "completed"
     if processing == "active" or status in {
-        "answered", "in_call", "ringing", "initiated",
+        "answered",
+        "in_call",
+        "ringing",
+        "initiated",
     }:
         return "active"
     return "pending"
@@ -144,13 +151,19 @@ def _duration_between(start: Any, end: Any) -> Optional[int]:
     if not start:
         return None
     try:
-        start_dt = start if isinstance(start, datetime) else datetime.fromisoformat(
-            str(start).replace("Z", "+00:00")
+        start_dt = (
+            start
+            if isinstance(start, datetime)
+            else datetime.fromisoformat(str(start).replace("Z", "+00:00"))
         )
-        end_dt = end if isinstance(end, datetime) else (
-            datetime.fromisoformat(str(end).replace("Z", "+00:00"))
-            if end
-            else datetime.now(timezone.utc)
+        end_dt = (
+            end
+            if isinstance(end, datetime)
+            else (
+                datetime.fromisoformat(str(end).replace("Z", "+00:00"))
+                if end
+                else datetime.now(timezone.utc)
+            )
         )
         if start_dt.tzinfo is None and end_dt.tzinfo is not None:
             end_dt = end_dt.replace(tzinfo=None)
@@ -163,6 +176,7 @@ def _duration_between(start: Any, end: Any) -> Optional[int]:
 
 class CallListItem(BaseModel):
     """Call list item (summary)"""
+
     id: str
     talklee_call_id: Optional[str] = None
     timestamp: str
@@ -205,6 +219,7 @@ class CallListItem(BaseModel):
 
 class CallDetail(BaseModel):
     """Full call details"""
+
     id: str
     talklee_call_id: Optional[str] = None
     timestamp: str
@@ -252,6 +267,7 @@ class CallDetail(BaseModel):
 
 class CallListResponse(BaseModel):
     """Paginated call list response"""
+
     items: List[CallListItem]
     page: int
     page_size: int
@@ -265,6 +281,7 @@ class CallIssueItem(BaseModel):
     stop a call — out of minutes, outside hours, caller-ID unverified, TTS
     warmup failure, rate limits — all fire before a ``calls`` row exists.
     """
+
     job_id: str
     phone_number: str
     campaign_id: Optional[str] = None
@@ -274,7 +291,7 @@ class CallIssueItem(BaseModel):
     category: Optional[str] = None
     title: str
     suggestion: str
-    severity: str   # error | warning | info
+    severity: str  # error | warning | info
     stage: str
     attempts: int = 0
     updated_at: Optional[str] = None
@@ -301,10 +318,11 @@ class LiveCallItem(BaseModel):
     renders dozens of these. Anything not strictly needed for the live
     row (transcript, recording, full metadata) belongs on CallDetail.
     """
+
     id: str
     talklee_call_id: Optional[str] = None
     to_number: str
-    status: str                          # CallState value
+    status: str  # CallState value
     started_at: Optional[str] = None
     answered_at: Optional[str] = None
     ended_at: Optional[str] = None
@@ -313,7 +331,7 @@ class LiveCallItem(BaseModel):
     campaign_id: Optional[str] = None
     campaign_name: Optional[str] = None
     lead_id: Optional[str] = None
-    caller_id: Optional[str] = None      # the FROM number used
+    caller_id: Optional[str] = None  # the FROM number used
     direction: Literal["inbound", "outbound"] = "outbound"
     caller_ani: Optional[str] = None
     called_did: Optional[str] = None
@@ -329,8 +347,8 @@ class LiveCallItem(BaseModel):
 
 class LiveCallsResponse(BaseModel):
     items: List[LiveCallItem]
-    server_time: str                     # so the FE can compute elapsed
-                                          # times even if its clock drifts
+    server_time: str  # so the FE can compute elapsed
+    # times even if its clock drifts
 
 
 # Statuses that count as "in flight" for the live panel. Old finalised
@@ -354,7 +372,9 @@ _LIVE_STATUSES = (
 _LIVE_MAX_AGE_MINUTES = 30
 
 
-@router.post("/{call_id}/hangup", dependencies=[Depends(require_permission(Permission.CALLS_DELETE))])
+@router.post(
+    "/{call_id}/hangup", dependencies=[Depends(require_permission(Permission.CALLS_DELETE))]
+)
 async def hangup_live_call(
     call_id: str,
     current_user: CurrentUser = Depends(get_current_user),
@@ -394,12 +414,13 @@ async def hangup_live_call(
         raise HTTPException(status_code=403, detail="No tenant context")
     try:
         tenant_uuid = UUID(str(current_user.tenant_id))
-        async with db_client.pool.acquire() as conn:
+        async with acquire_with_tenant(db_client.pool, str(tenant_uuid)) as conn:
             row = await conn.fetchrow(
                 "SELECT external_call_uuid, provider_call_id, provider, direction, "
                 "status, started_at, answered_at, campaign_id FROM calls "
                 "WHERE id = $1 AND tenant_id = $2",
-                UUID(call_id), tenant_uuid,
+                UUID(call_id),
+                tenant_uuid,
             )
         if not row:
             raise HTTPException(status_code=404, detail="Call not found")
@@ -451,20 +472,14 @@ async def hangup_live_call(
             )
             raise HTTPException(
                 status_code=(
-                    504
-                    if error_code in {"confirmation_timeout", "hangup_unconfirmed"}
-                    else 503
+                    504 if error_code in {"confirmation_timeout", "hangup_unconfirmed"} else 503
                 ),
                 detail={
                     "error": "termination_unconfirmed",
                     "reason": error_code,
                     "call_id": call_id,
-                    "call_status": (
-                        "termination_pending" if retry_is_durable else current_status
-                    ),
-                    "termination_status": (
-                        "requested" if retry_is_durable else "failed"
-                    ),
+                    "call_status": ("termination_pending" if retry_is_durable else current_status),
+                    "termination_status": ("requested" if retry_is_durable else "failed"),
                     "provider_hangup_requested": proof.requested,
                     "provider_hangup_confirmed": False,
                     "provider_hangup_error": proof.error or error_code,
@@ -486,9 +501,7 @@ async def hangup_live_call(
                 except Exception:  # local tests/minimal deployments
                     redis_client = None
                 duration = (
-                    _duration_between(row["answered_at"], None) or 0
-                    if row["answered_at"]
-                    else 0
+                    _duration_between(row["answered_at"], None) or 0 if row["answered_at"] else 0
                 )
                 await finalize_proven_inbound_termination(
                     db_client.pool,
@@ -505,9 +518,7 @@ async def hangup_live_call(
                     ),
                     release_only=not bool(row["answered_at"]),
                     redis_client=redis_client,
-                    campaign_id=(
-                        str(row["campaign_id"]) if row.get("campaign_id") else None
-                    ),
+                    campaign_id=(str(row["campaign_id"]) if row.get("campaign_id") else None),
                 )
             except Exception as exc:
                 settlement_deferred = True
@@ -546,7 +557,7 @@ async def hangup_live_call(
             }
 
         latest_status = None
-        async with db_client.pool.acquire() as conn:
+        async with acquire_with_tenant(db_client.pool, str(tenant_uuid)) as conn:
             updated = await conn.fetchrow(
                 """
                 UPDATE calls
@@ -576,10 +587,12 @@ async def hangup_live_call(
                    AND status <> ALL($3::text[])
                  RETURNING status
                 """,
-                UUID(call_id), tenant_uuid, list(terminal_statuses),
+                UUID(call_id),
+                tenant_uuid,
+                list(terminal_statuses),
             )
         if not updated:
-            async with db_client.pool.acquire() as conn:
+            async with acquire_with_tenant(db_client.pool, str(tenant_uuid)) as conn:
                 latest_status = await conn.fetchval(
                     "SELECT status FROM calls WHERE id = $1 AND tenant_id = $2",
                     UUID(call_id),
@@ -618,9 +631,11 @@ async def list_live_calls(
         None, description="If set, restrict the live feed by call direction."
     ),
     recent_window_seconds: int = Query(
-        60, ge=0, le=600,
+        60,
+        ge=0,
+        le=600,
         description="Also include calls that ended within this many seconds. "
-                    "Keeps the panel showing the outcome briefly before the row vanishes.",
+        "Keeps the panel showing the outcome briefly before the row vanishes.",
     ),
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
@@ -695,38 +710,40 @@ async def list_live_calls(
     for r in rows:
         row_status = str(r["status"] or "unknown")
         termination_requested = row_status == "termination_pending"
-        items.append(LiveCallItem(
-            id=str(r["id"]),
-            talklee_call_id=r["talklee_call_id"],
-            to_number=r["to_number"] or "",
-            status=row_status,
-            started_at=r["started_at"].isoformat() if r["started_at"] else None,
-            answered_at=r["answered_at"].isoformat() if r["answered_at"] else None,
-            ended_at=r["ended_at"].isoformat() if r["ended_at"] else None,
-            duration_seconds=r["duration_seconds"],
-            outcome=r["outcome"],
-            campaign_id=str(r["campaign_id"]) if r["campaign_id"] else None,
-            campaign_name=r["campaign_name"],
-            lead_id=str(r["lead_id"]) if r["lead_id"] else None,
-            caller_id=r["caller_id"] if (r["direction"] or "outbound") == "outbound" else None,
-            direction=r["direction"] or "outbound",
-            caller_ani=_display_caller_ani(r),
-            called_did=r["called_did"],
-            admission_status=r["admission_status"],
-            consent_status=r["consent_status"],
-            processing_status=r["processing_status"],
-            termination_status=("requested" if termination_requested else "none"),
-            termination_requested_at=(
-                r["updated_at"].isoformat()
-                if termination_requested and r["updated_at"]
-                else None
-            ),
-            termination_error=None,
-            # The durable row proves intent/retry ownership, not whether the
-            # process got as far as dispatching DELETE before it crashed.
-            provider_hangup_requested=None,
-            provider_hangup_confirmed=False,
-        ))
+        items.append(
+            LiveCallItem(
+                id=str(r["id"]),
+                talklee_call_id=r["talklee_call_id"],
+                to_number=r["to_number"] or "",
+                status=row_status,
+                started_at=r["started_at"].isoformat() if r["started_at"] else None,
+                answered_at=r["answered_at"].isoformat() if r["answered_at"] else None,
+                ended_at=r["ended_at"].isoformat() if r["ended_at"] else None,
+                duration_seconds=r["duration_seconds"],
+                outcome=r["outcome"],
+                campaign_id=str(r["campaign_id"]) if r["campaign_id"] else None,
+                campaign_name=r["campaign_name"],
+                lead_id=str(r["lead_id"]) if r["lead_id"] else None,
+                caller_id=r["caller_id"] if (r["direction"] or "outbound") == "outbound" else None,
+                direction=r["direction"] or "outbound",
+                caller_ani=_display_caller_ani(r),
+                called_did=r["called_did"],
+                admission_status=r["admission_status"],
+                consent_status=r["consent_status"],
+                processing_status=r["processing_status"],
+                termination_status=("requested" if termination_requested else "none"),
+                termination_requested_at=(
+                    r["updated_at"].isoformat()
+                    if termination_requested and r["updated_at"]
+                    else None
+                ),
+                termination_error=None,
+                # The durable row proves intent/retry ownership, not whether the
+                # process got as far as dispatching DELETE before it crashed.
+                provider_hangup_requested=None,
+                provider_hangup_confirmed=False,
+            )
+        )
 
     return LiveCallsResponse(
         items=items,
@@ -736,11 +753,11 @@ async def list_live_calls(
 
 @router.get("/issues", response_model=CallIssuesResponse)
 async def list_call_issues(
-    campaign_id: Optional[str] = Query(
-        None, description="If set, restrict to this campaign."
-    ),
+    campaign_id: Optional[str] = Query(None, description="If set, restrict to this campaign."),
     window_minutes: int = Query(
-        60, ge=1, le=1440,
+        60,
+        ge=1,
+        le=1440,
         description="How far back to look for stuck/failed dial attempts.",
     ),
     current_user: CurrentUser = Depends(get_current_user),
@@ -809,7 +826,7 @@ async def list_call_issues(
     """
 
     try:
-        async with db_client.pool.acquire() as conn:
+        async with acquire_with_tenant(db_client.pool, str(current_user.tenant_id)) as conn:
             rows = await conn.fetch(sql, *args)
     except Exception as exc:
         logger.error("list_call_issues failed: %s", exc)
@@ -821,6 +838,7 @@ async def list_call_issues(
     minutes_ok = True
     try:
         from app.domain.services.minutes_quota import tenant_minutes_status
+
         minutes_ok = not (await tenant_minutes_status(current_user.tenant_id)).exhausted
     except Exception:
         minutes_ok = True  # fail open — never hide a real issue on a lookup glitch
@@ -836,7 +854,7 @@ async def list_call_issues(
 
     tenant_rules = CallingRules.default()
     try:
-        async with db_client.pool.acquire() as conn:
+        async with acquire_with_tenant(db_client.pool, str(current_user.tenant_id)) as conn:
             raw_rules = await conn.fetchval(
                 "SELECT calling_rules FROM tenants WHERE id = $1::uuid",
                 current_user.tenant_id,
@@ -844,6 +862,7 @@ async def list_call_issues(
         if raw_rules:
             if isinstance(raw_rules, str):
                 import json as _json
+
                 raw_rules = _json.loads(raw_rules)
             if isinstance(raw_rules, dict):
                 tenant_rules = CallingRules.from_dict(raw_rules)
@@ -855,6 +874,7 @@ async def list_call_issues(
         if isinstance(cfg, str):
             try:
                 import json as _json
+
                 cfg = _json.loads(cfg)
             except Exception:  # noqa: BLE001
                 cfg = None
@@ -876,27 +896,30 @@ async def list_call_issues(
         except Exception as exc:  # noqa: BLE001 — enrichment must never 500
             logger.debug("list_call_issues: classify failed reason=%r: %s", reason, exc)
             blocked = None
-        items.append(CallIssueItem(
-            job_id=str(r["id"]),
-            phone_number=r["phone_number"] or "",
-            campaign_id=str(r["campaign_id"]) if r["campaign_id"] else None,
-            campaign_name=r["campaign_name"],
-            status=r["status"] or "unknown",
-            reason_code=reason,
-            category=category,
-            title=adv.title,
-            suggestion=adv.suggestion,
-            severity=adv.severity,
-            stage=adv.stage,
-            attempts=r["attempt_number"] or 0,
-            updated_at=r["updated_at"].isoformat() if r["updated_at"] else None,
-            block_code=blocked.code.value if blocked else None,
-            block_message=blocked.message if blocked else None,
-            next_eligible_at=(
-                blocked.next_eligible_at.isoformat()
-                if blocked and blocked.next_eligible_at else None
-            ),
-        ))
+        items.append(
+            CallIssueItem(
+                job_id=str(r["id"]),
+                phone_number=r["phone_number"] or "",
+                campaign_id=str(r["campaign_id"]) if r["campaign_id"] else None,
+                campaign_name=r["campaign_name"],
+                status=r["status"] or "unknown",
+                reason_code=reason,
+                category=category,
+                title=adv.title,
+                suggestion=adv.suggestion,
+                severity=adv.severity,
+                stage=adv.stage,
+                attempts=r["attempt_number"] or 0,
+                updated_at=r["updated_at"].isoformat() if r["updated_at"] else None,
+                block_code=blocked.code.value if blocked else None,
+                block_message=blocked.message if blocked else None,
+                next_eligible_at=(
+                    blocked.next_eligible_at.isoformat()
+                    if blocked and blocked.next_eligible_at
+                    else None
+                ),
+            )
+        )
 
     # Newest first across all numbers (DISTINCT ON forced phone_number order).
     items.sort(key=lambda it: it.updated_at or "", reverse=True)
@@ -918,13 +941,13 @@ async def list_calls(
     from_date: Optional[str] = Query(None, alias="from", description="Start date (YYYY-MM-DD)"),
     to_date: Optional[str] = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
     current_user: CurrentUser = Depends(get_current_user),
-    db_client: Client = Depends(get_db_client)
+    db_client: Client = Depends(get_db_client),
 ):
     """
     Get paginated list of calls.
-    
+
     Used by: /dashboard/history page.
-    
+
     Query params:
         - page: Page number (1-indexed)
         - page_size: Items per page (max 100)
@@ -934,6 +957,7 @@ async def list_calls(
     """
     try:
         import uuid as _uuid
+
         tenant_uuid = _uuid.UUID(str(current_user.tenant_id))
         offset = (page - 1) * page_size
 
@@ -1009,7 +1033,9 @@ async def list_calls(
                     ORDER BY c.created_at DESC
                     LIMIT ${idx} OFFSET ${idx + 1}
                     """,
-                    *params, page_size, offset,
+                    *params,
+                    page_size,
+                    offset,
                 )
                 total = await conn.fetchval(
                     f"SELECT COUNT(*) FROM calls c WHERE {where}",
@@ -1024,46 +1050,50 @@ async def list_calls(
             inbound_from = _display_caller_ani(row)
             display_from = _display_from_number(row)
             display_to = (
-                row["called_did"]
-                if row_direction == "inbound"
-                else row["phone_number"]
+                row["called_did"] if row_direction == "inbound" else row["phone_number"]
             ) or ""
-            items.append(CallListItem(
-                id=str(row["id"]),
-                talklee_call_id=row["talklee_call_id"],
-                timestamp=created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at),
-                from_number=display_from,
-                to_number=display_to,
-                status=row["status"] or "unknown",
-                duration_seconds=row["duration_seconds"],
-                outcome=row["outcome"],
-                campaign_name=row["campaign_name"],
-                campaign_id=str(row["campaign_id"]) if row["campaign_id"] else None,
-                summary=row["summary"],
-                recording_id=str(row["recording_id"]) if row["recording_id"] is not None else None,
-                lead_outcome=row["lead_outcome"],
-                has_feedback=bool(row["has_feedback"]),
-                direction=row_direction,
-                caller_ani=inbound_from,
-                called_did=row["called_did"],
-                inbound_campaign_id=(
-                    _inbound_config_id(row)
-                ),
-                assignment_id=str(row["assignment_id"]) if row["assignment_id"] else None,
-                route_id=route_id,
-                route_version=row["route_version"],
-                config_version=row["config_version"],
-                config_checksum=checksum,
-                admission_status=row["admission_status"],
-                admission_reason=row["admission_reason"],
-                consent_status=row["consent_status"],
-                processing_status=row["processing_status"],
-                billing_status=row["billing_status"],
-                billing_hold_reason=row["billing_hold_reason"],
-                recording_status=_recording_state(row, snapshot),
-                transcript_status=_transcript_state(row),
-                media_state=_media_state(row),
-            ))
+            items.append(
+                CallListItem(
+                    id=str(row["id"]),
+                    talklee_call_id=row["talklee_call_id"],
+                    timestamp=(
+                        created_at.isoformat()
+                        if hasattr(created_at, "isoformat")
+                        else str(created_at)
+                    ),
+                    from_number=display_from,
+                    to_number=display_to,
+                    status=row["status"] or "unknown",
+                    duration_seconds=row["duration_seconds"],
+                    outcome=row["outcome"],
+                    campaign_name=row["campaign_name"],
+                    campaign_id=str(row["campaign_id"]) if row["campaign_id"] else None,
+                    summary=row["summary"],
+                    recording_id=(
+                        str(row["recording_id"]) if row["recording_id"] is not None else None
+                    ),
+                    lead_outcome=row["lead_outcome"],
+                    has_feedback=bool(row["has_feedback"]),
+                    direction=row_direction,
+                    caller_ani=inbound_from,
+                    called_did=row["called_did"],
+                    inbound_campaign_id=(_inbound_config_id(row)),
+                    assignment_id=str(row["assignment_id"]) if row["assignment_id"] else None,
+                    route_id=route_id,
+                    route_version=row["route_version"],
+                    config_version=row["config_version"],
+                    config_checksum=checksum,
+                    admission_status=row["admission_status"],
+                    admission_reason=row["admission_reason"],
+                    consent_status=row["consent_status"],
+                    processing_status=row["processing_status"],
+                    billing_status=row["billing_status"],
+                    billing_hold_reason=row["billing_hold_reason"],
+                    recording_status=_recording_state(row, snapshot),
+                    transcript_status=_transcript_state(row),
+                    media_state=_media_state(row),
+                )
+            )
 
         return CallListResponse(
             items=items,
@@ -1071,26 +1101,23 @@ async def list_calls(
             page_size=page_size,
             total=total or 0,
         )
-    
+
     except Exception as e:
         logger.error(f"Failed to fetch calls: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to fetch calls"
-        )
+        raise HTTPException(status_code=500, detail="Failed to fetch calls")
 
 
 @router.get("/{call_id}", response_model=CallDetail)
 async def get_call(
     call_id: str,
     current_user: CurrentUser = Depends(get_current_user),
-    db_client: Client = Depends(get_db_client)
+    db_client: Client = Depends(get_db_client),
 ):
     """
     Get individual call details.
-    
+
     Used by: Call detail modal/page.
-    
+
     Returns full call information including transcript and recording reference.
     """
     try:
@@ -1162,7 +1189,7 @@ async def get_call(
 
         call = dict(call_row)
         recording_id = call.get("recording_id")
-        
+
         # Normalize summary_json: asyncpg may return JSONB as str or dict
         raw_summary_json = call.get("persisted_summary_json") or call.get("summary_json")
         if isinstance(raw_summary_json, str):
@@ -1180,9 +1207,7 @@ async def get_call(
         inbound_from = _display_caller_ani(call)
         display_from = _display_from_number(call)
         display_to = (
-            call.get("called_did")
-            if direction == "inbound"
-            else call.get("phone_number")
+            call.get("called_did") if direction == "inbound" else call.get("phone_number")
         ) or ""
         transfer_legs = []
         for leg in leg_rows:
@@ -1200,7 +1225,9 @@ async def get_call(
         return CallDetail(
             id=str(call["id"]),
             talklee_call_id=call.get("talklee_call_id"),
-            timestamp=created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at),
+            timestamp=(
+                created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at)
+            ),
             from_number=display_from,
             to_number=display_to,
             status=call.get("status", "unknown"),
@@ -1218,9 +1245,7 @@ async def get_call(
             provider_call_id=call.get("provider_call_id"),
             caller_ani=inbound_from,
             called_did=call.get("called_did"),
-            inbound_campaign_id=(
-                _inbound_config_id(call)
-            ),
+            inbound_campaign_id=(_inbound_config_id(call)),
             assignment_id=str(call["assignment_id"]) if call.get("assignment_id") else None,
             route_id=route_id,
             route_version=call.get("route_version"),
@@ -1238,25 +1263,26 @@ async def get_call(
             recording_status=_recording_state(call, snapshot),
             transcript_status=_transcript_state(call),
             media_state=_media_state(call),
-            answer_delay_seconds=_duration_between(
-                call.get("started_at"), call.get("answered_at")
-            ) if call.get("answered_at") else None,
-            conversation_duration_seconds=_duration_between(
-                call.get("answered_at"), call.get("ended_at")
-            ) if call.get("answered_at") else None,
+            answer_delay_seconds=(
+                _duration_between(call.get("started_at"), call.get("answered_at"))
+                if call.get("answered_at")
+                else None
+            ),
+            conversation_duration_seconds=(
+                _duration_between(call.get("answered_at"), call.get("ended_at"))
+                if call.get("answered_at")
+                else None
+            ),
             billed_duration_seconds=call.get("billed_duration_seconds"),
             cost=float(call["cost"]) if call.get("cost") is not None else None,
             transfer_legs=transfer_legs,
         )
-    
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to fetch call {call_id}: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to fetch call"
-        )
+        raise HTTPException(status_code=500, detail="Failed to fetch call")
 
 
 @router.get("/{call_id}/transcript")
@@ -1264,16 +1290,16 @@ async def get_call_transcript(
     call_id: str,
     format: str = Query("json", description="Format: 'json' or 'text'"),
     current_user: CurrentUser = Depends(get_current_user),
-    db_client: Client = Depends(get_db_client)
+    db_client: Client = Depends(get_db_client),
 ):
     """
     Get call transcript in requested format (Day 10).
-    
+
     Used by: Transcript viewer in call details.
-    
+
     Query params:
         - format: 'json' for structured turns, 'text' for plain text
-    
+
     Returns:
         JSON format: {"turns": [...], "metadata": {...}}
         Text format: Plain text transcript
@@ -1282,20 +1308,23 @@ async def get_call_transcript(
         # Verify call belongs to tenant before fetching transcript
         if not verify_tenant_access(db_client, "calls", call_id, current_user.tenant_id):
             raise HTTPException(status_code=404, detail="Call not found")
-        
+
         # First try the transcripts table (Day 10)
-        transcript_response = db_client.table("transcripts").select(
-            "turns, full_text, word_count, turn_count, created_at"
-        ).eq("call_id", call_id).execute()
-        
+        transcript_response = (
+            db_client.table("transcripts")
+            .select("turns, full_text, word_count, turn_count, created_at")
+            .eq("call_id", call_id)
+            .execute()
+        )
+
         if transcript_response.data and len(transcript_response.data) > 0:
             transcript_data = transcript_response.data[0]
-            
+
             if format == "text":
                 return {
                     "format": "text",
                     "transcript": transcript_data.get("full_text", ""),
-                    "call_id": call_id
+                    "call_id": call_id,
                 }
             else:
                 return {
@@ -1304,46 +1333,44 @@ async def get_call_transcript(
                     "metadata": {
                         "word_count": transcript_data.get("word_count", 0),
                         "turn_count": transcript_data.get("turn_count", 0),
-                        "created_at": transcript_data.get("created_at")
+                        "created_at": transcript_data.get("created_at"),
                     },
-                    "call_id": call_id
+                    "call_id": call_id,
                 }
-        
+
         # Fallback to calls table transcript fields
-        call_response = db_client.table("calls").select(
-            "transcript, transcript_json"
-        ).eq("id", call_id).single().execute()
-        
+        call_response = (
+            db_client.table("calls")
+            .select("transcript, transcript_json")
+            .eq("id", call_id)
+            .single()
+            .execute()
+        )
+
         if not call_response.data:
-            raise HTTPException(
-                status_code=404,
-                detail="Call not found"
-            )
-        
+            raise HTTPException(status_code=404, detail="Call not found")
+
         call_data = call_response.data
-        
+
         if format == "text":
             return {
                 "format": "text",
                 "transcript": call_data.get("transcript", ""),
-                "call_id": call_id
+                "call_id": call_id,
             }
         else:
             return {
                 "format": "json",
                 "turns": call_data.get("transcript_json", []),
                 "metadata": {},
-                "call_id": call_id
+                "call_id": call_id,
             }
-    
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to fetch transcript for call {call_id}: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to fetch transcript"
-        )
+        raise HTTPException(status_code=500, detail="Failed to fetch transcript")
 
 
 @router.get("/{call_id}/summary")
@@ -1358,6 +1385,7 @@ async def get_call_summary(
     if not current_user.tenant_id:
         raise HTTPException(status_code=400, detail="Tenant ID required")
     from app.domain.services.call_summary.store import generate_and_store
+
     try:
         summary = await generate_and_store(db_client.pool, str(current_user.tenant_id), call_id)
     except Exception:
@@ -1372,20 +1400,21 @@ async def get_call_summary(
 # Day 1: Call Events & Legs Endpoints
 # =============================================================================
 
+
 @router.get("/{call_id}/events")
 async def get_call_events(
     call_id: str,
     limit: int = Query(100, ge=1, le=500),
     event_type: Optional[str] = Query(None, description="Filter by event type"),
     current_user: CurrentUser = Depends(get_current_user),
-    db_client: Client = Depends(get_db_client)
+    db_client: Client = Depends(get_db_client),
 ):
     """
     Get call events (timeline) for a specific call.
-    
+
     Returns chronological list of events: state changes, leg starts,
     transcripts, LLM calls, TTS, webhooks, etc.
-    
+
     Query params:
         - limit: Max events to return (default 100, max 500)
         - event_type: Filter by type (state_change, transcript, etc.)
@@ -1394,21 +1423,21 @@ async def get_call_events(
         # Verify call belongs to tenant
         if not verify_tenant_access(db_client, "calls", call_id, current_user.tenant_id):
             raise HTTPException(status_code=404, detail="Call not found")
-        
+
         # Build query
         query = db_client.table("call_events").select("*").eq("call_id", call_id)
-        
+
         if event_type:
             query = query.eq("event_type", event_type)
-        
+
         response = query.order("created_at", desc=False).limit(limit).execute()
-        
+
         return {
             "call_id": call_id,
             "events": response.data or [],
-            "count": len(response.data) if response.data else 0
+            "count": len(response.data) if response.data else 0,
         }
-    
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1420,11 +1449,11 @@ async def get_call_events(
 async def get_call_legs(
     call_id: str,
     current_user: CurrentUser = Depends(get_current_user),
-    db_client: Client = Depends(get_db_client)
+    db_client: Client = Depends(get_db_client),
 ):
     """
     Get call legs for a specific call.
-    
+
     Returns all legs (PSTN, WebSocket, SIP, etc.) with their status
     and timing information.
     """
@@ -1432,18 +1461,23 @@ async def get_call_legs(
         # Verify call belongs to tenant
         if not verify_tenant_access(db_client, "calls", call_id, current_user.tenant_id):
             raise HTTPException(status_code=404, detail="Call not found")
-        
-        response = db_client.table("call_legs").select("*").eq("call_id", call_id).order("created_at", desc=False).execute()
-        
+
+        response = (
+            db_client.table("call_legs")
+            .select("*")
+            .eq("call_id", call_id)
+            .order("created_at", desc=False)
+            .execute()
+        )
+
         return {
             "call_id": call_id,
             "legs": response.data or [],
-            "count": len(response.data) if response.data else 0
+            "count": len(response.data) if response.data else 0,
         }
-    
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to fetch legs for call {call_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch call legs")
-
